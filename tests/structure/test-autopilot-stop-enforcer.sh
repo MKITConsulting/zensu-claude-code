@@ -68,12 +68,9 @@ copy_runtime() {
   local destination="$1" runtime_entry
   mkdir -p "$destination"
   destination="$(cd "$destination" && pwd -P)" || return 1
-  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+  for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
     cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
   done
-  mkdir -p "$destination/mcp-runtime"
-  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-    "$destination/mcp-runtime/" || return 1
 }
 
 bind_runtime_session() {
@@ -916,9 +913,31 @@ else check "S7n the unnamed fallback must not gain a release command (line=$FALL
 # The rc=4 arm must derive its sentence from the published value and take no
 # second holder read: a read after the fence returned is a fresh chance to name
 # a run the fence never judged, with a remedy that cancels.
-if ! grep -qE 'autopilot_read_workspace|_autopilot_read_workspace_critical|_autopilot_workspace_refusal' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"; then
+#
+# COMMENT-STRIPPED, because the property is a CALL and never a spelling. This
+# repository anchors by SYMBOL on purpose, so a comment in that hook naming
+# _autopilot_workspace_refusal to explain why the arm does NOT call it is the
+# cross-reference the house rule asks for — and a whole-file needle reported it as
+# the defect. MEASURED: that comment is what turned this row red on head 2393b8a0,
+# in a suite named for something the change under test never touched.
+S7N2_CODE="$(sed -e 's|^[[:space:]]*#.*$||' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh")"
+if [ -n "$(printf '%s' "$S7N2_CODE" | tr -d '[:space:]')" ]; then
+  check "S7n2-control the comment-stripped hook is non-empty" PASS
+else check "S7n2-control the comment-stripped hook is non-empty" FAIL; fi
+if ! printf '%s\n' "$S7N2_CODE" | grep -qE 'autopilot_read_workspace|_autopilot_read_workspace_critical|_autopilot_workspace_refusal'; then
   check "S7n2 the Stop hook derives the holder sentence from the published value and re-reads nothing" PASS
 else check "S7n2 the rc=4 arm must not re-read the holder" FAIL; fi
+# ...and the needle still BITES after the strip. The plant travels THROUGH the same
+# `sed`, which is the whole point: appending it afterwards matched for any input —
+# including the empty string — so the row could not see the residual it names, a strip
+# expression that eats CODE lines rather than comment lines. The emptiness case is
+# S7n2-control's job, one row up.
+if printf '%s\n  autopilot_read_workspace "$W" "$W"\n' \
+    "$(cat "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh")" \
+  | sed -e 's|^[[:space:]]*#.*$||' \
+  | grep -qE 'autopilot_read_workspace'; then
+  check "S7n2-control2 the stripped scan still sees a planted call" PASS
+else check "S7n2-control2 the stripped scan still sees a planted call" FAIL; fi
 
 # `skills/autopilot-release/SKILL.md` teaches the model to recognize the own-run
 # case by two literals of this renderer. Nothing compared them, so a reword of
@@ -1468,12 +1487,9 @@ TICKET9F="$(CLAUDE_PROJECT_DIR="$P7F" bash "$LOG" --review-ticket --session stop
 CLAUDE_PROJECT_DIR="$P7F" tdd_consume_review_ticket "$ZENSU_SESSION_KEY" "$TICKET9F" >/dev/null
 FRESH_PLUGIN="$TMP/fresh-prompt-plugin"; mkdir -p "$FRESH_PLUGIN"
 FRESH_PLUGIN="$(cd "$FRESH_PLUGIN" && pwd -P)"
-for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
   cp -R "$PLUGIN_DIR/$runtime_entry" "$FRESH_PLUGIN/$runtime_entry"
 done
-mkdir -p "$FRESH_PLUGIN/mcp-runtime"
-cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-  "$FRESH_PLUGIN/mcp-runtime/"
 FRESH_STATE_LIB="$FRESH_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \

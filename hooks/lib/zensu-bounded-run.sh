@@ -75,9 +75,9 @@ zensu_run_bounded() {
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
   # kill the hook rather than no-op. Latent today — every live call site passes a command —
   # and guarded so the property does not depend on every later caller remembering. Do not
-  # restate that parenthetical as "both call sites": there are SEVEN, in FOUR files as of this writing, the newest being the `--tdd-complete` claim-inventory child in `hooks/lib/zensu-log.sh`, and the
-  # ladder's own header says the census is a criterion rather than a count for exactly this
-  # reason. Say "every live call site", which stays true as callers are added.
+  # restate that parenthetical as "both call sites": there are more than two, in several
+  # files, and the ladder's own header says the census is a criterion rather than a count for
+  # exactly this reason. Say "every live call site", which stays true as callers are added.
   # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
   # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
   # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the

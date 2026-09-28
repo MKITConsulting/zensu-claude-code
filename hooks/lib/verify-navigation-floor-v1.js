@@ -5,22 +5,13 @@ const FLOOR_REASONS = Object.freeze({
   INVALID: 'navigation target is invalid',
   CREDENTIALS: 'navigation target contains credentials',
   QUERY_OR_FRAGMENT: 'navigation target contains query or fragment',
-  LOCAL_LOOPBACK_ONLY: 'local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost',
+  LOCAL_LITERAL_LOOPBACK: 'local navigation policy accepts literal loopback-IP origins only',
   REMOTE_HTTPS: 'remote navigation policy requires non-loopback HTTPS origins',
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
 });
 
-const CONSENT_REMOTE_REASON = 'consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost); a remote target needs the parent-environment navigation policy';
-
-// RFC 6761 reserves this name for the loopback interface, and Chromium resolves it itself rather
-// than through DNS or /etc/hosts. It is admitted EXACTLY, never as a suffix: 'localhost.',
-// 'app.localhost' and 'localhost.localdomain' all stay refused, because their resolution was
-// never measured on every host this plugin ships to. No --host-resolver-rules pin travels with
-// it: a MAP rule carries ONE address, and measured on Chromium 1228 'MAP localhost 127.0.0.1'
-// makes a server bound to [::1] unreachable while 'MAP localhost [::1]' does the same to a
-// server bound to 127.0.0.1. Chromium's own resolution reaches both families.
-const LOCALHOST_NAME = 'localhost';
+const CONSENT_REMOTE_REASON = 'consent mode admits literal loopback origins only; a remote target needs the parent-environment navigation policy';
 
 function normalizeRoute(route) {
   if (typeof route !== 'string' || !route.startsWith('/')
@@ -101,21 +92,11 @@ function isPublicAddress(address) {
   return family === 4 ? isPublicIpv4(address) : family === 6 ? isPublicIpv6(address) : false;
 }
 
-// LITERAL loopback IPs only. The remote arm of classifyOrigin and parsePolicy both need this
-// narrower question — an address that resolves to loopback is never a remote target — so the
-// predicate keeps its meaning and isLocalHost below is the one that also admits the NAME.
 function isLoopbackHost(hostname) {
   const normalized = normalizeHostname(hostname);
   if (normalized === '::1') return true;
   const value = ipv4Number(normalized);
   return value !== null && inIpv4Range(value, '127.0.0.0', 8);
-}
-
-// The one answer to "is this origin local". Every consumer asks THIS rather than composing its
-// own test: classifyOrigin's local arm, and parsePolicy's local and remote arms in the broker,
-// which used to spell that composition a second time.
-function isLocalHost(hostname) {
-  return isLoopbackHost(hostname) || normalizeHostname(hostname) === LOCALHOST_NAME;
 }
 
 async function resolveRemoteHost(hostname, resolver) {
@@ -140,8 +121,7 @@ function comparisonOrigin(parsed) {
 
 function checkNavigationTarget(rawUrl, navigation = true) {
   // A non-string target is refused, never coerced. String(["http://127.0.0.1:9999"])
-  // is the bare URL, so coercion let an array argument classify as loopback and reach
-  // the consent broker's approved map without a prompt.
+  // is the bare URL, so coercion would let an array argument classify as loopback.
   if (typeof rawUrl !== 'string') return { ok: false, reason: FLOOR_REASONS.INVALID };
   let parsed;
   try { parsed = new URL(rawUrl); }
@@ -160,7 +140,7 @@ function classifyOrigin(rawUrl, navigation = true) {
   const { parsed } = target;
   const hostname = normalizeHostname(parsed.hostname);
   const secure = parsed.protocol === 'https:' || parsed.protocol === 'wss:';
-  if (isLocalHost(hostname)) {
+  if (isLoopbackHost(hostname)) {
     return { ...target, mode: 'local', hostname };
   }
   if (net.isIP(hostname)) {
@@ -168,20 +148,17 @@ function classifyOrigin(rawUrl, navigation = true) {
     if (!isPublicAddress(hostname)) return { ok: false, reason: FLOOR_REASONS.REMOTE_NOT_PUBLIC, origin: target.origin };
     return { ...target, mode: 'remote', hostname };
   }
-  if (!secure) return { ok: false, reason: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, origin: target.origin };
+  if (!secure) return { ok: false, reason: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK, origin: target.origin };
   return { ...target, mode: 'remote', hostname };
 }
 
-// The three TOP-LEVEL guards parsePolicy applies before it touches a single target, extracted so
-// the three components that need them share one implementation instead of three. It is
-// SYNCHRONOUS and reaches no resolver by construction — the per-target rules, which are the ones
-// that can resolve DNS for a remote origin, stay parsePolicy's alone. It answers '' for a policy
-// whose contract holds and a short reason otherwise, so a caller renders the reason it was given
-// rather than inventing one.
+// The three TOP-LEVEL guards of a navigation policy. It answers '' for a policy whose contract
+// holds and a short reason otherwise, so a caller renders the reason it was given rather than
+// inventing one.
 //
-// An EMPTY raw is not judged here: parsePolicy returns its deny default before any check, and a
-// caller asking "is a policy present" must decide absence itself. Answering '' for '' would tell
-// such a caller that the empty string is an acceptable policy.
+// An EMPTY raw is not judged here: a caller asking "is a policy present" must decide absence
+// itself. Answering '' for '' would tell such a caller that the empty string is an acceptable
+// policy.
 function policyContractFault(raw) {
   let value;
   try { value = JSON.parse(raw); }
@@ -197,17 +174,63 @@ function policyContractFault(raw) {
   return '';
 }
 
+const MAX_POLICY_ROUTES = 64;
+
+function parsePolicyTargets(raw) {
+  const fault = policyContractFault(raw);
+  if (fault) return { ok: false, fault };
+  const value = JSON.parse(raw);
+  const targets = new Map();
+  for (const rawTarget of value.targets) {
+    const targetKeys = Object.keys(rawTarget || {}).sort();
+    if (JSON.stringify(targetKeys) !== JSON.stringify(['evidenceMode', 'origin', 'routes'])
+        || rawTarget.evidenceMode !== 'declared-safe'
+        || !Array.isArray(rawTarget.routes) || rawTarget.routes.length < 1
+        || rawTarget.routes.length > MAX_POLICY_ROUTES) {
+      return { ok: false, fault: 'policy target contract is invalid; v1 supports declared-safe evidence only' };
+    }
+    const routes = new Set();
+    for (const route of rawTarget.routes) {
+      const normalizedRoute = normalizeRoute(route);
+      if (normalizedRoute === null) return { ok: false, fault: 'policy route must be an absolute query-free pathname' };
+      if (routes.has(normalizedRoute)) return { ok: false, fault: 'policy routes must be normalized and unique' };
+      routes.add(normalizedRoute);
+    }
+    if (typeof rawTarget.origin !== 'string') return { ok: false, fault: 'policy origin must be a string' };
+    let parsed;
+    try { parsed = new URL(rawTarget.origin); }
+    catch (_error) { return { ok: false, fault: 'policy origin is invalid' }; }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/'
+        || rawTarget.origin.includes('?') || rawTarget.origin.includes('#')) {
+      return { ok: false, fault: 'policy origin must not contain credentials, path, query, or fragment' };
+    }
+    if (targets.has(parsed.origin)) return { ok: false, fault: 'policy origins must be unique' };
+    const hostname = normalizeHostname(parsed.hostname);
+    if (value.mode === 'local') {
+      if (!['http:', 'https:'].includes(parsed.protocol) || !net.isIP(hostname) || !isLoopbackHost(hostname)) {
+        return { ok: false, fault: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK };
+      }
+    } else if (parsed.protocol !== 'https:' || isLoopbackHost(hostname)) {
+      return { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS };
+    } else if (net.isIP(hostname) && !isPublicAddress(hostname)) {
+      return { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC };
+    }
+    targets.set(parsed.origin, { origin: parsed.origin, hostname, routes });
+  }
+  return { ok: true, mode: value.mode, targets };
+}
+
 module.exports = {
   CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
-  LOCALHOST_NAME,
+  MAX_POLICY_ROUTES,
   checkNavigationTarget,
+  parsePolicyTargets,
   policyContractFault,
   classifyOrigin,
   expandIpv6,
   inIpv4Range,
   ipv4Number,
-  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   isPublicIpv4,

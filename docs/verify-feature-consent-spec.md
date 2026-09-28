@@ -1,12 +1,23 @@
 # Verify-Feature Consent Flow and Guided Setup — Specification
 
+**Superseded in part.** The Playwright MCP server, its capability broker
+(`scripts/playwright-mcp-proxy.js`), its launcher and its lockfile-backed npm runtime were
+removed: each Claude Code session started the server and materialized a private runtime of
+several hundred megabytes whether or not a browser was ever opened. `/zensu:verify-feature` now
+drives `playwright-cli`, and the consent gate moved to the `Bash` matcher, where it judges a
+`playwright-cli` call on a `zensu-verify-*` session whose command text names the CLI and the
+session — a textual gate — with a command allowlist, a run config the gate reads itself, the same
+floor, the same per-origin consent and the same memory. Every statement
+below about the broker, its start modes, its execution marker or the MCP tool names describes the
+retired design. The current behaviour is in `docs/gates.md` § Browser Consent Gate and
+`docs/verify-feature.md`; this document stays as the record of the consent-mode decisions.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)
-was replaced by AC-018 — consent mode admits loopback origins only, because
+was replaced by AC-018 — consent mode admits literal-loopback origins only, because
 Chromium's DNS pins are passed at browser launch and a remote origin approved mid-session
-could not be pinned (AC-018 was AMENDED on 2026-09-22: the exact name `localhost` joined the
-loopback IPs, and the amendment is recorded at the AC itself); FR-003 (moving the eval's port-reservation helper) was replaced by FR-005
+could not be pinned; FR-003 (moving the eval's port-reservation helper) was replaced by FR-005
 — a shipped `scripts/verify-free-port.js`, because the eval helper is a handoff proxy bound to
 that harness. A review round then made consent PER ORIGIN rather than per route, because the prompt, the
 hook and the broker had each been enforcing a different rule; the acceptance criteria below
@@ -47,8 +58,6 @@ Measured on the maintainer's machine during the analysis (2026-09-02):
 - `playwright-mcp.sh --check-policy` accepts a policy handed to a child process (exit 0),
   refuses an absent policy (`navigation policy mode does not match`), and refuses
   `localhost` (`local navigation policy accepts literal loopback-IP origins only`).
-  That last refusal is history: the 2026-09-22 amendment of AC-018 admits the exact name
-  `localhost`, and only other hostnames are refused now.
 
 ## 2. What it does
 
@@ -142,7 +151,7 @@ present) and `deny` (today's behaviour when it is absent):
 | Mode | Trigger at server start | Origin decision | Floor |
 |---|---|---|---|
 | `policy` | `ZENSU_VERIFY_NAVIGATION_POLICY_V1` parses | the policy targets, as today | as today |
-| `consent` | variable absent AND the consent hook is registered in the broker's own `hooks/hooks.json` | every `browser_navigate` / `browser_tabs new` call that reaches the broker is treated as consented, because it passed the hook chain; the broker records the origin in an in-memory approved set and enforces sub-requests and redirects against that set | loopback `http`/`https` with a loopback IP or the exact name `localhost`, or public `https` with DNS pinning and the existing address-class rejection; the first approved navigation locks the session to local or remote and a later navigation of the other class is refused |
+| `consent` | variable absent AND the consent hook is registered in the broker's own `hooks/hooks.json` | every `browser_navigate` / `browser_tabs new` call that reaches the broker is treated as consented, because it passed the hook chain; the broker records the origin in an in-memory approved set and enforces sub-requests and redirects against that set | loopback `http`/`https` with a literal IP, or public `https` with DNS pinning and the existing address-class rejection; the first approved navigation locks the session to local or remote and a later navigation of the other class is refused |
 | `deny` | variable absent AND the hook is not registered | as today | as today |
 
 Rules that stay unchanged in every mode: the tool allowlist, `browser_evaluate` and all
@@ -318,7 +327,7 @@ session can write.
    dependency, `node --test` driver, floor cases include the four measured bypass classes
    from the plugin-data guard's history (dangling symlink, lexical `..`, case variant,
    link-through-link do not apply to URLs; the URL classes are userinfo, query, fragment,
-   IPv4-mapped IPv6, and every hostname but the exact name `localhost`).
+   IPv4-mapped IPv6, and `localhost`).
 2. **Broker consent mode.** Extend `parsePolicy`'s absent branch: read
    `hooks/hooks.json` from the broker's own plugin root, look for the consent hook command,
    set `mode: 'consent'`; `assertAllowedUrl` consults the in-memory approved set and the
@@ -371,7 +380,7 @@ session can write.
 |----|-------------|--------|
 | AC-001 | With `ZENSU_VERIFY_NAVIGATION_POLICY_V1` unset and the consent hook registered, the broker starts in `consent` mode and `browser_navigate` to `http://127.0.0.1:<port>/` succeeds after the PreToolUse hook returned `ask`. | spec §6.2 |
 | AC-002 | With the variable unset and the consent hook absent from `hooks/hooks.json`, the broker starts in `deny` mode and every navigation is refused exactly as today. | spec §6.2 |
-| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a hostname other than the exact name `localhost` (for example `app.localhost`), a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. | spec §6.2, §6.3 |
+| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a `localhost` hostname, a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. | spec §6.2, §6.3 |
 | AC-004 | The PreToolUse hook returns `ask` for the first navigation to each new loopback origin, and `allow` for every navigation to an origin the session consent memory already holds, whatever its route. | spec §6.3 |
 | AC-005 | The PostToolUse hook records exactly `(origin, route, decidedBy, at)` after an executed navigation — and no route set — and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
 | AC-006 | A sub-request or redirect to an origin outside the broker's approved set is blocked in consent mode. | spec §6.2 |
@@ -386,7 +395,7 @@ session can write.
 | AC-015 | The hook pair has no config off-switch; `ESCAPE_STEMS` and `ZENSU_BYPASS_GATE_ALLOWLIST` are unchanged. | spec §6.3 |
 | AC-016 | `docs/configuration.md` hook count, every `#hooks-N` anchor and the `docs/gates.md` gate count match the registered hooks. | spec §7 step 7 |
 | AC-017 | The SessionStart banner prints one consent-mode line when no policy is present in the environment AND the hook pair plus the decision module are present in the plugin root — it does NOT read `hooks.json`, and its own text points at `/zensu:doctor` for the registration. Silenceable by `hooks.sessionBanner` like its siblings. | spec §6.9 |
-| AC-018 | Consent mode admits loopback origins only — a loopback IP (`127.0.0.0/8`, `[::1]`) or the exact name `localhost`; a remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. **Amended 2026-09-22**: the name `localhost` was admitted, because an app whose CORS allow-list, cookies or auth callbacks are keyed on that origin cannot be verified through a literal IP. It carries no resolver pin — a `--host-resolver-rules` MAP rule holds ONE address, and measured on Chromium 1228 pinning `127.0.0.1` makes a server bound to `[::1]` unreachable and vice versa, while Chromium's own resolution reaches both. The premise that Chromium resolves the name itself rather than through `/etc/hosts` is not provable from this repository, so the broker checks it: a response served for `localhost` from a non-loopback address closes the browser and refuses every later call — detection after the connection, not prevention. No other hostname is admitted. | spec §6.2 |
+| AC-018 | Consent mode admits literal-loopback origins only; a remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. | spec §6.2 |
 | FR-001 | The floor predicates exist in exactly one module required by both the broker and the hook. | spec §7 step 1 |
 | FR-002 | The consent decision and prompt text exist in exactly one module with a `node --test` driver. | spec §6.3 |
 | FR-003 | **deprecated** — replaced by FR-005. The port reservation helper ships under `scripts/` and the eval imports it from there. | spec §7 step 5 |

@@ -11,11 +11,13 @@
 # inherit /zensu:doctor's justification and needs its own, stated here because
 # hooks/lib/zensu-doctor-invocation.js points at this header:
 #
-#   - FOUR write classes, all confined, and the ORDER here is their NUMBERING:
+#   - FIVE write classes, all confined, and the ORDER here is their NUMBERING:
 #     the bounded-exception paragraph below labels the lease sweep "write class 3"
-#     and the workflow-baseline repair "write class 4", as do all four sibling
-#     carriers, while this list used to present them the other way round one screen
-#     above. (1) one record for THIS session in the
+#     and the workflow-baseline repair "write class 4", while this list used to
+#     present them the other way round one screen above. The numbered LABELS are
+#     local to this header — a grep for `write class` finds them nowhere else — so
+#     what the sibling carriers share is the ORDER, not the labels; do not restate
+#     that as a census a reader cannot check. (1) one record for THIS session in the
 #     private plugin-data store; (2) one workflow history entry in the recorded
 #     project; (3) any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
@@ -35,8 +37,49 @@
 #     names the executing root is KEPT, and keeps wedging later lease operations. That
 #     residual is documented in review-evidence-sweep-v1.js beside the predicate —
 #     the sweep is no longer part of adoptContext, and THIS script is what invokes
-#     it. Nothing else, and nothing outside
+#     it. (5) the recorded project ROOT itself, re-created as an empty directory
+#     together with at most RESTORE_MAX_MISSING_COMPONENTS missing components
+#     below the nearest existing ancestor, reachable ONLY through
+#     `--restore-root --confirm` (bounded exception (c) below). It is the one
+#     class that creates a directory the record does not yet have, so its
+#     destination is worth stating twice: the path comes from
+#     context.project_root and from nowhere else, which is what lets this script
+#     re-create the anchor a session already had while never being steerable to a
+#     new one. Nothing else, and nothing outside
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
+#   - CLASS 5 IS not bounded by location, and the distinction matters because the
+#     two claims read alike: "the destination is CARRIED from the record" is true,
+#     "the destination is BOUNDED" is not. Classes 1-4 land inside <plugin_data>
+#     or inside the recorded project, and the barrier paragraph below was written
+#     for them. Class 5 is the first whose destination is an ARBITRARY absolute
+#     path: restoreRootComponentLadder applies no containment check of any kind —
+#     not under $HOME, not inside a git repository, not excluding a child of the
+#     filesystem root — and the private records directory bounds WHICH RECORD IS
+#     READ, never where the syscall lands. What IS bounded is the DEPTH: at most
+#     RESTORE_MAX_MISSING_COMPONENTS components below a nearest-existing ancestor
+#     the ladder proved to be a real, canonical, link-free directory, and each one
+#     is re-verified by realpath after it is created.
+#     A LOCATION allowlist was weighed and REFUSED. `git worktree remove` does
+#     leave the parent in place, so a `$HOME`-or-inside-a-git-repository rule would
+#     admit the ordinary case — but it also refuses legitimate roots this project
+#     really has (a worktree under /opt, /srv or /Volumes, and this repository's
+#     own fixtures under the canonicalized temp root), and it would be a policy
+#     invented at the boundary rather than derived from the record. The barrier
+#     stays the records directory, which is the same one classes 1-4 rest on — but
+#     state what that buys PRECISELY, because "already holds the capability this
+#     write would give it" is an overstatement and stood here as one. What authoring
+#     a record already confers is the CHOICE of destination: the path comes from the
+#     record and from nowhere else, so this write adds no target a record author
+#     could not already name. What it does add is the ACT — creating a directory
+#     outside the store, which write access to the store does not itself perform.
+#     That residual is narrowed rather than closed: the depth bound above, and the
+#     ancestor-permission rule (refusal `unsafe-ancestor-ownership`), which refuses a
+#     nearest-existing ancestor that users other than its owner can write unless it
+#     is sticky. Both NARROW the window and neither closes it: Node exposes no
+#     `mkdirat`, so every syscall resolves the name again, and the sticky exemption
+#     admits a tree where a co-tenant can still create the name first. The realpath
+#     re-verification after each mkdir is what catches that. State it that way, and
+#     never as a location bound.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
 #     adoptableRecord's condition-1 LADDER. Naming only its first rung, as this
@@ -60,10 +103,11 @@
 #     barrier. State it this way and not as "every location is derived from the
 #     record": that is the stronger claim, and it is not what the code enforces.
 #   - The record and history writes require every adoptableRecord condition to
-#     hold. There are exactly TWO bounded exceptions, and they are stated here
-#     because this header is what the recognizer's admission rests on. Both are
-#     reached the same way — an `already-served` refusal WITH `--confirm` — and
-#     both are idempotent repairs that re-mint no record:
+#     hold. There are exactly THREE bounded exceptions, and they are stated here
+#     because this header is what the recognizer's admission rests on. All three
+#     are idempotent repairs that re-mint no record. (a) and (b) are reached the
+#     same way — an `already-served` refusal WITH `--confirm` — while (c) has its
+#     own argv mode and never runs adoptableRecord at all:
 #       (a) write class 4, the workflow-baseline repair: when this session's own
 #           workflow document is MISSING it is recreated through
 #           initializeWorkflowState, which mkdirs `<recorded project>/.zensu` and
@@ -77,12 +121,33 @@
 #       (b) write class 3, the lease sweep, re-run over the same session key. It
 #           touches nothing outside
 #           <plugin_data>/review-evidence/v1/{records,superseded}/<session key>.
-#     Without `--confirm` that refusal is read-only like every other. Counting (a)
+#       (c) write class 5, the project-root restore, under `--restore-root
+#           --confirm`. Its own condition ladder is restoreRootVerdict, and it is
+#           DISJOINT from adoptableRecord by construction rather than by ordering:
+#           it requires the STRICT readContext to FAIL and
+#           readOrphanedProjectRootContext to SUCCEED, which excludes a healthy
+#           session and a pruned installation. A LINEAGE BREAK is NOT excluded by
+#           that ladder and it is worth saying so: allowMissingProjectRoot waives
+#           only the recorded root's existence, so a lineage-broken record whose
+#           project root is also gone passes BOTH reads. What excludes it is the
+#           next conjunct — this mode re-applies the plugin_data equality check and
+#           REQUIRES servesRecordedRuntime, the inverse of adoption's condition 3,
+#           which is also why the remedy for that state is adopt FIRST and restore
+#           second. Then it
+#           refuses a symlinked or non-canonical nearest-existing ancestor and a
+#           gap deeper than RESTORE_MAX_MISSING_COMPONENTS. It then composes
+#           exception (a) over the restored root, so the one command leaves no
+#           second wedge behind. Provenance is one PROJECT_ROOT_RESTORED history
+#           entry, reserved in the same three guard bodies as BASELINE_REBUILT.
+#     Without `--confirm` every one of the three is read-only. Counting (a)
 #     as part of the sweep is what this header said for one release, and it
 #     understated the admission the recognizer grants: the sweep never leaves the
 #     plugin-data store, while (a) writes into the user's project tree.
 #   - It cannot reach project source files, cannot run a build or a test, and
-#     takes no argument other than the single literal `--confirm`.
+#     takes no argument other than the two literals `--restore-root` and
+#     `--confirm` — NEITHER of which takes a value. That is the property, not the
+#     arity: a mode that accepted a destination would be the caller-named
+#     re-anchoring CLAUDE.md refuses, not an extension of this one.
 #   - Without `--confirm` it is strictly read-only and answers the same question
 #     the doctor row asks.
 #
@@ -175,17 +240,42 @@ ZSA_REQUIRED_MODULES
   exit 1
 }
 
+# TWO literals, and NEITHER takes a value. That is the property to keep, not the
+# arity: the whole safety argument for the restore mode is that the destination is
+# carried from the record, so an argument that could name a path is the one thing
+# this parser must never learn to accept. Each literal may appear once — a repeat
+# is refused rather than ignored, so the accepted surface stays exactly what the
+# recognizer's allowlist enumerates.
 CONFIRM=0
-case "${1:-}" in
-  '') ;;
-  --confirm) CONFIRM=1 ;;
-  *)
-    printf '%s\n' 'zensu:adopt-session: the only supported argument is --confirm' >&2
-    exit 2
-    ;;
-esac
-[ "$#" -le 1 ] || {
-  printf '%s\n' 'zensu:adopt-session: the only supported argument is --confirm' >&2
+MODE=adopt
+for _zsa_arg in "$@"; do
+  case "$_zsa_arg" in
+    --confirm)
+      [ "$CONFIRM" -eq 0 ] || {
+        printf '%s\n' 'zensu:adopt-session: --confirm may be given only once' >&2
+        exit 2
+      }
+      CONFIRM=1
+      ;;
+    --restore-root)
+      [ "$MODE" = adopt ] || {
+        printf '%s\n' 'zensu:adopt-session: --restore-root may be given only once' >&2
+        exit 2
+      }
+      MODE=restore-root
+      ;;
+    *)
+      printf '%s\n' 'zensu:adopt-session: the only supported arguments are --restore-root and --confirm' >&2
+      exit 2
+      ;;
+  esac
+done
+# UNREACHABLE as the loop above stands: it exits 2 on any token that is not one of
+# the two literals and on any repeat, so at most two arguments can survive it. Kept
+# as a belt against a future loop edit that relaxes one of those arms, and annotated
+# rather than silent, because this file annotates its other defense-in-depth guards.
+[ "$#" -le 2 ] || {
+  printf '%s\n' 'zensu:adopt-session: the only supported arguments are --restore-root and --confirm' >&2
   exit 2
 }
 
@@ -262,4 +352,5 @@ ZADOPT_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" \
 ZADOPT_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
 ZADOPT_SESSION_ID="$CLAUDE_CODE_SESSION_ID" \
 ZADOPT_CONFIRM="$CONFIRM" \
+ZADOPT_MODE="$MODE" \
 node "$DIR/session-adopt-report-v1.js"

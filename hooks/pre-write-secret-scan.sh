@@ -63,7 +63,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # which is keyed by the binding that does not exist.
   #
   # Both must be relaxed HERE, not only in the sibling Bash gates: hooks.json
-  # registers three PreToolUse hooks on the Bash matcher and a deny from ANY of
+  # registers several PreToolUse hooks on the Bash matcher and a deny from ANY of
   # them wins, so leaving this one closed silently reinstated the exact deadlock
   # the relaxation exists to remove. stdout is the JSON decision channel, so the
   # orphaned probe's printed path is discarded.
@@ -72,7 +72,8 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # two relaxable states, and a deny from ANY hook on this matcher wins — so
   # leaving this one closed would silently reinstate the deadlock the allowance
   # removes. Both are closed whitelisted shapes (a fixed set of assignments, one
-  # `bash <script in the executing installation>`, and at most `--confirm`), so
+  # `bash <script in the executing installation>`, and a closed two-literal argument
+  # set — `--restore-root` and `--confirm`, neither of which takes a value), so
   # neither can carry secret-bearing content for this gate to scan. That the
   # second one WRITES is irrelevant here — this gate scans payloads, it does not
   # judge writes; see the header of hooks/lib/zensu-session-adopt.sh for the

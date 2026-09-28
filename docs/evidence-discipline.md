@@ -52,8 +52,8 @@ generation: a recalled path may have been renamed or deleted since.
 **R6 — Never restate a result you did not produce.** Build status, test counts, pass/fail
 verdicts, and coverage numbers may be reported only from a run that actually happened in
 this session, with the command that produced them. Reusing a number from a previous run, a
-plan document, or an expectation is fabricated evidence — the failure mode the witness
-cross-check and the Phase 6 audits exist to catch.
+plan document, or an expectation is fabricated evidence — the failure mode the
+plugin-run full suite and the Phase 6 audits exist to catch.
 
 ## How the rule reaches every process
 
@@ -101,11 +101,10 @@ to be this rule may override it. Agents act on the block; humans and the hook re
 The discipline is not only prose. These are the places that already fail closed on it, and
 the reason the rule is worded the way it is:
 
-- The **Phase 6 witness cross-check** (`hooks/pre-bash-witness.sh` and
-  `hooks/post-bash-witness.sh` plus the `/zensu:tdd` audit) matches every claimed `cmd="…"`
-  against an independent log of what actually ran, and contradicts a claimed pass whose
-  captured output shows a failure — or whose command was attempted and never completed,
-  which is the only record a failing Bash call leaves. That is R6 in code.
+- The **full-suite gate** (`zensu-log.sh --evidence-run` plus the `--chain-done`
+  terminus) runs the suite itself, records the exit code it actually returned bound to a
+  fingerprint of the working tree, and refuses to close a reviewed chain on a missing, red
+  or stale record. No test result is claimed in prose. That is R6 in code.
 - The **REVIEW PACKET v1** contract makes reviewers reject a spawn whose evidence fields are
   missing instead of reviewing from imagination, and instructs them never to reproduce a
   build or test claim they did not receive. That is R2 and R6 for the review chain.

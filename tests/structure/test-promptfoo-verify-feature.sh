@@ -54,7 +54,7 @@ else
   check "runtime and live runner are executable" FAIL
 fi
 
-if bash -n "$RUNTIME" && bash -n "$RUNNER" && node --check "$SERVER" >/dev/null && node --check "$RESERVATION" >/dev/null && node --check "$ASSERTION" >/dev/null \
+if bash -n "$RUNTIME" && bash -n "$RUNNER" && bash -n "$REMOTE_PROVIDER" && node --check "$SERVER" >/dev/null && node --check "$RESERVATION" >/dev/null && node --check "$ASSERTION" >/dev/null \
   && node --check "$CONTRACT_TEST" >/dev/null; then
   check "fixture and runner syntax checks pass" PASS
 else
@@ -62,17 +62,17 @@ else
 fi
 
 CONTRACT_OUT="$(node --test "$CONTRACT_TEST" 2>&1)"
-if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 15; then
+if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 23; then
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"))" PASS
 else
-  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 15 registered)" FAIL
+  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 23 registered)" FAIL
 fi
 
-ASSERTION_SMOKE="$(node -e 'const check=require(process.argv[1]); const attest="\n===== wrapper attestation =====\n[wrapper_attestation] {\"init_git\":true,\"tracked_clean\":true,\"manifest_version\":1,\"root\":\"/tmp/eval\"}\n"; const up="[tool_use: Bash] id=u input={\"command\":\"./scripts/fixture-runtime.sh up\"}\n[tool_result: Bash] id=u is_error=false\nfixture-runtime: started\n"; const browser="[tool_use: mcp__zensu-browser__browser_snapshot] id=s input={}\n[tool_result: mcp__zensu-browser__browser_snapshot] id=s is_error=false\nok\n"; const down="[tool_use: Bash] id=d input={\"command\":\"./scripts/fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"; const good=up+browser+down+attest; const fake=up+browser+"[tool_use: Bash] id=d input={\"command\":\"printf stopped # fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"+attest; const unsafe=up+browser+"[tool_use: mcp__zensu-browser__browser_run_code_unsafe] id=e input={}\n"+down+attest; if(check(good,{config:{check:"localTeardown"}}).pass&&!check(fake,{config:{check:"localTeardown"}}).pass&&!check(unsafe,{config:{check:"localTeardown"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"
+ASSERTION_SMOKE="$(node -e 'const check=require(process.argv[1]); const attest="\n===== wrapper attestation =====\n[wrapper_attestation] {\"init_git\":true,\"tracked_clean\":true,\"manifest_version\":1,\"root\":\"/tmp/eval\"}\n"; const up="[tool_use: Bash] id=u input={\"command\":\"./scripts/fixture-runtime.sh up\"}\n[tool_result: Bash] id=u is_error=false\nfixture-runtime: started\n"; const browser="[tool_use: Bash] id=s input={\"command\":\"playwright-cli -s=zensu-verify-smoke snapshot\"}\n[tool_result: Bash] id=s is_error=false\n### Snapshot\n"; const down="[tool_use: Bash] id=d input={\"command\":\"./scripts/fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"; const good=up+browser+down+attest; const fake=up+browser+"[tool_use: Bash] id=d input={\"command\":\"printf stopped # fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"+attest; const unsafe=up+browser+"[tool_use: Bash] id=e input={\"command\":\"playwright-cli -s=zensu-verify-smoke eval document.title\"}\n"+down+attest; if(check(good,{config:{check:"localTeardown"}}).pass&&!check(fake,{config:{check:"localTeardown"}}).pass&&!check(unsafe,{config:{check:"localTeardown"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"
 if [ "$ASSERTION_SMOKE" = "ok" ]; then
-  check "grading requires clean attestation and rejects fake teardown/browser_evaluate" PASS
+  check "grading requires clean attestation and rejects fake teardown and a denied playwright-cli command" PASS
 else
-  check "grading requires clean attestation and rejects fake teardown/browser_evaluate" FAIL
+  check "grading requires clean attestation and rejects fake teardown and a denied playwright-cli command" FAIL
 fi
 ASSERTION_PROTOCOL_SMOKE="$(node -e 'const check=require(process.argv[1]); const call="[tool_use: Skill] id=s1 input={\"skill\":\"zensu:verify-feature\"}\n"; const exact=call+"[tool_result: Skill] id=s1 is_error=false\nloaded\n"; const spoof="[tool_use: Skill] id=s1 input={\"skill\":\"other\",\"args\":\"\\\"skill\\\":\\\"zensu:verify-feature\\\"\"}\n[tool_result: Skill] id=s1 is_error=false\nloaded\n"; const pass="[assistant_text]\nreport\nVERIFY-FEATURE-VERDICT: PASS\n"; const early="[assistant_text]\nVERIFY-FEATURE-VERDICT: PASS\ntrailing text\n"; const duplicate="[assistant_text]\nVERIFY-FEATURE-VERDICT: PASS\nVERIFY-FEATURE-VERDICT: PASS\n"; const warned=exact+"[stream_warning] event limit reached\n"; if(check(exact,{config:{check:"skillInvocation"}}).pass&&!check(call,{config:{check:"skillInvocation"}}).pass&&!check(spoof,{config:{check:"skillInvocation"}}).pass&&!check(warned,{config:{check:"skillInvocation"}}).pass&&check(pass,{config:{check:"localVerdict"}}).pass&&!check(early,{config:{check:"localVerdict"}}).pass&&!check(duplicate,{config:{check:"localVerdict"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"
 if [ "$ASSERTION_PROTOCOL_SMOKE" = "ok" ]; then
@@ -100,11 +100,13 @@ fi
 
 if grep -qF 'ZENSU_PLUGIN_DIR_OVERRIDE' "$RUNNER" \
   && grep -qF 'unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER' "$RUNNER" \
-  && grep -qF 'ZENSU_MCP_TEST_MODE ZENSU_MCP_TEST_PASSTHROUGH ZENSU_MCP_RUNTIME_DIR_OVERRIDE' "$RUNNER" \
+  && grep -qF 'PLAYWRIGHT_MCP_*|PWTEST_*) unset "$ambient"' "$RUNNER" \
+  && ! grep -qF 'ZENSU_MCP_' "$RUNNER" \
+  && ! grep -qF 'playwright-mcp.sh' "$RUNNER" \
+  && grep -qF 'export ZENSU_VERIFY_NAVIGATION_POLICY_V1=' "$RUNNER" \
   && grep -qF 'ZENSU_E2E_DISPOSABLE_ENVIRONMENT' "$RUNNER" \
   && grep -qF 'PROMPTFOO_CONFIG_DIR' "$RUNNER" \
   && grep -qF 'PROMPTFOO_DISABLE_TELEMETRY=1' "$RUNNER" \
-  && grep -qF 'playwright-mcp.sh" --zensu-install-runtime' "$RUNNER" \
   && grep -qF 'PROMPTFOO_PID=$!' "$RUNNER" \
   && grep -qF "trap 'exit 143' TERM HUP" "$RUNNER" \
   && grep -qF -- '--no-cache' "$RUNNER" \
@@ -122,10 +124,10 @@ if grep -qF 'require_disposable_environment: true' "$CFG" \
 else
   check "live eval requires and documents a disposable unrestricted host" FAIL
 fi
-if grep -qF 'promptfoo claude jq node npm git curl' "$RUNNER"; then
-  check "runner preflights every CLI required by the locked browser runtime" PASS
+if grep -qF 'for cli in promptfoo claude jq node git curl playwright-cli; do' "$RUNNER"; then
+  check "runner preflights every CLI the live run needs, including playwright-cli" PASS
 else
-  check "runner preflights every CLI required by the locked browser runtime" FAIL
+  check "runner preflights every CLI the live run needs, including playwright-cli" FAIL
 fi
 
 case "$(uname -s)" in
@@ -139,12 +141,9 @@ else
 RUNNER_SIGNAL_STUBS="$(mktemp -d -t verify-feature-runner-signal-XXXXXX)"
 RUNNER_SIGNAL_STATE="$RUNNER_SIGNAL_STUBS/state"
 RUNNER_LATE_STATE="$RUNNER_SIGNAL_STUBS/late.pid"
-cat >"$RUNNER_SIGNAL_STUBS/bash" <<'STUB'
+cat >"$RUNNER_SIGNAL_STUBS/playwright-cli" <<'STUB'
 #!/bin/bash
-case "${1:-} ${2:-}" in
-  *playwright-mcp.sh*' --zensu-install-runtime') exit 0 ;;
-  *) exec /bin/bash "$@" ;;
-esac
+exit 0
 STUB
 cat >"$RUNNER_SIGNAL_STUBS/claude" <<'STUB'
 #!/bin/bash
@@ -215,17 +214,21 @@ if grep -qF '/zensu:verify-feature' "$LOCAL" \
   && grep -qF 'check: localEvidence' "$LOCAL" \
   && grep -qF 'check: localTeardown' "$LOCAL" \
   && grep -qF "input?.skill === 'zensu:verify-feature'" "$ASSERTION" \
-  && grep -qF 'browser_take_screenshot' "$ASSERTION" \
+  && grep -qF "require(path.join(__dirname, '..', '..', '..', 'hooks', 'lib', 'verify-consent-v1.js'))" "$ASSERTION" \
+  && grep -qF 'consent.ALLOWED_COMMANDS' "$ASSERTION" \
+  && grep -qF 'consent.SESSION_RE' "$ASSERTION" \
+  && grep -qF 'consent.parseCliArgs' "$ASSERTION" \
   && grep -qF 'result.id === call.id' "$ASSERTION" \
-  && grep -qF "input.command === './scripts/fixture-runtime.sh down'" "$ASSERTION" \
+  && grep -qF "bashCommand(call) === './scripts/fixture-runtime.sh down'" "$ASSERTION" \
   && grep -qF 'result.id === teardown.id' "$ASSERTION" \
   && grep -qF 'screenshotEvidenceOffsets({' "$ASSERTION" \
-  && grep -qF "Object.prototype.hasOwnProperty.call(input, 'filename')" "$ASSERTION" \
-  && grep -qF 'imageEvidence.test(result.body)' "$ASSERTION" \
-  && grep -qF 'after: snapshot.end' "$ASSERTION"; then
-  check "local scenario pins correlated browser evidence, data, verdict, and teardown" PASS
+  && grep -qF 'IMAGE_EVIDENCE.test(result.body)' "$ASSERTION" \
+  && grep -qF 'readsPrintedFile(' "$ASSERTION" \
+  && grep -qF 'after: snapshot.result.end' "$ASSERTION" \
+  && ! grep -qE "'(mousewheel|set-forced-colors|dialog-dismiss|clear-contrast)'" "$ASSERTION"; then
+  check "local scenario pins gated playwright-cli evidence, data, verdict, and teardown" PASS
 else
-  check "local scenario pins correlated browser evidence, data, verdict, and teardown" FAIL
+  check "local scenario pins gated playwright-cli evidence, data, verdict, and teardown" FAIL
 fi
 
 if grep -qF 'EXAMPLE_REJECT_ME' "$REMOTE" \
@@ -243,6 +246,8 @@ fi
 
 if grep -qF "id: 'exec: ./remote-provider.sh'" "$REMOTE_ACCEPTED" \
   && grep -qF 'https://example.com/' "$REMOTE_ACCEPTED" \
+  && grep -qF '`Learn more`' "$REMOTE_ACCEPTED" \
+  && grep -qF 'link "Learn more"' "$ASSERTION" \
   && grep -qF 'check: remoteAcceptedTools' "$REMOTE_ACCEPTED" \
   && grep -qF 'check: remoteAcceptedEvidence' "$REMOTE_ACCEPTED" \
   && grep -qF 'check: remoteAcceptedVerdict' "$REMOTE_ACCEPTED" \
@@ -251,9 +256,9 @@ if grep -qF "id: 'exec: ./remote-provider.sh'" "$REMOTE_ACCEPTED" \
   && grep -qF 'mode: declared-safe' "$REMOTE_RECIPE" \
   && grep -qF 'dataClassification: pre-classified-non-sensitive' "$REMOTE_RECIPE" \
   && grep -qF 'containsSecrets: false' "$REMOTE_RECIPE"; then
-  check "accepted remote scenario pins a dedicated exact policy and complete brokered evidence" PASS
+  check "accepted remote scenario pins a dedicated exact policy and complete gated evidence" PASS
 else
-  check "accepted remote scenario and policy are fully registered" FAIL
+  check "accepted remote scenario pins a dedicated exact policy and complete gated evidence" FAIL
 fi
 
 if grep -qF 'up: "./scripts/fixture-runtime.sh up"' "$RECIPE" \
@@ -414,7 +419,9 @@ rm -rf "$NEG_DIR"
 
 if grep -qF 'live and advisory' "$README" \
   && grep -qF 'remote-accepted-public.yaml' "$README" \
-  && grep -qF 'tests/structure/test-promptfoo-verify-feature.sh' "$README"; then
+  && grep -qF 'tests/structure/test-promptfoo-verify-feature.sh' "$README" \
+  && grep -qF 'playwright-cli' "$README" \
+  && grep -qF 'cannot answer the consent prompt' "$README"; then
   check "eval README separates advisory live proof from deterministic structure coverage" PASS
 else
   check "eval README separates advisory live proof from deterministic structure coverage" FAIL

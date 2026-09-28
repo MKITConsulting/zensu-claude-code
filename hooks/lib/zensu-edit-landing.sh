@@ -449,9 +449,9 @@ absolute_claim_verdict() {
 }
 
 # ── Claim extraction ─────────────────────────────────────────────────────────
-# Only the two contracted forms carry a gradeable file list. Anything else that
-# says WIRED names nothing that can be checked and is reported UNVERIFIED — a
-# legacy or malformed entry must never read as passing.
+# Only the two contracted forms carry a gradeable file list. Any other entry
+# whose step id is followed by WIRED names nothing that can be checked and is
+# reported UNVERIFIED — a legacy or malformed entry must never read as passing.
 CLAIMS_FILE="$(mktemp)" || die "mktemp failed"
 
 CLAIM_COUNT=0
@@ -637,52 +637,91 @@ grade_claim() {
   emit "EDIT NOT LANDED — $(render_claim_value "${step}"): claimed $(render_claim_value "${resolved}"), git shows no change"
 }
 
-# Read the log. Claim lines carry a step id followed by one of the two forms.
+CLAIM_LABEL_TOKEN_BUDGET=5
+
+claim_label() {
+  local rest="$1" tok count=0
+  CLAIM_LABEL=""
+  case "$rest" in
+    *[\'\"\|]*) return 1 ;;
+  esac
+  while :; do
+    rest="${rest#"${rest%%[![:space:]]*}"}"
+    [ -n "$rest" ] || return 0
+    [ "$count" -lt "$CLAIM_LABEL_TOKEN_BUDGET" ] || return 1
+    tok="${rest%%[[:space:]]*}"
+    rest="${rest#"$tok"}"
+    CLAIM_LABEL="${CLAIM_LABEL:+$CLAIM_LABEL }$tok"
+    count=$((count + 1))
+  done
+}
+
+# Read the log. A claim opens with a short step label directly followed by its marker.
 LOG_LINE_NO=0
 while IFS= read -r line || [ -n "$line" ]; do
   LOG_LINE_NO=$((LOG_LINE_NO + 1))
-  case "$line" in
-    *"WIRED (verified, no change)"*)
+  entry="${line#"${line%%[![:space:]]*}"}"
+  case "$entry" in
+    \[*\]*) entry="${entry#*\]}"; entry="${entry#"${entry%%[![:space:]]*}"}" ;;
+  esac
+  case "$entry" in
+    'EDIT LANDED '*|'EDIT NOT LANDED '*|'EDIT LANDING AUDIT '*|'PENDING PREDICATE '*|'UNVERIFIED '*|'RECEIPT REFUSED '*) continue ;;
+  esac
+  marker=""
+  claim_lead=""
+  for candidate in "IMPL completed — files:" "IMPL completed – files:" "IMPL completed - files:" \
+                   "WIRED — files:" "WIRED – files:" "WIRED - files:" "WIRED (verified, no change)"; do
+    case "$entry" in
+      *"$candidate"*)
+        lead="${entry%%"$candidate"*}"
+        if [ -z "$marker" ] || [ "${#lead}" -lt "${#claim_lead}" ]; then
+          marker="$candidate"
+          claim_lead="$lead"
+        fi
+        ;;
+    esac
+  done
+  if [ -n "$marker" ] && claim_label "$claim_lead"; then
+    step="${CLAIM_LABEL:-(none)}"
+  else
+    step="${entry%%[[:space:]]*}"
+    marker="${entry#"$step"}"
+    marker="${marker#"${marker%%[![:space:]]*}"}"
+    case "$marker" in
+      WIRED*) marker="WIRED" ;;
+      *) continue ;;
+    esac
+  fi
+  case "$marker" in
+    "WIRED (verified, no change)")
       # Contract: a step that verified an existing wiring instead of changing
       # one. Exempt, and counted so the receipt shows it was used.
       EXEMPT_VERIFIED=$((EXEMPT_VERIFIED + 1))
       continue
       ;;
-    *"IMPL completed — files:"*)
-      # The step id is the token immediately before the marker; everything to
-      # its left is the configurable timestamp prefix.
-      step="$(printf '%s' "${line%% IMPL completed*}" | awk '{print $NF}')"
-      files="${line#*IMPL completed — files:}"
-      ;;
-    *"WIRED — files:"*)
-      step="$(printf '%s' "${line%% WIRED — files:*}" | awk '{print $NF}')"
-      files="${line#*WIRED — files:}"
-      ;;
-    *"WIRED"*)
-      wired_head="${line%% WIRED*}"
-      wired_head="${wired_head#\[*\] }"
-      case "$wired_head" in
-        ''|*[[:space:]]*) continue ;;
-      esac
+    WIRED)
       [ "$INVENTORY" -eq 1 ] && continue
       UNVERIFIED=$((UNVERIFIED + 1))
       CLAIM_COUNT=$((CLAIM_COUNT + 1))
       # The LINE NUMBER, never the line. This value is wholly author-written and
       # shares a NAMESPACE with this file's own verdict vocabulary, so no
       # character screen closes it: a log line reading
-      # `[ts] T05 WIRED EDIT LANDED — T01: src/x.ts` satisfies the whitespace
-      # guard above and used to render a forged `EDIT LANDED` inside a
+      # `[ts] T05 WIRED EDIT LANDED — T01: src/x.ts` is a well-formed bare
+      # claim and used to render a forged `EDIT LANDED` inside a
       # diagnostic that skills/tdd/SKILL.md step 5b b) tells the model to copy
       # verbatim into the run log, the report and the CHAIN-END SUMMARY — and a
       # spelling with no colon carries no forbidden character under any screen.
       # Screening characters was the wrong instrument for the wrong value. The
       # number identifies the entry precisely and carries zero author bytes.
       # The step id is kept and SCREENED. It is the one token in the line that
-      # is bounded by the arm's own whitespace guard, and dropping it would cost
+      # is bounded by the step-id split above, and dropping it would cost
       # the reader the only thing that says WHICH step is unverifiable — the
       # line number says where, the step id says what.
-      emit "UNVERIFIED — a WIRED entry at run-log line ${LOG_LINE_NO} (step $(render_claim_value "${wired_head}")) names no files: list and cannot be graded"
+      emit "UNVERIFIED — a WIRED entry at run-log line ${LOG_LINE_NO} (step $(render_claim_value "${step}")) names no files: list and cannot be graded"
       continue
+      ;;
+    *" files:")
+      files="${entry#*"$marker"}"
       ;;
     *) continue ;;
   esac

@@ -2,7 +2,7 @@
 # Full /zensu:tdd lifecycle — hermetic end-to-end walk (no live claude, no API).
 #
 # Drives ONE session through the COMPLETE cycle via the real hooks/libs in the
-# real order, asserting the phase-gate, witness, post-review routing and Stop-hook
+# real order, asserting the phase-gate, post-review routing and Stop-hook
 # at EVERY transition — the depth complement to test-smoke-main-thread-chain.sh
 # (which proves activation breadth but stops at IMPL).
 #
@@ -11,7 +11,6 @@
 #   S1: RED_WRITE -> RED_RUN -> RED_FAIL -> IMPL -> GREEN_RUN -> GREEN_PASS
 #   S2: RED_WRITE -> RED_FAIL -> IMPL -> GREEN_PASS   (multi-step progression)
 #   REFACTOR
-#   witness a command mid-cycle
 #   --tdd-complete -> Stop BLOCK (force code-reviewer)
 #   post-review (code-reviewer) routes in-thread, increments rounds
 #   --code-review-done -> Stop BLOCK (force self-review)
@@ -21,7 +20,6 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
-WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
@@ -51,7 +49,7 @@ export CLAUDE_PLUGIN_DATA="$PLUGIN_DATA"
 STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
 export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
-unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
+unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
@@ -126,20 +124,6 @@ echo "== REFACTOR =="
 phase_step REFACTOR S2
 [ "$(gate "$PROD")" = "allow" ] && check "R1 REFACTOR: prod edit allow" PASS || check "R1 REFACTOR prod allow" FAIL
 [ "$(gate "$TEST")" = "allow" ] && check "R2 REFACTOR: test edit allow" PASS || check "R2 REFACTOR test allow" FAIL
-
-echo "== Witness mid-cycle (active session) =="
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID_RAW"'"}' | bash "$WITNESS" >/dev/null 2>&1
-WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
-W1_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
-{ [ -f "$WLOG" ] && printf '%s' "$W1_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W1_LINE" | grep -qF 'tail="ok"'; } \
-  && check "W1 active session records witness line with cmd= + tail=" PASS || check "W1 witness line (tail) got='${W1_LINE}'" FAIL
-
-# W1b: production-shaped tool_response (NO exit_code, as the real Claude Code Bash payload) ->
-# exit=? but tail= still captured from real stdout. The reality the exit_code mocks can't show.
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"node --test"},"tool_response":{"stdout":"pass 1","stderr":"","interrupted":false,"isImage":false},"session_id":"'"$SID_RAW"'"}' | bash "$WITNESS" >/dev/null 2>&1
-W1B_LINE="$(grep -F 'cmd="node --test"' "$WLOG" 2>/dev/null | head -n1)"
-{ printf '%s' "$W1B_LINE" | grep -qF 'exit=?' && printf '%s' "$W1B_LINE" | grep -qF 'tail="' && printf '%s' "$W1B_LINE" | grep -qF 'pass 1'; } \
-  && check "W1b production payload (no exit_code) -> exit=? + tail= captured" PASS || check "W1b reality-shape tail got='${W1B_LINE}'" FAIL
 
 echo "== Terminus: implComplete -> review -> self-review -> done =="
 # Mid-TDD (not yet complete): Stop must allow.

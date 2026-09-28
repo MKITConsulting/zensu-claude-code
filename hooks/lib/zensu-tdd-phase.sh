@@ -467,12 +467,14 @@ _tdd_reserved_provenance() {
     [Rr][Uu][Nn][Tt][Ii][Mm][Ee]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
     [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]_[Rr][Ee][Bb][Uu][Ii][Ll][Tt]) return 0 ;;
+    [Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Rr][Oo][Oo][Tt]_[Rr][Ee][Ss][Tt][Oo][Rr][Ee][Dd]) return 0 ;;
   esac
   case "${2:-}" in
     [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *) return 0 ;;
     [Rr][Uu][Nn][Tt][Ii][Mm][Ee]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
     [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]-[Rr][Ee][Bb][Uu][Ii][Ll][Tt]:\ *) return 0 ;;
+    [Pp][Rr][Oo][Jj][Ee][Cc][Tt]-[Rr][Oo][Oo][Tt]-[Rr][Ee][Ss][Tt][Oo][Rr][Ee][Dd]:\ *) return 0 ;;
   esac
   return 1
 }
@@ -2773,7 +2775,7 @@ tdd_has_red_fail() {
 # document renders: `text` for a terminus that must disclose, the default
 # `empty` for a clearing verb, where a clean ENOENT means nothing was recorded.
 
-ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE"
+ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_FULL_SUITE_GATE"
 ZENSU_BYPASS_UNREADABLE_TEXT="UNREADABLE — workflow state could not be validated; this is NOT a clean ledger"
 ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this session; this is NOT a clean ledger"
 

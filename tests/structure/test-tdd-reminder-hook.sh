@@ -144,8 +144,10 @@ if [ -n "$AC12" ] \
    && printf '%s' "$AC12" | grep -qi 'no tdd' \
    && printf '%s' "$AC12" | grep -qi 'Auto Mode' \
    && printf '%s' "$AC12" | grep -qi 'Plan mode' \
-   && printf '%s' "$AC12" | grep -qi 'IGNORE'; then
-  check "C12 directive carries ask-first + fast-paths (use/no tdd, Auto Mode) + dismiss clauses (Plan mode, IGNORE)" PASS
+   && printf '%s' "$AC12" | grep -qi 'IGNORE' \
+   && printf '%s' "$AC12" | grep -qF 'ZENSU DELIVERY ROUTE:' \
+   && printf '%s' "$AC12" | grep -qF '/zensu:delivery-route'; then
+  check "C12 directive carries ask-first + fast-paths (use/no tdd, Auto Mode) + dismiss clauses (Plan mode, IGNORE) + the delivery-route field" PASS
 else
   fired12="$([ -n "$AC12" ] && echo yes || echo no)"
   check "C12 directive content (fired=$fired12)" FAIL

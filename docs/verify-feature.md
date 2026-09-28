@@ -4,14 +4,40 @@
 it observed. Under `/zensu:autopilot` its preconditions are prepared for you. Run on its own,
 it has two ways to authorize the browser:
 
-- **Consent mode** (the default when nothing is configured): the first navigation to each
-  loopback origin asks you through Claude Code's own permission prompt, in the CLI and in the
-  desktop app alike, with no environment variable and no restart. It covers local targets
-  only. Section 0 describes it.
+- **Consent mode** (the default when nothing is configured): the first time the run's browser
+  reaches each loopback origin, Claude Code's own permission prompt asks you, in the CLI and in
+  the desktop app alike, with no environment variable and no restart. That promise holds for an
+  interactive session: how the host resolves the prompt under bypass permissions, in auto mode
+  or in a headless run is unverified, so such a run belongs in policy mode. It covers local
+  targets only. Section 0 describes it.
 - **Policy mode**: a **navigation policy** exported by the environment that launches Claude
   Code. It is the only channel a model cannot write, it is required for remote targets and
-  for unattended runs, and it was the only way to run the skill before consent mode existed.
-  Sections 1 to 4 describe it.
+  for unattended runs — bypass permissions, auto mode, a headless run — and it was the only
+  way to run the skill before consent mode existed. Sections 1 to 4 describe it.
+
+The browser is driven by `playwright-cli`, which you install once:
+
+```bash
+npm install -g @playwright/cli@0.1.21
+```
+
+That is the version the browser consent gate was measured against, and the run-config helper
+refuses to write a run config for any other. The gate itself never reads the installed version,
+so a `playwright-cli` installed or put ahead on `PATH` after the helper ran goes unmeasured, and
+so does a run whose run config of the right shape was written another way. The check reads the
+version the package manifest declares, which vouches neither for what a wrapper script runs nor
+for a function or alias named `playwright-cli` that the shell already has.
+`brew install playwright-cli` is unpinned: it installs
+whichever version Homebrew ships. It uses your installed Chrome. When Chrome is missing,
+the skill asks before it runs `playwright-cli install-browser`, because that downloads a
+browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version, read
+from the `@playwright/cli` package manifest the binary resolves to, and warns when that version
+is not the one the browser consent gate was measured against. A manifest that names another
+package or cannot be judged is reported as such, and the binary is not run. Only when no
+manifest exists at all does the doctor run `playwright-cli --version`, once, with stdin closed
+and a five-second bound that kills it on every host; the version it prints is reported as
+self-reported and is never taken as measured, so the run-config helper still refuses to start a
+run on it.
 
 In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
 bundled Zensu monorepo adapter recognizes, or an application you already run
@@ -20,56 +46,92 @@ contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules
 and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
 replace them.
 
+## How the browser is fenced
+
+Every run writes a **run config** into its own run directory with
+`scripts/verify-browser-config.js` and opens the browser with it, under a session named
+`zensu-verify-<run>`. The run config makes the browser isolated, restricts every request to the
+run's origins (`network.allowedOrigins`), blocks service workers, and keeps screenshots and
+snapshots inside the run directory. For a remote host it also pins the hostname to the public
+address the helper resolved.
+
+The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
+`playwright-cli` call on a `zensu-verify` session before it runs only when the command text
+names the CLI and that session, or names the CLI while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
+`playwright-cli`, even one set or left empty in the same command, an ANSI-C escape inside the
+name such as `$'playwright\x2dcli'`, a script file, an alias under another name — never reaches
+it, so that call is not judged, and the literal-spelling and one-plain-call rules below never
+apply to it; `$'playwright-cli'`, which holds the plain name, still names the CLI to it, so a
+call on a `zensu-verify` session spelled that way is judged and denied as not one plain call. A
+session name assembled at run time — a variable, a substitution, an ANSI-C escape or an
+expansion inside the `zensu-verify-` prefix — hides the call the same way, unless the hook
+environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session: then a call that spells
+`playwright-cli` literally is judged whatever its session, and a session that is not literal is
+denied. A function or alias named
+`playwright-cli` that the shell already has, such as one from a startup file, is judged as the
+plain call its text shows, and the gate cannot see what it runs, so the denials below bind only
+what the command text spells. While its
+prefilter library loads, the gate reaches no decision for a call on any other session whose
+command text names no `zensu-verify-` session, and denies a command that merely mentions both
+markers — a search, a commit message.
+That is the accepted cost of a textual gate: search with the Grep tool and commit with a message
+file. While the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a
+call on any other session reaches no decision only when the command meets every condition that
+[Browser Consent Gate](gates.md#browser-consent-gate) lists for it, and every other command that
+names the CLI, a mere mention included, is denied. A known wrapper, a package launcher, a CLI
+path or an environment assignment is refused only on a `zensu-verify` session. For a
+`zensu-verify` call:
+
+- only the commands a verification needs are admitted: opening and closing the session,
+  navigation, snapshots, screenshots, console and request listings, clicks and typing, and
+  display emulation. `eval`, `run-code`, every cookie, storage and state command, file upload,
+  request details, recording, tracing, `attach` and `close-all` are denied;
+- `open` must name the run config, and the gate reads it itself before the browser starts;
+- calls must come from the main thread, name their session and arguments literally, and run as
+  exactly one plain `playwright-cli` command — no second command, pipe, subshell, substitution,
+  wrapper, package launcher or nested shell, and a redirection only to a literal path, never to a
+  variable, substitution, glob, brace, `~` or `=` target nor on a line of its own — so a denial
+  names the rule rather than guessing. Outside single quotes a `$` counts as an expansion unless
+  whitespace, the end of the command or a closing double quote follows it;
+- every target origin passes the navigation floor of section 2 and, without a policy, the
+  consent prompt below.
+
 ## 0. Consent mode
 
 When `ZENSU_VERIFY_NAVIGATION_POLICY_V1` is absent from the environment that launched Claude
-Code, the Playwright broker starts in consent mode, provided the plugin registers the consent
-hook pair on the broker's navigation tools (`/zensu:doctor` reports this as
+Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 `verify-feature: consent mode ready`). Then:
 
-- The first `browser_navigate` to each new origin opens a permission prompt naming the origin,
-  the route it starts with, the routes the run declares synthetic-safe and the consequence:
-  answering Yes lets the model open and read any page on that origin, screenshots included,
-  for the rest of the session. The model cannot answer that prompt.
+- The first `playwright-cli` call of the run that reaches a new origin — opening the browser,
+  `goto` or `tab-new` — opens a permission prompt naming the origin, the session, the routes the
+  run declares synthetic-safe and the consequence: answering Yes lets the model open and read
+  any page on that origin, screenshots included, for the rest of the session. The model cannot
+  answer that prompt.
 - Approved origins are remembered for the session in
   `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
   passes without a second prompt. The report's `Consent` block lists every record.
-- The broker keeps a hard floor whatever you answer: loopback origins only — a loopback IP
-  (`127.0.0.1`, any other `127.0.0.0/8` address, `[::1]`) or the exact name `localhost`, and no
-  other hostname, so `app.localhost` and `localhost.` stay refused — no credentials, no query or
-  fragment in a navigation, and sub-requests, WebSockets and redirects only to origins the
-  session already opened.
-- A remote target is refused in consent mode, by the hook and by the broker, because the
-  browser's DNS pins are fixed at launch. Remote verification needs the policy of section 4.
-- The port no longer has to be known before launch: the run reserves a free loopback port
-  through `scripts/verify-free-port.js`, hands it to the recipe as `ZENSU_VERIFY_PORT`, and
-  the prompt shows the resulting origin.
+- The floor holds whatever you answer: literal loopback origins only (`127.0.0.1`, `[::1]`;
+  never `localhost`), no credentials, no query or fragment in a navigation, and the browser
+  requests nothing from an origin outside the run config.
+- A remote target is refused in consent mode, by the run-config helper and by the gate, because
+  the browser's DNS pins are written before it starts. Remote verification needs the policy of
+  section 4.
+- The port does not have to be known before launch: the run reserves a free loopback port
+  through `scripts/verify-free-port.js`, hands it to the recipe as `ZENSU_VERIFY_PORT`, and the
+  prompt shows the resulting origin.
 
-- The broker does not take the plugin's word that the gate is installed. Consent mode
-  self-approves an origin only when a live marker
-  (`.zensu/state/verify-consent-exec-<session-key>-<origin digest>.json`) records the gate
-  deciding a navigation to that origin, and it reads the marker each time it is asked to approve
-  an origin it has not already approved in this broker process, rather than caching the mode it
-  resolved at start. The broker has no session key, so its read is scoped to the project rather
-  than to one session; the `/zensu:doctor` row is the session-scoped half — scoped by the
-  marker's FILENAME, which any session in the project can write, so that row reports a file and
-  never attests a run. So hooks switched off host-side, or a broker launched from a different plugin tree
-  than the one the host loaded its hooks from, produce a refusal rather than unprompted access in
-  the COMMON case — not in every case, and `docs/gates.md` states the same bound: the broker's read
-  is project-scoped and carries no session key, so a live marker for the same loopback origin
-  written by a different session in the cwd-anchored project satisfies it instead.
-  `/zensu:doctor` reports the two facts separately: `verify-feature:` for registration and
-  `verify-feature gate:` for execution.
-
-What consent mode does not do: an origin already approved inside the broker's process stays
-approved — the marker gates the write into that set, never each later navigation — so hooks
-switched off AFTER an origin's first approval produce no refusal for that origin. A prompt the
-user DECLINED also leaves its marker live for the marker's window, because the gate writes
-before the human answers. And the consent memory and the execution marker are both files the
-session can write, so they are controls, not proofs — the floor bounds what a forged record
-could reach to other loopback services, and the marker separates a gate that ran from one that
-did not without authenticating who wrote it. With the policy present the hook stays silent and the broker enforces the policy
-exactly as in the sections below.
+What consent mode does not do: it does not survive hooks switched off host-side. With the hooks
+off, nothing in the plugin judges `playwright-cli` at all, and `/zensu:doctor` can report only
+that the hooks are registered, not that they run. Nor is it verified without a person at the
+prompt: how the host resolves a hook `ask` under bypass permissions, in auto mode or in a
+headless run was never observed, so run an unattended or bypass session in policy mode, which
+asks nothing. The consent memory is a file the session can
+write, so it is a control, not a proof — the floor bounds what a forged record could reach to
+other loopback services. And the browser follows a server redirect to another origin even though
+it refuses every other request there, so the skill checks the page URL after every navigation and
+stops a scenario that left the approved set. With the policy present the gate asks nothing and
+enforces the policy exactly as in the sections below.
 
 ### Guided setup and attach mode
 
@@ -87,13 +149,10 @@ serve this worktree (its working directory equals the worktree root) or not.
 
 ## 1. The navigation policy is read when Claude Code starts
 
-The plugin registers its Playwright MCP server in `.mcp.json`. Claude Code starts that server
-once, at session start: `scripts/playwright-mcp.sh` materializes the pinned runtime and runs the
-broker, `scripts/playwright-mcp-proxy.js`, which parses `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
-from its own environment at that moment. Every browser request is judged against that parsed
-policy for the rest of the session. A `Bash` call inside the session is a child process and
-cannot reach the already-running server, which is why the skill never tries to set the
-variable and stops with PARTIAL instead.
+The gate's hooks and the run-config helper read `ZENSU_VERIFY_NAVIGATION_POLICY_V1` from the
+environment Claude Code was started with. A `Bash` call inside the session cannot change that
+environment for the hooks, which is why the skill never tries to set the variable and stops with
+PARTIAL instead.
 
 So the variable has to be exported by the shell that launches Claude Code:
 
@@ -111,60 +170,61 @@ again with the new value.
 | `version` | the integer `1` |
 | `mode` | `local` or `remote`; it must match the `--mode` the skill runs in |
 | `targets` | 1 to 8 entries; each carries exactly `origin`, `evidenceMode`, and `routes` |
-| `origin` | scheme, host, and port only: no path, credentials, query, fragment, or trailing slash; unique across targets |
+| `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
 | `routes` | 1 to 64 page paths per target; each starts with `/`, carries no `?`, `#`, or `*`, is already normalized, and is unique |
 
 No other key is accepted at either level. Routes are matched exactly on the pathname:
 `/inventory` covers neither `/inventory/` nor `/inventory/42`, and the root page needs its own
 `/` entry. Routes belong to the origin they sit under and are never combined across targets.
-The route rule applies to page navigations, redirects included; the API and asset requests a
-page makes, and its WebSocket connections, only have to hit an approved origin.
+The gate applies the route rule to the navigation commands it sees — opening the browser,
+`goto` and `tab-new`. It does not see a navigation the page itself makes, and the API and asset
+requests a page makes only have to hit an origin in the run config.
 
 ### Checking the policy before the run
 
 The skill runs this preflight for every route before its first browser call:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<origin>" "<route>" declared-safe
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" "<route>" declared-safe
 ```
 
-It parses the policy exactly as the server does and loads no browser runtime. Success is
-silent with exit `0`; a refusal prints `zensu Playwright broker: <reason>` on stderr and exits
-`1`. Run it from a terminal with `${CLAUDE_PLUGIN_ROOT}` replaced by the installed plugin
-directory, or let the skill run it, which reports a refusal as PARTIAL with that reason.
+It judges the target exactly as the gate does and starts no browser. Before it judges the target
+it runs the readiness check of the run-config helper: both consent hooks must be registered on a
+matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
+of the caller must name the measured version, and no empty or relative `PATH` entry may come
+before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
+terminal. Section 5 lists those refusals and their fixes. It prints `policy` when a
+policy approves the target, `consent` when no policy is set and the target is a loopback origin,
+and exits `0` in both cases; a refusal prints `zensu verify browser config: <reason>` on stderr
+and exits `1`. Run it from a terminal with `${CLAUDE_PLUGIN_ROOT}` replaced by the installed
+plugin directory, or let the skill run it, which reports a refusal as PARTIAL with that reason.
 The messages you will meet:
 
 | Message | Cause |
 |---|---|
-| `navigation policy mode does not match` | the policy is **absent** from the environment (an unset policy parses as a deny-everything policy with no mode), or its `mode` differs from the mode being checked |
-| `local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost` | a local origin uses a hostname other than the exact name `localhost` |
-| `navigation policy target does not match` | the origin is not listed exactly; a trailing slash or a different port is enough |
-| `navigation target route is not approved for evidence` | the route is not in that origin's `routes` |
-| `evidence route must be an absolute query-free pathname` | a route carries `?`, `#`, or `*`, or does not start with `/` |
-| `navigation policy contains unknown or missing keys` | a top-level key is missing, misspelled, or extra |
+| `navigation policy mode does not match` | the policy's `mode` differs from the mode being checked |
+| `remote-target-needs-parent-environment-policy: …` | a remote target with no policy in the launch environment |
+| `local navigation policy accepts literal loopback-IP origins only` | a local origin uses `localhost` or another hostname |
+| `<origin>: origin is not a target of the navigation policy` | the origin is not listed; a different port is enough |
+| `<origin><route>: route is not approved for evidence by the navigation policy` | the route is not in that origin's `routes` |
+| `route must be an absolute, normalized, query-free pathname` | the route being checked carries `?`, `#`, `*` or a dot segment, or does not start with `/` |
+| `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
+| `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
 
-`/zensu:doctor` checks that the Playwright MCP server is declared and that its pinned runtime
-is installable; it does not read the navigation policy. The preflight above is the only check
-for that.
+`/zensu:doctor` checks the policy's contract too and reports an invalid one as
+`verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)`; the preflight above
+is the only check of a particular origin and route.
 
 ## 2. Local mode
 
 Local mode proves the code in the current worktree, so the application has to be started from
 that worktree on an origin the policy already names.
 
-- **A loopback origin.** The origin is `http://` or `https://` plus either a loopback IP address
-  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) or the exact name `localhost`, and
-  the port. Every other hostname is rejected, because the broker refuses to trust DNS or
-  `/etc/hosts` for a boundary decision. `localhost` is the one name admitted: RFC 6761 reserves
-  it for the loopback interface and Chromium resolves it itself, to BOTH `127.0.0.1` and `[::1]`,
-  so an app bound to either family is reachable. No `--host-resolver-rules` pin travels with it —
-  such a rule carries one address and would cut off the other family — so the broker verifies the
-  claim instead: every response served for `localhost` is checked against the address it came
-  from, and one served from a non-loopback address closes the browser and ends the run. That
-  check happens AFTER the connection, so it reports a breach rather than preventing it.
-  Prefer `localhost` only when the app needs that exact origin (CORS allow-lists, cookies, auth
-  callbacks); a literal IP keeps the resolution question out of the run entirely.
+- **Literal loopback IP.** The origin is `http://` or `https://` plus a loopback IP address
+  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) and the port. `localhost` and
+  every other hostname are rejected, because the gate refuses to trust DNS or `/etc/hosts`
+  for a boundary decision.
 - **The port is fixed before launch.** The policy carries it, so the application must bind
   exactly that port and fail rather than fall back to another one (Vite's `--strictPort`, or
   an explicit bind in your own script). A server that silently moves to a free port produces
@@ -190,8 +250,8 @@ Then, inside the session:
 /zensu:verify-feature <what to verify> --route=/inventory
 ```
 
-The broker opens a visible Chromium window; keep the machine attended, because a login, when
-one is needed, happens by you typing into that window.
+When a login is needed the skill opens a visible browser window; keep the machine attended,
+because the login happens by you typing into that window.
 
 ## 3. The runtime recipe
 
@@ -267,6 +327,9 @@ validate:
     containsSecrets: false
 ```
 
+`validate.navigationBroker` keeps its name so existing recipes stay valid; it declares the
+policy of section 1 and is optional in consent mode.
+
 The script behind it is yours. The contract it has to meet:
 
 - `up` starts the app bound to `127.0.0.1:$VERIFY_PORT`, refuses to start when that port is
@@ -304,10 +367,11 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 /zensu:verify-feature <what to verify> --mode=remote --base-url=https://preview.example.com --route=/inventory
 ```
 
-- The origin must be non-loopback `https://`. The broker resolves the hostname, rejects any
-  answer that is not globally routable (RFC 1918, CGNAT, link-local, ULA, and the rest),
-  rejects a mix of public and non-public answers, and pins the browser to the approved
-  addresses so a later DNS change cannot redirect it.
+- The origin must be non-loopback `https://`. The run-config helper resolves the hostname,
+  rejects any answer that is not globally routable (RFC 1918, CGNAT, link-local, ULA, and the
+  rest), rejects a mix of public and non-public answers, and pins the browser to the approved
+  address so a later DNS change cannot redirect it. The gate refuses to open a run config whose
+  remote hostname carries no pin.
 - The base URL is validated in memory before anything else happens: absolute, `https://`, no
   userinfo, no query, no fragment. A signed or token-bearing preview link is rejected and
   never echoed; use a credential-free entry URL plus a visible login in the headed browser.
@@ -323,19 +387,19 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode`, or the consent hook is not registered so an absent policy still means deny-everything (`/zensu:doctor` shows `verify-feature: cannot start`) | fix the policy's mode, or reinstall the plugin so consent mode is available |
-| PARTIAL; reason `consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost)` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
-| PARTIAL; reason names `no in-session evidence that the Zensu consent gate ran for this origin` | the consent gate left no live execution marker for this origin under the tree the BROKER is anchored to — hooks switched off host-side, no bound session, or a broker anchored on a different tree than the one the gate wrote under | run `/zensu:doctor` and read its `verify-feature gate:` row. It is a DIFFERENT read, not the same fact twice: it is session-scoped and covers every origin, while the broker's is project-scoped and asks about this one origin, and it runs under the session record's project root rather than the broker's own. This refusal names no tree — only the two that report an unreadable state directory or an exhausted marker budget do |
+| PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode` | fix the policy's mode, or unset it to use consent mode for a local target |
+| PARTIAL; reason starts `remote-target-needs-parent-environment-policy` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
-| PARTIAL; reason names `loopback origins only` | the local origin uses a hostname that is not a loopback IP and not the exact name `localhost` (for example `app.localhost`, `localhost.`, or a `/etc/hosts` alias) | use `127.0.0.1` or `localhost` in the policy, the recipe, and the `baseUrlCommand` output |
-| PARTIAL; reason names `not a loopback address` | a response for `localhost` was served from off-loopback, so the tripwire closed the browser | check `/etc/hosts` and anything that rewrites name resolution, then re-run |
-| PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a trailing slash or a path | bind the port strictly; print the bare origin |
+| PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
+| PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
-| the skill reports that the plugin MCP server was not loaded | the Playwright tool set is absent from the session | check the plugin installation with `/zensu:doctor`, then restart Claude Code |
-| after a plugin update, browser calls prompt again, or a `permissions` `ask` or `deny` rule no longer applies to them | the broker's MCP server key moved from `playwright` to `zensu-browser`, so a rule written for `mcp__plugin_zensu_playwright__…` or `mcp__playwright__…` no longer matches its tools; the `ask` and `deny` cases fail silently, and the consent gate itself covers only `browser_navigate` and `browser_tabs`, so a lost rule on any other broker tool is replaced by nothing in this plugin on the main thread | re-spell each rule for `mcp__plugin_zensu_zensu-browser__…` or `mcp__zensu-browser__…`, then restart Claude Code; the Browser Consent Gate section of [gates.md](gates.md) explains the rename |
-| the browser binary is missing | the pinned Chromium is not installed | approve `bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser`, then restart Claude Code |
-
-The runtime and integrity model behind the server (per-invocation generations, the SRI-pinned
-lockfile, what `--check-policy` does and does not load) is described in
-[Playwright MCP runtime integrity](playwright-mcp-runtime.md).
+| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
+| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers `Bash` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
+| PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
+| PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
+| the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
+| a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL rather than worked around |
+| a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
+| PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in policy mode, to the policy too) |
+| after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |

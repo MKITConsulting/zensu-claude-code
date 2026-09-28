@@ -139,9 +139,10 @@
   project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still
   beginning with <code>/</code>. A foreign root outside both <code>$HOME</code> and the project root is
   detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not.
-  They remain requirements, not achieved properties. No carrier has been chosen that the session
-  cannot itself rewrite, so rule 2 is stated and not yet satisfied — see §6.1.1 and §8.1 of the
-  specification.</p>
+  They remain requirements, not achieved properties. A carrier was chosen on 2026-09-20 — the
+  Session Control record, sealed by a confirmation at arming — but the gate that makes its store
+  unwritable from inside a session is not built, so rule 2 is stated and not yet satisfied — see
+  §6.1.1 and §8.1 of the specification.</p>
 
   <figure>
     <div class="scroll" tabindex="0" role="group" aria-labelledby="p1-cap">
@@ -183,7 +184,7 @@
           <path d="M470,296 L470,312"/>
         </g>
         <text class="t-acc code-svg" x="470" y="330" text-anchor="middle" font-size="12.5">codeRoots[]</text>
-        <text class="t-ink2" x="470" y="348" text-anchor="middle" font-size="11.5">must freeze at arming · carrier not yet chosen</text>
+        <text class="t-ink2" x="470" y="348" text-anchor="middle" font-size="11.5">must freeze at arming · carrier chosen, not built</text>
 
         <g class="flow">
           <path d="M470,358 L470,388"/>
@@ -225,7 +226,7 @@
       <summary>Text description of the diagram</summary>
       <ol>
         <li>Layer 1, identity: one anchor — the orchestrator repository, holding record, state, logs, resume and doctor. Exactly one, never more.</li>
-        <li>Layer 2, reach: the anchor (identity plus code) alongside backend/ and frontend/ (code only). Together they form codeRoots[], which must freeze at arming and must never be derived from model-authored text — a requirement no chosen carrier yet satisfies. The anchor is a root too.</li>
+        <li>Layer 2, reach: the anchor (identity plus code) alongside backend/ and frontend/ (code only). Together they form codeRoots[], which must freeze at arming and must never be derived from model-authored text — a requirement the chosen carrier satisfies only once §6.1.1's preconditions are built. The anchor is a root too.</li>
         <li>Layer 3, evidence duty: five checks read that same list — Edit landing (did every claim land?), Review packet (does the reviewer see it?), Write gate (may this be written?), Terminus (was there any work?), Cross-repo review (does it fit together?).</li>
         <li>Reach and evidence duty are the same set. Identity never is.</li>
       </ol>
@@ -248,7 +249,9 @@
       from a plan, a specification, or a review comment. A root the model can name is a confinement
       the model can leave. This is the rule the design does not yet meet: the workflow document is
       writable from inside the session and its validator is shape-only, so it cannot enforce the
-      immutability the rule demands, and no other carrier has been chosen.</p>
+      immutability the rule demands. §6.1.1 has since moved the field onto the Session Control
+      record and paired it with a confirmation at arming; that record's own store is writable from
+      inside a session until §6.1.1's first precondition ships.</p>
     </div>
     <div class="law">
       <span class="n">Rule 3</span>
@@ -284,8 +287,8 @@
   <footer>
     Principle illustration for <a href="multi-repo-chains-spec.md">the specification</a>,
     alongside <a href="multi-repo-chains-overview.html">the overview page</a>.
-    Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until a
-    carrier for the root list is chosen.
+    Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until the
+    preconditions for the chosen carrier are built.
   </footer>
 
 </main>

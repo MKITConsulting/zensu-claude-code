@@ -2,8 +2,12 @@
 set -euo pipefail
 
 # Test-only escape hatches must never cross into the live runner.
-unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER \
-  ZENSU_MCP_TEST_MODE ZENSU_MCP_TEST_PASSTHROUGH ZENSU_MCP_RUNTIME_DIR_OVERRIDE
+unset ZENSU_WRAPPER_TEST_MODE ZENSU_WRAPPER_TEST_KILL_WATCHER
+for ambient in $(compgen -e); do
+  case "$ambient" in
+    PLAYWRIGHT_MCP_*|PWTEST_*) unset "$ambient" ;;
+  esac
+done
 
 if [ "${ZENSU_E2E_DISPOSABLE_ENVIRONMENT:-0}" != "1" ]; then
   echo "verify-feature eval: Claude runs with unrestricted host permissions; use a disposable environment and set ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 to acknowledge that boundary" >&2
@@ -38,16 +42,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
-for cli in promptfoo claude jq node npm git curl; do
+for cli in promptfoo claude jq node git curl playwright-cli; do
   if ! command -v "$cli" >/dev/null 2>&1; then
     echo "verify-feature eval: required CLI '$cli' is not on PATH" >&2
     exit 127
   fi
 done
-
-# Prepare the integrity-checked MCP dependency before Claude enters the immutable
-# fixture sandbox, where package installation is intentionally impossible.
-bash "$PLUGIN_DIR/scripts/playwright-mcp.sh" --zensu-install-runtime
 
 export ZENSU_PLUGIN_DIR_OVERRIDE="$PLUGIN_DIR"
 export PROMPTFOO_CONFIG_DIR="$PROMPTFOO_STATE"

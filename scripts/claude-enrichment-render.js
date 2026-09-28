@@ -96,7 +96,6 @@ async function main() {
     }
     if (!file || !fs.existsSync(file)) continue;
     if (kind === '--hook') await renderLines(file, 'hook events', root);
-    else if (kind === '--witness') await renderLines(file, `witness: ${protectFraming(sanitize(path.basename(file)))}`, root);
     else if (kind === '--fsm') renderFsm(file, root);
   }
 }

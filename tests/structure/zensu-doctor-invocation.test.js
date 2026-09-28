@@ -94,10 +94,21 @@ const payload = (command, toolName = "Bash") => ({
 });
 
 const verdict = (command, toolName) => recognize(payload(command, toolName), pluginRoot);
-const canonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`;
+const canonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" bash "${doctorPath}"`;
+const previousReleaseCanonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`;
 
-test("the canonical skill invocation is recognized", () => {
+test("the canonical skill invocation is recognized, and it is the one skills/doctor/SKILL.md Phase 1 emits", () => {
   assert.deepStrictEqual(verdict(canonical), { ok: true, reason: "" });
+  const skill = fs.readFileSync(nodePath.join(__dirname, "..", "..", "skills", "doctor", "SKILL.md"), "utf8");
+  const emitted = skill.split(/\r?\n/)
+    .filter((line) => line.includes('bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"'))
+    .map((line) => line
+      .split("${CLAUDE_PLUGIN_DATA}").join(dataDir)
+      .split("${CLAUDE_PROJECT_DIR}").join(projectDir)
+      .split("${CLAUDE_PLUGIN_ROOT}").join(commandSpelling(pluginRoot)));
+  assert.ok(emitted.length >= 2, `expected both Phase 1 doctor commands in the skill, found ${emitted.length}`);
+  assert.ok(emitted.includes(canonical), `the skill emits no command equal to the canonical form: ${JSON.stringify(emitted)}`);
+  assert.ok(emitted.every((line) => !line.includes("ZDOC_PLAYWRIGHT_TOOLS")), "the skill must no longer emit ZDOC_PLAYWRIGHT_TOOLS");
 });
 
 test("the bare invocation with no assignments is recognized", () => {
@@ -187,9 +198,10 @@ test("a path-kind assignment must be rooted and traversal-free", () => {
   assert.strictEqual(verdict(`CLAUDE_PROJECT_DIR= bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
 });
 
-test("a Set-kind assignment accepts only its declared members", () => {
+test("a Set-kind assignment accepts only its declared members, and the previous release's ZDOC_PLAYWRIGHT_TOOLS=ready form stays recognized", () => {
   assert.strictEqual(verdict(`ZDOC_PLAYWRIGHT_TOOLS=1 bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
   assert.strictEqual(verdict(`ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`).ok, true);
+  assert.deepStrictEqual(verdict(previousReleaseCanonical), { ok: true, reason: "" });
 });
 
 test("ZDOC_PLAYWRIGHT is NOT reachable — only the tools signal is", () => {
@@ -286,10 +298,16 @@ test("the adoption is recognized bare and with exactly one --confirm", () => {
   );
 });
 
-test("the adoption declares exactly one argument and refuses every other shape", () => {
+test("the adoption declares two literal arguments and refuses every other shape", () => {
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --force`).reason, REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm --confirm`).reason, REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --restore-root --restore-root`).reason,
+    REASONS.ARGUMENT);
+  // The one that matters most for this mode: a DESTINATION is never admitted,
+  // whichever flag precedes it.
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --restore-root /tmp/evil`).reason,
+    REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`EVIL=1 bash "${adoptPath}"`).reason, REASONS.ASSIGNMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}"; whoami`).reason, REASONS.CHARSET);
 });
@@ -308,5 +326,27 @@ test("isDoctorInvocation never admits the write, and the recognized list stays a
   assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), PLATFORM_SUPPORTED);
   assert.deepStrictEqual(Object.keys(RECOGNIZED).sort(), ["adopt", "doctor"]);
   assert.deepStrictEqual(RECOGNIZED.doctor.args, []);
-  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--confirm"]);
+  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--restore-root", "--confirm"]);
+  // The property that makes widening this list safe, pinned as a property
+  // rather than as today's two spellings: every admitted argument is an exact
+  // literal and NONE of them takes a value. An entry that could carry a
+  // destination would let an invocation name a directory, which is the
+  // caller-named re-anchoring the design refuses — so it must fail HERE rather
+  // than be discovered in the script that consumes it.
+  for (const arg of RECOGNIZED.adopt.args) {
+    assert.match(arg, /^--[a-z][a-z-]*$/, `${arg} is not a bare literal flag`);
+  }
+});
+
+// The argv surface the recognizer admits must be exactly the one the script
+// accepts, in both directions. A literal admitted here and refused there is a
+// remedy the user is told to run and cannot; a literal accepted there and
+// refused here is a mode the gate silently blocks.
+test("every admitted adopt argument is one the adopt script itself accepts", () => {
+  const script = fs.readFileSync(
+    nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS), "utf8");
+  for (const arg of RECOGNIZED.adopt.args) {
+    assert.ok(script.includes(`    ${arg})`),
+      `${arg} is admitted by the recognizer but has no case arm in the adopt script`);
+  }
 });

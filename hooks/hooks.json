@@ -58,10 +58,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-witness.sh\""
-          },
-          {
-            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-zensu-gate.sh\""
           },
           {
@@ -72,12 +68,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-secret-scan.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh\"",
@@ -110,11 +101,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh\"",
+            "timeout": 60
           }
         ]
       },
@@ -124,16 +116,6 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh\"",
-            "timeout": 60
           }
         ]
       }
@@ -165,6 +147,11 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-autopilot-resume.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-worktree-keep.sh\"",
+            "timeout": 10
           }
         ]
       }
@@ -238,6 +225,22 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-best-solution-first.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-worktree-keep.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end-worktree-keep.sh\"",
             "timeout": 10
           }
         ]

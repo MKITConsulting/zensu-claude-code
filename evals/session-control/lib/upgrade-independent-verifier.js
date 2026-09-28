@@ -162,11 +162,13 @@ function runtimeEntries(root, manifest) {
     if (manifest[field] !== undefined) add(manifest[field], `plugin manifest ${field}`);
   }
   if (manifest.mcpServers !== undefined) {
-    for (const relative of ['scripts', 'mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
+    for (const relative of ['mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
       const candidate = path.join(root, relative);
       if (fs.existsSync(candidate)) entries.add(candidate);
     }
   }
+  const scripts = path.join(root, 'scripts');
+  if (fs.existsSync(scripts)) entries.add(scripts);
   return [...entries];
 }
 

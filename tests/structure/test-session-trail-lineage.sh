@@ -3228,11 +3228,12 @@ fi
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added
-# later by copying the L10 line inherits the developer's REAL config root and a
-# `takeover` there writes a real edge into it. Both halves are asserted: every
-# invocation carries the unset, and EXACTLY ONE is exempt. Either alone is
-# satisfiable by accident -- a second forgotten `env -u` is indistinguishable
-# from a second deliberate exemption.
+# later by copying the L10 line inherits the developer's REAL config root: there
+# `label` and `lineage --backfill --apply` write with no selector at all, and
+# `takeover` without `--no-record` or `adopt` writes an edge once its selector
+# resolves. Both halves are asserted: every invocation carries the unset, and
+# EXACTLY ONE is exempt. Either alone is satisfiable by accident -- a second
+# forgotten `env -u` is indistinguishable from a second deliberate exemption.
 SELF_FILE="$PLUGIN_DIR/tests/structure/test-session-trail-lineage.sh"
 INV_TOTAL="$(grep -c 'node "\$TRAIL_MJS"' "$SELF_FILE" || true)"
 INV_UNSET="$(grep -c 'env -u CLAUDE_CONFIG_DIR node "\$TRAIL_MJS"' "$SELF_FILE" || true)"

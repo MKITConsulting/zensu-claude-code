@@ -5,9 +5,9 @@ completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, and which a logged
 claim arms even when the anchor's tree is clean (discipline patch 10 in
 [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here. Six of the
-eight are convention-nudges with a documented escape hatch, not security
-boundaries — see [Session Control](session-control.md) for the part that is. The
+and §Requirements-Table Gate below, which has its own section here — and ONE
+terminus refusal at `--chain-done`, §Full-Suite Gate. Seven of the nine are
+convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
 two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
 escape hatch, and neither is a security boundary on its own: the first closes one
 channel to one directory and names the ones it leaves open; the second puts a human
@@ -20,13 +20,16 @@ recognized by `hooks/lib/zensu-doctor-invocation.js` rather than by any
 individual gate: `/zensu:doctor`, which writes nothing, and
 `/zensu:adopt-session`, whose writes are confined to the calling session's own
 record, one workflow history entry, a move of that session's stale
-review-evidence leases, and — on an `already-served` refusal with `--confirm`
+review-evidence leases — on an `already-served` refusal with `--confirm`
 only — that session's own missing workflow document plus its `.zensu` ancestors
-under the recorded project root; it carries its own justification, and the
-authoritative four-class enumeration, in the header of
+under the recorded project root, and — under `--restore-root --confirm` only —
+the recorded project root itself when that directory is what is gone; it carries
+its own justification, and the authoritative five-class enumeration, in the header of
 `hooks/lib/zensu-session-adopt.sh`. Both are matched as exact whitelisted shapes
 — a closed set of assignments, one `bash <script in the executing installation>`,
-and for the adoption at most the literal `--confirm`. Every hook on the `Bash`
+and for the adoption at most the literals `--restore-root` and `--confirm`, each
+at most once. Neither literal takes a VALUE, which is what keeps a destination out
+of every invocation this gate admits. Every hook on the `Bash`
 matcher plus the all-tool capability gate must allow, because a deny from any one
 of them wins. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
@@ -202,7 +205,9 @@ instruction that cannot succeed until its cap releases the guard.
   agent with `tools: Bash`.
 - **What bounds the CHILD is in this tree, not an assumption about the host.**
   `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
-  tool outside the read trio for a `REVIEWER` principal, and confines its reads to the project
+  tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
+  report tool, admitted only with one string `message` field (see
+  [Session Control](session-control.md)) — and confines its reads to the project
   root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
@@ -334,180 +339,256 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the Playwright broker's navigating
-tools — `browser_navigate` and `browser_tabs` in either spelling of the broker's server key
-`zensu-browser` (`mcp__plugin_zensu_zensu-browser__…` / `mcp__zensu-browser__…`). The pair exists so that
-`/zensu:verify-feature` can run without `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the
-environment that launched Claude Code: that variable was the only channel a model cannot
-write, and it cost every user a shell prefix, a port fixed before launch, and a restart per
-change — and the desktop app has no shell prefix at all.
+(`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. The gate is
+textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
+`scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
+text names the CLI and that session, or names the CLI while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names one, and while their prefilter library loads they stay out of
+every other Bash call: both hooks exit before starting `node` unless the payload, with quotes and
+backslashes removed and in any letter case, names `playwright-cli` (or `@playwright/cli`) and a
+`zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. A
+`playwright-cli` call on any other session reaches no decision unless its command text also names
+a `zensu-verify-` session, which denies it. While the hook environment's `PLAYWRIGHT_CLI_SESSION`
+names one, such a call reaches no decision only when all of these hold: the command parses and
+stays within the 256 KiB size bound; it holds no operator (`;`, `&`, `&&`, `|`, `||`, `|&`,
+parentheses), no command on a further line, and no `$(…)`, `${…}`, `$((…))`, backtick or
+process-substitution body, heredoc, here-string or non-literal redirection target anywhere; its
+one `playwright-cli` stands in command position, directly or behind a package launcher or a
+wrapper the gate knows (`env`, `sudo`, `doas`, `timeout`, `gtimeout`, `nohup`, `time`, `nice`,
+`exec`, `command`, `builtin`); the call gives at most one session argument and the command at
+most one `PLAYWRIGHT_CLI_SESSION` assignment; the session and every argument are literal and
+parse; and the command defines no `playwright-cli` function, uses no environment builtin and
+names no `PLAYWRIGHT_MCP_*` or `PWTEST_*` variable. Every other command that names the CLI, a
+mere mention included, is denied. A known wrapper, a package launcher, a CLI path or an
+environment assignment is refused only on a `zensu-verify` session.
+The pair exists so that `/zensu:verify-feature` can run without
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
+is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
+before launch, and a restart per change — and the desktop app has no shell prefix at all.
 
-**What it does.** When no parent policy is present, the broker starts in *consent mode*
-(`scripts/playwright-mcp-proxy.js` checks its own `hooks/hooks.json` for this registration at
-start, and stays in the old deny-everything mode without it). The PreToolUse hook then returns
+**Why a Bash gate.** `/zensu:verify-feature` used to drive a bundled Playwright MCP server
+behind a capability broker. Claude Code started that server once per session, and each start
+materialized a private npm runtime of several hundred megabytes whether or not a browser was ever
+opened. The skill now drives `playwright-cli`, which the user installs once
+(`npm install -g @playwright/cli@0.1.21`, the measured version; `brew install playwright-cli` is
+unpinned), and the controls the broker
+held moved into this gate and into the run config the browser is opened with.
+
+**Scope.** Only `zensu-verify-*` sessions are judged. A `playwright-cli` call on the default
+session or on a session a user or another skill named is not a verification run: a user's own
+skill may legitimately use `eval`, cookies or state files there, and denying it would be
+overreach. The cost is stated rather than implied: a model that opens a browser under a session
+name it chose itself sits outside the gate, and the skill's instruction to use only the printed
+session is prose, not a boundary.
+
+**What it judges, per call.**
+
+- **The principal.** Main thread only; a subagent's `zensu-verify` call is denied.
+- **The shape: exactly one plain call.** A command whose text names `playwright-cli` and a
+  `zensu-verify` session — after quote removal and in any letter case — or that names
+  `playwright-cli` while the hook environment's `PLAYWRIGHT_CLI_SESSION` names such a session, is
+  admitted only as ONE top-level `playwright-cli` call: no second command, no `;`, `&&`, `||`,
+  pipe or background `&`, no subshell, command substitution, heredoc or here-string, no
+  nested shell or `eval` body, and a redirection only to a literal path: a redirection whose
+  target is not a literal — a variable, a substitution, an unquoted glob or brace, a leading `~`
+  or `=` — is denied, and a redirection on a line of its own is a second command. The per-call rules
+  below run first, so a call the gate can judge
+  keeps its specific reason, and any other shape is denied as not one plain call. A gated call
+  reached through `xargs` or another program, a command string handed to a shell or another
+  program, a heredoc, here-string, nested shell or `eval` body the gate cannot judge — one
+  beyond the nesting bound included — a function named `playwright-cli`, in any letter case, that
+  the command defines, an
+  `export` or other environment builtin, an environment assignment or `env`/`sudo`/`doas`
+  wrapper on the call (a nested shell body inherits the ones on the shell that runs it), any
+  other wrapper (`timeout`, `gtimeout`, `nohup`, `time`, `nice`, `exec`, `command`, `builtin`, or
+  one the gate does not know), a package launcher (`npx`, `bunx`, `pnpx`, `npm`/`pnpm`/`yarn`
+  `dlx`/`exec`/`x`), a CLI named other than by its bare name — a path, another letter case or the
+  package name `@playwright/cli`, where only `playwright-cli` (on Windows also its `.cmd`, `.exe`
+  and `.ps1` names) lets `PATH` resolve the binary `/zensu:doctor` measured, unless the shell
+  already has a function or alias of that name, which neither hook can see — and any
+  `PLAYWRIGHT_MCP_*` or `PWTEST_*` name in the command text, quoted apart or not, are denied.
+  The session name and every argument must be literal: a shell variable, substitution, glob,
+  brace expansion, or a leading `~` or `=` beside a `zensu-verify` session denies, so quote such
+  an argument. Outside single quotes a `$` counts as an expansion unless whitespace, the end of
+  the command or a closing double quote follows it, so the zsh spellings `$=X`, `$~X`, `$^X` and
+  `$+X` deny as well.
+  `-s=<session>`, `--session <session>` and a literal
+  `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
+  `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
+  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.21's
+  parser; an argument shape it does not recognize is denied rather than admitted — an option
+  outside the allowlist on a `zensu-verify` call, and a plain call whose text names a
+  `zensu-verify` session that the parser does not resolve as the call's session. **Accepted
+  cost:** a command that merely mentions both markers — a search, a commit message — is denied
+  too; search with the Grep tool and commit with a message file.
+- **The command set.** An allowlist, each command with its own flags: session (`open`, `close`,
+  `list`), navigation, observation (`snapshot`, `find`, `screenshot`, `console`, `requests`),
+  interaction, and display emulation. Everything else is denied — `eval`, `run-code`, every
+  cookie, local/session-storage and state command, `delete-data`, `route`, the request-detail
+  commands, `upload`, `drop`, `pdf`, recording, tracing and video, `attach`, `install`,
+  `install-browser`, `close-all` and `kill-all` — as are `--filename`, `--persistent`,
+  `--profile`, and a flag given twice. The denial names `/zensu:verify-feature` and says not to
+  retry the call under another session name or through another program.
+  `skills/verify-feature/rules/browser-verification.md` carries the list the model works from;
+  `ALLOWED_COMMANDS` in `hooks/lib/verify-consent-v1.js` is the one that decides.
+- **`open`.** It must carry `--config=<absolute path>`, and the gate reads that file itself and
+  requires exactly the shape the helper writes: an isolated browser, `--no-proxy-server` plus,
+  for remote hosts, one `--host-resolver-rules` pin per hostname to a public address, service
+  workers blocked, one to eight canonical origins as `network.allowedOrigins`, and `outputDir`
+  set to the run directory's own `browser/` folder. It also denies when the launch environment
+  sets a `PLAYWRIGHT_MCP_*` variable, which the CLI would merge over the run config, when the
+  global `~/.playwright/cli.config.json` sets anything beyond a short list of presentation keys
+  or selects a browser other than Chromium, and when `--browser` names anything but a Chromium
+  channel, because the resolver pins and the proxy switch are Chromium switches.
+- **Navigation targets.** Every origin in the run config, and the URL of `open`, `goto` and
+  `tab-new`, pass through the floor below.
+
+**The floor holds regardless of consent.** A `localhost` or any other hostname in local mode, a
+non-loopback `http` origin, a private, link-local, loopback-mapped or documentation address,
+credentials in the URL, and a query or fragment in a navigation are all refused. Consent mode
+admits **literal loopback origins only**. A remote target needs the parent policy: the run-config
+helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
+gate then requires, because an origin approved mid-session could not be pinned. The browser
+itself refuses every request to an origin outside `network.allowedOrigins`. It does NOT refuse a
+server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
+line after every navigating call and stops a scenario that left the approved set. In consent mode
+nothing enforces routes — the human consented to the whole origin.
+
+**Consent and memory.** With no parent policy the PreToolUse hook returns
 `permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
-first navigation to each new loopback origin. Consent is per ORIGIN: once an origin is
-approved, every route on it passes silently for the rest of the session, which is exactly what
-the broker enforces and what the prompt says. The runtime recipe's declared routes are prompt
-CONTEXT — they tell the human what the run intends to visit — and steer no decision. The
-PostToolUse hook records an executed navigation as `(origin, route, decidedBy, at)` in
-`<project>/.zensu/state/verify-consent-<session-key>.json`, written by `O_EXCL` temp plus
-rename, contained to that directory, and never through a symlink. The decision, the prompt
-text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the address and URL
-predicates both the hook and the broker apply live in `hooks/lib/verify-navigation-floor-v1.js`,
-so there is one floor, not two.
+first call that reaches each new loopback origin. Consent is per ORIGIN: once an origin is
+approved, every route on it passes silently for the rest of the session, which is what the
+prompt says. The runtime recipe's declared routes are prompt CONTEXT — they tell the human what
+the run intends to visit — and steer no decision. The PostToolUse hook records an executed call
+as `(origin, route, decidedBy, at)` in `<project>/.zensu/state/verify-consent-<session-key>.json`,
+written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
+The decision, the prompt text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the
+address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
+run-config helper uses too, so there is one floor, not two.
 
-**The floor holds regardless of consent.** Both layers refuse, independently: every hostname
-but the exact name `localhost` (so `app.localhost`, `localhost.` and a `/etc/hosts` alias are
-refused), a non-loopback `http` origin, a private, link-local, loopback-mapped or documentation
-address, credentials in the URL, and a query or fragment in a navigation. Consent mode admits
-**loopback origins only** — a loopback IP or `localhost`. That one name is admitted because
-RFC 6761 reserves it for the loopback interface and Chromium resolves it itself, to both
-`127.0.0.1` and `[::1]`; no `--host-resolver-rules` pin carries it, since such a rule holds one
-address and would cut off the other family. The broker checks the claim rather than trusting it:
-a response served for `localhost` from a non-loopback address closes the browser and refuses
-every later call. That check runs after the connection, so it reports a breach rather than
-preventing one. A remote target is refused by the hook
-and by the broker with the same reason, because Chromium's DNS pins are passed at browser
-launch and an origin approved mid-session could not be pinned; remote verification keeps the
-parent policy. Sub-requests, WebSockets and redirects reach only origins the session already
-opened. In consent mode neither layer enforces routes — the human consented to the whole origin — so a
-same-origin redirect to an undeclared route is stopped by neither.
-
-**With a parent policy present the gate stays silent** and the broker enforces the policy
-exactly as before; the PostToolUse hook then records `decidedBy: policy-mode`.
+**With a parent policy present the gate asks nothing.** It admits only the policy's targets,
+navigation commands only to their declared routes, and a remote hostname only when the run
+config pins it; the PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
+contract denies every `zensu-verify` navigation, with the broken rule named.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
 raised for this origin), `remembered` (the memory already held the origin) and `policy-mode`.
 `asked` does not assert that a person said yes — it asserts that the pre hook would have asked
-and the navigation then executed.
+and the call then succeeded.
 
-**Fault direction.** The PreToolUse hook is a gate and fails closed: a missing `node`, an
-absent or symlinked module, or a module failure denies the navigation with a stderr note. A
-session that cannot bind its Session Control record still gets the floor and a prompt for
-every navigation, but the prompt is all it gets: with no session key there is no name to bind an
-execution marker to, so the broker refuses the navigation the human was just asked about. The
-hook says exactly that on stderr — that this session cannot complete a consent-mode navigation,
-and to run `/zensu:doctor` — rather than the older and weaker "nothing is remembered". The PostToolUse hook
-never blocks: every fault is a stderr note and exit `0` — with the one exception every sibling
-hook shares, the plugin-root identity guard, which refuses with exit 2 before the hook body runs
-(self-resolution failure and inherited-root mismatch are two distinct messages). A navigation the
-broker rejected (`isError`) is not recorded.
+**Fault direction.** While its prefilter library loads, the PreToolUse hook fails closed on a
+marked call and never touches any other: a Bash call whose payload does not name both markers —
+and whose hook environment names no `zensu-verify` session — exits before `node` starts. Both
+hooks read the markers through one sourced library, `hooks/lib/zensu-browser-consent-prefilter.sh`.
+When it cannot be sourced, each hook falls back to a test of its own: a payload that names either
+marker alone — `playwright` or `zensu-verify`, in any letter case — is treated as marked, so the
+PreToolUse hook denies it with `prefilter library unavailable` once the plugin-root check and the
+`/zensu:doctor` exemption have run, and the recorder skips it with a stderr note naming the same
+cause. That test reads the whole hook payload, not only the command, so in a project whose
+working directory names either word every Bash call is denied until the library is restored, the
+recognized `/zensu:doctor` and adoption commands excepted; a call whose payload names neither
+word still passes silently. Unlike the library, that test drops the JSON escapes `\n`, `\r` and
+`\t` without first pairing escaped backslashes, so a gated call can name neither word to it:
+`playw\right-cli -s=ze\nsu-verify-x eval 1`, which bash runs as
+`playwright-cli -s=zensu-verify-x eval 1`, passes unjudged until the library is restored, and so
+does a call that splits only `playwright-cli` that way while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session. On a POSIX host with `node`, the recognized `/zensu:doctor` and adoption commands exit 0 before the decision
+module runs, even when a path in them names both markers; the recognizer refuses on win32, so
+there such a command is judged like any other. For a marked payload, a missing `node`,
+an absent or symlinked module, or a module failure denies with a stderr note, and the recorder
+skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
+JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
+a backslash-newline or backslash-CR-LF line continuation and one `LC_ALL=C tr -d` pass removes
+quotes and backslashes, with the raw payload as the fallback when either pass fails: stripping them in pure bash
+was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
+`tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
+prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The
+PostToolUse hook never blocks: every fault, its plugin-root identity guard included, is a stderr
+note and exit `0`; only the PreToolUse hook's identity guard exits 2, and only for a marked call. The host fires no PostToolUse event for a Bash call that failed, so a failed
+navigation is not recorded.
 
-**No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. A
-switch the session could flip would relax the hook while the broker, which reads the
-registration once at start, kept trusting the chain. The parent policy is the supported
-alternative, so nothing here lands a bypass-ledger entry.
+**No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. The parent
+policy is the supported alternative, so nothing here lands a bypass-ledger entry.
 
-**Why the server key is `zensu-browser`.** The gate is registered on the tool NAME,
-`mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)`. The key used to be `playwright`,
-the default key of upstream `@playwright/mcp`, so the optional group also matched a user's own
-browser server keyed `playwright` and denied its remote navigations in every session, with no
-skill running. A key upstream does not use ends that without narrowing the matcher. The key is a
-naming convention, not a server identity: a different server that someone keys `zensu-browser`
-would still match the gate and would still be taken for the broker by `/zensu:doctor` and
-`/zensu:verify-feature`, so a collision is unlikely rather than impossible. Both spellings stay
-gated because both come from this plugin's own declaration: the same `.mcp.json` yields
-`mcp__plugin_zensu_zensu-browser__…` when it is loaded as a plugin and `mcp__zensu-browser__…`
-when the repository itself is opened as a project. That project load normally fails to start (see
-the residuals below), so the bare arm is defense in depth: a broker runs under the bare name only
-where the declaration starts outside the plugin loader with a resolvable command, for example
-with `CLAUDE_PLUGIN_ROOT` present where Claude Code expands `.mcp.json`, or with the declaration
-copied into another MCP scope. Narrowing to the plugin-scoped spelling would leave exactly that
-broker in consent mode with no gate, because the broker checks the registration by matcher string
-and never sees its own server name.
+**Update your permission rules.** The plugin no longer ships an MCP server, so every rule
+written for its browser tools — `mcp__plugin_zensu_playwright__…` in release 0.21.1 and earlier,
+`mcp__plugin_zensu_zensu-browser__…` on builds after it — now matches nothing. Delete an `allow`
+rule written for them: it grants nothing now. Re-spell a `deny` or `ask` rule as a Bash rule, for
+example `Bash(playwright-cli:*)`: until then it restricts nothing, because the browser now runs
+through Bash.
 
-**Re-spell permission rules after updating.** The broker's tool names moved from
-`mcp__plugin_zensu_playwright__…` / `mcp__playwright__…` to `mcp__plugin_zensu_zensu-browser__…`
-/ `mcp__zensu-browser__…`. Every `permissions` rule written for the old names stops matching the
-broker, whichever list it sits in: an `allow` rule no longer pre-approves it, so its calls prompt
-again, and an `ask` or `deny` rule no longer applies, so the new names fall back to whatever the
-rest of your rules and your permission mode decide. The first shows itself; the other two do not,
-so move each rule to the new name. Weigh the second case by what the gate covers: it registers on
-`browser_navigate` and `browser_tabs` only, so a lost `deny` or `ask` on any other broker tool —
-`browser_take_screenshot` and `browser_network_requests` among them — is replaced by nothing in this
-plugin on the main thread. A rule for `mcp__playwright__…` still matches a server of your
-own keyed `playwright`, which this plugin no longer gates.
+**Residuals, named rather than implied.**
 
-**Residuals, named rather than implied.** Opening this repository as a project still loads root
-`.mcp.json` as a project-scope server, where `${CLAUDE_PLUGIN_ROOT}` is unexpanded and the server
-fails to start; it no longer hides a server keyed `playwright`. The consent memory is a file in a directory the
-session can write through a Bash redirect, so a forged record skips the prompt for that origin;
-the floor bounds the damage to other loopback services. The broker no longer trusts that the
-host ran the hook: consent mode refuses to self-approve an origin without a live per-session
-marker the gate writes for every decided loopback navigation, one per (session, origin), and it
-reads that marker each time it is asked to approve an origin it has not already approved in this
-process, rather than caching a mode resolved once at start — so hooks switched off host-side, a
-broker launched from a different tree than the one whose registry the host loaded, and a plugin
-swap inside a long-lived MCP process all leave the broker refusing rather than self-approving.
-The launcher carries `ZENSU_VERIFY_PROJECT_ROOT` through its `env -i` allowlist, so the broker
-anchors on that root when something upstream supplies it. **Nothing in the plugin does**, and
-saying otherwise was a false guarantee this document briefly carried: a derivation in the
-launcher was tried and removed, because that process has no hook payload for the session binder
-and no guaranteed session identity for the payload-free one. In practice the broker therefore
-anchors on its own cwd, and for a session whose cwd is a worktree while the record names another
-tree the two anchors disagree. State the consequence in BOTH directions rather than as a refusal:
-the broker refuses when the cwd-anchored tree holds no live marker for that origin, and the
-`/zensu:doctor` execution row, which reads under the RECORD's root, can then report a gate that
-ran while that broker still refuses — but a loopback origin is the same string in every project,
-and the broker's read carries no session key, so a live marker for that origin written by a
-different session in the cwd-anchored project satisfies the check instead. Refusal is the common
-case, not the guaranteed one. `/zensu:doctor` reports
-both facts on separate rows: `verify-feature:` reports REGISTRATION, and `verify-feature gate:`
-reports EXECUTION, session-scoped, with a contract fault reported as `could not be judged` rather
-than as the benign row. SEVEN bounds travel with that and are stated rather than implied. The
-marker lives in a directory the session can write through a Bash redirect, so it authenticates
-nothing against a session forging its own; what it removes is the SILENT case, where a gate that
-never ran was indistinguishable from one that did. An origin already approved inside the
-broker's process stays approved — the marker gates the WRITE into the approved set, never each
-later navigation against it, because a consent the human gave is not revoked by a later plugin
-change. The BROKER's read is project-scoped rather than session-scoped, because it has no
-session key: a sibling session's marker for the same origin satisfies it, and only the doctor
-row binds the session — and that binding is the marker's own FILENAME, not anything the body
-proves. `.zensu/state/` is writable from any session in the project, so a co-tenant can write
-`verify-consent-exec-<another session's key>-<any tag>.json` and make THAT session's doctor
-print an execution row for a gate run it never had. The row is therefore evidence about a file,
-not an attestation; closing it needs the session key inside the signed-for body, which the
-marker has no way to authenticate today either. And a prompt the human DECLINED still leaves a marker live for its
-window, because the gate writes before the answer exists; the marker records `asked` rather than
-`allowed`, which names the state but does not close it — closing it needs a signal the gate
-cannot emit before the human has answered. The fifth bound is that WINDOW itself
-(`MAX_EVIDENCE_AGE_MS`, five minutes): a marker is honoured only while it is inside it, so a
-session whose gate ran an hour ago and has navigated nowhere since is refused by the broker and
-reported by the doctor as registered-with-no-live-marker. Neither surface is saying the gate
-never ran, and both say so in as many words — the `verify-feature gate:` row names expiry beside
-"no navigation yet" as an ordinary cause, and the broker's refusal names the window and points at
-that row. The sixth is that the reap which keeps the walk's budget from filling is NOT
-session-scoped: a write in one session removes markers a sibling session wrote. It is clocked on
-`MAX_EVIDENCE_REAP_AGE_MS`, which is twice the read window above, and that GRACE is load-bearing
-rather than slack: the broker's expiry probe deliberately reads with no window at all, and a
-marker it would still honour is the only input that can produce the `expired` diagnosis instead
-of a bare `absent`. So the sweep is NOT bounded to entries no reader anywhere could honour — past
-the ten-minute horizon it removes exactly the ones that probe wants, and a sweep clocked on the
-five-minute window would have removed them from the first write anywhere in the project. What it
-does not remove is anything a NAVIGATION could still have used. The cost of the grace is the
-other way round: a dead marker holds a walk slot for twice as long against the budget whose
-exhaustion is the `truncated` state. Either way a session's markers can disappear under it, which
-is why the doctor row is worded as a report about a LIVE marker rather than about the gate's
-history. The seventh is that the sweep runs INSIDE the gating hook and reads and parses
-every candidate it examines, up to the same budget — so a decided navigation carries up to that
-many `lstat`-then-read windows. That is a count, not a comparison: the broker's own read is
-bounded by the same budget rather than by one window, because `liveEvidenceOrigins` stops early
-only when it MATCHES the origin it was given, and a miss is exactly the case that produces a
-refusal. On a miss the broker walks the directory TWICE — once for the present probe and once for
-the widened expiry probe — so both sides are bounded by that budget and neither is bounded by
-one. An already-present
-non-regular file is refused before either read, so the exposure is the swap race rather than a
-plantable block; the count is what is new, and it is named here rather than left to be discovered
-from a hook that has become slow. MCP elicitation would remove
-the prompt residual in the CLI; it is not the shipped channel because the desktop app lacks it, and
-the decision module is shaped so elicitation can replace the prompt without changing the
-memory or the wording.
+- **Hooks switched off host-side leave `playwright-cli` unconstrained.** The retired broker
+  refused to self-approve an origin without a per-session marker the gate wrote, so a disabled
+  hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
+  config and the skill's own instructions are all that remain, and neither is a boundary.
+  `/zensu:doctor` reports REGISTRATION from files on disk and cannot see whether the hooks run.
+  Before it judges a policy, its `verify-feature` row checks that both hooks, the prefilter
+  library, the decision module and the run-config helper exist, that the module is no symlink and
+  loads, that the helper loads, and that both hooks are registered on a matcher that covers
+  `Bash`; any failure reads `cannot start`, with the cause named. Its registration probe and the
+  run-config helper's follow the host's own matcher rule as read out of the Claude Code 2.1.280
+  binary, and report a matcher the host may read two ways as undetermined, never as missing.
+- **The consent memory is a file in a directory the session can write** through a Bash
+  redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
+  other loopback services.
+- **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
+  it again when it starts the browser, so a file swapped in between is followed. The run
+  directory sits under the project, where the session can write.
+- **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
+- **In policy mode routes are enforced on navigation commands only.** An in-page navigation to
+  an undeclared route on an approved origin is not seen by any hook.
+- **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
+  `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
+  even one set or left empty in the same command, an ANSI-C escape inside a name, such as
+  `$'playwright\x2dcli'`, a script file that makes the call, an alias under another name, or a
+  copy or link of the binary under another name — never puts both markers in the command text, so
+  neither hook sees the call. `$'playwright-cli'`, which holds the plain name, still names the
+  CLI, so a call on a `zensu-verify` session spelled that way is judged and denied as not one
+  plain call. While the
+  hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a call that spells
+  `playwright-cli` literally is marked whatever its session, so a session assembled at run time —
+  a variable, a substitution, an ANSI-C escape or an expansion inside the prefix — is denied as
+  not literal; only a CLI name assembled at run time stays unseen. The single-call and literal-argument rules bind only a call the
+  gate judges, so they do not narrow this and do not make the gate a boundary. A function or
+  alias named `playwright-cli` that the shell already has, such as one from a startup file, is
+  judged as the plain call its text shows, and neither hook can see what it runs.
+- **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin
+  and no integrity check for `playwright-cli`. The one guard is the run-config helper's readiness
+  check, which its `--check-policy` preflight and its write run both perform: it refuses unless
+  both consent hooks are demonstrably registered on a matcher that covers `Bash` and the
+  `@playwright/cli` manifest of the `playwright-cli` on `PATH` names exactly the measured version
+  — a version the package declares, not a verified binary. The check runs only when the helper
+  runs: the gate judges `open` by the shape of the run config it names and never reads the
+  installed version, so a run config of that shape written another way, or a `playwright-cli`
+  installed or put ahead on `PATH` after the helper ran, runs unmeasured. The check never runs the binary, so a
+  version the binary would print about itself counts for nothing. It reads the
+  `node_modules/@playwright/cli/package.json` beside the `playwright-cli` found on `PATH` first,
+  on every platform, so a wrapper script in a directory that holds that manifest at the measured
+  version passes: the check vouches for the manifest beside the wrapper, not for what the wrapper
+  runs, nor for a function or alias named `playwright-cli` that the shell already has. Any other
+  wrapper script outside the package fails it: with no `package.json` in the
+  directory of its resolved path or the three above it, it resolves to no manifest, and the refusal adds the remedy of putting the
+  directory npm installs `playwright-cli` into first on `PATH`; when a `package.json` sits there,
+  that manifest answers instead — as another package, or as one the check cannot judge — and the
+  refusal names only the install command, though the `PATH` order still has to change. A `PATH`
+  whose empty or relative entry comes before or holds `playwright-cli` is refused too, because the
+  shell reads that entry against the working directory of each call. A later CLI can change the
+  meaning of an existing flag, or rename or ignore a fence the run config relies on —
+  `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins,
+  `browser.contextOptions.serviceWorkers` — and every gate check still passes while that
+  browser-side fence is gone. The configuration channels are judged only as far as the gate
+  knows them — the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
+  a command, and the global `cli.config.json` — so a new environment or config channel of a
+  later CLI is unjudged.
+- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
+  run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
+  prompt.
 
-`tests/structure/test-verify-consent.sh` drives the pair against a real Session Control
-session and pins the matcher, the memory, the floor, the loopback bound and the skill wording;
-`tests/structure/playwright-mcp-proxy.test.js` pins the broker's three start modes.
+`tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
+and pins the matcher, the memory, the floor, the command set and the skill wording.
 
 ## Missing Workflow Baseline
 
@@ -558,6 +639,85 @@ to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`
 `SessionStart` self-heal above requires no token at all. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
+## Vanished Recorded Project Root
+
+The ordinary shape after `git worktree remove`: the Session Control record is readable, this
+installation may serve it, and the directory it records as `project_root` is gone.
+`readOrphanedProjectRootContext` waives exactly that one existence check, so reads and the
+read-only diagnostics keep working — while `Edit`, `Write`, `MultiEdit` and every writing Bash
+command deny, because the workflow document lived under that root and no write can be
+attributed to a project that is not there. It IS a relaxable bind failure, and the table in
+[Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
+
+Re-creating the directory by hand does not repair it, and that is the trap this remedy exists
+for. `adoptionWorkflowStatePath` joins `.zensu/state/tdd-phase-<session key>.json` onto the
+recorded root, so an empty re-created directory moves the session into a SECOND wedge:
+`revalidateWorkflowState` then throws on the `.*` matcher and every tool denies with
+`activated workflow CAS state is missing` (§Missing Workflow Baseline).
+
+```bash
+# read-only report
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --restore-root
+# re-creates the root AND rebuilds the baseline
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --restore-root --confirm
+```
+
+Rendered in full because the recognizer admits only `bash <script in the executing
+installation>`: a bare script name is refused, so the short form would be a spelling
+nobody can run. `/zensu:adopt-session --restore-root` is the slash equivalent.
+
+`/zensu:adopt-session --restore-root` reports the verdict and writes nothing; adding
+`--confirm` performs both halves in one run. **The path comes only from the record.**
+No argument names a directory anywhere in this mode, and neither literal it accepts takes a
+value, so the anchor never moves and the source-write gate compares against exactly the root
+it compared against before. Creating a directory at a path the record already names restores the
+authority the session already had and adds none.
+
+**Carried from the record is not the same as bounded, and only the first is true.** This is the
+one write class whose destination is an arbitrary absolute path: it is **not bounded by location**
+— not to `$HOME`, not to a git repository, not away from a child of the filesystem root — and
+the private records directory bounds *which record is read*, never where the directory lands.
+What is bounded is the DEPTH: at most `RESTORE_MAX_MISSING_COMPONENTS` components below a
+nearest-existing ancestor the ladder proved to be a real, canonical, link-free directory, with
+each created component re-verified by realpath. The bound is named by its constant rather than
+spelled as a number, because a numeral in prose beside the symbol that owns it is a second copy
+nothing recomputes. A location allowlist was weighed and refused: it would admit
+the ordinary case and reject legitimate roots under `/opt`, `/srv` or `/Volumes`, and it would
+be a policy invented at the boundary instead of derived from the record. The barrier is the one
+every other write class rests on — write access to the private records directory. What authoring
+a record already confers is the CHOICE of destination: the path comes from the record and from
+nowhere else, so this write adds no target a record author could not already name. What it adds
+is the ACT of creating a directory outside the store, which write access to the store does not
+itself perform — narrowed by the depth bound and the ancestor-permission rule, never removed.
+
+Seven refusals, each naming which condition failed: `record-unreadable`,
+`plugin-data-mismatch`, `not-served-by-executing-runtime`, `root-present`,
+`unsafe-ancestor`, `unsafe-ancestor-ownership`, `too-many-missing-components`. The nearest
+existing ancestor must be a real directory that is its own realpath and not a symlink, it
+must not be writable by users other than its owner unless it is sticky, and at most
+`RESTORE_MAX_MISSING_COMPONENTS` components may be missing below it — a record pointing
+into a tree that is mostly gone is not a recycled worktree. The permission rule is its own
+refusal because its remedy is its own: the tree is intact, so a `chmod` fixes it when you own it,
+and a move when you do not — where `unsafe-ancestor` means the tree changed under the record. The
+refusal carries one reason for two causes, so every carrier of it names both arms: the directory
+is owned by another user, or you own it and it is group- or other-writable without the sticky bit.
+
+**It restores the ANCHOR, not the work.** The directory comes back empty, it is not a git
+worktree, and the chain that lived there is gone rather than restored; the rebuilt baseline
+reads "never active", because that is all a fresh baseline can say. Both reports state this
+before and after `--confirm`.
+That is what this command PLANTS,
+and it is a forecast rather than a report: when another run wins the race and creates the directory first, this run never saw the contents and says so instead. `/zensu:doctor` probes the recorded root afterwards and states what is there now. If the directory was moved rather than deleted, moving it back
+is the better repair. Provenance is a `PROJECT_ROOT_RESTORED` workflow history entry, which
+`zensu-log.sh --phase` and both phase writers reserve; it records no bypass-ledger entry,
+because no gate was escaped.
+
+**Order matters when the lineage is also broken.** `restoreRootVerdict` requires this
+installation to SERVE the record, so a session that is ALSO an incompatible runtime must run
+`/zensu:adopt-session --confirm` first and only then `--restore-root --confirm`.
+`tests/structure/test-restore-project-root.sh` pins every refusal, the read-only contract and
+the end-to-end repair.
+
 ## Vanished Working Directory
 
 A session can outlive the directory it was working in; a git worktree removed after its pull
@@ -579,7 +739,10 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
   verdict is decided by its lease and is the same with or without the directory.
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
-  them to report to the main thread rather than retry.
+  them to report to the main thread rather than retry. A reviewer and a PLM subagent can do
+  that: their `SubagentHandback` report resolves no path and is decided before the `cwd` is
+  examined. A neutral child's handback still passes that resolution and is denied with the
+  rest.
 
 Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the
 workflow document are revalidated for every principal BEFORE the `cwd` is looked at, so a
@@ -597,7 +760,7 @@ Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow 
 - **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
 - **State.** Phase markers persist at `.zensu/state/tdd-phase-<scv1-session-key>.json`. Every atomic mutation increments the record revision, and each step's history remains auditable from the file.
-- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate (and Bash witness) enforce **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, the calling skill's own `--tdd-mode` default (`/zensu:pr-fix-findings` asks for `strict`) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
+- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate enforces **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, the calling skill's own `--tdd-mode` default (`/zensu:pr-fix-findings` asks for `strict`) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + edit landing + build verification), real-time progress log at `.zensu/logs/`.
 
@@ -666,5 +829,46 @@ plan must carry a usable `## Requirements` table.
   `ZENSU_EDIT_LANDING_GATE=off` — exempting a session from one must not disarm the other, and
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
+
+## Full-Suite Gate
+
+A reviewed chain closes only on a green full-suite run of the current tree. The plugin runs the
+suite itself (`zensu-log.sh --evidence-run --scope full`, see
+[Full-Suite Evidence](configuration.md#full-suite-evidence)), records the exit code the suite
+actually returned, and binds the record to a fingerprint of the working tree. `--chain-done`
+reads the newest record, never a claim in the run log.
+
+- **Where it applies.** The ticket-bound standalone terminus (`--chain-done
+  --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
+  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
+  `max-rounds` prints `FULL SUITE — not checked` and never blocks, because the post-review hook
+  drives that call with its output discarded. `--tdd-complete` is not gated: review rounds
+  change the tree anyway.
+- **What it prints.** One line, `FULL SUITE — <state> | <cause> | cmd: <command> | gate: <mode>`,
+  plus `| run: <command>` when running the suite again is the remedy. Passing states: `pass`
+  (the newest completed full run on the current tree exited 0; earlier red runs on the same tree
+  add a `flaky` line), `pass-tree-unverified` (exit 0, but the tree could not be fingerprinted,
+  and the cause says why), `not-applicable` (the project is not a git repository or work tree,
+  or git is not installed) and `escaped`. Refusing states: `missing`, `running`, `failed`,
+  `interrupted`, `stale` (lists up to ten changed paths), `mutated-during-run` (the suite changed
+  files while it ran), `command-mismatch` (the run used another command than
+  `evidence.fullSuiteCommand`), `invalid` (the newest record does not validate) and
+  `unavailable` (the store or git could not be read). A refusal exits `1` and leaves the chain
+  open.
+- **Order.** A closed chain short-circuits first. A claimed ticket is then compared, read-only,
+  with the session's consumed ticket; a wrong ticket is refused by the transition and never
+  reaches the verdict. The verdict runs before the transition, and the pass line and the
+  bypass line print after it.
+- **Modes.** `evidence.fullSuiteGate` is `required` (default) or `advisory`, which prints the
+  same verdict marked `(advisory, not blocking)` and closes the chain. An unknown value acts as
+  `required`, and the first line says so. This repository commits `advisory`, because CI is its
+  full-suite gate.
+- **Bypass** with `ZENSU_FULL_SUITE_GATE=off`. The escape is recorded in the bypass ledger only
+  where the gate applies: never for a wrong ticket and never outside a work tree.
+- **What it does not prove.** Records live in the plugin's private data directory, which the
+  reviewer and neutral subagents cannot read and Edit/Write cannot reach. A Bash redirect from
+  the main thread can still write one, which is the documented residual of every plugin store.
+  The gate stops a chain from closing on a missing, red or stale run by accident; it does not
+  stop a model that forges a record on purpose.
 
 **Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-13, four-channel logging.

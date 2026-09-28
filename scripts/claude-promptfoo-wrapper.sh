@@ -575,13 +575,6 @@ if [ "$SAW_STATE" = "0" ] && [ -s "$ZENSU_HOOK_LOG" ] && grep -qE 'Current phase
   add_enrichment --synthetic-uninitialized -
 fi
 
-shopt -s nullglob
-for wf in "$ISOLATED_DIR"/.zensu/logs/witness-*.log; do
-  [ -f "$wf" ] || continue
-  add_enrichment --witness "$wf"
-done
-shopt -u nullglob
-
 if [ "$ENRICH_COUNT" -gt 0 ]; then
   node "$ENRICH_RENDERER" "${ENRICH_ARGS[@]}"
   ENRICH_RC=$?

@@ -16,7 +16,7 @@ drives the chain RED → GREEN → code-review → self-review → done.
 | 4 | FSM history has `RED_FAIL` | a failing test really preceded the impl (test-first) |
 | 5 | FSM history reached `IMPL`/`GREEN_PASS` | implementation happened |
 | 6 | `node --test` passes in the fixture | the GREEN is real, executed here, not claimed |
-| 7 | witness log has a test run | anti-hallucination trail |
+| 7 | run log has an `EVIDENCE RUN — scope=full exit=0` line | the plugin ran the suite and recorded the real exit code |
 | 8 | transcript shows the review stage | code-review / self-review ran |
 
 3 + 4 + 6 together are the core proof: test-first, real pass, full chain complete.

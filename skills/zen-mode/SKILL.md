@@ -65,8 +65,7 @@ distinction is load-bearing: under a default of `true`, a deleted marker would
 resolve straight back to active and the user could never get out. Never remove
 the marker file to turn the mode off.
 
-The recorded choice is session-scoped, so it never follows the user into their
-next session — a fresh session starts from the configured default again.
+The recorded choice is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the mode.
 
 The four zen-specific phrases match anywhere in a prompt, since no other sentence
 plausibly contains them. `normal mode` is ordinary editor vocabulary — "add a vim

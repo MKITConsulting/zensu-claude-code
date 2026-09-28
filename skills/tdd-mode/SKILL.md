@@ -127,8 +127,7 @@ mid-chain can neither un-gate a strict chain nor re-arm a vanilla one. To change
 the mode for work already under way, finish or reset the chain first, then arm
 again.
 
-The marker is session-scoped: it never follows the user into their next session,
-which starts from the configured default again.
+The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the mode.
 
 ## Scope
 

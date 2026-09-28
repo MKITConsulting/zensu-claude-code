@@ -13,6 +13,8 @@ exec rm -f $DEBUG_LOG
 set PLUGIN_DIR [lindex $argv 1]
 if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
 
+set GAP {(?:[ \t]|\x1b\[[0-9;]*[A-Za-z])*}
+
 spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
   "Plan a tiny one-line change: add an HTML comment '<!-- hook-eval-marker -->' at top of README.md. Call ExitPlanMode."
 
@@ -29,13 +31,14 @@ expect {
 }
 
 expect {
-  -re "PostToolUse:ExitPlanMode hook" {
+  -re "PostToolUse:ExitPlanMode${GAP}hook" {
     send_user "\n>>> HOOK FIRED (PostToolUse:ExitPlanMode visible in output)\n"
+    exp_continue -continue_timer
   }
   -re "tdd-manager" {
     send_user "\n>>> tdd-manager mention detected (delegation path)\n"
   }
-  -re "skip.*tdd|proceed normally|doc-only|escape" {
+  -re "skip.*tdd|proceed${GAP}normally|doc-only|escape" {
     send_user "\n>>> ESCAPE-HATCH: doc-only path detected\n"
   }
   timeout {

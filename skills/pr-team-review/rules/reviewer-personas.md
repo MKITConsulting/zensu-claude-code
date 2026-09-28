@@ -23,7 +23,7 @@ Every persona returns exactly one raw JSON object as its entire final assistant 
     }
   ],
   "overall_notes": ["<cross-cutting points, plus every finding anchored outside `_name-status.txt`>"],
-  "positives": ["<things done well — for the synthesis Strengths section>"]
+  "positives": ["<things done well — for the synthesis What is solid block>"]
 }
 ```
 
@@ -48,9 +48,11 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ## Persona Pool
 
+**Reading a trigger.** Each trigger is a criterion about what the change IS, not a file-name list. The paths, file types and annotations it names are examples from common stacks, never a closed set: a diff meets the trigger when it meets the criterion in whatever language, framework or layout the repository uses, including one no example mentions. Judge by what the changed code does and use the examples only to calibrate. `docs-only` is the one deliberate exception — its list IS closed, because casting it suppresses the holistic core.
+
 ### `ddd-strategic`
 
-**Trigger:** `docs/DDD/`, `*-bounded-context.md`, naming discussions in `--conversation`, BC-renames in git log.
+**Trigger:** A change that defines, renames or redraws a bounded context, its ubiquitous language, or the context map — in documentation or in code that declares module or context boundaries. Examples: `docs/DDD/`, `*-bounded-context.md`, context-map or glossary files, naming discussions in `--conversation`, bounded-context renames in the git log.
 
 **Focus:** Bounded Context naming, Context Map, Published Language contracts, BC boundaries (true BC vs ACL adapter), cross-BC event payloads.
 
@@ -60,7 +62,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `ddd-tactical`
 
-**Trigger:** `@AggregateRoot`/aggregate classes, `*VO.java`/`*ValueObject*`, invariant docs, state-machine docs.
+**Trigger:** Domain-model code in any language — aggregates, entities that guard invariants, value objects, domain events, explicit state machines — and the documents that specify them. Examples: `@AggregateRoot` or aggregate classes, `*VO.java`, `*ValueObject*`, records or immutable types used as value objects in Kotlin, C#, TypeScript or Python, domain-event types, invariant or state-machine docs.
 
 **Focus:** Aggregate design, Value Objects (Records + compact constructors), invariant enforcement, named state-transition methods (no setters), Domain Events (past tense, no entity refs), Tell-Don't-Ask.
 
@@ -70,17 +72,17 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `backend-idiom`
 
-**Trigger:** `*.java`, `*.kt`, `*.cs`, `*.go`, `*.rs`, `*.py`, `*.ts` (Node) — stack-aware.
+**Trigger:** Server-side or backend source code in any language — stack-aware: judge it against the idioms of the language and framework the diff actually uses. Examples: `*.java`, `*.kt`, `*.scala`, `*.cs`, `*.go`, `*.rs`, `*.py`, `*.rb`, `*.php`, `*.ex`, `*.swift` on the server, C or C++ services, `*.ts`/`*.js` on Node, Deno or Bun.
 
 **Focus:** Framework idiom (Spring/Micronaut/Quarkus/Node/Django/etc.), Modulith/layering boundaries, DI, transactional boundaries (HTTP-call-inside-Tx is a P1 smell), exception handling (no brittle string-matches), null/Optional discipline.
 
 **Evidence targets:** Prepared backend hunks, exact stack manifests, and allowlisted source candidates containing transactional, dependency-injection, authorization, and exception boundaries.
 
-**Prompt template:** Detect stack from `build.gradle`/`pom.xml`/`package.json`. Review framework-idiomatic patterns + watch for anti-patterns (HTTP-in-Tx, manual SecurityContext access, brittle string-matching on exception messages, missing `@Transactional(readOnly=true)` on queries). Max 8 inline findings.
+**Prompt template:** Detect the stack from the manifest in the leased evidence, whichever the language uses — e.g. `build.gradle`, `pom.xml`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `composer.json`, `Gemfile`, `*.csproj`, `mix.exs`. Review framework-idiomatic patterns for THAT stack + watch for anti-patterns (HTTP-in-Tx, brittle string-matching on exception messages, and the stack's own framework misuse — in Spring: manual SecurityContext access, missing `@Transactional(readOnly=true)` on queries). Max 8 inline findings.
 
 ### `persistence-db`
 
-**Trigger:** Migrations dirs (`db/migration/`, `prisma/migrations/`, `alembic/`), ORM-Files (`*Entity.java`, `*Repository.java`, Prisma schema, SQLAlchemy models).
+**Trigger:** Schema migrations, persistence mappings, or data-access code in any framework or ORM. Examples — migrations: Flyway `db/migration/`, Liquibase changelogs, Rails `db/migrate/`, Django `*/migrations/`, Laravel `database/migrations/`, EF Core `Migrations/`, `prisma/migrations/`, `alembic/`, raw `*.sql`; mappings and data access: `*Entity.java`, `*Repository.java`, Prisma schema, SQLAlchemy, Django or ActiveRecord models, Eloquent, TypeORM, GORM, Diesel, Ecto schemas.
 
 **Focus:** Migration quality (idempotent, forward-only, no `NOT NULL DEFAULT ''` traps), JPA/ORM mapping (`@EntityGraph` + `Pageable` → in-memory pagination smell), indices (partial unique predicates, GIN-trigram planner verification), constraints (CHECK/FK), multi-tenancy strategy.
 
@@ -90,7 +92,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `security`
 
-**Trigger:** NOT gated by path alone. Path signals: Auth/SecurityConfig changes, new endpoints, JWT-Forwarding code, CORS config, anything in `infrastructure/security/`. Content signals, which fire on an EXISTING path a path rule never matches: authorization or tenant-scoping code touched (role/permission checks, ownership predicates, repository or query filters), a secret/credential/token/API key introduced in code, config, or a log or trace statement, or a new outbound third-party client. The content signals are load-bearing because `bug-hunter` is instructed to defer security-only defects to this persona — an uncast seat leaves that whole class unowned, and it is a P1 (must-fix-before-merge) class.
+**Trigger:** NOT gated by path alone. Path signals: authentication, session or authorization configuration in any framework (e.g. a Spring `SecurityConfig`, auth middleware, identity-provider setup), new endpoints, token-forwarding code such as JWT forwarding, CORS config, anything in a security module such as `infrastructure/security/`. Content signals, which fire on an EXISTING path a path rule never matches: authorization or tenant-scoping code touched (role/permission checks, ownership predicates, repository or query filters), a secret/credential/token/API key introduced in code, config, or a log or trace statement, or a new outbound third-party client. The content signals are load-bearing because `bug-hunter` is instructed to defer security-only defects to this persona — an uncast seat leaves that whole class unowned, and it is a P1 (must-fix-before-merge) class.
 
 **Focus:** AuthN/AuthZ matrix (role-based + resource-based), tenant isolation, input validation (Unicode-letters in DE/EN/FR tenants!), secret/credential leakage in logs (the PII-in-logs *privacy* judgement is owned by `data-privacy`), CORS allowedOrigins (no `*` with credentials), JWT Bearer-prefix compliance, dead-code ACL checkers (false-positive for auditors).
 
@@ -100,7 +102,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `rest-api`
 
-**Trigger:** `*Controller.java`, `OpenAPI*.yaml`, `routes.ts`, anything with `@GetMapping`/`@PostMapping`/etc.
+**Trigger:** HTTP endpoint definitions or their contracts in any framework — route and controller declarations, handlers, OpenAPI specs. Examples: `*Controller.java` with `@GetMapping`/`@PostMapping`, ASP.NET `[HttpGet]`, Express, Fastify or NestJS routes such as `routes.ts`, FastAPI or Flask route decorators, Django `urls.py`, Rails `config/routes.rb`, Laravel `routes/*.php`, Go `net/http`, gin or echo handlers, Phoenix routers, `OpenAPI*.yaml`.
 
 **Focus:** REST conventions (PUT=full-replace vs PATCH=partial), DTO/Request/Response separation (no application DTOs leaking through presentation), OpenAPI annotations, error contract (RFC 7807 ProblemDetail), pagination (no `Page<T>` leaking Spring-Data internals), HTTP status codes (201/204 differentiation), idempotency keys.
 
@@ -110,7 +112,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `tests-qa`
 
-**Trigger:** Test files in PR — or notable absence thereof. Mutation in test/ directory.
+**Trigger:** Test files in the PR — or notable absence thereof — in any framework or layout. Examples: `test/`, `tests/`, `spec/`, `__tests__/`, `src/test/`, `*Test.java`, `*_test.go`, `test_*.py`, `*.spec.ts`, `*.test.js`, `*_spec.rb`.
 
 **Focus:** Test *quality + strategy* — integration vs unit balance (Testcontainers/WireMock vs mocks-only), concurrency tests for race-prone paths (number allocators, optimistic locking), edge-case coverage (length boundaries, null, empty), mock strategy, coverage per BR/invariant. The explicit covered/uncovered *file + path inventory* is owned by `coverage-audit` — here focus on whether the tests that exist are the RIGHT tests.
 
@@ -176,7 +178,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `frontend-component`
 
-**Trigger:** `*.tsx`, `*.jsx`, `*.vue`, `*.svelte`, `*.html` (Angular), `*.component.ts`.
+**Trigger:** UI component code in any framework, on the web, mobile or desktop — components with their own state, inputs and lifecycle. Examples: `*.tsx`/`*.jsx` (React, Preact, Solid), `*.vue`, `*.svelte`, `*.astro`, Angular `*.component.ts` with its `*.html` template, Lit or other web components, Blazor `*.razor`, SwiftUI views, Jetpack Compose `@Composable` functions, Flutter widgets in `*.dart`.
 
 **Focus:** Component structure, state management (signals/hooks/computed), props/inputs, lifecycle, event handlers, change detection. **Accessibility semantics (WCAG, ARIA, keyboard, focus) are owned by the `accessibility` persona** — review component design here, not a11y.
 
@@ -184,7 +186,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `frontend-ux`
 
-**Trigger:** UI templates + CSS-Files (`*.scss`, `*.css`, `*.tailwind.config.*`), design-system imports.
+**Trigger:** The visual and layout surface in any styling approach — templates and stylesheets, design tokens and themes, design-system imports, responsive layout, user-facing strings and locale files. Examples: `*.css`, `*.scss`, `*.less`, CSS-in-JS or styled components, `tailwind.config.*`, token or theme files, SwiftUI or Compose theme objects, locale resources such as `locales/*.json`, `*.po`, `*.xliff`, `*.arb`, Android `strings.xml`, iOS `Localizable.strings`.
 
 **Focus:** Design system adherence (no one-off colors/spacing), responsive (mobile-first breakpoints), i18n (no hard-coded strings). **WCAG / accessibility semantics are owned by the `accessibility` persona** — review layout + design-system consistency here, not a11y.
 
@@ -192,7 +194,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `infrastructure-iac`
 
-**Trigger:** `*.tf`, `*.tfvars`, `*.yaml` under `k8s/`/`helm/`, `Dockerfile`, `docker-compose.yml`.
+**Trigger:** Infrastructure or deployment definitions in any tool — provisioning, orchestration, container builds, runtime configuration. Examples: Terraform or OpenTofu `*.tf`/`*.tfvars`, Pulumi or CDK programs, CloudFormation or SAM templates, Bicep or ARM, Ansible playbooks, Kubernetes manifests, Helm charts, Kustomize overlays, `Dockerfile`/`Containerfile`, `docker-compose.yml`/`compose.yaml`, Nomad jobs, `serverless.yml`.
 
 **Focus:** IaC idiom (variables vs hardcoded), state management (remote backend, locking), drift, cost, secrets handling (no plaintext, no committed creds), least-privilege IAM.
 
@@ -200,7 +202,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `ci-cd`
 
-**Trigger:** `.github/workflows/`, `Jenkinsfile`, `Makefile`, `azure-pipelines.yml`, `gitlab-ci.yml`.
+**Trigger:** Build, test or delivery pipeline definitions in any CI/CD system, and the build scripts a pipeline invokes. Examples: GitHub Actions `.github/workflows/`, GitLab `.gitlab-ci.yml`, `Jenkinsfile`, `azure-pipelines.yml`, CircleCI `.circleci/`, `bitbucket-pipelines.yml`, Buildkite `.buildkite/`, Tekton or Argo pipelines, `Makefile`, `justfile`, `Taskfile.yml`.
 
 **Focus:** Pipeline correctness, secrets exposure (`echo $SECRET`!), caching, idempotency, matrix strategies, branch protection alignment.
 
@@ -216,7 +218,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `docs-only`
 
-**Trigger:** PR diff has ONLY `*.md`/`*.adoc`/`*.rst` files. Single-agent cast.
+**Trigger:** PR diff has ONLY prose documentation files — `*.md`, `*.adoc` or `*.rst`, and nothing else. Single-agent cast. This is the one trigger whose list is deliberately CLOSED: casting `docs-only` suppresses the holistic core, so a file that only resembles documentation keeps the ordinary cast — `*.mdx`, which can embed components, a `*.txt` that may be a dependency manifest such as `requirements.txt`, or a doc template that code renders.
 
 **Focus:** Clarity, consistency, cross-links, glossary alignment, broken anchor links, code-block syntax tags.
 
@@ -264,7 +266,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `supply-chain`
 
-**Trigger:** Dependency manifests / lockfiles changed — `package.json`/`package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`, `build.gradle`/`pom.xml`, `go.mod`/`go.sum`, `pyproject.toml`/`poetry.lock`/`requirements*.txt`, `Cargo.toml`/`Cargo.lock`, `Gemfile`/`Gemfile.lock`, and CI action pins under `.github/`.
+**Trigger:** Dependency manifests or lockfiles changed in any ecosystem, or CI action pins. Examples: `package.json`/`package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`/`bun.lock`, `build.gradle`/`pom.xml`/`gradle/libs.versions.toml`, `go.mod`/`go.sum`, `pyproject.toml`/`poetry.lock`/`uv.lock`/`requirements*.txt`, `Cargo.toml`/`Cargo.lock`, `Gemfile`/`Gemfile.lock`, `composer.json`/`composer.lock`, `*.csproj`/`packages.lock.json`, `Package.swift`/`Package.resolved`, `pubspec.yaml`/`pubspec.lock`, `mix.exs`/`mix.lock`; CI action pins under `.github/`.
 
 **Focus:** OWASP Top 10 2025 **A03 — Software Supply Chain Failures**. New/updated dependencies justified and pinned (no floating ranges on security-sensitive deps), transitive-vulnerability surface, versions with known CVEs, license compatibility (copyleft pulled into a proprietary product), typosquat / dependency-confusion / namespace risk, lockfile integrity (no unexplained churn or integrity-hash drop), unmaintained or deprecated packages, CI-action / build-plugin provenance (third-party GitHub Actions pinned to a full commit SHA, not a mutable tag).
 
@@ -274,7 +276,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `resilience`
 
-**Trigger:** Outbound HTTP / RPC clients, message producers/consumers, retry/timeout config, `@Transactional` methods that make external calls, schedulers, distributed locks, idempotency keys, caches with fallbacks.
+**Trigger:** Outbound HTTP / RPC clients, message producers/consumers, retry/timeout config, transaction boundaries that make external calls (e.g. Spring `@Transactional`), schedulers, distributed locks, idempotency keys, caches with fallbacks.
 
 **Focus:** Behavior under partial failure. A timeout on every remote call (no unbounded waits), retries with capped exponential backoff + jitter (never naive tight-loop retries), circuit breakers / bulkheads to stop cascading failure, idempotency of side-effecting operations so a retry is safe, graceful degradation / fallback when a dependency is down, partial-failure handling (don't leave half-written state), poison-message handling on consumers, correct at-least-once vs exactly-once semantics.
 
@@ -304,7 +306,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 
 ### `accessibility`
 
-**Trigger:** `*.tsx`, `*.jsx`, `*.vue`, `*.svelte`, `*.html` (Angular), `*.component.ts`, form + interactive-widget templates, icon/image markup. (Split out of `frontend-ux`, which now owns only design-system / responsive / i18n.)
+**Trigger:** User-facing UI markup or interactive widgets in any framework, on the web, mobile or desktop — anything a person perceives, navigates or operates. Examples: the UI component files `frontend-component` names, form and interactive-widget templates, icon and image markup, SwiftUI accessibility modifiers, Compose `semantics`, Flutter `Semantics`, Android `contentDescription`. (Split out of `frontend-ux`, which now owns only design-system / responsive / i18n.)
 
 **Focus:** WCAG 2.2 AA. Semantic HTML + correct ARIA (roles/states, no ARIA misuse over native elements), full keyboard operability + logical focus order + visible focus indicators, color-contrast ratios, alt text / accessible names for images + icon buttons, form-label association + programmatic error messaging, `prefers-reduced-motion` for animation, screen-reader flow, correct `lang` attributes, adequate target sizes.
 

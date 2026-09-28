@@ -510,11 +510,11 @@ fi
 # arms pinned: the skill-side rule can survive while the carrier that delivers it does not.
 # Needles are SINGLE-quoted: these contain backticks, and a double-quoted needle would be
 # command-substituted away by bash and pin nothing (that exact defect shipped once here).
-CLOSE_PASS_HITS="$(grep -cF -- 're-run the FULL test suite over the current tree in the FOREGROUND' "$HOOK" 2>/dev/null || echo 0)"
+CLOSE_PASS_HITS="$(grep -cF -- 'FIRST, run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree' "$HOOK" 2>/dev/null || echo 0)"
 if [ "$CLOSE_PASS_HITS" -eq 2 ] \
   && grep -qF -- 'this convergence branch is where the verdict for the tree that ships is measured' "$HOOK" \
   && grep -qF -- 'NO self-review stage follows in this configuration' "$HOOK" \
-  && grep -qF -- '| scope: full' "$HOOK"; then
+  && [ "$(grep -cF -- '--evidence-run --scope full --if-stale' "$HOOK" 2>/dev/null || echo 0)" -eq 2 ]; then
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction" PASS
 else
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction (hits: $CLOSE_PASS_HITS)" FAIL

@@ -173,17 +173,8 @@ printf '%s' "$INPUT" | \
       // is not a fault when the tool NAMED it — see the provenance check below.
       let result;
       try {
-        // BOTH candidate roots, the same pair `zensu-log.sh append` and
-        // `post-bash-witness.sh` pass. A sweep with a root set of its own is a
-        // THIRD redactor: it can rewrite a narrative claim in a way the witness
-        // entry was not, and `zensu-evidence-crosscheck.js` matches those two by
-        // EQUALITY — so the divergence mints an evidence gap that no later sweep
-        // can repair, because both files are already written. `redactFile` adds
-        // the artifact-derived root itself, so this pair makes the sweep apply
-        // the UNION of what the two writers applied.
-        //
-        // `expectedRoot` is deliberately NOT widened with it: that is the
-        // containment bound, and it stays the record root alone.
+        // `expectedRoot` is deliberately NOT widened with `CLAUDE_PROJECT_DIR`:
+        // that is the containment bound, and it stays the record root alone.
         result = mod.redactFile(target, {
           projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ""].filter(Boolean),
           expectedRoot: project,
@@ -200,14 +191,6 @@ printf '%s' "$INPUT" | \
       // residual class made a routine race report as the worst outcome.
       if (mod.CLEAN_REASONS.has(result.reason)) continue;
       if (mod.TRANSIENT_REASONS.has(result.reason)) continue;
-      // Refused BY DESIGN, on either route and regardless of provenance: the
-      // module declined to touch the file on purpose, so there is nothing to
-      // report. Three sets were not a partition — `witness-artifact` fell
-      // through all of them and printed "artifact left UNREDACTED" for a refusal
-      // the design intends. Optional-chained so an older module that predates
-      // the set degrades to the previous behaviour (a spurious line) rather than
-      // throwing, which would silence the redactor for the whole call.
-      if (mod.DESIGN_REFUSAL_REASONS?.has(result.reason)) continue;
       // Keyed on PROVENANCE, not on the matcher. "This path is not an artifact"
       // is an ordinary outcome for the file a write tool NAMED — that matcher
       // sees every file the model writes, and a genuine fault for a path the
