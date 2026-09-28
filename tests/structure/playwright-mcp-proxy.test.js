@@ -21,6 +21,7 @@ function shellQuote(value) {
 const {
   ALLOWED_TOOLS,
   JsonLineTransport,
+  localhostBreachReason,
   assertActiveUrls,
   assertAllowedUrl,
   chromiumResolverRules,
@@ -93,7 +94,14 @@ test('local policies accept exact loopback origins and reject broader targets', 
     mode: 'local',
     targets: [{ origin: 'http://192.168.1.2:5173', evidenceMode: 'declared-safe', routes: ['/inventory'] }],
   })), /loopback/);
-  await assert.rejects(parsePolicy(rawPolicy('local', 'http://localhost:5173')), /literal loopback-IP/);
+  // The exact NAME localhost is a local origin, and it carries NO resolver pin: a MAP rule holds
+  // one address and would cut off the other loopback family. Lookalikes stay refused.
+  const named = await parsePolicy(rawPolicy('local', 'http://localhost:5173'));
+  assert.equal(assertAllowedUrl(named, 'http://localhost:5173/inventory').pathname, '/inventory');
+  assert.equal(chromiumResolverRules(named), null);
+  for (const lookalike of ['http://localhost.:5173', 'http://app.localhost:5173', 'http://localhost.localdomain:5173']) {
+    await assert.rejects(parsePolicy(rawPolicy('local', lookalike)), /loopback origins only/, lookalike);
+  }
   assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/admin'), /route/);
 });
 
@@ -124,6 +132,10 @@ test('remote policies pin public DNS and reject non-public address classes', asy
     mode: 'remote',
     targets: [{ origin: 'https://127.0.0.1', evidenceMode: 'declared-safe', routes: ['/dashboard'] }],
   })), /non-loopback/);
+  // localhost is refused by NAME in a remote policy, before any lookup: the resolver below
+  // throws if it is ever asked.
+  await assert.rejects(parsePolicy(rawPolicy('remote', 'https://localhost', 'declared-safe', ['/dashboard']),
+    async () => { throw new Error('the resolver must not be asked about localhost'); }), /non-loopback/);
 });
 
 test('missing, malformed, wildcard, and unknown policy contracts fail closed', async () => {
@@ -331,7 +343,9 @@ test('owned contexts block service workers and gate HTTP redirects and WebSocket
   let contextOptions;
   let launchOptions;
   let browserClosed = 0;
+  let responseListener;
   const context = {
+    on: (event, handler) => { if (event === 'response') responseListener = handler; },
     route: async (_pattern, handler) => { routeHandler = handler; },
     routeWebSocket: async (_pattern, handler) => { webSocketHandler = handler; },
   };
@@ -345,6 +359,7 @@ test('owned contexts block service workers and gate HTTP redirects and WebSocket
   const owned = await openOwnedContext(chromium, policy);
   assert.equal(owned.context, context);
   assert.deepEqual(contextOptions, { serviceWorkers: 'block' });
+  assert.equal(typeof responseListener, 'function', 'every owned context carries the localhost tripwire');
   assert.equal(launchOptions.headless, false);
   assert.equal(launchOptions.args.includes('--no-proxy-server'), true);
 
@@ -375,6 +390,55 @@ test('owned contexts block service workers and gate HTTP redirects and WebSocket
   assert.deepEqual(await socket('wss://example.com/events'), ['close:1008']);
   await owned.browser.close();
   assert.equal(browserClosed, 1);
+});
+
+test('a localhost response served from a non-loopback address trips the broker for the rest of the session', async () => {
+  const policy = await parsePolicy(rawPolicy('local', 'http://localhost:5173'));
+  let listener;
+  let closed = 0;
+  const context = {
+    on: (event, handler) => { if (event === 'response') listener = handler; },
+    route: async () => {},
+    routeWebSocket: async () => {},
+    close: async () => { closed += 1; },
+  };
+  await configureContext(context, policy);
+  const respond = async (url, serverAddr) => {
+    listener({ url: () => url, serverAddr });
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  // Measured shapes: Playwright reports IPv6 in brackets. Loopback of either family passes, an
+  // absent or unreadable address is not judged, and another host is out of the wire's scope.
+  await respond('http://localhost:5173/', async () => ({ ipAddress: '[::1]', port: 5173 }));
+  await respond('http://localhost:5173/api', async () => ({ ipAddress: '127.0.0.1', port: 5173 }));
+  await respond('http://localhost:5173/cached', async () => null);
+  await respond('http://localhost:5173/odd', async () => { throw new Error('no address'); });
+  await respond('http://127.0.0.1:5173/', async () => ({ ipAddress: '93.184.216.34', port: 5173 }));
+  assert.equal(policy.localhostBreach, undefined);
+  assert.equal(closed, 0);
+
+  await respond('http://localhost:5173/inventory', async () => ({ ipAddress: '93.184.216.34', port: 5173 }));
+  assert.deepEqual(policy.localhostBreach, { ipAddress: '93.184.216.34', url: 'http://localhost:5173/inventory' });
+  assert.equal(closed, 1);
+  await respond('http://localhost:5173/again', async () => ({ ipAddress: '10.0.0.9', port: 5173 }));
+  assert.equal(policy.localhostBreach.ipAddress, '93.184.216.34', 'the first breach is the one reported');
+  assert.equal(closed, 1);
+
+  let upstreamCalls = 0;
+  const server = {
+    _requestHandlers: new Map([
+      ['tools/list', async () => ({ tools: ALLOWED_TOOLS.map((name) => ({ name })) })],
+      ['tools/call', async () => { upstreamCalls += 1; return { content: [] }; }],
+    ]),
+  };
+  installCapabilityBoundary(server, policy, async () => {}, () => ['http://localhost:5173/inventory']);
+  for (const name of ['browser_snapshot', 'browser_navigate', 'browser_close']) {
+    const result = await server._requestHandlers.get('tools/call')({ params: { name, arguments: { url: 'http://localhost:5173/inventory' } } });
+    assert.equal(result.isError, true, name);
+    assert.equal(result.content[0].text.endsWith(localhostBreachReason(policy.localhostBreach)), true, name);
+  }
+  assert.equal(upstreamCalls, 0);
+  assert.match(localhostBreachReason(policy.localhostBreach), /not a loopback address/);
 });
 
 test('JSON line transport terminates and releases its buffer after one oversized message', async () => {
@@ -485,7 +549,7 @@ test('the consent recorder predicate is graded across the same truth table as it
 });
 
 test('consent mode approves loopback navigations, keeps the floor, and refuses remote and unapproved origins', async () => {
-  const projectRoot = consentProject(['http://127.0.0.1:5173']);
+  const projectRoot = consentProject(['http://127.0.0.1:5173', 'http://localhost:4200']);
   const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot });
   assert.equal(policy.mode, 'consent');
   assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory'), /origin is not approved/);
@@ -499,7 +563,12 @@ test('consent mode approves loopback navigations, keeps the floor, and refuses r
   assert.throws(() => assertAllowedUrl(policy, 'https://app.example.com/', false), /origin is not approved/);
   assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory?token=1'), /query or fragment/);
   assert.throws(() => approveConsentOrigin(policy, 'https://app.example.com/'), new RegExp(CONSENT_REMOTE_REASON.slice(0, 30)));
-  assert.throws(() => approveConsentOrigin(policy, 'http://localhost:5173/'), /literal loopback-IP/);
+  // localhost is local, so it reaches the evidence check like any loopback IP: with the gate's
+  // marker it is approved, without one it is refused for missing evidence, never by the floor.
+  assert.equal(approveConsentOrigin(policy, 'http://localhost:4200/login').mode, 'local');
+  assert.equal(assertAllowedUrl(policy, 'http://localhost:4200/api/items', false).pathname, '/api/items');
+  assert.throws(() => approveConsentOrigin(policy, 'http://localhost:5173/'), /no in-session evidence/);
+  assert.throws(() => approveConsentOrigin(policy, 'http://app.localhost:5173/'), /loopback origins only/);
   assert.throws(() => approveConsentOrigin(policy, 'http://10.0.0.5/'), /non-loopback HTTPS/);
   assert.throws(() => approveConsentOrigin(policy, 'http://user:pw@127.0.0.1:5173/'), /credentials/);
   // A non-string target must never enter the approved map. The hook's own targetOf requires a
@@ -509,14 +578,14 @@ test('consent mode approves loopback navigations, keeps the floor, and refuses r
     assert.throws(() => approveConsentOrigin(policy, value), /navigation target is invalid/);
   }
   assert.equal(policy.approved.has('http://127.0.0.1:9999'), false);
-  assert.equal(policy.approved.size, 1);
+  assert.equal(policy.approved.size, 2);
   assert.equal(chromiumResolverRules(policy), null);
   const local = await parsePolicy(rawPolicy('local', 'http://127.0.0.1:5173'));
   assert.throws(() => approveConsentOrigin(local, 'http://127.0.0.1:5173/'), /requires consent mode/);
 });
 
 test('consent-mode call boundary approves on navigate and tabs-new and blocks everything else', async () => {
-  const projectRoot = consentProject(['http://127.0.0.1:5173', 'http://127.0.0.1:7777', 'http://127.0.0.1:9000']);
+  const projectRoot = consentProject(['http://127.0.0.1:5173', 'http://127.0.0.1:7777', 'http://127.0.0.1:9000', 'http://localhost:4200']);
   const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot });
   let upstreamCalls = 0;
   let activeUrls = ['about:blank'];
@@ -534,9 +603,10 @@ test('consent-mode call boundary approves on navigate and tabs-new and blocks ev
   const call = (name, args) => server._requestHandlers.get('tools/call')({ params: { name, arguments: args } });
   const remote = await call('browser_navigate', { url: 'https://app.example.com/' });
   assert.equal(remote.isError, true);
-  assert.match(remote.content[0].text, /consent mode admits literal loopback origins only/);
-  const hostname = await call('browser_navigate', { url: 'http://localhost:5173/' });
+  assert.match(remote.content[0].text, /consent mode admits loopback origins only/);
+  const hostname = await call('browser_navigate', { url: 'http://app.localhost:5173/' });
   assert.equal(hostname.isError, true);
+  assert.match(hostname.content[0].text, /loopback origins only/);
   assert.equal(upstreamCalls, 0);
   const first = await call('browser_navigate', { url: 'http://127.0.0.1:5173/inventory' });
   assert.equal(first.isError, undefined);
@@ -551,6 +621,10 @@ test('consent-mode call boundary approves on navigate and tabs-new and blocks ev
   activeUrls = ['http://127.0.0.1:5173/inventory', 'http://127.0.0.1:7777/popup'];
   const leaked = await call('browser_snapshot', {});
   assert.equal(leaked.isError, true);
+  activeUrls = ['about:blank'];
+  const named = await call('browser_navigate', { url: 'http://localhost:4200/' });
+  assert.equal(named.isError, undefined);
+  assert.equal(policy.approved.has('http://localhost:4200'), true);
 });
 
 test('check-policy reports consent mode for a loopback route and refuses remote without a policy', () => {
@@ -562,10 +636,13 @@ test('check-policy reports consent mode for a loopback route and refuses remote 
   assert.equal(ok.stdout, 'consent\n');
   const remote = spawnSync(process.execPath, [proxy, '--check-policy', 'remote', 'https://app.example.com', '/', 'declared-safe'], { env, encoding: 'utf8' });
   assert.equal(remote.status, 1);
-  assert.match(remote.stderr, /consent mode admits literal loopback origins only/);
-  const hostname = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://localhost:5173', '/', 'declared-safe'], { env, encoding: 'utf8' });
+  assert.match(remote.stderr, /consent mode admits loopback origins only/);
+  const named = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://localhost:5173', '/', 'declared-safe'], { env, encoding: 'utf8' });
+  assert.equal(named.status, 0, named.stderr);
+  assert.equal(named.stdout, 'consent\n');
+  const hostname = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://app.localhost:5173', '/', 'declared-safe'], { env, encoding: 'utf8' });
   assert.equal(hostname.status, 1);
-  assert.match(hostname.stderr, /literal loopback-IP/);
+  assert.match(hostname.stderr, /loopback origins only/);
   const withPolicy = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://127.0.0.1:5173', '/inventory', 'declared-safe'], {
     env: { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: rawPolicy('local', 'http://127.0.0.1:5173') }, encoding: 'utf8',
   });
@@ -587,7 +664,8 @@ test('launcher check-policy subprocess pins parent mode, origin, route, and evid
   assert.equal(consent.status, 0, consent.stderr);
   assert.equal(consent.stdout, 'consent\n');
   assert.notEqual(run('', 'remote', 'https://app.example.com', '/').status, 0);
-  assert.notEqual(run('', 'local', 'http://localhost:5173').status, 0);
+  assert.equal(run('', 'local', 'http://localhost:5173').status, 0);
+  assert.notEqual(run('', 'local', 'http://app.localhost:5173').status, 0);
   assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'remote', 'http://127.0.0.1:5173').status, 0);
   assert.notEqual(run('{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/*"]}]}', 'local', 'http://127.0.0.1:5173').status, 0);
   assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:9999').status, 0);

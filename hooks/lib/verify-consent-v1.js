@@ -668,7 +668,8 @@ function promptRoutes(routes) {
 function promptText({ origin, route, mode, declaredRoutes }) {
   const routes = normalizeRoutes(declaredRoutes);
   // The remote arm is unreachable today: decide denies every non-local mode before the only
-  // call site, and AC-018 admits literal-loopback origins only. It is kept for a future
+  // call site, and AC-018 admits loopback origins only (a loopback IP or the exact name
+  // localhost). It is kept for a future
   // elicitation channel, so a reader does not conclude consent mode prompts for remote targets.
   const modeWord = mode === 'remote' ? 'a deployed (remote) target' : 'a local loopback target';
   const lines = [];

@@ -60,7 +60,7 @@ Claude session with the exact origin and evidence-route policy. A child Bash com
 change the MCP server's parent environment.
 
 Without a parent policy the broker runs in consent mode and the same three commands still
-apply: `planned-origin` then picks a free literal-loopback port through
+apply: `planned-origin` then picks a free loopback port through
 `<absolute-plugin-root>/scripts/verify-free-port.js`, records it once in the run directory
 (`zensu-planned-origin`, mode `0600`) so `up` reuses the same origin, and `--check-policy`
 prints `consent` with exit `0`. The first `browser_navigate` to that origin opens the host's
@@ -72,7 +72,9 @@ literal `http://127.0.0.1:<port>` origin, page route `/`, and `declared-safe` ev
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at
 `55432` and `8090`, creates per-run database/JWT secrets and a private runtime lease,
 starts `pgvector/pgvector:pg17`, and launches the backend and Vite with `--strictPort` on
-literal loopback. Secrets are stored mode `0600` beneath the run directory solely for later
+literal loopback. That is the ADAPTER's own choice, not the floor's limit: the floor also admits
+the name `localhost`, and this adapter stays on `127.0.0.1` because it owns the bind itself and
+has no CORS or callback reason to need the name. Secrets are stored mode `0600` beneath the run directory solely for later
 controller actions; never read, print, or pass that file to another tool. The persistent JSON
 state contains no secret values or killable PIDs.
 

@@ -34,10 +34,11 @@ hook pair on the broker's navigation tools (`/zensu:doctor` reports this as
 - Approved origins are remembered for the session in
   `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
   passes without a second prompt. The report's `Consent` block lists every record.
-- The broker keeps a hard floor whatever you answer: literal loopback origins only
-  (`127.0.0.1`, `[::1]`; never `localhost`), no credentials, no query or fragment in a
-  navigation, and sub-requests, WebSockets and redirects only to origins the session already
-  opened.
+- The broker keeps a hard floor whatever you answer: loopback origins only — a loopback IP
+  (`127.0.0.1`, any other `127.0.0.0/8` address, `[::1]`) or the exact name `localhost`, and no
+  other hostname, so `app.localhost` and `localhost.` stay refused — no credentials, no query or
+  fragment in a navigation, and sub-requests, WebSockets and redirects only to origins the
+  session already opened.
 - A remote target is refused in consent mode, by the hook and by the broker, because the
   browser's DNS pins are fixed at launch. Remote verification needs the policy of section 4.
 - The port no longer has to be known before launch: the run reserves a free loopback port
@@ -137,7 +138,7 @@ The messages you will meet:
 | Message | Cause |
 |---|---|
 | `navigation policy mode does not match` | the policy is **absent** from the environment (an unset policy parses as a deny-everything policy with no mode), or its `mode` differs from the mode being checked |
-| `local navigation policy accepts literal loopback-IP origins only` | a local origin uses `localhost` or another hostname |
+| `local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost` | a local origin uses a hostname other than the exact name `localhost` |
 | `navigation policy target does not match` | the origin is not listed exactly; a trailing slash or a different port is enough |
 | `navigation target route is not approved for evidence` | the route is not in that origin's `routes` |
 | `evidence route must be an absolute query-free pathname` | a route carries `?`, `#`, or `*`, or does not start with `/` |
@@ -152,10 +153,18 @@ for that.
 Local mode proves the code in the current worktree, so the application has to be started from
 that worktree on an origin the policy already names.
 
-- **Literal loopback IP.** The origin is `http://` or `https://` plus a loopback IP address
-  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) and the port. `localhost` and
-  every other hostname are rejected, because the broker refuses to trust DNS or `/etc/hosts`
-  for a boundary decision.
+- **A loopback origin.** The origin is `http://` or `https://` plus either a loopback IP address
+  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) or the exact name `localhost`, and
+  the port. Every other hostname is rejected, because the broker refuses to trust DNS or
+  `/etc/hosts` for a boundary decision. `localhost` is the one name admitted: RFC 6761 reserves
+  it for the loopback interface and Chromium resolves it itself, to BOTH `127.0.0.1` and `[::1]`,
+  so an app bound to either family is reachable. No `--host-resolver-rules` pin travels with it —
+  such a rule carries one address and would cut off the other family — so the broker verifies the
+  claim instead: every response served for `localhost` is checked against the address it came
+  from, and one served from a non-loopback address closes the browser and ends the run. That
+  check happens AFTER the connection, so it reports a breach rather than preventing it.
+  Prefer `localhost` only when the app needs that exact origin (CORS allow-lists, cookies, auth
+  callbacks); a literal IP keeps the resolution question out of the run entirely.
 - **The port is fixed before launch.** The policy carries it, so the application must bind
   exactly that port and fail rather than fall back to another one (Vite's `--strictPort`, or
   an explicit bind in your own script). A server that silently moves to a free port produces
@@ -315,11 +324,12 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | Symptom | Cause | Fix |
 |---|---|---|
 | PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode`, or the consent hook is not registered so an absent policy still means deny-everything (`/zensu:doctor` shows `verify-feature: cannot start`) | fix the policy's mode, or reinstall the plugin so consent mode is available |
-| PARTIAL; reason `consent mode admits literal loopback origins only` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
+| PARTIAL; reason `consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost)` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
 | PARTIAL; reason names `no in-session evidence that the Zensu consent gate ran for this origin` | the consent gate left no live execution marker for this origin under the tree the BROKER is anchored to — hooks switched off host-side, no bound session, or a broker anchored on a different tree than the one the gate wrote under | run `/zensu:doctor` and read its `verify-feature gate:` row. It is a DIFFERENT read, not the same fact twice: it is session-scoped and covers every origin, while the broker's is project-scoped and asks about this one origin, and it runs under the session record's project root rather than the broker's own. This refusal names no tree — only the two that report an unreadable state directory or an exhausted marker budget do |
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
-| PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
+| PARTIAL; reason names `loopback origins only` | the local origin uses a hostname that is not a loopback IP and not the exact name `localhost` (for example `app.localhost`, `localhost.`, or a `/etc/hosts` alias) | use `127.0.0.1` or `localhost` in the policy, the recipe, and the `baseUrlCommand` output |
+| PARTIAL; reason names `not a loopback address` | a response for `localhost` was served from off-loopback, so the tripwire closed the browser | check `/etc/hosts` and anything that rewrites name resolution, then re-run |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a trailing slash or a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | the skill reports that the plugin MCP server was not loaded | the Playwright tool set is absent from the session | check the plugin installation with `/zensu:doctor`, then restart Claude Code |

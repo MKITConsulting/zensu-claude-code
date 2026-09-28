@@ -17,8 +17,9 @@ the source skill's dependency on a personal `/test-feature` command.
    evidence reaches the model. Never replace it with navigate-then-check logic. The policy must
    bind the same exact page route to the same origin with `evidenceMode: declared-safe`.
    In consent mode (the preflight printed `consent`) the ORIGIN half of that boundary holds with
-   the user in the loop instead of the policy: the broker admits literal loopback origins only,
-   and the consent hook opens the host's permission prompt once per new loopback origin. The
+   the user in the loop instead of the policy: the broker admits loopback origins only — a
+   loopback IP or the exact name `localhost`, never another hostname — and the consent hook opens
+   the host's permission prompt once per new loopback origin. The
    ROUTE half does NOT hold — neither layer enforces routes in consent mode, because the human
    consented to the whole origin — so binding a page route to its evidence is a prose obligation
    on you here, not a boundary anything checks. Wait for the user's answer; a refused prompt makes

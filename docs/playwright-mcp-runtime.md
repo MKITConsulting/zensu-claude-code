@@ -49,9 +49,9 @@ require network access.
   npm package scripts stay disabled.
 - `--check-policy` executes only the checked-in broker's policy parser. It never
   loads the upstream npm graph and therefore needs no runtime generation. In
-  consent mode it prints `consent` on stdout and exits `0` for a literal-loopback
-  origin and route, and refuses a remote target with the reason that names the
-  parent-environment policy.
+  consent mode it prints `consent` on stdout and exits `0` for a loopback origin
+  and route — a loopback IP or the exact name `localhost` — and refuses a remote
+  target with the reason that names the parent-environment policy.
 
 The production launcher has no runtime-directory override or test passthrough.
 Tests exercise an exact copied launcher inside a disposable fixture rather than

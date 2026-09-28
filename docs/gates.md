@@ -357,10 +357,17 @@ text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the address 
 predicates both the hook and the broker apply live in `hooks/lib/verify-navigation-floor-v1.js`,
 so there is one floor, not two.
 
-**The floor holds regardless of consent.** Both layers refuse, independently: a `localhost`
-or any other hostname, a non-loopback `http` origin, a private, link-local, loopback-mapped
-or documentation address, credentials in the URL, and a query or fragment in a navigation.
-Consent mode admits **literal loopback origins only**. A remote target is refused by the hook
+**The floor holds regardless of consent.** Both layers refuse, independently: every hostname
+but the exact name `localhost` (so `app.localhost`, `localhost.` and a `/etc/hosts` alias are
+refused), a non-loopback `http` origin, a private, link-local, loopback-mapped or documentation
+address, credentials in the URL, and a query or fragment in a navigation. Consent mode admits
+**loopback origins only** — a loopback IP or `localhost`. That one name is admitted because
+RFC 6761 reserves it for the loopback interface and Chromium resolves it itself, to both
+`127.0.0.1` and `[::1]`; no `--host-resolver-rules` pin carries it, since such a rule holds one
+address and would cut off the other family. The broker checks the claim rather than trusting it:
+a response served for `localhost` from a non-loopback address closes the browser and refuses
+every later call. That check runs after the connection, so it reports a breach rather than
+preventing one. A remote target is refused by the hook
 and by the broker with the same reason, because Chromium's DNS pins are passed at browser
 launch and an origin approved mid-session could not be pinned; remote verification keeps the
 parent policy. Sub-requests, WebSockets and redirects reach only origins the session already

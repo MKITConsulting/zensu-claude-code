@@ -32,7 +32,9 @@ A port the application binds is proposed only when the evidence shows how to pas
 For every service the evidence names, propose:
 
 - `up`: the start command, bound to `127.0.0.1` and to `$ZENSU_VERIFY_PORT`, refusing to fall
-  back to another port;
+  back to another port. Bind `localhost` instead only when the app needs that exact origin (a
+  CORS allow-list, a cookie domain or an auth callback keyed on it) — the floor admits that one
+  name, and the base URL must then use it too;
 - `ready`: an HTTP probe on a path the code exposes (`/`, `/health`, `/api/health`), or a log
   line the start command prints; a sleep is never readiness;
 - `down`: leave empty when the service runs as a foreground child the run supervises; name a

@@ -33,8 +33,10 @@ const ALLOWED_TOOL_SET = new Set(ALLOWED_TOOLS);
 const {
   CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
+  LOCALHOST_NAME,
   checkNavigationTarget,
   classifyOrigin,
+  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
@@ -96,12 +98,18 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
     if (targets.has(parsed.origin)) throw new Error('navigation origins must be unique');
     const hostname = normalizeHostname(parsed.hostname);
     if (value.mode === 'local') {
-      if (!['http:', 'https:'].includes(parsed.protocol) || !net.isIP(hostname)
-          || !isLoopbackHost(hostname)) {
-        throw new Error(FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+      // isLocalHost is the floor's own answer to "is this origin local", so this arm no longer
+      // composes one out of net.isIP plus isLoopbackHost. That second composition is what made
+      // docs/gates.md's "one floor, not two" claim false, and it is why admitting a NAME had to
+      // be changed in two places rather than one.
+      if (!['http:', 'https:'].includes(parsed.protocol) || !isLocalHost(hostname)) {
+        throw new Error(FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
       }
     } else {
-      if (parsed.protocol !== 'https:' || isLoopbackHost(hostname)) {
+      // isLocalHost, not isLoopbackHost: 'https://localhost' is refused HERE with the remote
+      // reason instead of reaching resolveRemoteHost, which would answer with a DNS-shaped
+      // message about a name this policy mode never accepts.
+      if (parsed.protocol !== 'https:' || isLocalHost(hostname)) {
         throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
       }
       pins.set(hostname, await resolveRemoteHost(hostname, resolver));
@@ -410,6 +418,11 @@ function installCapabilityBoundary(server, policy, closeOwned = async () => {}, 
     if (!ALLOWED_TOOL_SET.has(name)) {
       return deniedToolResult('tool capability is not allowlisted');
     }
+    // Every tool, browser_close included: once localhost has answered from off-loopback, the
+    // run is over, and a tool that still worked would let it continue past the finding.
+    if (policy.localhostBreach) {
+      return deniedToolResult(localhostBreachReason(policy.localhostBreach));
+    }
     try {
       if (name !== 'browser_close') {
         assertActiveUrls(policy, await currentUrls(), name === 'browser_navigate');
@@ -457,7 +470,42 @@ function installCapabilityBoundary(server, policy, closeOwned = async () => {}, 
   });
 }
 
+// The ONE premise this broker cannot prove from the code it ships: that Chromium resolves the
+// NAME 'localhost' to a loopback address itself rather than through DNS or /etc/hosts. No
+// --host-resolver-rules pin can carry it (a MAP rule holds one address and would cut off the
+// other loopback family, measured), so the premise is made OBSERVABLE instead of assumed: every
+// response served for host 'localhost' is checked against the address it actually came from.
+// This is detection AFTER the connection, never prevention — say so wherever it is described.
+function localhostBreachReason(breach) {
+  return `localhost was served from ${breach.ipAddress} for ${breach.url}, which is not a loopback address; `
+    + 'the browser was closed and this session cannot continue — check /etc/hosts and run /zensu:doctor';
+}
+
+async function assertLoopbackServed(context, policy, response) {
+  if (policy.localhostBreach) return;
+  let hostname;
+  try { hostname = normalizeHostname(new URL(response.url()).hostname); }
+  catch (_error) { return; }
+  if (hostname !== LOCALHOST_NAME) return;
+  let served = null;
+  try { served = await response.serverAddr(); }
+  catch (_error) { return; }
+  const ipAddress = served && typeof served.ipAddress === 'string' ? served.ipAddress : '';
+  // An absent address is a cache hit, a service-worker replay or a data: URL — there is nothing
+  // to judge, and treating absence as a breach would trip the wire on every replayed byte.
+  // isLoopbackHost normalizes the brackets an IPv6 address arrives in ('[::1]').
+  if (!ipAddress || isLoopbackHost(ipAddress)) return;
+  policy.localhostBreach = {
+    ipAddress: ipAddress.slice(0, 64),
+    url: String(response.url()).slice(0, 200),
+  };
+  if (typeof context.close === 'function') await context.close().catch(() => {});
+}
+
 async function configureContext(context, policy) {
+  // No optional guard: a context without an event channel must fail loudly here rather than
+  // silently ship without the tripwire.
+  context.on('response', (response) => { void assertLoopbackServed(context, policy, response); });
   await context.route('**/*', async (route) => {
     const request = route.request();
     try {
@@ -636,6 +684,7 @@ module.exports = {
   installCapabilityBoundary,
   isPublicAddress,
   JsonLineTransport,
+  localhostBreachReason,
   openOwnedContext,
   parsePolicy,
   resolveStartupPolicy,

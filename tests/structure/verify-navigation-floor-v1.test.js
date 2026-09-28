@@ -7,8 +7,10 @@ const path = require('node:path');
 const floor = require('../../hooks/lib/verify-navigation-floor-v1.js');
 const {
   FLOOR_REASONS,
+  LOCALHOST_NAME,
   checkNavigationTarget,
   classifyOrigin,
+  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
@@ -21,9 +23,16 @@ test('the broker requires the floor module instead of carrying its own predicate
   const proxyPath = path.resolve(__dirname, '../../scripts/playwright-mcp-proxy.js');
   const source = require('node:fs').readFileSync(proxyPath, 'utf8');
   assert.match(source, /verify-navigation-floor-v1\.js/);
-  for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost', 'function resolveRemoteHost']) {
+  for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost', 'function isLocalHost', 'function resolveRemoteHost']) {
     assert.equal(source.includes(own), false, own);
   }
+  // parsePolicy used to compose "is this origin local" itself out of net.isIP plus
+  // isLoopbackHost, a second spelling of the rule classifyOrigin owns. Both of its arms now ask
+  // the floor's isLocalHost, and the old composition must not come back.
+  const parse = source.slice(source.indexOf('async function parsePolicy'), source.indexOf('function consentPolicy'));
+  assert.ok(parse.length > 0, 'parsePolicy body not found');
+  assert.equal(parse.includes('!net.isIP(hostname)'), false, 'parsePolicy composes its own local test again');
+  assert.equal((parse.match(/isLocalHost\(hostname\)/g) || []).length, 2, 'both policy arms must ask isLocalHost');
   const proxy = require(proxyPath);
   assert.equal(proxy.isPublicAddress, isPublicAddress);
 });
@@ -37,6 +46,18 @@ test('loopback detection accepts every 127/8 address and ::1 and nothing else', 
   assert.equal(isLoopbackHost('128.0.0.1'), false);
   assert.equal(isLoopbackHost('::ffff:127.0.0.1'), false);
   assert.equal(normalizeHostname('[2001:DB8::1]'), '2001:db8::1');
+});
+
+test('the local-host predicate admits loopback IPs and the exact name localhost, never a suffix or alias', () => {
+  assert.equal(LOCALHOST_NAME, 'localhost');
+  for (const local of ['127.0.0.1', '127.9.9.9', '::1', '[::1]', 'localhost', 'LOCALHOST', 'LocalHost']) {
+    assert.equal(isLocalHost(local), true, local);
+  }
+  for (const refused of ['localhost.', 'app.localhost', 'localhost.localdomain', 'localhost6', 'xn--localhost', 'localhost:4200', '128.0.0.1', '::ffff:127.0.0.1', '', 'example.com']) {
+    assert.equal(isLocalHost(refused), false, refused);
+  }
+  // isLoopbackHost keeps its narrower meaning, which the remote arm depends on.
+  assert.equal(isLoopbackHost('localhost'), false);
 });
 
 test('public-address classification rejects private, reserved, loopback, mapped and documentation ranges', () => {
@@ -59,13 +80,18 @@ test('navigation targets refuse credentials, query and fragment, and unknown sch
   assert.equal(checkNavigationTarget('wss://app.example.com/events', false).origin, 'https://app.example.com');
 });
 
-test('origin classification splits literal loopback from public https and refuses the rest', () => {
+test('origin classification splits loopback origins from public https and refuses the rest', () => {
   assert.equal(classifyOrigin('http://127.0.0.1:5173/inventory').mode, 'local');
   assert.equal(classifyOrigin('https://[::1]:8443/').mode, 'local');
+  assert.equal(classifyOrigin('http://localhost:5173/').mode, 'local');
+  assert.equal(classifyOrigin('http://LOCALHOST:5173/').origin, 'http://localhost:5173');
+  assert.equal(classifyOrigin('https://localhost:8443/').mode, 'local');
+  assert.equal(classifyOrigin('ws://localhost:5173/events', false).mode, 'local');
   assert.equal(classifyOrigin('https://app.example.com/dashboard').mode, 'remote');
   assert.equal(classifyOrigin('https://93.184.216.34/').mode, 'remote');
-  assert.equal(classifyOrigin('http://localhost:5173/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
-  assert.equal(classifyOrigin('http://app.example.com/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+  for (const refused of ['http://localhost.:5173/', 'http://app.localhost:5173/', 'http://localhost.localdomain/', 'http://app.example.com/']) {
+    assert.equal(classifyOrigin(refused).reason, FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, refused);
+  }
   assert.equal(classifyOrigin('http://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_HTTPS);
   assert.equal(classifyOrigin('https://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('https://169.254.169.254/latest/meta-data').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);

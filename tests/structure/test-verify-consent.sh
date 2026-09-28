@@ -106,7 +106,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
     check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 10 "verify-navigation-floor-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR" 11 "verify-navigation-floor-v1.test.js"
 run_unit "V7 consent" "$UNIT_CONSENT" 43 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 
@@ -219,7 +219,7 @@ case "$REASON" in
 esac
 [ ! -e "$MEMORY" ] && check "V14 asking writes no memory" PASS || check "V14 asking writes no memory" FAIL
 
-for url in "http://localhost:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" "http://127.0.0.1:4200/?t=1" "http://127.0.0.1:4200/#x"; do
+for url in "http://app.localhost:4200/" "http://localhost.:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" "http://127.0.0.1:4200/?t=1" "http://127.0.0.1:4200/#x"; do
   [ "$(pre_verdict "$NAV" "$url" "$SID" "$PROJ")" = "DENY" ] \
     && check "V15 floor denies $url" PASS || check "V15 floor denies $url" FAIL
 done
@@ -236,13 +236,17 @@ case "$(pre_reason "$TABS" "https://remote.example.com/" "$SID" "$PROJ")" in
   *'parent-environment navigation policy'*) check "V16d a tabs call opening a remote url is refused for want of the parent policy" PASS ;;
   *) check "V16d a tabs call opening a remote url is refused for want of the parent policy" FAIL ;;
 esac
-case "$(pre_reason "$TABS" "http://localhost:4290/" "$SID" "$PROJ")" in
-  *'literal loopback-IP origins only'*) check "V16e a tabs call opening a non-literal loopback url is denied by the floor" PASS ;;
-  *) check "V16e a tabs call opening a non-literal loopback url is denied by the floor" FAIL ;;
+case "$(pre_reason "$TABS" "http://app.localhost:4290/" "$SID" "$PROJ")" in
+  *'loopback origins only'*) check "V16e a tabs call opening a non-loopback hostname is denied by the floor" PASS ;;
+  *) check "V16e a tabs call opening a non-loopback hostname is denied by the floor" FAIL ;;
 esac
-[ "$(pre_verdict "$TABS" "http://localhost:4290/" "$SID" "$PROJ")" = "DENY" ] \
+[ "$(pre_verdict "$TABS" "http://app.localhost:4290/" "$SID" "$PROJ")" = "DENY" ] \
   && check "V16e-control the floor refusal on the tabs path is a deny" PASS \
   || check "V16e-control the floor refusal on the tabs path is a deny" FAIL
+# The EXACT name localhost is a loopback origin: it reaches the prompt like a loopback IP.
+[ "$(pre_verdict "$TABS" "http://localhost:4290/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "V16f a tabs call opening the exact name localhost is asked about" PASS \
+  || check "V16f a tabs call opening the exact name localhost is asked about" FAIL
 
 post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 [ -f "$MEMORY" ] && node -e '
@@ -255,9 +259,9 @@ post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V18 the remembered (origin, route) now passes silently" PASS \
   || check "V18 the remembered (origin, route) now passes silently" FAIL
-[ "$(pre_verdict "$NAV_CLI" "http://localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
-  && check "V18b-control the bare broker spelling is gated: the floor denies localhost on it" PASS \
-  || check "V18b-control the bare broker spelling is gated: the floor denies localhost on it" FAIL
+[ "$(pre_verdict "$NAV_CLI" "http://app.localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V18b-control the bare broker spelling is gated: the floor denies a non-loopback hostname on it" PASS \
+  || check "V18b-control the bare broker spelling is gated: the floor denies a non-loopback hostname on it" FAIL
 [ "$(pre_verdict "$NAV_CLI" "http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V18b the bare broker spelling shares the same memory" PASS \
   || check "V18b the bare broker spelling shares the same memory" FAIL
@@ -295,7 +299,7 @@ post_run "$NAV" "http://127.0.0.1:4200/rejected" "$SID" "$PROJ" '{"isError":true
 node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records.length === 1 ? 0 : 1)' "$MEMORY" 2>/dev/null \
   && check "V22 a navigation the broker rejected is not remembered" PASS \
   || check "V22 a navigation the broker rejected is not remembered" FAIL
-post_run "$NAV" "http://localhost:4200/" "$SID" "$PROJ" >/dev/null
+post_run "$NAV" "http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records.length === 1 ? 0 : 1)' "$MEMORY" 2>/dev/null \
   && check "V23 a floor-refused target is never remembered" PASS \
   || check "V23 a floor-refused target is never remembered" FAIL
@@ -348,9 +352,9 @@ VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://127.0.0.1:4300/" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V27 with a policy the broker accepts the gate stays silent and leaves enforcement to the broker" PASS \
   || check "V27 with a policy the broker accepts the gate stays silent and leaves enforcement to the broker" FAIL
-[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
-  && check "V27a the floor still refuses a hostname target in policy mode" PASS \
-  || check "V27a the floor still refuses a hostname target in policy mode" FAIL
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://app.localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V27a the floor still refuses a non-loopback hostname target in policy mode" PASS \
+  || check "V27a the floor still refuses a non-loopback hostname target in policy mode" FAIL
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_verdict "$NAV" "http://127.0.0.1:4301/" "$SID" "$PROJ")" = "ASK" ] \
   && check "V27b a policy value the broker would refuse leaves the gate armed" PASS \
   || check "V27b a policy value the broker would refuse leaves the gate armed" FAIL
@@ -454,7 +458,7 @@ esac
   && case "$STDERR_UNBOUND" in *'nothing is remembered'*) true ;; *) false ;; esac \
   && check "V29 an unbound session still asks, enforces the floor and says it remembers nothing" PASS \
   || check "V29 an unbound session still asks, enforces the floor and says it remembers nothing" FAIL
-[ "$(pre_verdict "$NAV" "http://localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
+[ "$(pre_verdict "$NAV" "http://app.localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
   && check "V29b the floor holds without a bound session" PASS || check "V29b the floor holds without a bound session" FAIL
 BEFORE="$(ls "$PROJ/.zensu/state" | sort | tr '\n' ' ')"
 post_run "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ" >/dev/null

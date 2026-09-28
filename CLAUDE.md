@@ -9082,6 +9082,67 @@ the classified ORIGIN and checks no route afterwards, so any future prompt promi
 grant than that would have the human decide on a false description. The sentence names the origin
 and says the browser does not check routes again.
 
+**THE FLOOR ADMITS ONE HOSTNAME, `localhost`, AND NOTHING ELSE THAT LOOKS LIKE IT.** It used to
+admit literal loopback IPs only, which made an ordinary local app unverifiable whenever its CORS
+allow-list, its cookies or an auth callback were keyed on `http://localhost:<port>` — measured on
+the trigger for this change, a frontend whose backend allowed exactly that origin. `isLocalHost`
+in `hooks/lib/verify-navigation-floor-v1.js` is the ONE predicate for "is this origin local", and
+`isLoopbackHost` keeps its narrower meaning because the remote arm needs it. `localhost.`,
+`app.localhost`, `localhost.localdomain` and every `/etc/hosts` alias stay refused; their
+resolution was never measured on every host this plugin ships to.
+
+**NO `--host-resolver-rules` PIN TRAVELS WITH THE NAME, and the measurement is why.** A MAP rule
+carries ONE address. Measured on Chromium 1228 (Chrome for Testing 149.0.7827.55) against two
+servers on ephemeral ports: native `http://localhost:<p>` reached a `::1`-only server AND a
+`127.0.0.1`-only server, while `MAP localhost 127.0.0.1` made the `::1`-only one unreachable and
+`MAP localhost [::1]` did the same to the other. A pin would therefore break exactly the class of
+app this change exists for — a Node/Vite/Angular dev server that binds whichever family
+`localhost` resolves to first. `chromiumResolverRules` already returns `null` in consent and local
+mode, so nothing had to change there, and `playwright-mcp-proxy.test.js` pins that a localhost
+policy still produces no rule.
+
+**THE ONE UNPROVEN PREMISE IS OBSERVABLE RATHER THAN ASSUMED.** That Chromium resolves the NAME
+itself rather than through `/etc/hosts` could not be discriminated by measurement here: on macOS
+the OS resolver answers `*.localhost` with loopback too, and proving it needs a bind-mounted hosts
+file on Linux. So the broker watches instead — `context.on('response')` plus
+`response.serverAddr()` for every response whose host is `localhost` — and a non-loopback address
+sets `policy.localhostBreach`, closes the context and makes EVERY later tool call refuse,
+`browser_close` included. Say what it is: detection AFTER the connection, never prevention. An
+absent address (cache, `data:`, a throwing call) is not judged, because treating absence as a
+breach would trip the wire on every replayed byte.
+
+**Sites that move together:** `LOCALHOST_NAME` / `isLocalHost` / the renamed
+`FLOOR_REASONS.LOCAL_LOOPBACK_ONLY` (the old key asserted "literal", which stopped being true) /
+`CONSENT_REMOTE_REASON` in the floor; BOTH arms of `parsePolicy` in the broker, which no longer
+compose their own local test out of `net.isIP` plus `isLoopbackHost` — the second composition that
+made `docs/gates.md`'s "one floor, not two" false, now pinned by the first case in
+`tests/structure/verify-navigation-floor-v1.test.js`; `localhostBreachReason` /
+`assertLoopbackServed` and the breach check in `installCapabilityBoundary`; the stale AC-018
+comment in `hooks/lib/verify-consent-v1.js`; and the operator accounts — `docs/verify-feature.md`,
+`docs/gates.md`, `docs/configuration.md`, `docs/playwright-mcp-runtime.md`, `docs/operations.md`,
+`docs/verify-feature-consent-spec.md` (AC-018 is AMENDED in place, keeping its id, and the 2026-09-02
+measurement that refused `localhost` is kept as history and labelled as such),
+`skills/verify-feature/SKILL.md`, its `rules/browser-verification.md`, `rules/setup.md` and
+`rules/zensu-monorepo.md`, and `skills/autopilot/rules/config.md`, whose own
+`http://localhost:5173` example stopped contradicting its own rule.
+
+**Version: `patch`.** Walked entry by entry: no context-record or workflow-state schema field, no
+strict key set (`mode,targets,version` and `evidenceMode,origin,routes` are untouched), no hook
+added, removed or renamed and no matcher changed, no new config key, no attestation change. The
+consent hook keeps its `ask`/`deny`/`allow` vocabulary and only relaxes an existing deny, which
+this file's own lineage rule does not treat as breaking.
+
+**Known gaps, accepted and named:** the `/etc/hosts` premise stays unproven, and the tripwire
+reports a breach rather than preventing it; no suite drives a real Chromium, so a future build that
+stopped resolving `localhost` natively would surface as a connection failure in a live run rather
+than as a red suite (`mcp-runtime`'s own Chromium revision is not in the repo, so the measurement
+above was taken on the worktree's `playwright` 1.61.1); `*.localhost` stays refused; the bundled
+Zensu monorepo adapter keeps binding and authorizing `127.0.0.1` only, by its own choice; and an
+app that calls a SECOND loopback origin still needs that origin navigated once for its own consent
+prompt, because sub-requests reach approved origins only — `skills/verify-feature/SKILL.md` now
+says so, and a recipe-declared companion-origin list that ONE prompt could cover is the named
+follow-up.
+
 **CONSENT IS PER ORIGIN, in all three carriers, and the route-scoped design that preceded it is
 recorded here so it is not rebuilt.** The first attempt asked per route while the PROMPT told the
 human a Yes opened the whole origin and the BROKER checked only the origin (`assertAllowedUrl`

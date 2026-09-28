@@ -5,13 +5,22 @@ const FLOOR_REASONS = Object.freeze({
   INVALID: 'navigation target is invalid',
   CREDENTIALS: 'navigation target contains credentials',
   QUERY_OR_FRAGMENT: 'navigation target contains query or fragment',
-  LOCAL_LITERAL_LOOPBACK: 'local navigation policy accepts literal loopback-IP origins only',
+  LOCAL_LOOPBACK_ONLY: 'local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost',
   REMOTE_HTTPS: 'remote navigation policy requires non-loopback HTTPS origins',
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
 });
 
-const CONSENT_REMOTE_REASON = 'consent mode admits literal loopback origins only; a remote target needs the parent-environment navigation policy';
+const CONSENT_REMOTE_REASON = 'consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost); a remote target needs the parent-environment navigation policy';
+
+// RFC 6761 reserves this name for the loopback interface, and Chromium resolves it itself rather
+// than through DNS or /etc/hosts. It is admitted EXACTLY, never as a suffix: 'localhost.',
+// 'app.localhost' and 'localhost.localdomain' all stay refused, because their resolution was
+// never measured on every host this plugin ships to. No --host-resolver-rules pin travels with
+// it: a MAP rule carries ONE address, and measured on Chromium 1228 'MAP localhost 127.0.0.1'
+// makes a server bound to [::1] unreachable while 'MAP localhost [::1]' does the same to a
+// server bound to 127.0.0.1. Chromium's own resolution reaches both families.
+const LOCALHOST_NAME = 'localhost';
 
 function normalizeRoute(route) {
   if (typeof route !== 'string' || !route.startsWith('/')
@@ -92,11 +101,21 @@ function isPublicAddress(address) {
   return family === 4 ? isPublicIpv4(address) : family === 6 ? isPublicIpv6(address) : false;
 }
 
+// LITERAL loopback IPs only. The remote arm of classifyOrigin and parsePolicy both need this
+// narrower question — an address that resolves to loopback is never a remote target — so the
+// predicate keeps its meaning and isLocalHost below is the one that also admits the NAME.
 function isLoopbackHost(hostname) {
   const normalized = normalizeHostname(hostname);
   if (normalized === '::1') return true;
   const value = ipv4Number(normalized);
   return value !== null && inIpv4Range(value, '127.0.0.0', 8);
+}
+
+// The one answer to "is this origin local". Every consumer asks THIS rather than composing its
+// own test: classifyOrigin's local arm, and parsePolicy's local and remote arms in the broker,
+// which used to spell that composition a second time.
+function isLocalHost(hostname) {
+  return isLoopbackHost(hostname) || normalizeHostname(hostname) === LOCALHOST_NAME;
 }
 
 async function resolveRemoteHost(hostname, resolver) {
@@ -141,7 +160,7 @@ function classifyOrigin(rawUrl, navigation = true) {
   const { parsed } = target;
   const hostname = normalizeHostname(parsed.hostname);
   const secure = parsed.protocol === 'https:' || parsed.protocol === 'wss:';
-  if (isLoopbackHost(hostname)) {
+  if (isLocalHost(hostname)) {
     return { ...target, mode: 'local', hostname };
   }
   if (net.isIP(hostname)) {
@@ -149,7 +168,7 @@ function classifyOrigin(rawUrl, navigation = true) {
     if (!isPublicAddress(hostname)) return { ok: false, reason: FLOOR_REASONS.REMOTE_NOT_PUBLIC, origin: target.origin };
     return { ...target, mode: 'remote', hostname };
   }
-  if (!secure) return { ok: false, reason: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK, origin: target.origin };
+  if (!secure) return { ok: false, reason: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, origin: target.origin };
   return { ...target, mode: 'remote', hostname };
 }
 
@@ -181,12 +200,14 @@ function policyContractFault(raw) {
 module.exports = {
   CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
+  LOCALHOST_NAME,
   checkNavigationTarget,
   policyContractFault,
   classifyOrigin,
   expandIpv6,
   inIpv4Range,
   ipv4Number,
+  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   isPublicIpv4,

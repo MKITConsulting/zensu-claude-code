@@ -159,9 +159,9 @@ test('a server keyed playwright is never the Zensu broker: its tools reach no de
     assert.equal(decision.reason, REASONS.NOT_A_NAVIGATION, name);
     assert.equal(preEnvelope(decision), null, name);
   }
-  const floorDeny = preEnvelope({ verdict: 'deny', reason: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK });
+  const floorDeny = preEnvelope({ verdict: 'deny', reason: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY });
   assert.equal(floorDeny.hookSpecificOutput.permissionDecisionReason,
-    `Zensu browser consent gate denied the navigation: ${FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK}`);
+    `Zensu browser consent gate denied the navigation: ${FLOOR_REASONS.LOCAL_LOOPBACK_ONLY}`);
   for (const envelope of [floorDeny, preEnvelope(brokerRemote)]) {
     assert.doesNotMatch(envelope.hookSpecificOutput.permissionDecisionReason, /playwright|server key|different server/);
   }
@@ -185,10 +185,13 @@ test('a record is judged on its stamp independently of its route', () => {
 });
 
 test('the floor denies before any memory is consulted', () => {
-  const records = [record('http://localhost:4200', '/')];
+  // A remembered record for a name the floor refuses must not rescue it. 'app.localhost' is the
+  // lookalike that stays refused now that the exact name 'localhost' is a local origin.
+  const records = [record('http://app.localhost:4200', '/')];
   const cases = [
-    ['http://localhost:4200/', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
-    ['http://example.com/', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
+    ['http://app.localhost:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['http://localhost.:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['http://example.com/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://10.0.0.5/', FLOOR_REASONS.REMOTE_HTTPS],
     ['https://192.168.1.10/', FLOOR_REASONS.REMOTE_NOT_PUBLIC],
     ['https://169.254.169.254/', FLOOR_REASONS.REMOTE_NOT_PUBLIC],
@@ -213,12 +216,18 @@ test('consent mode admits loopback origins only; a remote target is refused with
   }
   const local = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:1/' }, records: [record('https://app.example.com', '/')], declaredRoutes: [] });
   assert.equal(local.verdict, 'ask');
+  // The exact name localhost is a loopback origin: asked once, then remembered like any other.
+  const named = decide({ toolName: NAV, toolInput: { url: 'http://localhost:4200/' }, records: [], declaredRoutes: [] });
+  assert.equal(named.verdict, 'ask');
+  assert.equal(named.mode, 'local');
+  const remembered = decide({ toolName: NAV, toolInput: { url: 'http://localhost:4200/login' }, records: [record('http://localhost:4200', '/')], declaredRoutes: [] });
+  assert.equal(remembered.verdict, 'allow');
   assert.equal(consent.lockFromRecords, undefined);
 });
 
 test('policy mode and non-navigation calls allow silently', () => {
-  // A literal loopback address, not "localhost": the floor now runs ahead of the policy-mode
-  // allow, and a hostname is exactly what its local rule refuses. AC-005 owns that discrimination.
+  // The floor runs ahead of the policy-mode allow, so a hostname the local rule refuses is denied
+  // even here. AC-005 owns that discrimination; this case is the plain allow.
   const policy = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:1/' }, records: [], declaredRoutes: [], policyPresent: true });
   assert.equal(policy.verdict, 'allow');
   assert.equal(policy.reason, REASONS.POLICY_MODE);
@@ -331,9 +340,11 @@ test('the pre CLI emits ask or deny envelopes and denies an unreadable payload',
   const ask = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);
   assert.equal(ask.status, 0);
   assert.equal(ask.envelope.hookSpecificOutput.permissionDecision, 'ask');
-  const deny = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
+  const named = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
+  assert.equal(named.envelope.hookSpecificOutput.permissionDecision, 'ask');
+  const deny = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://app.localhost:4200/' } }, env);
   assert.equal(deny.envelope.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(deny.envelope.hookSpecificOutput.permissionDecisionReason, /literal loopback-IP/);
+  assert.match(deny.envelope.hookSpecificOutput.permissionDecisionReason, /loopback origins only/);
   const quiet = runCli('pre', { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_snapshot', tool_input: {} }, env);
   assert.equal(quiet.stdout, '');
   const unreadable = runCli('pre', '{not json', env);
@@ -416,7 +427,7 @@ test('the post CLI records an executed navigation, tags its decision source and 
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/login' } }, env);
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'asked'], ['/login', 'remembered']]);
-  runCli('post', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
+  runCli('post', { tool_name: NAV, tool_input: { url: 'http://app.localhost:4200/' } }, env);
   runCli('post', { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_snapshot', tool_input: {} }, env);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/rejected' }, tool_response: { isError: true, content: [{ type: 'text', text: 'Zensu browser broker rejected the operation: x' }] } }, env);
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
@@ -424,6 +435,9 @@ test('the post CLI records an executed navigation, tags its decision source and 
   runCli('post', { tool_name: NAV, tool_input: { url: 'https://app.example.com/dashboard' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: VALID_POLICY });
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.deepEqual(stored.records[2], { ...stored.records[2], origin: 'https://app.example.com', route: '/dashboard', decidedBy: 'policy-mode' });
+  runCli('post', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/login' } }, env);
+  stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
+  assert.deepEqual(stored.records[3], { ...stored.records[3], origin: 'http://localhost:4200', route: '/login', decidedBy: 'asked' });
   const refused = runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/x' } }, { ...env, ZENSU_VERIFY_PROJECT_ROOT: '' });
   assert.match(refused.stderr, /consent memory not written/);
   assert.equal(refused.status, 0);
@@ -888,7 +902,8 @@ test('AC-103 the gate records per-session EXECUTION evidence, bounded and contai
   // the whole re-classification block deleted and proves nothing about it. Each of the three
   // sub-rules gets its own body, because they refuse for different reasons.
   assert.equal(consent.executionEvidencePresent(dir, plant('https://app.example.com', good('https://app.example.com')), { projectRoot: root }), false, 're-classification on read: a remote origin is refused even when the body names it exactly');
-  assert.equal(consent.executionEvidencePresent(dir, plant('http://localhost:4225', good('http://localhost:4225')), { projectRoot: root }), false, 're-classification on read: an origin the floor no longer accepts at all');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://app.localhost:4225', good('http://app.localhost:4225')), { projectRoot: root }), false, 're-classification on read: an origin the floor does not accept at all');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://localhost:4227', good('http://localhost:4227')), { projectRoot: root }), true, 'the exact name localhost is a local origin on read too');
   assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4226/', good('http://127.0.0.1:4226/')), { projectRoot: root }), false, 're-classification on read: a spelling that does not survive normalization');
   assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4224', Object.assign(good('http://127.0.0.1:4224'), { verdict: 'whatever' })), { projectRoot: root }), false, 'verdict vocabulary');
 

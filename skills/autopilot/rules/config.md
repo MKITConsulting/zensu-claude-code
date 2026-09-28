@@ -82,8 +82,11 @@ must be present exactly or navigation remains PARTIAL. A dynamically chosen orig
 authorized from inside an already-running Claude session: launch the session with the exact
 origin policy first, or use a separate discovery run and restart with that policy.
 
-In `local` mode every origin must use a literal loopback IP with `http` or `https`; hostnames
-such as `localhost` are rejected rather than trusted through mutable DNS/hosts resolution. In `remote`
+In `local` mode every origin must use `http` or `https` with a loopback IP or the exact name
+`localhost`; every other hostname is rejected rather than trusted through mutable DNS/hosts
+resolution. `localhost` carries no resolver pin — Chromium resolves that name itself, to both
+loopback families — and the broker ends the run if a response for it ever arrives from a
+non-loopback address. In `remote`
 mode every origin must be non-loopback HTTPS; the broker rejects any DNS answer that is not
 globally routable and pins each hostname to an approved address for the browser process. The
 broker checks every request before continuation, rejects unapproved origins, and reapplies the

@@ -354,7 +354,7 @@ PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
 # coupling unit_cases_registered_floor exists to avoid. A real failure is already
 # non-zero from node, and PROXY_TEST_RC covers it.
 PROXY_TEST_RC=$?
-if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 28; then
+if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 29; then
   check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy ($(unit_cases_report_text "$PROXY_TEST_OUTPUT"))" PASS
 else
   check "P6g MCP broker inventory/policy behavior (rc=$PROXY_TEST_RC, out=${PROXY_TEST_OUTPUT:0:500})" FAIL

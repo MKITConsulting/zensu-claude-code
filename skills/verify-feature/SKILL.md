@@ -39,7 +39,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
 | `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
-| `--attach=<origin>` | local only | none | Verify an app the user already runs on a literal loopback origin. Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
+| `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
 | `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and routes, for unattended runs and for hosts that keep the policy in their launch environment. |
 
@@ -141,7 +141,7 @@ every navigation/redirect is rechecked for userinfo, query, and fragment. Remote
 only non-loopback HTTPS, rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation,
 multicast/reserved, IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public
 and non-public DNS answers, and pins each hostname to an approved public address in Chromium to
-prevent DNS rebinding. Local mode accepts literal loopback-IP origins only. Raw Playwright navigation
+prevent DNS rebinding. Local mode accepts loopback origins only: a loopback IP, or the exact name `localhost` and no other hostname. Raw Playwright navigation
 followed by a final-URL check is too late. **In POLICY mode** a policy that is invalid, mismatched
 or does not approve the target stops before browser use with PARTIAL. **In CONSENT mode** there is
 no policy to be missing and the run continues under the paragraph below; only a REMOTE target
@@ -155,9 +155,14 @@ registered on the broker's navigation tools, so the FIRST `browser_navigate` to 
 opens the host's own permission prompt to the user. Consent is per ORIGIN: once the user
 approves an origin, every further route on it proceeds without a prompt. Answering that prompt is the user's action; never answer it on their behalf,
 never work around a refusal, and treat a refused prompt as PARTIAL for that origin. The broker
-keeps a hard floor in this mode: literal loopback origins only, no credentials, no query or
+keeps a hard floor in this mode: loopback origins only — a loopback IP or the exact name
+`localhost`, never another hostname — no credentials, no query or
 fragment in a navigation, sub-requests and redirects only to origins the session already
-opened. A remote target is refused in consent mode by both the hook and the broker; remote
+opened. **An app that calls a SECOND loopback origin needs that origin opened too.** A page at
+`http://localhost:4200` whose login posts to `http://localhost:9090` has its request aborted
+until `http://localhost:9090` has been navigated once and consented, because the broker admits
+sub-requests only to approved origins. Open every origin the app talks to with its own
+`browser_navigate` before driving the flow, and treat each prompt as the user's to answer. A remote target is refused in consent mode by both the hook and the broker; remote
 verification keeps the parent policy. Consent mode remembers each approved ORIGIN for
 this session in `.zensu/state/verify-consent-<session-key>.json` — a record names the route that
 was visited, but the route steers no later decision — and the report lists every record in its
@@ -251,7 +256,10 @@ Claude's native placeholder substitution.
    In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
    recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
-   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. Use
+   `http://localhost:$ZENSU_VERIFY_PORT` instead only when the app needs that exact origin — a
+   CORS allow-list, a cookie domain or an auth callback keyed on it — and bind the server so the
+   name reaches it. The
    MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
    `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
    for the run, so a reused run directory keeps the port it already recorded. Never derive the
@@ -270,8 +278,8 @@ Claude's native placeholder substitution.
 ### Attach mode
 
 `--attach=<origin>` verifies an application the user already runs. The origin must pass the
-same literal-loopback rule as local mode (`http://127.0.0.1:<port>` or another loopback IP;
-never `localhost`). Boot nothing, seed nothing through the runtime, register no `down`
+same loopback rule as local mode (`http://127.0.0.1:<port>`, another loopback IP, or
+`http://localhost:<port>`; no other hostname). Boot nothing, seed nothing through the runtime, register no `down`
 command, and never stop, signal, or restart the attached process. Establish identity before
 the matrix: resolve the listening process with
 `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
