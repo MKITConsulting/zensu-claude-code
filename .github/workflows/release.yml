@@ -573,6 +573,26 @@ jobs:
             rm -f "$err_file"
             return "$rc"
           }
+          # A release created moments ago is not guaranteed to be visible on the
+          # LIST endpoint yet, and `release_json` resolves the id from that list
+          # because a draft carries no tag to look up. A bare
+          # `RELEASE="$(release_json)"` therefore fails under `set -e` with NO
+          # message at all — which is exactly how v0.18.0 stranded as an untagged
+          # draft: the log held the draft URL, then `exit 1`, and the cause had to
+          # be reconstructed from timestamps. Every read-back after a mutation
+          # goes through this bounded retry instead.
+          release_json_retry() {
+            local what="$1" attempt out
+            for attempt in $(seq 1 10); do
+              if out="$(release_json 2>/dev/null)" && [ -n "$out" ]; then
+                printf '%s' "$out"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "::error::could not read back the release after $what (10 attempts over ~20s); the release list never returned $TAG" >&3
+            return 1
+          }
           verify_asset() {
             printf '%s' "$1" | jq -e --arg name "$ASSET" --arg digest "$EXPECTED_DIGEST" '
               (.assets | length) == 1
@@ -679,10 +699,7 @@ jobs:
               gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
               --draft --title "$TAG" --target "${{ github.sha }}" \
               --notes-file "${{ runner.temp }}/notes.md"
-            RELEASE="$(release_json)" || {
-              echo "::error::could not read the draft release object for $TAG after creating it"
-              exit 1
-            }
+            RELEASE="$(release_json_retry "draft creation")"
             printf '%s' "$RELEASE" | jq -e '
               .draft == true and .immutable == false and (.assets | length) == 0
             ' >/dev/null || {
@@ -693,15 +710,9 @@ jobs:
               gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
 
-          RELEASE="$(release_json)" || {
-            echo "::error::could not read the release object for $TAG before normalizing its metadata"
-            exit 1
-          }
+          RELEASE="$(release_json_retry "asset upload")"
           normalize_draft_metadata "$RELEASE"
-          RELEASE="$(release_json)" || {
-            echo "::error::could not re-read the release object for $TAG after normalizing its metadata"
-            exit 1
-          }
+          RELEASE="$(release_json_retry "metadata normalization")"
           verify_metadata "$RELEASE" true false || {
             echo "::error::draft tag/target/prerelease/title/body metadata differs immediately before publish"
             exit 1
@@ -733,10 +744,9 @@ jobs:
 
           PUBLISHED=""
           for ATTEMPT in $(seq 1 10); do
-            CANDIDATE="$(release_json)" || {
-              echo "::error::could not read the published release object for $TAG while verifying immutability"
-              exit 1
-            }
+            # Bare, but deliberately so: this IS the retry loop, and a read that
+            # fails here must cost one attempt rather than kill the step.
+            CANDIDATE="$(release_json 2>/dev/null || true)"
             if verify_metadata "$CANDIDATE" false true && verify_asset "$CANDIDATE"; then
               PUBLISHED="$CANDIDATE"
               break
@@ -757,10 +767,7 @@ jobs:
           # Re-READ rather than re-check. `verify_asset "$PUBLISHED"` re-derived the
           # same answer from the same string the poll loop had just accepted, so it
           # asserted nothing; this observes state taken after the tag exists.
-          FINAL="$(release_json)" || {
-            echo "::error::could not re-read the published release object for $TAG"
-            exit 1
-          }
+          FINAL="$(release_json_retry "publication")"
           verify_asset "$FINAL" || {
             echo "::error::published asset for $TAG is incomplete or has the wrong digest on a fresh read"
             exit 1
