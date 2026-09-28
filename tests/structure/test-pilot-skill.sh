@@ -148,11 +148,38 @@ if grep -qF '/zensu:pilot' "$PLUGIN_DIR/hooks/session-start-banner.sh"; then
 else
   check "P8c banner skills line mentions /zensu:pilot" FAIL
 fi
-PRIMER_PILOT_COUNT="$(grep -oF '/zensu:pilot' "$PLUGIN_DIR/hooks/session-start-primer.sh" 2>/dev/null | wc -l | tr -d '[:space:]')"
-if [ "$PRIMER_PILOT_COUNT" = "2" ]; then
-  check "P8d primer mentions /zensu:pilot in BOTH mode variants (strict + vanilla)" PASS
+# P8d asserts what its label says: /zensu:pilot is named in BOTH mode variants.
+# It used to compare a WHOLE-FILE match count against the literal 2, which is a
+# different claim — it broke the moment a heredoc gained a second legitimate
+# mention, and bumping the literal would only re-arm the same trap on the next
+# primer edit. Extract the two heredocs and require the name in each.
+# An unchecked mktemp -d leaves the variable empty and awk then writes the blocks
+# to /b1 and /b2, which the guard below would grade as if they were the primer.
+PILOT_ROUTE_CLAUSE='/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)'
+PRIMER_BLOCK_DIR="$(mktemp -d)" || PRIMER_BLOCK_DIR=""
+if [ -z "$PRIMER_BLOCK_DIR" ]; then
+  check "P8d primer heredoc extraction (mktemp -d failed)" FAIL
 else
-  check "P8d primer /zensu:pilot count is ${PRIMER_PILOT_COUNT:-<unreadable>} (expected 2)" FAIL
+awk -v dir="$PRIMER_BLOCK_DIR" '{
+  if ($0 ~ /^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*\|.*)?$/) { n++; inb=1; next }
+  if ($0 ~ /^[[:space:]]*JSON[[:space:]]*$/) { inb=0; next }
+  if (inb) print > (dir "/b" n)
+}' "$PLUGIN_DIR/hooks/session-start-primer.sh" 2>/dev/null
+if [ ! -f "$PRIMER_BLOCK_DIR/b1" ] || [ ! -f "$PRIMER_BLOCK_DIR/b2" ] || [ -f "$PRIMER_BLOCK_DIR/b3" ]; then
+  check "P8d primer heredoc extraction found the expected two mode variants" FAIL
+# The needle is the FULL route clause, never the bare skill name: both primer
+# heredocs also carry a pre-existing "runs via the /zensu:pilot conductor skill"
+# sentence, so a bare `/zensu:pilot` needle stays satisfied after the four-route
+# clause is deleted from BOTH heredocs. Measured against this tree with the clause
+# stripped: the bare needle reports PASS, the clause needle FAILS. The sibling
+# suite tests/structure/test-tdd-vanilla-mode.sh (P3, BNR2c) uses full clauses for
+# the same measured reason; a bare needle here would encode the opposite guidance.
+elif grep -qF "$PILOT_ROUTE_CLAUSE" "$PRIMER_BLOCK_DIR/b1" && grep -qF "$PILOT_ROUTE_CLAUSE" "$PRIMER_BLOCK_DIR/b2"; then
+  check "P8d primer carries the full /zensu:pilot route clause in BOTH mode variants (strict + vanilla)" PASS
+else
+  check "P8d primer /zensu:pilot route clause missing from a mode variant" FAIL
+fi
+rm -rf "$PRIMER_BLOCK_DIR"
 fi
 
 # P9 — sibling handoffs: each pipeline neighbor ends with a Next step offer

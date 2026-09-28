@@ -87,6 +87,7 @@ jobs:
           - windows-shard-5
           - windows-shard-6
           - windows-shard-7
+          - windows-shard-8
     runs-on: windows-latest
     timeout-minutes: 35
     steps:

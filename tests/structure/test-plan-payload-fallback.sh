@@ -1181,8 +1181,7 @@ NO_MODULE_PLUGIN="$RAW_TMP/plugin-without-reader"
 mkdir -p "$NO_MODULE_PLUGIN"
 NO_MODULE_READY=false
 if cp -R "$PLUGIN_DIR/.claude-plugin" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/agents" \
-    "$PLUGIN_DIR/skills" "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/mcp-runtime" "$NO_MODULE_PLUGIN/" 2>/dev/null \
-    && cp "$PLUGIN_DIR/.mcp.json" "$NO_MODULE_PLUGIN/.mcp.json" \
+    "$PLUGIN_DIR/skills" "$PLUGIN_DIR/scripts" "$NO_MODULE_PLUGIN/" 2>/dev/null \
     && rm -f "$NO_MODULE_PLUGIN/hooks/lib/plan-payload-v1.js"; then
   NO_MODULE_PROJECT="$TMP/nomodule"
   mkdir -p "$NO_MODULE_PROJECT"

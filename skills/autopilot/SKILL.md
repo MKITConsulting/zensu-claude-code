@@ -96,7 +96,15 @@ LOG="$ROOT/hooks/lib/zensu-log.sh"
 ```
 
 Before presenting the Phase-0 plan, generate one token-safe run id (`run_<random-hex>`) and
-persist it from the worktree root:
+persist it from the worktree root.
+
+**Verify FIRST that the plan content you are about to present carries exactly one
+`<!-- zensu-autopilot:... -->` marker — this run's — after applying Phase 0.D's
+marker-hygiene rule.** Do that before the command below, not after it: the command mints
+the run and takes the working tree, so a collision discovered afterwards leaves a run that
+already holds the working tree while the plan gate refuses the approval as
+`PLAN_MARKER_MISSING_OR_AMBIGUOUS`. There is no in-place fix for that state — report the
+refusal and use `/zensu:autopilot-release`, which is the only exit.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
@@ -110,12 +118,21 @@ the pull request. Pass `--workspace <path>` only when the run drives a tree othe
 current one, and only when that tree lies under the project root — a worktree
 outside the project is refused.
 
-A refusal naming a nonterminal run in this working tree quotes the audited release command.
-That command cancels a run owned by ANOTHER session, so it is the user's call: report the
-refusal and the command, and never run it unasked. `/zensu:autopilot-release` is the
-guided form.
+A refusal naming a nonterminal run in this working tree points at the release path. Two
+cautions travel with it. First, `--autopilot-begin` has three refusals that name a run, and only
+the workspace-hold one is foreign by construction — the own-run cases fail above it, so its
+holder can never be yours. The other two, `nonterminal orphan … requires exact recovery` and
+`active run … is not terminal`, DO name a run of your own; the release verb refuses a caller
+that owns the run, and such a run is finished or repaired rather than released. Second, when the run really is another session's, what happens to it
+is the user's call: report the refusal and use `/zensu:autopilot-adopt` to continue the run
+here, or `/zensu:autopilot-release` to cancel it — adoption first, because a cancel that was
+reached for first cannot be undone. Both are guided forms that report the holding run and
+mutate nothing without an explicit yes. Never run the raw
+verb unasked.
 
-This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
+This must succeed before `ExitPlanMode`. **Phase 0.D owns the marker-hygiene rule in full —
+apply it exactly as written there; do not restate or improvise it here.** Then append exactly
+one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the
 harness hands back (`tool_response.plan`, saved at `tool_response.filePath`), never in a
 file it was not given, so the marker has to travel inside the plan itself:
@@ -304,9 +321,26 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
+without the user's explicit OK**. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
+`ExitPlanMode` — leaving the rest of each line intact — before appending this run's
+marker.** Strip the comment, never the whole line: the gate's matcher is unanchored, so a
+marker can share a line with real requirement text that must survive. The plan content is
+the only document the gate reads, so stripping the incoming feature description is not enough:
+Phase 0.C turns that description into the spec and the numbered acceptance criteria, and a
+marker carried across while writing them survives a strip of the description while the gate
+still counts two. Because `--autopilot-begin` runs before this presentation, a collision found
+here is found too late — the run already holds the working tree, and `/zensu:autopilot-release`
+is the exit; verify the count before that command, as the durable-begin section states. The plan-approval gate now
+offers this route for an ordinary approved plan, and a plan whose earlier run is DONE or
+CANCELLED still carries that run's marker; appending a second one makes the gate refuse
+the approval as `PLAN_MARKER_MISSING_OR_AMBIGUOUS`, which is the single planning gate this
+run cannot get past. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
 the plan content you pass to `ExitPlanMode`. Do not proceed if either operation fails.
+Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`
+falls through to the standalone plan-approval directive, which asks the four-route question
+while no delivery route is decided, and once one is recorded or configured
+sends this spec to `/zensu:tdd` or implements it directly without asking.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 
@@ -358,8 +392,10 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
    exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
-   (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
-   step 6). The body also carries one audit line
+   (deprecated rows stay listed with status `⚪ deprecated`, no evidence; status filled in after
+   step 6). Every `Status` cell carries a leading marker — 🟢 pass, 🟡 partial, 🟡 unvalidated,
+   🔴 fail, ⚪ deprecated — prefixing the word rather than replacing it; ⚪ is bound to
+   provenance, so use it only for a row the spec already marks deprecated. The body also carries one audit line
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
@@ -414,7 +450,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 After all delivery invariants and current-head evidence are durable, apply
 `DELIVERY_COMPLETE`. Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
 stable `AC-###` IDs — one evidence entry per active ID; deprecated rows stay listed with
-status `deprecated`, no evidence — and the `Gates bypassed during build:` audit line
+status `⚪ deprecated`, no evidence — and the `Gates bypassed during build:` audit line
 (the step-3 union, `none` when clean). Then:
 - **Do NOT merge, push a release, or deploy.** The final merge is the human's.
 - Report: the PR link, the per-AC table, what looped and why, and anything decided

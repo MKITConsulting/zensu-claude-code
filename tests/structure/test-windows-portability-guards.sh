@@ -26,6 +26,15 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
+ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
+BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
+EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
+# The superseded-lease sweep is the SECOND requireable module carrying the hardened
+# open, and it belongs in this inventory for the reason stated beside the plan-payload
+# entry: every count pin here is per-file and therefore blind to a NEW file that
+# brings its own secure open.
+LEASE_SWEEP="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
 DOCTOR_REPORT="$ROOT/hooks/lib/zensu-doctor-report.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
@@ -33,8 +42,7 @@ RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
 AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
 ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
 PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
-PLAYWRIGHT_MCP="$ROOT/scripts/playwright-mcp.sh"
-PLAYWRIGHT_MCP_TEST="$ROOT/tests/structure/playwright-mcp-proxy.test.js"
+VERIFY_RUNTIME="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 CORE_SNAPSHOT_BLOCK="$(awk '
   /^function readRegularFileSnapshot\(/ { capture=1 }
   /^function readRegularFile\(/ { capture=0 }
@@ -42,8 +50,29 @@ CORE_SNAPSHOT_BLOCK="$(awk '
 ' "$CORE")"
 AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
 AUTOPILOT_STATE_WORKSPACE_BLOCK="$(sed -n '/^CONC_PROJECT=/,/^CONC_REFUSAL_OK=true$/p' "$AUTOPILOT_STATE_TEST")"
+# A suite file that ends up containing a spliced copy of its own prologue re-executes this
+# line, resetting the counters — the summary then reports only the checks after the last reset
+# and looks entirely plausible. That is not hypothetical: it happened during this change (a
+# JS `$`-pattern replacement spliced ~485 lines of a suite into itself, and the file still
+# reported its normal total). An expected-total pin would not have caught it; a re-entry guard
+# does, and costs nothing per added check. It detects a splice that INCLUDES these lines, which
+# is the whole-prologue shape; a splice starting strictly below them is not covered.
+if [ -n "${ZENSU_SUITE_PROLOGUE_ENTERED:-}" ]; then
+  printf 'prologue re-entered — this suite file is corrupt\n' >&2
+  exit 1
+fi
+ZENSU_SUITE_PROLOGUE_ENTERED=1
 PASS=0; FAIL=0
+# Arity is checked because a label that word-splits is not a cosmetic defect: check() reads
+# position 2 unconditionally, so an over-supplied call whose second word happens to read PASS
+# scores a FAILING check as a success. That happened in this change — an unquoted expansion in
+# a FAIL label — and was fixed at its call site. This makes the class unrepeatable instead of
+# re-swept by hand.
 check() {
+  if [ "$#" -ne 2 ]; then
+    printf '  FAIL  check() called with %s arguments, expected 2 — a label word-split: %s\n' "$#" "${1:-}"
+    FAIL=$((FAIL + 1)); return 0
+  fi
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
@@ -262,27 +291,17 @@ else
 fi
 
 if grep -qF 'MUTATING_CONTROL_CANARY_URL="$(jq -ebr '\''.url'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_ORIGIN="$(jq -ebr '\''.origin'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_POLICY="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn' "$CLAUDE_WRAPPER" \
-  && grep -qF 'json_quote "$MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1=' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''ZENSU_VERIFY_NAVIGATION_POLICY_V1='\'' \' "$CLAUDE_WRAPPER" \
+  && grep -qF 'json_quote "curl -fsS $MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
+  && ! grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$CLAUDE_WRAPPER" \
   && grep -qF '"${CLAUDE_ENV[@]}" claude "${CLAUDE_ARGS[@]}" "$FULL_PROMPT"' "$CLAUDE_WRAPPER" \
   && grep -qF 'SELFTEST_MUTATING_CONTROL_CANARY_URL=' "$CLAUDE_WRAPPER" \
   && grep -qF 'attack="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg url "$SELFTEST_MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --argjson block "$attack"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node -e' "$CLAUDE_WRAPPER_SELFTEST" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER" \
-  && grep -qF '"MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1="' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'local arg_conv_excl="$1"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'env_args+=( "MSYS2_ARG_CONV_EXCL=$arg_conv_excl" )' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_PROXY_HOST="$(cygpath -am "$PROXY")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_RUNTIME_DIR_HOST="$(cygpath -am "$RUNTIME_DIR")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF "run_sanitized_child '*' node \"\$POLICY_PROXY_HOST\"" "$PLAYWRIGHT_MCP" \
-  && grep -qF "test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {" "$PLAYWRIGHT_MCP_TEST"; then
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" PASS
+  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER"; then
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" PASS
 else
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" FAIL
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" FAIL
 fi
 
 if grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" "$CLAUDE_WRAPPER_SELFTEST" \
@@ -454,10 +473,180 @@ else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
 fi
 
-# The doctor renderer carries THREE opens, and they differ on purpose — which is the
+# The session-lineage ledger reader is the third hardened open in a requireable
+# module, and the FIRST one outside hooks/. Same reason it is listed: every count
+# pin above is per-file and therefore blind to a NEW file carrying a secure open,
+# so a file that is merely correct today has nothing keeping it correct. The
+# properties are the ones that make the read safe against a store the session can
+# write: BOTH flags are resolved once in the Windows-safe spelling, the descriptor --
+# not the path -- carries the regular-file and size assertions, and the size cap
+# is applied to the fstat result rather than to a prior lstat.
+#
+# O_NONBLOCK is pinned beside O_NOFOLLOW because it closes a hazard the descriptor
+# checks structurally cannot: O_RDONLY on a FIFO blocks until a writer appears, and
+# the fstat/isFile assertions run AFTER the open. One planted entry in a directory
+# every session on the machine can write wedged every reader on the host. It carries
+# the same platform gate, for the same reason -- the constant is absent on win32.
+# Both spellings are single-quoted now: the file used a double-quoted "win32" on the
+# NOFOLLOW line and a single-quoted one eleven lines below, for the same platform
+# gate, in a module whose every other literal is single-quoted. Normalising it later
+# would have reddened this suite, which is the coupling CLAUDE.md's roster records.
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)" "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'const st = fs.fstatSync(fd);' "$SESSION_LINEAGE")" -eq 1 ] \
+  && grep -qF 'if (!st.isFile()) return { text: null, reason: EDGE_REFUSALS.NOT_A_FILE };' "$SESSION_LINEAGE" \
+  && grep -qF 'if (st.size > MAX_RECORD_BYTES) return { text: null, reason: EDGE_REFUSALS.OVERSIZE };' "$SESSION_LINEAGE" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$SESSION_LINEAGE" \
+  && ! grep -qF '| (fs.constants.O_NONBLOCK || 0)' "$SESSION_LINEAGE" \
+  && ! grep -qF 'fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW' "$SESSION_LINEAGE"; then
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" PASS
+else
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" FAIL
+fi
+
+# The artifact redactor is another requireable module carrying a hardened
+# open — the inventory above is deliberately not numbered, because an ordinal in
+# a comment goes stale the next time a module is enrolled and nothing checks it.
+# It is enrolled here for the same reason the plan-payload reader is:
+# every count pin in this file is per-file, so a NEW file with a secure open is
+# invisible to all of them. It carries THREE descriptor-judged opens of the
+# artifact — the read in redactFile, the append in writeArtifactLine, and the
+# read that validates the target before replaceArtifactFile publishes by rename —
+# and all three fstat the DESCRIPTOR, which is what makes the symlink and
+# hard-link refusals unraceable. The third arrived when `replace` stopped
+# truncating in place: an ftruncate commits the destroy before the new bytes
+# exist, so that mode now writes an O_EXCL temp and renames, and the counts below
+# moved with it. The absent O_TRUNC is still part of the contract: truncating at
+# open would run BEFORE the nlink check could refuse a hard link. The dev/ino
+# comparison and the pre-rename re-stat are pinned here for
+# the same reason the opens are: its REJECT direction is a race no behavioral
+# suite can stage, so the structural pin is the only place it can be held.
+#
+# `fs.fstatSync(fd)` is FOUR, not three: writeArtifactLine fstats a second time
+# AFTER its write, because a rename landing between the checks and the write
+# sends the line to an orphaned inode and the old spelling reported that as
+# success. That call site is asserted separately below, so raising the count
+# alone cannot satisfy this check.
+#
+# The pre-rename re-stat is TWO spellings and both are asserted, because the
+# `stat`-based one holds only `redactFile`. `replaceArtifactFile` compares against
+# `prior` instead, and while only the first literal was here, deleting that whole
+# guard left every assertion in this block green: the `concurrent-write` reason is
+# still minted by `redactFile` and both `fsyncSync` calls are untouched. The
+# `prior === null` arm is asserted separately for the same reason — it is the half
+# that defends a target APPEARING between the tolerated ENOENT and the rename, and
+# nothing else in this file or in the behavioral suite reaches it. R45 covers the
+# post-write re-check of writeArtifactLine in APPEND mode, not this one.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'const NON_BLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | noFollow | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | platformNoFollow() | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF '| platformNoFollow() | NON_BLOCK' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.fstatSync(fd)' "$ARTIFACT_REDACT")" -eq 4 ] \
+  && [ "$(grep -cF '!sameInode(fs.fstatSync(fd), target)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'stat.nlink !== 1' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF '!sameInode(stat, target)' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.fsyncSync(out)' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && grep -qF 'expected.dev === stat.dev && expected.ino === stat.ino' "$ARTIFACT_REDACT" \
+  && grep -qF "err.code === 'ELOOP' || err.code === 'EMLINK'" "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== stat.size || now.mtimeMs !== stat.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== prior.size || now.mtimeMs !== prior.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'prior === null' "$ARTIFACT_REDACT" \
+  && grep -qF "reason: 'concurrent-write'" "$ARTIFACT_REDACT" \
+  && ! grep -qF 'fs.constants.O_TRUNC' "$ARTIFACT_REDACT" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$ARTIFACT_REDACT"; then
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" PASS
+else
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" FAIL
+fi
+# The rule-block reader is the third file carrying a hardened open, and it is now
+# ONE file rather than two carriers to be compared. It is enrolled here for the
+# reason stated above: every count pin in this suite is per-file, so a NEW file
+# carrying a secure open is invisible until it is named.
+#
+# What used to sit here was a ~115-line cross-carrier equality apparatus —
+# extract both embedded readers, strip indentation, compare bodies, compare
+# MAX_FILE, compare MAX_BLOCK, count declarations on each side. Every line of it
+# existed because the reader was hand-copied into two hooks, and all it could ever
+# prove was that the two copies agreed with each other, never that either was
+# right. The copies are gone; the apparatus goes with them. What replaces it is
+# the property that made it necessary: exactly one owner, and no carrier holding a
+# reader of its own.
+#
+# The open deliberately omits the plan-payload reference's `nlink !== 1` clause —
+# the path is fixed under the executing plugin root rather than payload-named, so
+# a hard link is not a way to reach a file the symlink check refuses, and refusing
+# one would silently disable the rule on any install that materializes files by
+# hard link. That omission is pinned as a negative so it cannot be reintroduced.
+RULE_BLOCK_LIB="$ROOT/hooks/lib/rule-block-v1.js"
+RB_CARRIER_READERS=""
+for carrier in "$BEST_SOLUTION_HOOK" "$EVIDENCE_DISCIPLINE_HOOK"; do
+  # A carrier that reopens the rule file itself, or redeclares either bound, has
+  # forked the reader again. Both are the shape this consolidation removed.
+  grep -qF 'fs.openSync(rulePath' "$carrier" && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):open"
+  grep -qE '(MAX_BLOCK|MAX_FILE)[[:space:]]*=[[:space:]]*[0-9]' "$carrier" \
+    && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):bound"
+  grep -qF 'readRuleBlock' "$carrier" || RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):not-wired"
+done
+if [ -f "$RULE_BLOCK_LIB" ] \
+  && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | platformNoFollow() | platformNonBlock())' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$RULE_BLOCK_LIB" \
+  && [ "$(grep -cE '^const MAX_BLOCK = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cE '^const MAX_FILE = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$RULE_BLOCK_LIB" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$RULE_BLOCK_LIB" \
+  && ! grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB" | grep -qF 'nlink' \
+  && [ -z "$RB_CARRIER_READERS" ]; then
+  check "the rule-block reader is one owner with a Windows-safe flag, and neither carrier forked it" PASS
+else
+  check "rule-block reader ownership broken:${RB_CARRIER_READERS:- (owner check failed)}" FAIL
+fi
+
+# The review ceilings are the second thing the two carriers must keep in step. What must match is
+# the intended HEADROOM, and it is compared as a DECLARED CONSTANT in each suite — deliberately
+# NOT as ceiling-minus-live-block. That earlier shape reduced algebraically to a constraint on the
+# two prose documents' length difference that no file states: a one-character edit to either rule
+# text, well inside its own ceiling, turned this suite red while the owning suite correctly
+# accepted it. Measured, not assumed — 88 against 89 on a single added character. A ceiling is a
+# budget the block may grow into; pinning it to the block would make that budget unreachable.
+# The fail-safe now has one source, so it is read from the owner rather than from
+# each carrier — which is what the two BSF_/EVD_ variables used to do, and what the
+# consolidation above removed.
+RB_MAX_BLOCK_N="$(sed -n 's/^const MAX_BLOCK = \([0-9]*\);$/\1/p' "$RULE_BLOCK_LIB" | head -1)"
+suite_const() { sed -n "s/^$2=\([0-9]*\).*/\1/p" "$1" | head -1; }
+suite_const_n() { grep -c "^$2=" "$1"; }
+HDR_BSF_SUITE="$ROOT/tests/structure/test-best-solution-first.sh"
+HDR_EVD_SUITE="$ROOT/tests/structure/test-evidence-discipline.sh"
+HDR_BSF_H="$(suite_const "$HDR_BSF_SUITE" REVIEW_HEADROOM)"
+HDR_EVD_H="$(suite_const "$HDR_EVD_SUITE" REVIEW_HEADROOM)"
+HDR_BSF_C="$(suite_const "$HDR_BSF_SUITE" REVIEW_CEILING)"
+HDR_EVD_C="$(suite_const "$HDR_EVD_SUITE" REVIEW_CEILING)"
+HDR_N="$(( $(suite_const_n "$HDR_BSF_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_BSF_SUITE" REVIEW_CEILING) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_CEILING) ))"
+if [ -z "$HDR_BSF_H" ] || [ -z "$HDR_EVD_H" ] || [ -z "$HDR_BSF_C" ] || [ -z "$HDR_EVD_C" ]; then
+  check "a review-ceiling constant could not be resolved (headroom bsf=${HDR_BSF_H:-none} evd=${HDR_EVD_H:-none}; ceiling bsf=${HDR_BSF_C:-none} evd=${HDR_EVD_C:-none})" FAIL
+elif [ "$HDR_N" -ne 4 ]; then
+  check "the review-ceiling constants are not declared exactly once each (4 expected, $HDR_N found) — head -1 would read a decoy while the suite uses the last assignment" FAIL
+elif [ "$HDR_BSF_H" != "$HDR_EVD_H" ]; then
+  check "the declared review headroom differs (bsf=$HDR_BSF_H evd=$HDR_EVD_H) — the criterion is absolute headroom, identical on both carriers, not a ratio" FAIL
+elif [ -z "$RB_MAX_BLOCK_N" ]; then
+  check "the shared reader's MAX_BLOCK is not a bare integer (${RB_MAX_BLOCK_N:-none}) — the ceiling comparison cannot run, and an unguarded -ge would fall through to PASS" FAIL
+elif [ "$HDR_BSF_C" -ge "$RB_MAX_BLOCK_N" ] || [ "$HDR_EVD_C" -ge "$RB_MAX_BLOCK_N" ]; then
+  check "a review ceiling is not below the shared MAX_BLOCK fail-safe (bsf $HDR_BSF_C, evd $HDR_EVD_C, fail-safe $RB_MAX_BLOCK_N) — the tripwire would be inert" FAIL
+else
+  check "both suites declare the same review headroom ($HDR_BSF_H chars) below the shared MAX_BLOCK fail-safe" PASS
+fi
+
+# The doctor renderer carries FOUR opens, and they differ on purpose — which is the
 # reason it belongs in this inventory rather than being assumed to follow one rule.
 # readNoteJson reads a note in a session-writable directory and therefore refuses a
-# symlink and a hard link. readSettingsJson reads the user's own ~/.claude/settings.json.
+# symlink and a hard link. readAutopilotJson joins that SAME class and for the same
+# reason: it reads durable Autopilot run documents and the owner-keyed pointer out of
+# `<project>/.zensu/state/`, which any session in the project can write, so a symlink
+# there would let a co-tenant redirect what the report opens — and this reader feeds a
+# row that recommends a state-mutating release command. readSettingsJson reads the user's own ~/.claude/settings.json.
 # readJson reads SIX files across two classes: the three plugin manifests (plugin.json,
 # marketplace.json, hooks.json) and the config class (~/.zensu/config.json, the
 # project-local .zensu/config.json, and a caller-named ZENSU_CONFIG). The O_NOFOLLOW
@@ -465,23 +654,49 @@ fi
 # those routinely and their real consumer, rd() in hooks/lib/zensu-config.sh, follows the
 # link — and the manifests simply inherit the same open. Both non-note readers therefore
 # deliberately carry NO O_NOFOLLOW.
-# The open COUNT is asserted too: without it a fourth `fs.openSync(x, O_RDONLY)` with no
-# flags at all satisfies every idiom count below and passes unseen. Adding it to readJson was a measured regression:
+# The open COUNT is asserted too: without it a FIFTH `fs.openSync(x, O_RDONLY)` with no
+# flags at all satisfies every idiom count below and passes unseen. That is why this
+# check turns red when an open is ADDED — it is an inventory, and a new reader must be
+# classified here deliberately rather than inherit a rule by accident. Adding it to readJson was a measured regression:
 # a symlinked config rendered a ❌ claiming the file was ignored while every hook read it.
-# All three must keep the platform-guarded O_NONBLOCK, because a blocking open on a FIFO
+# All four must keep the platform-guarded O_NONBLOCK, because a blocking open on a FIFO
 # would hang a renderer contracted to always exit 0 — also measured, past a 30 s bound.
 # The `|| 0` spelling is banned on BOTH flags, not only on O_NOFOLLOW: it is the idiom
 # that hides an unavailable constant on a Windows build instead of failing visibly.
-if [ "$(grep -cF 'process.platform !== '"'"'win32'"'"' && Number.isInteger(fs.constants.O_NOFOLLOW)' "$DOCTOR_REPORT")" -eq 1 ] \
-  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$DOCTOR_REPORT")" -eq 3 ] \
+if [ "$(grep -cF 'process.platform !== '"'"'win32'"'"' && Number.isInteger(fs.constants.O_NOFOLLOW)' "$DOCTOR_REPORT")" -eq 2 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$DOCTOR_REPORT")" -eq 4 ] \
   && [ "$(grep -cF 'fs.constants.O_RDONLY | nonBlock' "$DOCTOR_REPORT")" -eq 2 ] \
-  && grep -qF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock)' "$DOCTOR_REPORT" \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock)' "$DOCTOR_REPORT")" -eq 2 ] \
   && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$DOCTOR_REPORT" \
-  && [ "$(grep -oF 'fs.openSync(' "$DOCTOR_REPORT" | wc -l | tr -d ' ')" -eq 3 ] \
+  && [ "$(grep -oF 'fs.openSync(' "$DOCTOR_REPORT" | wc -l | tr -d ' ')" -eq 4 ] \
   && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$DOCTOR_REPORT"; then
-  check "doctor renderer keeps a guarded O_NONBLOCK on all three opens and O_NOFOLLOW only on the note reader" PASS
+  check "doctor renderer keeps a guarded O_NONBLOCK on all four opens and O_NOFOLLOW on the two session-writable readers" PASS
 else
-  check "doctor renderer keeps a guarded O_NONBLOCK on all three opens and O_NOFOLLOW only on the note reader" FAIL
+  check "doctor renderer keeps a guarded O_NONBLOCK on all four opens and O_NOFOLLOW on the two session-writable readers" FAIL
+fi
+
+WORKTREE_KEEP="$ROOT/hooks/lib/worktree-keep-v1.js"
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollowFlag() | nonBlockFlag())' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_APPEND | noFollowFlag() | nonBlockFlag()' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'appendFlags | fs.constants.O_CREAT | fs.constants.O_EXCL' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.nlink !== 1' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.dev !== opened.dev || landed.ino !== opened.ino' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF 'fs.constants.O_APPEND | fs.constants.O_CREAT' "$WORKTREE_KEEP" \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o600)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o644)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.linkSync(temp, file)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.copyFileSync(temp, file, fs.constants.COPYFILE_EXCL)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF "fs.openSync(marker.file, 'wx'" "$WORKTREE_KEEP" \
+  && [ "$(grep -oF 'fs.openSync(' "$WORKTREE_KEEP" | wc -l | tr -d ' ')" -eq 4 ] \
+  && ! grep -qF 'readFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'appendFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$WORKTREE_KEEP"; then
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" PASS
+else
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
@@ -526,6 +741,38 @@ if grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOF
   check "Promptfoo hook log proves identity before truncating on Windows" PASS
 else
   check "Promptfoo hook log proves identity before truncating on Windows" FAIL
+fi
+
+# The superseded-lease sweep's reader, held to the same two properties the
+# plan-payload reader is: the platform gate resolves O_NOFOLLOW rather than assuming
+# it, and the test seam is a MODE compared against one string — never a mask a caller
+# could OR into the open. A raw mask there would let O_CREAT through, so the reader
+# would CREATE the file it reports unreadable.
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$LEASE_SWEEP" \
+  && grep -qF "settings.mode === LSTAT_PRECHECK_MODE" "$LEASE_SWEEP" \
+  && ! grep -qE 'settings\.noFollow' "$LEASE_SWEEP"; then
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" PASS
+else
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" FAIL
+fi
+
+# Both openSync writes in the verify-feature runtime script land through an exclusive create
+# rather than a truncating redirect; the script's third write lands through flag: "wx", which is
+# the same exclusive create and is not counted here. Each tests the path's absence at the top of its case arm and
+# then runs a port scan or several node processes before writing, so a plain > follows a
+# symlink planted in that window — one of them carries the database password, the JWT secret
+# and the runtime lease. Neither is discriminated by any behavioural check: the suite's mode
+# assertions pass for the old `( umask 077; printf > )` too, and its symlink cases are decided
+# by the guard that fires BEFORE the write. This inventory is the only thing that sees a
+# revert. writeFileSync rather than writeSync, because writeSync can short-write and its
+# return value is discarded at both sites.
+if [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600' "$VERIFY_RUNTIME")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.writeFileSync(fd, ' "$VERIFY_RUNTIME")" -eq 2 ] \
+  && ! grep -qF '>"$SECRETS"' "$VERIFY_RUNTIME" \
+  && ! grep -qF '>"$PLANNED_ORIGIN_FILE"' "$VERIFY_RUNTIME"; then
+  check "the verify-feature runtime script creates both records exclusively, never by truncating redirect" PASS
+else
+  check "the verify-feature runtime script creates both records exclusively, never by truncating redirect" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

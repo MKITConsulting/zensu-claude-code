@@ -2,6 +2,7 @@
   "hooks": {
     "autoTdd": true,
     "tddImplementation": false,
+    "defaultDeliveryRoute": "ask",
     "chainEnforcer": true,
     "autopilotEnforcer": true,
     "autoFix": true,
@@ -17,10 +18,21 @@
     "zenModeDefault": true,
     "mcpGate": true,
     "bashWriteGate": true,
+    "bestSolutionFirst": true,
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
-    "pendingReviewTtlHours": 6
+    "incrementalReviewRounds": true,
+    "aspectActivation": true,
+    "reviewConvergence": true,
+    "reviewSpawnScopeSentence": true,
+    "reviewerSpawnAutoAllow": true,
+    "pendingReviewTtlHours": 6,
+    "implStopNudgeAfter": 12,
+    "autopilotOwnerActivityTtlHours": 1,
+    "autopilotReleaseOwnerActivityTtlHours": 6,
+    "worktreeKeep": true,
+    "worktreeKeepIdleHours": 72
   },
   "context": {
     "compactionNudge": true,
@@ -28,5 +40,9 @@
   },
   "logging": {
     "timestampStyle": "wall"
+  },
+  "evidence": {
+    "fullSuiteCommand": "",
+    "fullSuiteGate": "required"
   }
 }

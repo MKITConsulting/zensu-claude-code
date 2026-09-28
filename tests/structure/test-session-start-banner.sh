@@ -1,4 +1,9 @@
 #!/bin/bash
+# NOT GRADED HERE: the banner's _ZENSU_ROUTE_QUESTION_LIVE guard and both delivery
+# route tips are pinned by D26/D27/D29/D30 in test-plan-approved-delegate.sh, and
+# the four-route IF-branch tip additionally by BNR2c in test-tdd-vanilla-mode.sh; the
+# guard's fourth arm and the hooks.defaultDeliveryRoute disclosure by R14 in
+# test-delivery-route.sh.
 set -u
 
 # Pins the SessionStart "Zensu active" banner + agent primer (0.4.0):
@@ -45,8 +50,9 @@ else
   check "B5 fresh-start filter accepts only SessionStart startup/clear" FAIL
 fi
 
-if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$PRIMER" \
-  && grep -qF 'ZENSU_LOG_COMMAND' "$PRIMER"; then
+if grep -qF 'zensu_directive_substitute ZENSU_LOG_COMMAND "$LOG_COMMAND"' "$PRIMER" \
+  && grep -qF 'source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"' "$PRIMER" \
+  && grep -qF 'MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" node -e' "$PLUGIN_DIR/hooks/lib/zensu-directive.sh"; then
   check "B5a primer preserves its pre-quoted model command across MSYS env conversion" PASS
 else
   check "B5a primer preserves its pre-quoted model command across MSYS env conversion" FAIL
@@ -86,6 +92,33 @@ OUT_START="$(printf '%s' '{"source":"startup"}' | bash "$BANNER" 2>/dev/null)"
 
 OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
+OUT_CONSENT="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 bash "$BANNER" 2>/dev/null)"
+case "$OUT_CONSENT" in
+  *'Browser verification'*'consent mode'*'playwright-cli'*'remote targets still need the policy'*'/zensu:doctor'*) check "B11a banner names consent mode, the playwright-cli driver, its remote bound and /zensu:doctor when no policy is set" PASS ;;
+  *) check "B11a banner names consent mode, the playwright-cli driver, its remote bound and /zensu:doctor when no policy is set" FAIL ;;
+esac
+OUT_POLICY="$(printf '%s' '{"source":"startup"}' | ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' bash "$BANNER" 2>/dev/null)"
+case "$OUT_POLICY" in
+  *'consent mode'*) check "B11b banner drops the consent line when a parent policy is present" FAIL ;;
+  *) check "B11b banner drops the consent line when a parent policy is present" PASS ;;
+esac
+QUIET_CONFIG="$(mktemp "${TMPDIR:-/tmp}/zensu-banner-quiet.XXXXXX")" || exit 1
+printf '%s\n' '{"hooks":{"sessionBanner":false}}' >"$QUIET_CONFIG"
+OUT_QUIET="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_CONFIG="$QUIET_CONFIG" bash "$BANNER" 2>/dev/null)"
+case "$OUT_QUIET" in
+  *'consent mode'*) check "B11c hooks.sessionBanner=false silences the consent line" FAIL ;;
+  *) check "B11c hooks.sessionBanner=false silences the consent line" PASS ;;
+esac
+case "$OUT_QUIET" in
+  *'Reviewer spawns'*) check "B11c-grant the reviewer-spawn grant line still survives the flag, as its own comment requires" PASS ;;
+  *) check "B11c-grant the reviewer-spawn grant line still survives the flag, as its own comment requires" FAIL ;;
+esac
+OUT_QUIET_CONTROL="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 bash "$BANNER" 2>/dev/null)"
+case "$OUT_QUIET_CONTROL" in
+  *'consent mode'*) check "B11c-control the same invocation without the flag does emit the consent line" PASS ;;
+  *) check "B11c-control the same invocation without the flag does emit the consent line" FAIL ;;
+esac
+rm -f "$QUIET_CONFIG"
 
 PRIMER_START="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$PRIMER" 2>/dev/null)"
 if printf '%s' "$PRIMER_START" | node -e '
@@ -167,6 +200,8 @@ mkdir -p "$SPECIAL_ROOT/hooks/lib" "$SPECIAL_BASE/run"
 SPECIAL_CANONICAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
 cp "$PRIMER" "$SPECIAL_ROOT/hooks/session-start-primer.sh"
 cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$SPECIAL_ROOT/hooks/lib/zensu-config.sh"
+cp "$PLUGIN_DIR/hooks/lib/zensu-directive.sh" "$SPECIAL_ROOT/hooks/lib/zensu-directive.sh"
+cp "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$SPECIAL_ROOT/hooks/lib/zensu-msys-env.sh"
 cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SPECIAL_ROOT/hooks/lib/claude-principal-v1.js"
 cp "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" "$SPECIAL_ROOT/hooks/lib/zensu-agent-context.sh"
 printf '%s\n' '#!/bin/bash' \

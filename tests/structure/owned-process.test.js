@@ -31,6 +31,24 @@ function waitForExit(handle) {
   });
 }
 
+async function exitStatusOfSelfSignal(signal) {
+  const script = `process.kill(process.pid, ${JSON.stringify(signal)}); setInterval(() => {}, 1000);`;
+  const handle = spawn(process.execPath, [ownedProcess, process.execPath, '-e', script], { stdio: 'ignore' });
+  try {
+    return await waitForExit(handle);
+  } finally {
+    try { handle.kill('SIGKILL'); } catch (_error) {}
+  }
+}
+
+test('a child killed by SIGKILL is reported as 128 plus its signal number', posixProcessGroups, async () => {
+  assert.equal(await exitStatusOfSelfSignal('SIGKILL'), 137);
+});
+
+test('a child killed by SIGTERM is reported as 128 plus its signal number', posixProcessGroups, async () => {
+  assert.equal(await exitStatusOfSelfSignal('SIGTERM'), 143);
+});
+
 test('normal root exit still kills a TERM-resistant background descendant', posixProcessGroups, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-normal-'));
   const descendantFile = path.join(root, 'descendant.pid');

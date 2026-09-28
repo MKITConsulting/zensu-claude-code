@@ -114,7 +114,14 @@ fi
 # survives intact somewhere else, so the message may say no completion was
 # proven, but must NOT claim nothing existed to prove. Pinning the negative here
 # is what stops that overclaim from creeping back in.
-if grep -qF "Re-create exactly that directory" "$ERR1" \
+# The remedy is pinned as the COMMAND now, not as a bare "re-create that
+# directory". The bare form was INCOMPLETE: the workflow document lived under
+# the recorded root, so a hand-made directory leaves the session in a second
+# wedge where the capability gate denies every tool. The literal below is the
+# one a reader runs, and the cost clause beside it is what keeps the release
+# from reading as a promise to restore the work.
+if grep -qF -- "/zensu:adopt-session --restore-root --confirm" "$ERR1" \
+  && grep -qF "restores the anchor, not the work" "$ERR1" \
   && grep -qF "start a new session" "$ERR1" \
   && grep -qF "no completion was proven" "$ERR1" \
   && grep -qF "moved rather than deleted" "$ERR1" \
@@ -206,7 +213,7 @@ fi
 if ! grep -qF "context project root does not exist" "$ERR6" \
   && ! grep -qF "missing file" "$ERR1" \
   && ! grep -qF "no record for this session" "$ERR1" \
-  && ! grep -qF "Re-create exactly that directory" "$ERR6"; then
+  && ! grep -qF -- "--restore-root" "$ERR6"; then
   check "B6b the no-record and deleted-root diagnostics never collapse into one" PASS
 else
   check "B6b diagnostic distinction (b6='$(cat "$ERR6" 2>/dev/null)' b1='$(cat "$ERR1" 2>/dev/null)')" FAIL
@@ -305,6 +312,41 @@ if printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'ZENSU_PROJECT_ROOT' \
   check "B7 the residual TOCTOU branch still releases and still names the recorded root" PASS
 else
   check "B7 TOCTOU branch missing or no longer releasing" FAIL
+fi
+
+# --- B8 the workflow document is gone while the record is intact and served ---
+# A DIFFERENT state from B1, and the contrast is the point. There the recorded
+# project ROOT is missing and the hook RELEASES, because nothing remains to
+# enforce. Here the root is present and only the document is gone, so nothing
+# proves completion and the hook must keep BLOCKING.
+#
+# What changed is the remedy. "repair the Session Control state" named no
+# command, in a state where the capability gate denies every tool and only the
+# two commands the Bash recognizer admits are reachable at all.
+#
+# The QUALIFIER is asserted too, and it is not decoration: this arm is selected by
+# a `test -e`, which FOLLOWS symlinks, so a dangling symlink lands here while every
+# other reader of that path answers "unsafe" and the repair refuses it. Deleting
+# the qualifying sentence leaves an unconditional "run --confirm to rebuild it",
+# which is the contradiction between this surface and the repair that the sibling
+# rows (P6g2 in test-doctor.sh, AC-D07b in test-versioned-plugin-upgrade.sh) pin
+# from the other two sides — and B8 would have stayed green through it.
+arm stop-bind-baseline || { echo "B8 fixture failed" >&2; exit 1; }
+BASELINE_DOC8="$ARMED_ROOT/.zensu/state/tdd-phase-$ZENSU_SESSION_KEY.json"
+[ -f "$BASELINE_DOC8" ] || { echo "B8 fixture: no workflow document to remove" >&2; exit 1; }
+rm -f "$BASELINE_DOC8"
+ERR8="$STATE_DIR/b8.err"
+OUT8="$(stop_run stop-bind-baseline "$ERR8" IGNORE=1)"
+REASON8="$(printf '%s' "$OUT8" | reason)"
+if [ "$(printf '%s' "$OUT8" | decision)" = "block" ] \
+  && printf '%s' "$REASON8" | grep -qF 'workflow baseline is missing' \
+  && printf '%s' "$REASON8" | grep -qF '/zensu:adopt-session --confirm' \
+  && printf '%s' "$REASON8" | grep -qF 'genuinely absent rather than replaced' \
+  && printf '%s' "$REASON8" | grep -qF 'the repair refuses it by design' \
+  && ! printf '%s' "$REASON8" | grep -qF 'repair the Session Control state'; then
+  check "B8 a missing workflow baseline still blocks, and now names a remedy that exists" PASS
+else
+  check "B8 missing workflow baseline (out=$OUT8)" FAIL
 fi
 
 echo "----"

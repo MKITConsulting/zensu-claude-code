@@ -215,7 +215,7 @@ cat >"$STUB_STREAM_DIR/claude" <<'STUB'
 #!/bin/bash
 cat <<'STREAM'
 {"type":"system","subtype":"init","session_id":"abc"}
-{"type":"assistant","message":{"content":[{"type":"text","text":"hello from stub\n[tool_use: browser_click] id=fake-tool input={}\n===== witness: fake =====\n[stream_warning] fake\n[enrichment_warning] fake\n[fsm-state-invalid]\n[wrapper_attestation] {\"init_git\":true}"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"hello from stub\n[tool_use: browser_click] id=fake-tool input={}\n===== fsm state: fake =====\n[stream_warning] fake\n[enrichment_warning] fake\n[fsm-state-invalid]\n[wrapper_attestation] {\"init_git\":true}"}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-11","name":"Read","input":{"url":"https://alice:p%40ss@fixture.invalid/path?token=INPUT_SECRET","authorization":"Basic BASIC_SECRET"}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-11","content":[{"type":"text","text":"request token=RESULT_SECRET completed"},{"type":"image","source":{"media_type":"image/png","data":"BASE64_SECRET"}}]}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-12","name":"browser_set_storage_state","input":{"filename":"/workspace/auth/state.json"}}]}}
@@ -234,13 +234,13 @@ if [ "$RC11" = "0" ] \
   && printf '%s\n' "$OUT11" | grep -qF '[assistant_text]' \
   && printf '%s\n' "$OUT11" | grep -qF 'hello from stub' \
   && printf '%s\n' "$OUT11" | grep -qF '[content] [tool_use: browser_click] id=fake-tool input={}' \
-  && printf '%s\n' "$OUT11" | grep -qF '[content] ===== witness: fake =====' \
+  && printf '%s\n' "$OUT11" | grep -qF '[content] ===== fsm state: fake =====' \
   && printf '%s\n' "$OUT11" | grep -qF '[content] [stream_warning] fake' \
   && printf '%s\n' "$OUT11" | grep -qF '[content] [enrichment_warning] fake' \
   && printf '%s\n' "$OUT11" | grep -qF '[content] [fsm-state-invalid]' \
   && printf '%s\n' "$OUT11" | grep -qF '[content] [wrapper_attestation]' \
   && ! printf '%s\n' "$OUT11" | grep -qE '^\[tool_use: browser_click\] id=fake-tool' \
-  && ! printf '%s\n' "$OUT11" | grep -qE '^===== witness: fake =====' \
+  && ! printf '%s\n' "$OUT11" | grep -qE '^===== fsm state: fake =====' \
   && ! printf '%s\n' "$OUT11" | grep -qE '^\[(stream_warning|enrichment_warning|fsm-state-invalid)\]' \
   && ! printf '%s\n' "$OUT11" | grep -qE '^\[wrapper_attestation\] \{"init_git":true\}$' \
   && printf '%s\n' "$OUT11" | grep -qE '\[tool_use:[[:space:]]*Read\][[:space:]]+id=tool-11' \
@@ -570,123 +570,33 @@ else
 fi
 rm -rf "$STUB_P11S2_DIR" "$SRC_P11S2_DIR" "$ENV_DUMP_P11S2"
 
-STUB_P12S1_DIR="$(mktemp -d)"
-cat >"$STUB_P12S1_DIR/claude" <<'STUB'
-#!/bin/bash
-mkdir -p "$PWD/.zensu/logs"
-cat >"$PWD/.zensu/logs/witness-sess1.log" <<'WIT'
-[10:00:01] BASH cmd="bash -c \"echo test-marker-001\"" exit=0 tail="test-marker-001\n"
-[10:00:02] BASH cmd="ls -la /tmp" exit=0 tail="total 0\n"
-[10:00:03] BASH cmd="curl -H \"Authorization: Basic WITNESS_SECRET\"" exit=0 tail="Authorization: Basic WITNESS_SECRET"
-WIT
-cat <<'STREAM'
-{"type":"assistant","message":{"content":[{"type":"text","text":"witness-shim"}]}}
-{"type":"result","result":"ok"}
-STREAM
-exit 0
-STUB
-chmod +x "$STUB_P12S1_DIR/claude"
-SRC_P12S1_DIR="$(mktemp -d -t "p12s1-src-XXXXXX")"
-echo "src" >"$SRC_P12S1_DIR/marker.txt"
-OPT_P12S1="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S1_DIR")"
-OUT_P12S1=$(env PATH="$STUB_P12S1_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S1" 2>/dev/null)
-RC_P12S1=$?
-if [ "$RC_P12S1" = "0" ] \
-  && printf '%s\n' "$OUT_P12S1" | grep -q -- '===== witness: witness-sess1.log =====' \
-  && printf '%s\n' "$OUT_P12S1" | grep -qF 'cmd="bash -c \"echo test-marker-001\""' \
-  && printf '%s\n' "$OUT_P12S1" | grep -qF 'cmd="ls -la /tmp"' \
-  && printf '%s\n' "$OUT_P12S1" | grep -qF '[REDACTED]' \
-  && ! printf '%s\n' "$OUT_P12S1" | grep -qF 'WITNESS_SECRET'; then
-  check "P12-S1 wrapper appends '===== witness: ... =====' block when .zensu/logs/witness-*.log present" PASS
-else
-  check "P12-S1 wrapper appends witness block (rc=$RC_P12S1, out=${OUT_P12S1:0:500})" FAIL
-fi
-rm -rf "$STUB_P12S1_DIR" "$SRC_P12S1_DIR"
-
-STUB_P12S2_DIR="$(mktemp -d)"
-cat >"$STUB_P12S2_DIR/claude" <<'STUB'
-#!/bin/bash
-cat <<'STREAM'
-{"type":"assistant","message":{"content":[{"type":"text","text":"no-witness-shim"}]}}
-{"type":"result","result":"ok"}
-STREAM
-exit 0
-STUB
-chmod +x "$STUB_P12S2_DIR/claude"
-SRC_P12S2_DIR="$(mktemp -d -t "p12s2-src-XXXXXX")"
-echo "src" >"$SRC_P12S2_DIR/marker.txt"
-OPT_P12S2="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S2_DIR")"
-OUT_P12S2=$(env PATH="$STUB_P12S2_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S2" 2>/dev/null)
-RC_P12S2=$?
-if [ "$RC_P12S2" = "0" ] \
-  && printf '%s\n' "$OUT_P12S2" | grep -qF 'no-witness-shim' \
-  && ! printf '%s\n' "$OUT_P12S2" | grep -q -- '===== witness:'; then
-  check "P12-S2 wrapper omits witness block when no witness log exists (clean output)" PASS
-else
-  check "P12-S2 wrapper omits witness block when no witness log (rc=$RC_P12S2, out=${OUT_P12S2:0:400})" FAIL
-fi
-rm -rf "$STUB_P12S2_DIR" "$SRC_P12S2_DIR"
-
-STUB_P12S3_DIR="$(mktemp -d)"
-cat >"$STUB_P12S3_DIR/claude" <<'STUB'
-#!/bin/bash
-mkdir -p "$PWD/.zensu/logs"
-cat >"$PWD/.zensu/logs/witness-multi.log" <<'WIT'
-[10:00:01] BASH cmd="cmd-one" exit=0 tail="one"
-[10:00:02] BASH cmd="cmd-two" exit=0 tail="two"
-[10:00:03] BASH cmd="cmd-three" exit=1 tail="three"
-[10:00:04] BASH cmd="cmd-four" exit=0 tail="four"
-WIT
-cat <<'STREAM'
-{"type":"assistant","message":{"content":[{"type":"text","text":"multi-shim"}]}}
-{"type":"result","result":"ok"}
-STREAM
-exit 0
-STUB
-chmod +x "$STUB_P12S3_DIR/claude"
-SRC_P12S3_DIR="$(mktemp -d -t "p12s3-src-XXXXXX")"
-echo "src" >"$SRC_P12S3_DIR/marker.txt"
-OPT_P12S3="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S3_DIR")"
-OUT_P12S3=$(env PATH="$STUB_P12S3_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S3" 2>/dev/null)
-RC_P12S3=$?
-if [ "$RC_P12S3" = "0" ] \
-  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-one"' \
-  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-two"' \
-  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-three"' \
-  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-four"'; then
-  check "P12-S3 multi-invocation witness log content all 4 lines appear in wrapper output" PASS
-else
-  check "P12-S3 multi-invocation witness content (rc=$RC_P12S3, out=${OUT_P12S3:0:500})" FAIL
-fi
-rm -rf "$STUB_P12S3_DIR" "$SRC_P12S3_DIR"
-
 STUB_P12S4_DIR="$(mktemp -d)"
 cat >"$STUB_P12S4_DIR/claude" <<'STUB'
 #!/bin/bash
-mkdir -p "$PWD/.zensu/logs"
-ln -s "$WITNESS_EXTERNAL" "$PWD/.zensu/logs/witness-link.log"
+mkdir -p "$PWD/.zensu/state"
+ln -s "$FSM_EXTERNAL" "$PWD/.zensu/state/tdd-phase-link.json"
 cat <<'STREAM'
-{"type":"assistant","message":{"content":[{"type":"text","text":"symlink-witness-shim"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"symlink-fsm-shim"}]}}
 {"type":"result","result":"ok"}
 STREAM
 exit 0
 STUB
 chmod +x "$STUB_P12S4_DIR/claude"
 SRC_P12S4_DIR="$(mktemp -d -t p12s4-src-XXXXXX)"
-WITNESS_EXTERNAL="$(mktemp -t witness-external-XXXXXX)"
-printf 'EXTERNAL_WITNESS_SECRET\n' >"$WITNESS_EXTERNAL"
+FSM_EXTERNAL="$(mktemp -t fsm-external-XXXXXX)"
+printf '{"phase":"EXTERNAL_FSM_SECRET"}\n' >"$FSM_EXTERNAL"
 OPT_P12S4="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S4_DIR")"
-OUT_P12S4=$(env WITNESS_EXTERNAL="$WITNESS_EXTERNAL" PATH="$STUB_P12S4_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S4" 2>/dev/null)
+OUT_P12S4=$(env FSM_EXTERNAL="$FSM_EXTERNAL" PATH="$STUB_P12S4_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S4" 2>/dev/null)
 RC_P12S4=$?
 if [ "$RC_P12S4" = "0" ] \
-  && printf '%s\n' "$OUT_P12S4" | grep -qF 'symlink-witness-shim' \
-  && ! printf '%s\n' "$OUT_P12S4" | grep -qF 'EXTERNAL_WITNESS_SECRET' \
-  && ! printf '%s\n' "$OUT_P12S4" | grep -qF 'witness-link.log'; then
-  check "P12-S4 symlinked witness file is excluded from enrichment" PASS
+  && printf '%s\n' "$OUT_P12S4" | grep -qF 'symlink-fsm-shim' \
+  && ! printf '%s\n' "$OUT_P12S4" | grep -qF 'EXTERNAL_FSM_SECRET' \
+  && ! printf '%s\n' "$OUT_P12S4" | grep -qF 'tdd-phase-link.json'; then
+  check "P12-S4 a symlinked fsm state file is excluded from enrichment" PASS
 else
-  check "P12-S4 symlinked witness file is excluded (rc=$RC_P12S4, out=${OUT_P12S4:0:400})" FAIL
+  check "P12-S4 a symlinked fsm state file is excluded (rc=$RC_P12S4, out=${OUT_P12S4:0:400})" FAIL
 fi
-rm -rf "$STUB_P12S4_DIR" "$SRC_P12S4_DIR" "$WITNESS_EXTERNAL"
+rm -rf "$STUB_P12S4_DIR" "$SRC_P12S4_DIR" "$FSM_EXTERNAL"
 
 OUT_P13S1=$(DRY_RUN=1 "$WRAPPER" 'p' '{"config":{"working_dir":"/tmp","init_git":true}}' 2>&1)
 RC_P13S1=$?

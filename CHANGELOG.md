@@ -7,6 +7,286 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-28
+
+### Added
+
+- **tdd**: Run the full suite through a plugin-owned evidence runner and drop the Bash witness (#335)
+- **session-control**: Restore a vanished recorded project root (#312)
+- **review**: Converge the tdd auto-fix loop with a findings ledger and severity rubric (#325)
+- **worktree-keep**: Keep a live session's worktree out of the desktop pool (#318)
+- **pr-team-review**: Publish standalone reviews without asking first (#332)
+- **delivery-route**: Make the delivery-route answer session-sticky (#324)
+- **verify-feature**: Drive the browser through playwright-cli and drop the bundled MCP server (#319)
+- **pr-team-review**: Publish a verdict-first review layout (#322)
+- **autopilot**: Adopt a durable run across a session-id change (#300)
+- **multi-repo**: Detect and refuse cross-repository chains (stage 1) (#311)
+- **session-trail**: Offer a worktree move alternative on the present leg (#313)
+
+### Changed
+
+- **redact**: Remove the witness special cases left after the evidence runner (#337)
+- **reviewer-capability**: Pin the read-only allowlist and sweep host tool names (#333)
+- **reviewer-capability**: Pin that a reviewer or PLM handback stays denied on a bind failure (#334)
+- **session-trail**: Pin the one-session collapse on the PR, worktree and partial tiers (#330)
+- **verify-feature**: Align docs and rules with the playwright-cli consent gate (#329)
+- **deps**: Clear the eight open Dependabot alerts in dev tooling (#316)
+- Split CLAUDE.md into path-scoped rules and unpin its prose (#321)
+- **multi-repo**: Decide the codeRoots carrier and state its preconditions (#317)
+
+### Fixed
+
+- **owned-process**: Report 128 plus the real signal number (#336)
+- **eval**: Match plan-approval TUI phrases across escape-drawn spaces (#326)
+- **reviewer-capability**: Admit the host's SubagentHandback report tool (#331)
+- **vcs**: Surface forge CLI errors from the review publish paths (#328)
+- **session-trail**: Keep selectors off the invoking session and age sessions from turn records (#327)
+- **edit-landing**: Anchor the claim grammar and accept every dash spelling (#323)
+- **pr-team-review**: Read persona triggers as criteria, not closed file lists (#315)
+- **session-trail**: Honor queue remove operations in depth and prompt listing (#320)
+- **verify-feature**: Close the declared-safe argument hole in the transcript grader (#310)
+- **evidence**: Match witness claims that carry escaped quotes (#309)
+- **verify-feature**: Give the browser broker a unique MCP server key (#308)
+
+### Upgrade notes
+
+- **verify-feature**: `/zensu:verify-feature` now drives the browser through `playwright-cli`,
+  which you install once: `npm install -g @playwright/cli@0.1.21`. That is the version the
+  browser consent gate was measured against, and the run-config helper refuses to start a run
+  on any other. `brew install playwright-cli` is unpinned: it installs whichever version
+  Homebrew ships.
+- **verify-feature**: the plugin no longer ships a Playwright MCP server, so permission rules
+  for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing.
+  Delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask`
+  rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it
+  restricts nothing.
+
+## [0.21.1] - 2026-09-15
+
+### Added
+
+- **review-chain**: Scope auto-fix rounds to their delta and activate aspects (#306)
+
+## [0.21.0] - 2026-09-14
+
+### Added
+
+- **session-trail**: Render the destination rule and carry-over recipe on adopt (#302)
+- **verify-feature**: Drive browser verification without a parent-environment policy (#296)
+- **autopilot**: Make a durable run's hold visible before it refuses you (#298)
+- **plan-gate**: Ask which delivery route an approved plan takes (#295)
+- **session-control**: Name and adopt a session whose recorded installation was pruned (#292)
+- **zen-mode**: Bind the chain-progress anchor to the real Zensu chain state (#285)
+- **review**: Colour-code the chain-end summary and PR-body status cells (#286)
+- **session-trail**: Continue a takeover inside the caller's own anchor (#282)
+- **doctor**: Count implementing-phase turns and warn on an unreviewed own chain (#278)
+
+### Changed
+
+- **deferred-review-claim**: Make the C7 and C6b failure messages diagnosable (#293)
+- **session-trail**: Pin the continuation --json payload across every reachable state (#289)
+- **verify-feature**: Add a standalone how-to for the navigation policy and runtime recipe (#288)
+
+### Fixed
+
+- **session-control**: Keep a bound session's tools when its working directory vanishes (#304)
+- **tests**: Read node's summary without assuming a single-byte prefix (#301)
+- **hooks**: Match the review delegate on Task as well as Agent (#299)
+- **verify-feature**: Anchor the marker sweep and own the writer's refusal vocabulary (#303)
+- **session-control**: Adopt a session whose recorded project root is gone (#272)
+- **doctor**: Repair the bash 3.2 parse error that reports a bound session as unbound (#297)
+- **session-control**: Repair a workflow baseline that vanished under a served record (#283)
+- **witness**: Record Bash calls the host never reports back (#291)
+- **deps**: Raise the fast-uri floor past two advisories (#290)
+- **release**: Make every failure in the publish step nameable (#287)
+- **release**: Make the publish step's failures diagnosable (#284)
+
+## [0.20.0] - 2026-08-31
+
+### Added
+
+- **gates**: Deny file-tool writes into the plugin data store (#279)
+- **zen-mode**: Anchor multi-turn work with a chain-progress line (#276)
+- **review-chain**: State the review-spawn scope in the resume and fix-round directives (#277)
+- **session-trail**: Route every takeover into the taker's own worktree (#275)
+- **permissions**: Admit Zensu's own confined reviewer spawns before the classifier (#271)
+- **doctor**: Report a chain stranded by a session fork (#270)
+- **tdd**: Scope the Phase 5 checkpoint to the completed phase's tests (#269)
+- **session-trail**: Record every takeover as a lineage edge (#268)
+- **artifacts**: Make .zensu plans and logs publication-safe at write time (#255)
+
+### Changed
+
+- **doctor**: Record the own-chain implementing gap and its counter fix (#273)
+
+### Fixed
+
+- **session-control**: Close three gaps in the adoption report's display guard (#280)
+- **autopilot**: Release a Stop a foreign run holds with no review queued (#274)
+- **session-trail**: Never continue in a worktree an archivable session owns (#266)
+
+### Added
+
+- **artifacts**: Publication-safe `.zensu/` plans and logs. Consuming repos commit
+  `.zensu/plans/{ts}_tdd-{slug}.md` and `.zensu/logs/{ts}_tdd-{slug}.log` as an audit
+  trail and may later open-source the repository. A scan of ~27k committed log lines
+  across four such repos found **no credential values** and ~436 lines carrying an
+  absolute developer path (`/Users/<name>/…`), almost all inside the `cmd="…"` field of
+  a CHECKPOINT/AUDIT line — that field quotes a shell command verbatim, and those
+  commands routinely begin `cd "/Users/<name>/IdeaProjects/<product>/<repo>/.claude/worktrees/<name>"`.
+  New `hooks/lib/zensu-artifact-redact-v1.js` is the single source of truth and applies
+  three rules **in this order**: project root(s) → `<project>`, `$HOME` → `~`, residual
+  `/Users/<seg>` / `/home/<seg>` / `/root` → `<home>`. Rule 1 must precede rule 2
+  because the project root is normally nested under `$HOME`; the residual rule is what
+  makes the guarantee checkable ("no `/Users/` in the file") rather than best-effort.
+  **Every rule is bounded on both sides** — without the right bound `/homework` becomes
+  `<home>work`, without the left one the rules fire inside `src/home/index.ts` — and the
+  segment class excludes quotes, because eating the closing `"` of a `cmd="…"` field
+  desynchronizes the claim from its witness entry and produces the exact `EVIDENCE GAP`
+  the design exists to prevent. Secret **names** are deliberately NOT redacted: a name
+  grants no access, this repo's own workflows carry `secrets.GITHUB_TOKEN` in public,
+  and redacting names would only make the audit trail harder to read; credential
+  **values** remain the job of `hooks/pre-write-secret-scan.sh`.
+  **There was no writer-side chokepoint to add a filter to**, which is the part of this
+  change that is not obvious: `zensu-log.sh` only ever returned the timestamp PREFIX and
+  the model appended the line itself with `printf … >> {log}`, while the plan is written
+  with the Write tool. Three writers now exist. `zensu-log.sh append --log <file>
+  --message <text> [--start <epoch>] [--truncate]` is the narrative-log writer and
+  replaces that recipe in `skills/tdd/SKILL.md` and `docs/tdd-manager-workflow.md`; it
+  deliberately carries no leading `--` so it never selects the Session Control binding
+  case, and it is **contained**: the destination must resolve to a real
+  `<root>/.zensu/{plans,logs}/<file>` or the verb refuses. That containment is not
+  hygiene — without it the verb performs exactly the write rules (A)/(B) of the
+  source-write gate exist to judge, while carrying none of the redirect/tee/heredoc
+  tokens that make a command parseable as a channel, so no Bash gate could see it.
+  The line is WRITTEN by the module too, not by a shell redirect: a `>>` names a path
+  and follows what it finds, and `[ -L ]` is blind to a hard link, so one planted in
+  `.zensu/logs/` turned the verb into an append/truncate primitive on any file on the
+  same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor
+  (`isFile`, `nlink === 1`, and the expected dev/ino re-derived from the canonical
+  parent), keeps `O_TRUNC` out of the open flags so the `nlink` check can still refuse,
+  and refuses any bucket but `logs` and any name starting with `witness-` — so
+  the log verb can never destroy a committed plan or the evidence the crosscheck
+  matches against. The destructive `mode: 'replace'` does not truncate in place at all:
+  it validates through a read-only descriptor, writes an `O_EXCL` temp, `fsync`s and
+  renames, so a failed write leaves the previous bytes addressable.
+  `hooks/post-bash-witness.sh` redacts the witness `cmd` — **not** for the witness's own
+  sake — it is gitignored in THIS repo only, and a consuming repo must add `.zensu/state/` and `.zensu/logs/witness-*.log` itself — but because
+  `zensu-evidence-crosscheck.js` matches a claim against a witness entry by EQUALITY.
+  Its `tail` is deliberately left raw: nothing compares it, its only reader is the
+  failure-marker scan, and redaction there is purely subtractive, so a `failed` token
+  inside an absolute path would vanish and an `EVIDENCE CONTRADICTION` would downgrade
+  to `verified`. Both writers pass BOTH candidate project roots, since they derive the
+  root from different authorities and must substitute identically.
+  New PostToolUse hook `hooks/post-artifact-redact.sh` is the net under both: BOTH
+  registered matchers sweep the artifacts modified in the last 5 minutes — which catches
+  a hand-rolled `printf >>` and a subagent-written artifact. In the steady state that
+  window also keeps the hundreds of tracked plans a consuming repo can hold out of the
+  read set, but the window is NOT what bounds the sweep and this note no longer implies
+  it is: a `git checkout` refreshes every tracked artifact mtime at once and puts all of
+  them inside it. `SWEEP_MAX_TARGETS` (25 per invocation, newest mtime first) is the
+  bound, and an mtime is not knowable without a stat, so the enumeration was never
+  bounded by the window either. The write matchers
+  additionally redact the tool's own `file_path`, which is the only way an artifact
+  outside that window is reached. A `witness-` prefixed name is excluded in the
+  `logs` bucket only — where the witness actually lives; the same name under
+  `.zensu/plans/` is an ordinary plan and is redacted like one. A refusal names
+  whether the target was swept or written. Every path exits 0 — a
+  PostToolUse hook cannot un-run the call it follows — but no refusal is silent: an
+  artifact left un-redacted (too large, hard-linked, unreadable) is reported on stderr,
+  because shipping one with `/Users/<name>/…` intact and nothing recording it is the
+  worst outcome the hook can produce.
+  **Containment is canonicalized, and the comparison shape matters.** `redactFile`
+  refuses a symlinked, non-regular or hard-linked target, opens read-only with
+  `O_NOFOLLOW` and judges the DESCRIPTOR rather than the path (so the refusal cannot be
+  raced), refuses a non-UTF-8 artifact rather than rewriting its bytes lossily, writes
+  through an `O_EXCL` temp with `fsync` before the rename, and abandons the rename when
+  the artifact changed underneath it rather than destroying a concurrently appended
+  line. The directory check compares the canonical parent against the canonical root's
+  own join — comparing two realpaths of the same lexical path resolves both through the
+  same symlink and proves nothing, which is how a `.zensu/logs -> /var/log` link would
+  otherwise have carried the rewrite out of the project. A no-op redaction writes
+  nothing at all, so an unchanged artifact keeps its inode and a `tail -f` keeps
+  following.
+  Artifacts are now **English-only**: `templates/tdd-plan.md` and `skills/tdd/SKILL.md`
+  Phase 2 state it, and the `CLAUDE.md` carve-out that exempted `.zensu/plans` and
+  `.zensu/logs` from the repo's English-only rule is removed — a German plan written in a
+  German session would otherwise land in someone else's public history. `CLAUDE.md` also
+  gains an `## Artifact Path Redaction` section naming every coupled site and the
+  core/host split for the ports.
+  **One protection narrows, and it is disclosed rather than glossed.** The old recipe
+  wrote the log with `printf … >> {log}`, which `hooks/lib/bash-source-write-parse.js`
+  reports as a write channel, so `hooks/pre-write-secret-scan.sh` scanned the command
+  text — including the log message — against `hooks/lib/secret-patterns.js`. The
+  `append` verb carries no redirect, so that incidental scan no longer fires on a log
+  line. It was never a DESIGNED protection, but the reason an earlier revision of this entry
+  gave was wrong: `hooks/lib/secret-scan-decide.js` has no extension filter at all — it
+  scans the whole command text whenever a channel is present — so the old redirect form
+  genuinely was scanned and the loss is real rather than incidental, across both artifact
+  buckets. What makes it acceptable is that the gate declares itself not a security
+  boundary, that the ~27k-line scan found no credential values in any committed artifact,
+  and that the scan still covers every non-`pathExempt` Edit/Write/MultiEdit payload and
+  every real Bash write channel, and teaching the
+  shared parser a new channel form would pull rules (A)/(B)/(C) onto it as well — which
+  is why the verb enforces its own containment instead. Recorded here so the trade is
+  visible. The control is then RESTORED at the new chokepoint: `append` runs the same
+  curated rules over the message before writing and REFUSES on a match — a credential
+  value is not a location, and redacting one silently would hide it from whoever has to
+  rotate it — honouring `ZENSU_SECRET_SCAN=off` so a false positive is not a wedge. What
+  is genuinely gone is only the incidental coverage of the surrounding shell command.
+  **Bounds, stated rather than implied:** the rule is textual, so a path spelled through
+  a symlink or an alias matching no known root is not caught (macOS's `/private/{tmp,var}`
+  is the one alias pair handled by hand); a git repository root ABOVE the project root is
+  covered only insofar as `$HOME` covers it; artifacts from earlier runs are out of reach
+  by design; the `msysSpelling` inverse is a hand-copy validated by round-tripping through
+  `msysDrivePrefix`, so a change to that shared rule silently drops the MSYS spelling; and
+  nothing here recognizes a customer name or an internal hostname, which is why the
+  authoring rules ship alongside the redactor. Email addresses and internal URLs are NOT
+  redacted.
+  Pinned by new `tests/structure/test-artifact-redaction.sh`. The suite was
+  written first, and its first 19 checks measured 1 PASS / 18 FAIL against the pre-change
+  tree — so its sensitivity is proven rather than assumed: **1 PASS / 18 FAIL is the RED
+  reading of those first 19 checks, never a count of the shipped suite.** The suite as
+  shipped is **100 checks**, grown across the review rounds, the PR #255 team review and the
+  terminal self-review round. Its shape answers two ways a pin like this
+  goes vacuous: every "carries no `/Users/`" arm is paired with a content assertion, since
+  an emptied artifact satisfies the absence check; and every guard check asserts the exit
+  status AND that the on-disk shape the guard protects still holds, since a writer that
+  never wrote for an unrelated reason satisfies a naive refusal check. A skipped check is
+  counted separately and never as a PASS. `test-windows-portability-guards.sh` gains the
+  module in its secure-open inventory, whose other pins are per-file and therefore blind
+  to a new file.
+  **Release note:** this adds a registered hook and a new PostToolUse matcher group.
+  `CLAUDE.md`'s runtime-lineage breaking list names only *removing or renaming* a hook, or
+  changing a matcher, so `minor` here is a **conservative choice, not a consequence of that
+  rule**: no persisted shape moved. It errs in the safe direction — an over-cautious bump
+  costs a lineage break, it never ships a compatibility claim the code cannot honour.
+
+## [0.19.0] - 2026-08-25
+
+### Added
+
+- **session-trail**: Disclose the write anchor and route a commit-producing takeover (#259)
+- **hooks**: Remind every process to offer the best long-term solution first (#238)
+- **pilot**: Standard Acceptance Criteria table in every plugin-opened PR body (#265)
+- **doctor**: Report reviewer-spawn permission exposure before a chain wedges (#253)
+- **autopilot**: Scope durable runs per owner session and per workspace (#256)
+- **pr-team-review**: Broaden the security persona trigger to content signals (#260)
+- **skills**: Add the gauntlet-loop adversarial refinement skill (#249)
+- **gates**: Refuse completion when the plan carries no Requirements table (#254)
+
+### Changed
+
+- **multi-repo**: Answer open question 7 against the shipped occupancy predicate (#264)
+- **multi-repo**: Specify anchor-plus-code-roots chains (#258)
+
+### Fixed
+
+- **session-control**: Stop judging adoption on the caller's project dir (#252)
+- **pr-fix-findings**: Close the mid-run stop channel in standalone runs (#263)
+- **chain-enforcer**: Pin the host-refused reviewer spawn against a real capture (#261)
+- **bypass-ledger**: Close the disclosure gaps and own the read ladder once (#257)
+
 ## [0.18.2] - 2026-08-19
 
 ### Added

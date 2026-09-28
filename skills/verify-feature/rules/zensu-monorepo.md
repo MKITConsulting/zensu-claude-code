@@ -42,14 +42,14 @@ bash "$ZENSU_RUNTIME_CONTROLLER" down "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WOR
 
 Do not combine it with logging, pipes, conditionals, or other cleanup.
 
-## Broker preflight, start, and readiness
+## Navigation preflight, start, and readiness
 
-Resolve the planned application origin from the immutable parent policy before starting any
-resource, then require the already-running plugin MCP broker to accept it:
+Resolve the planned application origin before starting any resource, then require the
+navigation preflight to accept it:
 
 ```bash
 APP_ORIGIN="$(bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE")"
-bash "<absolute-plugin-root>/scripts/playwright-mcp.sh" --check-policy local "$APP_ORIGIN" "/" declared-safe
+node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy local "$APP_ORIGIN" "/" declared-safe
 bash "$ZENSU_RUNTIME_CONTROLLER" up "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 bash "$ZENSU_RUNTIME_CONTROLLER" ready "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 ```
@@ -57,9 +57,18 @@ bash "$ZENSU_RUNTIME_CONTROLLER" ready "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WO
 Run every controller/preflight action as its own Bash invocation. If policy resolution or
 preflight fails, do not start or navigate. Report PARTIAL with instructions to launch a new
 Claude session with the exact origin and evidence-route policy. A child Bash command cannot
-change the MCP server's parent environment.
+change the environment the browser consent gate reads.
 
-Before `up`, the Claude parent environment must authorize exactly one target containing a
+Without a parent policy the gate runs in consent mode and the same three commands still
+apply: `planned-origin` then picks a free literal-loopback port through
+`<absolute-plugin-root>/scripts/verify-free-port.js`, records it once in the run directory
+(`zensu-planned-origin`, mode `0600`) so `up` reuses the same origin, and `--check-policy`
+prints `consent` with exit `0`. After `ready`, write the run config for `$APP_ORIGIN` as the
+parent skill's "Browser session" step describes; the first `playwright-cli` call that reaches
+that origin opens the host's permission prompt to the user, and a refused prompt ends the run
+PARTIAL after `down`.
+
+With a parent policy, before `up` that environment must authorize exactly one target containing a
 literal `http://127.0.0.1:<port>` origin, page route `/`, and `declared-safe` evidence mode.
 `up` uses that exact frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at

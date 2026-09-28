@@ -186,7 +186,7 @@ test('validates the complete manifest before selecting a profile through the pub
     assert.match(stderr.join(''), /path traversal|repo-relative/);
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -367,7 +367,7 @@ test('times out a nested process tree and records deterministic failure evidence
     const nestedPid = Number(fs.readFileSync(pidFile, 'utf8'));
     await waitFor(() => !processAlive(nestedPid));
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -398,7 +398,7 @@ test('the internal profile deadline terminates the active tree before the CI env
     assert.equal(fs.existsSync(readyFile), true);
     assert.ok(result.report.durationMs < TEST_PROFILE_DEADLINE_ASSERT_MS);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -427,7 +427,7 @@ test('normal suite completion still terminates background descendants before rep
     const nestedPid = Number(fs.readFileSync(pidFile, 'utf8'));
     await waitFor(() => !processAlive(nestedPid));
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -456,7 +456,7 @@ test('continues after an ordinary suite failure and reports every result', async
       ],
     );
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -656,7 +656,7 @@ test('suite content and component identity are revalidated immediately before sp
     );
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -830,7 +830,7 @@ test('profile runner covers bash heartbeats, spawn errors, and selection errors'
       /requires .* current platform/,
     );
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -865,7 +865,7 @@ test('cleanup failures abort the remaining profile and persist diagnostics', asy
     assert.match(result.report.suites[0].cleanup.error, /synthetic cleanup failure/);
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -892,7 +892,7 @@ test('a cleanup that does not close the suite is reported fail-closed', async ()
     assert.match(result.report.suites[0].cleanup.error, /required cleanup recovery/);
     await new Promise((resolve) => setTimeout(resolve, 80));
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -927,7 +927,7 @@ test('signal cancellation writes a report and removes installed handlers', async
     assert.equal(signals.listenerCount('SIGINT'), 0);
     assert.equal(signals.listenerCount('SIGTERM'), 0);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
@@ -987,6 +987,6 @@ test('injectable CLI validates usage and executes an exact Windows profile', asy
     }), EXIT_MANIFEST);
     assert.match(stderr.join(''), /unknown profile/);
   } finally {
-    removeTemporaryRoot(root);
+    await removeTemporaryRootAfterProcessExit(root);
   }
 });

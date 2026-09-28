@@ -9,7 +9,8 @@ description: >
   the user confirms, cancels it with one audited event that bypasses the ownership check and
   nothing else. It never resumes a run, never advances a stage, and never releases a run
   this session owns — that one is cancelled the ordinary way. It is scoped by run id within
-  the project rather than by working tree, so the id must come from a refusal. Use when `--autopilot-begin` refuses because the workspace is held, when a
+  the project rather than by working tree, so the id comes from a refusal, from the `autopilot:`
+  row of /zensu:doctor, or from the --autopilot-status stderr disclosure. Use when `--autopilot-begin` refuses because the workspace is held, when a
   session that was running Autopilot is gone for good, or via /zensu:autopilot-release. No
   network or API key. Do not use to escape a review or to restart a run that is still live.
 ---
@@ -36,10 +37,12 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
 ## What it does NOT do
 
 - It does not resume, retry, or advance the run. The only transition it makes is `CANCEL`.
-- It is scoped by RUN ID within this project, not by working tree. It does not read
-  `workspaceRoot`, but it releases only a run that holds the working tree you are standing in
-  (exit `6` otherwise). A run id is an ordinary filename in a listable directory, so the id is
-  not a scope control and "take it from a refusal" is about relevance, not availability.
+- It is scoped by RUN ID within this project, not by working tree. It releases only a run that
+  holds the working tree you are standing in (exit `6` otherwise), and "holds" is CONTAINMENT
+  IN EITHER DIRECTION: a tree that contains the run's own tree, or one contained by it, counts
+  as holding it, so only a SIBLING worktree is refused. A run id is an ordinary filename in a
+  listable directory, so the id is not a scope control and "take it from a refusal" is about
+  relevance, not availability.
   **Exit `6` is an accident guard, not an authorization boundary.** Anything that can run this
   command can also change directory into the holding tree, and the refusal itself names that
   tree — so it stops a mistake, never a caller who means to release the run. Do not cite it as
@@ -51,10 +54,34 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
   release accepts the owner there, because otherwise the run has no exit at all.
 - It records no bypass-ledger entry. The ledger records gate ESCAPES so that everything
   under "Gates bypassed" is true, and this escapes no gate — it ends a run.
-- It refuses while the owning session still looks active (exit `7`): that session's workflow
-  document `.zensu/state/tdd-phase-<owner>.json` is aged against the same staleness bound
-  `/zensu:doctor` uses. That is a heuristic, not proof of death — an owner that never wrote a
-  workflow document is not covered, and the durable record still does not name who cancelled a
+- It refuses while the owning session still looks active (exit `7`) — but ONLY when the caller does NOT own the run; that check sits inside the foreign-owner branch, so it never fires for the torn-`begin` own-run case above: that session's workflow
+  document `.zensu/state/tdd-phase-<owner>.json` is aged against this verb's OWN
+  owner-activity window, `hooks.autopilotReleaseOwnerActivityTtlHours` (default 6 hours).
+  `/zensu:autopilot-adopt` reads a different key, `hooks.autopilotOwnerActivityTtlHours`,
+  because an adoption taken too early is recoverable and a cancel is not. The `autopilot:` row
+  of `/zensu:doctor` quotes EACH verb's own window — relay that row's owner-silence clause as
+  the per-verb account of which verb refuses. The doctor's OTHER rows (the pending-review marker, a foreign open chain) age
+  against `pendingReviewTtlHours`, a different key answering a different question, so do
+  not carry a number from one of those rows into this verb. That is a heuristic, not proof of death, and it has TWO ways to stand down — state the
+  partition the code actually has, not one per cause. **Stand-down 1: the configured
+  window is `0`**, which disables this verb's check and writes
+  `owner liveness unchecked: autopilotReleaseOwnerActivityTtlHours is 0`. **Stand-down 2: there
+  is NO workflow document for the recorded owner** — one shared branch and one shared
+  line, covering an owner that never wrote one and an owner whose document was DELETED
+  alike, so do not expect two distinguishable messages for those two causes. Both are
+  files any session in the project can create or delete, and this verb applies an
+  irreversible `CANCEL`, so a single such write ends a live owner's run with no exit `7`
+  at all. Read the stderr lines before reporting a clean release.
+
+  A document dated in the FUTURE is NOT a stand-down here — it REFUSES with exit `7`,
+  because a clock artefact — a jumped VM clock, a container skewed against a shared
+  filesystem, an NFS mount, a restore that carried mtimes forward — must never authorise
+  an irreversible cancel against a session that is demonstrably alive.
+  `/zensu:autopilot-adopt` refuses the same stamp while the previous owner's pointer still
+  designates the run, so it is no route around this refusal. The run is not stranded: the
+  owner can cancel through the ordinary event path, and
+  `hooks.autopilotReleaseOwnerActivityTtlHours: 0` is the documented, disclosed off-switch,
+  which belongs to the user. The durable record still does not name who cancelled a
   run. The user's yes remains the real control.
 
 ## Step 1 — report, do not act
@@ -69,10 +96,61 @@ LOG="$ROOT/hooks/lib/zensu-log.sh"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 
-A run belonging to another session is deliberately invisible there. The run id you need is the
-one quoted in the `--autopilot-begin` refusal — that refusal is the only line that names it.
-Do not guess it and do not enumerate the state directory looking for candidates; an id you did
-not read from a refusal is not evidence.
+`--autopilot-status` answers about runs you OWN, so its stdout cannot show you a foreign run —
+but it is no longer silent about one. In the rc-1 case it writes a stderr line carrying one of FOUR answers — a foreign run holds
+this working tree and which one; a run this session OWNS holds it; a run holds it whose OWNER
+could not be established; or nothing holds it — plus a FIFTH line saying the question could not
+be answered at all. Count them as five branches: an earlier wording here said "one of four
+things" above three items that expand to five, which is the same off-by-one the hook comment
+had already been corrected for. Read that line: it is the cheapest source of the id.
+
+SIX surfaces name the run id, and any of them is evidence:
+
+1. the `--autopilot-begin` refusal;
+2. the standalone `/zensu:tdd` begin refusal raised when a durable run already holds the tree;
+3. the Stop refusal raised when a deferred review cannot be adopted for the same reason;
+4. the `autopilot:` row of `/zensu:doctor`;
+5. the `--autopilot-status` stderr line described above;
+6. the stderr line the deferred-review fence prints when it STANDS DOWN — a run holds the tree
+   but has no deferred review to interleave with, so Stop is released rather than blocked. It is
+   easy to miss because it accompanies a non-refusal, and it is the only entry here that can
+   print `(unnamed)` instead of an id, when the holding record could not be read. `(unnamed)` is
+   not an id: treat that line as no evidence and use another surface.
+
+What is still not evidence is an id you derived by listing `.zensu/state/` yourself. The doctor
+row is an enumeration of that directory, but it is one this plugin performs, validates against the
+schema its own worker enforces, and renders with the ownership already decided — which is exactly
+what reading the directory by hand does not give you. Take the id from one of the six surfaces;
+do not read the directory yourself and do not guess.
+
+One case is explicitly NOT a release: when a refusal says the holding run's record names THIS
+session as its owner, it names the run but deliberately withholds the release command, because in
+that state the verb's self-release guard does not fire and it would cancel this session's own live
+generation. Finish or repair that run instead. The record is an unauthenticated file, so say it
+names this session rather than that the run belongs to it. Recognize that case POSITIVELY, by the
+clause it carries: an own-run refusal says `whose run record names this session as its owner` and
+`finish or repair that run`,
+while a foreign one says `run /zensu:autopilot-adopt to continue it here, or
+/zensu:autopilot-release to cancel it` — adoption is named first because it continues the run
+under a new owner, and a cancel that was reached for first cannot be undone, so consider
+`/zensu:autopilot-adopt` before offering this skill's own remedy. (Both literals are pinned against the
+renderer by S7o in `tests/structure/test-autopilot-stop-enforcer.sh`, so a reword of either side
+turns that check red rather than silently breaking this rule, and it grades BOTH own-run shapes.)
+
+The own-run case has TWO shapes, and both carry those two literals. The ordinary one offers the
+guided `/zensu:autopilot-adopt`, which is what reinstalls a missing owner pointer. The second
+offers NEITHER verb: when the held run's pending stage is `TDD_RUNNING` while its record names
+another session as the driver of that inner chain, the pointer repair is refused with exit 3, so
+the refusal quotes no command at all and points at the `autopilot:` row of `/zensu:doctor`
+instead — a read-only step, because everything that refusal states is read from a file any
+session in this project can write. Relay it as it stands. A refusal that quotes no command is
+never licence to offer this skill's remedy.
+
+Do NOT key on the absence of a
+release command — the model-facing foreign form quotes no runnable command either, so absence
+no longer discriminates. Do NOT generalize the rule to any refusal that omits a command: the owner-mismatch
+Stop refusal (`active run … is owned by another top-level session`) also names a run without
+one, and there the owner really is someone else.
 
 Report to the user, in one short block: the run id, the stage the refusal named, and the
 fact that the run belongs to another session. Then ask whether to end it.
@@ -87,7 +165,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-release --run
 the user's behalf. Wait for the user to say yes in this conversation first.
 
 The command runs under the same project lock as every other writer, so it cannot interleave
-with a live owner mid-event. It refuses a terminal run, refuses a run this session owns, and
+with a live owner mid-event. It refuses a terminal run, refuses a run this session owns WHILE that session's pointer still designates it (the torn-`begin` exception above is exactly the gap), and
 is idempotent: an interrupted release repeated with the same arguments reports success
 rather than a conflict.
 
@@ -97,14 +175,29 @@ invocation (a missing `--run`, a missing or duplicated `--confirm`, an unknown a
 unreadable/unsafe durable state; `3` a malformed run id, or a run that is already terminal; `4` the
 caller owns the run AND that session's pointer still designates it, the run's ledger is
 exhausted, or the derived event id collides with an existing entry; `5` the durable write could
-not be staged or replaced; `6` the run does not hold the working tree you are standing in —
-release it from the tree it holds, which is the tree whose refusal named the id; `7` the owning
+not be staged or replaced; `6` the run does not hold the working tree you are standing in. The
+refusal NAMES both trees — the one you are in and the one the run holds — so move to the named
+tree, or to one that contains it or is contained by it, since occupancy is containment in either
+direction and only a sibling worktree is refused; `7` the owning
 session still looks active, so releasing it would end a live run. On `1` or `5`, report the code
-and stop — neither is repaired by retrying the release. On `7`, do not retry: either the owner
-is genuinely working, or it must go stale first. Exit `7` is reachable only while
-`hooks.pendingReviewTtlHours` is above zero; at `0` the liveness check does not run and the
-release proceeds against a live owner, which the command discloses on stderr as
-`owner liveness unchecked`.
+and stop — neither is repaired by retrying the release. On `7`, do not retry, and READ THE MESSAGE — the code
+covers two different situations and only one of them resolves by waiting. If it says the owning
+session is still active, the owner is genuinely working or has only just stopped, and the window
+will expire. If it says the document is DATED IN THE FUTURE, waiting resolves nothing: a stamp
+years ahead never goes stale, and the real exits are the two that message names — the owner's
+own ordinary cancel, or the user setting `hooks.autopilotReleaseOwnerActivityTtlHours` to `0`.
+Adoption is not a third: it refuses the same stamp.
+
+Exit `7` is governed by a user-owned configuration value, this verb's owner-activity window. Do
+not lower or disable it, and do not create, delete, touch or re-date the owner's workflow
+document to get past a refusal — on this verb that removes the only time bound on an
+irreversible cancel. That setting is the user's, no agent may edit a config file to widen its
+own reach, and the operator reference documents the key where the user reads it. When the check stands DOWN — which
+is TWO cases here, not three: the user disabled it, or there is no workflow document for the
+recorded owner — the command says so on stderr as `owner liveness unchecked`, naming which one.
+A future-dated document is NOT among them; it refuses with exit `7` and emits no such line, so do
+not go looking for one. Report that line; an absent exit `7`
+is not the same as a check that was performed and passed.
 
 ## Step 3 — confirm the outcome
 

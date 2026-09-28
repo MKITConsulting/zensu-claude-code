@@ -131,10 +131,10 @@ fi
 # LIST endpoint, and — being a bare assignment under `set -e` — killed the step
 # with no message. The class is grep-able even though the behaviour is not: a
 # read-back assignment must go through the bounded retry, never through the raw
-# resolver. The retry loop's own read is the ONE exemption and is spelled with an
-# explicit `|| true`, so it cannot be confused with an unguarded assignment.
-RAW_READBACK="$(grep -nE '^[[:space:]]*(RELEASE|CANDIDATE)="\$\(release_json\)"' \
-  "$WORKFLOW" 2>/dev/null || true)"
+# resolver. Exempt: the retry loop's own read (explicit `|| true`) and the
+# pre-mutation lookup (`|| RELEASE_STATUS=$?`), neither an unguarded assignment.
+RAW_READBACK="$(grep -nE '^[[:space:]]*(RELEASE|CANDIDATE|FINAL)="\$\(release_json\)"' \
+  "$WORKFLOW" 2>/dev/null | grep -vF '|| RELEASE_STATUS=$?' || true)"
 if [ -z "$RAW_READBACK" ]; then
   check "Release read-backs use the bounded retry, never a bare release_json assignment" PASS
 else

@@ -40,7 +40,7 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
-INPUT="$(cat 2>/dev/null || true)"
+{ INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 # Parse the Bash command into zensu invocations. Emits one line per invocation,
 # tab-separated "<noun>\t<verb>". Emits nothing — so the
@@ -151,17 +151,10 @@ if ! zensu_bind_hook_session "$INPUT"; then
   if zensu_doctor_allowed "$INPUT"; then
     exit 0
   fi
-  # A deny still has to say WHY. The lineage state is the one bind failure with a
-  # remedy that works in place, so it gets its own reason naming both versions
-  # instead of the generic "start a fresh session". stdout is the decision
-  # channel here, so the predicate's own output is captured, never leaked.
-  if ZENSU_LINEAGE="$(zensu_session_incompatible_runtime "$INPUT")" \
-    && [ -n "$ZENSU_LINEAGE" ]; then
-    zensu_emit_hook_session_deny incompatible-runtime \
-      "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
-    exit 0
-  fi
-  zensu_emit_hook_session_deny
+  # A deny still has to say WHY. The named-state ladder and its rationale live in
+  # zensu_emit_named_bind_deny (hooks/lib/zensu-session.sh). This gate names no
+  # fallback scope, so an unnamed state gets the generic deny.
+  zensu_emit_named_bind_deny "$INPUT"
   exit 0
 fi
 

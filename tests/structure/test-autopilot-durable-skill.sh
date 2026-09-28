@@ -66,4 +66,82 @@ has "$TDD" '--chain-id "$CHAIN_ID" --outcome no-changes' \
   && check "D11 bound zero-change path records no-changes explicitly" PASS \
   || check "D11 exact bound zero-change outcome" FAIL
 
+# D12 the marker-strip rule has exactly ONE authoritative statement. It used to be
+# a hand-copied pair — the durable-begin site restated the action while pointing at
+# Phase 0.D only for the CONSEQUENCE, so a model reaching the earlier site had been
+# told what to do and had no reason to read on. The earlier copy dropped the
+# load-bearing half ("Strip the comment, never the whole line"), which is what keeps
+# an unanchored matcher from eating real requirement text out of the plan the user
+# is then asked to approve.
+D12_RESTATE="$(grep -c 'Strip any pre-existing' "$AUTO" || true)"
+D12_RULE="$(grep -c 'Strip the comment, never the whole line' "$AUTO" || true)"
+if [ "$D12_RESTATE" -eq 0 ] && [ "$D12_RULE" -eq 1 ]; then
+  check "D12 the strip rule is stated once, with its never-the-whole-line bound" PASS
+else
+  check "D12 strip rule copies (restatements=$D12_RESTATE authoritative=$D12_RULE, want 0/1)" FAIL
+fi
+
+# D13 the strip targets the bytes the GATE reads. hooks/plan-approved-delegate.sh
+# counts markers in `resolved.plan` — the ExitPlanMode plan CONTENT — while the
+# rule used to name the incoming feature description. Those are different
+# documents: Phase 0.C turns the description into the spec and the acceptance
+# criteria, so a marker carried across while writing them survives a strip of the
+# description and the gate still counts two.
+if has "$AUTO" 'COMMENT from the plan CONTENT you are about to pass to' \
+  && has "$AUTO" 'stripping the incoming feature description is not enough' \
+  && ! has "$AUTO" 'COMMENT from the incoming'; then
+  check "D13 the strip targets the plan content the gate actually reads" PASS
+else
+  check "D13 strip target document" FAIL
+fi
+
+# D14 the single-marker check is ordered BEFORE the durable begin. --autopilot-begin
+# mints the run and takes the working tree; when the strip misses, the gate refuses
+# an already-minted run and the recovery is a separate guided command. Presence is
+# not enough here — the precondition has to be readable before the command it
+# guards, so the line numbers are compared.
+D14_PRE="$(grep -n 'Verify FIRST that the plan content you are about to present carries exactly one' "$AUTO" | head -1 | cut -d: -f1)"
+D14_BEGIN="$(grep -n -- '--autopilot-begin --run "\$RUN_ID"' "$AUTO" | head -1 | cut -d: -f1)"
+if [ -n "$D14_PRE" ] && [ -n "$D14_BEGIN" ] && [ "$D14_PRE" -lt "$D14_BEGIN" ]; then
+  check "D14 the single-marker precondition precedes --autopilot-begin" PASS
+else
+  check "D14 marker precondition ordering (precondition=${D14_PRE:-absent} begin=${D14_BEGIN:-absent})" FAIL
+fi
+
+# D15 the wedge the ordering exists to prevent is named with its recovery, so a run
+# that mints before the refusal is not left without an exit.
+# Both needles occur at more than one site in this file (the release path names the
+# command three times), so a whole-file pair would be satisfied by a sibling and
+# could not see the deletion it exists to catch. Each site is sliced and graded on
+# its own: the durable-begin block, where the precondition is stated, and Phase 0.D,
+# where the rule it guards lives.
+d15_slice() { # $1 start regex, $2 end regex (exclusive)
+  awk -v s="$1" -v e="$2" 'BEGIN{on=0} $0 ~ s {on=1} on && $0 ~ e && !($0 ~ s) {exit} on {print}' "$AUTO"
+}
+D15_BEGIN="$(d15_slice '^Before presenting the Phase-0 plan' '^A refusal naming a nonterminal run')"
+D15_CONFIRM="$(d15_slice '^\*\*0\.D — Confirm\.\*\*' '^## ')"
+d15_pair() { printf '%s' "$1" | grep -qF '/zensu:autopilot-release' && printf '%s' "$1" | grep -qF 'already holds the working tree'; }
+if [ -z "$D15_BEGIN" ] || [ -z "$D15_CONFIRM" ]; then
+  check "D15 slices not extracted (begin=${#D15_BEGIN} confirm=${#D15_CONFIRM} chars)" FAIL
+elif d15_pair "$D15_BEGIN" && d15_pair "$D15_CONFIRM"; then
+  check "D15 both the durable-begin block and Phase 0.D name the minted-then-refused recovery" PASS
+else
+  check "D15 minted-then-refused recovery missing from a site" FAIL
+fi
+
+D16_BEGIN="$(d15_slice '^Before presenting the Phase-0 plan' '^### ')"
+D16_CONFIRM="$(d15_slice '^\*\*0\.D — Confirm\.\*\*' '^#')"
+if [ -z "$D16_BEGIN" ] || [ -z "$D16_CONFIRM" ]; then
+  check "D16 slices not extracted (begin=${#D16_BEGIN} confirm=${#D16_CONFIRM} chars)" FAIL
+elif printf '%s' "$D16_BEGIN" | grep -qF 'This must succeed before `ExitPlanMode`.' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'Immediately before `ExitPlanMode`, create the durable run' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'falls through to the standalone plan-approval directive, which asks the four-route question' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'while no delivery route is decided, and once one is recorded or configured' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'sends this spec to `/zensu:tdd` or implements it directly without asking.'; then
+  check "D16 the durable-begin block and Phase 0.D both put --autopilot-begin before ExitPlanMode, and Phase 0.D names the whole standalone fall-through a reversal causes" PASS
+else
+  check "D16 an ExitPlanMode ordering statement or part of its standalone fall-through consequence is missing" FAIL
+fi
+
 echo "----"; echo "test-autopilot-durable-skill: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.22.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -18,8 +18,10 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## What you get
 
-- **A plan you approve first.** Claude Code plans; Zensu asks once whether to
-  run the guided workflow. You stay in the loop exactly once, not every turn.
+- **A plan you approve first.** Claude Code plans; Zensu asks which delivery route to
+  take and remembers a Zensu-workflow answer for the rest of the session —
+  or never, when the project sets `hooks.defaultDeliveryRoute`.
+  You stay in the loop once, not every turn.
 - **A review that cannot be skipped.** Five specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
@@ -75,13 +77,17 @@ validated pull request: one planning gate, then plan → build → review → fi
 verify, unattended. It stops at a ready PR and never merges.
 
 **Just this change** — describe what you want and approve the plan. Zensu asks
-whether to run the guided workflow with its review chain.
+which delivery route to take: autopilot to a reviewed PR, the guided workflow
+with its review chain, the step-by-step pilot, or implementing it directly.
+Answer the route question with the Zensu workflow once: the session remembers that answer (a
+direct, autopilot or pilot answer decides only that plan or request), and
+`/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
 
 ## What's included
 
-### Skills (27)
+### Skills (29)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (28 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (30 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -90,10 +96,11 @@ whether to run the guided workflow with its review chain.
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
+| `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only |
+| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -104,12 +111,13 @@ whether to run the guided workflow with its review chain.
 | `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, and take a session over |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over, and trace where a session was continued across windows and accounts |
 | `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default |
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
 | `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
+| `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
@@ -188,16 +196,18 @@ Point the CLI at your own deployment with the `--api-url` flag, the
 export ZENSU_API_URL=https://api.example.internal
 ```
 
-The plugin `.mcp.json` contains only the local Playwright driver used for live
-verification; it has no Zensu API or hosted-MCP endpoint to redirect. If you
-operate under GDPR, CCPA, or similar regulations, self-hosting keeps the data
-under your control.
+The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint
+to redirect. If you operate under GDPR, CCPA, or similar regulations,
+self-hosting keeps the data under your control.
 
 ## Requirements
 
 Claude Code 2.1.211 or newer on macOS or Linux. Hooks need a POSIX shell —
 Windows users need WSL or Git Bash; native `cmd.exe` and PowerShell are not
-supported.
+supported. `/zensu:verify-feature` and the autopilot browser driver additionally
+need `playwright-cli` on `PATH` (`npm install -g @playwright/cli@0.1.21`, the
+version the browser consent gate was measured against; `brew install playwright-cli`
+is unpinned).
 
 ## Documentation
 
@@ -205,12 +215,15 @@ supported.
 |----------|---------------|
 | [Architecture](docs/architecture.md) | The three layers, the workflow diagram, evidence discipline, typical flows |
 | [Review chain](docs/review-chain.md) | The reviewer agents, custom repo personas, skill overlays, templates |
-| [Gates](docs/gates.md) | The write gates, the secret scan, the TDD phase gate, and the completion-time requirements-table gate |
+| [Gates](docs/gates.md) | The write gates, the secret scan, the plugin-data containment guard, the browser consent gate, the TDD phase gate, and the completion-time requirements-table gate |
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
+| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, and how to continue in a nested worktree when it happened anyway |
+| [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing
 

@@ -385,7 +385,8 @@ cp "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
   "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" \
   "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" \
   "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" \
-  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$MISSING_STATE_PLUGIN/hooks/lib/"
+  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-directive.sh" "$MISSING_STATE_PLUGIN/hooks/lib/"
 MISSING_STATE_DATA="$TMP/missing-state-plugin-data"
 mkdir -p "$MISSING_STATE_DATA"
 bind_missing_state_session() {

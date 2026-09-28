@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# Shared watchdog ladder for hook-path child processes.
+#
+# THE one watchdog ladder. It serves the children that read OUTSIDE
+# this process — the `git status` the turn counter runs, the transcript read the
+# refused-spawn probe runs, and the children `hooks/user-prompt-zen-mode.sh` spawns
+# — which is the criterion, not a count. State it that way:
+# CLAUDE.md records that an enumeration of the `node` children on this path was written
+# as "a THIRD child" and was already short by one on the day it landed, and the two the
+# lease adds carry no watchdog on ANY host and are named there as a known gap.
+#
+# NOT EVERY CALLER IS ON THE STOP PATH, and that is worth naming rather than folding
+# into the list above, because it changes what the deadline below is. The zen-mode
+# children fire on EVERY prompt of a zen-mode session, so this constant bounds a
+# per-prompt caller as well as the two end-of-turn ones — one deadline across all of
+# them, and `Z45` in `tests/structure/test-zen-mode.sh` is what holds it under that
+# hook's own registration timeout. Raising it is therefore no longer a Stop-path-only
+# decision.
+#
+# The two Stop-path children it was created for used to carry SEPARATE ladders, so the arm added to one was missing
+# from the other — and the one left behind was the transcript read, whose own comment
+# records the larger exposure. `timeout` is absent on base macOS and some Git Bash
+# installs, and `gtimeout` is the name a Homebrew coreutils install puts there instead,
+# so probing only the first leaves a host that DOES have a watchdog running unbounded.
+#
+# It RUNS the command rather than answering a prefix. A prefix was tried first and the
+# two grounds recorded for it were both false: redirections written after a shell
+# function name apply for the duration of that function and are inherited by the child
+# it execs, so a wrapper threads nothing, and the payload stays spelled once either way.
+# What the prefix form actually cost was a `# shellcheck disable=SC2086` at each site, an
+# unstated dependency on `IFS` containing a space and on the words being glob-free, and
+# an extra fork per call. `"$@"` has none of those.
+#
+# The last arm runs the command UNBOUNDED, on purpose. Making it inert without a
+# watchdog was the review's preferred fix and was REJECTED on a measurement: neither
+# binary exists on base macOS, so it would switch a review-integrity diagnostic off on
+# the platform it was built for. Do not read `|| return 0` at either call site as the
+# mitigation — it tests an exit status, so it degrades a child that RETURNS and can do
+# nothing about one that hangs. C56/C56d pin that this arm stays reachable.
+#
+# STATE THE RESIDUAL NARROWLY, because a wider one invites over-investment. The
+# block-on-open vectors are already closed inside the transcript module: it refuses a NUL
+# byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
+# and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
+# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
+# that hangs.
+#
+# "Availability only, no adversary in the loop" was the closing sentence here and it is
+# NO LONGER TRUE, so it is retired rather than reworded. `zensu-log.sh --tdd-complete`
+# runs `zensu-edit-landing.sh --inventory` through this ladder, and that child walks the
+# ancestors of every absolute path a SESSION-WRITABLE run log names — one `cd … && pwd -P`
+# plus one `-e` probe each. The path set is chosen by the content of that log, so a
+# co-tenant able to write it chooses where the probes land, and an automount or a stalled
+# network mount is reachable from inside the session. What remains true is narrower and
+# worth keeping: the block-on-open vectors above are closed, and what is left is a
+# filesystem that does not answer. That child carries its own in-process budgets
+# (`CLAIM_ANCESTOR_BUDGET`, `INV_CLAIM_BUDGET`) precisely because this ladder cannot be
+# relied on to bound it — the budgets cap the NUMBER of probes, and a single probe that
+# never returns is still unbounded on a host without `timeout`/`gtimeout`.
+#
+# WHAT THE UNBOUNDED ARM COSTS DIFFERS PER CALLER, and stating only the Stop-path answer
+# understated it. On the Stop path it costs a DIAGNOSTIC: the Stop hook's own registration
+# in `hooks.json` carries no `timeout` key, unlike several sibling entries, so nothing in
+# this repository bounds that hook either and whether the host applies a default is
+# unverified. On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
+# so the host kills the whole hook instead, and that turn loses the entire injected
+# directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
+# only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is
+# what closes a chain, its registration is a plain Bash invocation with no host timeout at
+# all, and `|| return 0` at the call site tests an exit status a hang never produces — so
+# the chain simply never completes. Same arm, three very different prices.
+zensu_run_bounded() {
+  # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
+  # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
+  # kill the hook rather than no-op. Latent today — every live call site passes a command —
+  # and guarded so the property does not depend on every later caller remembering. Do not
+  # restate that parenthetical as "both call sites": there are more than two, in several
+  # files, and the ladder's own header says the census is a criterion rather than a count for
+  # exactly this reason. Say "every live call site", which stays true as callers are added.
+  # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
+  # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
+  # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the
+  # "no probe ran" state this situation actually is, and which renders.
+  [ "$#" -gt 0 ] || return 1
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 5 "$@"
+  else
+    "$@"
+  fi
+}

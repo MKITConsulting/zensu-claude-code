@@ -67,12 +67,20 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // and is NOT restated here — a second copy is a second thing to go stale, and
 // this comment is where a future reviewer decides whether the list stays at two.
 // In one line: it writes one record for the calling session, one workflow
-// history entry, and moves that session's stale review-evidence leases aside;
+// history entry, moves that session's stale review-evidence leases aside, and —
+// on an `already-served` refusal with `--confirm` only — recreates that session's
+// own MISSING workflow document and its `.zensu` ancestors under the RECORDED
+// project root — and, under `--restore-root --confirm`, re-creates the RECORDED
+// project root itself when it is the thing that is gone, then rebuilds that
+// document over it. Those and the workflow history entry above are the THREE
+// write classes that leave the plugin-data store, and the history entry is written on
+// the ordinary `--confirm` adoption as well, with no `already-served` qualifier —
+// calling the document write "the one" was false and understated the admission;
 // what BOUNDS those writes is readContext (session
 // hash, digest recomputed against the RECORDED root, that root's declared
 // version) plus the sibling-root and plugin_data checks — NOT derivation, since
-// the two path assignments are caller-supplied literals here exactly as they are
-// for the diagnostic. Without --confirm it is read-only.
+// CLAUDE_PLUGIN_DATA is a caller-supplied literal here exactly as it is for the
+// diagnostic. Without --confirm it is read-only.
 //
 // Admitting it is what makes the lineage diagnosis actionable: the state it
 // repairs denies Edit, Write and every other Bash call, so a remedy the user
@@ -82,24 +90,52 @@ const ADOPT_SEGMENTS = ["hooks", "lib", "zensu-session-adopt.sh"];
 const INTERPRETER = "bash";
 
 // Each recognized script declares the arguments it accepts, as exact literals.
-// The doctor takes none. The adoption takes at most one, and `--confirm` is the
-// whole difference between a report and a write, so it is spelled out here
-// rather than left to the script: the gate decides what may be invoked, and a
-// script cannot widen its own recognition.
+// The doctor takes none. The adoption takes at most two, each at most once, and
+// they are spelled out here rather than left to the script: the gate decides what
+// may be invoked, and a script cannot widen its own recognition.
+//
+// `--confirm` is the whole difference between a report and a write.
+// `--restore-root` selects WHICH repair, and it is admitted on the same terms as
+// the rest of that script's write classes — see its header, bounded exception
+// (c). What makes admitting it safe is a property of this list rather than of
+// that script: every entry is an exact LITERAL and none of them takes a value, so
+// no invocation this gate admits can carry a destination. A mode that accepted a
+// path would be the caller-named re-anchoring the design refuses, and it could
+// not be expressed here without changing the shape of this table — which is the
+// signal a future reviewer should treat as the decision point.
 const RECOGNIZED = {
   doctor: { segments: DOCTOR_SEGMENTS, args: [] },
-  adopt: { segments: ADOPT_SEGMENTS, args: ["--confirm"] },
+  adopt: { segments: ADOPT_SEGMENTS, args: ["--restore-root", "--confirm"] },
 };
 
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 // The UNION of names the recognized scripts read and the Bash tool does not
-// supply. `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are read by both;
-// `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only, and accepting it on the adoption form
-// costs nothing because that script never reads it. Kept as one shared set
+// supply. `CLAUDE_PLUGIN_DATA` is read by both; `CLAUDE_PROJECT_DIR` is
+// doctor-only in practice — the adoption is bounded by the record and ignores it
+// — and `ZDOC_PLAYWRIGHT_TOOLS` is read by neither any more: the doctor probes
+// playwright-cli itself, and the name stays accepted for the same reason
+// `CLAUDE_PROJECT_DIR` does below, because the previous release's skill body
+// emits it. Accepting any of them on the
+// adoption form costs nothing, because that script reads neither. Kept as one shared set
 // rather than per-entry: unlike `args`, an assignment cannot change what a
 // script DOES, only what it can see. `path` requires a rooted, traversal-free
 // literal; a Set requires one of its members.
+//
+// `CLAUDE_PROJECT_DIR` is NOT a harmless leftover now that the adoption ignores it,
+// and it must not be dropped on that reasoning. It is what keeps a model still
+// holding the PREVIOUS release's skill body — which emits the assignment — from
+// having its command refused. That is not an exotic case: a mid-session upgrade is
+// precisely the state this whole feature exists for, and the skill text a running
+// model holds is the one thing an upgrade does not replace.
+//
+// The residual it leaves sits on the READ command rather than the write one:
+// `isRootedLiteralPath("")` is false, so a harness rendering the placeholder empty
+// makes the assignment reject and denies the entire invocation — /zensu:doctor
+// included, the first thing a wedged user is told to run. `skills/doctor/SKILL.md`
+// therefore instructs the model to OMIT the assignment rather than render it empty;
+// the recognizer cannot fix that end, because by the time it sees the command the
+// empty value is already there.
 const ASSIGNMENTS = {
   CLAUDE_PLUGIN_DATA: "path",
   CLAUDE_PROJECT_DIR: "path",

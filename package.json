@@ -10,24 +10,26 @@
     "session-control:concurrency": "bash evals/session-control/run-eval.sh concurrency",
     "session-control:adversarial": "bash evals/session-control/run-eval.sh adversarial",
     "session-control:release": "bash evals/session-control/run-eval.sh release",
-    "reset-review-limit:eval": "bash evals/reset-review-limit/run-eval.sh"
+    "reset-review-limit:eval": "bash evals/reset-review-limit/run-eval.sh",
+    "session-trail:coverage": "c8 --reporter=text --reporter=text-summary --include=\"skills/session-trail/scripts/*.mjs\" --all bash tests/structure/run-session-trail-coverage.sh"
   },
   "devDependencies": {
+    "c8": "12.0.0",
     "promptfoo": "0.121.20",
     "yaml": "2.9.0"
   },
   "overrides": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@hono/node-server": "^2.0.5",
-    "adm-zip": "^0.6.0",
-    "fast-uri": "^3.1.5",
+    "adm-zip": "^0.6.1",
+    "fast-uri": "3.1.6",
     "fast-xml-parser": "^5.10.1",
-    "hono": "^4.12.34",
+    "hono": "^4.13.5",
     "ip-address": "^10.3.1",
     "@apidevtools/json-schema-ref-parser": {
-      "js-yaml": "^4.3.1"
+      "js-yaml": "^4.3.2"
     },
-    "sharp": "^0.35.0",
+    "sharp": "^0.35.4",
     "undici": "^7.29.0"
   }
 }

@@ -99,6 +99,40 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// Control characters and DEL. canonicalDirectory rejects a SUBSET of these
+// (`[\0\r\n]`) on the strict path; the callers below need the wider class,
+// because their value never passes through realpath and reaches a terminal and
+// the model's context as-is — the /zensu:doctor report renders it verbatim.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+// The shape half of canonicalDirectory's job, for the callers that must NOT
+// require the directory to exist. There are THREE, and they arrived from two
+// branches: the orphaned-project-root reader and the pruned-plugin-root reader
+// each waive that function's existence check for one recorded root, and
+// buildContext re-mints a record around a value one of them returned.
+//
+// It is NOT a strict subset of canonicalDirectory, and saying so would mislead:
+// it rejects a WIDER control-character class, and it adds an absoluteness and a
+// normalization check that the canonicalizing path gets for free from realpath.
+// Those two are what keep a waived branch from admitting a spelling no
+// canonical comparison will ever match — `/a/b/../c` passes `isAbsolute` alone.
+// Kept as one function rather than inline copies because a shape check guarding
+// a value printed into a terminal is exactly the rule that rots when written
+// twice.
+function requireAbsentDirectoryPath(input, label) {
+  const value = requireText(input, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -154,6 +188,31 @@ function readRegularFileSnapshot(
 ) {
   const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
     ? fs.constants.O_NOFOLLOW : 0;
+  // O_NONBLOCK is what keeps this reader from BLOCKING, which is a different
+  // hazard from the symlink one O_NOFOLLOW covers. `open(2)` on a FIFO with no
+  // writer waits forever, and the `isFile()` rejection below cannot help: it runs
+  // on the DESCRIPTOR, so it is reached only once the open has already returned.
+  // Every caller reads a path under `<project>/.zensu/state/`, which is writable
+  // from inside a session and covered by no gate while a chain is inactive, so a
+  // planted FIFO is reachable — and one caller, the zen-mode UserPromptSubmit
+  // hook, reads on EVERY prompt, which turns a blocked open into a session with
+  // no way out: the prompt never reaches the model, so the off-phrase escape is
+  // never evaluated either.
+  //
+  // POSIX LEAVES the flag UNSPECIFIED for a regular file — it specifies
+  // `O_NONBLOCK` for FIFOs and for block and character special files, and says
+  // nothing about the rest. "Unspecified" is not "no effect", and the stronger
+  // wording stood here as the reason this change was safe for the shared
+  // reader's other callers. What is true, and what the safety actually rests on:
+  // Linux and macOS ignore it on a regular file, so no legitimate caller changes
+  // behaviour on the supported hosts; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. The read
+  // loop below carries an `EAGAIN` arm so the residual — a filesystem where the
+  // unspecified behaviour does bite — is handled rather than assumed away.
+  // Guarded the same way as O_NOFOLLOW because the constant is not defined on
+  // every build; where it is absent `nonBlock` is 0 and this class stays open.
+  const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+    ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -176,7 +235,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {
@@ -196,8 +255,39 @@ function readRegularFileSnapshot(
 
     const data = Buffer.alloc(before.size);
     let offset = 0;
+    // AN EAGAIN ARM, so the non-blocking open's guarantee is true by
+    // construction rather than by platform behaviour. The descriptor is already
+    // gated behind the `isFile()` check above, so a FIFO or device never reaches
+    // this loop and `EAGAIN` is unreachable on the hosts this ships to. It is
+    // still handled, because the flag is what makes that true: on a filesystem
+    // where the unspecified regular-file behaviour does bite — historically
+    // Linux mandatory locking, some network and FUSE mounts — `readSync` throws
+    // rather than returning a short count, and an unhandled throw here would
+    // surface as a corrupt-document failure. The retry budget is bounded so a
+    // descriptor that never becomes readable fails loudly instead of spinning.
+    // PACED, not spun. A bare `continue` spent all 64 retries in microseconds, so
+    // the budget bounded the LOOP without ever waiting for the condition it
+    // exists to outlast — a descriptor that is momentarily unreadable is
+    // unreadable for milliseconds, not nanoseconds. `sleep` is this module's ONE
+    // blocking pause - `setTimeout` needs an event loop this synchronous call
+    // never returns to - and it is asked for the BEST-EFFORT contract here: the
+    // retry budget terminates without the pause, so a host that cannot wait costs
+    // latency and nothing else, whereas the lock poll sharing that primitive must
+    // actually wait and keeps the strict default. The worst case is bounded at
+    // 64 ms of wall clock, paid only on a host where the arm is reachable at all.
+    let againBudget = 64;
     while (offset < data.length) {
-      const read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      let read;
+      try {
+        read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      } catch (error) {
+        if ((error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK') && againBudget > 0) {
+          againBudget -= 1;
+          sleep(1, { bestEffort: true });
+          continue;
+        }
+        throw error;
+      }
       if (read === 0) fail(`file changed while reading: ${file}`);
       offset += read;
     }
@@ -416,15 +506,14 @@ function manifestRuntimeEntries(pluginRoot, host, manifest) {
     }
   }
 
-  // MCP manifests activate executable plugin runtime outside hooks/agents/skills.
-  // Include the launcher scripts and their lockfile-backed metadata so an active
-  // session detects changes to every byte that can affect the launched server.
   if (manifest.mcpServers !== undefined) {
-    for (const relative of ['scripts', 'mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
+    for (const relative of ['mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
       const candidate = path.join(pluginRoot, relative);
       if (fs.existsSync(candidate)) entries.add(candidate);
     }
   }
+  const scripts = path.join(pluginRoot, 'scripts');
+  if (fs.existsSync(scripts)) entries.add(scripts);
   return [...entries];
 }
 
@@ -499,9 +588,27 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function buildContext(options) {
+// The existence waiver is a SECOND PARAMETER, never a key of `options`, and that
+// is load-bearing rather than stylistic: `registerContext` forwards its caller's
+// whole options object into this function (`buildContext({ ...options, … })`),
+// so a waiver carried inside it could ride that spread into a FRESH record mint
+// — a path with no absence proof at all. Exactly the shape validateContext
+// already uses for its namesake, and for the same reason.
+//
+// It waives the SAME single check validateContext waives — whether the project
+// root still exists — and re-applies that function's shape half in its place, so
+// the only difference between the two paths is the existence test. It exists for
+// ONE caller, adoptContext, re-minting a record whose recorded worktree was
+// deleted: there is nothing to realpath, and refusing would leave that session
+// wedged with no write channel to repair itself. The emitted record shape is
+// unchanged — the value carried through is the one the previous record already
+// held, which was canonicalized when that record was minted.
+function buildContext(options, buildOptions) {
   const host = requireHost(options.host);
-  const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+  const allowMissingProjectRoot = Boolean(buildOptions && buildOptions.allowMissingProjectRoot);
+  const projectRoot = allowMissingProjectRoot
+    ? requireAbsentDirectoryPath(options.projectRoot, 'project root')
+    : canonicalDirectory(options.projectRoot, 'project root');
   const { pluginRoot, manifest } = pluginMetadata(options.pluginRoot, host);
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const createdAt = options.createdAt || nowIso();
@@ -537,14 +644,41 @@ function buildContext(options) {
   };
 }
 
-// `options.allowMissingProjectRoot` waives ONE check and nothing else: whether
-// the recorded project root still exists on disk. It defaults to off, so every
-// caller that does not opt in keeps the strict behaviour. The only opt-in
-// caller is readOrphanedProjectRootContext, which separately PROVES the path is
-// absent — waiving the check does not mean the field is unvalidated, because
-// the requireText loop below still rejects a missing, blank, or unsafe value.
+// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` are NOT
+// symmetric, and the asymmetry is stated HERE because this is the block a caller
+// reads before opting in.
+//
+// `allowMissingProjectRoot` waives ONE check and nothing else: whether that
+// recorded root still exists on disk.
+//
+// `allowMissingPluginRoot` waives THREE, because readContextInternal reads the
+// same flag a SECOND time — the root's existence here, plus the runtime-digest
+// re-measure and the manifest-version match there. It CANNOT be narrowed: both of
+// those read the tree that is gone (computeRuntimeDigest and pluginMetadata are
+// handed context.plugin_root), so they have no input once the installation is
+// pruned. Splitting the flag in two would advertise a separation that does not
+// exist.
+//
+// State what that costs precisely, because it reads worse than it is: the waiver
+// drops a CONSISTENCY check, not a barrier. runtime_digest is a content hash of a
+// readable tree computed by an exported pure function — never a secret — so anyone
+// able to write the private records directory could always mint a record carrying
+// a correct digest for the executing tree. The barrier is that directory itself,
+// and every other bound still holds; readPrunedPluginRootContext enumerates them.
+//
+// Both default to off, so every caller that does not opt in keeps the strict
+// behaviour. Each has exactly one opt-in caller —
+// readOrphanedProjectRootContext and readPrunedPluginRootContext — which
+// separately PROVES the path is absent and re-applies the shape half through
+// requireAbsentDirectoryPath. Waiving the check does not mean the field is
+// unvalidated: the requireText loop below still rejects a missing or blank value.
+//
+// buildContext takes a waiver named `allowMissingProjectRoot` too, for the
+// adoption re-mint. It is a SEPARATE parameter on a different function and the
+// two never reach each other; the name is shared because the thing waived is.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
+  const allowMissingPluginRoot = Boolean(options && options.allowMissingPluginRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     fail('context record must be an object');
   }
@@ -573,7 +707,9 @@ function validateContext(context, expectedHost, options) {
   if (!allowMissingProjectRoot) {
     canonicalDirectory(context.project_root, 'context project root');
   }
-  canonicalDirectory(context.plugin_root, 'context plugin root');
+  if (!allowMissingPluginRoot) {
+    canonicalDirectory(context.plugin_root, 'context plugin root');
+  }
   canonicalDirectory(context.plugin_data, 'context plugin data');
   if (!HASH_RE.test(context.runtime_digest)) {
     fail('context runtime digest is invalid');
@@ -588,9 +724,27 @@ function contextRecordFile(recordsDir, sessionId) {
   return path.join(recordsDir, `${sessionKey(sessionId)}.json`);
 }
 
-function sleep(milliseconds) {
-  const buffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+// THE ONE PAUSE PRIMITIVE, and the fault contract is the CALLER'S to state. A
+// second copy of this function shipped beside it for one release, performing the
+// identical `Atomics.wait` while SWALLOWING a throw — so the module held two
+// opposite contracts for one mechanism and nothing said which was right. On a
+// build without `SharedArrayBuffer`, or one that refuses `Atomics.wait` on the
+// main thread, the two would have diverged exactly where it matters: the lock
+// poll would throw while the reader spun.
+//
+// The DEFAULT is strict, because that is what a poll that must actually wait
+// needs — silently not waiting there would burn the CPU and break the lock's own
+// timing, which is worse than a loud failure. `bestEffort` is opt-in for a caller
+// whose bound terminates without the pause: the EAGAIN retry is bounded at 64
+// iterations either way, so for it a missing pause costs latency and nothing else.
+function sleep(milliseconds, options) {
+  const bestEffort = !!(options && options.bestEffort);
+  try {
+    const buffer = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+  } catch (error) {
+    if (!bestEffort) throw error;
+  }
 }
 
 function processStartIdentity(pid) {
@@ -1294,23 +1448,35 @@ function readContextInternal(options) {
   const file = contextRecordFile(recordsDir, options.sessionId);
   const context = validateContext(readJson(file), options.expectedHost, {
     allowMissingProjectRoot: options.allowMissingProjectRoot,
+    allowMissingPluginRoot: options.allowMissingPluginRoot,
   });
   if (context.session_id_hash !== sessionIdHash(options.sessionId)) {
     fail('context session hash mismatch');
   }
-  const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
-  if (currentDigest !== context.runtime_digest) {
-    fail('context runtime digest mismatch');
-  }
-  const { manifest } = pluginMetadata(context.plugin_root, context.host);
-  if (manifest.version !== context.plugin_version) {
-    fail('context plugin version mismatch');
+  // With the minting installation gone there is nothing to re-measure: the
+  // digest and the declared version stay shape-checked by validateContext and
+  // are otherwise taken on the record's word. That is the stated cost of the
+  // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
+  // proves the root is absent before it hands the record to anyone.
+  if (!options.allowMissingPluginRoot) {
+    const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
+    if (currentDigest !== context.runtime_digest) {
+      fail('context runtime digest mismatch');
+    }
+    const { manifest } = pluginMetadata(context.plugin_root, context.host);
+    if (manifest.version !== context.plugin_version) {
+      fail('context plugin version mismatch');
+    }
   }
   return context;
 }
 
 function readContext(options) {
-  return readContextInternal({ ...options, allowMissingProjectRoot: false });
+  return readContextInternal({
+    ...options,
+    allowMissingProjectRoot: false,
+    allowMissingPluginRoot: false,
+  });
 }
 
 // One of the two bind failures a caller may treat as "nothing left to enforce"
@@ -1318,7 +1484,7 @@ function readContext(options) {
 // reader): every part of the record validates exactly as readContext demands,
 // and its recorded project root is simply gone — the harness recycled or the user deleted that
 // worktree. The workflow document lives at <project_root>/.zensu/state/, so it
-// died with the directory: no review chain and no Autopilot run remain
+// is not reachable from this record: no review chain and no Autopilot run remain
 // reachable, which is the same argument that already releases a session with no
 // record at all.
 //
@@ -1330,28 +1496,51 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
 function readOrphanedProjectRootContext(options) {
-  const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // Both waivers are pinned, not just this reader's own: the spread carries the
+  // caller's options, and the COMBINED state — project root gone AND installation
+  // pruned — must refuse because the reader forbids it, never because no caller
+  // happened to pass the other flag. readContext pins both for the same reason.
+  const context = readContextInternal({
+    ...options,
+    allowMissingProjectRoot: true,
+    allowMissingPluginRoot: false,
+  });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
-  // which the doctor skill renders verbatim. Without these two guards a record
+  // which the doctor skill renders verbatim. Without the shape half a record
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
-  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
-    fail('context project root is unsafe');
-  }
-  if (!path.isAbsolute(context.project_root)) {
-    fail('context project root must be absolute');
-  }
+  // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
+  // waived check ON THIS READER — the pruned-plugin-root reader below waives
+  // three, and the flag block above says which.
+  //
+  // NAMING THE TIGHTENING, because the extraction carried it in silently and the
+  // reworded sentence above absorbs it without saying so. The inline code this
+  // replaced applied TWO checks, UNSAFE_PATH_CHARACTERS and path.isAbsolute.
+  // requireAbsentDirectoryPath adds a THIRD — `path.resolve(value) !== value` — so
+  // a project_root that is absent, absolute and control-character free but NOT
+  // resolve-normalized used to classify as the relaxable orphan state, where Stop
+  // releases and the gates relax, and now fails closed into the generic deny. The
+  // tightening is INTENDED for this reader: the value reaches the same terminal and
+  // the same report the other two checks protect, and a non-normalized spelling is
+  // exactly the shape that makes a printed path mean something other than it reads.
+  //
+  // The rule is kept HERE deliberately. Applying it only where the value is
+  // WRITTEN would move the refusal out of adoptableRecord into a throw inside
+  // adoptContext, and would break the AC-C14b row that pins an absolute-but-
+  // unnormalized project_root as `record-unreadable`.
+  //
+  // The practical blast radius is nil, because project_root is minted through
+  // canonicalDirectory and a realpathSync.native result is resolve-stable on POSIX
+  // and win32 alike — but that is an argument, not a test, so this arm has its own
+  // unit case rather than inheriting the pruned call site's. The one spelling the
+  // argument does not cover is a win32 UNC share root, where path.win32.resolve
+  // appends a separator realpathSync.native does not; that is UNVERIFIED in both
+  // directions, because no suite exercises it.
+  requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1367,8 +1556,40 @@ function readOrphanedProjectRootContext(options) {
   fail('context project root still exists');
 }
 
+// The relaxed reader for the OTHER recorded root. An installation the host has
+// pruned from its plugin cache leaves a record that is intact in every respect
+// except that its plugin_root no longer exists — and with it every way to
+// re-measure the runtime digest or re-read the declared version. Existence is
+// the one waived check, and it is proven rather than assumed: the path must be
+// absent (lstat, never realpath, for the reason the orphan reader states), and
+// its PARENT must still be a real directory, because a pruned installation
+// leaves its cache directory behind while a record naming a root under a
+// directory that never existed is not this state. Lineage is deliberately NOT
+// judged here — the state is reachable under a compatible lineage too, and in
+// both cases the record cannot be served; the callers decide what the absence
+// means, and adoption is the one exit.
+function readPrunedPluginRootContext(options) {
+  // Sibling waiver pinned off — see readOrphanedProjectRootContext above.
+  const context = readContextInternal({
+    ...options,
+    allowMissingPluginRoot: true,
+    allowMissingProjectRoot: false,
+  });
+  requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
+  canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
+  try {
+    fs.lstatSync(context.plugin_root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    fail('context plugin root is unreadable');
+  }
+  fail('context plugin root still exists');
+}
+
 // ---------------------------------------------------------------------------
-// Adoption — serving an intact record from a declared-incompatible lineage.
+// Adoption — taking an intact record over when the executing runtime cannot SERVE
+// it: a declared-incompatible lineage, or a pruned minting installation. Say
+// "taking over", never "serving": a pruned record is adopted once and never served.
 // ---------------------------------------------------------------------------
 //
 // runtimeLineageCompatible decides who may serve a record from the DECLARED
@@ -1406,13 +1627,14 @@ function readOrphanedProjectRootContext(options) {
 // composes it with the creating helpers; adoptionWorkflowStatePath composes it
 // without them. Both must agree, or the read-only probe and the read it guards
 // resolve to different files.
-const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+// Frozen because it is EXPORTED: an external consumer that pushed a segment
+// would move where this module itself resolves every workflow document.
+const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 
 const ADOPTION_REFUSALS = {
   RECORD_UNREADABLE: 'record-unreadable',
   PLUGIN_DATA: 'plugin-data-mismatch',
-  PROJECT_ROOT: 'project-root-mismatch',
   ALREADY_SERVED: 'already-served',
   NOT_SIBLING: 'not-a-sibling-installation',
   EXECUTING_UNIDENTIFIED: 'executing-runtime-unidentified',
@@ -1425,11 +1647,6 @@ const ADOPTION_REFUSALS = {
 // manifest could steer the superseded record anywhere in the tree.
 const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 
-// A hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js. That module cannot be
-// required from here (it requires the binder, which requires this core), and the
-// sweep has to agree with its listRecords about which entries are valid — an
-// entry this predicate keeps but listRecords rejects leaves the wedge intact.
-const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
 
 function adoptionRefusal(reason) {
   return { ok: false, reason };
@@ -1443,9 +1660,11 @@ function adoptionRefusal(reason) {
 function adoptionWorkflowStatePath(projectRoot, sessionId) {
   // Composed from the SAME segment constants workflowStateDirectory uses, so the
   // guard and the read it guards can never resolve to different files. A separate
-  // spelling would let a layout move skip condition 7 entirely — silently
-  // removing one conjunct of the self-closing property the whole authorising
-  // argument rests on.
+  // spelling would let a layout move skip the workflow-schema condition entirely
+  // — silently removing one conjunct of the self-closing property the whole
+  // authorising argument rests on. Named rather than numbered on purpose: the
+  // ordinal moved once already when a condition was removed, and a stale number
+  // here points at a check that no longer exists.
   return path.join(
     projectRoot,
     ...WORKFLOW_STATE_SEGMENTS,
@@ -1456,42 +1675,105 @@ function adoptionWorkflowStatePath(projectRoot, sessionId) {
 // Never throws: every caller is on a failure path already, and an exception
 // would replace a named condition with a stack trace. A refusal always names
 // exactly which of the conditions was not met.
+//
+// options.projectRoot is ACCEPTED FOR COMPATIBILITY AND NEVER READ — see the block
+// after condition 2 for why the comparison was removed. Rejecting a supplied value
+// would be worse than ignoring it: it would hard-fail every caller that still
+// passes one and turn a deliberate relaxation into a break. Stated on the header
+// because the options object still destructures five keys and a reader would
+// otherwise learn about the sixth thirty lines into the body.
 function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
   let context;
+  let orphanedProjectRoot = false;
+  let prunedPluginRoot = false;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
-    // Condition 1 — the record is still provably itself. readContext recomputes
-    // the runtime digest against the RECORDED root and re-reads that root's
-    // manifest, so a forged or hand-edited record cannot reach adoption; it also
-    // enforces the context schema and that the recorded project root exists.
-    context = readContext({
+    // Condition 1 — the record is still provably itself. On the STRICT branch
+    // readContext recomputes the runtime digest against the RECORDED root and
+    // re-reads that root's manifest, so a forged or hand-edited record cannot
+    // reach adoption; it also enforces the context schema and that both recorded
+    // roots exist.
+    //
+    // TWO disagreements are admitted past that strict read, and only through it
+    // failing first. They arrived from different branches and are DISJOINT by
+    // construction, each reader pinning the other's waiver off, so a record with
+    // BOTH roots gone is refused by both and lands on `record-unreadable`. That
+    // disjointness is what makes the order below non-load-bearing.
+    //
+    // A recorded project root that is GONE. It has to be admitted: `git worktree
+    // remove` on a live session is an ordinary, documented cleanup, and combined
+    // with a mid-session plugin update it wedged the session permanently — every
+    // write channel denied, /zensu:doctor reporting "no valid record" for a record
+    // sitting intact in plugin data. Nothing is waived by admitting it: the
+    // workflow document lived under that root and is not reachable from this
+    // record, so there is no persisted shape left for the two runtimes to disagree
+    // about, which is the same argument that already relaxes this state for a
+    // COMPATIBLE upgrade. readOrphanedProjectRootContext waives exactly one check
+    // and REFUSES a root that still exists.
+    //
+    // A recorded installation the host PRUNED from its cache. Say what that
+    // branch gives up, because "the root's existence alone" is false:
+    // readPrunedPluginRootContext proves the absence and waives THREE checks —
+    // the root's existence, the digest re-measure and the manifest-version match
+    // — the last two because they read the tree that is gone. So the forgery
+    // sentence above does NOT carry over: there the digest and the declared
+    // version are taken on the record's word.
+    //
+    // What still bounds both relaxed branches, stated rather than left to be
+    // inferred: the session-id hash, the full schema and principal-profile
+    // validation, source_revision === runtime_digest, plugin_data equality, the
+    // sibling-root bound, ADOPTION_SAFE_VERSION_RE on both versions before either
+    // reaches a filename, the never-backwards comparison, and the PROVEN absence
+    // of the waived root. The barrier was never the digest — it is the private
+    // records directory. That is the stated cost, and the reason such a record is
+    // adopted once rather than served. Every OTHER disagreement — plugin version,
+    // session hash, schema, principal profiles — throws in all three readers and
+    // still lands on `record-unreadable` below.
+    const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,
       expectedHost: options.host,
-    });
+    };
+    try {
+      context = readContext(readerOptions);
+    } catch {
+      try {
+        context = readOrphanedProjectRootContext(readerOptions);
+        orphanedProjectRoot = true;
+      } catch {
+        context = readPrunedPluginRootContext(readerOptions);
+        prunedPluginRoot = true;
+      }
+    }
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
   // Condition 2 — the record store boundary is never relaxed.
   if (context.plugin_data !== pluginData) return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA);
-  // Condition 3 — adopting a record for a different project would move a
-  // session's anchor, which is exactly what immutability exists to prevent.
-  let projectRoot;
-  try {
-    projectRoot = canonicalDirectory(options.projectRoot, 'project root');
-  } catch {
-    return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
-  }
-  if (context.project_root !== projectRoot) return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
-  // Condition 4 — nothing to adopt when this runtime already serves the record.
+  // There is deliberately NO condition on the CALLER's project root. It protected
+  // nothing — the anchor is carried FROM the record, and the write bound is
+  // readContext plus the sibling-root and plugin_data checks — and it contradicted
+  // `resolveHookSession`, which answers `projectRoot: context.project_root` because
+  // the mutable payload cwd is never a project authority. It also made this repair
+  // unreachable in the state it exists for: a fork whose cwd was a worktree records
+  // that worktree while the harness still reports the origin repo. The full account,
+  // including why a record whose project root is GONE is ADMITTED at condition 1
+  // above while every other disagreement still refuses as `record-unreadable`,
+  // is in `docs/session-control.md` under "Unbindable
+  // sessions".
+  //
+  // Condition 3 — nothing to adopt when this runtime already serves the record.
   // Refusing here keeps adoption from being a way to re-mint a healthy session.
-  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+  // A pruned root serves nothing — the strict read already failed — so the
+  // check is skipped for it: a compatible-but-pruned record is adoptable, not
+  // "already served", because no installation can bind it any more.
+  if (!prunedPluginRoot && servesRecordedRuntime(context, executingPluginRoot, context.host)) {
     return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
   }
-  // Condition 5 — the same structural bound servesRecordedRuntime applies: a
+  // Condition 4 — the same structural bound servesRecordedRuntime applies: a
   // marketplace install lands beside the versions it replaces, a development
   // checkout never does, so a --plugin-dir tree cannot adopt an installed
   // session's record no matter what its manifest declares.
@@ -1504,7 +1786,7 @@ function adoptableRecord(options) {
     || !ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) {
     return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
   }
-  // Condition 6 — never backwards. Only a newer tree can be expected to
+  // Condition 5 — never backwards. Only a newer tree can be expected to
   // understand an older one's state; the reverse is the direction that loses
   // data, and it stays refused here exactly as it is in runtimeLineageCompatible.
   const recordedParts = parseRuntimeVersion(context.plugin_version);
@@ -1520,7 +1802,7 @@ function adoptableRecord(options) {
       break;
     }
   }
-  // Condition 7 — the workflow document, when there is one, must be readable by
+  // Condition 6 — the workflow document, when there is one, must be readable by
   // THIS runtime. validateWorkflowState enforces `schema` and `schema_version`,
   // so a real persisted-shape break refuses here. A missing document is not a
   // disagreement: there is no shape to disagree about, and adoption leaves the
@@ -1544,124 +1826,16 @@ function adoptableRecord(options) {
     context,
     recorded: context.plugin_version,
     executing: executingVersion,
+    // WHICH relaxed reader answered, carried rather than re-derived: the caller
+    // must re-mint the record around the SAME value, and asking the filesystem a
+    // second time would let a directory re-created between the two reads turn a
+    // waived check into a canonicalized one. The two are mutually exclusive —
+    // the readers pin each other's waiver off — so at most one is ever true.
+    orphanedProjectRoot,
+    prunedPluginRoot,
   };
 }
 
-// Stale leases are moved OUT of the records directory, never renamed inside it:
-// listRecords fails on any entry that does not end in `.json`, so a set-aside
-// file left in place would be strictly worse than the stale lease it replaced.
-//
-// Why they must go at all: review-evidence-lease-v1.js compares its recorded
-// plugin_root STRICTLY and listRecords propagates the first failure, so a single
-// lease minted before the adoption would fail every later lease operation for
-// this session. A lease is a short-lived evidence reservation — losing one costs
-// a repeat, not a guarantee — so this is the cheapest correct resolution, and it
-// sets them aside rather than deleting them.
-function discardSupersededLeases(pluginData, key, executingPluginRoot) {
-  const recordsDirectory = path.join(pluginData, 'review-evidence', 'v1', 'records', key);
-  // The owning module reaches this directory only through ensurePrivateDirectory,
-  // which rejects a symlink, an alias and unsafe permissions or ownership. This
-  // copy cannot call that constructor (the dependency runs the other way), so it
-  // re-applies the part that matters before it renames anything: a symlinked or
-  // aliased records directory is left ALONE rather than swept through.
-  try {
-    const stat = fs.lstatSync(recordsDirectory);
-    // `unsafe` distinguishes a store this sweep REFUSED to touch from the
-    // ordinary "no lease was ever minted" case. Both discard nothing; only one of
-    // them is a clean outcome, and the caller must be able to say which.
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: true };
-    if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
-      return { discarded: 0, failed: [], unsafe: true };
-    }
-  } catch (error) {
-    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' };
-  }
-  let entries;
-  try {
-    entries = fs.readdirSync(recordsDirectory);
-  } catch {
-    // ONE shape on every path. The directory only exists once a lease was
-    // minted, so this is the ORDINARY case — a scalar here would hand the
-    // caller `undefined` for both fields and make the reporter throw AFTER the
-    // record swap had already succeeded, reporting failure for a completed
-    // adoption.
-    return { discarded: 0, failed: [] };
-  }
-  const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
-  let discarded = 0;
-  const failed = [];
-  // The DESTINATION gets the same treatment as the source. mkdirSync with
-  // `recursive` does NOT fail on an existing symlink-to-directory, so without
-  // this a pre-created link there would quietly receive every moved lease while
-  // the sweep still reported a clean count.
-  const asideIsSafe = () => {
-    try {
-      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
-      const stat = fs.lstatSync(asideDirectory);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
-      if (process.platform !== 'win32') {
-        if ((stat.mode & 0o077) !== 0) return false;
-        if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  // `unsafe` carries the whole diagnosis, exactly as the three source-unsafe
-  // returns do. Listing every entry as `failed` here would name leases the
-  // keep-branch would have left alone, and the reporter would print two
-  // contradictory warnings about the same sweep.
-  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: true };
-  for (const name of entries.sort()) {
-    // EVERY entry listRecords would reject, not only the `.json` ones: it fails
-    // the whole set on an unexpected name, so a leftover `.tmp` from a killed
-    // lease write wedges it exactly as hard as a stale record would.
-    const file = path.join(recordsDirectory, name);
-    let record;
-    try {
-      record = JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch {
-      record = null;
-    }
-    // An unreadable lease is moved aside too: listRecords would fail on it just
-    // as hard, and leaving it would defeat the whole point of this sweep.
-    // Keep a SUPERSET of what listRecords accepts — stated as a superset because
-    // that is what it is. Three of that reader's conjuncts are mirrored here (the
-    // id shape, lease_id agreeing with the filename, and the executing root),
-    // which is what stops an entry it rejects from being kept on plugin_root
-    // alone. NOT mirrored: it also rejects a symlinked or multiply-linked record
-    // file, a non-canonical spelling, an oversized one, and every validateRecord
-    // violation. An entry failing only those while naming the executing root is
-    // therefore KEPT and keeps wedging later lease operations — a residual, not
-    // the main gap, because a lease can only name the executing root if that
-    // runtime minted it, and none can be minted while the session is unbound.
-    // The id shape is a hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js,
-    // pinned by test-versioned-plugin-upgrade.sh; keep the two in step.
-    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
-    if (LEASE_RECORD_ID_RE.test(leaseId)
-      && record && typeof record === 'object'
-      && record.lease_id === leaseId
-      && record.plugin_root === executingPluginRoot) {
-      continue;
-    }
-    try {
-      // No mkdir here: asideIsSafe() already created AND validated the directory.
-      // Re-creating it per entry would succeed silently on a link swapped in after
-      // the guard, moving the lease through it — the exact hazard the guard closes.
-      fs.renameSync(file, path.join(asideDirectory, name));
-      discarded += 1;
-    } catch {
-      // A lease that could NOT be moved is reported separately, never folded
-      // into the success count and never swallowed. Counting only successes
-      // would render a partial sweep as a clean adoption while the exact wedge
-      // this sweep exists to prevent survives.
-      failed.push(name);
-    }
-  }
-  return { discarded, failed };
-}
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
@@ -1690,6 +1864,21 @@ function adoptContext(options) {
       pluginRoot: executingPluginRoot,
       pluginData,
       createdAt: verdict.context.created_at,
+    }, {
+      // Taken from the verdict, never re-derived from the filesystem. When it is
+      // set the anchor is a directory that no longer exists, so buildContext
+      // waives the existence check and keeps the recorded spelling; the new
+      // record then lands the session in the ordinary orphaned-project-root
+      // state, where reads and this repair's own diagnostics work and writes stay
+      // denied. Nothing recreates the deleted directory: the provenance write
+      // below is guarded by the workflow document's own existsSync, which is
+      // false for a root that is gone, so mutateWorkflowState — which mkdirs
+      // every missing component — is never reached.
+      //
+      // The SECOND argument, never a key of the object above: that object is the
+      // shape registerContext spreads a caller's options into, and this waiver
+      // must not be reachable from there.
+      allowMissingProjectRoot: verdict.orphanedProjectRoot,
     });
     // Set aside, never overwrite. "The record is immutable" stays literally true:
     // no record is ever rewritten, a second one is minted beside it, and the
@@ -1756,6 +1945,13 @@ function adoptContext(options) {
       recorded: verdict.recorded,
       executing: verdict.executing,
       projectRoot: verdict.context.project_root,
+      // Reported so the caller can say what the session is bound to NOW. For a
+      // vanished project root that is an anchor which no longer exists, which
+      // leaves writes denied after a successful adoption; announcing an
+      // unqualified success there would send the user straight into a deny they
+      // were just told was repaired.
+      orphanedProjectRoot: verdict.orphanedProjectRoot,
+      prunedPluginRoot: verdict.prunedPluginRoot,
     };
   });
 
@@ -1765,6 +1961,7 @@ function adoptContext(options) {
   // failure here is reported to the caller, never smoothed over, and never
   // reverts an adoption that already succeeded.
   let provenance = 'recorded';
+  let adoptProvenanceCause = null;
   // A session with no workflow document is a state adoptableRecord explicitly
   // blesses ("a missing document is not a disagreement"), so it must not be
   // routed through the failure branch below — mutateWorkflowState fails closed on
@@ -1796,18 +1993,1215 @@ function adoptContext(options) {
         return state;
       });
     } catch (error) {
-      provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+      // Bare token plus a separate cause, the same split renderRestoreOutcome's
+      // RESTORED arm takes when it prints `provenance` and `provenance cause` as two
+      // rows.
+      // `error.message` on this path carries `session-control-v1: ` from fail(), so a
+      // composed `unavailable: <message>` trips safeDisplayValue's PAIR_SEPARATOR
+      // (`/ :|: /`) and folds the ROW, label included.
+      provenance = 'unavailable';
+      adoptProvenanceCause = error && error.message ? error.message : 'unknown';
     }
   }
 
-  const leases = discardSupersededLeases(pluginData, key, adopted.context.plugin_root);
-
+  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and the
+  // adoption ENTRY SCRIPT calls it after this function returns — see that module's
+  // header for why the direction had to invert (requiring the lease owner from this
+  // file is a cycle). The consequence for a caller: an adoption is not complete
+  // until the sweep has also run, and a host that forgets it gets a re-minted record
+  // with the superseded leases still wedging every later lease operation.
   return {
     ...adopted,
     provenance,
-    leasesDiscarded: leases.discarded,
-    leasesFailed: leases.failed,
-    leasesUnsafe: Boolean(leases.unsafe),
+    provenanceCause: adoptProvenanceCause,
+  };
+}
+
+// A DIFFERENT wedge from the one adoption exits, and confusing the two is the
+// mistake this block exists to prevent. Adoption answers "this runtime may not
+// serve the record"; this answers "this runtime serves the record perfectly
+// well, and the workflow document the record anchors is GONE". The observed
+// cause is a worktree deleted and re-created — `.zensu/state/` is gitignored, so
+// the document does not come back — followed by a compaction that continues the
+// SAME session rather than starting a new one.
+//
+// The state is fail-closed by design and STAYS so. revalidateWorkflowState in
+// reviewer-capability-v1.js throws on a missing document precisely so that
+// deleting one file cannot turn an armed chain into "never active", and that
+// hook is on the `.*` matcher, so it denies every tool. Nothing here relaxes it.
+// The repair REBUILDS the document and leaves provenance behind.
+//
+// What it costs, stated here because the code cannot state it later: a chain
+// that was live when the document vanished is GONE. The rebuilt baseline reads
+// "never active", because that is all a fresh baseline can say. That is why the
+// writer records BASELINE_REBUILT on every path.
+//
+// Say what GATES it precisely, because an earlier wording here claimed a consent
+// control that does not exist. TWO callers reach this writer and NEITHER is user
+// consent. The adopt entry point requires the literal `--confirm` in argv, which
+// is a token the model supplies to itself — the same prose-backed, not
+// consent-backed shape CLAUDE.md already records for `--autopilot-release`; the
+// "wait for the user to say yes" rule lives in skills/adopt-session/SKILL.md, not
+// in a gate. And claude-session-control-v1.js's SessionStart record-exists branch
+// reaches it with NO token at all, on a clean ENOENT, so a session could delete
+// its own document and wait for an automatic compaction. That is an accepted gap
+// recorded in CLAUDE.md §"Workflow-Baseline Repair", not a control.
+const BASELINE_STATES = {
+  PRESENT: 'present',
+  MISSING: 'missing',
+  UNSAFE: 'unsafe',
+  UNREADABLE: 'unreadable',
+};
+
+// Refusals name the BIND, never the document: reaching a verdict about the
+// document at all requires the record to be provably this session's and this
+// runtime's. Separate vocabulary from ADOPTION_REFUSALS on purpose — the two
+// commands answer different questions, and one shared set would invite a caller
+// to render one's remedy for the other's cause.
+const BASELINE_REFUSALS = {
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  NOT_SERVED: 'not-served-by-executing-runtime',
+};
+
+const BASELINE_HISTORY_PHASE = 'BASELINE_REBUILT';
+const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
+
+// The two ways repairWorkflowBaseline can refuse, as CODES rather than as prose a
+// caller has to substring-match. The distinction is the whole reason they exist:
+// ALREADY_PRESENT is benign — someone else healed the document between the
+// caller's verdict and this one, which is the outcome the caller wanted — while
+// NOT_REPAIRABLE means something is sitting at that path and the refusal is the
+// point. Callers that cannot tell them apart end up contradicting each other.
+const BASELINE_ALREADY_PRESENT_CODE = 'ZENSU_WORKFLOW_BASELINE_ALREADY_PRESENT';
+const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
+// The OWNER-side predicate, beside `isBaselineAlreadyPresent` and
+// `isRestoreRootAlreadyPresent`. This was the one code in the family whose
+// comparison was spelled twice — here and again in the report layer — which is the
+// class `baselineProvenanceUnrecorded` above records being extracted to remove.
+const isBaselineNotRepairable = (error) => Boolean(
+  error && error.code === BASELINE_NOT_REPAIRABLE_CODE);
+
+// The PREDICATE, not the raw constant, is what consumers must use. Comparing
+// `error.code === core.BASELINE_ALREADY_PRESENT_CODE` reads as a match whenever
+// BOTH sides are undefined — a port that copies the writer without the constant,
+// or any tree where the export is dropped, then reports EVERY refusal as the
+// benign race: headline "nothing to repair", exit 0, tamper included. A function
+// that tests a non-empty string cannot fail that way.
+// The guard is the FUNCTION, never a conjunct inside it. Two `typeof` tests used
+// to sit here against a module-scope literal declared a few lines above, where
+// they can never be false — they read as a defense while defending nothing. What
+// actually removes the hazard is that a consumer compares through a call instead
+// of against a constant it would have to import.
+function isBaselineAlreadyPresent(error) {
+  return Boolean(error) && error.code === BASELINE_ALREADY_PRESENT_CODE;
+}
+
+function baselineRefusal(reason) {
+  return { ok: false, reason };
+}
+
+// Classifies the document without reading it when a cheaper test already
+// decides, and the ORDER is the contract: the safety tests run before the parse,
+// so a symlink or a hard link is reported as tamper rather than as a document
+// that merely failed to validate. It mirrors revalidateWorkflowState in
+// reviewer-capability-v1.js — the gate whose refusal sends a user here — so the
+// two agree about which shapes are unsafe. MAX_JSON_BYTES is the same bound
+// readRegularFile applies, so a document called oversized here is one the reader
+// would refuse anyway.
+//
+// The DIRECTORY components are judged first, and leaving them out was a real
+// defect rather than an omission: `lstat` resolves every component except the
+// last, so a symlinked `.zensu` or `.zensu/state` whose target lacks the document
+// answered ENOENT and classified MISSING/repairable — a tamper shape offered as
+// rebuildable, while the write then failed at ensureDescendantDirectory and the
+// report told the user to retry the repair that cannot succeed. The gate this
+// claims to mirror has always checked them; the claim was false until it did.
+// The SHAPE half, split out because it needs no session id. Everything above the
+// parse — the directory ladder and the leaf's safety tests — answers MISSING or
+// UNSAFE from the filesystem alone, and PRESENT here means only "the shape is
+// fine, now read it". `/zensu:doctor` holds a session KEY rather than a raw
+// session id, so it can reach this and not the full classifier; without the split
+// it was left deciding MISSING from a `readdirSync` listing, which follows
+// symlinks and therefore promised a rebuild for shapes the repair refuses by
+// design, and rendered NOTHING when a symlinked component resolved to a real
+// directory holding the document while the gate denied every tool.
+// ONE walk over the directory components, reporting BOTH the verdict and the
+// component that produced it. It existed twice — once in the classifier that
+// DECIDES the verdict, once in the namer that decides WHICH path the operator is
+// told to inspect — as two hand-written copies with nothing pinning them
+// together. Adding a component or changing a safety test in the classifier alone
+// left the namer falling through to the leaf and naming it for an ancestor fault,
+// which is verbatim the defect the namer was written to fix, and it would have
+// failed silently. Both public signatures are unchanged.
+//
+// The components are composed from WORKFLOW_STATE_SEGMENTS rather than spelled
+// here, because that constant's own comment calls itself the ONE spelling of the
+// document's location: a layout move that edited it while these walks kept
+// validating `.zensu/state` would have judged one tree while the leaf named
+// another.
+//
+// The walk is anchored on the RESOLVED project root, not on the caller's
+// spelling. revalidateWorkflowState can compare each component against itself
+// because its projectRoot arrives canonical from the bound record; the classifier
+// is also called with a raw fixture path, and on macOS a temp root is spelled
+// `/var/...` by the caller and `/private/var/...` by the kernel — so requiring
+// the caller's own spelling to be canonical reported every healthy document under
+// such a root as tamper. Resolving the root once keeps the property that matters
+// (no symlink at `.zensu` or `.zensu/state`) without inheriting an ancestor's
+// legitimate aliasing.
+function baselineComponentLadder(projectRoot) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync.native(projectRoot);
+  } catch {
+    // UNSAFE for EVERY failure, ENOENT included, and that is not the same rule
+    // the component loop below uses. An absent COMPONENT is what the repair
+    // creates; an absent PROJECT ROOT is not — `initializeWorkflowState` fails on
+    // it, so calling it MISSING would set `repairable: true` and put the report
+    // back to offering a rebuild that cannot succeed, which is the exact shape
+    // this ladder was added to remove. A vanished recorded root is already owned
+    // by `readContext`, which refuses it as `record-unreadable` before any caller
+    // reaches here.
+    return { rootReal: null, verdict: BASELINE_STATES.UNSAFE, at: projectRoot };
+  }
+  let candidate = rootReal;
+  for (const segment of WORKFLOW_STATE_SEGMENTS) {
+    candidate = path.join(candidate, segment);
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(candidate);
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: initializeWorkflowState creates
+      // these components. Every other errno is NOT absence.
+      if (error && error.code === 'ENOENT') {
+        return { rootReal, verdict: BASELINE_STATES.MISSING, at: candidate };
+      }
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) {
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+    try {
+      if (fs.realpathSync.native(candidate) !== candidate) {
+        return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+      }
+    } catch {
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+  }
+  return { rootReal, verdict: null, at: null };
+}
+
+function classifyWorkflowBaselineShape(file, projectRoot) {
+  const ladder = baselineComponentLadder(projectRoot);
+  if (ladder.verdict !== null) return ladder.verdict;
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+    // Anything else — EACCES, ENOTDIR, a symlink loop — is NOT absence.
+    // Reporting it as missing would aim the repair at a path it cannot own.
+    return BASELINE_STATES.UNSAFE;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES) {
+    return BASELINE_STATES.UNSAFE;
+  }
+  return BASELINE_STATES.PRESENT;
+}
+
+function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+  const shape = classifyWorkflowBaselineShape(file, projectRoot);
+  if (shape !== BASELINE_STATES.PRESENT) return shape;
+  try {
+    readWorkflowState({ projectRoot, sessionId });
+  } catch {
+    return BASELINE_STATES.UNREADABLE;
+  }
+  return BASELINE_STATES.PRESENT;
+}
+
+// WHICH component made the verdict UNSAFE. The state alone cannot say: the ladder
+// returns the same bare token for a symlinked `.zensu`, a symlinked
+// `.zensu/state` and a bad leaf. Naming the leaf for all three sent the operator
+// to a path that need not exist — with `.zensu/state` symlinked elsewhere the
+// leaf is not there at all — while the diagnosis said "something is at that path"
+// and "remove the file". This file already fixed that class for the lease sweep
+// with `nameComponent()`; this is the same remedy for the same defect.
+//
+// Recomputed rather than threaded out of the classifier, so the classifier keeps
+// its one-value return and every existing caller and pin is untouched. It is only
+// ever called once, on a verdict already known to be UNSAFE.
+function baselineUnsafeComponent(projectRoot, file) {
+  const ladder = baselineComponentLadder(projectRoot);
+  // The two readings of one walk deliberately DIVERGE on the absent-component arm,
+  // and keeping that divergence is the reason this is a shared ladder rather than
+  // a shared return value. A clean ENOENT is MISSING to the classifier, because
+  // the repair creates those components; to the NAMER an absent component is not
+  // what made anything unsafe, so it falls through to the leaf exactly as the
+  // hand-written copy did by continuing past it.
+  if (ladder.rootReal === null) return projectRoot;
+  if (ladder.verdict === BASELINE_STATES.UNSAFE) return ladder.at;
+  return file;
+}
+
+// Never throws, for the reason adoptableRecord never throws: every caller is
+// already on a failure path, and an exception would replace a named condition
+// with a stack trace.
+function workflowBaselineVerdict(options) {
+  let context;
+  let executingPluginRoot;
+  let pluginData;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+    context = readContext({
+      recordsDir: options.recordsDir,
+      sessionId: options.sessionId,
+      expectedHost: options.host,
+    });
+  } catch {
+    return baselineRefusal(BASELINE_REFUSALS.RECORD_UNREADABLE);
+  }
+  if (context.plugin_data !== pluginData) {
+    return baselineRefusal(BASELINE_REFUSALS.PLUGIN_DATA);
+  }
+  // The INVERSE of adoption's condition 3, deliberately. Adoption refuses when
+  // the executing runtime already serves the record; this REQUIRES it. A record
+  // this runtime may not serve is a lineage break with its own exit — routing it
+  // here would rebuild a document under a runtime that is not allowed to read
+  // the record anchoring it.
+  if (!servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return baselineRefusal(BASELINE_REFUSALS.NOT_SERVED);
+  }
+  const file = adoptionWorkflowStatePath(context.project_root, options.sessionId);
+  const state = classifyWorkflowBaseline(file, context.project_root, options.sessionId);
+  return {
+    ok: true,
+    state,
+    // ONLY `missing` is repairable. `unsafe` and `unreadable` mean something IS
+    // sitting at that path; rebuilding over it would destroy the evidence and
+    // hand the session its capabilities back in the same step.
+    repairable: state === BASELINE_STATES.MISSING,
+    path: file,
+    // The component the refusal is ABOUT, so a diagnosis can send the operator to
+    // the thing that is actually there. Equals `path` when the leaf is at fault.
+    unsafeAt: state === BASELINE_STATES.UNSAFE
+      ? baselineUnsafeComponent(context.project_root, file)
+      : null,
+    projectRoot: context.project_root,
+    context,
+  };
+}
+
+// Rebuilds a MISSING baseline and records that it did. The verdict is evaluated
+// twice — once by the caller to report, once here to act — for the reason
+// adoptContext re-evaluates its own: between the two, the document could have
+// come back, or something could have been planted at its path.
+function repairWorkflowBaseline(options) {
+  const verdict = workflowBaselineVerdict(options);
+  if (!verdict.ok) fail(`workflow baseline is not repairable: ${verdict.reason}`);
+  if (!verdict.repairable) {
+    // TYPED, not a prose string. The refusal has two meanings a caller must be
+    // able to tell apart, and matching on the message is how that claim goes
+    // quietly wrong — the same argument reviewer-capability-v1.js makes for
+    // BASELINE_MISSING_CODE. `present` is a BENIGN race: between the caller's
+    // verdict and this one, a concurrent SessionStart or a second window healed
+    // the document, and the caller wanted it healed. Everything else is tamper.
+    // Without the code the two shipped callers disagreed: the SessionStart
+    // adapter re-classified and swallowed the race, while the adopt report
+    // reported `rebuild-failed`, exited 1, and told the user the cause had to be
+    // cleared first — for a session that was already fine.
+    const error = new Error(
+      `workflow baseline is not repairable: workflow-document-${verdict.state}`,
+    );
+    error.code = verdict.state === BASELINE_STATES.PRESENT
+      ? BASELINE_ALREADY_PRESENT_CODE
+      : BASELINE_NOT_REPAIRABLE_CODE;
+    error.baselineState = verdict.state;
+    throw error;
+  }
+  // Idempotent by construction: it returns an existing document untouched, so a
+  // concurrent writer that won the race is never overwritten.
+  //
+  // DECIDE FROM THE LOCKED CHECK, never from the verdict above it. That verdict is
+  // taken outside the state-directory lock, so a document created between it and
+  // this call is invisible to it — and the refusal ladder above only fires when
+  // the verdict ITSELF saw PRESENT. Reporting the narrower window as a rebuild
+  // this run performed appended a SECOND `BASELINE_REBUILT` entry onto somebody
+  // else's heal and printed "has been rebuilt" for work this run did not do,
+  // breaking the exactly-one invariant the suites pin. Routing it through the
+  // same typed refusal both callers already handle costs nothing and makes the
+  // benign race read the same however narrow the window was.
+  const initialized = initializeWorkflowStateDetailed({
+    projectRoot: verdict.projectRoot,
+    sessionId: options.sessionId,
+  });
+  if (!initialized.created) {
+    const raced = new Error(
+      `workflow baseline is not repairable: workflow-document-${BASELINE_STATES.PRESENT}`,
+    );
+    raced.code = BASELINE_ALREADY_PRESENT_CODE;
+    raced.baselineState = BASELINE_STATES.PRESENT;
+    throw raced;
+  }
+  // Provenance is a history entry and NOT a record or state field, exactly as it
+  // is for the adoption and for --chain-recover: a field would be a persisted
+  // shape change, which under the runtime-lineage rule costs a breaking release
+  // and would wedge every session then running.
+  //
+  // And deliberately NOT a bypass-ledger entry. The ledger records gate ESCAPES
+  // so that everything rendered under "Gates bypassed" is true; this escaped no
+  // gate, because the document a gate would have read was already gone.
+  let provenance = 'recorded';
+  let provenanceCause = null;
+  try {
+    mutateWorkflowState({
+      projectRoot: verdict.projectRoot,
+      sessionId: options.sessionId,
+      actor: 'main-v1',
+      workflowState: 'baseline_rebuilt',
+      event: 'baseline-rebuilt',
+    }, (state) => {
+      const history = Array.isArray(state.history) ? state.history : [];
+      // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+      // validates and the one every existing history writer sets.
+      history.push({
+        step: '',
+        phase: BASELINE_HISTORY_PHASE,
+        ts: nowIso(),
+        reason: `${BASELINE_HISTORY_REASON_PREFIX}${verdict.state}`,
+      });
+      state.history = history;
+      return state;
+    });
+  } catch (error) {
+    // Reported, never smoothed over, and never rolled back: the document is real
+    // and its provenance is not. Undoing a rebuild that already succeeded would
+    // put the session back in the state this repair exists to leave.
+    // THE ROW RULE (see session-adopt-report-v1.js). A composed `unavailable: <msg>`
+    // trips safeDisplayValue's PAIR_SEPARATOR and folds the ROW, label included —
+    // MEASURED for the sibling producers. Bare token, cause on its own field.
+    provenance = 'unavailable';
+    provenanceCause = error && error.message ? error.message : 'unknown';
+  }
+  return {
+    path: verdict.path,
+    projectRoot: verdict.projectRoot,
+    provenance,
+    provenanceCause,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Restoring a vanished recorded PROJECT root.
+//
+// A THIRD wedge, and the one most easily confused with the two above it.
+// adoptableRecord answers "this runtime may not SERVE the record";
+// workflowBaselineVerdict answers "it serves it fine and the workflow document is
+// gone". This one answers "it serves it fine and the DIRECTORY the record anchors
+// is gone" — the ordinary shape after `git worktree remove`, where readContext
+// throws, readOrphanedProjectRootContext succeeds, reads still work and every
+// write denies.
+//
+// WHY THIS IS NOT THE RE-ANCHORING THAT WAS REFUSED. CLAUDE.md records the
+// refusal of re-anchoring a record to a live directory: a session may delete its
+// own root, so a caller-named anchor would become a cross-project write escape.
+// Nothing here accepts a caller-named anchor. The path comes only from
+// context.project_root, so the anchor never MOVES — the source-write gate keeps
+// comparing against exactly the root it compared against before, and creating a
+// directory at a path the record already names restores the authority the session
+// already had and adds none. Do not "generalize" this into a mode that takes a
+// destination; that is the refused design, not an extension of this one.
+const RESTORE_ROOT_REFUSALS = Object.freeze({
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  // Spelled exactly as BASELINE_REFUSALS.NOT_SERVED, because the CONDITION is
+  // identical — both are produced by servesRecordedRuntime. The sets stay separate
+  // objects for the reason stated above; what a separate vocabulary does not license
+  // is one constant NAME carrying two wire values, which turns a lookup against the
+  // wrong set into a silent false instead of a loud miss.
+  NOT_SERVED: 'not-served-by-executing-runtime',
+  ROOT_PRESENT: 'root-present',
+  UNSAFE_ANCESTOR: 'unsafe-ancestor',
+  TOO_MANY_MISSING_COMPONENTS: 'too-many-missing-components',
+  // Its OWN member rather than a second cause folded into UNSAFE_ANCESTOR: that one
+  // says the tree changed under the record, and its remedy is to inspect a link. This
+  // one says the tree is intact and the PERMISSIONS on it are wrong, whose remedy is a
+  // chmod or a different parent. One wire value carrying both would render a remedy
+  // for the other half in every report that hit it.
+  UNSAFE_ANCESTOR_OWNERSHIP: 'unsafe-ancestor-ownership',
+});
+
+const RESTORE_HISTORY_PHASE = 'PROJECT_ROOT_RESTORED';
+const RESTORE_HISTORY_REASON_PREFIX = 'project-root-restored: ';
+// The RACED half of the reason, and it is EXPORTED because a READER needs it. The
+// `/zensu:doctor` restore row states the repair's cost — the directory came back
+// EMPTY and is not a git worktree — and that sentence is true of a run that planted
+// the components and FALSE of one that lost the race, whose documented cause is a
+// `git worktree add` in another terminal: a populated worktree with a branch. The
+// row therefore has to tell the two entries apart, and the only signal in the
+// persisted document is this suffix. Hand-copying it into the renderer would put the
+// same drift trap there that the phase token already avoids by reading the core, so
+// a renderer that cannot resolve this export withholds the claim instead of guessing.
+const RESTORE_HISTORY_RACED_SUFFIX = ', completed by another run';
+
+// A JUDGEMENT, not a measurement, and stated as one so the next reader can raise
+// it on evidence rather than on taste. One removed worktree leaves a handful of
+// missing components below a directory that is still there; a gap deeper than
+// this means the whole tree MOVED, where re-creating a stub helps nobody and
+// quietly plants an empty directory in a place the user did not ask for.
+const RESTORE_MAX_MISSING_COMPONENTS = 4;
+
+// Reached only when the repair loses a race with something that re-created the
+// directory between the verdict and the write. TYPED rather than a prose string,
+// for the reason repairWorkflowBaseline gives about its own benign race: the
+// caller has to be able to tell "somebody else already did it" from tamper, and
+// matching on a message is how that claim goes quietly wrong.
+const RESTORE_ALREADY_PRESENT_CODE = 'ZENSU_PROJECT_ROOT_ALREADY_PRESENT';
+
+function restoreRootRefusal(reason, at) {
+  return at === undefined ? { ok: false, reason } : { ok: false, reason, at };
+}
+
+function isRestoreRootAlreadyPresent(error) {
+  return Boolean(error) && error.code === RESTORE_ALREADY_PRESENT_CODE;
+}
+
+// Walks UP from the recorded root to the nearest component that still exists, and
+// judges that component. Two properties carry it and neither is decoration.
+//
+// The symlink test is NOT the whole check. lstat on the nearest existing
+// component reports that component's own kind, so a symlink further UP the chain
+// is invisible to it — hence the realpath equality test, the same one
+// baselineComponentLadder applies to `.zensu` and `.zensu/state`. Following such
+// a link would create the recorded root inside a DIFFERENT tree, which is the one
+// escape this whole design exists to avoid.
+//
+// Refusing a symlinked ancestor costs nothing legitimate: every project_root is
+// minted through canonicalDirectory, i.e. realpathSync.native, so at mint time the
+// path contained no link at all. A link there NOW means the tree changed under the
+// record, which is exactly the case to refuse rather than resolve through.
+//
+// THE INPUT MUST BE CANONICAL, and that is a real precondition rather than a
+// nicety — the realpath equality test refuses any spelling that is not. The one
+// production caller satisfies it by construction (context.project_root is minted
+// through realpathSync.native), which is the whole reason the strict form is
+// affordable here. A caller handing it an uncanonicalized path gets
+// `unsafe-ancestor` for a perfectly ordinary tree: on macOS every path under
+// /var/folders resolves to /private/var/folders, so a hand-built temp path refuses.
+// That is the trap deletableTarget records in the doctor renderer — it walks from
+// the canonical root for exactly this reason — and it is why the suite
+// canonicalizes its fixture roots rather than relaxing this test.
+// The ancestor-permission rule, ONE implementation, named rather than inlined so the
+// ladder's refusal and its own unit cases judge the same thing.
+//
+// THREE ways it declines to decide, each deliberate. On a host with no POSIX identity —
+// win32 — `process.getuid` is absent and the mode bits are not the access control, so the
+// check ABSTAINS rather than refusing every restore there. A stat that carries no numeric
+// `uid` or `mode` is the same case. And the STICKY bit is a full exemption, taken with its
+// cost stated rather than argued away: `/tmp` is writable by every user and sticky by
+// design, and without the exemption the repair would refuse every recorded root under a
+// temp directory. What sticky buys is NARROWER than what this rule asks for. It constrains
+// `unlink` and `rename` of entries that ALREADY EXIST, so an entry this run created cannot
+// be removed or renamed out from under it by another user. It says nothing about CREATE, and every
+// component this writer plants is one `verdict.missing` proved ABSENT — so under a sticky
+// ancestor a co-tenant can still win the race to the name, and the realpath re-verification
+// after each mkdir is what catches that, never this rule. (The phrasing avoids the literal
+// that R12b reserves for the retraction below about the mode of the directory this repair
+// CREATES — a different claim from this one, which is about an ancestor the repair never
+// touches.)
+//
+// `root` is accepted as an owner beside the caller: a system-managed parent such as
+// `/opt` or `/srv` is a legitimate place for a project, and refusing it would invent a
+// location policy the record never asked for — the same reasoning that refused a location
+// allowlist for the destination itself.
+// The ABSTAIN ladder, shared by both rules below so a host that cannot decide
+// abstains identically wherever the question is asked. Hoisted rather than copied:
+// the two predicates disagree about the WRITE BITS on purpose, and a second copy of
+// the part they agree on is what lets that deliberate divergence drift into an
+// accidental one.
+function restoreOwnershipUndecidable(componentStat) {
+  if (typeof process.getuid !== 'function') return true;
+  return !componentStat
+    || typeof componentStat.uid !== 'number'
+    || typeof componentStat.mode !== 'number';
+}
+
+// THE LEAF RULE — the OWNER half alone, and it is a SEPARATE predicate rather than a
+// flag because the two questions are different. The recorded project root is the
+// DESTINATION this repair hands back, never a directory it plants a child inside, so
+// the swap window the write-bits half exists to close does not exist there: nothing is
+// created under the leaf by this function. Its mode is the user's own business, and a
+// worktree created under the ordinary umask 002 is 0775 — applying the ancestor rule to
+// it turned "the directory came back between the check and the write" into
+// `FAILED` / exit 1 for the most common shape of the benign race.
+//
+// What still has to hold is the owner: announcing ALREADY RESTORED over a directory
+// belonging to somebody else tells the user their anchor is back when what is at that
+// path is not theirs. `root` is accepted for the same reason it is accepted below.
+function restoreRootOwnerSafe(componentStat) {
+  if (restoreOwnershipUndecidable(componentStat)) return true;
+  return componentStat.uid === process.getuid() || componentStat.uid === 0;
+}
+
+function restoreAncestorPermissionsSafe(componentStat) {
+  if (restoreOwnershipUndecidable(componentStat)) return true;
+  // The owner half is the leaf rule, called rather than re-spelled: an ancestor this
+  // repair may plant inside must satisfy everything the destination must satisfy, and
+  // then one thing more.
+  if (!restoreRootOwnerSafe(componentStat)) return false;
+  if ((componentStat.mode & 0o1000) !== 0) return true;
+  return (componentStat.mode & 0o022) === 0;
+}
+
+// The same rule over EVERY component of a chain, which is what the ladder's own
+// comment always claimed and what it did not do. Judging the nearest existing
+// component alone leaves a GRANDPARENT open to every user's write above a self-owned
+// parent
+// unexamined, and the realpath equality test beside it proves the chain is LINK-FREE
+// while saying nothing about who may write to it — so the whole subtree stayed
+// replaceable while the check passed.
+//
+// Modelled on `assertSecureWorkspaceRoot` in `review-evidence-lease-v1.js`, which has
+// held the stricter rule all along for a LESS dangerous operation — reading a lease
+// workspace — than this one, which creates a directory at an arbitrary absolute path.
+// The divergence is what this closes; the template is not copied blindly, because that
+// walker also enforces a 0700 leaf, which is a rule about a directory IT creates and
+// would refuse every ordinary project root here.
+//
+// Returns the FIRST offending component walking DOWN from the filesystem root, so the
+// value is the HIGHEST one that fails rather than the nearest existing one. The
+// renderer labels it accordingly; do not reuse the sibling refusal's row here.
+//
+// A component it cannot stat is NOT reported, and the honest reason is narrower than
+// the one this comment used to give. It claimed "the ladder above already answers for
+// absence and for an unreadable component", which is true only from the nearest
+// EXISTING component downwards — the ladder walks UP from the recorded root and stops
+// there, so every ancestor ABOVE it, which is exactly what this walk covers, is one the
+// ladder never stats. So this arm fails OPEN, and nothing else answers for it. The
+// exposure is narrow rather than absent: `lstat` here succeeds for every ancestor of a
+// component the ladder just stat'ed successfully, because that stat already required
+// search permission on the whole chain — what remains is a permission change racing
+// between the two walks. Refusing instead was weighed and declined: an unreadable
+// ancestor is the ladder's own UNSAFE_ANCESTOR cause, and answering it a second time
+// here would replace a precise refusal with a less precise one.
+function restoreAncestorChainOffender(dir) {
+  const parsed = path.parse(dir);
+  const relative = path.relative(parsed.root, dir);
+  const segments = relative === '' ? [] : relative.split(path.sep);
+  let current = parsed.root;
+  for (let index = 0; ; index += 1) {
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (!restoreAncestorPermissionsSafe(componentStat)) return current;
+    if (index >= segments.length) return null;
+    current = path.join(current, segments[index]);
+  }
+}
+
+function restoreRootComponentLadder(projectRoot) {
+  const missing = [];
+  let candidate = projectRoot;
+  for (;;) {
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(candidate);
+    } catch (error) {
+      // ENOENT is a component the repair creates. ENOTDIR is ALSO absence — it
+      // means some ancestor is a file, so this path cannot exist either — and it
+      // is handled by continuing UP rather than refusing here, so the refusal
+      // names the file that is actually there instead of a child path that does
+      // not exist. That is the same lesson baselineUnsafeComponent records: an
+      // `at` the operator cannot inspect sends them to the wrong place. The walk
+      // then meets that file as the nearest EXISTING component and refuses it by
+      // the isDirectory test below. Every other errno — EACCES, a symlink loop —
+      // is NOT absence, and answering "missing" for it would aim a mkdir at a
+      // path this process cannot see.
+      if (!error || (error.code !== 'ENOENT' && error.code !== 'ENOTDIR')) {
+        // The candidate has NOT been proven to exist — the lstat on it is what just
+        // failed — so the refusal must not hand it to a renderer that labels `at` as
+        // the nearest EXISTING component. On the first iteration `candidate` IS the
+        // recorded root, and the report then told the operator to inspect a path that
+        // is very likely absent. That is the same failure the ENOTDIR arm above states
+        // it avoids, applied to one arm and not to its neighbour. The path is still
+        // carried, because it is the one an operator has to look at; only the CLAIM
+        // about it changes, and `atUnreadable` is what the renderer keys its label on.
+        const refusal = restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+        refusal.atUnreadable = true;
+        return refusal;
+      }
+      missing.push(candidate);
+      const parent = path.dirname(candidate);
+      // path.dirname is a fixed point at the filesystem root on POSIX and at a
+      // drive root on win32, so this terminates. Reaching it means NOTHING on the
+      // way to the recorded root exists, which is not a removed worktree.
+      if (parent === candidate) {
+        // No `at`. Every candidate on this walk answered ENOENT, so naming one
+        // would send the operator to a path this ladder just proved absent —
+        // the same rule the ENOTDIR arm above follows, and the renderer already
+        // omits the line when `at` is missing.
+        return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR);
+      }
+      candidate = parent;
+      continue;
+    }
+    // The recorded root itself is there. The verdict below proves absence through
+    // readOrphanedProjectRootContext before it ever calls this, so reaching here
+    // with an empty `missing` means the tree changed in between.
+    if (missing.length === 0) {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.ROOT_PRESENT, candidate);
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+    }
+    try {
+      if (fs.realpathSync.native(candidate) !== candidate) {
+        return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+      }
+    } catch {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+    }
+    // WHO may write here. Every test above establishes WHAT this component is — a real,
+    // canonical, link-free directory — and none of them asks who else can change it. The
+    // loop then plants a directory inside it, re-verifying each created component by
+    // realpath, which NARROWS the swap window and cannot close it: Node exposes no
+    // `mkdirat`, so the name is resolved again on every syscall. Under an ancestor a
+    // co-tenant may write, that window is theirs to win. Refusing it closes the window by
+    // not opening it.
+    const offender = restoreAncestorChainOffender(candidate);
+    if (offender !== null) {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP, offender);
+    }
+    return {
+      ok: true,
+      nearestExisting: candidate,
+      // Top-down, which is the order they are created in and the order a report
+      // reads in. `missing` was built walking up.
+      missing: missing.slice().reverse(),
+    };
+  }
+}
+
+// Never throws: like adoptableRecord, every caller is already on a failure path,
+// and an exception would replace a named condition with a stack trace.
+//
+// The STRICT read must FAIL and the orphan read must SUCCEED. That makes this
+// verdict disjoint from the healthy case BY CONSTRUCTION rather than by an
+// ordering the next edit could break — and it is why a root that is present, or a
+// record broken in some other way, can never reach the write below.
+function restoreRootVerdict(options) {
+  let executingPluginRoot;
+  let pluginData;
+  let context;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+  } catch {
+    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  }
+  const readerOptions = {
+    recordsDir: options.recordsDir,
+    sessionId: options.sessionId,
+    expectedHost: options.host,
+  };
+  let strictReadSucceeded = false;
+  try {
+    readContext(readerOptions);
+    strictReadSucceeded = true;
+  } catch {
+    // Expected in the state this repair exists for.
+  }
+  if (strictReadSucceeded) return restoreRootRefusal(RESTORE_ROOT_REFUSALS.ROOT_PRESENT);
+  try {
+    context = readOrphanedProjectRootContext(readerOptions);
+  } catch {
+    // The strict read failed for some OTHER reason — a digest mismatch, a schema
+    // break, a pruned installation. Those have their own exits; this one must not
+    // silently stand in for them.
+    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE);
+  }
+  if (context.plugin_data !== pluginData) {
+    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.PLUGIN_DATA);
+  }
+  // The same bind workflowBaselineVerdict requires, for the same reason: creating
+  // the anchor of a record this runtime is not allowed to read would repair the
+  // wrong half. A lineage break has its own exit, and it is adoption.
+  if (!servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return restoreRootRefusal(RESTORE_ROOT_REFUSALS.NOT_SERVED);
+  }
+  const ladder = restoreRootComponentLadder(context.project_root);
+  if (!ladder.ok) return ladder;
+  if (ladder.missing.length > RESTORE_MAX_MISSING_COMPONENTS) {
+    return {
+      ok: false,
+      reason: RESTORE_ROOT_REFUSALS.TOO_MANY_MISSING_COMPONENTS,
+      at: ladder.nearestExisting,
+      missingCount: ladder.missing.length,
+      limit: RESTORE_MAX_MISSING_COMPONENTS,
+    };
+  }
+  return {
+    ok: true,
+    projectRoot: context.project_root,
+    nearestExisting: ladder.nearestExisting,
+    missing: ladder.missing,
+    context,
+  };
+}
+
+// ONE predicate for "the rebuild happened and its BASELINE_REBUILT history entry did
+// not". It was spelled three times with three different tests — in the adopt report's
+// two renderers and in the SessionStart self-heal — and the three had already diverged
+// on which provenance values count. `existing` is excluded because nothing was rebuilt
+// there, so nothing was owed a history entry.
+function baselineProvenanceUnrecorded(baseline) {
+  if (!baseline || typeof baseline !== 'object') return false;
+  return baseline.provenance !== 'recorded' && baseline.provenance !== 'existing';
+}
+
+// ONE builder for the benign race. It was constructed verbatim at three sites, and a
+// suite row pinned the DUPLICATION (`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'`
+// equal to 3) rather than the property. The claim worth holding is that every
+// producer routes through here, which is what that row asserts now.
+//
+// This block sat above `baselineProvenanceUnrecorded` for a release — two functions
+// from its subject — so a reader arriving at that predicate met a paragraph about
+// something else. R12d grades the OFFSET rather than the text, because a needle alone
+// cannot see which function a comment introduces.
+function restoreRootAlreadyPresentError(created) {
+  const raced = new Error(
+    `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
+  );
+  raced.code = RESTORE_ALREADY_PRESENT_CODE;
+  raced.created = Array.isArray(created) ? created.slice() : [];
+  return raced;
+}
+
+// Does `candidate` name a directory the RECORD CAN USE? Three answers in one call,
+// because the writer has to tell them apart and a bare `lstat` cannot: absent,
+// present-but-unusable, present-and-usable.
+//
+// EXPORTED for its own cases. The leaf arm that consumes it sits immediately below a
+// re-derivation of the verdict, so a present leaf is already ROOT_PRESENT there and
+// no fixture can reach the arm itself — routing the decision through one helper is
+// what gives the discrimination coverage at all.
+//
+// `real` is `realpathSync.native(candidate) === candidate`, which is the ladder's own
+// whole-chain test: equality proves transitively that NO component on the way here is
+// a link, not merely that the leaf is not one. A dangling link, a regular file, a
+// FIFO and a directory reached through a symlinked parent all answer present-unusable.
+function restoreRootRealDirectory(candidate) {
+  let entry;
+  try {
+    entry = fs.lstatSync(candidate);
+  } catch (error) {
+    // ENOENT and ENOTDIR are both absence: an ancestor that is a file means this
+    // path cannot exist either. Every other errno is NOT absence — EACCES and a
+    // symlink loop mean the process cannot see what is there — so they answer
+    // present-unusable, which is the refusing direction.
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+      return { present: false, real: false };
+    }
+    return { present: true, real: false };
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) return { present: true, real: false };
+  try {
+    // The STAT travels with the verdict. The arm that adopts a component this run did
+    // not create has to judge its owner and mode by the ladder's own rule, and taking a
+    // second lstat there would judge a different instant than the one the realpath test
+    // just proved — the two reads are what a swap in between would sit inside.
+    return { present: true, real: fs.realpathSync.native(candidate) === candidate, stat: entry };
+  } catch {
+    return { present: true, real: false };
+  }
+}
+
+// Re-creates the recorded project root and rebuilds the workflow baseline in the
+// same run. The verdict is evaluated twice — once by the caller to report, once
+// here to act — for the reason adoptContext and repairWorkflowBaseline re-evaluate
+// their own: between the two, the directory could have come back, or something
+// could have been planted on the way to it.
+//
+// THE ORDER IS THE CONTRACT: mkdir, then baseline, then provenance. The provenance
+// entry lives IN the workflow document, so it has nowhere to go until the baseline
+// exists, and the baseline cannot be written until the directory does.
+//
+// The baseline half never rolls the mkdir back and never throws out of here. The
+// directory is the primary repair — it is what un-denies the write gate — and a
+// failed document rebuild is reported so the caller can say so, exactly as
+// repairWorkflowBaseline reports a failed provenance write rather than undoing a
+// rebuild that succeeded.
+// `deps` is a FILESYSTEM seam and deliberately not a verdict one. An injectable
+// verdict would delete the TOCTOU re-check this function exists to be; an injectable
+// mkdir leaves every check in place and lets a fixture plant a name BETWEEN two
+// iterations, which is the only way any post-verdict arm below is reachable — the
+// verdict is re-derived here, so a static fixture just changes what the ladder
+// computes. Defaulted, so every production call site is unchanged.
+function restoreWorkflowProjectRoot(options, deps) {
+  const mkdir = (deps && deps.mkdir) || ((target) => fs.mkdirSync(target, { mode: 0o755 }));
+  const verdict = restoreRootVerdict(options);
+  if (!verdict.ok) {
+    // ROOT_PRESENT is the BENIGN race and must be TYPED, not a generic fail().
+    // This re-derivation is the one that actually observes it: the caller's
+    // verdict was taken before a record read and two runtime-digest walks, so a
+    // `git worktree add` in another terminal lands inside that window far more
+    // often than inside the nanosecond-wide leaf lstat below. With an untyped
+    // throw the report printed "FAILED … Run /zensu:doctor" for a session that
+    // had just become completely healthy, which is the opposite of what
+    // RESTORE_ALREADY_PRESENT_CODE exists to express.
+    if (verdict.reason === RESTORE_ROOT_REFUSALS.ROOT_PRESENT) {
+      throw restoreRootAlreadyPresentError([]);
+    }
+    fail(`recorded project root is not restorable: ${verdict.reason}`);
+  }
+  // The TOCTOU re-check, immediately before the write and never folded into the
+  // verdict above it. It DECIDES FROM EVIDENCE rather than from presence: a bare
+  // lstat answered "the recorded project root came back" for anything at that name,
+  // so one `ln -s /nonexistent <root>` — or a `touch` — turned the fully wedged
+  // state into an exit-0 "ALREADY RESTORED". The root had not come back:
+  // readContext realpaths the value, and readOrphanedProjectRootContext names a
+  // dangling symlink or a file there as explicitly NOT this state. The verdict one
+  // line up already refuses that shape as record-unreadable; only this window used
+  // to drop the standard.
+  const leaf = restoreRootRealDirectory(verdict.projectRoot);
+  if (leaf.present) {
+    if (!leaf.real) {
+      fail(`recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR}`);
+    }
+    // The LEAF rule, not the ancestor one. Announcing ALREADY RESTORED over a directory
+    // nothing checked the owner of is the report telling the user their anchor is back
+    // while it is in fact somebody else's directory — but the ancestor rule's write-bits
+    // half has no business here, and applying it refused the ordinary umask-002 worktree.
+    if (!restoreRootOwnerSafe(leaf.stat)) {
+      fail('recorded project root is not restorable: '
+        + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+    }
+    throw restoreRootAlreadyPresentError([]);
+  }
+  // ONE COMPONENT AT A TIME, and never `recursive: true`. A recursive mkdir
+  // resolves every intermediate component through ordinary path resolution, so a
+  // symlink planted at one of them between the ladder's check and this write is
+  // FOLLOWED — which re-opens the exact escape restoreRootComponentLadder's
+  // realpath test exists to close, and which the leaf lstat above cannot see
+  // because the leaf is still absent in that scenario. Creating each component
+  // with a bare mkdir makes a planted name fail EEXIST instead, and `missing` is
+  // already ordered top-down at the ladder for precisely this loop.
+  //
+  // This narrows the race; it does not close it. Node exposes no `mkdirat`, so
+  // between two iterations a component can still be swapped, and what the loop buys
+  // depends on WHERE: `mkdir(2)` does not follow a symlink at the FINAL component, so
+  // a name planted there fails EEXIST and is refused before anything is written —
+  // while every component ABOVE it is resolved normally and a swap there is followed
+  // in silence. The post-create realpath check below is what catches the second case,
+  // and it is detection AFTER the fact: the directory has already landed in the other
+  // tree. Do not restate this as "a swap is REFUSED rather than traversed" — that is
+  // true of one of the two positions, and the check below says so in its own words.
+  //
+  // Mode is explicit so the CAP does not depend on the ambient umask being tight.
+  // State what that buys and no more: `fs.mkdirSync(target, { mode })` hands the mode
+  // to mkdir(2), which applies `mode & ~umask`, so Node does not bypass the umask and
+  // the dependence is not removed — under `umask 077` the root still lands 0700. What
+  // the explicit mode does is bound the result from ABOVE independently of the umask:
+  // under a permissive `umask 002` this yields 0755 where Node's 0o777 default would
+  // have yielded 0775. It is strictly non-widening versus that default in every umask.
+  //
+  // An earlier revision of this comment claimed the explicit mode removed the umask
+  // dependence and that the root "could land world-writable" without it. Both are
+  // false, and the second contradicts this paragraph's own premise: a umask can only
+  // CLEAR bits, so it can never add a world-write bit neither 0o777 nor 0755 was
+  // given. A maintainer reasoning from the old text would have reached the wrong
+  // conclusion about what this argument protects.
+  const created = [];
+  // A run that PLANTED components and then lost the race must still record that it
+  // did. Every raced throw fires ABOVE repairWorkflowBaseline and above the
+  // mutateWorkflowState below, so the count reached the operator on stdout only and
+  // the workflow history — which this feature names as its ONLY durable disclosure,
+  // there being deliberately no bypass-ledger entry — recorded nothing at all. The
+  // partial case is ordinary rather than contrived: two sessions can legitimately
+  // name one project_root, so both interleave per component and each ends up having
+  // created a strict subset.
+  //
+  // The flag is what the loop sets INSTEAD of throwing, and only when there is work
+  // to record. A run that created NOTHING keeps throwing exactly as before: there is
+  // no provenance to write, and an entry claiming otherwise would be false. The two
+  // pre-loop arms above are unchanged for the same reason.
+  let alreadyPresent = false;
+  for (const component of verdict.missing) {
+    try {
+      mkdir(component);
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        // EEXIST is the ONE signal this primitive gives, and all three readings of
+        // it are decided from EVIDENCE rather than from the component's position.
+        // The position alone got two of them wrong: an intermediate EEXIST was
+        // read as tamper, and a leaf EEXIST as the benign race.
+        //
+        // FIRST, the whole chain. The race the comments describe is a
+        // `git worktree add` in another terminal, and git creates every component
+        // at once — so the loop meets EEXIST on an INTERMEDIATE first. If the
+        // recorded root is now a real canonical directory the repair is complete,
+        // whatever this component is: realpath equality on the leaf proves
+        // transitively that nothing on the way to it is a link. Reporting that as
+        // `FAILED … Run /zensu:doctor` is the same wrong outcome the ROOT_PRESENT
+        // re-derivation was added to prevent, one component up.
+        const leafNow = restoreRootRealDirectory(verdict.projectRoot);
+        if (leafNow.real && !restoreRootOwnerSafe(leafNow.stat)) {
+          // Same rule, same reason as the leaf arm above the loop: a recorded root that
+          // appeared during the race is still a directory this run is about to hand the
+          // session back, and nothing else judges who owns it. The LEAF rule, because
+          // this IS the recorded root — the ancestor rule one arm down judges a
+          // component the loop would go on to plant inside.
+          // CARRIED, like every other throw site in this loop. A race that refuses
+          // here can follow components this run really planted, and a composed
+          // `fail()` message cannot name them — safeDisplayValue folds a pair.
+          try {
+            fail('recorded project root is not restorable: '
+              + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+          } catch (thrown) {
+            thrown.created = created.slice();
+            throw thrown;
+          }
+        }
+        if (leafNow.real) {
+          // The work is CARRIED, not discarded. `verdict.projectRoot` is the LAST
+          // element of `verdict.missing`, so with two or more missing components
+          // this run has already created the ones above it — and dropping `created`
+          // here made the caller print "this run created nothing" over directories
+          // it had just planted.
+          //
+          // CARRIED FURTHER than the message now: with work to record, the loop ends
+          // and the function falls through to the baseline repair and the provenance
+          // write, so what this run planted lands in the workflow history instead of
+          // living only in a line of stdout. See the flag's own comment above the loop.
+          if (created.length > 0) {
+            alreadyPresent = true;
+            break;
+          }
+          throw restoreRootAlreadyPresentError(created);
+        }
+        // SECOND, a sibling repair. ONE project_root can be named by SEVERAL
+        // records — a worktree that hosted three sessions and was then removed
+        // leaves three — so two sessions each running --restore-root --confirm is
+        // ordinary, not contrived. The loser meets EEXIST on a component the winner
+        // created, and what is at that name IS the directory the record needs.
+        // NOT pushed onto `created`: the provenance entry counts what THIS run
+        // performed, and claiming another run's work would make that entry false.
+        // EVIDENCE FIRST, identity second. Testing the identity first left one window
+        // open: a leaf whose directory becomes real BETWEEN the `leafNow` read above
+        // and this one failed the `component !== verdict.projectRoot` conjunct and fell
+        // to the refusal below, whose three claims this read has just disproven. No
+        // fixture can open that window — the seam injects mkdir, not the reads — so the
+        // ORDER is what closes it.
+        const there = restoreRootRealDirectory(component);
+        // WHICH rule depends on WHAT this component is, and the loop reaches both here:
+        // `missing` is ordered top-down and ends at the recorded root, so the last
+        // iteration judges the destination while every earlier one judges a directory
+        // the next iteration plants inside. Asking the ancestor question about the
+        // destination is the defect the leaf arms above fix; asking the leaf question
+        // about an intermediate would re-open the swap window this rule exists for.
+        const thereSafe = component === verdict.projectRoot
+          ? restoreRootOwnerSafe(there.stat)
+          : restoreAncestorPermissionsSafe(there.stat);
+        if (there.real && !thereSafe) {
+          // THE BYPASS THIS CLOSES. `restoreRootRealDirectory` tests lstat kind plus
+          // realpath equality and nothing about uid or mode, so this arm used to adopt a
+          // component the ladder would have refused — then plant the next one inside it.
+          // Two paths answering "is this safe to plant inside?" with different rules is
+          // the shape a race wins: the ladder sees a chain that is clean, and the loop
+          // meets a component a co-tenant created in between. Sticky does not prevent
+          // that: it constrains `unlink` and `rename` of EXISTING entries and says
+          // nothing about CREATE, and every component here is one that did not exist
+          // when the ladder looked.
+          // CARRIED, for the reason the sibling arm above states.
+          try {
+            fail('a component of the recorded project root exists at '
+              + `${component}, and is not one this repair may plant inside: `
+              + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+          } catch (thrown) {
+            thrown.created = created.slice();
+            throw thrown;
+          }
+        }
+        if (there.real) {
+          if (component === verdict.projectRoot) {
+            // Same rule as the leaf arm above: with work to record, end the loop and
+            // let the provenance write run. With none, throw as before.
+            if (created.length > 0) {
+              alreadyPresent = true;
+              break;
+            }
+            throw restoreRootAlreadyPresentError(created);
+          }
+          continue;
+        }
+        // THIRD, everything else: a regular file, a link, or a name this process
+        // cannot canonicalize. Now the message describes what the code ESTABLISHED
+        // rather than what it assumed — the previous wording asserted "something is
+        // at that name that the verdict did not see" without ever looking.
+        try {
+          fail(`a component of the recorded project root already exists at ${component}, `
+            + 'so the path below it cannot be created as recorded — it is not a directory, '
+            + 'or it is a link, or it does not canonicalize to itself');
+        } catch (thrown) {
+          // Every failure arm carries the work too: the operator cleaning up needs to
+          // know which components this run planted, and a message cannot carry them —
+          // a composed `fail()` string is folded by safeDisplayValue's pair rule.
+          thrown.created = created.slice();
+          throw thrown;
+        }
+      }
+      // `fail()` throws, so the catch is what builds the error. Written as a catch
+      // around the call and never through an intermediate `let failure`: that shape
+      // read like ordinary flow, and if `fail()` ever stopped throwing on some path
+      // it left `failure` undefined and raised an untyped TypeError on the next
+      // line — AFTER this run had already created directories, which is the one
+      // moment the function must still be able to report what it planted.
+      try {
+        fail(`recorded project root could not be created at ${component}: `
+          + `${error && error.message ? error.message : 'unknown'}`);
+      } catch (thrown) {
+        thrown.created = created.slice();
+        throw thrown;
+      }
+    }
+    // mkdir(2) does not follow a symlink at the LAST component, so a name planted
+    // THERE fails EEXIST — but every component above it is resolved normally, and a
+    // swap there is followed in silence. The ladder's realpath test proved the whole
+    // chain link-free at verdict time; this re-applies it after each create, which is
+    // detection AFTER the fact — the directory is already in the wrong place — but it
+    // converts a silent success report naming the recorded path into a refusal.
+    // `created` deliberately does NOT gain this component: the name resolves
+    // somewhere else, so listing it under the recorded spelling would be false.
+    if (!restoreRootRealDirectory(component).real) {
+      const moved = new Error(
+        `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR}`,
+      );
+      moved.created = created.slice();
+      // Reported under its OWN spelling rather than under none. Keeping it off
+      // `created` is right — that name resolves somewhere else, so listing it there
+      // would be false — but it left the one directory an operator most needs to find
+      // named nowhere at all, in the only branch that establishes tamper.
+      moved.misplaced = component;
+      throw moved;
+    }
+    created.push(component);
+  }
+  let baseline = null;
+  let baselineError = null;
+  let baselineNotRepairable = false;
+  try {
+    baseline = repairWorkflowBaseline(options);
+  } catch (error) {
+    // A concurrent SessionStart that healed the document first is the benign race
+    // and is NOT an error — it is the outcome this call wanted.
+    if (isBaselineAlreadyPresent(error)) {
+      // GUARDED, because this is the one call after the mkdir loop that can throw:
+      // adoptionWorkflowStatePath routes through sessionKey, which fails on a value
+      // this function never re-validates. Every other post-loop throw site attaches
+      // `created` precisely so the caller can report what was planted, and a throw
+      // escaping here would carry none — the one moment that report matters most.
+      let baselinePath = '';
+      try {
+        baselinePath = adoptionWorkflowStatePath(verdict.projectRoot, options.sessionId);
+      } catch (pathFault) {
+        baselinePath = '';
+      }
+      baseline = {
+        path: baselinePath,
+        projectRoot: verdict.projectRoot,
+        provenance: 'existing',
+      };
+    } else {
+      baselineError = error && error.message ? error.message : 'unknown';
+      // CARRIED as its own field, because the two faults have opposite remedies: a
+      // document that is merely MISSING is rebuilt by the adoption, while one that is
+      // UNSAFE or UNREADABLE is tamper evidence the repair refuses by design. Folding
+      // both into one message sent the operator into the command that just declined.
+      baselineNotRepairable = isBaselineNotRepairable(error);
+    }
+  }
+  // Provenance is a history entry and NOT a record or state field, exactly as it
+  // is for the adoption, for --chain-recover and for the baseline repair: a field
+  // would be a persisted shape change, which under the runtime-lineage rule costs
+  // a breaking release and would wedge every session then running.
+  //
+  // And deliberately NOT a bypass-ledger entry. The ledger records gate ESCAPES so
+  // that everything rendered under "Gates bypassed" is true; this escaped no gate
+  // — the gate was denying correctly, and what changed is the fact it reads.
+  let provenanceCause = null;
+  let provenance = 'recorded';
+  if (baselineError !== null) {
+    // A BARE TOKEN, with the cause carried separately. This value is rendered
+    // through `safeDisplayValue`, whose pair-forgery rule is `/ :|: /` — so any
+    // value carrying a foreign message folds, and `baselineError` ALWAYS carries
+    // one: every producer on that path goes through `fail()`, which prefixes
+    // `session-control-v1: `. Rewording the literal could not fix that, which is
+    // what made an earlier "no colon in this string" comment true of the literal
+    // and false of what rendered. MEASURED before the split, the whole row came
+    // back as `"unavailable\u003a the workflow document could not be rebuilt (…)"`.
+    // Splitting means the fold applies to the cause alone and the label survives.
+    provenance = 'unavailable';
+    // Deliberately NOT set here: the renderer already prints `baseline cause`
+    // from baselineError, and duplicating it on two adjacent rows leaves a reader
+    // unable to tell which of the two causes this field carries. It is reserved
+    // for the history-write failure below, which has no other row.
+    provenanceCause = null;
+  } else {
+    try {
+      mutateWorkflowState({
+        projectRoot: verdict.projectRoot,
+        sessionId: options.sessionId,
+        actor: 'main-v1',
+        workflowState: 'project_root_restored',
+        event: 'project-root-restored',
+      }, (state) => {
+        const history = Array.isArray(state.history) ? state.history : [];
+        // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+        // validates and the one every existing history writer sets.
+        history.push({
+          step: '',
+          phase: RESTORE_HISTORY_PHASE,
+          ts: nowIso(),
+          // `created`, never `verdict.missing`: the provenance entry claims work
+          // THIS run performed, and the two diverge whenever a component was
+          // already there. The sibling baseline repair states the same rule about
+          // itself — it exists to tell a creation from a find, because it appends
+          // an entry claiming it performed one.
+          // The RACED completion says so. An entry identical to an ordinary one
+          // would put the same claim on two different outcomes, and the one thing
+          // an operator reading this history needs here is that the recorded root
+          // came back from somewhere else while this run was still planting.
+          reason: `${RESTORE_HISTORY_REASON_PREFIX}${created.length} component(s)`
+            + (alreadyPresent ? RESTORE_HISTORY_RACED_SUFFIX : ''),
+        });
+        state.history = history;
+        return state;
+      });
+    } catch (error) {
+      provenance = 'unavailable';
+      provenanceCause = error && error.message ? error.message : 'unknown';
+    }
+  }
+  return {
+    projectRoot: verdict.projectRoot,
+    created,
+    nearestExisting: verdict.nearestExisting,
+    baseline,
+    baselineError,
+    baselineNotRepairable,
+    provenance,
+    provenanceCause,
+    // The RETURNED flag the renderer keys ALREADY RESTORED off. It replaces the
+    // throw for the partial case only; a run that created nothing still throws, so
+    // both mechanisms exist and a caller must read this field rather than assume a
+    // successful return means this run created the recorded root.
+    alreadyPresent,
   };
 }
 
@@ -1917,6 +3311,7 @@ const WORKFLOW_BOOLEAN_EXTENSIONS = [
 const WORKFLOW_INTEGER_EXTENSIONS = [
   'reviewRound',
   'stopBlockCount',
+  'implStopCount',
   'autopilotAttempt',
 ];
 
@@ -2147,8 +3542,18 @@ function validateWorkflowState(state, sessionId) {
 }
 
 function atomicWriteJson(file, value) {
-  if (fs.existsSync(file)) {
-    const existing = fs.lstatSync(file);
+  // lstat, never existsSync. existsSync FOLLOWS the link, so it answers false for a
+  // DANGLING symlink and skipped all three guards below for exactly the shape they
+  // exist to catch: the rename then replaced the link and reported a clean write,
+  // destroying the tamper artifact. Only a clean ENOENT is absence; any other errno
+  // means something is at that path that this function must not write over.
+  let existing = null;
+  try {
+    existing = fs.lstatSync(file);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') fail(`unreadable state file rejected: ${file}`);
+  }
+  if (existing) {
     if (existing.isSymbolicLink()) fail('symlink state file rejected');
     if (!existing.isFile()) fail('non-regular state file rejected');
     if (existing.nlink > 1) fail('multi-linked state file rejected');
@@ -2307,12 +3712,38 @@ function mutateWorkflowState(options, mutation) {
   ));
 }
 
-function initializeWorkflowState(options) {
+// The detailed form reports whether THIS call created the document. Every
+// pre-existing caller wants the document itself and is served by the wrapper
+// below, so the contract they were written against is unchanged; the repair is
+// the one caller that has to tell a creation from a find, because it appends a
+// provenance entry claiming it performed one.
+function initializeWorkflowStateDetailed(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
   const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
+    // lstat, never existsSync, and for the same reason atomicWriteJson uses it: a
+    // DANGLING symlink is invisible to existsSync, so this re-check was STRICTLY
+    // WEAKER than the classifyWorkflowBaseline verdict it exists to confirm under
+    // the lock — it reported `created: true` for a shape the classifier calls
+    // UNSAFE. Any existing entry, whatever its kind, is NOT a creation.
+    let existing = null;
+    try {
+      existing = fs.lstatSync(file);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') {
+        fail(`unreadable workflow state file rejected: ${file}`);
+      }
+    }
+    if (existing) {
+      if (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1) {
+        // Never read through it and never create over it: the outer classifier
+        // already refuses this shape, and rebuilding here would destroy the
+        // evidence the refusal exists to preserve.
+        fail(`unsafe workflow state file rejected: ${file}`);
+      }
+      return { state: validateWorkflowState(readJson(file), key), created: false };
+    }
     const initial = stampWorkflowState({
       active: false,
       vanilla: false,
@@ -2333,8 +3764,12 @@ function initializeWorkflowState(options) {
       history: [],
     }, key, 'idle', 'session-start', undefined, 0);
     atomicWriteJson(file, initial);
-    return initial;
+    return { state: initial, created: true };
   });
+}
+
+function initializeWorkflowState(options) {
+  return initializeWorkflowStateDetailed(options).state;
 }
 
 function transitionWorkflowState(options) {
@@ -3025,6 +4460,7 @@ function retireDeferredReviewOwner(options) {
         draft.reviewTicketConsumed = true;
         draft.reviewRound = 0;
         draft.stopBlockCount = 0;
+        delete draft.implStopCount;
         draft.deferredReviewClaim = '';
         return draft;
       });
@@ -3554,6 +4990,7 @@ function resetDeferredReviewState(state) {
   state.step_id = '';
   state.history = [];
   delete state.reviewRearm;
+  delete state.implStopCount;
   delete state.autopilotRunId;
   delete state.autopilotAttempt;
   delete state.autopilotReturnStage;
@@ -4028,6 +5465,13 @@ module.exports = {
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
   ATTESTATION_SCHEMA,
+  // The workflow-document LAYOUT, exported so a caller that must judge the file
+  // before this module opens it does not re-spell the path. `workflowStateFile`
+  // is deliberately NOT the export for that job: it reaches
+  // `ensureDescendantDirectory`, so merely asking it for the path CREATES the
+  // directory, which is the opposite of what a read-only pre-check wants.
+  WORKFLOW_STATE_SEGMENTS,
+  WORKFLOW_STATE_PREFIX,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,
@@ -4038,11 +5482,137 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  readPrunedPluginRootContext,
+  // Exported for the unit layer alone — no production caller requires it; all
+  // of its call sites are in this file. Without a direct handle its three rules
+  // (the UNSAFE_PATH_CHARACTERS class, path.isAbsolute, and the
+  // path.resolve(value) !== value normalization test) are reachable only through
+  // a full synthetic record fixture, and CLAUDE.md already names it a core-half
+  // port obligation, so a port has to be able to pin it cheaply.
+  requireAbsentDirectoryPath,
+  ADOPTION_SAFE_VERSION_RE,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
   adoptableRecord,
   adoptContext,
+  // The read-only path helper. Exported because SessionStart needs to ASK where
+  // the document is without creating it — workflowStateFile resolves through
+  // ensureDescendantDirectory and mkdirs every missing component, which is right
+  // for a writer and wrong for a probe.
+  adoptionWorkflowStatePath,
+  BASELINE_STATES,
+  BASELINE_REFUSALS,
+  BASELINE_ALREADY_PRESENT_CODE,
+  BASELINE_NOT_REPAIRABLE_CODE,
+  isBaselineNotRepairable,
+  // PRODUCTION consumers, not test seams — a port that drops either ships a
+  // report and a doctor row calling an undefined function. `baselineUnsafeComponent`
+  // is read by hooks/lib/zensu-doctor-report.js (the own-document row) and by
+  // hooks/lib/session-adopt-report-v1.js (the adopted-with-no-document warning);
+  // `classifyWorkflowBaselineShape` by the same report.
+  baselineUnsafeComponent,
+  classifyWorkflowBaselineShape,
+  // Likewise production, and the one whose absence is SILENT rather than loud:
+  // hooks/lib/session-adopt-report-v1.js and hooks/lib/claude-session-control-v1.js
+  // both route the benign race through it, and a tree without it reports every
+  // refusal — tamper included — as "nothing to repair" with exit 0. The two
+  // constants below it travel with it for the same reason.
+  isBaselineAlreadyPresent,
+  BASELINE_HISTORY_PHASE,
+  BASELINE_HISTORY_REASON_PREFIX,
+  // ALSO a production consumer, and the comment here used to say the opposite:
+  // hooks/lib/claude-session-control-v1.js calls it for the SessionStart self-heal
+  // and hooks/lib/zensu-doctor-report.js for the own-document row. A port reading
+  // "for the unit layer alone" would have dropped both. It IS additionally the
+  // handle the unit layer needs, because driving the unsafe/unreadable arms
+  // through workflowBaselineVerdict needs a full synthetic install — so without it
+  // the classification truth table would ship with two arms nothing executes.
+  classifyWorkflowBaseline,
+  workflowBaselineVerdict,
+  repairWorkflowBaseline,
+  // The project-root restore.
+  //
+  // PORT-RELEVANT, stated here because every sibling repair in this family
+  // carries the split and a port works from the roster rather than the prose.
+  // The CORE half is exactly the names below plus EVERY member of
+  // RESTORE_ROOT_REFUSALS — read that set from the object, never from a numeral here,
+  // which is the rule this roster states about its host half and then broke about its
+  // own: the count said six and a seventh member landed. They are host-neutral and read
+  // nothing from the environment, every anchor arriving as an option, with ONE named
+  // exception: `restoreAncestorPermissionsSafe` reads `process.getuid`, and it ABSTAINS
+  // where that is absent rather than refusing, so a host without POSIX identity gets the
+  // previous behaviour instead of a repair that never runs. That helper is not exported
+  // — the ladder is, and driving the ladder is what reaches it — but a port that
+  // re-implements the ladder without it ships a repair with one bound fewer on who may
+  // write the tree it plants in. It is NOT only the names — the writer's
+  // RETURN SHAPE is part of it, and one member of that shape is easy to miss because
+  // no export announces it. `restoreWorkflowProjectRoot` answers `alreadyPresent`,
+  // and the two ways this repair loses the race are BOTH live: a run that created
+  // nothing still THROWS, which `isRestoreRootAlreadyPresent` below classifies, while
+  // a run that planted components and then lost it COMPLETES and reports the race in
+  // that field. Both mechanisms reach the same outcome, so a caller must read the
+  // field rather than take a successful return for work this run performed — a port
+  // that implements the list and not the shape announces RESTORED for a directory
+  // another run created. `RESTORE_HISTORY_RACED_SUFFIX` is the persisted half of the
+  // same fact: it is the only signal in the workflow document that tells a raced entry
+  // from a planted one, which is why a doctor row reads it rather than copying it.
+  // ONE ORDERING fact travels with that shape and is a host obligation rather than a
+  // core one, so a port reading only the name list drops it. This writer DOES call
+  // `repairWorkflowBaseline` — say so plainly, because an earlier wording here said it
+  // never does and a port implementing that ships a writer with no baseline half and a
+  // return three fields short of what two host renderers read. The ordinary path owns
+  // the repair and returns `baseline` / `baselineError` / `baselineNotRepairable`, which
+  // `restoreBaselineRows` and `renderRestoreOutcome` consume. What is asymmetric is the
+  // THROW path: all four `restoreRootAlreadyPresentError` throws fire ABOVE that call, so
+  // on those paths the baseline has NOT been repaired and the CALLER owes it — a port
+  // that returns early on the throw ships an arm reporting success with the workflow
+  // document never rebuilt, which is the state in which the capability gate denies every
+  // tool. The host renderers this roster names are `renderRestoreVerdict`,
+  // `performRestore` and `renderRestoreOutcome`. The single renderer they replaced is
+  // defined nowhere in the tree; R12k forbids its name here, so it is not repeated.
+  // The HOST half carries NO count here on
+  // purpose: the numeral was wrong by one for a round after `restoreRootRealDirectory`
+  // landed, and it went stale again when this roster omitted two obligations the
+  // feature's own pointer paragraph already listed. Read the list, never a total.
+  // A port that takes only the core delta gets a writer with no reachable caller and
+  // keeps the wedge: the `--restore-root` argv mode and its ZADOPT_MODE wire, the
+  // report renderer and its exit-code contract, the recognizer's argument list,
+  // the three reserved-phase guard bodies, the doctor row, the Stop release, the
+  // skill, the `orphaned-project-root` deny scope — in the shell emitter AND in
+  // the capability gate, which spells its own — and `zensu_safe_display_path`
+  // together with every constant it reads, which a port must place where BOTH its
+  // emitter and its Stop hook can call it (read that set from the function, never
+  // from a count here: this roster forbids a hand-maintained numeral two sentences
+  // above and then carried one for that very set), plus the operator accounts every
+  // surface is mirrored in.
+  // `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT
+  // included in this change; each carries its own recognizer against a different
+  // harness, and the ladder's ancestor rules have to be re-decided against
+  // whatever that host canonicalizes.
+  //
+  // `restoreRootComponentLadder` and
+  // `RESTORE_ALREADY_PRESENT_CODE` are exported for the same reason
+  // classifyWorkflowBaseline is: both refusal arms are unreachable through
+  // restoreRootVerdict from a synthetic install — one needs a symlinked ancestor
+  // under a recorded root, the other needs a directory to appear inside the
+  // TOCTOU window — so without a direct handle the ladder's truth table would
+  // ship with arms nothing executes.
+  RESTORE_ROOT_REFUSALS,
+  RESTORE_HISTORY_PHASE,
+  RESTORE_HISTORY_REASON_PREFIX,
+  RESTORE_HISTORY_RACED_SUFFIX,
+  RESTORE_MAX_MISSING_COMPONENTS,
+  RESTORE_ALREADY_PRESENT_CODE,
+  isRestoreRootAlreadyPresent,
+  restoreRootComponentLadder,
+  restoreAncestorPermissionsSafe,
+  restoreOwnershipUndecidable,
+  restoreRootOwnerSafe,
+  restoreRootRealDirectory,
+  baselineProvenanceUnrecorded,
+  restoreRootVerdict,
+  restoreWorkflowProjectRoot,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,

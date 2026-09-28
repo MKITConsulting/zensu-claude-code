@@ -2,7 +2,7 @@
 set -u
 
 # Pins the .zensu/ ignore contract: the entire .zensu/ run-artifact tree
-# (per-run plans + narrative/witness logs) is gitignored and never committed —
+# (per-run plans + narrative logs) is gitignored and never committed —
 # these are ephemeral dogfooding output of running the plugin on itself. Only
 # .zensu/config.json (durable user-facing config) stays tracked.
 
@@ -47,11 +47,6 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   else
     check "G5 git check-ignore: a narrative log IS ignored" FAIL
   fi
-  if git check-ignore -q ".zensu/logs/witness-smoke-1.log"; then
-    check "G6 git check-ignore: a witness log IS ignored" PASS
-  else
-    check "G6 git check-ignore: a witness log IS ignored" FAIL
-  fi
   if git check-ignore -q ".zensu/config.json"; then
     check "G7 git check-ignore: .zensu/config.json is NOT ignored" FAIL
   else
@@ -60,7 +55,6 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 else
   check "G4 git check-ignore (skipped: not a git repo)" PASS
   check "G5 git check-ignore (skipped: not a git repo)" PASS
-  check "G6 git check-ignore (skipped: not a git repo)" PASS
   check "G7 git check-ignore (skipped: not a git repo)" PASS
 fi
 

@@ -340,9 +340,9 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: 'Write',
         tool_input: { file_path: 'ATTACK.txt', content: 'attack' },
-      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed');
+      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report');
       if (denied.hookSpecificOutput.permissionDecisionReason
-          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed') {
+          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report') {
         throw new Error(`${agentType} Write denial was not exact`);
       }
       const exactTraversalReason = 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 traversal root may reach protected Session Control or workflow state';
@@ -475,7 +475,7 @@ function provePrincipalAndPreToolContracts(options) {
       agent_type: agentType,
       tool_name: 'mcp__zensu__update_feature',
       tool_input: { feature_id: 'FEATURE-1', status: 'done' },
-    }, environment), 'general-purpose mutating Zensu MCP', 'mutating Zensu MCP');
+    }, environment), 'general-purpose mutating Zensu MCP', 'outside the read allowlist');
     const exactCommandReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
     for (const [label, toolName, toolInput] of [
       ['Bash environment enumeration', 'Bash', { command: 'env' }],

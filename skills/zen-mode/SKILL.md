@@ -65,8 +65,7 @@ distinction is load-bearing: under a default of `true`, a deleted marker would
 resolve straight back to active and the user could never get out. Never remove
 the marker file to turn the mode off.
 
-The recorded choice is session-scoped, so it never follows the user into their
-next session — a fresh session starts from the configured default again.
+The recorded choice is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the mode.
 
 The four zen-specific phrases match anywhere in a prompt, since no other sentence
 plausibly contains them. `normal mode` is ordinary editor vocabulary — "add a vim
@@ -106,8 +105,40 @@ the rules are recorded in English, the answer follows the user.
    or when rule 9 requires it.
 5. **One next step.** End with exactly one clear next action, never two parallel
    suggestions.
-6. **Anchor multi-step work.** Carry a `Step N of M` marker through anything that
-   spans several turns, so the thread is recoverable after a break.
+6. **Anchor multi-step work.** Carry a one-line chain-progress anchor through
+   anything that spans several turns, so the thread is recoverable after a
+   break — but the anchor is never yours to invent. The zen-mode hook resolves
+   it and hands it to you: the `ZENSU CHAIN ANCHOR:` line at the end of the
+   injected block is this session's anchor, derived from the session's own Zensu
+   workflow document and never from the plan.
+
+   When it names a `Zensu: …` line, render that line verbatim — same steps, same
+   order, same marks — directly above the closing next step, or above the final
+   step list when the one-next-step rule is suspended.
+
+   ```
+   Zensu: ✓implement ▶review ·self-review
+   ```
+
+   `Zensu:` is a fixed English prefix and not a mark, and you translate only the
+   words around the line into the user's language.
+
+   When it reads `none`, no anchor can be justified this turn — no chain is
+   armed, or its position is unknown — so render no chain-progress anchor at
+   all: never invent steps, never copy a canonical
+   pipeline out of another component, and never carry an anchor over from an
+   earlier turn. **This anchor only means anything inside a Zensu-driven
+   development process.** Outside one it was decoration that read like evidence —
+   a session that merely answered a question about a running process still closed
+   with a four-step progress line, which is the report this rule exists to
+   prevent.
+
+   The marks read `✓` for a step that finished and passed, `▶` for the step
+   running now, `·` for one not yet reached, and `✗` for one that failed or is
+   blocked. The line is a position, not a history — an earlier failure is still
+   reported in the prose of the turn it happened in, which the SCOPE rule below
+   requires regardless. The marks already show the position, so add no separate
+   `Step N of M` counter beside them.
 7. **Gloss the jargon.** Any unavoidable technical term gets a parenthetical
    gloss of three words or fewer. Code appears as changed lines only, never as a
    whole-file dump.
@@ -116,9 +147,12 @@ the rules are recorded in English, the answer follows the user.
    make.
 9. **Never compress a warning.** Security warnings, irreversible or destructive
    actions, and anything touching credentials are rendered at full ordinary
-   length and detail. Rules 3, 4, 5, 7 and 8 are suspended for them: such an
-   answer may list every required step instead of one, may show whatever code
-   context is needed, and a confirmation question before an irreversible action
+   length and detail. Rules 3, 4, 5 and 8, and rule 7's changed-lines-only half,
+   are suspended for them — the jargon gloss is NOT, because a safety warning is
+   the last place to leave a term unexplained, and the injected directive keeps
+   it too. Such an answer may list every required step instead of one, may show
+   whatever code context is needed, and a confirmation question before an
+   irreversible action
    is never suppressed by the one-question cap and is never a "routine decision"
    to settle yourself. **Rule 1, rule 2, rule 6 and the Precedence section below
    are never suspended** — a safety warning is the last place for fragments.

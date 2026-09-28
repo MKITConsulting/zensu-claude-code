@@ -211,6 +211,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "best-solution-first",
+          "runner": "bash",
+          "path": "tests/structure/test-best-solution-first.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
           "id": "deferred-claim-adoption",
           "runner": "bash",
           "path": "tests/structure/test-deferred-review-claim.sh",
@@ -218,13 +225,6 @@
             "--cases",
             "P0,P1,P2,P3,L1,L2,C1,C2,C2f,C2c,C2d,C2e,D1"
           ],
-          "timeoutMs": 900000
-        },
-        {
-          "id": "plan-payload-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-plan-payload-fallback.sh",
-          "args": [],
           "timeoutMs": 900000
         },
         {
@@ -347,6 +347,19 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "stop-enforcer-self-review-routing",
+          "runner": "bash",
+          "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
+          "args": [],
+          "timeoutMs": 1700000
+        }
+      ]
+    },
+    "windows-shard-8": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
           "id": "review-worker-evidence-lease",
           "runner": "bash",
           "path": "tests/structure/test-review-worker-evidence-lease.sh",
@@ -354,11 +367,18 @@
           "timeoutMs": 300000
         },
         {
-          "id": "stop-enforcer-self-review-routing",
+          "id": "session-trail-lineage",
           "runner": "bash",
-          "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
+          "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
-          "timeoutMs": 1500000
+          "timeoutMs": 600000
+        },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
         }
       ]
     }

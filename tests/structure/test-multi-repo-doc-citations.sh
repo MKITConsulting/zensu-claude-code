@@ -17,6 +17,15 @@
 # implemented, and until it is, a green run means the citations point at
 # SOMETHING, not that they point at what the document says.
 #
+# ONE family of citations IS graded that way, and it is graded ELSEWHERE: `T36` in
+# `tests/structure/test-session-trail-skill.sh` pairs every citation from these two
+# documents into `skills/session-trail/` with a needle naming the cited CONTENT, across
+# both carriers. It lives in that suite rather than here because the files that MOVE those
+# targets are the skill's, not the docs'. The pointer is here so an editor working from
+# the docs' side — who would naturally run this suite and read this header — finds it:
+# a green run HERE does not mean those citations survived. They broke three times in one
+# change to that skill while this suite stayed green, which is what prompted `T36`.
+#
 # The pin is deliberately generic rather than a hand-maintained table of
 # expected symbols. A table would be a fourth copy of the citations, with the
 # same drift problem one level up. Instead every citation must satisfy two
@@ -160,6 +169,7 @@ const BASENAME_PATH = Object.assign(Object.create(null), {
   "pre-bash-source-write-gate.sh": "hooks/pre-bash-source-write-gate.sh",
   "pre-edit-tdd-reminder.sh": "hooks/pre-edit-tdd-reminder.sh",
   "pre-bash-zensu-gate.sh": "hooks/pre-bash-zensu-gate.sh",
+  "pre-reviewer-capability-gate.sh": "hooks/pre-reviewer-capability-gate.sh",
   "pre-write-secret-scan.sh": "hooks/pre-write-secret-scan.sh",
   "trail.mjs": "skills/session-trail/scripts/trail.mjs",
   "stop-chain-enforcer.sh": "hooks/stop-chain-enforcer.sh",

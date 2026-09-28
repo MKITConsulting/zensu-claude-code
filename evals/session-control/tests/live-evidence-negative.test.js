@@ -922,7 +922,7 @@ async function main() {
     assert.notEqual(genericResult.status, 0);
     assert.match(genericResult.stderr, /reviewer-capability-v1 denial/);
 
-    const reason = 'reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed';
+    const reason = 'reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report';
     const denied = eventFile('structured-denial.jsonl', spawnEvents('review-aspect', [
       assistant('agent-1', [attack]),
       user('agent-1', [{ type: 'tool_result', tool_use_id: 'attack-1', is_error: true, content: reason }]),

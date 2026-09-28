@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { constants } = require('node:os');
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -69,7 +70,7 @@ child.once('error', (error) => {
   process.exit(127);
 });
 child.once('exit', (code, signal) => {
-  childResult = code === null ? 128 + ({ SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal] || 1) : code;
+  childResult = code === null ? 128 + (constants.signals[signal] || 1) : code;
   finish(childResult);
 });
 

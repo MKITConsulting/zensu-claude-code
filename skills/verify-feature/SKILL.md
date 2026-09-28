@@ -4,8 +4,8 @@ description: >
   [Zensu] Live-verify an already-built feature against either the current local git
   worktree or a deployed preview. Discovers the changed behavior, builds a risk-ranked
   P0/P1/P2 scenario matrix, boots an isolated local runtime from a checked-in recipe (or
-  the bundled Zensu monorepo adapter), drives the real UI through the pinned Playwright MCP,
-  and reports DOM/data, visual, console, and network evidence. Remote mode clearly
+  the bundled Zensu monorepo adapter), drives the real UI through playwright-cli behind the
+  browser consent gate, and reports DOM/data, visual, console, and network evidence. Remote mode clearly
   distinguishes deployed code from unpushed worktree changes and keeps authentication
   credential-blind through visible manual login only.
   Does not fix code or write committed tests. Use when the user asks to verify/test a
@@ -38,7 +38,10 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--route=<path>` | no | derive | Initial route. Derive only when the changed router or supplied criteria make it unambiguous. |
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
-| `--config=<path>` | no | `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
+| `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
+| `--attach=<origin>` | local only | none | Verify an app the user already runs on a literal loopback origin. Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
+| `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
+| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and routes, for unattended runs and for hosts that keep the policy in their launch environment. |
 
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
@@ -55,14 +58,15 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
   needed by those criteria; do not invent unrelated responsive, idempotence, error-path, or
   other matrix rows unless the changed code makes them necessary to the stated behavior or a
   safety-critical adjacent path.
-- **Real interfaces.** Exercise the user-visible UI and its real backend. Never invoke
-  `browser_evaluate`; it is intentionally absent from the Zensu broker because even read-only
-  page code can inspect authenticated data or bypass evidence controls.
+- **Real interfaces.** Exercise the user-visible UI and its real backend. Never run
+  `playwright-cli eval` or `run-code`; the browser consent gate denies both on a
+  `zensu-verify` session because even read-only page code can inspect authenticated data or
+  bypass evidence controls.
 - **Credential-blind.** Never receive, read, print, paste, or interpolate a real password,
-  token, cookie, API key, or storage-state content. The bundled Zensu MCP broker omits all
-  cookie/storage/session getters and setters because they expose credential material. Do
-  not accept an auth artifact path or run a storage-state login script; use visible manual
-  browser login or report the authenticated coverage as PARTIAL.
+  token, cookie, API key, or storage-state content. The browser consent gate denies every
+  cookie, local/session-storage and state command on a `zensu-verify` session because they
+  expose credential material. Do not accept an auth artifact path or run a storage-state login
+  script; use visible manual browser login or report the authenticated coverage as PARTIAL.
 - **Safe writes.** Local throwaway fixture creation is allowed. Remote destructive or
   externally visible actions (delete, send, publish, pay, invite) require explicit user
   confirmation even when they are part of a scenario.
@@ -122,22 +126,64 @@ For a `remote` URL that passed validation, print this warning before any subsequ
 Do not imply that a remote PASS proves the worktree diff unless the deployment identity is
 confirmed.
 
-Before any browser call, require the plugin's version-1 navigation broker declared by
-`validate.navigationBroker` and configured in Claude's parent environment as
-`ZENSU_VERIFY_NAVIGATION_POLICY_V1`. Run
-`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
-as a standalone preflight for every route. The parent JSON must bind each exact page route to
+Before any browser call, resolve which of the two modes this session is in. **Policy mode** is
+a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claude Code, declared
+by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
+ordinary case for a user who has not configured anything. Run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
+as a standalone preflight for every route. It prints `consent` or `policy` and exits `0`, or
+exits `1` with a named reason. In policy mode the parent JSON must bind each exact page route to
 its validated origin with the `declared-safe` mode described in the config contract. Contract
-v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is
-not proven safe stops with PARTIAL. The broker exposes an exact tool allowlist, owns the isolated browser
-context, and intercepts every request before continuation. It allows only configured origins;
-every navigation/redirect is rechecked for userinfo, query, and fragment. Remote mode accepts
-only non-loopback HTTPS, rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation,
-multicast/reserved, IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public
-and non-public DNS answers, and pins each hostname to an approved public address in Chromium to
-prevent DNS rebinding. Local mode accepts literal loopback-IP origins only. Raw Playwright navigation
-followed by a final-URL check is too late. A missing, invalid, mismatched, or unapproved parent
-policy stops before browser use with PARTIAL; never try to configure it from a child Bash call.
+v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is not
+proven safe stops with PARTIAL.
+
+The browser is `playwright-cli`, and the browser consent gate — the hook pair
+`pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
+judges a `playwright-cli` call on a `zensu-verify-*` session before it runs. It is a textual gate: it
+judges the calls whose command text names the CLI and that session, which is one more reason every
+call spells both literally. It denies every
+command outside the set in `rules/browser-verification.md`, every flag outside that command's
+own list, every call from a subagent, every call whose session or arguments are not
+literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
+gate reads that config itself: an isolated browser, the run's origins as
+`network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
+mode accepts literal loopback-IP origins only. Remote mode accepts only non-loopback HTTPS,
+rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/reserved,
+IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
+answers, and pins each hostname to an approved public address in Chromium to prevent DNS
+rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
+target stops before browser use with PARTIAL; the gate admits only its targets, and navigation
+commands only to its declared routes. **In CONSENT mode** there is no policy to be missing and
+the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
+because remote verification keeps the policy. Never try to configure the variable from a child
+Bash call in either mode — the hooks read it from the environment Claude Code started with, and
+the gate denies an `export` or an environment assignment on a command that carries a
+`zensu-verify` call.
+
+**Consent mode (no parent policy).** When the preflight prints `consent`, the FIRST
+`playwright-cli` call that reaches a new origin — `open` with the run config, `goto`, or
+`tab-new` — opens the host's own permission prompt to the user. Consent is per ORIGIN: once the
+user approves an origin, every further route on it proceeds without a prompt. Answering that
+prompt is the user's action; never answer it on their behalf, never work around a refusal, and
+treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: literal
+loopback origins only, no credentials, no query or fragment in a navigation, and the browser
+refuses every request to an origin outside the run config. A remote target is refused in consent
+mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
+remembers each approved ORIGIN for this session in
+`.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
+but the route steers no later decision — and the report lists every record in its `Consent`
+block. **Read that file for the report and never write, edit or delete it.** A record placed
+there skips the human's permission prompt for that origin, so writing one grants yourself the
+consent this gate exists to ask for. Only the PostToolUse hook writes it.
+
+**Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
+navigation and every subresource outside the run config, but the browser follows a server
+redirect to another origin. After every call that can navigate — `open`, `goto`, `go-back`,
+`go-forward`, `reload`, `tab-new`, and any click or key press that follows a link or submits a
+form — read the `Page URL` line `playwright-cli` prints. If it names an origin outside the run
+config, stop driving that page: take no snapshot or screenshot and read no console or network
+output from it, run `close`, and report the scenario PARTIAL with the redirect as the
+observation.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
@@ -187,9 +233,13 @@ Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
 concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
 Claude's native placeholder substitution.
 
-1. Inspect the explicit `--config` path or `.zensu/autopilot.yaml` as a **candidate**, using
-   `../autopilot/rules/config.md`. An autopilot recipe is not automatically safe for live
-   verification. Accept it only when all of these facts are explicit and internally
+0. When `--attach=<origin>` was given, skip runtime preparation entirely: see "Attach mode"
+   below. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
+1. Inspect the explicit `--config` path, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`,
+   as a **candidate**, using `../autopilot/rules/config.md` (the two file names share one
+   schema; `runtime.yaml` is the verify-owned spelling that setup writes, and it is tried first).
+   Record which file was selected in the report. An autopilot recipe is not automatically safe
+   for live verification. Accept it only when all of these facts are explicit and internally
    consistent:
    - every service has startup and readiness commands;
    - every started resource has an explicit scoped `down` command, or remains a foreground
@@ -199,10 +249,13 @@ Claude's native placeholder substitution.
    - application and authentication base URLs, fixture setup, and cleanup refer to the same
      run-specific runtime;
    - the browser base URL is either a run-specific literal or comes from a checked-in
-     `validate.baseUrlCommand` executed only after readiness; its output must exactly match an
-     origin already authorized in the immutable parent broker policy. Validate it again before
-     navigating. A command that dynamically selects a previously unknown port is incompatible
-     with the current session and requires a discovery run followed by a policy-configured restart;
+     `validate.baseUrlCommand` executed only after readiness. Validate it again before
+     navigating. **In POLICY mode** its output must exactly match an origin already authorized in
+     the immutable parent-environment policy, and a command that dynamically selects a previously
+     unknown port is incompatible with that session: it requires a discovery run followed by a
+     policy-configured restart. **In CONSENT mode** a run-specific loopback port is the EXPECTED
+     shape rather than a defect — nothing is pre-authorized, and the first navigation to it asks
+     the user through the permission prompt;
    Reject fixed-port Compose stacks, shared resource names, daemonized services without
    ownership, or recipes whose teardown scope is ambiguous. Record why the candidate was
    rejected; do not execute any part of it.
@@ -210,8 +263,20 @@ Claude's native placeholder substitution.
    - the accepted candidate recipe;
    - when the repository matches the Zensu monorepo markers, the bundled
      `rules/zensu-monorepo.md` adapter (including when an autopilot candidate was rejected);
-   - otherwise stop with PARTIAL and list the missing startup, readiness, base URL, auth,
-     fixture, isolation, and teardown facts. Never invent commands.
+   - otherwise, in an interactive session, offer the guided setup with ONE `AskUserQuestion`
+     ("No runtime recipe found. Set one up now?"); on yes run `rules/setup.md`, then resume at
+     step 1 with the recipe it wrote. On no, or when no human can answer, stop with PARTIAL and
+     list the missing startup, readiness, base URL, auth, fixture, isolation, and teardown
+     facts. Never invent commands.
+   In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
+   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
+   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
+   `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
+   for the run, so a reused run directory keeps the port it already recorded. Never derive the
+   adapter's origin from a second free-port call — the two would diverge on a reused run
+   directory and on two concurrent runs.
 3. Before starting a service, register its scoped cleanup. A daemonized or shared service
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own
@@ -222,28 +287,82 @@ Claude's native placeholder substitution.
 5. Seed only data required by the matrix, through repository-owned fixtures, typed tools, or
    the UI. Never use a hand-written raw API payload when the repository has a typed path.
 
+### Attach mode
+
+`--attach=<origin>` verifies an application the user already runs. The origin must pass the
+same literal-loopback rule as local mode (`http://127.0.0.1:<port>` or another loopback IP;
+never `localhost`). Boot nothing, seed nothing through the runtime, register no `down`
+command, and never stop, signal, or restart the attached process. Establish identity before
+the matrix: resolve the listening process with
+`lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
+`lsof -a -p <pid> -d cwd -Fn`, and compare it with the physical worktree root. Report
+"worktree identity proven" only on an exact match; report "attached runtime, identity unproven"
+otherwise, which caps the verdict at PARTIAL because the worktree claim of local mode is then
+unestablished. Consent applies unchanged: the first navigation to the attached origin asks the
+user.
+
 ### Remote mode
 
 Use only the supplied/configured base URL. Do not boot or tear down remote infrastructure.
 Keep mutations minimal and use disposable records with recognizable run-specific names. The
-navigation broker from Phase 0 is mandatory for every remote route and redirect; its
-absence stops before `browser_navigate` with PARTIAL.
+parent-environment policy from Phase 0 is mandatory for every remote route; without it the
+helper and the gate refuse the target, and the run stops before `open` with PARTIAL. The
+redirect check from Phase 0 applies to every navigation.
+
+### Browser session (both modes)
+
+After readiness, once the base URL is final, write the run config:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>"
+```
+
+Pass one `--origin` per origin the matrix needs — the application origin and, only when it
+differs, the validated authentication origin — and nothing else. The helper prints
+`session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
+line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
+`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
+installed `playwright-cli` manifest names the measured version, and no empty or relative PATH
+entry comes before or holds `playwright-cli`; then report PARTIAL with its
+reason, and never open a browser without the run config it writes. Copy the printed session
+name and config path LITERALLY into every later call. Never rebuild them, never hold them in a
+shell variable, and never set `PLAYWRIGHT_CLI_SESSION`: the gate denies a session or argument it
+cannot read as a literal. Then open the browser, headed when the matrix needs visible manual
+login:
+
+```bash
+playwright-cli -s=<session> open --config=<config> [--headed] <app-origin><route>
+```
+
+Run each `playwright-cli` call as its own plain Bash command on the main thread — exactly one
+call per Bash command, with nothing before or after it: no `&&`, `;` or pipe, no subshell or
+command substitution, no wrapper such as `timeout` or `nohup`, no package launcher such as
+`npx`, never through `xargs`, `bash -c`, a heredoc or a here-string, and never from a subagent.
+The gate denies every other shape. Name the same session on every call:
+`playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[`
+or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell
+pattern it cannot judge. Single-quote an argument that carries `$`: double quotes do not help,
+because the gate reads a `$` outside single quotes as an expansion it cannot judge unless
+whitespace, the end of the command or a closing double quote follows it, so a `fill` or `type`
+value such as `"$12"` is denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
+as `rules/browser-verification.md` section 0 describes; every other denial is final.
 
 ### Authentication (both modes)
 
-The bundled browser driver exposes no cookie, local/session-storage, or storage-state
-capability. This is deliberate: the upstream `storage` capability combines state restoration
-with credential getters and exporters, so enabling it would violate the credential-blind
-boundary. Do not invoke `auth.loginScript`, accept `STORAGE_STATE`, add `--caps=storage`, or
-try to restore browser state by another tool. A future checked-in broker may re-enable opaque
-state only when it exposes a path-contained setter and hard-denies every getter/exporter.
+The browser consent gate denies every cookie, local/session-storage and storage-state command
+on a `zensu-verify` session, and `open` carries only the run config, which holds no storage
+state. This is deliberate: those commands combine state restoration with credential getters
+and exporters, so admitting them would violate the credential-blind boundary. Do not invoke
+`auth.loginScript`, accept `STORAGE_STATE`, or try to restore browser state by another tool or
+another session. A future gate may re-enable opaque state only when it admits a path-contained
+setter and hard-denies every getter/exporter.
 
-Before authenticating or navigating to any protected route—including an initial
-`browser_navigate` result that may contain a DOM snapshot—validate the selected recipe's
+Before authenticating or navigating to any protected route—including an initial `open` or
+`goto`, which prints the page title and writes a snapshot of the page—validate the selected recipe's
 `validate.evidenceSafety` block using the fail-closed schema and exact-route coverage in
-`../autopilot/rules/config.md`. Every route in scope must appear under the same origin target
-in the immutable broker policy and be proved synthetic/pre-classified non-sensitive by
-`mode: declared-safe`. If the block is absent, invalid, or
+`../autopilot/rules/config.md`. Every route in scope must be proved synthetic/pre-classified
+non-sensitive by `mode: declared-safe`, and in policy mode must also appear under the same origin
+target in the parent-environment policy. If the block is absent, invalid, or
 does not cover a route exactly, do not restore auth or navigate to that protected content; skip
 the scenario and report PARTIAL. Final-report redaction is too late. The same boundary applies
 to screenshots.
@@ -266,21 +385,23 @@ Load `rules/browser-verification.md` and execute the matrix against the resolved
 - After every meaningful interaction, take a semantic snapshot before selecting the next
   action. Prefer role/name/ref-based interactions over guessed CSS selectors.
 - Capture and actually inspect screenshots at the checkpoints named in the matrix.
-- Console and network tool results are model-visible before report redaction. Contract v1 has
-  no trusted authenticated sanitizer, so do not invoke those raw tools on authenticated
-  targets; mark that evidence plane PARTIAL. Direct MCP inspection is allowed only for a proven
+- `console` and `requests` output is model-visible before report redaction. Contract v1 has
+  no trusted authenticated sanitizer, so do not run those commands on authenticated targets;
+  mark that evidence plane PARTIAL. Direct inspection is allowed only for a proven
   unauthenticated, synthetic, secret-free target such as an isolated local fixture.
 - Record expected versus observed evidence while running; do not reconstruct it from memory.
 
-Parallel execution is allowed only when each lane has an isolated browser context, its own
-fixtures, and no shared mutable state. Otherwise execute sequentially. Parallelism never
+Parallel execution is allowed only when each lane has its own run directory, run config and
+`zensu-verify` session, its own fixtures, and no shared mutable state. Otherwise execute
+sequentially. Parallelism never
 reduces the evidence requirements.
 
 ## Phase 4 — Cleanup (always)
 
 Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
-- close the browser;
+- run `playwright-cli -s=<session> close` for every session this run opened; never `close-all`
+  or `kill-all`, which end sessions this run does not own;
 - delete the run directory without touching a sibling or out-of-scope path;
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
   call; let its lease-bound controller stop only the process groups and resources it owns;
@@ -308,6 +429,13 @@ Use this format:
 - **Visual:** what each screenshot actually showed about layout, clipping, overlap,
   responsiveness, styling, and legibility. “Screenshot taken” is not an observation.
 - **Reproduction:** exact steps and captured signal for each failure.
+- **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
+  holds after the run, where `decidedBy` is `asked` (the host raised a consent prompt for this
+  origin — the recorder cannot observe how the human answered, only that the navigation then
+  executed), `remembered` (any route on an origin already present in the memory — the route is
+  never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
+  it). In consent mode also name the recipe
+  that supplied the declared routes shown IN the prompt, and every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 
 Verdict rules:
@@ -326,23 +454,26 @@ VERIFY-FEATURE-VERDICT: PASS
 
 Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
-## Playwright MCP preflight
+## playwright-cli preflight
 
-This plugin ships a pinned, lockfile-backed Playwright runtime behind a Zensu capability and
-navigation broker. The broker creates an isolated context and exposes only the exact operations
-listed by `scripts/playwright-mcp-proxy.js`; upstream `browser_evaluate`,
-`browser_run_code_unsafe`, storage/cookie/session getters, file upload/drop, raw request-detail,
-route, and configuration tools are never advertised or callable. Every MCP server start
-materializes a private generation from the SRI-pinned lockfile outside the plugin root;
-concurrent servers never share `node_modules`. The normal npm cache remains enabled, but a
-cache miss may require network access. For every required browser operation, accept either the
-direct `mcp__playwright__<operation>` name or Claude's plugin namespace
-`mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
-that the plugin MCP server was not loaded and ask the user to restart Claude Code after
-checking the plugin installation. If the browser binary is missing, require the validated
-natively rendered `${CLAUDE_PLUGIN_ROOT}` path, obtain explicit approval for the networked
-browser installation, then run
-`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser` and ask the user to
-restart Claude Code so the MCP server reloads. `browser_install` is not a tool in the pinned
-runtime. Do not silently replace the browser driver with ad-hoc `curl` checks; that cannot
-prove the UI.
+Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
+must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
+and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.21`,
+the version the browser consent gate was measured against; `brew install playwright-cli` is
+unpinned and may install a version the run-config helper refuses. Never install it on their
+behalf.
+`/zensu:doctor` reports whether it is installed and which version. The browser consent gate
+parses its arguments as measured against version 0.1.21 and denies an argument shape it does
+not recognize rather than admitting it — including a `zensu-verify` session name it does not
+resolve as the call's session.
+
+The run config uses the system Chrome channel. When `open` reports that the browser is not
+installed, obtain explicit approval for the networked download, then run
+`playwright-cli install-browser` WITHOUT a session flag — the gate does not admit it on a
+`zensu-verify` session — and retry `open`. Never switch to Firefox or WebKit: the run config's
+resolver pins and proxy switch are Chromium switches, and the gate refuses another `--browser`
+value. Never drive `playwright-cli` on a session name you chose yourself, and never `attach` to
+a running browser: only a `zensu-verify` session opened with the run config sits behind the
+consent gate, and a browser outside it has neither the origin restriction nor the
+credential-blind command set. Do not silently replace the browser driver with ad-hoc `curl`
+checks; that cannot prove the UI.

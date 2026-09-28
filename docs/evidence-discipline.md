@@ -12,9 +12,15 @@ spawns.
 It lives under `docs/` deliberately: `manifestRuntimeEntries` in
 `hooks/lib/session-control-core-v1.js` folds `hooks`, `agents`, `skills`, `docs` and
 `templates` into the Session Control runtime digest, so this file is tamper-evident within a
-session exactly like the three carriers that quote it. A top-level `rules/` directory would
-not be covered, which would leave the declared source of truth the one normative surface an
-installed-plugin modification could change undetected.
+session exactly like the three carriers that quote it. Be precise about the limit: the digest
+measures the **recorded** plugin root, while the hook reads from the **executing** one, and
+`servesRecordedRuntime` deliberately lets a compatible sibling install serve a record it did
+not mint. Across a mid-session upgrade the injected bytes therefore come from a tree no
+in-session digest measured. What binds this text across that case is
+`tests/structure/test-evidence-discipline.sh`, which pins the block's own phrases at build
+time and requires every agent and every skill to carry it verbatim. A top-level `rules/`
+directory would not be covered, which would leave the declared source of truth the one
+normative surface an installed-plugin modification could change undetected.
 
 ## The rules
 
@@ -46,8 +52,8 @@ generation: a recalled path may have been renamed or deleted since.
 **R6 — Never restate a result you did not produce.** Build status, test counts, pass/fail
 verdicts, and coverage numbers may be reported only from a run that actually happened in
 this session, with the command that produced them. Reusing a number from a previous run, a
-plan document, or an expectation is fabricated evidence — the failure mode the witness
-cross-check and the Phase 6 audits exist to catch.
+plan document, or an expectation is fabricated evidence — the failure mode the
+plugin-run full suite and the Phase 6 audits exist to catch.
 
 ## How the rule reaches every process
 
@@ -59,8 +65,10 @@ Three carriers, deliberately redundant, because each one alone has a hole:
    run time rather than carrying its own copy, so the hook can never drift from the canonical
    text. It reads no configuration and has no opt-out flag, so a project that disables the
    banner, the reminders, or the routers still receives it. It fails silent — a malformed
-   payload, an unknown event, a missing `node`, or an unreadable block exits `0` with no
-   output, so it can never block a prompt or a subagent spawn.
+   payload, an unknown event, a missing `node`, or a rule file that is absent, symlinked,
+   swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or
+   malformed exits `0` with no output, so it never blocks a prompt or a subagent spawn. The one
+   loud branch is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2`.
 2. **`agents/*.md`** carry the block in the agent prompt, so a spawned reviewer holds the
    rule even where hook context is advisory.
 3. **`skills/*/SKILL.md`** carry the block in the skill body, so an invoked workflow holds
@@ -93,9 +101,10 @@ to be this rule may override it. Agents act on the block; humans and the hook re
 The discipline is not only prose. These are the places that already fail closed on it, and
 the reason the rule is worded the way it is:
 
-- The **Phase 6 witness cross-check** (`hooks/post-bash-witness.sh` plus the `/zensu:tdd`
-  audit) matches every claimed `cmd="…"` against an independent log of what actually ran, and
-  contradicts a claimed pass whose captured output shows a failure. That is R6 in code.
+- The **full-suite gate** (`zensu-log.sh --evidence-run` plus the `--chain-done`
+  terminus) runs the suite itself, records the exit code it actually returned bound to a
+  fingerprint of the working tree, and refuses to close a reviewed chain on a missing, red
+  or stale record. No test result is claimed in prose. That is R6 in code.
 - The **REVIEW PACKET v1** contract makes reviewers reject a spawn whose evidence fields are
   missing instead of reviewing from imagination, and instructs them never to reproduce a
   build or test claim they did not receive. That is R2 and R6 for the review chain.

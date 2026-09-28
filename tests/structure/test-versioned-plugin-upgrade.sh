@@ -7,15 +7,216 @@ PASS=0
 FAIL=0
 SKIPPED=0
 
+# SKIP is a THIRD verdict, not a quiet PASS. The tally already carried a SKIPPED
+# counter that nothing incremented, so a row that could not run on this host had only
+# two options: claim a pass it had not earned, or fail for a reason unrelated to the
+# contract it names. Both are worse than saying so. Anything that is neither PASS nor
+# SKIP is still a failure — the default stays fail-closed.
 check() {
   if [ "$2" = PASS ]; then
     printf '  PASS  %s\n' "$1"
     PASS=$((PASS + 1))
+  elif [ "$2" = SKIP ]; then
+    printf '  SKIP  %s\n' "$1"
+    SKIPPED=$((SKIPPED + 1))
   else
     printf '  FAIL  %s\n' "$1"
     FAIL=$((FAIL + 1))
   fi
 }
+
+# HOISTED to the very front on purpose - before the mktemp, before the first
+# synthetic install. These two pins need no fixture, no synthetic install and no
+# session lifecycle: they read $ROOT and compare two strings. They were the LAST
+# checks in the file, behind eleven full tree installs and five session lifecycles,
+# on a Windows ceiling CLAUDE.md records as UNMEASURED. That is the shape in which
+# the source-write-gate suite lost its tail at check ~210 and the plan-payload
+# suite at ~61 of 70, both green for everything before the kill. Same placement,
+# same reason, as the routing suite's unit driver.
+# THE SEAM, replacing two byte-for-byte hand-copy pins that used to stand here.
+# Those pins asserted that `LEASE_RECORD_ID_RE` and `LEASE_RECORD_MAX_BYTES` in the
+# core still equalled their owners in review-evidence-lease-v1.js. Review of PR #252
+# recorded what that bought and what it did not: both compared source SPELLINGS
+# rather than behaviour (`8388608` in the owner turned them red with nothing wrong),
+# neither checked that the two sides applied the constant to the same quantity, and
+# three FURTHER copied elements — the store layout, ensurePrivateDirectory and the
+# ownership predicate — were never pinned at all. CLAUDE.md's own rule for that
+# function ("if it needs a fourth correction, take the seam") had already fired.
+#
+# So the copies are gone. The core cannot require the owner — review-evidence-lease-v1.js
+# requires claude-hook-session-v1.js, which requires session-control-core-v1.js, so
+# that direction is a CYCLE — and the sweep therefore moved OUT of the core into
+# review-evidence-sweep-v1.js, which may require the owner freely. What is pinned now
+# is that arrangement, not a pair of strings: the core defines neither literal and no
+# longer carries the sweep, and the sweep gets both from the owner.
+#
+# WORKING TREE, not HEAD: every side of this pin is read from $ROOT.
+CORE_SRC="$ROOT/hooks/lib/session-control-core-v1.js"
+SWEEP_SRC="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
+OWNER_SRC="$ROOT/hooks/lib/review-evidence-lease-v1.js"
+if [ -f "$SWEEP_SRC" ] \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$CORE_SRC" \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$SWEEP_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$CORE_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$SWEEP_SRC" \
+  && grep -qF "require('./review-evidence-lease-v1.js')" "$SWEEP_SRC"; then
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" PASS
+else
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" FAIL
+fi
+
+# The other half of the seam: the owner actually EXPORTS what the sweep consumes.
+# Without this a copy could come back as a re-declaration in the sweep and the pin
+# above would still pass on the core alone.
+if grep -qE '^  LEASE_ID_RE,' "$OWNER_SRC" \
+  && grep -qE '^  MAX_RECORD_BYTES,' "$OWNER_SRC" \
+  && grep -qE '^  REVIEW_EVIDENCE_SEGMENTS,' "$OWNER_SRC" \
+  && grep -qE '^  ensurePrivateDirectory,' "$OWNER_SRC" \
+  && grep -qE '^  leaseRecordIsOwned,' "$OWNER_SRC"; then
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" PASS
+else
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" FAIL
+fi
+
+# The sweep is no longer part of adoptContext, so an adoption is only complete once
+# the ENTRY POINT has also run it. A host that takes the core delta alone gets a
+# re-minted record with the superseded leases still wedging every lease operation.
+#
+# The caller is the REPORT MODULE, not the shell script: the payload that invokes it
+# moved out of the `node -e` string in the same change. Both halves are pinned, so
+# neither the call nor the script that runs it can quietly disappear.
+REPORT_SRC="$ROOT/hooks/lib/session-adopt-report-v1.js"
+if ! grep -qF 'discardSupersededLeases' "$CORE_SRC" \
+  && grep -qF 'sweepLeases.discardSupersededLeases' "$REPORT_SRC" \
+  && grep -qF 'session-adopt-report-v1.js' "$ROOT/hooks/lib/zensu-session-adopt.sh"; then
+  check "the adoption entry point owns the sweep call now that the core does not" PASS
+else
+  check "the adoption entry point owns the sweep call now that the core does not" FAIL
+fi
+
+# The required-module guard list is ONE table, not a copy-paste run. WORKING TREE,
+# not HEAD — this is a source pin, so it grades the edit in front of you.
+#
+# The list is the point, not the tidiness. This file's own history records
+# claude-path-v1.js "left out when the list last grew, with the omission written into
+# a comment as a known gap": a list that grows by copy-paste is a list that loses a
+# member, and the loss is silent because each surviving block still passes. So both
+# halves are pinned — the per-module hand-copied FORM must be gone, and every module
+# the entry point loads must still be named.
+#
+# The form needle is anchored at the start of a line and requires an ALL-CAPS single
+# variable, which is what the seven hand-copied blocks looked like; the shell-sibling
+# loop uses a lowercase `_zsa_` loop variable and is deliberately not matched, because
+# it is the shape this check wants MORE of.
+ADOPT_SRC="$ROOT/hooks/lib/zensu-session-adopt.sh"
+# The COPY half counts the emitted refusal, not a spelling of the guard. A regex over
+# the `[ -f "$VAR" ] && [ ! -L "$VAR" ]` shape matched exactly ONE way of writing the
+# copy: an indented one, or one written in the table's own `"$DIR/foo.js"` style, kept
+# the counter at zero. Any hand copy must reproduce the message, so the message is what
+# is counted — expected 2, the module loop and the shell-sibling loop.
+ADOPT_REFUSALS="$(grep -cF 'is missing or symlinked; repair the Zensu plugin installation' "$ADOPT_SRC" 2>/dev/null || true)"
+# The MEMBERSHIP half reads the heredoc ONLY. Grepping the whole file could not tell a
+# guarded module from one merely NAMED in the table's own header comment, where all
+# seven also appear — so deleting a row while its comment line survived left this green,
+# which is precisely the silent-omission failure the pin exists to catch.
+ADOPT_TABLE="$(awk '/<<.ZSA_REQUIRED_MODULES./{f=1;next} /^ZSA_REQUIRED_MODULES$/{f=0} f' "$ADOPT_SRC" 2>/dev/null || true)"
+ADOPT_MODULES_MISSING=""
+for _adopt_mod in session-control-core-v1.js claude-hook-session-v1.js \
+    session-adopt-report-v1.js review-evidence-sweep-v1.js \
+    review-evidence-lease-v1.js zensu-safe-display-v1.js claude-path-v1.js; do
+  printf '%s\n' "$ADOPT_TABLE" | grep -qE "^${_adopt_mod}\|" \
+    || ADOPT_MODULES_MISSING="$ADOPT_MODULES_MISSING $_adopt_mod"
+done
+if [ "$ADOPT_REFUSALS" = 2 ] && [ -n "$ADOPT_TABLE" ] && [ -z "$ADOPT_MODULES_MISSING" ]; then
+  check "the adoption entry point guards its required modules from one table, not seven copies" PASS
+else
+  check "the adoption entry point guards its required modules from one table, not seven copies (refusals=$ADOPT_REFUSALS want 2, table_lines=$(printf '%s\n' "$ADOPT_TABLE" | grep -c . ), missing:${ADOPT_MODULES_MISSING:- none})" FAIL
+fi
+
+# The two checks above are SOURCE pins, and on their own they leave the guard disarmable
+# by a single token. The refactor concentrated seven independent `exit 1`s into one loop
+# body: delete just that `exit 1` and the printf survives, so ADOPT_REFUSALS stays 2 and
+# the membership half still sees all seven rows — green, with every module unguarded.
+# The row count cannot close it either, because deleting the exit does not change how
+# many rows are read. Only a RUN can, so this drives one.
+#
+# The discriminator is the MESSAGE, not the exit status. The script exits non-zero in this
+# fixture whatever happens — there is no bound session here — so a status check alone would
+# pass against a gutted guard. The control arm is what makes the positive arm mean something:
+# with all seven modules present the guard message must be ABSENT.
+# The membership half above compares the table against a HARDCODED list, which catches a
+# row deleted from the table and cannot catch an edge added to the require GRAPH — the
+# property the table's own header actually claims ("EVERY module this command loads").
+# Both halves were hand-maintained name lists, so the refactor moved the copy-paste
+# hazard rather than removing it, and this file's header records the precedent: a module
+# was left out when the list last grew, and the omission was written up as a known gap.
+#
+# Derive the closure instead. Walk relative `require('./x.js')` specifiers transitively
+# from the entry module and compare the reachable set against the table's first column.
+# A new `require("./x.js")` in any of the seven fails here instead of loading unguarded.
+# The walk models ONE specifier spelling, deliberately and not completely: a computed
+# `require(path.join(...))`, an extension-less `./x`, or a `../` relative one is invisible
+# to it and would shrink the closure while it still compared set-equal. Every relative
+# require under hooks/lib currently carries the literal `./x.js` form, so the pin is live
+# today; the bound is stated so the next reader does not take it for a resolver.
+ADOPT_CLOSURE="$(node -e '
+const fs = require("fs"), path = require("path");
+const lib = process.argv[1], seen = new Set(), queue = ["session-adopt-report-v1.js"];
+while (queue.length) {
+  const f = queue.shift();
+  if (seen.has(f)) continue;
+  seen.add(f);
+  let src = "";
+  try { src = fs.readFileSync(path.join(lib, f), "utf8"); } catch { continue; }
+  for (const m of src.matchAll(/require\(\s*["\x27]\.\/([A-Za-z0-9._-]+\.js)["\x27]\s*\)/g)) {
+    if (!seen.has(m[1])) queue.push(m[1]);
+  }
+}
+process.stdout.write([...seen].sort().join("\n"));
+' "$ROOT/hooks/lib" 2>/dev/null || true)"
+ADOPT_TABLE_FILES="$(printf '%s\n' "$ADOPT_TABLE" | sed 's/|.*//' | grep . | LC_ALL=C sort || true)"
+if [ -n "$ADOPT_CLOSURE" ] && [ "$ADOPT_CLOSURE" = "$ADOPT_TABLE_FILES" ]; then
+  check "the required-module table equals the entry module's transitive require closure" PASS
+else
+  check "the required-module table equals the entry module's transitive require closure (only_in_graph:$(comm -23 <(printf '%s\n' "$ADOPT_CLOSURE") <(printf '%s\n' "$ADOPT_TABLE_FILES") | tr '\n' ' ') only_in_table:$(comm -13 <(printf '%s\n' "$ADOPT_CLOSURE") <(printf '%s\n' "$ADOPT_TABLE_FILES") | tr '\n' ' '))" FAIL
+fi
+
+ADOPT_RUN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-adopt-guard-XXXXXX" 2>/dev/null || true)"
+ADOPT_GUARD_VERDICT="unrun"
+if [ -n "$ADOPT_RUN" ] && [ -d "$ADOPT_RUN" ] && [ ! -L "$ADOPT_RUN" ]; then
+  mkdir -p "$ADOPT_RUN/hooks/lib"
+  if cp "$ROOT"/hooks/lib/*.js "$ADOPT_SRC" "$ADOPT_RUN/hooks/lib/" 2>/dev/null; then
+    _adopt_needle='is missing or symlinked; repair the Zensu plugin installation'
+    env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PLUGIN_DATA bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/intact.err" || true
+    ADOPT_INTACT_HITS="$(grep -cF "$_adopt_needle" "$ADOPT_RUN/intact.err" 2>/dev/null || true)"
+    rm -f "$ADOPT_RUN/hooks/lib/zensu-safe-display-v1.js"
+    env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PLUGIN_DATA bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/missing.err" || true
+    # The NOUN is asserted, not just the sentence: the table maps each file to its own
+    # noun, and a loop that reported the wrong row would otherwise read as correct.
+    #
+    # And the guard message must be the LAST line on stderr, which is the half that
+    # actually pins `exit 1`. Asserting only that the message APPEARS does not: delete
+    # the exit and the printf still runs, so a message-only check passes against a guard
+    # that no longer stops anything. Measured on this tree — armed, stderr is exactly the
+    # one refusal; disarmed, the script continues and a second line follows it from a
+    # later stage. Any later stage will do, so the check reads "nothing follows" rather
+    # than naming whichever message happens to be next.
+    ADOPT_LAST_LINE="$(tail -n 1 "$ADOPT_RUN/missing.err" 2>/dev/null || true)"
+    if [ "$ADOPT_INTACT_HITS" = 0 ] \
+      && grep -qF "the display-safety module $_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null \
+      && [ "$ADOPT_LAST_LINE" = "zensu:adopt-session: the display-safety module $_adopt_needle" ]; then
+      ADOPT_GUARD_VERDICT="ok"
+    else
+      ADOPT_GUARD_VERDICT="intact_hits=$ADOPT_INTACT_HITS want 0; missing_arm=$(grep -cF "$_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null || true) want >=1; last_line=${ADOPT_LAST_LINE:-<empty>}"
+    fi
+  fi
+  rm -rf "$ADOPT_RUN"
+fi
+if [ "$ADOPT_GUARD_VERDICT" = ok ]; then
+  check "the adoption entry point actually REFUSES a removed required module, naming that module's noun" PASS
+else
+  check "the adoption entry point actually REFUSES a removed required module, naming that module's noun ($ADOPT_GUARD_VERDICT)" FAIL
+fi
 
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot create isolated temp directory' >&2; exit 1; }
@@ -32,8 +233,13 @@ mkdir -p "$PROVENANCE_SOURCE/.claude-plugin" "$PROVENANCE_SOURCE/hooks"
 git -C "$PROVENANCE_SOURCE" init -q
 git -C "$PROVENANCE_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$PROVENANCE_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+# The case patterns carry a LEADING paren. Inside a $( ) substitution bash 3.2 ends the
+# substitution at the first `)` it meets, so the bare `MINGW*|MSYS*|CYGWIN*)` form truncates
+# the command and this config value silently becomes empty on the repo's oldest supported
+# shell. `(PATTERN)` balances the paren and parses identically on every later bash;
+# tests/structure/test-bash32-portability.sh B1 is what scans for the unbalanced spelling.
 git -C "$PROVENANCE_SOURCE" config core.hooksPath \
-  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+  "$(case "$(uname -s 2>/dev/null)" in (MINGW*|MSYS*|CYGWIN*) printf NUL ;; (*) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$PROVENANCE_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '{"name":"zensu","plugins":[{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}]}' \
@@ -82,8 +288,9 @@ mkdir -p "$SYMLINK_SOURCE/.claude-plugin" "$SYMLINK_SOURCE/hooks"
 git -C "$SYMLINK_SOURCE" init -q
 git -C "$SYMLINK_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$SYMLINK_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+# Leading parens for the same bash 3.2 reason as the PROVENANCE_SOURCE site above.
 git -C "$SYMLINK_SOURCE" config core.hooksPath \
-  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+  "$(case "$(uname -s 2>/dev/null)" in (MINGW*|MSYS*|CYGWIN*) printf NUL ;; (*) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$SYMLINK_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '#!/bin/bash' 'exit 0' > "$SYMLINK_SOURCE/hooks/example.sh"
@@ -108,10 +315,34 @@ else
   check "fixture installer rejects tracked symlinks before any external write" FAIL
 fi
 
-# This offline structure test intentionally materializes both roots from the
-# current checkout. It proves create-once, root-binding, and fail-closed
+# This offline structure test materializes both roots from the COMMITTED revision:
+# `ROOT_REVISION` captures `git rev-parse HEAD` above and the install fixture reads
+# the tree with `git ls-tree`. (No line number here on purpose — the previous wording
+# named one and the next hoist made it stale, which is the same drift this comment is
+# warning about.) That split is load-bearing to know: anything reached through a
+# $SYNTHETIC_*_ROOT path — every behavioural row, and the copies of
+# skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read — grades the LAST COMMIT,
+# while a handful of rows read $ROOT, the working tree, directly. Each of those is
+# labelled `WORKING TREE, not HEAD` in place; the count is deliberately NOT written
+# out here, because a hand-maintained number is exactly what a driven loop cannot
+# catch when a row is removed.
+#
+# An uncommitted change under hooks/ or skills/ therefore reports green against the
+# previous commit everywhere except those rows. It cost a full review round here
+# once, so it is now an executable check rather than a warning in prose — see the
+# row immediately below. This suite proves create-once, root-binding, and fail-closed
 # invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
+#
+# Placed beside the two hoisted pins and for the same reason: it needs no fixture and
+# no session lifecycle, and a Windows timeout that kills the tail must not be able to
+# take the one row that tells you the rest graded the wrong tree.
+if git -C "$ROOT" diff --quiet HEAD -- hooks skills 2>/dev/null; then
+  check "the tree under test is committed (behavioural rows grade $ROOT_REVISION)" PASS
+else
+  check "UNCOMMITTED hooks/ or skills/ changes: behavioural rows grade $ROOT_REVISION, not your edits" FAIL
+  git -C "$ROOT" diff --name-only HEAD -- hooks skills 2>/dev/null | head -10
+fi
 SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
 SHARED_DATA="$TMP/data/zensu-zensu"
 PROJECT="$TMP/project"
@@ -441,7 +672,21 @@ bash_payload() {
 # share this one implementation so the stderr and decision handling cannot drift
 # apart between them.
 gate_decision_from() {
-  local root="$1" hook="$2" payload="$3" out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
+  # $4/$5 are OPTIONAL row-scoped capture paths. Every other caller takes the
+  # shared default and overwrites it in turn, which is harmless while nothing
+  # reads either file after the call returns. A row that DOES read them back —
+  # to dump a failure, or to extract the reason out of the same run that produced
+  # the decision — must name its own pair, or it reports a neighbour's bytes. The
+  # alternative, re-spelling these paths at the call site, put a copy of a local
+  # three thousand lines from its declaration.
+  #
+  # `${4-…}`, NOT `${4:-…}`: only an UNSET parameter takes the default. `:-`
+  # substitutes for an empty string too, so a caller whose path variable failed to
+  # expand would silently write into the shared pair and read a neighbour's bytes
+  # back — the exact confusion the row-scoped paths exist to remove, restored by
+  # the one caller least able to notice it.
+  local root="$1" hook="$2" payload="$3"
+  local out="${4-$TMP/doctor-gate.out}" err="${5-$TMP/doctor-gate.err}"
   if printf '%s' "$payload" \
       | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
@@ -455,9 +700,29 @@ gate_decision_from() {
   # bind makes the binder print its "context plugin root is neither the
   # executing plugin nor a compatible upgrade of it" diagnostic before any gate
   # decides, so requiring an empty stderr would grade every allow as a failure.
-  # Anything OTHER than that diagnostic — a crash, a node stack — still fails,
+  # Anything OTHER than such a diagnostic — a crash, a node stack — still fails,
   # so a real regression stays visible.
-  if [ -s "$err" ] && grep -qv '^claude hook session binder: ' "$err"; then
+  #
+  # TWO forms, because the bind can fail one layer deeper: a record whose project
+  # root is gone is refused by the core library's own fail(), which never reaches
+  # the binder's message at all. That shape was unreachable here until a check
+  # drove an ORPHANED session through a gate, and grading its correct deny as
+  # `hook-stderr` reports a working gate as broken.
+  #
+  # BOTH forms are ONE message each, never a prefix namespace. That reasoning was
+  # applied to the `session-control-v1: ` half first and left the binder half
+  # wholesale, which was the same hole one door down: `claude hook session
+  # binder: ` prefixes EVERY fail() in that file — `CLAUDE_PLUGIN_DATA does not
+  # exist`, `private Session Control record directory is unsafe`, `session id is
+  # unavailable or unsafe` — so a broken FIXTURE produced a diagnostic that
+  # cleared the allowlist, and with an empty stdout mapping to `allow` below it
+  # was graded as a passing gate on every row expecting `allow`. Only the two
+  # messages this suite's states legitimately produce are admitted: the lineage
+  # disagreement, and the core's own refusal of a vanished project root. A stack
+  # trace still fails on its unprefixed lines, and a fixture fault now fails on
+  # its own text.
+  if [ -s "$err" ] \
+    && grep -qvE '^(claude hook session binder: context plugin root is not a compatible lineage of the executing plugin|session-control-v1: context project root does not exist)' "$err"; then
     printf 'hook-stderr\n'
     return
   fi
@@ -768,13 +1033,14 @@ fi
 # every later lease operation for the session. Closing it needs a lease-schema
 # change (the record carries no plugin_version), so this asserts the refusal
 # exists and will fail loudly the day someone changes it silently.
+#
+# WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && grep -qF 'Known gap 1' "$ROOT/CLAUDE.md"; then
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" PASS
+    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js"; then
+  check "the review-evidence lease keeps the strict comparison" PASS
 else
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" FAIL
+  check "the review-evidence lease keeps the strict comparison" FAIL
 fi
 
 # AC-013 — a record and workflow document minted by the PREVIOUS RELEASE, from
@@ -822,8 +1088,9 @@ else
     node "$GOLDEN_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GOLDEN_SESSION"
   )"
   GOLDEN_RECORD="$GOLDEN_DATA/session-control/v1/records/$GOLDEN_KEY.json"
-  # Read the previous release's artifacts with the CURRENT tree's core: that is
-  # the direction that matters, and readContext revalidates the digest, the
+  # Read the previous release's artifacts with the WORKING TREE core — one of the
+  # six rows that do, against a suite whose behavioural rows all grade HEAD. That is
+  # the direction that matters here, and readContext revalidates the digest, the
   # manifest version, the schema and the principal profiles as it goes.
   if [ "$GOLDEN_START_RC" -eq 0 ] && [ -f "$GOLDEN_RECORD" ] \
       && CORE="$ROOT/hooks/lib/session-control-core-v1.js" \
@@ -851,6 +1118,8 @@ fi
 # AC-011 — the predicate's own truth table. Driven from here rather than
 # registered separately: this suite is already in every profile, so the unit
 # file cannot be silently left out of a shard.
+# WORKING TREE, not HEAD: this requires ../../hooks/lib directly, unlike every
+# behavioural row above, which reaches the fixture-installed copy of that file.
 . "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
 if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1 \
@@ -866,6 +1135,7 @@ else
     "$TMP/recognizer-unit.out" 2>/dev/null | head -40
 fi
 
+# WORKING TREE, not HEAD — same split as the recognizer unit row above.
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
 if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1 \
   && unit_cases_registered_floor "$TMP/lineage-unit.out" 13; then
@@ -873,6 +1143,37 @@ if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out
 else
   check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= 13 registered)" FAIL
   sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
+fi
+
+# WORKING TREE, not HEAD — same split again. The superseded-lease sweep moved out
+# of session-control-core-v1.js into its own module (requiring the lease owner from
+# the core is a require cycle), which finally gives it a unit driver: its refusal
+# arms used to cost a full synthetic install plus a session lifecycle each, and
+# three of its return shapes were not reachable from here at all. Driven from this
+# file for the same reason the two above are — tests/run-all.sh discovers only
+# test-*.sh, so an undriven *.test.js never executes anywhere.
+SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
+if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" 32; then
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
+else
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 32 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/sweep-unit.out" 2>/dev/null | head -40
+fi
+
+# WORKING TREE, not HEAD — same split. The adoption REPORT moved out of a
+# single-quoted `node -e` shell payload into its own module, which is what finally
+# gives safe() a driver: it had no test in either direction, so deleting its whole
+# guard condition and returning the text unchanged left the suite green.
+REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
+if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/report-unit.out" 46; then
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
+else
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 46 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
 
 # The non-sibling case is the one that cannot be inferred from the version
@@ -989,7 +1290,8 @@ CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_OUT" 2>/dev/null
 if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
-    && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT"; then
+    && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT" \
+    && ! grep -qF 'is gone and the running Zensu installation' "$DOCTOR_OUT"; then
   check "AC-C02 the doctor row names both versions and never claims 'no valid record'" PASS
 else
   check "AC-C02 the doctor row names both versions and never claims 'no valid record'" FAIL
@@ -1018,7 +1320,14 @@ printf '%s' "$ADOPT_STOP_PAYLOAD" \
 if [ ! -s "$STOP_OUT" ] \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$STOP_ERR" \
     && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
-    && grep -qF 'no completion was proven' "$STOP_ERR"; then
+    && grep -qF 'no completion was proven' "$STOP_ERR" \
+    && grep -qF 'The recorded project root still EXISTS' "$STOP_ERR" \
+    `# The deferral arm must state REACHABILITY, never contents. Pinned POSITIVELY,` \
+    `# because the negative form was dead on arrival: it excluded 'SURVIVES and is` \
+    `# unchanged', a literal round 7 had already retired, so the conjunct was always` \
+    `# true and guarded nothing. A live needle fails when the arm over-claims again.` \
+    && grep -qF "deliberately claims nothing about the document's contents" "$STOP_ERR" \
+    && ! grep -qF 'this is not a deferral' "$STOP_ERR"; then
   check "AC-C03 the Stop hook releases the lineage state instead of blocking" PASS
 else
   check "AC-C03 the Stop hook releases the lineage state instead of blocking" FAIL
@@ -1028,7 +1337,33 @@ fi
 # AC-C04 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
 # matcher wins. Enumerated from hooks.json for the same reason Part A and B do:
 # a hook added later is covered without editing this check.
-ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# The shape the SKILL emits, so this enumeration grades what a real invocation
+# looks like. It carries no CLAUDE_PROJECT_DIR: the adoption never reads it, and
+# passing it would put a value nobody consumes in front of the recognizer's
+# rooted-literal check — which refuses an empty value, so a harness that rendered
+# the placeholder empty would make the repair unreachable.
+ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# And the correspondence is PINNED, not asserted in prose. Without this the skill
+# could re-add the assignment and every row below would stay green while the real
+# invocation was refused — a green enumeration over a command that never runs. The
+# skill is the only producer of that shape and no other suite reads it.
+#
+# THREE emitted forms, not two: the adoption report, its `--confirm` twin, and
+# the `--restore-root` report the project-root restore added. The fourth mode,
+# `--restore-root --confirm`, is named in prose as "the same command with
+# --confirm" rather than spelled again, so it adds no literal here. The COUNT is
+# hand-maintained and the `CLAUDE_PROJECT_DIR` conjunct beside it is the
+# load-bearing half — an added form has to be counted here deliberately, which is
+# exactly what caught the restore mode.
+ADOPT_SKILL_COMMANDS="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"' \
+  "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md" 2>/dev/null || printf 0)"
+if [ "$ADOPT_SKILL_COMMANDS" = 3 ] \
+    && ! grep -q 'CLAUDE_PROJECT_DIR.*zensu-session-adopt\.sh' \
+      "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"; then
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
+fi
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
 # already disagreed on anchoring, and a matcher regex is exactly the thing whose
@@ -1059,19 +1394,33 @@ for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-s
     *) ADOPT_ENUMERATION_MISSING="$ADOPT_ENUMERATION_MISSING $required" ;;
   esac
 done
+# TWO hooks on this matcher allow on EVERY platform, and they do so for reasons
+# that have nothing to do with each other or with the MSYS spelling gap. One
+# decision site rather than the hand-copy this file used to carry in both loops
+# below: they graded the same question and a third exception added to one of them
+# would have left the other reporting a regression that is not one.
+#
+#   pre-bash-zensu-gate.sh   — exits 0 before it ever binds when the command
+#     carries no `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the
+#     adoption command carries none.
+#   pre-browser-navigation-consent.sh — exits 0 with no decision, before it
+#     resolves its plugin root or binds a session, whenever the payload names
+#     neither `playwright-cli` nor `@playwright/cli`, and the adoption command
+#     names neither.
+#
+# A THIRD entry needs its own sentence here. Do not add a name without one: the
+# value of this list is that every member states why it cannot deny.
+adopt_hook_expected() {
+  case "$1" in
+    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
+    *) printf '%s\n' "$2" ;;
+  esac
+}
+
 ADOPT_GATE_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
-  # pre-bash-zensu-gate.sh is the ONE exception on win32, and not because of the
-  # recognizer: it exits 0 before it ever binds when the command carries no
-  # `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the adoption command
-  # carries none. So it allows on EVERY platform, for a reason that has nothing to
-  # do with the MSYS spelling gap the other three are refused by. Expecting deny
-  # from it graded the early exit as a regression.
-  hook_expected="$ADOPT_EXPECTED"
-  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
-    hook_expected=allow
-  fi
+  hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
   fi
@@ -1082,6 +1431,35 @@ if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_ENUMERATION_MISSING" ] && [ -z 
   check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL" PASS
 else
   check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
+fi
+
+# The LEGACY shape, which is the one property that decides whether an in-flight
+# session survives the upgrade.
+#
+# $ADOPT_CMD used to carry CLAUDE_PROJECT_DIR and went through this same
+# enumeration. It no longer does, and the rows above therefore grade only the NEW
+# shape — so nothing graded the command an older, still-running skill copy emits. It
+# is still admitted (ASSIGNMENTS is unchanged and a rooted literal passes), but that
+# property was left resting on an allowlist entry whose own comment called it free,
+# which is exactly the setup for a future narrowing that turns this green suite into
+# a silently broken remedy for anyone mid-upgrade. A model does not reload its skill
+# body when the plugin updates underneath it.
+ADOPT_LEGACY_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$SYNTHETIC_BREAKING_ROOT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+ADOPT_LEGACY_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_LEGACY_CMD")"
+ADOPT_LEGACY_FAILURES=''
+while IFS= read -r hook_name; do
+  [ -n "$hook_name" ] || continue
+  hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
+    ADOPT_LEGACY_FAILURES="$ADOPT_LEGACY_FAILURES $hook_name"
+  fi
+done <<EOF
+$ADOPT_MATCHER_HOOKS
+EOF
+if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_LEGACY_FAILURES" ]; then
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted" PASS
+else
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted (unexpected:$ADOPT_LEGACY_FAILURES)" FAIL
 fi
 
 # The discrimination test for AC-C04: the recognizer must stay exactly this
@@ -1098,6 +1476,49 @@ if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-ga
   check "AC-C04 an ordinary Bash command in the same state still denies" PASS
 else
   check "AC-C04 an ordinary Bash command in the same state still denies" FAIL
+fi
+
+# AC-C04 — the SHAPE the skill actually emits, at the GATE layer. AC-C11 below
+# drives the same shapes at the script layer, which cannot see this: the
+# recognizer consumes assignments as an optional whitelist PREFIX, so the form
+# without CLAUDE_PROJECT_DIR — the one the skill emits now that the script never
+# reads it — has to be admitted here or the repair is unreachable no matter what
+# the script does. The empty-value row is the reason the assignment was dropped
+# rather than kept: `isRootedLiteralPath("")` is false, so a harness that rendered
+# the placeholder empty would refuse the whole invocation over a variable nobody
+# reads. Both rows are graded through the ".*" capability gate for the same reason
+# the discrimination test above is.
+# Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer refuses
+# on win32 BY DESIGN, so a literal would make these rows unpassable on the Windows
+# shard — the same defect class the block above was corrected for. The empty-value
+# row below asserts `deny` on every platform and therefore discriminates only on
+# POSIX, where the platform refusal is not already supplying that verdict.
+ADOPT_SHAPE_FAILURES=''
+ADOPT_NO_PROJECT="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES empty-project-dir:allowed"
+fi
+# The label follows the grading, exactly as $ADOPT_LABEL does above: on win32 all
+# three rows assert `deny`, and a fixed "is admitted" label would then report the
+# opposite of what was verified.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  ADOPT_SHAPE_LABEL="the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not"
+else
+  ADOPT_SHAPE_LABEL="refuses every emitted shape on win32 (documented MSYS spelling gap; the empty-value row does not discriminate here)"
+fi
+if [ -z "$ADOPT_SHAPE_FAILURES" ]; then
+  check "AC-C04 $ADOPT_SHAPE_LABEL" PASS
+else
+  check "AC-C04 $ADOPT_SHAPE_LABEL ($ADOPT_SHAPE_FAILURES)" FAIL
 fi
 
 # FR-C01 — the deny REASON, not just the decision. gate_decision_from discards
@@ -1155,8 +1576,14 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
     *) reason_payload="$ADOPT_EDIT_PAYLOAD" ;;
   esac
   reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
+  # The Edit/Write limit is part of the pattern, not an afterthought. Four of
+  # these five deniers emit the SHELL scope in zensu-session.sh, and its new
+  # conditional clause had no pin anywhere in tests/ — the only occurrence of that
+  # literal in the whole suite is AC-C20, which grades the JS capability gate.
+  # Both halves of the conditional are matched for the same reason AC-C20 matches
+  # both: the consequent alone survives deleting the guard.
   case "$reason_text" in
-    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*) ;;
+    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created"*) ;;
     *) LINEAGE_REASON_FAILURES="$LINEAGE_REASON_FAILURES $reason_hook" ;;
   esac
 done
@@ -1196,7 +1623,8 @@ recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm
 for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # Positive control on the SAME bare shape first: without it, a recognizer that
   # stopped accepting the bare form would make both gates deny for the wrong
-  # reason and the principal assertion below would stay green.
+  # reason and the principal assertion below would stay green. That argument only
+  # holds where the bare form is admitted at all — see the win32 skip below it.
   # Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer
   # refuses on win32 by design, so a fixed expectation is unpassable on the
   # Windows shard — the same defect class AC-C04 was corrected for.
@@ -1204,15 +1632,34 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
       "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != "$ADOPT_EXPECTED" ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
   fi
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
-      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
-    RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+  # Only meaningful where the recognizer ADMITS the bare form. On win32 it refuses
+  # every payload before the principal is ever consulted (zensu_doctor_allowed
+  # returns at zensu_doctor_invocation, ahead of zensu_hook_is_main_principal), so
+  # the platform refusal alone satisfies this `deny` and the principal conjunct is
+  # never exercised — a row reporting verified while testing nothing, which is the
+  # exact vacuity the positive control above exists to prevent. Skipped explicitly
+  # rather than left silently green.
+  if [ "$ADOPT_EXPECTED" = allow ]; then
+    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+        "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
+      RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+    fi
   fi
 done
-if [ -z "$RECOGNIZER_FAILURES" ]; then
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
+# The label follows the grading, exactly as $ADOPT_LABEL and $ADOPT_SHAPE_LABEL do:
+# on win32 every row above asserts deny, the shape-narrowness clause is supplied by
+# the platform refusal and the main-thread conjunct is skipped outright, so a fixed
+# "admitted in exactly one shape, for the main thread only" would report the
+# opposite of what ran.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  RECOGNIZER_LABEL="the second recognized command is admitted in exactly one shape, for the main thread only"
 else
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
+  RECOGNIZER_LABEL="refuses every adoption payload on win32 (documented MSYS spelling gap; neither the shape narrowness nor the main-thread conjunct discriminates here)"
+fi
+if [ -z "$RECOGNIZER_FAILURES" ]; then
+  check "FR-C03 $RECOGNIZER_LABEL" PASS
+else
+  check "FR-C03 $RECOGNIZER_LABEL (allowed:$RECOGNIZER_FAILURES)" FAIL
 fi
 
 # AC-C05 — the self-closing gate, and the single most important check here: a
@@ -1283,6 +1730,13 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$ADOPT_REPORT_OUT" 2>&1 \
     && grep -qF 'ADOPTABLE' "$ADOPT_REPORT_OUT" \
     && grep -qF 'Nothing has been changed' "$ADOPT_REPORT_OUT" \
+    `# The DISCRIMINATING negative for the orphan paragraph. This session's` \
+    `# project root is live, so (GONE) and the Edit/Write denial paragraph must` \
+    `# be ABSENT — a verdict.orphanedProjectRoot that was truthy for every record` \
+    `# would leave AC-C15a's positive green while this report told the user their` \
+    `# project root was gone. The --confirm half already carries its own negative.` \
+    && ! grep -qF '(GONE)' "$ADOPT_REPORT_OUT" \
+    && ! grep -qF 'It does NOT restore writes' "$ADOPT_REPORT_OUT" \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
   check "AC-C07 the bare entry point reports adoptable and changes nothing" PASS
 else
@@ -1290,13 +1744,205 @@ else
   head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
 fi
 
+# Defined HERE rather than beside the lease fixture that motivated it, because
+# AC-C11 below is the first consumer. The full account of why reaching a recorded
+# path from a shell variable takes BOTH steps — and what each one costs when it is
+# skipped on Windows — is the comment block above the lease fixture further down;
+# do not re-state it, and do not inline either step at a call site.
+native_root() {
+  local rendered
+  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
+  ROOT_IN="$rendered" node -e '
+    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
+  ' || return 1
+}
+# Also hoisted above its original site: AC-C11b below is the first consumer, and it
+# has to run BEFORE the adoption, because that is the only window in which `ok` is
+# a reachable verdict at all.
+adoption_reason() {
+  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+      executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
+# Every comparison of a report line or a record field against the shell's own
+# $PROJECT goes through this. On POSIX it is identity; on Git Bash the shell holds
+# /d/a/... while the record and the report hold D:\a\..., so a raw comparison can
+# only ever fail there — silently, since a POSIX run stays green.
+# Asserted as the CORRESPONDENCE its label claims, not as mere non-emptiness: the
+# helper returns an empty string on either failure step, and an empty needle would
+# turn every grep below into a match on the report's fixed label — a row that
+# reports PASS while testing nothing. Compared against the record the adoption is
+# about to be graded on, which is the only thing that makes the rendering right
+# rather than merely present.
+NATIVE_PROJECT="$(native_root "$PROJECT")"
+if [ -n "$NATIVE_PROJECT" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$ADOPT_RECORD")" = "$NATIVE_PROJECT" ]; then
+  check "the project fixture renders to the spelling the record holds" PASS
+else
+  check "the project fixture renders to the spelling the record holds" FAIL
+fi
+
+# AC-C11 — the three CLAUDE_PROJECT_DIR shapes the entry point used to die on,
+# driven through the shipped script rather than through adoptableRecord, because
+# two of them never reached that function: the script required the variable and
+# then rendered it through zensu-host-path.sh, which refuses a path that is not a
+# directory. Both exits happened BEFORE any report, so the one command that can
+# repair the session printed nothing at all in the state it exists for — and
+# neither shape is exotic: the record is minted from the SessionStart payload
+# cwd, so a fork whose cwd was a worktree records that worktree while the harness
+# still reports somewhere else, and a deleted worktree is the harness value gone.
+# The record is still at 0.17.0 here, so ADOPTABLE is the answer in all three. This
+# row owns the SCRIPT's environment handling and nothing else — the `ok` verdict at
+# the function boundary belongs to AC-C11b below, which drives the parameter the
+# entry point no longer passes at all.
+# `env -u` rather than an empty assignment: the suite inherits a real
+# CLAUDE_PROJECT_DIR from the session running it, and `VAR= cmd` is a SET empty
+# value that the `-n` guard would have caught for the wrong reason.
+ABSENT_PROJECT="$TMP/adopt-project-that-was-deleted"
+rm -rf "$ABSENT_PROJECT"
+# Only the CLAUDE_PROJECT_DIR spelling varies, so it is the only thing the caller
+# passes; everything else is fixed here. `env "$@"` keeps each spelling a single
+# quoted word — a word-split variable would break on any path with a space and a
+# leading assignment before a FUNCTION name has shell-dependent persistence.
+adopt_report_shape() {
+  env "$@" \
+    CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" 2>&1
+}
+# The RETAINED precondition, which got no test when the CLAUDE_PROJECT_DIR one was
+# removed. A bare `|| exit 1` here once made this command — the last reachable
+# diagnosis in a wedged session — print NOTHING at all for a plugin-data store that
+# had been pruned, replaced by a file or symlinked, because zensu-host-path.sh exits
+# silently for anything that is not an existing non-symlink directory.
+#
+# Asserted on the MESSAGE, never on the exit status: the pre-change tree also exited
+# non-zero here, so a status-only assertion would not discriminate.
+PLUGIN_DATA_IS_A_FILE="$TMP/plugin-data-is-a-file"
+printf x > "$PLUGIN_DATA_IS_A_FILE"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_IS_A_FILE" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+  >"$TMP/plugin-data-file.out" 2>"$TMP/plugin-data-file.err"
+if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-file.err"; then
+  check "a plugin-data store that is a file names its cause instead of exiting silently" PASS
+else
+  check "a plugin-data store that is a file names its cause instead of exiting silently" FAIL
+  sed -n '1,10p' "$TMP/plugin-data-file.err" 2>/dev/null
+fi
+
+# The same precondition through a SYMLINK, which is the shape the renderer rejects
+# for a different reason than a file does — and the one an operator is most likely to
+# have created on purpose.
+PLUGIN_DATA_LINK="$TMP/plugin-data-is-a-link"
+rm -rf "$PLUGIN_DATA_LINK"
+ln -s "$SHARED_DATA" "$PLUGIN_DATA_LINK" 2>/dev/null
+# ln -s exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy or
+# a shortcut native Node does not follow. Confirm before asserting on it.
+if [ -L "$PLUGIN_DATA_LINK" ]; then
+  CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_LINK" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/plugin-data-link.out" 2>"$TMP/plugin-data-link.err"
+  if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-link.err"; then
+    check "a symlinked plugin-data store names its cause instead of exiting silently" PASS
+  else
+    check "a symlinked plugin-data store names its cause instead of exiting silently" FAIL
+    sed -n '1,10p' "$TMP/plugin-data-link.err" 2>/dev/null
+  fi
+else
+  check "a symlinked plugin-data store names its cause instead of exiting silently" SKIP
+fi
+
+# The ENTRY-POINT-ONLY refusal, which CONV-1's ENTRY_ONLY list now REQUIRES to be
+# documented while nothing checked the code still emits it. It is raised before
+# adoptableRecord runs, when privateRecordsDirectory refuses the store — here a
+# records leaf that is group- and world-accessible. Platform-gated: the binder's
+# mode and ownership checks are POSIX-only.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "the entry point still emits private-record-store-unsafe (win32: mode checks are no-ops)" SKIP
+    ;;
+  *)
+    UNSAFE_STORE="$TMP/unsafe-record-store"
+    mkdir -p "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    chmod 0777 "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+      CLAUDE_PLUGIN_DATA="$UNSAFE_STORE" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+      >"$TMP/unsafe-store.out" 2>&1
+    if grep -qF 'NOT adoptable (private-record-store-unsafe)' "$TMP/unsafe-store.out"; then
+      check "the entry point still emits private-record-store-unsafe" PASS
+    else
+      check "the entry point still emits private-record-store-unsafe" FAIL
+      sed -n '1,10p' "$TMP/unsafe-store.out" 2>/dev/null
+    fi
+    ;;
+esac
+
+PROJECT_SHAPE_FAILURES=''
+adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset"
+adopt_report_shape CLAUDE_PROJECT_DIR="$ABSENT_PROJECT" >"$TMP/adopt-projectdir-absent.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES absent"
+adopt_report_shape CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" >"$TMP/adopt-projectdir-different.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES different"
+for shape in unset absent different; do
+  shape_out="$TMP/adopt-projectdir-$shape.out"
+  # The -n guard is load-bearing, not defensive: an empty NATIVE_PROJECT makes the
+  # third needle the report's own fixed label, which every ADOPTABLE report carries.
+  [ -n "$NATIVE_PROJECT" ] \
+    && grep -qF 'ADOPTABLE' "$shape_out" \
+    && grep -qF 'Nothing has been changed' "$shape_out" \
+    && grep -qF "project          : $NATIVE_PROJECT" "$shape_out" \
+    || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES $shape"
+done
+# One token per shape, appended at most once: the exit-status arm above and this
+# grep arm both fire for a broken shape, and a duplicate made the dump below print
+# the same capture twice.
+PROJECT_SHAPE_FAILURES="$(printf '%s' "$PROJECT_SHAPE_FAILURES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+# The record must still be untouched: without --confirm every shape is read-only.
+if [ -z "$PROJECT_SHAPE_FAILURES" ] \
+    && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR (failed:$PROJECT_SHAPE_FAILURES)" FAIL
+  # Dump what actually failed. A hardcoded shape here once printed a PASSING run
+  # beside a FAIL verdict, which is worse than printing nothing.
+  for failed in $PROJECT_SHAPE_FAILURES; do
+    printf '  --- %s ---\n' "$failed"
+    head -c 300 "$TMP/adopt-projectdir-$failed.out" 2>/dev/null
+    printf '\n'
+  done
+fi
+
+# AC-C11b — the `ok` verdict, at the FUNCTION boundary, under a project root that
+# is not the recorded one. AC-C11 above cannot supply this and must not be read as
+# if it did: it varies CLAUDE_PROJECT_DIR, and the entry point no longer passes any
+# projectRoot into adoptableRecord at all, so those three shapes exercise the
+# script's environment handling and nothing about the parameter. This row is the
+# only place the parameter itself is driven while `ok` is still reachable — after
+# the --confirm below, $SYNTHETIC_BREAKING_ROOT serves the record and every call
+# stops at already-served, which would leave a reintroduced comparison placed after
+# that condition completely invisible.
+REASON_FRESH_FOREIGN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$SYNTHETIC_BREAKING_ROOT" "$SYNTHETIC_BREAKING_ROOT")"
+REASON_FRESH_OWN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_FRESH_FOREIGN" = ok ] && [ "$REASON_FRESH_OWN" = ok ]; then
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies" PASS
+else
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies (foreign='$REASON_FRESH_FOREIGN' own='$REASON_FRESH_OWN')" FAIL
+fi
+
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
 cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
 
 # AC-C08 — seed the lease store so the sweep has something to sweep. Without this
 # the whole moving branch never runs: discardSupersededLeases returns 0 through
-# its readdir catch when the per-session records directory does not exist, so a
-# --confirm assertion on an empty store proves nothing about the discard.
+# its lstat ENOENT branch when the per-session records directory does not exist,
+# so a --confirm assertion on an empty store proves nothing about the discard.
 # Two leases with exactly one difference: the root they name.
 # Canonicalized: the sweep resolves plugin data through canonicalDirectory, so on
 # a host where the temp root is a symlink (/var -> /private/var on macOS) a
@@ -1306,6 +1952,26 @@ CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
 ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
 ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
 mkdir -p "$ADOPT_LEASE_DIR"
+# The two SHARED ancestors are forced 0755 rather than left to the ambient umask,
+# which makes this row the pin for a split that is otherwise only prose:
+# asideIsSafe() checks the SHAPE of every component but the PERMISSIONS of the leaf
+# alone. `review-evidence` and `v1` belong to ensurePrivateDirectory, which repairs
+# them; this guard may only look, and extending the mode check up the chain turns a
+# store an older version created at 0755 into a permanent destination refusal. That
+# is not hypothetical — it shipped for one round and `leases set aside : 3` below is
+# what caught it.
+#
+# Under umask 077 the ancestors would land at 0700 and the row would pass with the
+# ancestor check restored, so the chmod is what makes the bite umask-independent.
+# It is safe for every row after it: AC-C12 refuses through the per-segment shape lstat,
+# AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
+# sweep returns on ENOENT before asideIsSafe() runs — none consults the mode of these
+# two. Note the asymmetry this chmod does NOT cover: `superseded` IS mode-checked,
+# because nothing in the lease module owns or repairs it. Its 0700 comes from
+# asideIsSafe()'s own per-segment mkdir during the AC-C07 --confirm below; the chmods
+# at AC-C12 and AC-C12b are defensive re-sets so that no row depends on that
+# ordering. No check grades that mode directly.
+chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
 # Control stores host-natively — `D:\a\...` on Windows. `pwd -P` in Git Bash
@@ -1327,13 +1993,9 @@ mkdir -p "$ADOPT_LEASE_DIR"
 #
 # On POSIX both steps are identity, which is why every one of these failures was
 # invisible locally.
-native_root() {
-  local rendered
-  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
-  ROOT_IN="$rendered" node -e '
-    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
-  ' || return 1
-}
+#
+# `native_root` itself is defined ABOVE, beside AC-C11, which is now its first
+# consumer; this block stays here because it is the fixture that paid for it.
 CANONICAL_BREAKING_ROOT="$(native_root "$SYNTHETIC_BREAKING_ROOT")"
 CANONICAL_CANDIDATE_ROOT="$(native_root "$SYNTHETIC_CANDIDATE_ROOT")"
 # An empty root would silently make every fixture unmatchable and grade the sweep
@@ -1384,11 +2046,13 @@ else
 fi
 
 # The ORDINARY case: a session that never minted a review-evidence lease has no
-# per-session records directory at all, so the sweep takes its readdir-failure
-# path. That path returned a scalar while every other path returned an object,
-# which made the reporter throw AFTER the record swap had already succeeded — a
-# completed adoption reported as a failure. Driven on its own session, because
-# the seeded one above can never reach it.
+# per-session records directory at all, so the sweep returns through its lstat
+# ENOENT branch. That path once returned a scalar while every other path returned
+# an object, which made the reporter throw AFTER the record swap had already
+# succeeded — a completed adoption reported as a failure. Named precisely: the
+# readdir catch below it is NOT this case, it is a directory that exists and
+# cannot be read, and it reports unsafe. Driven on its own session, because the
+# seeded one above can never reach it.
 NOLEASE_SESSION='versioned-upgrade-adoption-no-lease'
 NOLEASE_START="$(EVENT=SessionStart SESSION="$NOLEASE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1404,25 +2068,267 @@ printf '%s' "$NOLEASE_START" \
     bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
 NOLEASE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$NOLEASE_SESSION")"
 NOLEASE_OUT="$TMP/adopt-nolease.out"
+# CLAUDE_PROJECT_DIR is deliberately NOT the recorded root here — see AC-C11a
+# below, which grades the anchor this same run produced. It changes nothing about
+# what AC-C08 itself pins: the sweep and the report are located from the record,
+# never from where the command was invoked.
 if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$NOLEASE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$NOLEASE_OUT" \
     && grep -qF 'leases set aside : 0' "$NOLEASE_OUT" \
     && grep -qF 'leases stuck     : 0' "$NOLEASE_OUT" \
-    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
+    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT" \
+    && ! grep -qF 'WARNING' "$NOLEASE_OUT"; then
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
-  check "AC-C08 a session with no lease store adopts cleanly and exits 0" FAIL
+  # Names the second cause on purpose: this run also supplies AC-C11a's foreign
+  # project dir, so a reintroduced CLAUDE_PROJECT_DIR precondition in the entry
+  # script fails HERE first, under a label that would otherwise send the reader
+  # to the lease sweep.
+  check "AC-C08 a session with no lease store adopts cleanly and exits 0 (also the foreign-project-dir input AC-C11a grades)" FAIL
+  head -c 400 "$NOLEASE_OUT" 2>/dev/null
+fi
+
+# The EXISTING-BUT-EMPTY records directory, which no scenario produced. The no-lease
+# row above reaches the lstat ENOENT arm instead — its directory does not exist at
+# all — and every other row seeds at least one entry.
+#
+# The second-order effect is what makes this worth a row rather than only a unit
+# case: AC-C12 and AC-C12b are armed-fixture-safe ONLY because this early return
+# fires before the destination guard. If write_lease ever wrote to the wrong path the
+# directory would be empty, this return would fire, no WARNING would print, and both
+# rows would go red instead of passing against an unarmed fixture. That positive
+# control was itself supplied by untested code.
+EMPTY_RECORDS_DIR="$SHARED_DATA/review-evidence/v1/records/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+EMPTY_ASIDE_DIR="$SHARED_DATA/review-evidence/v1/superseded/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+if [ -n "${EMPTY_RECORDS_DIR##*/}" ] && mkdir -p "$EMPTY_RECORDS_DIR" 2>/dev/null; then
+  rm -rf "$EMPTY_ASIDE_DIR"
+  # The record is already adopted by the row above, so this takes the in-place repair
+  # branch — which runs the same sweep against the same store.
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/empty-records.out" 2>&1
+  if grep -qF 'leases set aside : 0' "$TMP/empty-records.out" \
+      && ! grep -qF 'WARNING' "$TMP/empty-records.out" \
+      && [ ! -e "$EMPTY_ASIDE_DIR" ]; then
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" PASS
+  else
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" FAIL
+    sed -n '1,12p' "$TMP/empty-records.out" 2>/dev/null
+    ls -1d "$EMPTY_ASIDE_DIR" 2>/dev/null
+  fi
+else
+  # FAIL, not SKIP: reaching here means the sessionKey substitution produced nothing
+  # or the mkdir failed, and this file states the rule twenty lines earlier — fail
+  # loudly on the fixture rather than quietly on the feature.
+  check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf (FIXTURE could not be built)" FAIL
+fi
+
+# AC-C12 — the DESTINATION refusal, and the only check that reaches either scope
+# string. Both existing sweeps are clean paths: the seeded one passes asideIsSafe()
+# and the no-lease one returns through the lstat ENOENT branch, so before this row
+# nothing in the tree distinguished `source` from `destination`, or either from the
+# bare boolean they replaced. The counts cannot stand in for it — they print BEFORE
+# the unsafe branch, so a refused sweep still reports `set aside : 0`.
+#
+# A regular FILE at the destination, not a symlink: CLAUDE.md §Git Mutation Tables
+# records that `ln -s` exiting 0 is no evidence of a symlink under Git Bash (W167/
+# W168), and the guard's per-segment lstat refuses a file just as usefully. It
+# costs one session lifecycle, which is what makes the scope strings observable.
+DESTUNSAFE_SESSION='versioned-upgrade-adoption-dest-unsafe'
+DESTUNSAFE_START="$(EVENT=SessionStart SESSION="$DESTUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$DESTUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+DESTUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$DESTUNSAFE_SESSION")"
+DESTUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$DESTUNSAFE_KEY"
+DESTUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$DESTUNSAFE_KEY"
+mkdir -p "$DESTUNSAFE_RECORDS" "$(dirname "$DESTUNSAFE_ASIDE")"
+# `superseded` IS mode-checked by asideIsSafe(), unlike its two ancestors, so this
+# mkdir must not be what leaves it at the ambient umask. Today the product code
+# creates it first at 0700 during the AC-C07 --confirm above and this is a no-op —
+# but that makes every later clean sweep depend on row ORDER, and a reorder would
+# turn AC-C08's `leases set aside : 3` red for a reason unrelated to the sweep.
+chmod 0700 "$(dirname "$DESTUNSAFE_ASIDE")"
+DESTUNSAFE_LEASE='rel1_00112233445566778899aabbccddeeff'
+write_lease "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" "$DESTUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+printf 'not a directory\n' > "$DESTUNSAFE_ASIDE"
+DESTUNSAFE_OUT="$TMP/adopt-dest-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$DESTUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$DESTUNSAFE_OUT" \
+    && grep -qF 'SUPERSEDED directory could not be opened safely' "$DESTUNSAFE_OUT" \
+    && ! grep -qF 'lease RECORDS directory of this session could not be' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$DESTUNSAFE_OUT" \
+    && [ -f "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" ]; then
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" PASS
+else
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" FAIL
+  head -c 400 "$DESTUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12a — the SOURCE refusal, which AC-C12 can only assert the absence of. An
+# absence passes more easily when the text is wrong, so it cannot stand in for the
+# positive case: without this row the `source` scope and one of the two warning arms
+# are never executed at all. It reaches ONE of the four statements that can return
+# `source` — the symlink-or-non-directory refusal. The other three (a non-canonical
+# records path, a non-ENOENT lstat error, a readdir error) are executed by no row in
+# this suite; that is a stated gap, not an implied covered set. Same technique, one component up — a
+# regular FILE where the per-session records directory belongs makes the lstat
+# guard's `!stat.isDirectory()` fire, with no symlink and no ln -s involved.
+SRCUNSAFE_SESSION='versioned-upgrade-adoption-src-unsafe'
+SRCUNSAFE_START="$(EVENT=SessionStart SESSION="$SRCUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$SRCUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+SRCUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$SRCUNSAFE_SESSION")"
+mkdir -p "$CANONICAL_SHARED_DATA/review-evidence/v1/records"
+printf 'not a directory\n' > "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$SRCUNSAFE_KEY"
+SRCUNSAFE_OUT="$TMP/adopt-src-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$SRCUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$SRCUNSAFE_OUT" \
+    && grep -qF 'lease RECORDS directory of this session could not be' "$SRCUNSAFE_OUT" \
+    && ! grep -qF 'SUPERSEDED directory could not be opened safely' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$SRCUNSAFE_OUT"; then
+  check "AC-C12a a refused source is named as the records directory, not the destination" PASS
+else
+  check "AC-C12a a refused source is named as the records directory, not the destination" FAIL
+  head -c 400 "$SRCUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12b — the LEAF permission arm, which neither row above reaches: AC-C12 plants
+# a FILE at the leaf, and the mkdir there raises EEXIST, which the loop tolerates —
+# so the per-segment lstat refuses the non-directory before the leaf mode/uid pair
+# or the realpath check ever run. A pre-existing DIRECTORY at 0777 is what reaches
+# the leaf mode/uid pair: the mkdir neither chmods nor fails on it, so the guard
+# meets a leaf it did not create, which is exactly the case the check exists for.
+# The realpath check below that pair is NOT reached on this arm — the mode check
+# returns first — only on the win32 arm, where privateEnough short-circuits to true.
+# Delete the mode/uid pair and this row is what goes red.
+LEAFUNSAFE_SESSION='versioned-upgrade-adoption-leaf-unsafe'
+LEAFUNSAFE_START="$(EVENT=SessionStart SESSION="$LEAFUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$LEAFUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+LEAFUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$LEAFUNSAFE_SESSION")"
+LEAFUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$LEAFUNSAFE_KEY"
+LEAFUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$LEAFUNSAFE_KEY"
+mkdir -p "$LEAFUNSAFE_RECORDS" "$LEAFUNSAFE_ASIDE"
+# Same rule as AC-C12 above, and this mkdir creates `superseded` as an implicit
+# parent: that segment is mode-checked, so leaving it at the ambient umask would let
+# this row pass through the SEGMENT refusal while claiming the LEAF one — both emit
+# the same text — and would make every later clean sweep order-dependent.
+chmod 0700 "$(dirname "$LEAFUNSAFE_ASIDE")"
+LEAFUNSAFE_LEASE='rel1_0123456789abcdef0123456789abcdef'
+write_lease "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" "$LEAFUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+chmod 0777 "$LEAFUNSAFE_ASIDE"
+# The mode/uid pair is platform-gated in the guard (`process.platform !== 'win32'`),
+# so on win32 the only defect this row plants is invisible BY DESIGN and the sweep
+# proceeds normally. Asserting a refusal there would be unpassable — the same class
+# the four $ADOPT_LABEL / $RECOGNIZER_LABEL branches above exist for — and it would
+# also contradict AC-C08, which needs asideIsSafe() to return true on that host.
+# So both arms are graded, and the label follows the grading.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    LEAFUNSAFE_EXPECT=swept
+    LEAFUNSAFE_LABEL="a world-writable destination leaf is NOT refused on win32 (the mode/uid arm is platform-gated by design)"
+    ;;
+  *)
+    LEAFUNSAFE_EXPECT=refused
+    LEAFUNSAFE_LABEL="a world-writable pre-existing destination leaf is refused"
+    ;;
+esac
+LEAFUNSAFE_OUT="$TMP/adopt-leaf-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$LEAFUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT"; then
+  if [ "$LEAFUNSAFE_EXPECT" = refused ]; then
+    grep -qF 'SUPERSEDED directory could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 0' "$LEAFUNSAFE_OUT" \
+      && [ -f "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  else
+    # The positive control on the other arm: the sweep must actually RUN, not merely
+    # avoid warning, or a guard that refused for some other reason would read green.
+    ! grep -qF 'could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 1' "$LEAFUNSAFE_OUT" \
+      && [ ! -e "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  fi
+else
+  LEAFUNSAFE_OK=0
+fi
+if [ "$LEAFUNSAFE_OK" = 1 ]; then
+  check "AC-C12b $LEAFUNSAFE_LABEL" PASS
+else
+  check "AC-C12b $LEAFUNSAFE_LABEL" FAIL
+  head -c 400 "$LEAFUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The
+# run above passed a project dir that is not the recorded one, so an adoption that
+# re-anchored to the caller's value would be visible in both the report line and
+# the minted record. Neither may move: adoptContext builds the new record from
+# verdict.context.project_root, which is the whole reason dropping the caller-side
+# comparison relaxes nothing. Graded off the SAME run rather than a fresh one — a
+# second adoption of an adopted record can only answer already-served.
+NOLEASE_RECORD="$SHARED_DATA/session-control/v1/records/$NOLEASE_KEY.json"
+if grep -qF "project          : $NATIVE_PROJECT" "$NOLEASE_OUT" \
+    && [ -f "$NOLEASE_RECORD" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$NOLEASE_RECORD")" = "$NATIVE_PROJECT" ]; then
+  check "AC-C11a adoption from a differing project dir still anchors on the record" PASS
+else
+  check "AC-C11a adoption from a differing project dir still anchors on the record" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
 # AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
+# The absence of a WARNING is defence in depth on THIS row: `set aside : 3` already
+# excludes a refused sweep, because every unsafe return discards 0. It is the
+# no-lease row above where the conjunct is load-bearing — there the count is 0
+# either way.
 if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
+    && ! grep -qF 'WARNING' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/$LEASE_STALE_ID.json" ] \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json" ] \
@@ -1430,9 +2336,9 @@ if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" PASS
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" PASS
 else
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" FAIL
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" FAIL
   # Name the two strings that had to match. Every failure of this check so far was
   # a path-SPELLING mismatch invisible from a POSIX host, and each round cost a
   # full CI cycle to identify. Printing them turns the next one into a read.
@@ -1440,8 +2346,117 @@ else
   printf '    recorded root     : %s\n' \
     "$(node -p 'require(process.argv[1]).plugin_root' "$ADOPT_RECORD" 2>/dev/null)"
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
-  grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
+fi
+
+# The IN-PLACE LEASE-STORE REPAIR. adoptContext commits the record and only then
+# sweeps, and the two are not transactional together — so a run that died in between
+# leaves a committed adoption with the store still wedged, and every later run
+# refused as already-served. The documented remedy was unreachable for exactly the
+# state it repairs.
+#
+# Simulated the way it actually happens: the record is already adopted (the run
+# above did that), and a superseded lease is present that the sweep has not seen.
+REPAIR_LEASE_ID="rel1_$(printf 'e%.0s' $(seq 1 32))"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_LEASE_ID" '/previous/zensu/installation' 2>/dev/null
+if [ -f "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ]; then
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-repair.out" 2>&1
+  REPAIR_STATUS=$?
+  # exit 0, not 1: this is a successful repair, not a refusal.
+  if [ "$REPAIR_STATUS" -eq 0 ] \
+      && grep -qF 'ALREADY SERVED (lease store repaired)' "$TMP/adopt-repair.out" \
+      && grep -qF 'leases set aside : 1' "$TMP/adopt-repair.out" \
+      && [ ! -e "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_ASIDE/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" PASS
+  else
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+    printf '    exit: %s\n' "$REPAIR_STATUS"
+    sed -n '1,14p' "$TMP/adopt-repair.out" 2>/dev/null
+  fi
+
+  # The read-only form must stay read-only, which is what the recognizer's own
+  # justification for admitting this write-capable command rests on. Same session,
+  # a fresh superseded lease, and NO --confirm: it must refuse and move nothing.
+  REPAIR_RO_ID="rel1_$(printf 'f%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_RO_ID" '/previous/zensu/installation' 2>/dev/null
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/adopt-repair-readonly.out" 2>&1
+  if grep -qF 'NOT adoptable (already-served)' "$TMP/adopt-repair-readonly.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json" ] \
+      && [ ! -e "$ADOPT_LEASE_ASIDE/$REPAIR_RO_ID.json" ]; then
+    check "the report-only form still refuses already-served and sweeps nothing" PASS
+  else
+    check "the report-only form still refuses already-served and sweeps nothing" FAIL
+    sed -n '1,10p' "$TMP/adopt-repair-readonly.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json"
+
+  # A NON-EMPTY `failed`. Every adoption row asserts `leases stuck     : 0`, so the
+  # catch arm and the warning block it feeds were never observed — and that warning
+  # is the only place safe() is applied to a LIST. The partial sweep is also the one
+  # state the report has to describe correctly while still claiming the adoption
+  # succeeded.
+  #
+  # Driven through a COLLISION, which is now the shape that produces it: the move is
+  # a link/unlink pair, so an entry already sitting in the superseded directory is
+  # refused rather than overwritten.
+  REPAIR_STUCK_ID="rel1_$(printf 'd%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: "/previous/zensu/installation",
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_STUCK_ID" 2>/dev/null
+  mkdir -p "$ADOPT_LEASE_ASIDE" 2>/dev/null
+  printf 'ALREADY SET ASIDE\n' > "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-stuck.out" 2>&1
+  if grep -qF 'leases stuck     : 1' "$TMP/adopt-stuck.out" \
+      && grep -qF 'could NOT be set aside' "$TMP/adopt-stuck.out" \
+      && grep -qF "$REPAIR_STUCK_ID" "$TMP/adopt-stuck.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" ] \
+      && [ "$(cat "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json")" = 'ALREADY SET ASIDE' ]; then
+    check "a colliding entry is reported stuck and what was already set aside survives" PASS
+  else
+    check "a colliding entry is reported stuck and what was already set aside survives" FAIL
+    sed -n '1,16p' "$TMP/adopt-stuck.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
+else
+  check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+  check "the report-only form still refuses already-served and sweeps nothing" FAIL
+  check "a colliding entry is reported stuck and what was already set aside survives" FAIL
 fi
 
 # The point of the whole feature: the session works again, in place. Both are
@@ -1489,17 +2504,8 @@ fi
 # with exactly ONE thing wrong. Run after the adoption because they reuse the
 # record it produced: it now declares 0.18.0, which is what makes the backwards
 # and non-sibling cases expressible from the roots this suite already built.
-adoption_reason() {
-  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
-    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
-    const verdict = core.adoptableRecord({
-      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
-      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
-      executingPluginRoot: process.env.EXEC_ROOT,
-    });
-    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
-  ' 2>/dev/null || printf 'threw'
-}
+# `adoption_reason` is defined ABOVE, beside native_root: AC-C11b is its first
+# consumer and it runs before the adoption.
 ADOPT_RECORDS_DIR="$SHARED_DATA/session-control/v1/records"
 
 REASON_BACKWARDS="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT")"
@@ -1516,13 +2522,33 @@ else
   check "AC-C09 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
 fi
 
+# AC-C09 — the caller's project root is NOT one of the conditions, and this is the
+# check that says so. It was the inverse once: a supplied directory that was not
+# the recorded one refused as `project-root-mismatch`, which made the repair
+# unreachable in the state it exists for — the record is minted from the
+# SessionStart payload cwd while the adoption is handed CLAUDE_PROJECT_DIR, and a
+# session cannot change the latter. Nothing is relaxed by removing it: the anchor
+# is carried from the record (pinned end to end at AC-C11a above), and the write
+# bound is readContext plus the sibling-root and plugin_data checks, all of which
+# the neighbouring rows still exercise.
+#
+# The record here already declares 0.18.0, so $SYNTHETIC_BREAKING_ROOT is the
+# runtime that already serves it and `ok` is not reachable from this row — AC-C11b
+# above owns that verdict, at the function boundary, before the adoption. What this
+# row adds is the property at the OTHER end of the walk: the project argument must
+# change nothing even once an earlier condition answers first. Both halves are
+# needed, and neither alone is sufficient: a comparison reintroduced after
+# already-served is invisible here, and one reintroduced before it is invisible at
+# AC-C11b only if it happens to agree for both arguments — which comparing the two
+# reasons is what rules out.
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
-if [ "$REASON_PROJECT" = project-root-mismatch ]; then
-  check "AC-C09 a record for another project may not be adopted" PASS
+REASON_OWN_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_PROJECT" = already-served ] && [ "$REASON_PROJECT" = "$REASON_OWN_PROJECT" ]; then
+  check "AC-C09 a caller-supplied project root that differs is not an authority" PASS
 else
-  check "AC-C09 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
+  check "AC-C09 a caller-supplied project root that differs is not an authority (foreign='$REASON_PROJECT' own='$REASON_OWN_PROJECT')" FAIL
 fi
 
 REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
@@ -1535,7 +2561,10 @@ fi
 # The record now names $SYNTHETIC_BREAKING_ROOT, so that root has nothing left to
 # adopt. Without this refusal the adoption would be a way to re-mint a HEALTHY
 # session's record, which is the one thing immutability exists to prevent.
-REASON_SERVED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+# Graded off the call the row above already made with these exact five arguments —
+# a second identical node process buys nothing and this suite's Windows ceiling is
+# explicitly unmeasured.
+REASON_SERVED="$REASON_OWN_PROJECT"
 if [ "$REASON_SERVED" = already-served ]; then
   check "AC-C09 a record this installation already serves is not adoptable" PASS
 else
@@ -1545,15 +2574,42 @@ fi
 # A sibling root whose manifest declares no usable version is not a lineage claim
 # at all — it is a root that cannot be identified, and it must refuse under its
 # own reason rather than being compared as if it had one.
+#
+# SHARED WITH AC-C20b, which drives this same root through the capability gate to
+# exercise reviewer-capability-v1.js's `(unreadable)` substitution. That is why the
+# value is spelled to LOOK like a version and to be hostile, rather than the plain
+# `not a version` it carried before: AC-C20b needs a double quote (the value lands
+# in a JSON string) and a newline (a split deny reason is the model-context defect
+# it pins), while this row needs only that the value fail ADOPTION_SAFE_VERSION_RE.
+# Both hold. The two rows sit ~1000 lines apart, so neither can see the other's use
+# from its own site — change this literal and BOTH must be re-read. Prose is not what
+# makes that safe, and for one review round it was all there was: THIS row asserts the
+# exact reason string, so a value that stops failing the SHAPE turns it RED — but the
+# quote and the newline are consumed only by AC-C20b, and reducing this literal to a
+# single-line `not a version` left both rows green while the conjuncts that look for
+# `evil`, for `SECOND LINE` and for zero newlines silently stopped asserting anything.
+# Named rather than counted: an earlier wording put a denominator on them ("three of
+# that row's six") which was already wrong when written and moved again when the record
+# property was split out into AC-C20c.
+#
+# AC-C20b's precondition judges the CONTENT, and states exactly which content: the shape
+# failure, the quote, the newline AND both substrings. Requiring the two CHARACTERS
+# alone was the first repair and covered only the newline conjunct — re-spelling this
+# literal to `0.19.0"harmless / OTHER TEXT` kept that guard true while both substring
+# conjuncts went back to matching a value carrying neither. A re-spelling that drops any
+# of the four now fails THERE, by name.
+UNIDENTIFIED_VERSION='0.19.0"evil
+SECOND LINE'
 UNIDENTIFIED_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.19.0 "$ROOT_REVISION" 2>/dev/null
 )"
 if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
-    && MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json" node -e '
+    && MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json" \
+       VERSION_IN="$UNIDENTIFIED_VERSION" node -e '
       const fs = require("node:fs");
       const file = process.env.MANIFEST;
       const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-      manifest.version = "not a version";
+      manifest.version = process.env.VERSION_IN;
       fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
     '; then
   REASON_UNIDENTIFIED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$UNIDENTIFIED_ROOT")"
@@ -1611,27 +2667,63 @@ fi
 # routing it back through the FAILURE branch — reporting a completed adoption as
 # an anomaly — would have been invisible. The fixture already exists: the same
 # .zensu-less project TEST-4 just proved the bare form leaves alone.
+#
+# The EXPECTATION moved with the workflow-baseline repair, and the move is the
+# point rather than a rename. This branch used to close with "That is a normal
+# state, not a fault", which adoptableRecord condition 6 makes reachable together
+# with a MISSING baseline — so the report read fully successful while the
+# capability gate then denied every later tool call for the one reason the report
+# had just called normal. The adoption is still NOT a fault and must still be
+# announced as ADOPTED; what changed is that the missing document is now named as
+# the wedge it is, with the command that clears it.
+#
+# The needles are matched against a NEWLINE-FLATTENED copy of the report rather
+# than against the file, and that is load-bearing rather than tidy: the renderer
+# hard-wraps its warning paragraph, so "denies EVERY tool" is split across two
+# lines and a line-scoped `grep -F` can NEVER match it. Written line-scoped, this
+# check could only ever fail — and it did, silently pinning wording that had
+# already moved ("has NO workflow document" became "no usable workflow document"
+# when the UNSAFE branch landed). Pinning the SENTENCE keeps the assertion honest
+# across a re-wrap; pinning the line breaks pins the typography instead.
 INERT_CONFIRM_OUT="$TMP/adopt-inert-confirm.out"
-if CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-    CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
-    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
-    >"$INERT_CONFIRM_OUT" 2>&1 \
-    && grep -qF 'ADOPTED' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'provenance       : no-workflow-document' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'had no workflow document' "$INERT_CONFIRM_OUT"; then
-  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" PASS
+CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+  >"$INERT_CONFIRM_OUT" 2>&1
+INERT_CONFIRM_RC=$?
+INERT_CONFIRM_FLAT="$(tr '\n' ' ' <"$INERT_CONFIRM_OUT" 2>/dev/null || printf '')"
+if [ "$INERT_CONFIRM_RC" -eq 0 ] \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'ADOPTED' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'provenance       : no-workflow-document' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'no usable workflow document' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'denies EVERY tool in this session' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF -- '--confirm to rebuild the document' \
+    && ! printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'normal state, not a fault'; then
+  check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" PASS
 else
-  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" FAIL
+  check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" FAIL
   head -c 400 "$INERT_CONFIRM_OUT" 2>/dev/null
 fi
 
-# JUDGE-3 — the whole feature needs the SUPERSEDED installation to still exist.
-# Remove the recorded root and the diagnosis degrades to the `unbound` row whose
-# wording this work exists to remove. Pinned so the boundary is a stated contract
-# rather than an unnoticed fallback.
+# ---------------------------------------------------------------------------
+# Part D — the pruned recorded installation.
+#
+# JUDGE-3 stood here and pinned the OPPOSITE contract: a record whose minting
+# installation was pruned from the plugin cache was "neither named nor adoptable
+# (documented boundary)". That boundary is closed. The state has its own binder
+# mode, its own deny scope, a Stop release, a doctor row and an adoption path
+# through readPrunedPluginRootContext — the existence of the recorded root is the
+# ONE waived check, proven rather than assumed. Ids are namespaced AC-D## for the
+# same reason Part C's are AC-C##: this repo never recycles an id.
+#
+# ORDER IS LOAD-BEARING inside this part. Every row up to AC-D09 grades the
+# session in its wedged state, and AC-D06 — the adoption — ENDS that state, so it
+# runs last. The three tamper rows restore the record from a copy kept OUTSIDE
+# the store, because a stray file inside it is a different failure.
 PRUNED_CACHE_PARENT="$TMP/pruned/zensu/zensu"
 PRUNED_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
 PRUNED_SUCCESSOR="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.18.0 "$ROOT_REVISION" 2>/dev/null)"
+PRUNED_COMPATIBLE="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.1 "$ROOT_REVISION" 2>/dev/null)"
 PRUNED_DATA="$TMP/pruned-data"
 mkdir -p "$PRUNED_DATA" && chmod 700 "$PRUNED_DATA"
 PRUNED_SESSION='versioned-upgrade-pruned-root'
@@ -1643,21 +2735,765 @@ PRUNED_START="$(EVENT=SessionStart SESSION="$PRUNED_SESSION" CWD="$PROJECT" node
     cwd: process.env.CWD,
   }));
 ')"
-if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
+PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Read",
+    tool_input: {file_path: "README.md"},
+  }));
+')"
+PRUNED_RECORD=''
+PRUNED_RECORD_COPY="$TMP/pruned-record.copy"
+# Drives one binder mode from one root: the exit status is the answer, stdout the
+# printed pair when there is one.
+pruned_mode() {
+  printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$2" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      node "$2/hooks/lib/claude-hook-session-v1.js" "$1" 2>/dev/null
+}
+# adoption_reason with the verdict's pruned flag exposed, so a row can tell an
+# ordinary lineage adoption from the admission this part exists for.
+pruned_adoption_verdict() {
+  RECORDS="$PRUNED_DATA/session-control/v1/records" SID="$PRUNED_SESSION" DATA="$PRUNED_DATA" EXEC_ROOT="$1" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok pruned=" + verdict.prunedPluginRoot : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
+# gate_decision_from against the pruned store; the decision file is kept so a row
+# can also grep the reason the gate rendered.
+PRUNED_GATE_OUT="$TMP/pruned-gate.out"
+pruned_gate_decision() {
+  local hook="$1" payload="$2" err="$TMP/pruned-gate.err"
+  if printf '%s' "$payload" \
+      | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$PRUNED_SUCCESSOR/hooks/$hook" >"$PRUNED_GATE_OUT" 2>"$err"; then
+    :
+  else
+    printf 'hook-exit-nonzero\n'
+    return
+  fi
+  # In THIS state the bind fails inside the core, not inside the binder, so the
+  # authoritative diagnostic on stderr is the raw core line rather than the
+  # binder-prefixed one gate_decision_from tolerates. It is exactly the line the
+  # Stop hook tells the user to read, so it is expected here — and only it.
+  if [ -s "$err" ] \
+      && grep -qv -e '^claude hook session binder: ' \
+        -e '^session-control-v1: context plugin root does not exist$' "$err"; then
+    printf 'hook-stderr\n'
+    return
+  fi
+  OUT_FILE="$PRUNED_GATE_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write("allow\n"); process.exit(0); }
+    try {
+      process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision || "allow"}\n`);
+    } catch (_error) { process.stdout.write("unparseable\n"); }
+  '
+}
+pruned_tamper() {
+  RECORD="$PRUNED_RECORD" FIELD="$1" VALUE="$2" node -e '
+    const fs = require("node:fs");
+    const record = JSON.parse(fs.readFileSync(process.env.RECORD, "utf8"));
+    record[process.env.FIELD] = process.env.VALUE;
+    fs.writeFileSync(process.env.RECORD, JSON.stringify(record, null, 2) + "\n");
+  '
+}
+# Self-verifying on purpose. A silent `cp` failure leaves the TAMPERED record in
+# place, and a tampered record produces exactly the values the rows after a
+# tamper assert — `record-unreadable` from the adoption path and `mode=no` from
+# the binder — so every one of them would report PASS for the wrong reason. The
+# post-condition is what makes "the record reaching the next row is pristine" an
+# observation rather than an assumption.
+pruned_restore() {
+  cp "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    && cmp -s "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    || check "Part D record restore failed — every later row grades a tampered record" FAIL
+}
+PRUNED_E64="$(node -e 'process.stdout.write("e".repeat(64))')"
+PRUNED_F64="$(node -e 'process.stdout.write("f".repeat(64))')"
+if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] && [ -n "$PRUNED_COMPATIBLE" ] \
     && printf '%s' "$PRUNED_START" \
       | CLAUDE_PLUGIN_ROOT="$PRUNED_ROOT" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
         bash "$PRUNED_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
-  # Positive control FIRST: without it both assertions below are absences that a
-  # fixture which never worked would satisfy just as well.
   PRUNED_KEY="$(node "$PRUNED_SUCCESSOR/hooks/lib/session-control-core-v1.js" session-key "$PRUNED_SESSION")"
-  PRUNED_BEFORE="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
-  PRUNED_CONTROL=no
-  [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.json" ] \
-    && [ "$PRUNED_BEFORE" = ok ] && PRUNED_CONTROL=yes
+  PRUNED_RECORD="$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.json"
+  cp "$PRUNED_RECORD" "$PRUNED_RECORD_COPY"
+  # Positive controls FIRST, while the recorded root still exists: the breaking
+  # successor adopts it as an ordinary lineage break, the pruned mode answers "not
+  # this state", and the lineage mode names it. Without them every absence below
+  # would be satisfied by a fixture that never worked.
+  PRUNED_BEFORE="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_MODE_BEFORE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_MODE_BEFORE=yes
+  PRUNED_LINEAGE_BEFORE=no
+  pruned_mode incompatible-runtime "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_LINEAGE_BEFORE=yes
   rm -rf "$PRUNED_ROOT"
-  PRUNED_VERDICT="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
-  PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+
+  # AC-D01 — the predicate: named only once the root is gone, disjoint from the
+  # lineage predicate, and false for both relaxable states.
+  PRUNED_MODE_AFTER=no
+  PRUNED_PAIR="$(pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR")" && PRUNED_MODE_AFTER=yes
+  PRUNED_LINEAGE_AFTER=no
+  pruned_mode incompatible-runtime "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_LINEAGE_AFTER=yes
+  PRUNED_UNREGISTERED=no
+  pruned_mode unregistered "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_UNREGISTERED=yes
+  PRUNED_ORPHANED=no
+  pruned_mode orphaned-project-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_ORPHANED=yes
+  if [ "$PRUNED_BEFORE" = 'ok pruned=false' ] && [ "$PRUNED_MODE_BEFORE" = no ] \
+      && [ "$PRUNED_LINEAGE_BEFORE" = yes ] && [ "$PRUNED_MODE_AFTER" = yes ] \
+      && [ "$PRUNED_PAIR" = "$(printf '0.17.0\t0.18.0')" ] && [ "$PRUNED_LINEAGE_AFTER" = no ] \
+      && [ "$PRUNED_UNREGISTERED" = no ] && [ "$PRUNED_ORPHANED" = no ]; then
+    check "AC-D01 the pruned-plugin-root mode names both versions once the root is gone, and only then; the lineage and relaxable predicates stay false" PASS
+  else
+    check "AC-D01 the pruned-plugin-root mode (before='$PRUNED_BEFORE' mode-before=$PRUNED_MODE_BEFORE lineage-before=$PRUNED_LINEAGE_BEFORE mode-after=$PRUNED_MODE_AFTER pair='$PRUNED_PAIR' lineage-after=$PRUNED_LINEAGE_AFTER unregistered=$PRUNED_UNREGISTERED orphaned=$PRUNED_ORPHANED)" FAIL
+  fi
+
+  # AC-D02 — adoptable, and the verdict says WHY it was admitted.
+  PRUNED_VERDICT="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  if [ "$PRUNED_VERDICT" = 'ok pruned=true' ]; then
+    check "AC-D02 a pruned recorded installation is adoptable and the verdict carries prunedPluginRoot" PASS
+  else
+    check "AC-D02 a pruned recorded installation is adoptable (got '$PRUNED_VERDICT')" FAIL
+  fi
+
+  # AC-D03 — existence is the ONLY waiver. A record that ALSO disagrees about its
+  # own content stays refused and unnamed, with the root gone.
+  pruned_tamper source_revision "sha256:$PRUNED_E64"
+  PRUNED_TAMPER_A="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_TAMPER_A_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_TAMPER_A_MODE=yes
+  pruned_restore
+  pruned_tamper session_id_hash "sha256:$PRUNED_F64"
+  PRUNED_TAMPER_B="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_TAMPER_B_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_TAMPER_B_MODE=yes
+  pruned_restore
+  if [ "$PRUNED_TAMPER_A" = record-unreadable ] && [ "$PRUNED_TAMPER_A_MODE" = no ] \
+      && [ "$PRUNED_TAMPER_B" = record-unreadable ] && [ "$PRUNED_TAMPER_B_MODE" = no ]; then
+    check "AC-D03 a pruned root combined with a drifted source revision or an altered session hash stays record-unreadable and unnamed" PASS
+  else
+    check "AC-D03 existence is the only waiver (source-revision='$PRUNED_TAMPER_A'/$PRUNED_TAMPER_A_MODE session-hash='$PRUNED_TAMPER_B'/$PRUNED_TAMPER_B_MODE)" FAIL
+  fi
+
+  # AC-D04 — a root under a directory that never existed is not a PRUNED
+  # installation; the reader requires the cache directory itself to survive.
+  # The pristine control first: without it the refusal below is only known to
+  # follow the tamper, not to be CAUSED by it — a record left tampered by an
+  # earlier row refuses identically.
+  PRUNED_PRISTINE="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  if [ "$PRUNED_PRISTINE" = 'ok pruned=true' ]; then
+    check "AC-D04 the record reaching this row is pristine, so the refusal below is caused by the tamper" PASS
+  else
+    check "AC-D04 pristine control before the tamper (verdict='$PRUNED_PRISTINE')" FAIL
+  fi
+  pruned_tamper plugin_root "$TMP/never-existed/zensu/zensu/0.17.0"
+  PRUNED_NO_PARENT="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_NO_PARENT_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_NO_PARENT_MODE=yes
+  pruned_restore
+  if [ "$PRUNED_NO_PARENT" = record-unreadable ] && [ "$PRUNED_NO_PARENT_MODE" = no ]; then
+    check "AC-D04 a recorded root whose cache directory never existed is refused and unnamed" PASS
+  else
+    check "AC-D04 a recorded root whose cache directory never existed (verdict='$PRUNED_NO_PARENT' mode=$PRUNED_NO_PARENT_MODE)" FAIL
+  fi
+
+  # AC-D05 — the compatible-but-pruned sub-case. A 0.17.1 sibling would have
+  # SERVED the 0.17.0 record while its root existed; with the root gone it can
+  # serve nothing, so adoption must admit it rather than refuse `already-served`,
+  # and the predicate must name it whatever the lineage says.
+  PRUNED_COMPAT_VERDICT="$(pruned_adoption_verdict "$PRUNED_COMPATIBLE")"
+  PRUNED_COMPAT_MODE=no
+  PRUNED_COMPAT_PAIR="$(pruned_mode pruned-plugin-root "$PRUNED_COMPATIBLE")" && PRUNED_COMPAT_MODE=yes
+  PRUNED_COMPAT_LINEAGE=no
+  pruned_mode incompatible-runtime "$PRUNED_COMPATIBLE" >/dev/null && PRUNED_COMPAT_LINEAGE=yes
+  if [ "$PRUNED_COMPAT_VERDICT" = 'ok pruned=true' ] && [ "$PRUNED_COMPAT_MODE" = yes ] \
+      && [ "$PRUNED_COMPAT_PAIR" = "$(printf '0.17.0\t0.17.1')" ] && [ "$PRUNED_COMPAT_LINEAGE" = no ]; then
+    check "AC-D05 a compatible-but-pruned record is adoptable and named, never refused as already-served" PASS
+  else
+    check "AC-D05 compatible-but-pruned (verdict='$PRUNED_COMPAT_VERDICT' mode=$PRUNED_COMPAT_MODE pair='$PRUNED_COMPAT_PAIR' lineage=$PRUNED_COMPAT_LINEAGE)" FAIL
+  fi
+
+  # AC-D07 — every hook on the Bash matcher lets the adoption command through in
+  # the pruned state, and an ordinary command is denied with the pruned wording.
+  # The SAME enumerator Parts B and C use, and the same per-hook and per-platform
+  # expectations AC-C04 records.
+  PRUNED_ADOPT_CMD="CLAUDE_PLUGIN_DATA=$PRUNED_DATA bash $PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh --confirm"
+  PRUNED_ADOPT_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "$PRUNED_ADOPT_CMD")"
+  PRUNED_MATCHER_HOOKS="$(bash_matcher_hooks "$PRUNED_SUCCESSOR/hooks/hooks.json")"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) PRUNED_EXPECTED=deny ;;
+    *) PRUNED_EXPECTED=allow ;;
+  esac
+  PRUNED_ENUMERATION_MISSING=''
+  for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+    case "$PRUNED_MATCHER_HOOKS" in
+      *"$required"*) ;;
+      *) PRUNED_ENUMERATION_MISSING="$PRUNED_ENUMERATION_MISSING $required" ;;
+    esac
+  done
+  PRUNED_GATE_FAILURES=''
+  while IFS= read -r hook_name; do
+    [ -n "$hook_name" ] || continue
+    hook_expected="$(adopt_hook_expected "$hook_name" "$PRUNED_EXPECTED")"
+    if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_ADOPT_PAYLOAD")" != "$hook_expected" ]; then
+      PRUNED_GATE_FAILURES="$PRUNED_GATE_FAILURES $hook_name"
+    fi
+  done <<EOF
+$PRUNED_MATCHER_HOOKS
+EOF
+  if [ -n "$PRUNED_MATCHER_HOOKS" ] && [ -z "$PRUNED_ENUMERATION_MISSING" ] && [ -z "$PRUNED_GATE_FAILURES" ]; then
+    check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state" PASS
+  else
+    check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state (unexpected:$PRUNED_GATE_FAILURES missing-from-enumeration:$PRUNED_ENUMERATION_MISSING)" FAIL
+  fi
+  # The deny half, hook by hook. pre-bash-zensu-gate.sh is absent from this list
+  # for the reason `adopt_hook_expected` states above: it exits before it binds for
+  # a command carrying no zensu verb, so it is not a denier here and is not graded
+  # as one.
+  PRUNED_PLAIN_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "echo probe")"
+  PRUNED_DENY_FAILURES=''
+  for hook_name in pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+    # SLOT-ANCHORED, both halves. A bare '0.17.0' needle matches whichever slot
+    # happens to carry it, so transposing the two arguments at any of the four
+    # gate call sites — or degrading only the executing half to `(unreadable)` —
+    # left this row green while every user in this state was told the wrong
+    # installation minted the record. The executing half was asserted nowhere.
+    if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_PLAIN_PAYLOAD")" != deny ] \
+        || ! grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT" \
+        || ! grep -qF 'executing-runtime-older' "$PRUNED_GATE_OUT"; then
+      PRUNED_DENY_FAILURES="$PRUNED_DENY_FAILURES $hook_name"
+    fi
+  done
+  if [ -z "$PRUNED_DENY_FAILURES" ]; then
+    check "AC-D07 an ordinary command is denied by every binding Bash gate with the pruned wording, both versions and the adopt remedy" PASS
+  else
+    check "AC-D07 an ordinary command is denied with the pruned wording (failed:$PRUNED_DENY_FAILURES)" FAIL
+  fi
+
+  # AC-D11 — the Edit-matcher gate. It is registered on Edit|Write|MultiEdit, so
+  # no Bash-matcher row above can reach it and Part D built no Edit payload at
+  # all: its pruned capture and its pruned_plugin_root deny call had NO executed
+  # case anywhere. The shared-emitter argument bounds the WORDING, never the
+  # WIRING — a mis-spelled predicate name, or this branch placed after the generic
+  # zensu_emit_hook_session_deny six lines below it, would leave the Edit channel
+  # telling the user to start a fresh session while every other gate names the
+  # repair, with the whole suite green.
+  PRUNED_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Edit",
+      tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+    }));
+  ')"
+  if [ "$(pruned_gate_decision pre-edit-tdd-reminder.sh "$PRUNED_EDIT_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording and both version slots" PASS
+  else
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D12 — pre-bash-zensu-gate.sh, reached for the first time. Every other row
+  # hands it a command with no `zensu <noun> <verb>` form, so it returns at its own
+  # `[ -z "$INVOCATIONS" ] && exit 0` nine lines above the bind and its pruned
+  # branch is never executed — the allow half above is satisfied identically in a
+  # tree with that branch deleted. A real read-classified CLI invocation is the
+  # only shape that gets past the early return, and the classification happens
+  # AFTER the bind, so the pruned deny is what comes back.
+  PRUNED_ZENSU_PAYLOAD="$(bash_payload "$PRUNED_SESSION" 'zensu features list')"
+  if [ "$(pruned_gate_decision pre-bash-zensu-gate.sh "$PRUNED_ZENSU_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation and denies with the pruned wording" PASS
+  else
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D10 — the all-tool capability gate, for a NON-Bash tool: it spells its own
+  # deny, so it is graded on its own text.
+  PRUNED_CAP_OUT="$TMP/pruned-capability.out"
+  printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$PRUNED_SUCCESSOR/hooks/pre-reviewer-capability-gate.sh" >"$PRUNED_CAP_OUT" 2>/dev/null
+  # Slot-anchored for the same reason as the deny loop above, and it matters more
+  # here: this gate hand-authors its deny in JS instead of calling the shell
+  # emitter, so this is a SECOND, independent interpolation of the same pair —
+  # the copy most likely to drift. Unanchored, `${pruned.executing}` could render
+  # the recorded version, an empty string or `undefined` and this row still passed.
+  if grep -qF '"permissionDecision":"deny"' "$PRUNED_CAP_OUT" \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_CAP_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_CAP_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_CAP_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_CAP_OUT" \
+      && grep -qF 'executing-runtime-older' "$PRUNED_CAP_OUT" \
+      && ! grep -qF 'immutable context revalidation failed' "$PRUNED_CAP_OUT"; then
+    check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording rather than the generic revalidation text" PASS
+  else
+    check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording (got: $(head -c 300 "$PRUNED_CAP_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D08 — the Stop hook RELEASES: exit 0, nothing on stdout, and stderr names
+  # both versions and the remedy. The control tampers the record — a pruned root
+  # combined with a second disagreement is still the blocking state.
+  PRUNED_STOP_PAYLOAD="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$PRUNED_SESSION")"
+  PRUNED_STOP_OUT="$TMP/pruned-stop.out"
+  PRUNED_STOP_ERR="$TMP/pruned-stop.err"
+  PRUNED_STOP_HOME="$TMP/pruned-stop-home"; mkdir -p "$PRUNED_STOP_HOME"
+  PRUNED_STOP_RC=0
+  printf '%s' "$PRUNED_STOP_PAYLOAD" \
+    | env -u ZENSU_CHAIN CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
+      bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$PRUNED_STOP_OUT" 2>"$PRUNED_STOP_ERR" \
+    || PRUNED_STOP_RC=$?
+  pruned_tamper source_revision "sha256:$PRUNED_E64"
+  PRUNED_STOP_CONTROL="$TMP/pruned-stop-control.out"
+  printf '%s' "$PRUNED_STOP_PAYLOAD" \
+    | env -u ZENSU_CHAIN CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
+      bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$PRUNED_STOP_CONTROL" 2>/dev/null || true
+  pruned_restore
+  if [ "$PRUNED_STOP_RC" = 0 ] && [ ! -s "$PRUNED_STOP_OUT" ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_STOP_ERR" \
+      && grep -qF 'version 0.17.0' "$PRUNED_STOP_ERR" \
+      && grep -qF '/zensu:adopt-session --confirm' "$PRUNED_STOP_ERR" \
+      && grep -qF 'its recorded project root is intact' "$PRUNED_STOP_ERR" \
+      && ! grep -qF 'The binding that resolves the project root is what failed' "$PRUNED_STOP_ERR" \
+      && grep -qF '"decision":"block"' "$PRUNED_STOP_CONTROL"; then
+    check "AC-D08 Stop releases in the pruned state naming both versions and the remedy, and still blocks a pruned-and-tampered record" PASS
+  else
+    check "AC-D08 Stop releases in the pruned state (rc=$PRUNED_STOP_RC stdout-bytes=$(wc -c <"$PRUNED_STOP_OUT" | tr -d ' ') stderr: $(head -c 200 "$PRUNED_STOP_ERR" 2>/dev/null) control: $(head -c 80 "$PRUNED_STOP_CONTROL" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D09 — the doctor row. The bite is again the ABSENCE of the old wording:
+  # before the third probe existed this state fell through to the line asserting
+  # the session has no record. Same HOME sandbox AC-C02 applies.
+  PRUNED_DOCTOR_OUT="$TMP/pruned-doctor.out"
+  PRUNED_DOCTOR_HOME="$TMP/pruned-doctor-home"; mkdir -p "$PRUNED_DOCTOR_HOME"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_DOCTOR_HOME" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-doctor.sh" >"$PRUNED_DOCTOR_OUT" 2>/dev/null
+  if grep -qF 'removed from the plugin cache' "$PRUNED_DOCTOR_OUT" \
+      && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$PRUNED_DOCTOR_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$PRUNED_DOCTOR_OUT" \
+      && ! grep -qF 'declares an incompatible lineage' "$PRUNED_DOCTOR_OUT"; then
+    check "AC-D09 the doctor renders the pruned row with both versions and never claims 'no valid record' or a lineage break" PASS
+  else
+    check "AC-D09 the doctor renders the pruned row with both versions" FAIL
+    grep -F 'binding:' "$PRUNED_DOCTOR_OUT" 2>/dev/null
+  fi
+
+  # AC-D06 — the repair, end to end, and therefore LAST: report, confirm, and the
+  # very next bind from the successor succeeds.
+  PRUNED_REPORT_OUT="$TMP/pruned-adopt-report.out"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" >"$PRUNED_REPORT_OUT" 2>&1 || true
+  PRUNED_CONFIRM_OUT="$TMP/pruned-adopt-confirm.out"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" --confirm >"$PRUNED_CONFIRM_OUT" 2>&1 || true
+  PRUNED_BOUND=no
+  PRUNED_BIND_OUT="$TMP/pruned-bind.out"
+  if printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+        node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" >"$PRUNED_BIND_OUT" 2>/dev/null \
+      && grep -qF 'export ZENSU_SESSION_KEY=' "$PRUNED_BIND_OUT"; then
+    PRUNED_BOUND=yes
+  fi
+  PRUNED_MODE_AFTER_ADOPTION=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_MODE_AFTER_ADOPTION=yes
+  if grep -qF 'ADOPTABLE' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'installation no longer on disk' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'ADOPTED' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'installation no longer on disk' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'record minted by : 0.17.0' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'now served by    : 0.18.0' "$PRUNED_CONFIRM_OUT" \
+      && [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.superseded-0.17.0.json" ] \
+      && [ "$PRUNED_BOUND" = yes ] && [ "$PRUNED_MODE_AFTER_ADOPTION" = no ]; then
+    check "AC-D06 the pruned record adopts end to end, says the installation is gone, keeps the superseded copy, and binds from the successor afterwards" PASS
+  else
+    check "AC-D06 the pruned record adopts end to end (bound=$PRUNED_BOUND mode-after=$PRUNED_MODE_AFTER_ADOPTION)" FAIL
+    head -c 400 "$PRUNED_REPORT_OUT" 2>/dev/null
+    head -c 400 "$PRUNED_CONFIRM_OUT" 2>/dev/null
+  fi
+else
+  check "Part D fixture unavailable: the pruned-installation rows could not be armed" FAIL
+fi
+
+# ---------------------------------------------------------------------------
+# Part C2 — the OTHER way the two sources of truth diverge: the recorded project
+# root is GONE (a `git worktree remove` on a live session, the documented cleanup
+# in skills/pr-team-review Phase E) while the executing runtime declares an
+# incompatible lineage. Each of the two narrow predicates answers "not me" for
+# that combination — the orphan one re-applies servesRecordedRuntime, the lineage
+# one used to read strictly — so it fell through to the `unbound` row and to
+# `record-unreadable`, wedging the session permanently with every write channel
+# denied.
+#
+# Its own session and its own project on purpose: the checks below DELETE that
+# project, and every fixture above needs $PROJECT to keep existing.
+# ---------------------------------------------------------------------------
+
+GONE_PROJECT="$TMP/gone-project"
+mkdir -p "$GONE_PROJECT"
+GONE_SESSION='versioned-upgrade-gone-project-root'
+GONE_START="$(EVENT=SessionStart SESSION="$GONE_SESSION" CWD="$GONE_PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+GONE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GONE_SESSION")"
+GONE_RECORD="$SHARED_DATA/session-control/v1/records/$GONE_KEY.json"
+# Hoisted ABOVE the fixture branch on purpose. Two rows far below the closing `fi`
+# use it (AC-C21's two doctor drives), and under `set -u` an unset expansion there
+# ABORTS the file — so the else arm's deliberate FAIL rows would be followed by no
+# rows at all, not even the PASS/FAIL summary, and a fixture failure would read as
+# a truncated run rather than as the interpretable report that arm exists to give.
+GONE_DOCTOR_HOME="$TMP/gone-doctor-home"; mkdir -p "$GONE_DOCTOR_HOME"
+# Hoisted for the SAME reason, and it is the same trap in its other form. AC-C20 far
+# below reads this name; guarding the read with `${...:-}` would avoid the `set -u`
+# abort but silently grade an EMPTY session id, so a fixture failure would surface as
+# an ordinary FAIL with no "(fixture unavailable)" label — the diagnosis the else arm
+# exists to give. Hoisting keeps both properties: no abort, and the label still means
+# something.
+LIVE_ROOT_SESSION='versioned-upgrade-live-project-root'
+if printf '%s' "$GONE_START" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$GONE_PROJECT" \
+      bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1 \
+    && [ -f "$GONE_RECORD" ]; then
+  # Positive control BEFORE the deletion, for the same reason JUDGE-3 takes one:
+  # without it every assertion below is satisfied just as well by a fixture that
+  # never registered at all.
+  GONE_BEFORE="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$GONE_SESSION" "$SHARED_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  # The spelling every LATER comparison must use, taken from the RECORD and taken
+  # NOW, while the directory still exists. On Git Bash the shell holds
+  # /d/a/... while the record and the report hold D:\a\..., so a raw $GONE_PROJECT
+  # needle can only ever fail there — silently, since a POSIX run stays green.
+  # `native_root` is not usable here: it realpaths the path, and by the time these
+  # rows run the directory is deleted. The record already holds the canonicalized
+  # spelling, because buildContext canonicalized it when the record was minted.
+  GONE_NATIVE="$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD" 2>/dev/null)" \
+    || GONE_NATIVE=""
+  rm -rf "$GONE_PROJECT"
+  GONE_AFTER="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$GONE_SESSION" "$SHARED_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  # GONE_NATIVE is conjoined rather than merely captured: it is the needle two rows
+  # below grep for, and an empty needle would turn those greps into a match on the
+  # report's fixed label — a row that passes while testing nothing. Same guard the
+  # native_root call sites above apply for the same reason.
+  if [ "$GONE_BEFORE" = ok ] && [ "$GONE_AFTER" = ok ] && [ ! -e "$GONE_PROJECT" ] \
+      && [ -n "$GONE_NATIVE" ]; then
+    check "AC-C13 a record whose project root is gone is still adoptable across the lineage break" PASS
+  else
+    check "AC-C13 a record whose project root is gone is still adoptable (before='$GONE_BEFORE' after='$GONE_AFTER' native='$GONE_NATIVE')" FAIL
+  fi
+
+  # The discrimination half. A vanished project root is the ONE disagreement
+  # admitted alongside the lineage; anything else must still refuse, or the
+  # fallback would have widened `record-unreadable` into an unconditional pass.
+  # Driven on a COPY so the record the checks below act on stays intact.
+  TAMPER_DATA="$TMP/gone-tamper-data"
+  rm -rf "$TAMPER_DATA"
+  mkdir -p "$TAMPER_DATA/session-control/v1/records" && chmod 700 "$TAMPER_DATA"
+  chmod 700 "$TAMPER_DATA/session-control" "$TAMPER_DATA/session-control/v1" \
+    "$TAMPER_DATA/session-control/v1/records"
+  cp "$GONE_RECORD" "$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json"
+  # The plugin_data rewrite is a SEPARATE step from the tamper, so a positive
+  # control can sit between them. Without one, any reason the copied store is
+  # unreadable — a partial copy, a permission, a canonicalization mismatch —
+  # satisfies the refusal this row asserts, and the row passes for the wrong
+  # reason. That is the discipline the AC-C13 control above states and JUDGE-3
+  # applies.
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER_DATA_NATIVE="$(native_root "$TAMPER_DATA")" || TAMPER_DATA_NATIVE=""
+  if [ -n "$TAMPER_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER_DATA_NATIVE" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      // plugin_data has to follow the copy or the refusal would be
+      // plugin-data-mismatch, which proves nothing about the digest.
+      record.plugin_data = process.env.DATA_IN;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    TAMPER_CONTROL="$(adoption_reason "$TAMPER_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  else
+    TAMPER_CONTROL='fixture-unavailable'
+  fi
+  if [ "$TAMPER_CONTROL" = ok ] \
+      && RECORD_IN="$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      record.runtime_digest = "sha256:" + "0".repeat(64);
+      record.source_revision = record.runtime_digest;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    GONE_TAMPERED="$(adoption_reason "$TAMPER_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+    if [ "$GONE_TAMPERED" = record-unreadable ]; then
+      check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable" PASS
+    else
+      check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (control='$TAMPER_CONTROL' got '$GONE_TAMPERED')" FAIL
+    fi
+  else
+    check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (control='$TAMPER_CONTROL')" FAIL
+  fi
+
+  # A SECOND tamper, because the first lands on a check BOTH readers share. The
+  # runtime-digest comparison lives in readContextInternal, which
+  # readOrphanedProjectRootContext delegates to, so AC-C14 never observes the
+  # orphan reader's OWN re-applied shape guard — the one that keeps a control
+  # character or a relative project_root out of the terminal and out of the
+  # model's context. This case rewrites project_root alone.
+  TAMPER2_DATA="$TMP/gone-tamper2-data"
+  rm -rf "$TAMPER2_DATA"
+  mkdir -p "$TAMPER2_DATA/session-control/v1/records" && chmod 700 "$TAMPER2_DATA"
+  chmod 700 "$TAMPER2_DATA/session-control" "$TAMPER2_DATA/session-control/v1" \
+    "$TAMPER2_DATA/session-control/v1/records"
+  cp "$GONE_RECORD" "$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json"
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER2_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER2_DATA_NATIVE="$(native_root "$TAMPER2_DATA")" || TAMPER2_DATA_NATIVE=""
+  if [ -n "$TAMPER2_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER2_DATA_NATIVE" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      record.plugin_data = process.env.DATA_IN;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    TAMPER2_CONTROL="$(adoption_reason "$TAMPER2_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER2_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  else
+    TAMPER2_CONTROL='fixture-unavailable'
+  fi
+  if [ "$TAMPER2_CONTROL" = ok ] \
+      && RECORD_IN="$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      // Relative, so it fails requireAbsentDirectoryPath rather than the shared
+      // digest check. A control character would do as well; this one keeps the
+      // fixture readable in a terminal.
+      record.project_root = "relative/not/absolute";
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    GONE_TAMPERED2="$(adoption_reason "$TAMPER2_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER2_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+    if [ "$GONE_TAMPERED2" = record-unreadable ]; then
+      check "AC-C14a the orphan reader's own shape guard refuses a non-absolute project root" PASS
+    else
+      check "AC-C14a the orphan reader's own shape guard refuses a non-absolute project root (control='$TAMPER2_CONTROL' got '$GONE_TAMPERED2')" FAIL
+    fi
+  else
+    check "AC-C14a the orphan reader's own shape guard refuses a non-absolute project root (control='$TAMPER2_CONTROL')" FAIL
+  fi
+
+  # The doctor row. Both facts, and never the `unbound` wording — which is the
+  # line this whole state used to receive.
+  GONE_DOCTOR_OUT="$TMP/adopt-gone-doctor.out"
+  CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DOCTOR_OUT" 2>/dev/null
+  if grep -qF 'is gone and the running Zensu installation declares an incompatible lineage' "$GONE_DOCTOR_OUT" \
+      && [ -n "$GONE_NATIVE" ] && grep -qF "$GONE_NATIVE" "$GONE_DOCTOR_OUT" \
+      && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$GONE_DOCTOR_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$GONE_DOCTOR_OUT"; then
+    check "AC-C15 the doctor row names both facts and never claims 'no valid record'" PASS
+  else
+    check "AC-C15 the doctor row names both facts and never claims 'no valid record'" FAIL
+    grep -F 'binding:' "$GONE_DOCTOR_OUT" 2>/dev/null
+  fi
+
+  # The READ-ONLY form first, and not only for ordering: the pre-confirm branch
+  # carries its own orphan disclosure, and "without --confirm it is read-only" is
+  # the premise the whole gate widening rests on. Nothing else in the suite
+  # reaches that branch — every other GONE_SESSION invocation passes --confirm.
+  GONE_REPORT_OUT="$TMP/adopt-gone-report.out"
+  if CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$GONE_REPORT_OUT" 2>&1 \
+      && grep -qF 'ADOPTABLE' "$GONE_REPORT_OUT" \
+      && grep -qF '(GONE)' "$GONE_REPORT_OUT" \
+      && grep -qF 'Nothing has been changed' "$GONE_REPORT_OUT" \
+      && grep -qF 'It does NOT restore writes' "$GONE_REPORT_OUT" \
+      && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.17.0 ]; then
+    check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing" PASS
+  else
+    check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing" FAIL
+    head -c 400 "$GONE_REPORT_OUT" 2>/dev/null
+  fi
+
+  # AC-C15a1 — the session-id-unusable refusal class, which had NO test anywhere in
+  # the tree. It exists because routing both of buildRequest's independent checks
+  # into one catch printed `private-record-store-unsafe` for a malformed or DERIVED
+  # session id, telling the user to repair a store that was never reached. The
+  # DERIVED id is the realistic way in: $GONE_KEY is the scv1_ key this suite
+  # already computed, and handing it back as the RAW session id is exactly the
+  # confusion the class is named for.
+  #
+  # The NEGATIVE is the load-bearing assertion, not the headline: re-merging the two
+  # catches would keep the store-unsafe wording and still refuse, so a positive-only
+  # row would stay green through the precise regression this class was split to
+  # prevent. The "not implicated" sentence is pinned for the same reason — it is the
+  # half that tells the user their store is fine.
+  GONE_BADID_OUT="$TMP/adopt-gone-badid.out"
+  CLAUDE_CODE_SESSION_ID="$GONE_KEY" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$GONE_BADID_OUT" 2>&1
+  GONE_BADID_RC=$?
+  if [ "$GONE_BADID_RC" -ne 0 ] \
+      && grep -qF 'NOT adoptable (session-id-unusable)' "$GONE_BADID_OUT" \
+      && grep -qF 'the record store is not implicated' "$GONE_BADID_OUT" \
+      && grep -qF 'Nothing was read and nothing was changed' "$GONE_BADID_OUT" \
+      && ! grep -qF 'private-record-store-unsafe' "$GONE_BADID_OUT"; then
+    check "AC-C15a1 a derived session id is refused as session-id-unusable, never as an unsafe store" PASS
+  else
+    check "AC-C15a1 a derived session id is refused as session-id-unusable, never as an unsafe store (rc=$GONE_BADID_RC)" FAIL
+    head -c 400 "$GONE_BADID_OUT" 2>/dev/null
+  fi
+
+  # The new argv mode's own argument guard. Reached transitively by AC-C15, so
+  # nothing observed its refusal arm.
+  GONE_ARGV_OUT="$TMP/adopt-gone-argv.out"
+  if CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+      CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      model-orphaned-incompatible-root extra >"$GONE_ARGV_OUT" 2>&1; then
+    check "AC-C15b the new argv mode refuses an extra argument" FAIL
+  elif grep -qF 'model-orphaned-incompatible-root does not accept arguments' "$GONE_ARGV_OUT"; then
+    check "AC-C15b the new argv mode refuses an extra argument" PASS
+  else
+    check "AC-C15b the new argv mode refuses an extra argument (wrong reason)" FAIL
+    head -c 200 "$GONE_ARGV_OUT" 2>/dev/null
+  fi
+
+  # The wrapper's refusal arm, driven for REAL. An earlier version of this row
+  # injected ZDOC_BINDING, which skips the whole `if [ -z "${ZDOC_BINDING:-}" ]`
+  # block in zensu-doctor.sh — the block that contains every wrapper call — so it
+  # graded the renderer's switch and could not fail. The honest shape is a session
+  # whose lineage IS incompatible while its project root still EXISTS: there the
+  # third-fact probe runs and must answer empty, so the doctor renders the plain
+  # lineage row. ADOPT_SESSION is that session before AC-C07 adopts it, and
+  # AC-C02 above already ran against it.
+  # Its own freshly registered session, NOT $ADOPT_SESSION: AC-C07 above already
+  # adopted that one, so by the time this row runs it binds normally and the
+  # doctor renders the healthy row — which would fail this check for a reason
+  # that has nothing to do with the probe.
+  LIVE_ROOT_START="$(EVENT=SessionStart SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      source: "startup",
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  ')"
+  if printf '%s' "$LIVE_ROOT_START" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
+    LIVE_ROOT_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$LIVE_ROOT_SESSION")"
+    [ -f "$SHARED_DATA/session-control/v1/records/$LIVE_ROOT_KEY.json" ] \
+      && LIVE_ROOT_REGISTERED=yes || LIVE_ROOT_REGISTERED=no
+  else
+    LIVE_ROOT_REGISTERED=no
+  fi
+  GONE_NEGATIVE_OUT="$TMP/adopt-gone-negative.out"
+  CLAUDE_CODE_SESSION_ID="$LIVE_ROOT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_NEGATIVE_OUT" 2>/dev/null
+  if grep -qF 'declares an incompatible lineage' "$GONE_NEGATIVE_OUT" \
+      && ! grep -qF 'is gone and the running Zensu installation' "$GONE_NEGATIVE_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$GONE_NEGATIVE_OUT"; then
+    check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders" PASS
+  else
+    check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders" FAIL
+    grep -F 'binding:' "$GONE_NEGATIVE_OUT" 2>/dev/null
+  fi
+
+  # The Stop hook's dead-root release branch, end to end. It releases the Stop
+  # guard and shipped with no executed case; AC-C03 above cannot stand in for it,
+  # because every needle AC-C03 greps appears in BOTH messages. Runs BEFORE the
+  # adoption, which is the only window in which this state exists.
+  GONE_STOP_PAYLOAD="$(EVENT=Stop SESSION="$GONE_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  ')"
+  GONE_STOP_OUT="$TMP/adopt-gone-stop.out"
+  GONE_STOP_ERR="$TMP/adopt-gone-stop.err"
+  if printf '%s' "$GONE_STOP_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" \
+        >"$GONE_STOP_OUT" 2>"$GONE_STOP_ERR" \
+      && grep -qF 'this is not a deferral' "$GONE_STOP_ERR" \
+      && grep -qF 'BOTH the recorded project root' "$GONE_STOP_ERR" \
+      `# Same dead-needle correction: this excluded a literal that no longer exists.` \
+      `# The gone-root arm must not borrow the DEFERRAL arm's wording, and the live` \
+      `# discriminator for that arm is the sentence AC-C19 already treats as arm 3.` \
+      && ! grep -qF 'The recorded project root still EXISTS' "$GONE_STOP_ERR" \
+      && ! grep -qF 'nothing is claimed about the workflow document either way' "$GONE_STOP_ERR" \
+      && [ ! -s "$GONE_STOP_OUT" ]; then
+    check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" PASS
+  else
+    check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" FAIL
+    head -c 400 "$GONE_STOP_ERR" 2>/dev/null
+  fi
+
+  # The PAYLOAD spelling of the third-fact mode, which the Stop branch above uses
+  # and which nothing else drives; only the model- twin was exercised.
+  GONE_PAYLOAD_OUT="$TMP/adopt-gone-payload-mode.out"
+  if printf '%s' "$GONE_STOP_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+        orphaned-incompatible-root >"$GONE_PAYLOAD_OUT" 2>/dev/null \
+      && [ -n "$GONE_NATIVE" ] && grep -qF "$GONE_NATIVE" "$GONE_PAYLOAD_OUT"; then
+    check "AC-C15e the payload spelling of the third-fact mode prints the dead root" PASS
+  else
+    check "AC-C15e the payload spelling of the third-fact mode prints the dead root" FAIL
+    head -c 200 "$GONE_PAYLOAD_OUT" 2>/dev/null
+  fi
+
+  # And its POSITIVE negative: a live project root must exit 3, not 1. A caller
+  # that cannot tell 3 from 1 has to infer a negative from a failure, which is how
+  # the Stop hook came to assert a surviving workflow document.
+  LIVE_ROOT_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
     process.stdout.write(JSON.stringify({
       hook_event_name: process.env.EVENT,
       session_id: process.env.SESSION,
@@ -1666,19 +3502,942 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
       tool_input: {file_path: "README.md"},
     }));
   ')"
-  PRUNED_NAMED=no
-  if printf '%s' "$PRUNED_TOOL_PAYLOAD" \
-      | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
-        node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" incompatible-runtime >/dev/null 2>&1; then
-    PRUNED_NAMED=yes
-  fi
-  if [ "$PRUNED_CONTROL" = yes ] && [ "$PRUNED_VERDICT" = record-unreadable ] && [ "$PRUNED_NAMED" = no ]; then
-    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (documented boundary)" PASS
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      orphaned-incompatible-root >/dev/null 2>&1
+  GONE_MODE_STATUS=$?
+  # The status alone proves nothing without knowing the session IS in the lineage
+  # state: an unregistered or unreadable session used to reach the same arm. Prove
+  # the state first, and prove that an UNAVAILABLE answer is a different status —
+  # a plugin-data directory with no record for this session cannot answer at all.
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      incompatible-runtime >/dev/null 2>&1
+  LIVE_ROOT_LINEAGE=$?
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$FOREIGN_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      orphaned-incompatible-root >/dev/null 2>&1
+  GONE_MODE_UNAVAILABLE=$?
+  if [ "$LIVE_ROOT_REGISTERED" = yes ] && [ "$LIVE_ROOT_LINEAGE" -eq 0 ] \
+      && [ "$GONE_MODE_STATUS" -eq 3 ] && [ "$GONE_MODE_UNAVAILABLE" -eq 1 ]; then
+    check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1" PASS
   else
-    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (control=$PRUNED_CONTROL before='$PRUNED_BEFORE' verdict='$PRUNED_VERDICT' named=$PRUNED_NAMED)" FAIL
+    check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1 (registered=$LIVE_ROOT_REGISTERED lineage=$LIVE_ROOT_LINEAGE negative=$GONE_MODE_STATUS unavailable=$GONE_MODE_UNAVAILABLE)" FAIL
+  fi
+
+  # AC-C14b — the NORMALIZATION arm. AC-C14a trips `must be absolute`; this one
+  # plants an absolute-but-unnormalized spelling, which `path.isAbsolute` admits
+  # and no canonical comparison would ever match. Deleting the check left the
+  # suite green, which is why it is pinned separately from its sibling.
+  TAMPER3_DATA="$TMP/gone-tamper3-data"
+  rm -rf "$TAMPER3_DATA"
+  mkdir -p "$TAMPER3_DATA/session-control/v1/records" && chmod 700 "$TAMPER3_DATA"
+  chmod 700 "$TAMPER3_DATA/session-control" "$TAMPER3_DATA/session-control/v1" \
+    "$TAMPER3_DATA/session-control/v1/records"
+  cp "$GONE_RECORD" "$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json"
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER3_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER3_DATA_NATIVE="$(native_root "$TAMPER3_DATA")" || TAMPER3_DATA_NATIVE=""
+  if [ -n "$TAMPER3_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER3_DATA_NATIVE" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      record.plugin_data = process.env.DATA_IN;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    TAMPER3_CONTROL="$(adoption_reason "$TAMPER3_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER3_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  else
+    TAMPER3_CONTROL='fixture-unavailable'
+  fi
+  if [ "$TAMPER3_CONTROL" = ok ] \
+      && RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      // Absolute, so it clears path.isAbsolute; unnormalized, so it must still be
+      // refused. This is the spelling a canonical comparison can never match.
+      record.project_root = record.project_root + "/../" + require("node:path").basename(record.project_root);
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    GONE_TAMPERED3="$(adoption_reason "$TAMPER3_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER3_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+    if [ "$GONE_TAMPERED3" = record-unreadable ]; then
+      check "AC-C14b an absolute but unnormalized project root is refused, not admitted" PASS
+    else
+      check "AC-C14b an absolute but unnormalized project root is refused, not admitted (control='$TAMPER3_CONTROL' got '$GONE_TAMPERED3')" FAIL
+    fi
+  else
+    check "AC-C14b an absolute but unnormalized project root is refused, not admitted (control='$TAMPER3_CONTROL')" FAIL
+  fi
+
+  # The repair, end to end through the shipped entry point. Three claims in one
+  # arm because they are one transaction: it adopts, it re-mints around the SAME
+  # absent anchor, and it does not recreate the directory — the last is the one a
+  # naive implementation breaks, because the provenance writer mkdirs every
+  # missing component of <project>/.zensu/state.
+  GONE_CONFIRM_OUT="$TMP/adopt-gone-confirm.out"
+  # The re-minted record is compared against the SUPERSEDED copy by full key set, not
+  # by the two fields this row used to check. Two fields cannot see a field that was
+  # dropped, renamed or added, and this record is the session-identity store: a
+  # re-mint that silently loses a key is exactly the class the adoption design forbids
+  # ("no record field is ever added" is an invariant, and losing one is worse). The
+  # comparison is cheap because both documents are on disk at this point — keeping the
+  # superseded copy readable is a deliberate property of the design, not an accident,
+  # so this row also pins that the copy is there at all.
+  GONE_SUPERSEDED="$SHARED_DATA/session-control/v1/records/$GONE_KEY.superseded-0.17.0.json"
+  if CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$GONE_CONFIRM_OUT" 2>&1 \
+      && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
+      && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'while Edit, Write and MultiEdit stay denied, and so does any Bash command' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'the source-write gate can attribute as a write — a write cannot be attributed' "$GONE_CONFIRM_OUT" \
+      && [ ! -e "$GONE_PROJECT" ] \
+      && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
+      && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ] \
+      && [ -f "$GONE_SUPERSEDED" ] \
+      && node -e '
+        const a = Object.keys(require(process.argv[1])).sort();
+        const b = Object.keys(require(process.argv[2])).sort();
+        if (JSON.stringify(a) !== JSON.stringify(b)) {
+          process.stderr.write("key sets differ\nre-minted:  " + a.join(",") + "\nsuperseded: " + b.join(",") + "\n");
+          process.exit(1);
+        }
+      ' "$GONE_RECORD" "$GONE_SUPERSEDED"; then
+    check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root" PASS
+  else
+    check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (project recreated: $([ -e "$GONE_PROJECT" ] && echo yes || echo no))" FAIL
+    head -c 400 "$GONE_CONFIRM_OUT" 2>/dev/null
+  fi
+
+  # What the repair does NOT buy. The session is now in the ordinary
+  # orphaned-project-root state, so the Edit gate must still deny — the row and
+  # the report both promise exactly that, and a relaxation here would be the
+  # gate widening this design deliberately refused.
+  GONE_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$GONE_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Edit",
+      tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+    }));
+  ')"
+  GONE_EDIT_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$GONE_EDIT_PAYLOAD")"
+  if [ "$GONE_EDIT_DECISION" = deny ]; then
+    check "AC-C17 Edit stays denied after the adoption — the anchor is still gone" PASS
+  else
+    check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (got '$GONE_EDIT_DECISION')" FAIL
+  fi
+
+  # And what it DOES buy, which is the half that makes the check above a
+  # discrimination rather than a constant: the lineage break is gone, so the
+  # doctor now reports the plain orphaned state instead of the combined one.
+  GONE_DOCTOR_AFTER="$TMP/adopt-gone-doctor-after.out"
+  CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DOCTOR_AFTER" 2>/dev/null
+  if grep -qF 'the project root recorded for this session no longer exists' "$GONE_DOCTOR_AFTER" \
+      && ! grep -qF 'declares an incompatible lineage' "$GONE_DOCTOR_AFTER"; then
+    check "AC-C18 after the adoption the doctor reports the plain orphaned state" PASS
+  else
+    check "AC-C18 after the adoption the doctor reports the plain orphaned state" FAIL
+    grep -F 'binding:' "$GONE_DOCTOR_AFTER" 2>/dev/null
   fi
 else
-  check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (fixture unavailable)" FAIL
+  check "AC-C13 a record whose project root is gone is still adoptable across the lineage break (fixture unavailable)" FAIL
+  check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (fixture unavailable)" FAIL
+  check "AC-C14a the orphan reader's own shape guard refuses a non-absolute project root (fixture unavailable)" FAIL
+  check "AC-C14b an absolute but unnormalized project root is refused, not admitted (fixture unavailable)" FAIL
+  check "AC-C15 the doctor row names both facts and never claims 'no valid record' (fixture unavailable)" FAIL
+  check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing (fixture unavailable)" FAIL
+  check "AC-C15b the new argv mode refuses an extra argument (fixture unavailable)" FAIL
+  check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders (fixture unavailable)" FAIL
+  check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived (fixture unavailable)" FAIL
+  check "AC-C15e the payload spelling of the third-fact mode prints the dead root (fixture unavailable)" FAIL
+  check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1 (fixture unavailable)" FAIL
+  check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (fixture unavailable)" FAIL
+  check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (fixture unavailable)" FAIL
+  check "AC-C18 after the adoption the doctor reports the plain orphaned state (fixture unavailable)" FAIL
+fi
+
+# AC-C19 — the Stop hook's THREE-arm ladder and the doctor's status capture,
+# pinned at SOURCE. WORKING TREE, not HEAD: both paths are read from $ROOT.
+# The Stop hook's middle arm is not behaviourally reachable — both probes call
+# the same module, so a fault that makes the third-fact probe unavailable also
+# makes the lineage probe fail and the branch is never entered. That leaves it
+# deletable, or givable either sibling's wording, with every behavioural row
+# green, which is the shape this change shipped twice. Anchor each count to a
+# line that actually EMITS the message, so a quoted mention in a comment cannot
+# satisfy the pin.
+STOP_LADDER="$ROOT/hooks/stop-chain-enforcer.sh"
+stop_arm_count() {
+  grep -c "^ *echo \"zensu chain-enforcer: releasing Stop.*$1" "$STOP_LADDER" 2>/dev/null || true
+}
+STOP_ARM_GONE="$(stop_arm_count 'this is not a deferral')"
+STOP_ARM_NEUTRAL="$(stop_arm_count 'nothing is claimed about the workflow document either way')"
+STOP_ARM_DEFER="$(stop_arm_count 'The recorded project root still EXISTS')"
+STOP_NEUTRAL_TEXT="$(grep "^ *echo \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
+DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
+# Anchored the same way the Stop arms are. A bare substring match was satisfied by
+# the explanatory COMMENTS alone, so deleting the export left the renderer's
+# clause permanently inert with this row still green — the same shape as the
+# defect this row exists to catch, one layer out. Count the export line and the
+# assignments separately: one export, and three assignments (the declaration
+# default, the positive-answer reset, and the unknown pair).
+DOCTOR_UNKNOWN_EXPORTS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN( |$)' "$DOCTOR_LADDER" 2>/dev/null || true)"
+DOCTOR_UNKNOWN_ASSIGNS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN=' "$DOCTOR_LADDER" 2>/dev/null || true)"
+# The line that SETS the flag is counted separately, because neither of the two
+# counts above reaches it: it sits after a `||`, so it does not begin the line,
+# and AC-C21 injects the value directly rather than computing it. Deleting this
+# one line therefore left the clause permanently unreachable with both rows
+# green — the same shape as every defect the last three rounds caught, found in
+# this suite's own pin while re-checking it by hand.
+# Full-line comments are stripped before ANY of the three needles below run.
+# Counting or matching over the raw file left them satisfiable by prose: this very
+# block explains each rule in a comment that quotes it, so deleting the real code
+# and leaving the explanation kept every count at its expected value with the row
+# green — the same vacuity the two anchored counts above were hardened against one
+# round earlier, still open on the three that follow.
+code_only() { grep -vE '^[[:space:]]*#' "$1" 2>/dev/null || true; }
+DOCTOR_UNKNOWN_SETS="$(code_only "$DOCTOR_LADDER" | grep -cE '\|\| *ZDOC_BINDING_ROOT_UNKNOWN=1' || true)"
+STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -ne "$ZENSU_ROOT_STATE_PRESENT"' || true)"
+# Both needles now require the NAMED status rather than a bare 3, which is what the
+# maintainability finding asked for: the trichotomy's vocabulary lives once, in
+# zensu-session.sh, and a silent revert to the literal fails here.
+#
+# The two spellings differ ON PURPOSE and that is not drift. The Stop hook sources
+# zensu-session.sh in its PARENT shell, so it reads the owner's name directly. The
+# doctor sources it only inside command substitutions, so the name is out of scope
+# there and reading it under `set -u` aborted the whole diagnostic; it copies the
+# VALUE into ZDOC_ROOT_STATE_PRESENT from the owner instead — still one definition,
+# still no literal.
+DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT"' || true)"
+# The two needles above cover the PRESENT member only, and for one round that was the
+# whole pin while the comment in zensu-session.sh claimed both files were held to the
+# NAMED spelling. They were not: nothing in tests/ named _GONE at all, and the doctor
+# was meanwhile spelling `"${ZDOC_ROOT_STATE_GONE:-0}"` — a default that restores the
+# literal the pair exists to remove. A half-pinned pair is worse than an unpinned one,
+# because the green row reads as covering the contract.
+#
+# Both members are pinned now, in both consumers. The doctor needle deliberately
+# matches the GUARDED spelling rather than the bare comparison: `-n` first is what
+# makes the screen above it have an effect, so a revert to the defaulted form fails
+# here even though it would still compare against the same name.
+# The decimal SCREEN is pinned by presence, one per member, and that bound is stated
+# rather than implied: its own branches are NOT executed anywhere. Reaching them needs a
+# bound session — the doctor exits at `unavailable` long before the copy block in any
+# fixture this suite can build — and the branch only fires when the OWNER retypes a
+# constant, which no fixture does. What IS executed is the consequence: the `-n`
+# requirement at each comparison site, without which the screen has no effect at all,
+# because an emptied value would simply fall back to a literal. Pin the pair together so
+# removing either half fails, and do not describe the screen itself as covered.
+DOCTOR_STATE_SCREENS="$(code_only "$DOCTOR_LADDER" | grep -cE "case \"\\\$ZDOC_ROOT_STATE_(GONE|PRESENT)\" in ''\|\*\[!0-9\]\*\)" || true)"
+STOP_GONE_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE"' || true)"
+DOCTOR_GONE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE"' || true)"
+DOCTOR_GONE_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_STATE_GONE" ]' || true)"
+# The defaulted spelling must be ABSENT, not merely outnumbered — this is the arm that
+# regressed, so it gets a negative needle of its own rather than relying on the count.
+DOCTOR_GONE_DEFAULTED="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ROOT_STATE_GONE:-' || true)"
+# The PRESENT half gets the identical pair, and the omission is worth naming: the round
+# that added the GONE needles reproduced the very defect it was fixing — it pinned one
+# member and left the other, in a block whose own comment says a half-pinned pair reads
+# greener than an unpinned one. Deleting the `-n` guard at the PRESENT site left AC-C19
+# green, because DOCTOR_POSITIVE_GUARD matches the comparison line unchanged.
+DOCTOR_PRESENT_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_STATE_PRESENT" ]' || true)"
+DOCTOR_PRESENT_DEFAULTED="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ROOT_STATE_PRESENT:-' || true)"
+# The Stop hook is the SECOND consumer of the same pair and screened neither member. It
+# does now, routing an unresolvable one to the state-neutral arm through a FLAG rather
+# than a sentinel status — a sentinel would still be compared against the bad value.
+STOP_STATE_SCREENS="$(code_only "$STOP_LADDER" | grep -c 'ZENSU_ROOT_STATE_UNRESOLVED=1' || true)"
+if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
+    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The recorded project root still EXISTS' \
+    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
+    && [ "$STOP_NEUTRAL_GUARD" = 1 ] \
+    && [ "$DOCTOR_POSITIVE_GUARD" = 1 ] \
+    && [ "$STOP_GONE_GUARD" = 1 ] \
+    && [ "$DOCTOR_GONE_GUARD" = 1 ] \
+    && [ "$DOCTOR_GONE_REQUIRED" = 1 ] \
+    && [ "$DOCTOR_GONE_DEFAULTED" = 0 ] \
+    && [ "$DOCTOR_STATE_SCREENS" = 2 ] \
+    && [ "$DOCTOR_PRESENT_REQUIRED" = 1 ] \
+    && [ "$DOCTOR_PRESENT_DEFAULTED" = 0 ] \
+    && [ "$STOP_STATE_SCREENS" = 2 ] \
+    && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
+    && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
+else
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER neutral_guard=$STOP_NEUTRAL_GUARD positive_guard=$DOCTOR_POSITIVE_GUARD exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS stop_gone=$STOP_GONE_GUARD dgone=$DOCTOR_GONE_GUARD dgone_req=$DOCTOR_GONE_REQUIRED dgone_default=$DOCTOR_GONE_DEFAULTED dpresent_req=$DOCTOR_PRESENT_REQUIRED dpresent_default=$DOCTOR_PRESENT_DEFAULTED screens=$DOCTOR_STATE_SCREENS stop_screens=$STOP_STATE_SCREENS)" FAIL
+fi
+
+# AC-C19b — the `(unreadable)` substitution, EXECUTED. CLAUDE.md names three copies of
+# the version-shape rule and this file disclosed that only the non-main arm shipped a
+# case; the truth was wider — a grep of tests/ found the substitution driven NOWHERE, in
+# any of the three. This one is an ordinary function in a sourceable library, so the gap
+# here was reach, not testability.
+#
+# The claim that the other two "genuinely have no seam" was true of a UNIT seam only, and
+# it is now false for one of them: reviewer-capability-v1.js exports nothing, but its copy
+# is reachable BEHAVIOURALLY through pre-reviewer-capability-gate.sh, and AC-C20b below
+# drives it that way. What that earlier wording got wrong beyond the seam is the CENSUS
+# itself, so state it here once and let AC-C20b point at this. CLAUDE.md names three
+# copies of the version-shape RULE with TWO outcomes, not three substitutions:
+# ADOPTION_SAFE_VERSION_RE REFUSES instead, while this one and
+# reviewer-capability-v1.js substitute. That refusal is NOT covered by AC-C09, and this
+# comment said it was for one review round. AC-C09 establishes that an installation
+# declaring no usable version is refused; it would establish that with the guard
+# DELETED, because parseRuntimeVersion re-tests both versions in the very next statement
+# of the SAME condition and returns the identical EXECUTING_UNIDENTIFIED, and
+# RUNTIME_VERSION_RE is a strict subset
+# of the shape guard. Measured: with that condition removed from adoptableRecord and
+# committed, every AC-C09 row still passed and the suite stayed green. It is the
+# member whose value reaches a FILENAME, so treat it as SOURCE-PINNABLE ONLY — see
+# CLAUDE.md's version-shape roster, which carries the same correction. `zensu-doctor.sh` is a CONSUMER of the constant
+# this row drives, not a further copy — it sources the owner, and it DROPS the pair
+# rather than substituting; AC-C02 already covers its accepting direction. TWO
+# substitution sites are uncovered, not one — an earlier wording here said one and
+# contradicted a paragraph in AC-C20b as well as CLAUDE.md: `hooks/stop-chain-enforcer.sh`,
+# which sets BOTH slots when EITHER fails (a BLANKET rule, unlike the per-slot members
+# named above), and `safeVersion(lineage.recorded)` in reviewer-capability-v1.js, whose
+# refusing direction needs an install tampered BEFORE the record is minted — see the
+# tamper-channel paragraph at AC-C20b. Covering the blanket rule belongs beside
+# AC-C03/AC-C19, which already drive that hook in this lineage state.
+#
+# WORKING TREE, not HEAD: this row sources $ROOT/hooks/lib/zensu-session.sh directly,
+# unlike the synthetic-root rows around it, so its verdict grades the tree on disk.
+# AC-C20b grades $ROOT_REVISION instead — see its own header. The committed-tree guard
+# near the top of this file is what keeps the two from disagreeing silently.
+#
+# FOUR properties, because substituting is only the first of them: the placeholder
+# appears, the lineage wording and the in-place remedy SURVIVE the substitution (the
+# defect this policy replaced dropped to a different scope and told the user to start a
+# fresh session), the injected quote does not reach the JSON, and — the one an earlier
+# count of three left out — the UNTOUCHED slot still renders its real version. That
+# fourth is the per-slot discriminator: without it the rule could substitute BOTH slots
+# and every other conjunct here would still hold. It is asserted once per direction
+# below (`0.18.0` beside a malformed recorded value, `0.17.0` beside a malformed
+# executing one), so a reader treating the list as complete could delete either.
+# The input carries a double quote precisely because this value lands in a JSON string.
+SAFE_VER_OUT="$(bash -c '
+  . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
+  zensu_emit_hook_session_deny incompatible-runtime "0.17.0\"evil" "0.18.0"
+' _ "$ROOT" 2>/dev/null || true)"
+# BOTH slots are driven. The first version passed a malformed RECORDED version and a
+# valid executing one, so deleting the SECOND of the two `ZENSU_SAFE_VERSION_RE` guards
+# in zensu_emit_hook_session_deny — the one applied to the executing slot — changed
+# nothing any assertion observed: one rule applied twice, with a case for one
+# application. Anchored by symbol rather than by line number, because a bare
+# `<file>:<line>` in prose is a claim nothing recomputes and no reader can tell a
+# correct one from a drifted one without opening the file.
+SAFE_VER_OUT2="$(bash -c '
+  . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
+  zensu_emit_hook_session_deny incompatible-runtime "0.17.0" "0.18.0 evil"
+' _ "$ROOT" 2>/dev/null || true)"
+if printf '%s' "$SAFE_VER_OUT" | grep -qF '(unreadable)' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF 'declares an incompatible lineage' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF '/zensu:adopt-session' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF '0.18.0' \
+  && ! printf '%s' "$SAFE_VER_OUT" | grep -qF '0.17.0"evil' \
+  && printf '%s' "$SAFE_VER_OUT2" | grep -qF '(unreadable)' \
+  && printf '%s' "$SAFE_VER_OUT2" | grep -qF '0.17.0' \
+  && ! printf '%s' "$SAFE_VER_OUT2" | grep -qF '0.18.0 evil' \
+  && ! printf '%s' "$SAFE_VER_OUT" | grep -qF 'start a fresh Claude Code session before using stateful tools'; then
+  check "AC-C19b a malformed version is substituted with (unreadable) in EITHER slot and the lineage remedy survives it" PASS
+else
+  check "AC-C19b a malformed version is substituted with (unreadable) in EITHER slot and the lineage remedy survives it (recorded=${SAFE_VER_OUT:0:80} executing=${SAFE_VER_OUT2:0:80})" FAIL
+fi
+
+# AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
+# status-1 path is not reachable end to end (both probes call the same module),
+# but the ZDOC_* values are injectable by design, so the renderer itself can be
+# driven for a positive and a negative. Without this the clause could be deleted
+# and every behavioural row would stay green.
+DOCTOR_CLAUSE_ON="$TMP/adopt-doctor-clause-on.out"
+DOCTOR_CLAUSE_OFF="$TMP/adopt-doctor-clause-off.out"
+env ZDOC_BINDING=incompatible-runtime ZDOC_BINDING_ROOT_UNKNOWN=1 \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_ON" 2>/dev/null
+env ZDOC_BINDING=incompatible-runtime \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_OFF" 2>/dev/null
+if grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ON" \
+    && grep -qF 'Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
+    && ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_OFF" \
+    && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_OFF"; then
+  check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" PASS
+else
+  check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" FAIL
+  grep -F 'binding:' "$DOCTOR_CLAUSE_ON" 2>/dev/null | head -c 300
+fi
+
+# AC-C21b — the flag is read as the ONE value its producer writes, not by JS
+# truthiness. `ZDOC_BINDING_ROOT_UNKNOWN=0` is the discriminator: under a bare
+# `env.X ? ... : ...` the string "0" is truthy and the clause appears, which would
+# state a hedge for a session whose root was positively determined. The failure
+# direction is safe, so nothing behavioural catches it — only this row does.
+DOCTOR_CLAUSE_ZERO="$TMP/adopt-doctor-clause-zero.out"
+env ZDOC_BINDING=incompatible-runtime ZDOC_BINDING_ROOT_UNKNOWN=0 \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_ZERO" 2>/dev/null
+if ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ZERO" \
+    && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_ZERO"; then
+  check "AC-C21b a quoted zero does not enable the unknown-root clause" PASS
+else
+  check "AC-C21b a quoted zero does not enable the unknown-root clause" FAIL
+  grep -F 'binding:' "$DOCTOR_CLAUSE_ZERO" 2>/dev/null | head -c 300
+fi
+
+# AC-C21c — the display fold is LOAD-BEARING, and nothing anywhere pinned it. The
+# value it folds is the recorded project root, which reaches the row through
+# readOrphanedProjectRootContext, whose only shape guard is
+# UNSAFE_PATH_CHARACTERS — a C0/DEL class that does NOT reject bidi overrides or
+# line separators. Those are exactly the characters that can HIDE the rest of a
+# rendered line, so replacing safeDisplayValue with the identity would leave every
+# other row green while the doctor printed a spoofable binding line. Driven
+# through the ZDOC_* channel AC-C21 already establishes, with U+202E and U+2028
+# in the injected path.
+DOCTOR_FOLD_OUT="$TMP/adopt-doctor-fold.out"
+DOCTOR_FOLD_PATH="$(printf '/tmp/gone‮gnop x')"
+env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
+  ZDOC_BINDING_PROJECT_ROOT="$DOCTOR_FOLD_PATH" \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_FOLD_OUT" 2>/dev/null
+# The two negatives below did not discriminate, and the surviving positive did not
+# help: it matches the row's PROSE, not its value, so a fold that dropped the value
+# entirely satisfied all three. Measured against a synthetic report carrying the
+# sentence and no value at all - it passed. Two positives close that. The first says
+# the value reached the row at all; the second says it was FOLDED rather than merely
+# removed, which is the claim this block's own comment makes and the stronger of the
+# two. That second needle is the literal six-character escape the fold EMITS
+# (backslash-u-2-0-2-e), never the raw character - grepping for the raw one here would
+# assert the exact opposite of the intent, and the negatives below already own it.
+# The two POSITIVES are scoped to the binding row, the way the sibling AC-C21d already
+# scopes its assertions: grepping the whole file cannot tell a folded value that landed
+# on THIS row from the same bytes appearing anywhere else in the report. The two
+# NEGATIVES stay on the whole file deliberately — there, whole-file absence is the
+# stronger claim, not the weaker one.
+# The value-reached-the-row needle is a fragment of the VALUE, never its POSIX
+# spelling. It was `/tmp/gone`, and that could not match on Windows: Git Bash rewrites
+# a POSIX `/tmp/...` argument into the native `C:/Users/.../Temp/...` on the way into a
+# native binary, so the row legitimately carried the converted path and the check failed
+# for the host's spelling rather than for the fold. `gnop` is the reversed-text fragment
+# the fixture itself plants, survives that conversion, and appears in no prose here.
+DOCTOR_FOLD_ROW="$(grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null || true)"
+if printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF 'BOTH the recorded project root' \
+    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF 'gnop' \
+    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF "\\u202e" \
+    && ! LC_ALL=C grep -qF "$(printf '‮')" "$DOCTOR_FOLD_OUT" \
+    && ! LC_ALL=C grep -qF "$(printf ' ')" "$DOCTOR_FOLD_OUT"; then
+  check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" PASS
+else
+  check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" FAIL
+  grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null | head -c 300
+fi
+
+# AC-C21d — the PAIR-FORGERY half of the same rule, which AC-C21c cannot reach.
+# Folding bidi characters is the weaker property: several plausible rules do it.
+# What makes safeDisplayValue the RIGHT rule here is that it also refuses a value
+# carrying a ` : ` sequence or a double space, because this report is built out of
+# `label : value` rows the doctor skill tells the model to print verbatim and the
+# recorded project root is minted from the SessionStart cwd — whoever names the
+# directory controls this substring. Without this row the pair guard had zero
+# coverage on the doctor side; it was pinned only for the adoption report.
+DOCTOR_PAIR_OUT="$TMP/adopt-doctor-pair.out"
+env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
+  ZDOC_BINDING_PROJECT_ROOT='/tmp/gone provenance : recorded' \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_PAIR_OUT" 2>/dev/null
+DOCTOR_PAIR_ROW="$(grep -F 'binding:' "$DOCTOR_PAIR_OUT" 2>/dev/null || true)"
+# The discriminator is the QUOTING, not the absence of the substring: JSON.stringify
+# escapes neither a space nor a colon, so ` : ` survives INSIDE the quoted form and a
+# `! grep` for it fails against a correctly folded row. What only safeDisplayValue
+# produces is the pair rendered as a JSON string — the opening quote sits immediately
+# after the `(` — and what a rule without the guard produces is the bare path there.
+if printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'BOTH the recorded project root' \
+    `# The pair separator is ESCAPED, not merely quoted: the guard now applies on both` \
+    `# branches, so ' : ' leaves as '\u003a'. Quoting alone was the earlier assertion` \
+    `# and it stopped discriminating once the escaping branch learned the same rule.` \
+    && printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF '("/tmp/gone provenance \u003a recorded")' \
+    && ! printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'provenance : recorded'; then
+  check "AC-C21d the binding row quotes a project root that could forge a label/value pair" PASS
+else
+  check "AC-C21d the binding row quotes a project root that could forge a label/value pair" FAIL
+  printf '%s' "$DOCTOR_PAIR_ROW" | head -c 300
+fi
+
+# AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
+# matcher, so a non-Bash tool in the lineage state lands there, and its deny was
+# the one surface still offering the repair without the limit. Driven through the
+# gate itself rather than grepped, so a reworded clause fails here and not only in
+# a source pin.
+CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Edit",
+    tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+  }));
+')"
+# ONE invocation, through the shared helper, with row-scoped capture paths — the same
+# collapse AC-C20b took. Driving the gate twice measured the decision and the reason in
+# two different executions, and threw the second run's stderr away, so a `hook-stderr`
+# decision was graded against a reason no graded run had produced.
+CAPABILITY_OUT="$TMP/adopt-capability-clause.out"
+CAPABILITY_ERR="$TMP/adopt-capability-clause.err"
+CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" \
+  pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD" \
+  "$CAPABILITY_OUT" "$CAPABILITY_ERR")"
+CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
+  const fs = require("node:fs");
+  const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+  if (raw === "") { process.stdout.write(""); process.exit(0); }
+  try {
+    process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+  } catch (_e) { process.stdout.write(""); }
+' 2>/dev/null)" || CAPABILITY_REASON=""
+# The ANTECEDENT is pinned alongside the consequent, and it has to be: this row
+# drives a session whose project root is LIVE, so deleting the guard clause would
+# turn a true conditional into a false unconditional claim in exactly the state
+# measured here, and a consequent-only grep would still pass. Pinning both halves
+# is what makes the row about the CONDITIONAL rather than about the sentence.
+if [ "$CAPABILITY_DECISION" = deny ] \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'If the recorded project root is ALSO gone' \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'; then
+  check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair" PASS
+else
+  check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL
+  printf '%s' "$CAPABILITY_REASON" | head -c 300
+  printf '\n  stderr: '; head -c 300 "$CAPABILITY_ERR" 2>/dev/null; printf '\n'
+fi
+
+# AC-C20a — the OTHER arm of the same branch, which AC-C20 above cannot reach. The
+# gate splits on classifyPreToolPayload, and the only thing that makes a payload
+# non-main is the presence of an agent_type/agent_id field, so the same Edit payload
+# with a subagent marker takes the other deny. It was unexercised anywhere in the tree
+# (zero occurrences of its sentence in any suite), which matters because the two arms
+# are asymmetric BY DESIGN and each half of that asymmetry is a decision someone made:
+#
+#   - the CAUSE is deliberately given to a constrained child too, because withholding
+#     it dropped a non-main principal back to `immutable context revalidation failed`,
+#     naming neither the lineage nor either version;
+#   - the REMEDY is deliberately withheld, because /zensu:adopt-session --confirm
+#     WRITES the immutable record and zensu_doctor_allowed conjoins
+#     zensu_hook_is_main_principal — pointing a read-only principal at a privileged
+#     write hands it a command every gate refuses it.
+#
+# The ABSENCE needle is therefore the load-bearing one: a future edit that unified the
+# two arms would keep every positive here green while handing a subagent the command.
+CAPABILITY_SUB_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    agent_type: "zensu:code-reviewer",
+    tool_name: "Edit",
+    tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+  }));
+')"
+# ONE invocation, for the reason given at AC-C20 above.
+CAPABILITY_SUB_OUT="$TMP/adopt-capability-subagent.out"
+CAPABILITY_SUB_ERR="$TMP/adopt-capability-subagent.err"
+CAPABILITY_SUB_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" \
+  pre-reviewer-capability-gate.sh "$CAPABILITY_SUB_PAYLOAD" \
+  "$CAPABILITY_SUB_OUT" "$CAPABILITY_SUB_ERR")"
+CAPABILITY_SUB_REASON="$(OUT_FILE="$CAPABILITY_SUB_OUT" node -e '
+  const fs = require("node:fs");
+  const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+  if (raw === "") { process.stdout.write(""); process.exit(0); }
+  try {
+    process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+  } catch (_e) { process.stdout.write(""); }
+' 2>/dev/null)" || CAPABILITY_SUB_REASON=""
+if [ "$CAPABILITY_SUB_DECISION" = deny ] \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'declares an incompatible lineage' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'minted by 0.17.0' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF '0.18.0 is executing' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'reserved for the main thread' \
+    && ! printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF '/zensu:adopt-session'; then
+  check "AC-C20a a subagent gets the cause and both versions, and is NOT handed the repair command" PASS
+else
+  check "AC-C20a a subagent gets the cause and both versions, and is NOT handed the repair command (decision=${CAPABILITY_SUB_DECISION:-unset})" FAIL
+  printf '%s' "$CAPABILITY_SUB_REASON" | head -c 300
+  printf '\n  stderr: '; head -c 300 "$CAPABILITY_SUB_ERR" 2>/dev/null; printf '\n'
+fi
+
+# AC-C20b — `reviewer-capability-v1.js`'s OWN copy of the version-shape rule,
+# EXECUTED. AC-C19b above drives the copy in `zensu-session.sh`; this row drives the
+# one that file spells itself, because AC-C20 and AC-C20a already reach
+# pre-reviewer-capability-gate.sh end to end and both feed it well-formed versions
+# (0.17.0 / 0.18.0), so its `safeVersion` was never exercised in its REFUSING
+# direction. Neutering it to the identity left the whole tree green — measured
+# against a COMMITTED neuter, which is the only kind this row can observe: the
+# synthetic roots are materialized from $ROOT_REVISION, so a working-tree edit under
+# hooks/ is invisible here.
+#
+# The PAIR does not grade one tree, and reading the sentence above as if it did is the
+# mistake to avoid: AC-C19b sources $ROOT — the WORKING TREE — while this row grades
+# $ROOT_REVISION, the last commit. They are two verdicts of different provenance, not
+# one census taken twice. The committed-tree guard near the top of this file fails
+# loudly on any uncommitted change under hooks/, so the two cannot silently disagree;
+# what they can do is mislead a reader who assumes a shared subject.
+#
+# WHICH SLOT can carry a malformed value, stated no wider than what this row proves.
+# A tampered RECORD cannot: readContextInternal fails the read with `context plugin
+# version mismatch` unless context.plugin_version equals the RECORDED root's own
+# manifest version, and readOrphanedProjectRootContext waives only the project-root
+# checks — a first version of this row tampered the record and denied as `immutable
+# context revalidation failed`, never reaching the lineage branch. That is a claim
+# about the TAMPER CHANNEL and not about the slot: a recorded INSTALLATION whose own
+# plugin.json declares a hostile version mints a self-consistent record, because
+# buildContext copies manifest.version verbatim and readContextInternal compares the
+# two for EQUALITY rather than for shape. So `safeVersion(lineage.recorded)` IS
+# reachable and its refusing direction is a NAMED UNCOVERED GAP, not an impossibility
+# — do not delete that call on the strength of this paragraph. Covering it needs an
+# install tampered BEFORE the record is minted plus a SessionStart to mint against
+# it, a fixture lifecycle more expensive than this whole row.
+#
+# The EXECUTING slot has no such tie: resolveIncompatibleRuntime returns
+# executingPluginVersion() verbatim after a non-empty-string test, and that value
+# comes straight out of the executing root's manifest. So the realistic threat this
+# row builds is an INSTALLATION whose plugin.json declares a hostile version.
+#
+# THE CENSUS IN THIS FILE LIVES AT AC-C19b — read it there. It is not the only copy and
+# does not claim to be: CLAUDE.md's version-shape roster carries the other, and the two
+# move together. What this block must not do is hold a THIRD, which it did for one review
+# round — and that copy had already drifted from both before anyone read it twice, saying
+# ONE substitution site was uncovered where the other two say TWO. Two copies that move
+# together is the standing state; a third is a census that will be wrong in one of them.
+#
+# What is LOCAL to this row is the per-slot discriminator, and it is worth stating
+# because it is what the `minted by 0.17.0` conjunct below is for. This gate substitutes
+# PER SLOT: the RECORDED version must still render while the EXECUTING one is replaced.
+# The BLANKET rule is `hooks/stop-chain-enforcer.sh`, which sets BOTH slots when EITHER
+# fails — an uncovered site AC-C19b names, and covering it belongs beside AC-C03/AC-C19,
+# not here. No count of those sites is restated here; AC-C19b owns it.
+#
+# The properties this row asserts, NAMED rather than counted, because the count moved
+# once already when the record property was split out into AC-C20c: the placeholder
+# appears; the lineage remedy SURVIVES the substitution (a deny that drops to a different
+# scope tells the user to start a fresh session instead); the RECORDED version still
+# renders, which is the per-slot discriminator above; the tampered value does not reach
+# the reason; and the reason stays ONE line, because a newline inside a deny reason
+# splits one hook message into several that a model reads as separate messages. That last
+# one is a model-context integrity property, not cosmetics, which is why the newline is
+# injected at all — and it is what the threat is actually about.
+#
+# Scope of that last claim: `safeVersion` is what holds THIS VALUE to a shape, and no
+# more. A sibling branch of the same function emits `immutable context revalidation
+# failed: ${error.message}` unfiltered, and that message can carry a manifest-controlled
+# path through localManifestEntry's throw — a separate residual this row does not close.
+#
+# It costs NO install: $UNIDENTIFIED_ROOT is the sibling root AC-C09 already built and
+# already tampered, and nothing between that row and this one reads or removes it. See
+# the note at that fixture for the shared-literal obligation. The precondition is
+# re-checked here rather than inherited silently, so a fixture that failed up there
+# reports its own cause instead of surfacing as a missing `(unreadable)` — and that
+# promise is only kept because the check below separates "judged and no longer
+# hostile" from "could not be read at all". Two causes rendered as one is the same
+# defect as no cause.
+CAPABILITY_BADVER_MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json"
+CAPABILITY_BADVER_READY=no
+CAPABILITY_BADVER_WHY=shared-fixture-root-missing
+if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
+    && [ -f "$CAPABILITY_BADVER_MANIFEST" ]; then
+  # It judges CONTENT, not only SHAPE, and the difference is the whole guard. An
+  # earlier version tested the alternation alone, which was VACUOUS: the three
+  # conjuncts below that look for `evil`, for `SECOND LINE` and for zero newlines are
+  # all satisfied by any value carrying none of them. Measured, not argued — reducing
+  # the shared literal to a single-line `not a version` left AC-C09 green, left this
+  # guard true, and left this row reporting PASS with half its assertions asserting
+  # nothing, with the whole suite green. No tally is quoted for either measurement: the
+  # absolute number changes the moment a row is added, and it already did when AC-C20c
+  # was split out. The literal is owned by `$UNIDENTIFIED_VERSION` and AC-C09's own
+  # assertion needs shape failure alone, so nothing on that side would have noticed.
+  # Anchored by SYMBOL rather than by a distance: a line count in prose recomputes no
+  # better than an absolute line number, which is the rot this round removed elsewhere.
+  #
+  # The FIRST repair of that was itself half a repair, and the residue is why the two
+  # SUBSTRINGS are named here rather than only the two character classes. Requiring a
+  # newline and a quote covers the `newlines=0` conjunct and NOTHING else: re-spelling
+  # the literal to `0.19.0"harmless\nOTHER TEXT` keeps both classes, so the guard stayed
+  # true while `grep -qF evil` and `grep -qF SECOND LINE` went back to matching a value
+  # that never carried either. Measured the same way, with the whole suite green. Every
+  # negative conjunct below needs its needle asserted PRESENT in the source value here,
+  # or it is a test of nothing.
+  #
+  # The verdict travels on STDOUT, not in the exit status. A three-way exit split reads
+  # cleanly and is wrong at one value: node exits 1 for an uncaught error of its own, so
+  # a typo in this program, a missing module or a `-e` syntax error all arrived as a
+  # fixture verdict — a confident answer about a manifest the program never
+  # judged. That is the rule CLAUDE.md states for the requirements gate one layer down,
+  # that a load fault must never be reported as a judged payload. Tokens separate the
+  # judged outcomes and leave every non-zero exit in the residual arm, where it names
+  # itself. `not-a-string` is split out for the same reason in the other direction: the
+  # parse SUCCEEDED there, so reporting it as `manifest-unreadable` sends the next
+  # reader to a file that reads perfectly well.
+  CAPABILITY_BADVER_VERDICT="$(MANIFEST_IN="$CAPABILITY_BADVER_MANIFEST" node -e '
+    const fs = require("node:fs");
+    let v;
+    try {
+      v = JSON.parse(fs.readFileSync(process.env.MANIFEST_IN, "utf8")).version;
+    } catch (_e) { process.stdout.write("unreadable"); process.exit(0); }
+    if (typeof v !== "string") { process.stdout.write("not-a-string"); process.exit(0); }
+    // The same alternation reviewer-capability-v1.js applies, plus the two injected
+    // characters AND the two injected substrings this row consumes. CLAUDE.md
+    // version-shape roster names THIS spelling as the fourth, test-side copy; it holds
+    // nothing in lockstep.
+    //
+    // TWO tokens, not one, for the two ways the fixture regresses. They send the
+    // reader to different places: `shape-ok` means the alternation stopped refusing
+    // the value, `needles-missing` means the injected substrings the negative
+    // conjuncts consume are gone while the shape is still hostile. Merging them into
+    // one verdict pointed at a shape problem when the needles were what went missing
+    // — the same reason `not-a-string` is split from `unreadable` above.
+    const failsShape = !/^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/.test(v);
+    const carriesNeedles = v.includes("\n") && v.includes("\"")
+      && v.includes("evil") && v.includes("SECOND LINE");
+    if (!failsShape) { process.stdout.write("shape-ok"); process.exit(0); }
+    process.stdout.write(carriesNeedles ? "hostile" : "needles-missing");
+  ' 2>/dev/null)" || CAPABILITY_BADVER_VERDICT=probe-failed
+  case "$CAPABILITY_BADVER_VERDICT" in
+    hostile) CAPABILITY_BADVER_READY=yes ;;
+    shape-ok) CAPABILITY_BADVER_WHY=shared-fixture-version-passes-the-shape-rule ;;
+    needles-missing) CAPABILITY_BADVER_WHY=shared-fixture-version-lost-its-injected-substrings ;;
+    unreadable) CAPABILITY_BADVER_WHY=shared-fixture-manifest-unreadable ;;
+    not-a-string) CAPABILITY_BADVER_WHY=shared-fixture-version-not-a-string ;;
+    *) CAPABILITY_BADVER_WHY="shared-fixture-probe-failed(${CAPABILITY_BADVER_VERDICT:-empty})" ;;
+  esac
+fi
+# AC-006's snapshot. Taken UNCONDITIONALLY and OUTSIDE the AC-C20b readiness branch,
+# because AC-006 is a property of the GATE, not of the version fixture: nesting it made
+# the store check disappear silently whenever the shared AC-C09 manifest precondition
+# was unmet, which is the one state where a fixture is already known to be off.
+#
+# WHOLE STORE, not one record. The earlier form snapshotted
+# `records/${LIVE_ROOT_KEY}.json` alone, so an added, removed or rewritten SIBLING
+# record — the shape a gate that re-mints under a different key would produce — passed
+# unobserved. Sorted `name<TAB>sha256` lines, so a rename is a diff and an unreadable
+# entry names itself rather than vanishing.
+#
+# Captured to a FILE and compared with `cmp`, never through `$(...)`: command
+# substitution strips TRAILING newlines from both sides, so a rewrite differing only
+# there compared equal — the same trap the newline counter above already documents,
+# and the reason the old "whole-file BYTES" claim overstated what it measured.
+record_store_digest() {
+  STORE_IN="$1" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const crypto = require("node:crypto");
+    let names;
+    try {
+      names = fs.readdirSync(process.env.STORE_IN).filter((n) => n.endsWith(".json")).sort();
+    } catch (_e) { process.stdout.write("no-store\n"); process.exit(0); }
+    if (names.length === 0) { process.stdout.write("empty-store\n"); process.exit(0); }
+    let out = "";
+    for (const n of names) {
+      try {
+        const bytes = fs.readFileSync(path.join(process.env.STORE_IN, n));
+        out += n + "\t" + crypto.createHash("sha256").update(bytes).digest("hex") + "\n";
+      } catch (_e) {
+        // A bare `unreadable` sentinel is NAME-ONLY, so a record whose bytes change
+        // while it stays unreadable compares equal across the two snapshots. Carry
+        // whatever lstat can still answer beside it; a second failure degrades to the
+        // bare sentinel rather than aborting the whole digest.
+        let meta = "";
+        try {
+          const st = fs.lstatSync(path.join(process.env.STORE_IN, n));
+          meta = ":" + st.size + ":" + st.mtimeMs + ":" + st.ino + ":" + st.mode;
+        } catch (_e2) { meta = ":no-lstat"; }
+        out += n + "\tunreadable" + meta + "\n";
+      }
+    }
+    process.stdout.write(out);
+  ' 2>/dev/null || printf 'digest-failed\n'
+}
+# The records directory has ONE spelling in this file. It was hoisted at AC-C13 and
+# re-spelling it here made a fourteenth copy of the same literal, which is how the two
+# halves of a snapshot come to measure different directories.
+CAPABILITY_STORE_DIR="$ADOPT_RECORDS_DIR"
+CAPABILITY_STORE_BEFORE="$TMP/adopt-store-before.digest"
+CAPABILITY_STORE_AFTER="$TMP/adopt-store-after.digest"
+# The record the gate BINDS to must be inside what the digest covers, or the row can
+# pass while covering only records the gate never touches. `$CAPABILITY_EDIT_PAYLOAD`
+# carries `session_id: $LIVE_ROOT_SESSION`, and `$LIVE_ROOT_KEY` is that session's key
+# — so this file is the one the claim is about. The retired one-record conjunct keyed
+# on it directly; widening to the whole store lost that binding, and with
+# `LIVE_ROOT_REGISTERED=no` plus any sibling record present the digest is valid,
+# identical on both sides, and about nothing. `${LIVE_ROOT_KEY:-}` because that
+# variable is assigned inside a conditional far above and `set -u` is on.
+CAPABILITY_STORE_TARGET=no
+if [ -n "${LIVE_ROOT_KEY:-}" ] && [ -f "$CAPABILITY_STORE_DIR/$LIVE_ROOT_KEY.json" ]; then
+  CAPABILITY_STORE_TARGET=yes
+fi
+record_store_digest "$CAPABILITY_STORE_DIR" >"$CAPABILITY_STORE_BEFORE" 2>/dev/null \
+  || printf 'digest-failed\n' >"$CAPABILITY_STORE_BEFORE"
+
+# MEASUREMENT WINDOW. Everything between this snapshot and the AFTER one below is what
+# AC-C20c attributes to the capability gate, and the boundary is POSITIONAL while the
+# row's label names the gate. This region must therefore contain only the AC-C20b gate
+# drive and the extractions that read its output back; a new row inserted here widens
+# the claim silently. A row that needs to run near these belongs ABOVE this snapshot or
+# BELOW the AC-C20c block.
+
+if [ "$CAPABILITY_BADVER_READY" = yes ]; then
+  CAPABILITY_BADVER_OUT="$TMP/adopt-capability-badversion.out"
+  CAPABILITY_BADVER_ERR="$TMP/adopt-capability-badversion.err"
+  # ONE invocation, through the shared helper, with ROW-SCOPED capture paths. This
+  # row used to drive the gate TWICE — a direct invocation for the reason and the
+  # newline count, the helper for the decision — so the three properties below were
+  # measured across two executions: a `decision=hook-stderr` failure dumped a `raw:`
+  # body the graded run never produced, and the reason came from a run whose decision
+  # nothing graded. Passing $4/$5 collapses both into one child.
+  #
+  # Its stderr is GRADED rather than discarded, which is what the direct invocation
+  # threw away. The helper's `hook-stderr` guard is per-line and ^-anchored, and this
+  # row is the first to drive it from a root whose manifest version carries a literal
+  # newline, so the row is sound only while the binder's own stderr stays version-free.
+  # It does today: the binder emits one fixed sentence naming neither version. If that
+  # ever changes, this row fails as decision=hook-stderr, and the manifest value is the
+  # place to look, not the gate.
+  CAPABILITY_BADVER_DECISION="$(gate_decision_from "$UNIDENTIFIED_ROOT" \
+    pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD" \
+    "$CAPABILITY_BADVER_OUT" "$CAPABILITY_BADVER_ERR")"
+  CAPABILITY_BADVER_REASON="$(OUT_FILE="$CAPABILITY_BADVER_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write(""); process.exit(0); }
+    try {
+      process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+    } catch (_e) { process.stdout.write(""); }
+  ' 2>/dev/null)" || CAPABILITY_BADVER_REASON=""
+  # Counted in node, not from the captured shell value: command substitution strips
+  # TRAILING newlines, so a shell-side count would under-report the one shape this
+  # property is about.
+  CAPABILITY_BADVER_NEWLINES="$(OUT_FILE="$CAPABILITY_BADVER_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    let reason = "";
+    try { reason = JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || ""; } catch (_e) { reason = ""; }
+    process.stdout.write(String((reason.match(/\n/g) || []).length));
+  ' 2>/dev/null)" || CAPABILITY_BADVER_NEWLINES=unset
+  # The negative needles are SUBSTRINGS of the injected value, deliberately, and must
+  # not be derived from $UNIDENTIFIED_VERSION. A substitution replaced by a
+  # strip-to-shape rule would emit `0.19.0evil`, which `evil` catches and a whole-value
+  # needle would not; and `grep -F` reads a pattern containing a newline as a LIST of
+  # patterns, so the derived form would preserve the conjunction only by that
+  # non-obvious rule and would pin the negative into a permanent FAIL the moment the
+  # literal grew a blank line. The precondition above is what holds the literal in
+  # place instead.
+  if [ "$CAPABILITY_BADVER_DECISION" = deny ] \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF '(unreadable) is executing' \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF '/zensu:adopt-session' \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'minted by 0.17.0' \
+      && ! printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'evil' \
+      && ! printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'SECOND LINE' \
+      && [ "$CAPABILITY_BADVER_NEWLINES" = 0 ]; then
+    check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line" PASS
+  else
+    check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line (decision=${CAPABILITY_BADVER_DECISION:-unset} newlines=${CAPABILITY_BADVER_NEWLINES:-unset})" FAIL
+    # The extracted reason is EMPTY for every decision that is not a parsed deny, and
+    # the newline counter's own catch yields "0" in the same cases — so printing the
+    # reason alone reports `newlines=0` for a run where nothing was measured. Dump the
+    # raw hook output and the row-scoped stderr copy, which is where a hook-stderr,
+    # unparseable or hook-exit-nonzero decision actually explains itself.
+    printf '  reason: '; printf '%s' "$CAPABILITY_BADVER_REASON" | head -c 300; printf '\n'
+    printf '  raw: '; head -c 400 "$CAPABILITY_BADVER_OUT" 2>/dev/null; printf '\n'
+    printf '  stderr: '; head -c 400 "$CAPABILITY_BADVER_ERR" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line (precondition: $CAPABILITY_BADVER_WHY)" FAIL
+fi
+
+# AC-006 — its OWN row, and the three things that buys are why it is not conjuncts 8-9
+# of AC-C20b any more. It was never named in the tally, so the property could not be
+# seen to have run; it was skipped WHOLESALE whenever AC-C20b's version precondition
+# was unmet; and a fixture fault on the record half rendered as `record=no` inside a
+# verdict about safeVersion, which is a wrong diagnosis rather than a missing one. The
+# manifest half already routed its faults through a named `(precondition: …)`; this half
+# now does the same.
+#
+# The rationale it replaces was also FALSE where it mattered. It argued that a mutation
+# here "is observed by nothing downstream" because this is the last gate_decision_from
+# caller. The RUNTIME_ADOPTED forge row at the end of this file runs zensu-log.sh
+# against $SHARED_DATA and binds through the very record this gate touches — its own
+# comment says so. A mutation IS observed downstream; what it is not is DIAGNOSED there,
+# because it would surface as a binding failure in an unrelated check. That is the
+# argument for a row of its own, and it is a different argument from the one that was
+# written down.
+#
+# The gate must actually have RUN for the claim to mean anything, so "the store is
+# unchanged because nothing executed" is reported as a precondition rather than as a
+# pass.
+record_store_digest "$CAPABILITY_STORE_DIR" >"$CAPABILITY_STORE_AFTER" 2>/dev/null \
+  || printf 'digest-failed\n' >"$CAPABILITY_STORE_AFTER"
+# The ladder classifies BOTH snapshots and BOTH halves of the gate drive, in that
+# order: a fixture fault, then a gate that did not run, then a gate that ran without
+# denying. The last arm is the one this row exists for and the one the first spelling
+# omitted — it consulted only $CAPABILITY_BADVER_READY, a property of the version
+# FIXTURE, so on `allow`, `hook-exit-nonzero`, `hook-stderr` or an unparseable decision
+# AC-C20b failed while this row compared two identical digests and asserted a property
+# of a denial that never happened. `${CAPABILITY_BADVER_DECISION:-unset}` because that
+# variable is assigned inside the readiness branch and `set -u` is on.
+#
+# An EMPTY digest file is a fault, not a clean store: `record_store_digest` emits a
+# sentinel for every state it can name, so nothing legitimately produces zero bytes,
+# and two empty files compare equal under `cmp -s`.
+CAPABILITY_STORE_WHY=""
+case "$(head -n 1 "$CAPABILITY_STORE_BEFORE" 2>/dev/null)" in
+  no-store) CAPABILITY_STORE_WHY=shared-record-store-absent ;;
+  empty-store) CAPABILITY_STORE_WHY=shared-record-store-empty ;;
+  digest-failed) CAPABILITY_STORE_WHY=before-snapshot-probe-failed ;;
+  "") CAPABILITY_STORE_WHY=before-snapshot-empty ;;
+esac
+# The AFTER head is classified too, and only for the two shapes that are a PROBE
+# fault. `no-store` and `empty-store` on this side are deliberately left to `cmp`,
+# because a store that vanished during the gate drive IS the mutation this row
+# grades. `digest-failed` and an empty file are not: they render as `(digest differs)`
+# — a store mutation that did not happen, which is the wrong-diagnosis class this
+# block argues against one paragraph up.
+if [ -z "$CAPABILITY_STORE_WHY" ]; then
+  case "$(head -n 1 "$CAPABILITY_STORE_AFTER" 2>/dev/null)" in
+    digest-failed) CAPABILITY_STORE_WHY=after-snapshot-probe-failed ;;
+    "") CAPABILITY_STORE_WHY=after-snapshot-empty ;;
+  esac
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "$CAPABILITY_STORE_TARGET" != yes ]; then
+  CAPABILITY_STORE_WHY="target-record-absent(${LIVE_ROOT_KEY:-unset})"
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "$CAPABILITY_BADVER_READY" != yes ]; then
+  CAPABILITY_STORE_WHY="gate-did-not-run($CAPABILITY_BADVER_WHY)"
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "${CAPABILITY_BADVER_DECISION:-unset}" != deny ]; then
+  CAPABILITY_STORE_WHY="gate-did-not-deny(${CAPABILITY_BADVER_DECISION:-unset})"
+fi
+if [ -n "$CAPABILITY_STORE_WHY" ]; then
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical (precondition: $CAPABILITY_STORE_WHY)" FAIL
+elif cmp -s "$CAPABILITY_STORE_BEFORE" "$CAPABILITY_STORE_AFTER"; then
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical" PASS
+else
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical (digest differs)" FAIL
+  printf '  before: '; head -c 300 "$CAPABILITY_STORE_BEFORE" 2>/dev/null; printf '\n'
+  printf '  after:  '; head -c 300 "$CAPABILITY_STORE_AFTER" 2>/dev/null; printf '\n'
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of
@@ -1694,8 +4453,29 @@ REFUSAL_GAPS="$(
     const core = require(process.env.CORE);
     const skill = fs.readFileSync(process.env.SKILL, "utf8");
     const reasons = Object.values(core.ADOPTION_REFUSALS);
-    if (reasons.length !== 8) { process.stdout.write("count:" + reasons.length); process.exit(0); }
-    const missing = reasons.filter((r) => !skill.includes(r));
+    if (reasons.length !== 7) { process.stdout.write("count:" + reasons.length); process.exit(0); }
+    // BOTH directions read the same parsed row set, never the whole file. Prose
+    // elsewhere in the skill mentions several of these reasons, so a forward check
+    // against `skill.includes` would stay green after the TABLE ROW was deleted —
+    // which is the drift it exists to catch. The character class is deliberately
+    // wider than any current value: a reason is a kebab-case identifier, and a
+    // future one carrying a digit must not slip past unnoticed in either direction.
+    const rows = skill.split("\n")
+      .map((l) => l.match(/^\|\s*`([a-z0-9_-]+)`\s*\|/))
+      .filter(Boolean)
+      .map((m) => m[1]);
+    // ENTRY-POINT-ONLY refusals. The adoption script emits `private-record-store-unsafe`
+    // itself, before adoptableRecord is ever reached, so it is a refusal a user sees
+    // and the model has to recognize — but it is not an ADOPTION_REFUSALS value. The
+    // stale arm used to reject it, which meant the refusal TABLE had to stay
+    // incomplete in order to keep this pin simple: the test dictated what could be
+    // documented instead of checking that what exists is documented. Naming the
+    // exception explicitly inverts that back.
+    const ENTRY_ONLY = ["private-record-store-unsafe"];
+    const known = reasons.concat(ENTRY_ONLY);
+    const stale = rows.filter((r) => !known.includes(r));
+    if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }
+    const missing = known.filter((r) => !rows.includes(r));
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
 )" || REFUSAL_GAPS=threw
@@ -1705,17 +4485,47 @@ else
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL
 fi
 
-# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
-# in review-evidence-lease-v1.js: the core cannot require that module (it requires
-# the binder, which requires the core), so the two are held in step by hand — and
-# by this pin, the way within() <-> isInside is held. Without it a widened lease id
-# shape would make the sweep silently set aside every new-format lease, green.
-CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = /[^;]*/" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = /[^;]*/" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
+# CONV-2 — the doctor skill must not hand the recognizer an EMPTY assignment.
+#
+# isRootedLiteralPath("") is false, so a harness that renders the placeholder empty
+# makes parseAssignment reject and the ENTIRE invocation is denied — and the command
+# it denies is /zensu:doctor, the FIRST of the two exempt commands and the one a
+# wedged user is told to run first, in exactly the bind-failure state it exists to
+# diagnose. The user gets a gate deny, not the script's own message, because the
+# recognizer runs before it. `CLAUDE_PROJECT_DIR= bash <doctor>` is already pinned as
+# ASSIGNMENT-refused in zensu-doctor-invocation.test.js; what is pinned HERE is that
+# the shipped skill body tells the model to omit the assignment rather than render it
+# empty, the way ZDOC_PLAYWRIGHT_TOOLS already is.
+#
+# Graded on what the skill OFFERS, not on a sentence: at least one shipped doctor
+# invocation must carry no CLAUDE_PROJECT_DIR at all, so the model has a form to
+# reach for. A prose-only pin would go red on a rewording that changed nothing and
+# green on guidance with no command behind it — the first draft of this row did
+# exactly the former.
+DOCTOR_SKILL="$ROOT/skills/doctor/SKILL.md"
+DOCTOR_CMDS_TOTAL="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null || printf 0)"
+DOCTOR_CMDS_WITHOUT_PROJECT="$(grep 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null \
+  | grep -cv 'CLAUDE_PROJECT_DIR' || printf 0)"
+if [ "$DOCTOR_CMDS_TOTAL" -ge 2 ] && [ "$DOCTOR_CMDS_WITHOUT_PROJECT" -ge 1 ] \
+  && grep -qiE 'render(ed)? EMPTY' "$DOCTOR_SKILL"; then
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case" PASS
 else
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case (total=$DOCTOR_CMDS_TOTAL without=$DOCTOR_CMDS_WITHOUT_PROJECT)" FAIL
+fi
+
+# CONV-3 — the recognizer must SAY why it still accepts the assignment at all. It is
+# not a harmless leftover: it is what keeps a model still holding the PREVIOUS
+# release's skill body from having its command refused, which is not exotic, because
+# a mid-session upgrade is the state the whole feature exists for.
+RECOGNIZER_SRC="$ROOT/hooks/lib/zensu-doctor-invocation.js"
+# ANCHORED to the ASSIGNMENTS entry, not the whole file: a whole-file grep is
+# satisfied by any unrelated occurrence anywhere, so it would grade prose that had
+# drifted away from the entry it explains.
+if sed -n '/NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
+  | grep -qE 'previous release|older skill|mid-session upgrade'; then
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" PASS
+else
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" FAIL
 fi
 
 # The reserved phase cannot be minted by a caller — the same protection
@@ -1750,6 +4560,435 @@ else
   check "the RUNTIME_ADOPTED provenance phase and reason cannot be minted through --phase (phase_rc=$FORGE_PHASE_RC reason_rc=$FORGE_REASON_RC)" FAIL
   head -c 200 "$FORGE_ERR" 2>/dev/null; head -c 200 "$FORGE_REASON_ERR" 2>/dev/null
 fi
+
+# ---------------------------------------------------------------------------
+# Part D — the workflow-baseline repair
+#
+# A DIFFERENT wedge from the one Part C exits. There the runtime may not SERVE
+# the record; here it serves it perfectly well and the workflow document the
+# record anchors is gone — a worktree deleted and re-created loses it, because
+# .zensu/state/ is gitignored. While it is gone the ".*" capability gate denies
+# every tool, which is deliberate and stays: a deleted document must never be
+# read as "no chain was ever active".
+#
+# It is driven against $SYNTHETIC_COMPATIBLE_ROOT rather than the breaking one,
+# because "served" is the precondition of the whole repair — AC-008 above already
+# proved that root binds this record.
+# ---------------------------------------------------------------------------
+
+# The DECISION channel alone is not enough here: the point of the change is WHICH
+# reason a deny carries, and a generic "immutable context revalidation failed"
+# would satisfy any check that only reads the word `deny`.
+# NAMED apart from the gate_reason_from at :1338 on purpose. This used to reuse
+# that name, which SHADOWED the earlier definition for every call below this line
+# — and the copy silently dropped the two env neutralizations the original's own
+# comment calls load-bearing, so a developer with ZENSU_API_URL or ZENSU_MCP_GATE
+# exported would have got an empty reason and a failure misdiagnosed as the scope
+# being gone. It carries them now, reads the ONE field the hook actually emits
+# (`permissionDecisionReason`; `permissionDecision_reason` existed nowhere in
+# hooks/ and made the first disjunct dead), and parses the payload once.
+baseline_gate_reason_from() {
+  local root="$1" hook="$2" payload="$3" out="$TMP/baseline-gate.out"
+  printf '%s' "$payload" \
+    | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
+      bash "$root/hooks/$hook" >"$out" 2>/dev/null || true
+  OUT_FILE="$out" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write("\n"); process.exit(0); }
+    try {
+      const parsed = JSON.parse(raw);
+      process.stdout.write(`${parsed?.hookSpecificOutput?.permissionDecisionReason || ""}\n`);
+    } catch (_error) { process.stdout.write("unparseable\n"); }
+  '
+}
+
+BASELINE_DOC="$(
+  CORE="$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/session-control-core-v1.js" \
+  PROJECT_ROOT="$PROJECT" SID="$SESSION" node -e '
+    const core = require(process.env.CORE);
+    process.stdout.write(
+      core.adoptionWorkflowStatePath(process.env.PROJECT_ROOT, process.env.SID),
+    );
+  '
+)"
+
+# Precondition, asserted rather than assumed: the document has to be THERE before
+# deleting it can mean anything. SessionStart writes it, but this suite has run a
+# long way by now and a check that passes because the file was already absent
+# would prove nothing.
+if [ -f "$BASELINE_DOC" ]; then
+  check "Part D the session's workflow document exists before it is removed" PASS
+else
+  check "Part D the session's workflow document exists before it is removed" FAIL
+fi
+
+# The control: with the document in place this root allows an ordinary Bash call.
+# Without it, the deny below could be the lineage state rather than this one.
+BASELINE_CONTROL="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+if [ "$BASELINE_CONTROL" = allow ]; then
+  check "Part D control: a served record with its document allows an ordinary command" PASS
+else
+  check "Part D control: a served record with its document allows an ordinary command (saw $BASELINE_CONTROL)" FAIL
+fi
+
+rm -f "$BASELINE_DOC"
+
+# AC-D07 — the deny NAMES the cause and the command. The generic wording is what
+# this row exists to keep out: it is accurate and names no way out, in a state
+# where this hook denies every tool.
+BASELINE_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+if [ "$BASELINE_DENY" = deny ] \
+    && printf '%s' "$BASELINE_REASON" | grep -qF 'the workflow document it anchors is missing' \
+    && printf '%s' "$BASELINE_REASON" | grep -qF '/zensu:adopt-session --confirm' \
+    && ! printf '%s' "$BASELINE_REASON" | grep -qF 'immutable context revalidation failed'; then
+  check "AC-D07 a missing workflow document denies with a named cause and a reachable remedy" PASS
+else
+  check "AC-D07 a missing workflow document denies with a named cause and a reachable remedy (decision=$BASELINE_DENY)" FAIL
+  printf '%s\n' "$BASELINE_REASON" | head -c 300
+fi
+
+# AC-D07b — the DISCRIMINATION half, and the half AC-D07 alone cannot establish.
+# A document that is PRESENT but tampered must keep the GENERIC wording: something
+# IS at that path, the repair refuses it by design, and recommending a rebuild
+# there tells the user to build over the evidence. Without this row, tagging the
+# `is unsafe` throw with baselineMissing() leaves the whole tree green while the
+# gate names the one remedy that cannot work — which is the contradiction this
+# change set exists to remove, reintroduced from the other side.
+BASELINE_LINK_SRC="$TMP/baseline-link-src.json"
+printf '{}' >"$BASELINE_LINK_SRC"
+ln "$BASELINE_LINK_SRC" "$BASELINE_DOC"
+BASELINE_TAMPER_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_TAMPER_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+rm -f "$BASELINE_DOC"
+# The SPECIFIC cause is required, not only the generic lead. `immutable context
+# revalidation failed` is emitted for EVERY untagged throw from
+# revalidateWorkflowState, including ones raised before the document is reached —
+# so a hard link that failed to be created, or a deny from earlier in the walk,
+# would satisfy the generic needle alone and this row would pass without ever
+# exercising the tamper branch it is named for.
+if [ "$BASELINE_TAMPER_DENY" = deny ] \
+    && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'immutable context revalidation failed' \
+    && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'activated workflow CAS state is unsafe' \
+    && ! printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'the workflow document it anchors is missing'; then
+  check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild" PASS
+else
+  check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild (decision=$BASELINE_TAMPER_DENY)" FAIL
+  printf '%s\n' "$BASELINE_TAMPER_REASON" | head -c 300
+fi
+
+# AC-D07c/AC-D07d — the absent DIRECTORY, which is the shape this whole feature
+# exists for and which AC-D07 does not reach. That row deletes the leaf while
+# `.zensu` and `.zensu/state` stay in place, so the component arm of
+# revalidateWorkflowState's ENOENT tagging was exercised by nothing — and a
+# deleted and re-created worktree loses the whole DIRECTORY, because
+# `.zensu/state/` is gitignored. The doctor row needed its own fixture (P6e in
+# test-doctor.sh) for exactly this reason; the GATE that actually denies had none.
+# Untagging either component arm leaves the flagship session denied with the
+# generic wording that names no way out, and every other row here green.
+#
+# The two arms are checked separately because the loop runs twice with different
+# labels; the deny TEXT is identical for both, so what discriminates is that the
+# component ENOENT is tagged at all.
+BASELINE_STATE_DIR="$(dirname -- "$BASELINE_DOC")"
+BASELINE_ZENSU_DIR="$(dirname -- "$BASELINE_STATE_DIR")"
+BASELINE_ZENSU_BAK="$TMP/baseline-zensu-bak"
+
+rm -rf "$BASELINE_STATE_DIR"
+BASELINE_NOSTATE_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_NOSTATE_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+if [ "$BASELINE_NOSTATE_DENY" = deny ] \
+    && printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF 'the workflow document it anchors is missing' \
+    && printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF '/zensu:adopt-session --confirm' \
+    && ! printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF 'immutable context revalidation failed'; then
+  check "AC-D07c an absent .zensu/state denies with the named cause, not the generic wording" PASS
+else
+  check "AC-D07c an absent .zensu/state denies with the named cause (decision=$BASELINE_NOSTATE_DENY)" FAIL
+  printf '%s\n' "$BASELINE_NOSTATE_REASON" | head -c 300
+fi
+
+# The component ABOVE it. Moved aside rather than deleted, so nothing else the
+# fixture keeps under `.zensu` is destroyed by a check about its absence.
+mv "$BASELINE_ZENSU_DIR" "$BASELINE_ZENSU_BAK"
+BASELINE_NOZENSU_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_NOZENSU_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+mv "$BASELINE_ZENSU_BAK" "$BASELINE_ZENSU_DIR"
+mkdir -p "$BASELINE_STATE_DIR"
+if [ "$BASELINE_NOZENSU_DENY" = deny ] \
+    && printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF 'the workflow document it anchors is missing' \
+    && printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF '/zensu:adopt-session --confirm' \
+    && ! printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF 'immutable context revalidation failed'; then
+  check "AC-D07d an absent .zensu denies with the named cause, not the generic wording" PASS
+else
+  check "AC-D07d an absent .zensu denies with the named cause (decision=$BASELINE_NOZENSU_DENY)" FAIL
+  printf '%s\n' "$BASELINE_NOZENSU_REASON" | head -c 300
+fi
+
+# AC-D09 — the doctor row is ARMED and never silent, which is the property that
+# matters most in a diagnostic and the only one this fixture can establish.
+#
+# BOTH arms are accepted, and that is a correction rather than a weakening. This
+# row used to require the DISCLOSURE arm alone, on the stated premise that "the
+# wrapper's own bind does not resolve in this suite's synthetic installs". That
+# premise was taken from a macOS observation and is FALSE on Linux and on Windows,
+# where the bind DOES resolve: the row then correctly renders the ❌ MISSING
+# finding for a document this block has just deleted, and a check demanding the
+# other wording failed for a reason that had nothing to do with the renderer.
+# Measured, not argued — ubuntu-latest and windows-shard-2 both reported the
+# MISSING row here while macOS reported the disclosure.
+#
+# Silence is the one verdict this row refuses, so silence is what it tests for.
+# Each arm is ONE ordered pattern rather than two independent greps: `missing
+# check, not an all-clear` occurs at six other sites in zensu-doctor-report.js and
+# `own workflow document` occurs on the BAD row too, so separate -qF calls could be
+# satisfied by two unrelated lines while the disclosure itself was gone.
+#
+# The ❌ arm is ALSO driven where the renderer is driven directly, with the
+# ZDOC_BINDING/ZDOC_SESSION_KEY pair: tests/structure/test-doctor.sh P6a, which is
+# where its wording, its glyph and its remedy are pinned. This row pins neither
+# arm's text beyond what distinguishes it from silence.
+BASELINE_DOCTOR_OUT="$TMP/baseline-doctor.out"
+BASELINE_DOCTOR_HOME="$TMP/baseline-doctor-home"; mkdir -p "$BASELINE_DOCTOR_HOME"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" HOME="$BASELINE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-doctor.sh" \
+  >"$BASELINE_DOCTOR_OUT" 2>/dev/null || true
+if grep -q "own workflow document was not checked.*missing check, not an all-clear" \
+    "$BASELINE_DOCTOR_OUT" \
+  || grep -q "own workflow document is MISSING.*/zensu:adopt-session --confirm" \
+    "$BASELINE_DOCTOR_OUT"; then
+  check "AC-D09 the doctor's own-document check is armed and never silent" PASS
+else
+  check "AC-D09 the doctor's own-document check is armed and never silent" FAIL
+  grep -F 'state:' "$BASELINE_DOCTOR_OUT" 2>/dev/null | head -3
+fi
+
+# AC-D05 — the report-only run diagnoses it and WRITES NOTHING. Proven by the
+# file still being absent, never by the output alone: "it is read-only" is the
+# premise the PreToolUse recognizer's admission of this command rests on.
+BASELINE_REPORT_OUT="$TMP/baseline-report.out"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" \
+  >"$BASELINE_REPORT_OUT" 2>/dev/null || true
+# `grep -qF --` is REQUIRED for the flag needle: without the `--` terminator grep
+# parses `--confirm` as its own option. It fails loudly here rather than passing
+# vacuously, but it is the same class of defect CLAUDE.md records for S7k.
+if grep -qF 'workflow document is MISSING' "$BASELINE_REPORT_OUT" \
+    && grep -qF -- '--confirm' "$BASELINE_REPORT_OUT" \
+    && grep -qF 'loss, not a restore' "$BASELINE_REPORT_OUT" \
+    && [ ! -f "$BASELINE_DOC" ]; then
+  check "AC-D05 the report-only run names the missing document and writes nothing" PASS
+else
+  check "AC-D05 the report-only run names the missing document and writes nothing" FAIL
+  head -c 300 "$BASELINE_REPORT_OUT" 2>/dev/null
+fi
+
+# AC-D06 / AC-D11 — --confirm rebuilds it, and the session can run tools again.
+BASELINE_CONFIRM_OUT="$TMP/baseline-confirm.out"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+  >"$BASELINE_CONFIRM_OUT" 2>/dev/null
+BASELINE_CONFIRM_RC=$?
+if [ "$BASELINE_CONFIRM_RC" -eq 0 ] \
+    && grep -qF 'workflow baseline rebuilt' "$BASELINE_CONFIRM_OUT" \
+    && [ -f "$BASELINE_DOC" ]; then
+  check "AC-D06 --confirm rebuilds the missing workflow document and exits 0" PASS
+else
+  check "AC-D06 --confirm rebuilds the missing workflow document and exits 0 (rc=$BASELINE_CONFIRM_RC)" FAIL
+  head -c 300 "$BASELINE_CONFIRM_OUT" 2>/dev/null
+fi
+
+# AC-D03 end to end — exactly one provenance entry, and NO bypass-ledger entry.
+# The ledger records gate ESCAPES so that everything under "Gates bypassed" is
+# true; this escaped no gate, because the document a gate would have read was
+# already gone.
+if BASELINE_DOC="$BASELINE_DOC" node -e '
+    const fs = require("node:fs");
+    const state = JSON.parse(fs.readFileSync(process.env.BASELINE_DOC, "utf8"));
+    const rebuilt = (state.history || []).filter((h) => h.phase === "BASELINE_REBUILT");
+    if (rebuilt.length !== 1) process.exit(1);
+    if (!rebuilt[0].ts) process.exit(1);
+    if (!String(rebuilt[0].reason || "").startsWith("baseline-rebuilt: ")) process.exit(1);
+    if (!Array.isArray(state.bypasses) || state.bypasses.length !== 0) process.exit(1);
+  '; then
+  check "AC-D03 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" PASS
+else
+  check "AC-D03 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" FAIL
+fi
+
+BASELINE_AFTER="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+if [ "$BASELINE_AFTER" = allow ]; then
+  check "AC-D11 the session runs ordinary commands again after the repair" PASS
+else
+  check "AC-D11 the session runs ordinary commands again after the repair (saw $BASELINE_AFTER)" FAIL
+fi
+
+# AC-D06 second half — a second --confirm is a no-op on the baseline rather than
+# a second rebuild, and must not report one.
+BASELINE_SECOND_OUT="$TMP/baseline-second.out"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+  >"$BASELINE_SECOND_OUT" 2>/dev/null
+BASELINE_SECOND_RC=$?
+if [ "$BASELINE_SECOND_RC" -eq 0 ] \
+    && ! grep -qF 'workflow baseline rebuilt' "$BASELINE_SECOND_OUT" \
+    && grep -qF 'workflow baseline: present' "$BASELINE_SECOND_OUT"; then
+  check "AC-D06 a second --confirm reports the document as present, not rebuilt again" PASS
+else
+  check "AC-D06 a second --confirm reports the document as present, not rebuilt again (rc=$BASELINE_SECOND_RC)" FAIL
+  head -c 300 "$BASELINE_SECOND_OUT" 2>/dev/null
+fi
+
+# AC-D04 — the provenance phase and its reason prefix cannot be minted by a
+# caller, the same protection CHAIN_RECOVERED and RUNTIME_ADOPTED carry, for the
+# same reason: a forgeable provenance entry is worse than none, because it is
+# believed. CLAUDE_CODE_SESSION_ID is REQUIRED — zensu-log.sh binds the model
+# session before it reaches the --phase case, so without it the helper exits 2 on
+# the binding and the guard never runs, green in a tree with the guard deleted.
+BASELINE_FORGE_ERR="$TMP/baseline-forge-phase.err"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-log.sh" --phase BASELINE_REBUILT --step forged \
+  >/dev/null 2>"$BASELINE_FORGE_ERR"
+BASELINE_FORGE_PHASE_RC=$?
+BASELINE_FORGE_REASON_ERR="$TMP/baseline-forge-reason.err"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-log.sh" --phase IMPL --step forged \
+  --reason "baseline-rebuilt: missing" >/dev/null 2>"$BASELINE_FORGE_REASON_ERR"
+BASELINE_FORGE_REASON_RC=$?
+if [ "$BASELINE_FORGE_PHASE_RC" -ne 0 ] \
+    && grep -qF 'BASELINE_REBUILT is written only by the workflow-baseline repair' "$BASELINE_FORGE_ERR" \
+    && [ "$BASELINE_FORGE_REASON_RC" -ne 0 ] \
+    && grep -qF "a 'baseline-rebuilt: ' reason is reserved for the workflow-baseline repair" "$BASELINE_FORGE_REASON_ERR"; then
+  check "AC-D04 the BASELINE_REBUILT phase and reason cannot be minted through --phase" PASS
+else
+  check "AC-D04 the BASELINE_REBUILT phase and reason cannot be minted through --phase (phase_rc=$BASELINE_FORGE_PHASE_RC reason_rc=$BASELINE_FORGE_REASON_RC)" FAIL
+  head -c 200 "$BASELINE_FORGE_ERR" 2>/dev/null; head -c 200 "$BASELINE_FORGE_REASON_ERR" 2>/dev/null
+fi
+
+# AC-D04b — the OTHER TWO guard sites, and the reason this row exists at all.
+# AC-D04 above goes through zensu-log.sh, which refuses at its own --phase guards
+# and exits 2 BEFORE tdd_write_phase is ever reached — so the guards inside
+# zensu-tdd-phase.sh (tdd_write_phase and _tdd_write_phase_critical) were driven
+# by NOTHING and all four lines could be deleted with the whole tree green, while
+# any caller that sources the phase library could then forge a BASELINE_REBUILT
+# provenance entry. T12h2 in test-chain-recover.sh is the sibling precedent.
+#
+# THE BIND IS THE WHOLE POINT, and a first version of this row got it wrong in a
+# way worth recording. It sourced zensu-session.sh and called only
+# zensu_resolve_session_id, which is a pure hash and exports nothing. Without
+# ZENSU_SESSION_KEY / ZENSU_PROJECT_ROOT / ZENSU_SESSION_CONTEXT, tdd_state_file
+# and _tdd_bound_project_root both fail — so with the guards DELETED the four
+# calls still returned non-zero, for a reason unrelated to the guards, and the
+# row passed while observing nothing at all. zensu_bind_model_session is what
+# supplies them; the session is already registered by the Part D fixture.
+#
+# TWO controls, because one axis is not enough. A POSITIVE call must SUCCEED
+# through the same entry point, which proves the fixture can write at all; and
+# the FULL history must grow by exactly that one entry with no forged entry in
+# it. Counting only BASELINE_REBUILT phases was blind to the two REASON-guard
+# calls, which pass phase IMPL: a forged write through a deleted reason guard
+# would land an IMPL entry that filter never counted.
+BASELINE_HIST_BEFORE="$(
+  DOC="$BASELINE_DOC" node -e '
+    const fs = require("node:fs");
+    try {
+      const d = JSON.parse(fs.readFileSync(process.env.DOC, "utf8"));
+      process.stdout.write(String(Array.isArray(d.history) ? d.history.length : -1));
+    } catch (_e) { process.stdout.write("-1"); }
+  ' 2>/dev/null
+)"
+BASELINE_DIRECT_OUT="$(
+  CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
+  bash -c '
+    . "$1/hooks/lib/zensu-session.sh" || { echo "source-failed"; exit 0; }
+    zensu_bind_model_session >/dev/null 2>&1 || { echo "bind-failed"; exit 0; }
+    . "$1/hooks/lib/zensu-tdd-phase.sh" || { echo "phase-source-failed"; exit 0; }
+    sid="$ZENSU_SESSION_KEY"
+    sf="$3"
+    rc_pub_phase=0;  tdd_write_phase "$sid" forged BASELINE_REBUILT >/dev/null 2>&1 || rc_pub_phase=$?
+    rc_pub_reason=0; tdd_write_phase "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_pub_reason=$?
+    rc_crit_phase=0
+    # SIX arguments, not five. The function reads the sixth (a timestamp) AFTER its
+    # six guard returns, and the library runs under set -u — so a five-argument
+    # call on a tree with the guard DELETED aborts the subshell at the unbound
+    # expansion before any write is attempted. The mutation probe showed exactly
+    # that: the rcs line came back EMPTY and only the public writer forged an
+    # entry. With the sixth argument a removed guard really reaches
+    # mutateWorkflowState, which is what the history assertion below can see.
+    _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" "" >/dev/null 2>&1 || rc_crit_phase=$?
+    rc_crit_reason=0
+    _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" "" >/dev/null 2>&1 || rc_crit_reason=$?
+    rc_control=0
+    tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
+    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
+  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>"$TMP/baseline-direct.err"
+)"
+BASELINE_HIST_AFTER="$(
+  DOC="$BASELINE_DOC" node -e '
+    const fs = require("node:fs");
+    try {
+      const d = JSON.parse(fs.readFileSync(process.env.DOC, "utf8"));
+      const h = Array.isArray(d.history) ? d.history : [];
+      const forged = h.filter((e) => e && (e.phase === "BASELINE_REBUILT"
+        || (typeof e.reason === "string" && e.reason.indexOf("baseline-rebuilt: ") === 0))).length;
+      process.stdout.write(h.length + ":" + forged);
+    } catch (_e) { process.stdout.write("-1:-1"); }
+  ' 2>/dev/null
+)"
+# A delimited read rather than `set --`: clobbering the script's positional
+# parameters at file scope would reach any row appended below, and Part D is the
+# file's tail, which is exactly where new rows land.
+BD_RC1=""; BD_RC2=""; BD_RC3=""; BD_RC4=""; BD_RC5=""
+IFS=':' read -r BD_RC1 BD_RC2 BD_RC3 BD_RC4 BD_RC5 <<<"$BASELINE_DIRECT_OUT"
+BASELINE_DIRECT_OK=false
+if [ -n "$BD_RC5" ] \
+    && [ "$BD_RC1" -ne 0 ] 2>/dev/null && [ "$BD_RC2" -ne 0 ] \
+    && [ "$BD_RC3" -ne 0 ] && [ "$BD_RC4" -ne 0 ] && [ "$BD_RC5" -eq 0 ] \
+    && [ "$BASELINE_HIST_AFTER" = "$((BASELINE_HIST_BEFORE + 1)):1" ]; then
+  BASELINE_DIRECT_OK=true
+fi
+if [ "$BASELINE_DIRECT_OK" = true ]; then
+  check "AC-D04b both exported writers refuse the reserved phase AND the reserved reason, an ordinary phase still writes, and no forged provenance entry landed" PASS
+else
+  check "AC-D04b both exported writers refuse the reserved phase and reason (rcs=$BASELINE_DIRECT_OUT history=$BASELINE_HIST_BEFORE->$BASELINE_HIST_AFTER)" FAIL
+  head -c 400 "$TMP/baseline-direct.err" 2>/dev/null
+fi
+
+# AC-D02 end to end — a document that is PRESENT but unreadable is never rebuilt
+# over. This is the discrimination test for the whole feature: without it, "the
+# repair rebuilds a missing document" and "the repair rebuilds anything it cannot
+# read" pass exactly the same checks.
+cp "$BASELINE_DOC" "$TMP/baseline-doc.bak"
+printf '%s' '{not json' > "$BASELINE_DOC"
+BASELINE_TAMPER_OUT="$TMP/baseline-tamper.out"
+CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+  >"$BASELINE_TAMPER_OUT" 2>/dev/null
+BASELINE_TAMPER_RC=$?
+if [ "$BASELINE_TAMPER_RC" -ne 0 ] \
+    && grep -qF 'workflow baseline NOT repaired' "$BASELINE_TAMPER_OUT" \
+    && [ "$(cat "$BASELINE_DOC")" = '{not json' ]; then
+  check "AC-D02 an unreadable document is refused and its bytes are left alone" PASS
+else
+  check "AC-D02 an unreadable document is refused and its bytes are left alone (rc=$BASELINE_TAMPER_RC)" FAIL
+  head -c 300 "$BASELINE_TAMPER_OUT" 2>/dev/null
+fi
+cp "$TMP/baseline-doc.bak" "$BASELINE_DOC"
 
 printf '%s\n' '----' \
   "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"

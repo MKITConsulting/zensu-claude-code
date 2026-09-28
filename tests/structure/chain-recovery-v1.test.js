@@ -81,6 +81,18 @@ test('an absent deferred-review claim is readable but never reads as "no claim"'
   assert.equal(report.shape, 'ready-for-review');
   assert.equal(report.deferredReviewClaim, 'unknown');
 
+  // The implementing-phase counter travels the same path and needs the same bite:
+  // without `naturalOr` the spread carries an ABSENT key through as `undefined`,
+  // every consumer's `Number.isSafeInteger` guard then reads false, the doctor row
+  // is skipped, and no negative case notices.
+  const noCounter = doc({});
+  delete noCounter.implStopCount;
+  assert.equal(chain.classifyChain(noCounter).implStopCount, 0);
+  for (const bad of [-1, 1.5, 'x', null, {}]) {
+    assert.equal(chain.classifyChain(doc({ implStopCount: bad })).implStopCount, 0);
+  }
+  assert.equal(chain.classifyChain(doc({ implStopCount: 7 })).implStopCount, 7);
+
   const wedged = doc(Object.assign({ reviewRearm: DISAGREEING }, BOUND_LINK));
   delete wedged.deferredReviewClaim;
   const blocked = chain.classifyChain(wedged);
@@ -137,7 +149,28 @@ test('a complete but invalid Autopilot link reads as partial, never as bound', (
     { autopilotRunId: 'x'.repeat(129) },
     { autopilotRunId: 'has space' },
     { chainOutcome: 'bogus' },
+    // The SHELL-METACHARACTER cases, and they are the ones the security argument for
+    // `shapeCommand`'s unquoted interpolation actually rests on: its output reaches a
+    // doctor row that is relayed verbatim as a remedy to run, and the only thing keeping
+    // that safe is that `isLinkId` admits none of these. A widening is the stated hazard,
+    // and before these rows the table would have stayed green through one. `chainId` is
+    // mirrored because it is interpolated too and carried no character-class case at all.
+    { autopilotRunId: 'run;id' },
+    { autopilotRunId: 'run$(x)' },
+    { autopilotRunId: 'run`x`' },
+    { autopilotRunId: "run'id" },
+    { autopilotRunId: 'run\nid' },
+    { chainId: 'chain;id' },
+    { chainId: 'chain$(x)' },
+    { chainId: 'chain`x`' },
+    { chainId: "chain'id" },
+    { chainId: 'chain\nid' },
+    { chainId: 'has space' },
+    { chainId: 'x'.repeat(129) },
   ];
+  // A floor, because the registration control counts test BLOCKS: deleting any or all of
+  // these rows leaves the suite's case count untouched, so nothing else would notice.
+  assert.ok(deviations.length >= 18, `deviation rows: ${deviations.length}`);
   const disagreeing = Object.assign({}, RECEIPT, { runId: 'run-other' });
   for (const deviation of deviations) {
     const state = doc(Object.assign({ reviewRearm: disagreeing }, BOUND_LINK, deviation));
@@ -161,6 +194,29 @@ test('the receipt key list is the exact shared schema, sorted and frozen', () =>
   ]);
   assert.equal(Object.isFrozen(chain.REARM_MARKER_KEYS), true);
   assert.equal(Object.isFrozen(chain.RETURN_STAGES), true);
+  // Every exported table, not a subset: the two command maps and the shape arrays were
+  // frozen at different times and the policy has to be observable, or the next one added
+  // is frozen or not by accident. RECOVERABLE_SHAPES matters most — `recoverable` is the
+  // flag that authorizes --chain-recover, and STUCK_SHAPES spreads it at load, so a
+  // mutation would move that verdict without moving `wedged`.
+  assert.equal(Object.isFrozen(chain.NEXT_COMMAND), true);
+  assert.equal(Object.isFrozen(chain.BLOCKED_RECOVERY_COMMAND), true);
+  // VALUE assertions for these two, not `Object.isFrozen`: that predicate answers true for a
+  // non-object, so a removed or renamed export would have passed silently — and unlike the
+  // four above, neither of these has independent existence coverage anywhere in this file.
+  // The derived loop below carries the frozenness policy for both.
+  assert.deepEqual([...chain.RECOVERABLE_SHAPES], ['wedged-stale-rearm']);
+  assert.deepEqual([...chain.INERT_SHAPES], ['no-session', 'chain-closed']);
+  // DERIVED, so "every exported table" is enforced rather than enumerated. The hand list
+  // above was already short by one on the day it landed, which is the census hazard this
+  // repository records elsewhere; the loop makes a sixth table added later frozen by the
+  // check instead of by memory. The named assertions stay as the readable statement of
+  // which tables exist today.
+  for (const [name, value] of Object.entries(chain)) {
+    if (value && typeof value === 'object') {
+      assert.equal(Object.isFrozen(value), true, `exported table not frozen: ${name}`);
+    }
+  }
   assert.deepEqual([...chain.RETURN_STAGES], ['GATES', 'CONVERGE', 'FIX_FINDINGS', 'VALIDATE', 'COVER']);
 });
 

@@ -37,6 +37,9 @@ block handed in as the invocation payload — autopilot passes the same `AC-###`
 authored in its Phase-0 planning; (2) a named plan artifact (e.g. a `.zensu/plans/*.md` file)
 when one is given; (3) the PR body's per-AC table. autopilot invokes cover at its Phase 1 step
 6b, so it supplies the ACs via (1) — it does not depend on the PR body being finalized first.
+Source (3) carries a marker PREFIX in its `Status` cell (🟢 pass, 🟡 partial, 🟡 unvalidated,
+🔴 fail, ⚪ deprecated), so match the status WORD inside the cell rather than testing the cell
+for equality against a bare literal.
 For each:
 
 - Each active `AC-###` ID → one test case, named/keyed by that stable ID, driven by the same

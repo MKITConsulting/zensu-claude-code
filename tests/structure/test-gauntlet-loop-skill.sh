@@ -49,7 +49,6 @@ README_MD="$PLUGIN_DIR/README.md"
 CAPABILITY_LIB="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 PRINCIPAL_LIB="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
 EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
-WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 # Sibling suite, read as EVIDENCE rather than as a test: G15's nested-spawn residue is
@@ -86,7 +85,7 @@ finish() {
 # surfaced as "G16 review-chain rationale does not discriminate", pointing the reader
 # at prose. A missing file is named here instead.
 for f in "$SKILL_MD" "$HARNESS_MD" "$BARS_MD" "$PLUGIN_JSON" "$README_MD" \
-  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$WITNESS" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
+  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
   "$CAPABILITY_GATE_TEST" "$MANIFEST_JSON" $AGENT_MDS; do
   if [ ! -f "$f" ]; then
     check "G0 required file exists: $f" FAIL
@@ -281,8 +280,6 @@ fi
 G9_MISS=""
 grep -qF 'zensu_hook_is_main_principal "$PAYLOAD" PreToolUse' "$EDIT_GATE" \
   || G9_MISS="$G9_MISS edit-gate-guard"
-grep -qF 'zensu_hook_is_main_principal "$INPUT" PostToolUse' "$WITNESS" \
-  || G9_MISS="$G9_MISS witness-guard"
 flat_has 'binds the LEAD ONLY' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-scope"
 # The anchor spans the claim AND the bound it inherits. An earlier spelling pinned the
 # unbounded absolute "no spawned agent is ever `main-v1`", which the section's own
@@ -293,9 +290,9 @@ flat_has 'no spawned agent is ever `main-v1`' "$SKILL_FLAT" && G9_MISS="$G9_MISS
 flat_has 'this bullet and the one above invert together' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-premise-consequence"
 flat_has 'is NOT phase-gated' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-consequence"
 if [ -z "$G9_MISS" ]; then
-  check "G9 skill states the main-v1-only scope of the edit gate and the witness" PASS
+  check "G9 skill states the main-v1-only scope of the edit gate" PASS
 else
-  check "G9 edit gate and witness are main-v1 only —$G9_MISS" FAIL
+  check "G9 edit gate is main-v1 only —$G9_MISS" FAIL
 fi
 
 if grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$REVIEW_DELEGATE" \
@@ -330,11 +327,16 @@ fi
 # The stem list is the source of truth and the alternation is BUILT from it, so the
 # two cannot drift — the reverse of G3, which decomposes its regex with sed and is
 # therefore coupled to that regex's shape. Enumerated from the tree, not from memory:
-#   grep -rhoE 'ZENSU_[A-Z_]+=off' docs/ hooks/ CLAUDE.md | sort -u
+#   grep -rhoE 'ZENSU_[A-Z_]+=off' docs/ hooks/ skills/ | sort -u
 # The first version covered three of these, so a skill teaching ZENSU_CHAIN=off —
 # the most tempting one for a long unattended loop, since it silences the chain
 # enforcer — passed with the label "pattern proven live".
-ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE TEST_WITNESS CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE'
+# SESSION_LINEAGE is a member of this SET but not of the bypass ledger: it is a privacy
+# control that disables no gate and records no entry. It belongs here because the set is
+# derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and skills/,
+# and G12's own purpose — a prompt carrier must never TEACH one of these spellings —
+# applies to it exactly as it does to the nine gates.
+ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE FULL_SUITE_GATE'
 # Quote tolerance: the gates decide the escape AFTER shell quote removal
 # (pre-edit-tdd-reminder.sh compares "${ZENSU_TDD_GATE:-}" = "off"), so prose
 # teaching ZENSU_CHAIN='off' disables the gate at runtime. A bare =off pattern
@@ -350,7 +352,7 @@ ESCAPE_RE="ZENSU_($(printf '%s|' $ESCAPE_STEMS | sed 's/|$//'))=[\"']?off"
 # the gates compare after shell quote removal; deriving with a quote-INTOLERANT pattern
 # left this check blind to exactly the spelling that tolerance was added for. Sorted
 # under LC_ALL=C so the two sides can never disagree on collation.
-ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=["'"'"']?off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/CLAUDE.md" 2>/dev/null \
+ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=["'"'"']?off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/skills" 2>/dev/null \
   | sed -e 's/^ZENSU_//' -e 's/=["'"'"']\{0,1\}off$//' | LC_ALL=C sort -u | tr '\n' ' ')"
 ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | tr '\n' ' ')"
 # THREE arms under an id of its own, and an empty derivation FAILS rather than skips.
@@ -362,7 +364,7 @@ ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | tr '\n' '
 # indistinguishable from "never ran", and on drift it fell through to a second G12
 # line, so one id printed both a FAIL and a PASS.
 if [ -z "$ESCAPE_TREE" ]; then
-  check "G12a gate-disable stem derivation found nothing under hooks/, docs/ and CLAUDE.md — the drift check cannot run" FAIL
+  check "G12a gate-disable stem derivation found nothing under hooks/, docs/ and skills/ — the drift check cannot run" FAIL
 elif [ "$ESCAPE_TREE" != "$ESCAPE_LIST_SORTED" ]; then
   check "G12a gate-disable stems have drifted — tree has [$ESCAPE_TREE], list has [$ESCAPE_LIST_SORTED]" FAIL
 else
@@ -415,7 +417,7 @@ done
 # suite green, and every prose addition makes the slack larger. Assert the four
 # claim-bearing paths BY NAME instead — these are the files G8, G9 and G11 pair their
 # claims against, so losing one silently unmoors a claim from its enforcement.
-REQUIRED_HOOKS='hooks/lib/reviewer-capability-v1.js hooks/pre-edit-tdd-reminder.sh hooks/post-bash-witness.sh plan-approved-delegate.sh'
+REQUIRED_HOOKS='hooks/lib/reviewer-capability-v1.js hooks/pre-edit-tdd-reminder.sh plan-approved-delegate.sh'
 HOOK_UNNAMED=""
 # Each required path is checked TWICE, and the two halves answer different questions.
 # `flat_has` proves the residency section still NAMES it; the -f test proves the file

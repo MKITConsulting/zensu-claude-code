@@ -123,12 +123,9 @@ copy_runtime() {
   local destination="$1" runtime_entry
   mkdir -p "$destination"
   destination="$(cd "$destination" && pwd -P)" || return 1
-  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+  for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
     cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
   done
-  mkdir -p "$destination/mcp-runtime"
-  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-    "$destination/mcp-runtime/" || return 1
 }
 
 bind_runtime_session() {

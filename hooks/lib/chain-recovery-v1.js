@@ -21,12 +21,43 @@ const REARM_MARKER_KEYS = Object.freeze([
 const RETURN_STAGES = Object.freeze(['GATES', 'CONVERGE', 'FIX_FINDINGS', 'VALIDATE', 'COVER']);
 const RECOVERY_HISTORY_PHASE = 'CHAIN_RECOVERED';
 const RECOVERY_HISTORY_REASON_PREFIX = 'chain-recovered: ';
-const CHAIN_OUTCOMES = ['', 'pass', 'no-changes', 'max-rounds'];
-const RECOVERABLE_SHAPES = ['wedged-stale-rearm'];
-const DEAD_END_SHAPES = ['self-review-unbindable'];
+// FROZEN AND EXPORTED like every other shape table beside it. It was neither,
+// while `hooks/lib/zen-anchor-v1.js` keys its own outcome allowlist on these
+// members - so a RENAMED member left a dead key there, and in that file's test
+// literals, with every check green and the blocked mark silently unreachable.
+const CHAIN_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds']);
+// FROZEN like every other exported shape table. `RECOVERABLE_SHAPES` is exported and feeds
+// `recoverable`, the flag that authorizes `--chain-recover`, while `STUCK_SHAPES` spreads it
+// at load — so a mutation would move `recoverable` and `blocked` without moving `wedged`.
+const RECOVERABLE_SHAPES = Object.freeze(['wedged-stale-rearm']);
+const DEAD_END_SHAPES = Object.freeze(['self-review-unbindable']);
 const STUCK_SHAPES = Object.freeze([...RECOVERABLE_SHAPES, ...DEAD_END_SHAPES]);
+// EVERY literal `chainShape` can return. The subsets above answer "is this shape
+// stuck"; nothing answered "is this every shape", so a consumer that needs the
+// total set had to use `NEXT_COMMAND`'s key set as a proxy — an invariant this
+// module never enforced. Keep in step with `chainShape` below; the sibling suite
+// derives the literals from that function's own source and compares them here, so
+// a shape added there without a row lands as a red check rather than as a
+// consumer silently answering nothing for a real chain.
+const ALL_SHAPES = Object.freeze([
+  'no-session',
+  'implementing',
+  'chain-closed',
+  'awaiting-self-review',
+  'self-review-unbindable',
+  'review-in-flight',
+  'ticket-unclaimed',
+  'ticket-spent',
+  'wedged-stale-rearm',
+  'ticket-lost',
+  'ready-for-review',
+]);
+// The shapes that carry no work forward. Exported so a consumer never hand-copies
+// them; keep in step with the literals `chainShape` returns below. See CLAUDE.md
+// §"Chain Shape & Rearm Receipt".
+const INERT_SHAPES = Object.freeze(['no-session', 'chain-closed']);
 
-const NEXT_COMMAND = {
+const NEXT_COMMAND = Object.freeze({
   'no-session': 'run /zensu:tdd to arm a chain',
   implementing: 'zensu-log.sh --tdd-complete once the implementation is done',
   'chain-closed': 'none — this chain already reached its terminus',
@@ -44,9 +75,9 @@ const NEXT_COMMAND = {
     'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer — the consumed rounds stand, so the next completion counts against the same budget',
   'ready-for-review': 'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer',
   'wedged-stale-rearm': 'zensu-log.sh --chain-recover',
-};
+});
 
-const BLOCKED_RECOVERY_COMMAND = {
+const BLOCKED_RECOVERY_COMMAND = Object.freeze({
   'partial-link':
     'run /zensu:tdd for a fresh generation — the Autopilot linkage is incomplete and cannot be repaired in place',
   'deferred-claim':
@@ -59,7 +90,7 @@ const BLOCKED_RECOVERY_COMMAND = {
     'this document has no readable deferredReviewClaim field, so recovery cannot prove no deferred-review claim is outstanding; it refuses rather than guess — start a fresh generation with /zensu:tdd',
   'link-shape':
     'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:tdd',
-};
+});
 
 const STALE_RECEIPT_CAVEAT =
   ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued — finish this generation with what it already holds, or start a fresh one with /zensu:tdd; on a standalone chain a budget reset drops the receipt as a side effect, on a bound one it does not)';
@@ -110,6 +141,7 @@ function normalizeChainState(input) {
     ? input.deferredReviewClaim
     : '';
   normalized.stopBlockCount = naturalOr(input.stopBlockCount, 0);
+  normalized.implStopCount = naturalOr(input.implStopCount, 0);
   return normalized;
 }
 
@@ -202,6 +234,14 @@ function chainShape(state, rearmReceipt) {
 
 const STALE_RECEIPT_CAVEAT_SHAPES = ['ticket-unclaimed', 'awaiting-self-review'];
 
+// The one branch below that interpolates state into a command string, and the reason it
+// needs no quoting is a PRECONDITION rather than a property of this function: it is
+// reachable only under `linkage === 'bound'`, which `autopilotLinkage` grants only when
+// both ids pass `isLinkId` (no whitespace, no shell metacharacter) and the attempt is an
+// integer in 1..999. Consumers relay `nextCommand` verbatim — the doctor's chain rows
+// print it as a remedy to run — so WIDENING `isLinkId` is what would open that channel,
+// and the widening and this interpolation must be re-decided together. Noted here rather
+// than only at a consumer, because a consumer cannot check a producer it does not own.
 function shapeCommand(shape, linkage, autopilot, rearmReceipt) {
   if (STALE_RECEIPT_CAVEAT_SHAPES.indexOf(shape) >= 0 && rearmReceipt === 'stale') {
     return NEXT_COMMAND[shape] + STALE_RECEIPT_CAVEAT;
@@ -269,6 +309,7 @@ function classifyChain(input) {
       && state.reviewRound >= 1,
     reviewRound: state.reviewRound,
     stopBlockCount: state.stopBlockCount,
+    implStopCount: state.implStopCount,
     revision: Number.isSafeInteger(state.revision) ? state.revision : null,
     lastEvent: typeof state.last_event === 'string' ? state.last_event : null,
     recoveries: countRecoveries(state),
@@ -287,10 +328,15 @@ function countRecoveries(state) {
 }
 
 module.exports = {
+  CHAIN_OUTCOMES,
+  ALL_SHAPES,
   BLOCKED_RECOVERY_COMMAND,
+  DEAD_END_SHAPES,
+  INERT_SHAPES,
   NEXT_COMMAND,
   REARM_MARKER_KEYS,
   RECOVERABLE_SHAPES,
+  STUCK_SHAPES,
   RECOVERY_HISTORY_PHASE,
   RECOVERY_HISTORY_REASON_PREFIX,
   RETURN_STAGES,

@@ -40,7 +40,11 @@ REG_N="$(node -e '
   || check "H2 header ($HDR_N) == registered hook scripts ($REG_N)" FAIL
 
 # Every 'Hooks (N)' and '#hooks-N' reference must use the header's N.
-BAD="$(grep -hoE 'Hooks \([0-9]+\)|#hooks-[0-9]+' "$HOOKS_DOC" "$README" | grep -oE '[0-9]+' | sort -u | grep -vx "${HDR_N:-x}" | tr '\n' ' ')"
+# docs/architecture.md carries a `configuration.md#hooks-N` cross-link and was NOT scanned,
+# so it was the one occurrence that could silently point at a stale header while this suite
+# stayed green.
+ARCH_DOC="$PLUGIN_DIR/docs/architecture.md"
+BAD="$(grep -hoE 'Hooks \([0-9]+\)|#hooks-[0-9]+' "$HOOKS_DOC" "$README" "$ARCH_DOC" | grep -oE '[0-9]+' | sort -u | grep -vx "${HDR_N:-x}" | tr '\n' ' ')"
 [ -z "$BAD" ] && check "H3 all 'Hooks (N)'/'#hooks-N' refs use N=$HDR_N" PASS \
   || check "H3 inconsistent hook-count refs (stray: $BAD vs header $HDR_N)" FAIL
 

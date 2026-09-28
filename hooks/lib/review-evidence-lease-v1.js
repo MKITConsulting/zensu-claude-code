@@ -24,6 +24,13 @@ const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 128 * 1024;
 const MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE_TOTAL_BYTES = 256 * 1024 * 1024;
+
+// The store prefix, named once. This module OWNS the layout; the superseded-lease
+// sweep in review-evidence-sweep-v1.js has to traverse exactly the chain storage()
+// creates, and it consumes this constant rather than re-spelling it. A divergence
+// would send the sweep walking a path that does not exist and land it in a blanket
+// destination refusal, silently.
+const REVIEW_EVIDENCE_SEGMENTS = ['review-evidence', 'v1'];
 const MAX_EVIDENCE_FILES = 20000;
 const LOCK_WAIT_ATTEMPTS = 200;
 const LOCK_WAIT_MS = 25;
@@ -396,10 +403,28 @@ function ensurePrivateDirectory(base, segments) {
 }
 
 function storage(binding) {
-  const root = ensurePrivateDirectory(binding.pluginData, ['review-evidence', 'v1']);
+  const root = ensurePrivateDirectory(binding.pluginData, REVIEW_EVIDENCE_SEGMENTS);
   const records = ensurePrivateDirectory(root, ['records', binding.sessionKey]);
   const locks = ensurePrivateDirectory(root, ['locks']);
   return { root, records, locks };
+}
+
+// Does this store entry belong to the executing installation? The superseded-lease
+// sweep needs the same answer listRecords reaches, and used to hand-copy the three
+// conjuncts. It is a SUBSET of validateRecord on purpose: a caller that keeps an
+// entry this returns true for keeps one listRecords may still reject (a multiply
+// linked file, a non-canonical spelling, a schema this release no longer reads),
+// so a keeper must state that residual rather than claim parity.
+//
+// `record` is whatever the caller managed to parse — null for an entry it could
+// not read at all, which is never owned.
+function leaseRecordIsOwned(name, record, executingPluginRoot) {
+  const leaseId = typeof name === 'string' && name.endsWith('.json') ? name.slice(0, -5) : '';
+  return LEASE_ID_RE.test(leaseId)
+    && !!record
+    && typeof record === 'object'
+    && record.lease_id === leaseId
+    && record.plugin_root === executingPluginRoot;
 }
 
 function sleep(milliseconds) {
@@ -415,9 +440,6 @@ function withLock(binding, callback) {
   for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
     try {
       descriptor = fs.openSync(lockFile, 'wx', 0o600);
-      fs.writeFileSync(descriptor, lockValue);
-      fs.fsyncSync(descriptor);
-      break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       try {
@@ -433,7 +455,26 @@ function withLock(binding, callback) {
       // unlink that owner's live lock. A fresh Claude Code session has a new
       // session key (and therefore a new lock path), which is the safe recovery.
       sleep(LOCK_WAIT_MS);
+      continue;
     }
+    // Separated from the open. Both used to sit in the same try, and the catch
+    // rethrows anything that is not EEXIST — so an ENOSPC or EIO from the write left
+    // through that throw with the descriptor OPEN and the lock file on disk, before
+    // the release `finally` below was ever entered. Every later lock for this key
+    // then spun the full budget and failed as "busy or abandoned", and reclaiming is
+    // deliberately forbidden. The file was created 'wx' one statement ago, so this
+    // process is unambiguously its only owner and may unlink it unconditionally —
+    // the content check the release uses would not match a partial write.
+    try {
+      fs.writeFileSync(descriptor, lockValue);
+      fs.fsyncSync(descriptor);
+    } catch (error) {
+      try { fs.closeSync(descriptor); } catch { /* best effort */ }
+      try { fs.unlinkSync(lockFile); } catch { /* best effort */ }
+      descriptor = undefined;
+      throw error;
+    }
+    break;
   }
   if (descriptor === undefined) {
     fail('private lease lock is busy or abandoned; close this Claude Code session and start a fresh session');
@@ -1799,4 +1840,14 @@ module.exports = {
   sealRecord,
   storeWorkerResult,
   toolViolation,
+  // The store's own vocabulary, exported so the superseded-lease sweep consumes
+  // it instead of hand-copying it. Five elements used to live as copies in
+  // session-control-core-v1.js and only two of them were pinned — and both pins
+  // compared source spellings rather than behaviour.
+  LEASE_ID_RE,
+  MAX_RECORD_BYTES,
+  REVIEW_EVIDENCE_SEGMENTS,
+  ensurePrivateDirectory,
+  leaseRecordIsOwned,
+  withLock,
 };

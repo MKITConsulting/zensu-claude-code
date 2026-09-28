@@ -13,6 +13,7 @@ const manifest = readJson('tests/profiles/windows-ci.v1.json');
 const catalog = readJson('tests/profiles/windows-ci-command-catalog.v1.json');
 const legacyCanary = readJson('tests/profiles/windows-legacy-canary.v1.json');
 const nativeStructureInventory = readJson('tests/profiles/windows-native-structure.v1.json');
+const localOnlyProfile = readJson('tests/profiles/promptfoo-local-only.v1.json');
 const workflow = YAML.parse(
   fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
 );
@@ -27,10 +28,65 @@ const expectedProfiles = [
   'windows-shard-4',
   'windows-shard-5',
   'windows-shard-6',
+  // Shard 7 is solo for the same reason shard 8 is, and it got there the same way.
+  // `stop-enforcer-self-review-routing` carried a 1500000 ms cap against a measured
+  // 1487825 ms (run 33433936017, green on main) — 99.2% of its own ceiling, which is
+  // "budget AT the measurement", the error the shard-8 note below ends by naming. The
+  // next run over the same content (33437827832) was killed at 1500142 ms. Its
+  // neighbour `review-worker-evidence-lease` (measured 137147 ms) moved to shard 8,
+  // whose two suites now measure ~292 s inside an 1800000 ms envelope, and the cap
+  // rose to 1700000 — about 14% over the last completing measurement, with ~100 s of
+  // profile budget left so a slow run still surfaces as a suite TIMED_OUT rather than
+  // as a profile abort that truncates the tail silently.
+  //
+  // 14% is thin against the 29% run-to-run spread this repo records for THIS suite,
+  // and 1800000 is the hard envelope, so the raise cannot be larger without moving
+  // `timeout-minutes` and every profile's `profileTimeoutMs` together. The durable
+  // fix is the one shard 8 got: find why this suite needs 25 minutes on Windows.
+  // Until then, expect this cap to bind again.
   'windows-shard-7',
+  // Shard 8 now carries two suites; it was created for one. Measured on run 32998414210, `session-trail-lineage`
+  // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
+  // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
+  // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
+  // measured job durations that run were 1630, 1187, 1886, 1779, 1008, 1011 and 1516
+  // seconds — so the suite needed a shard of its own, not a different neighbour.
+  //
+  // Every one of those numbers described a suite whose Windows wall clock was almost
+  // entirely a stalled subprocess, and they are kept only so the sizing lesson is not
+  // relearned. 893084 ms (run 32998414210, completed) and >900138 ms (33018717088,
+  // killed at 229 of 288) both measured trail.mjs's win32 process probe timing out
+  // 115 times at 8000 ms — about 920 s of the 997 s. Once the probe was fixed, run
+  // 33054489866 reported PASSED session-trail-lineage (154673 ms), 280 PASS / 0 FAIL /
+  // 4 SKIP. The cap is 600000: 3.9x the real measurement, generous against the
+  // run-to-run spread this repo records elsewhere, and deliberately BELOW the ~650 s a
+  // reintroduced stall would cost, so that regression trips the cap instead of merely
+  // making CI slow. The 1500000 it briefly carried was ten times the measurement and
+  // would have hidden exactly that. Budget against the measurement with headroom —
+  // never at it, which is what 900000 did, and never so far above it that the cap
+  // stops being a tripwire.
+  //
+  // The second suite arrived later: `review-worker-evidence-lease` was moved off
+  // shard 7 (see the note above) because this shard had the headroom and that one had
+  // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
+  //
+  // The THIRD suite is `plan-payload-path-transport`, and it is the same error a third
+  // time: 848420 ms measured against a 900000 ms cap on run 34069644202 — 94.3%, which
+  // is "budget AT the measurement" once more. Run 34110308541 was killed at 900152 ms,
+  // and because shard 4's four suites had summed to 1737578 ms of its 1800000 ms
+  // envelope (96.5%), the kill starved its neighbour too: `tdd-state-junction-safety`
+  // was granted 95474 ms of its own 180000 ms cap and aborted. Two red checks, one
+  // cause. Neither number could be raised in place — the shard had 62 s left — so the
+  // suite moved here, where 292 s of measured work leaves it 1427 s, and the cap rose
+  // to 1200000: about 41% over the last completing measurement, which covers the 29%
+  // run-to-run spread this repo records elsewhere while staying far below the 10x that
+  // stopped shard 8's own cap being a tripwire. It runs LAST on purpose, so its own cap
+  // binds before the profile envelope and a slow run surfaces as a suite TIMED_OUT
+  // rather than as an abort that truncates the tail silently.
+  'windows-shard-8',
 ];
-const expectedCommandCount = 41;
-const expectedCommandDigest = '7d03edc83f1e59d3caf280392636a6d6c966cc9aa492ef4920b691e9db2a1751';
+const expectedCommandCount = 43;
+const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -64,6 +120,29 @@ test('manifest and audited command catalog expose one exact bounded profile inve
   }
 });
 
+// The shard REBALANCES this repository records in prose are asserted by nothing on their own:
+// expectedProfiles already lists every shard, so moving a suite between two of them turns no
+// check red. Each entry below is a rebalance that was made for a measured reason, so putting it
+// back has to be a deliberate edit here rather than a silent one in the manifest.
+const expectedShardHomes = {
+  'plan-payload-path-transport': 'windows-shard-8',
+  'stop-enforcer-self-review-routing': 'windows-shard-7',
+  'session-trail-lineage': 'windows-shard-8',
+};
+
+test('measured shard rebalances stay where they were moved', () => {
+  const homes = new Map();
+  for (const [profileId, profile] of Object.entries(manifest.profiles)) {
+    for (const suite of profile.suites) {
+      assert.equal(homes.has(suite.id), false, `${suite.id} is registered on more than one shard`);
+      homes.set(suite.id, profileId);
+    }
+  }
+  for (const [suiteId, expectedProfile] of Object.entries(expectedShardHomes)) {
+    assert.equal(homes.get(suiteId), expectedProfile, `${suiteId} shard home`);
+  }
+});
+
 test('every structure test with a native Windows marker is audited and covered or excluded', () => {
   assert.equal(nativeStructureInventory.schemaVersion, 1);
   assert.ok(Array.isArray(nativeStructureInventory.markers));
@@ -88,10 +167,21 @@ test('every structure test with a native Windows marker is audited and covered o
   for (const relative of required) {
     assert.equal(paths.filter((candidate) => candidate === relative).length, 1, relative);
   }
+  const ciStructureTests = new Set(localOnlyProfile.ciStructureTests || []);
   for (const entry of nativeStructureInventory.excluded) {
     assert.equal(typeof entry.reason, 'string', entry.path);
     assert.ok(entry.reason.length >= 20, entry.path);
     assert.equal(paths.includes(entry.path), false, entry.path);
+    // The load-bearing half of an exclusion that keeps its coverage elsewhere. A
+    // reason may only CLAIM `ciStructureTests` membership if the suite is really
+    // in that array — otherwise the entry reads as "still covered weekly" while
+    // the suite runs on no Windows host at all, which is a silent coverage drop
+    // wearing the words of a deliberate scope decision. Keyed on the claim, not
+    // on every entry: an exclusion is free to say the suite is unsupported there.
+    if (/ciStructureTests/.test(entry.reason)) {
+      assert.ok(ciStructureTests.has(path.basename(entry.path)),
+        `${entry.path} claims ciStructureTests membership but is not in that array`);
+    }
   }
 });
 
