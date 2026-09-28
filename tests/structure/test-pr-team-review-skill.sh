@@ -652,14 +652,17 @@ else
   check "P15i domain-refiner receives only enumerated exact context files" FAIL
 fi
 
-if grep -qF 'In standalone mode, show the user the final body preview + inline count' "$SKILL_MD" \
-   && grep -qF '`AskUserQuestion` to obtain a separate, explicit publication approval before any forge' "$SKILL_MD" \
-   && grep -qF 'An earlier approval to run the skill, accept the cast, or continue the analysis is' "$SKILL_MD" \
-   && grep -qF 'In delegated mode, record the count as a progress' "$SKILL_MD" \
-   && grep -qF 'continue without a preview question or approval gate' "$SKILL_MD"; then
-  check "P15j standalone publish waits after final preview; delegated publish stays unattended" PASS
+if grep -qF 'In standalone mode, show the user the final body preview + inline count as a progress' "$SKILL_MD" \
+   && grep -qF 'record and publish at once. Do not ask for publication approval: invoking the skill on a' "$SKILL_MD" \
+   && grep -qF 'It never asks before' "$SKILL_MD" \
+   && grep -qF 'PR is the user'"'"'s authorization to post the synthesized review. In delegated mode, record' "$SKILL_MD" \
+   && grep -qF 'the count as a progress update and continue without a preview question or approval gate' "$SKILL_MD" \
+   && grep -qF 'Neither mode waits for a publication approval' "$WORKFLOW_MD" \
+   && ! grep -qF 'explicit publication approval' "$SKILL_MD" \
+   && ! grep -qF 'explicit publication approval' "$WORKFLOW_MD"; then
+  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" PASS
 else
-  check "P15j standalone publish waits after final preview; delegated publish stays unattended" FAIL
+  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" FAIL
 fi
 
 # P16 — repo-custom reviewer seats: the cast ingests .claude/agents/zensu-review-*.md
@@ -705,6 +708,104 @@ if grep -qF 'BASE checkout' "$WORKFLOW_MD"; then
   check "P16h workflow.md documents the base-checkout discovery trust guard" PASS
 else
   check "P16h workflow.md documents the base-checkout discovery trust guard" FAIL
+fi
+
+GITLAB_RULE="$SKILL_DIR/rules/gitlab-publish.md"
+BODY_TEMPLATE="$(awk '
+  /^Overall body structure \(Markdown\):/ { armed=1; next }
+  armed && /^```$/ { if (inside) exit; inside=1; next }
+  inside { print }
+' "$SKILL_MD")"
+INLINE_TEMPLATE="$(awk '
+  /^Inline comment structure \(Markdown\)/ { armed=1; next }
+  armed && /^````$/ { if (inside) exit; inside=1; next }
+  inside { print }
+' "$SKILL_MD")"
+
+if [ -n "$BODY_TEMPLATE" ] \
+   && [ "$(printf '%s\n' "$BODY_TEMPLATE" | head -1)" = '## Zensu team review' ] \
+   && printf '%s\n' "$BODY_TEMPLATE" | grep -qxF '> [!caution]' \
+   && ! grep -qE '^## Multi-Agent Review|^### Required Changes|^### Recommendation|^### TL;DR' "$SKILL_MD"; then
+  check "P17a body template opens with the heading and a lower-case verdict alert; legacy headings are gone" PASS
+else
+  check "P17a body template opens with the heading and a lower-case verdict alert; legacy headings are gone" FAIL
+fi
+
+if grep -qF -- '- `caution` — any P1 survived the gate' "$WORKFLOW_MD" \
+   && grep -qF -- '- `warning` — no P1, at least one P2' "$WORKFLOW_MD" \
+   && grep -qF -- '- `tip` — no P1 and no P2' "$WORKFLOW_MD" \
+   && grep -qF -- '`> [!important]`' "$WORKFLOW_MD" \
+   && grep -qF -- 'Choose the kind from the findings, never from `--verdict`' "$WORKFLOW_MD"; then
+  check "P17b banner kind follows the findings, with a separate alert for a degraded run" PASS
+else
+  check "P17b banner kind follows the findings, with a separate alert for a degraded run" FAIL
+fi
+
+if printf '%s\n' "$BODY_TEMPLATE" | grep -qF '**🔴 <p1> blocking** · **🟡 <p2> should fix** · **🔵 <p3> nits**' \
+   && grep -qF 'print all three severity counts, zeros included' "$WORKFLOW_MD"; then
+  check "P17c metric line carries all three severity counts" PASS
+else
+  check "P17c metric line carries all three severity counts" FAIL
+fi
+
+if grep -qF 'Number the findings `F1`…`Fn`' "$WORKFLOW_MD" \
+   && grep -qF 'never `#<n>`' "$WORKFLOW_MD" \
+   && grep -qF 'neutralized `[Unverified — do not fix]` finding gets no ID' "$WORKFLOW_MD" \
+   && printf '%s\n' "$BODY_TEMPLATE" | grep -qF -- '- **[Unverified — do not fix]**'; then
+  check "P17d stable F-IDs, no autolinking #<n>, and unverified findings stay unnumbered" PASS
+else
+  check "P17d stable F-IDs, no autolinking #<n>, and unverified findings stay unnumbered" FAIL
+fi
+
+if grep -qF '`<base>/blob/<sha>/<path>#L<a>` or `#L<a>-L<b>`' "$WORKFLOW_MD" \
+   && grep -qF '`<base>/-/blob/<sha>/<path>#L<a>` or `#L<a>-<b>`' "$WORKFLOW_MD" \
+   && grep -qF '`<sha>` is the full reviewed head' "$WORKFLOW_MD" \
+   && grep -qF 'git -C "$WORKTREE" merge-base origin/<base> HEAD' "$WORKFLOW_MD" \
+   && grep -qF 'Percent-encode every byte outside' "$WORKFLOW_MD"; then
+  check "P17e permalinks are pinned to the reviewed commit on both forges" PASS
+else
+  check "P17e permalinks are pinned to the reviewed commit on both forges" FAIL
+fi
+
+if [ -n "$INLINE_TEMPLATE" ] \
+   && [ "$(printf '%s\n' "$INLINE_TEMPLATE" | head -1)" = '🔴 **Blocking** · **F1** · <category>' ] \
+   && printf '%s\n' "$INLINE_TEMPLATE" | grep -qF '<!-- zensu-finding:v1 id=F1 sev=P1 cat=<category-slug> head=<sha7> -->' \
+   && ! printf '%s\n' "$INLINE_TEMPLATE" | grep -qF 'zensu-review:v1' \
+   && grep -qF 'A P2 comment opens with `🟡 **Should fix** · **F<n>** · <category>`' "$SKILL_MD"; then
+  check "P17f inline comments share one severity line and carry the finding marker, never the reconcile marker" PASS
+else
+  check "P17f inline comments share one severity line and carry the finding marker, never the reconcile marker" FAIL
+fi
+
+if grep -qxF '## Suggested changes' "$PUBLISH_RULE" \
+   && grep -qF 'The anchor validated as `valid` on side `RIGHT`' "$PUBLISH_RULE" \
+   && grep -qF '`suggestion` block: it would replace line `<n>`' "$PUBLISH_RULE" \
+   && grep -qF 'Spell the fence info string `suggestion:-0+0`' "$GITLAB_RULE" \
+   && grep -qF 'emit single-line suggestions only' "$GITLAB_RULE"; then
+  check "P17g suggestions only on validated RIGHT anchors, dropped on remap, single-line on GitLab" PASS
+else
+  check "P17g suggestions only on validated RIGHT anchors, dropped on remap, single-line on GitLab" FAIL
+fi
+
+if grep -qF '**Collapsing.**' "$WORKFLOW_MD" \
+   && grep -qF 'Never collapse a P1 finding, the verdict, or the uncovered-files list.' "$WORKFLOW_MD" \
+   && grep -qF '**Angle brackets.**' "$WORKFLOW_MD" \
+   && grep -qF '`under <ttl>h`' "$WORKFLOW_MD" \
+   && grep -qF '**Body-only findings.**' "$SKILL_MD" \
+   && grep -qF '`· no inline comment`' "$SKILL_MD" \
+   && grep -qF 'at 700 words or fewer' "$WORKFLOW_MD"; then
+  check "P17h collapse, angle-bracket, body-only, and visible-length rules are documented" PASS
+else
+  check "P17h collapse, angle-bracket, body-only, and visible-length rules are documented" FAIL
+fi
+
+BODY_TABLE_ROWS="$(printf '%s\n' "$BODY_TEMPLATE" | grep -c '^|')"
+if [ "$BODY_TABLE_ROWS" = "3" ] \
+   && printf '%s\n' "$BODY_TEMPLATE" | grep -qxF '| Covered | Partial | Uncovered | Changed prod files |' \
+   && ! printf '%s\n' "$INLINE_TEMPLATE" | grep -q '^|'; then
+  check "P17i the coverage counts table is the only table in the templates" PASS
+else
+  check "P17i the coverage counts table is the only table in the templates (body table rows: $BODY_TABLE_ROWS)" FAIL
 fi
 
 echo "----"

@@ -2,7 +2,6 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-WITNESS_HOOK="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 ROUNDS_HOOK="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
@@ -31,45 +30,45 @@ fi
 
 session_key() { node "$SESSION_CORE" session-key "$1"; }
 
-# ---- Witness log: none suppresses the [HH:MM:SS] prefix ----------------------
+# ---- Evidence run line: none suppresses the [HH:MM:SS] prefix ----------------
 WPROJ="$(mktemp -d)"
 SID="wt-none-$$"
 export CLAUDE_PROJECT_DIR="$WPROJ"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID"
-env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
-  bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
-PAY=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"go test ./..."},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID")
-echo "$PAY" | env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
-  bash "$WITNESS_HOOK" >/dev/null 2>&1
-WLINE="$(head -n1 "$WPROJ/.zensu/logs/witness-$(session_key "$SID").log" 2>/dev/null)"
+mkdir -p "$WPROJ/.zensu/logs"
+RLOG="$WPROJ/.zensu/logs/2026-01-01-0000_tdd-style.log"
+: > "$RLOG"
+(cd "$WPROJ" && env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --evidence-run --scope lint --cmd 'true' --log "$RLOG" >/dev/null 2>&1)
+WLINE="$(head -n1 "$RLOG" 2>/dev/null)"
 case "$WLINE" in
-  "BASH cmd="*) check "witness none: line has NO timestamp prefix (starts 'BASH cmd=')" PASS ;;
-  *)            check "witness none: no timestamp prefix (got '$WLINE')" FAIL ;;
+  "EVIDENCE RUN — scope=lint exit=0 "*) check "evidence run none: line has NO timestamp prefix (starts 'EVIDENCE RUN')" PASS ;;
+  *)                                    check "evidence run none: no timestamp prefix (got '$WLINE')" FAIL ;;
 esac
-if printf '%s' "$WLINE" | grep -qF 'cmd="go test ./..."'; then
-  check "witness none: cmd= still recorded (evidence intact)" PASS
+if printf '%s' "$WLINE" | grep -qF '| cmd: true'; then
+  check "evidence run none: the command is still recorded" PASS
 else
-  check "witness none: cmd= still recorded (got '$WLINE')" FAIL
+  check "evidence run none: the command is still recorded (got '$WLINE')" FAIL
 fi
 rm -rf "$WPROJ"
 
-# ---- Witness log: wall keeps the [HH:MM:SS] prefix (unchanged behavior) ------
+# ---- Evidence run line: wall keeps the [HH:MM:SS] prefix ---------------------
 WPROJ2="$(mktemp -d)"
 SID2="wt-wall-$$"
 export CLAUDE_PROJECT_DIR="$WPROJ2"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID2"
-env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
-  bash "$LOG" --tdd-begin --session "$SID2" >/dev/null 2>&1
-PAY2=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID2")
-echo "$PAY2" | env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
-  bash "$WITNESS_HOOK" >/dev/null 2>&1
-WLINE2="$(head -n1 "$WPROJ2/.zensu/logs/witness-$(session_key "$SID2").log" 2>/dev/null)"
-if printf '%s' "$WLINE2" | grep -qE '^\[[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\] BASH cmd='; then
-  check "witness wall: line keeps [HH:MM:SS] prefix" PASS
+mkdir -p "$WPROJ2/.zensu/logs"
+RLOG2="$WPROJ2/.zensu/logs/2026-01-01-0000_tdd-style.log"
+: > "$RLOG2"
+(cd "$WPROJ2" && env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --evidence-run --scope lint --cmd 'true' --log "$RLOG2" >/dev/null 2>&1)
+WLINE2="$(head -n1 "$RLOG2" 2>/dev/null)"
+if printf '%s' "$WLINE2" | grep -qE '^\[[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\] EVIDENCE RUN — scope=lint exit=0 '; then
+  check "evidence run wall: line keeps [HH:MM:SS] prefix" PASS
 else
-  check "witness wall: keeps [HH:MM:SS] prefix (got '$WLINE2')" FAIL
+  check "evidence run wall: keeps [HH:MM:SS] prefix (got '$WLINE2')" FAIL
 fi
 rm -rf "$WPROJ2"
 

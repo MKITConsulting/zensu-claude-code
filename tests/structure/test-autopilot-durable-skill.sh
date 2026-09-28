@@ -129,4 +129,19 @@ else
   check "D15 minted-then-refused recovery missing from a site" FAIL
 fi
 
+D16_BEGIN="$(d15_slice '^Before presenting the Phase-0 plan' '^### ')"
+D16_CONFIRM="$(d15_slice '^\*\*0\.D — Confirm\.\*\*' '^#')"
+if [ -z "$D16_BEGIN" ] || [ -z "$D16_CONFIRM" ]; then
+  check "D16 slices not extracted (begin=${#D16_BEGIN} confirm=${#D16_CONFIRM} chars)" FAIL
+elif printf '%s' "$D16_BEGIN" | grep -qF 'This must succeed before `ExitPlanMode`.' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'Immediately before `ExitPlanMode`, create the durable run' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'falls through to the standalone plan-approval directive, which asks the four-route question' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'while no delivery route is decided, and once one is recorded or configured' \
+  && printf '%s' "$D16_CONFIRM" | grep -qF 'sends this spec to `/zensu:tdd` or implements it directly without asking.'; then
+  check "D16 the durable-begin block and Phase 0.D both put --autopilot-begin before ExitPlanMode, and Phase 0.D names the whole standalone fall-through a reversal causes" PASS
+else
+  check "D16 an ExitPlanMode ordering statement or part of its standalone fall-through consequence is missing" FAIL
+fi
+
 echo "----"; echo "test-autopilot-durable-skill: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

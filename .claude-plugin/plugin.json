@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -9,7 +9,6 @@
   "repository": "https://github.com/MKITConsulting/zensu-claude-code",
   "license": "FSL-1.1-Apache-2.0",
   "keywords": ["product-lifecycle", "features", "security", "mcp"],
-  "mcpServers": "./.mcp.json",
   "agents": [
     "./agents/zensu-plm.md",
     "./agents/code-reviewer.md",
@@ -21,10 +20,12 @@
   "skills": [
     "./skills/adopt-session",
     "./skills/autopilot",
+    "./skills/autopilot-adopt",
     "./skills/autopilot-release",
     "./skills/bootstrap",
     "./skills/converge",
     "./skills/cover",
+    "./skills/delivery-route",
     "./skills/docs",
     "./skills/doctor",
     "./skills/gauntlet-loop",

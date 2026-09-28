@@ -226,12 +226,11 @@ case "$(uname -s)" in
 esac
 mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
 SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
-for runtime_dir in hooks agents skills docs templates scripts mcp-runtime; do
+for runtime_dir in hooks agents skills docs templates scripts; do
   cp -R "$PLUGIN_DIR/$runtime_dir" "$SPECIAL_ROOT/$runtime_dir"
 done
 mkdir -p "$SPECIAL_ROOT/.claude-plugin"
 cp "$PLUGIN_DIR/.claude-plugin/plugin.json" "$SPECIAL_ROOT/.claude-plugin/plugin.json"
-cp "$PLUGIN_DIR/.mcp.json" "$SPECIAL_ROOT/.mcp.json"
 SPECIAL_LOG="$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 SPECIAL_SID_RAW="postrev-special-root"
 SPECIAL_LABEL='special data $(touch POSTREV_DATA_PWNED) `touch POSTREV_DATA_TICKED`;touch POSTREV_DATA_SEMI'

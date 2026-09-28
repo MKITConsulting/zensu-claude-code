@@ -11,11 +11,10 @@
 #   2. render the module DIRECTORY through hooks/lib/zensu-host-path.sh, append
 #      the file name, and transport the result in an environment variable
 #      (hooks/lib/zensu-tdd-phase.sh, hooks/plan-approved-delegate.sh, the
-#      `append` verb in hooks/lib/zensu-log.sh, hooks/post-artifact-redact.sh
-#      and hooks/lib/zensu-witness.sh, which both witness writers
-#      -- hooks/pre-bash-witness.sh and hooks/post-bash-witness.sh -- source
-#      rather than each rendering the path themselves). The last three carry
-#      zensu-artifact-redact-v1.js, which is probed alongside the plan lib below.
+#      `append` and `--evidence-run` verbs in hooks/lib/zensu-log.sh, and
+#      hooks/post-artifact-redact.sh). The `append` verb and the redactor hook
+#      carry zensu-artifact-redact-v1.js, and `--evidence-run` carries
+#      evidence-run-v1.js; both are probed alongside the plan lib below.
 #
 # The shim cannot police mechanism 2 by scanning argv, and widening it to reject
 # the root in ANY environment value would reject every invocation, because
@@ -51,8 +50,7 @@ mkdir -p "$PLUGIN" "$PROJECT/src" "$PLUGIN_DATA" "$WORKSPACE" "$HOME_DIR"
 chmod 700 "$WORKSPACE" 2>/dev/null || true
 
 if cp -R "$ROOT/.claude-plugin" "$ROOT/hooks" "$ROOT/agents" "$ROOT/skills" \
-    "$ROOT/scripts" "$ROOT/mcp-runtime" "$PLUGIN/" \
-    && cp "$ROOT/.mcp.json" "$PLUGIN/.mcp.json"; then
+    "$ROOT/scripts" "$PLUGIN/"; then
   check "special plugin fixture copies the complete executable runtime" PASS
 else
   check "special plugin fixture copies the complete executable runtime" FAIL
@@ -256,19 +254,43 @@ else
   check "banner loads plugin.json from the special plugin root" FAIL
 fi
 
-DOCTOR_OUT="$(env -u ZDOC_PLAYWRIGHT \
+PW_SOURCE_VERSION="$(cd -P -- "$PLUGIN" && node -e 'process.stdout.write(String(require("./hooks/lib/verify-consent-v1.js").PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' 2>/dev/null)"
+PW_BIN="$RAW_TMP/playwright-cli-bin"
+mkdir -p "$PW_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_BIN/playwright-cli"
+chmod 755 "$PW_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_SOURCE_VERSION" > "$PW_BIN/node_modules/@playwright/cli/package.json"
+DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
+  -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION -u ZDOC_PLAYWRIGHT_SOURCE -u ZDOC_PLAYWRIGHT_OWNER \
+  PATH="$PW_BIN:$PATH" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
   CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN" \
   ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github \
-  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT_TOOLS=ready \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing \
   bash "$PLUGIN/hooks/lib/zensu-doctor.sh" 2>"$RAW_TMP/doctor.err")"
 DOCTOR_RC=$?
-if [ "$DOCTOR_RC" -eq 0 ] \
+if [ "$DOCTOR_RC" -eq 0 ] && [ -n "$PW_SOURCE_VERSION" ] \
     && printf '%s' "$DOCTOR_OUT" | grep -qF 'Zensu doctor' \
-    && printf '%s' "$DOCTOR_OUT" | grep -qF 'Playwright MCP: loaded and ready'; then
-  check "doctor loads its report, manifests, and proxy from the special plugin root" PASS
+    && printf '%s' "$DOCTOR_OUT" | grep -qF "playwright-cli: installed ($PW_SOURCE_VERSION) — /zensu:verify-feature and the autopilot browser driver run through it" \
+    && printf '%s' "$DOCTOR_OUT" | grep -qF 'verify-feature: consent mode ready, no runtime recipe'; then
+  check "doctor loads its report, manifests, the consent module and the playwright-cli version probe from the special plugin root" PASS
 else
-  check "doctor loads its report, manifests, and proxy from the special plugin root" FAIL
+  check "doctor loads its report, manifests, the consent module and the playwright-cli version probe from the special plugin root" FAIL
+fi
+POLICY_DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+  CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN" \
+  ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_SOURCE_VERSION" \
+  bash "$PLUGIN/hooks/lib/zensu-doctor.sh" 2>"$RAW_TMP/doctor-policy.err")"
+POLICY_DOCTOR_RC=$?
+if [ "$POLICY_DOCTOR_RC" -eq 0 ] \
+    && printf '%s' "$POLICY_DOCTOR_OUT" | grep -qF 'verify-feature: environment policy active' \
+    && ! printf '%s' "$POLICY_DOCTOR_OUT" | grep -qF 'could not be checked'; then
+  check "doctor loads the navigation floor from the special plugin root to judge a set policy" PASS
+else
+  check "doctor loads the navigation floor from the special plugin root to judge a set policy" FAIL
 fi
 
 SECRET_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" \
@@ -375,6 +397,18 @@ if [ -n "$REDACT_LIB" ] && [ -f "$REDACT_LIB" ] && [ -r "$REDACT_LIB" ] && [ ! -
   check "artifact redactor converts and loads (with its sibling require) from the special plugin root" PASS
 else
   check "artifact redactor converts and loads (with its sibling require) from the special plugin root" FAIL
+fi
+
+EVIDENCE_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/evidence-run-v1.js}"
+if [ -n "$EVIDENCE_LIB" ] && [ -f "$EVIDENCE_LIB" ] && [ -r "$EVIDENCE_LIB" ] && [ ! -L "$EVIDENCE_LIB" ] \
+  && ZENSU_EVR_LIB="$EVIDENCE_LIB" node -e '
+    const m=require(process.env.ZENSU_EVR_LIB);
+    process.exit(typeof m.main==="function" && typeof m.run==="function"
+      && typeof m.verdict==="function" && typeof m.computeTree==="function" ? 0 : 1);
+  ' 2>/dev/null; then
+  check "evidence runner converts and loads (with its sibling requires) from the special plugin root" PASS
+else
+  check "evidence runner converts and loads (with its sibling requires) from the special plugin root" FAIL
 fi
 
 

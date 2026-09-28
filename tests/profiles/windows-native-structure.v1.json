@@ -47,8 +47,12 @@
       "reason": "The only native-Windows branch passes T30 when Git Bash cannot create a real file symlink, so it asserts nothing there; the weekly Windows Safety run covers the suite."
     },
     {
+      "path": "tests/structure/test-delivery-route.sh",
+      "reason": "The only native-Windows marker is R9h's MSYS2_ENV_CONV_EXCL probe of the directive library's exclusion list through a POSIX node shim; it asserts no Windows behavior, and the suite stays in ciStructureTests, so the weekly Windows Safety run still executes it."
+    },
+    {
       "path": "tests/structure/test-doctor.sh",
-      "reason": "The only native-Windows branch skips a POSIX-only missing-npm rendering assertion."
+      "reason": "The only native-Windows branch skips P1pw4, the POSIX-only isolated-PATH assertion that the wrapper reports playwright-cli absent."
     },
     {
       "path": "tests/structure/test-evidence-discipline.sh",
@@ -87,12 +91,12 @@
       "reason": "The native-Windows branch explicitly skips the unavailable POSIX symlink fixture."
     },
     {
-      "path": "tests/structure/test-verify-feature-skill.sh",
-      "reason": "The native-Windows branch only tolerates absent POSIX signal delivery and asserts no Windows behavior."
-    },
-    {
       "path": "tests/structure/test-zensu-runtime-controller.sh",
       "reason": "The complete local-adapter runtime test is explicitly unsupported and skipped on native Windows."
+    },
+    {
+      "path": "tests/structure/test-restore-project-root.sh",
+      "reason": "The native marker is the R4 block's own host branch, and on win32 that branch grades a DOCUMENTED REFUSAL rather than path transport: zensu-doctor-invocation.js refuses every recognized invocation on that host by design, so the restore command is unreachable there exactly as /zensu:doctor is, and a blocking shard would pay for five ladder spawns, five armed baselines, two full adopt runs and roughly eighteen emitter drives to re-learn that. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly windows-safety run still executes it and windows-ci-contract.test.js enforces that membership rather than leaving it asserted in prose. Residual stated rather than implied: this suite's Windows wall clock has never been measured, and every windows-ci shard already documents itself as near its profileTimeoutMs, so a required slot would have to be paid for by moving another suite off one. Take the figure from the first green weekly run before proposing that trade."
     },
     {
       "path": "tests/structure/test-session-trail-verdict.sh",
@@ -101,6 +105,10 @@
     {
       "path": "tests/structure/test-plugin-data-guard.sh",
       "reason": "The complete containment suite remains in weekly Windows Safety. Its native marker is a two-class skip rule rather than a path-transport boundary: one row needs a case-insensitive volume and ten need real symlinks, so a PR-gate run would measure the host rather than the gate. The module transport this hook shares with its siblings is covered on the PR gate by test-msys-special-plugin-module-boundaries.sh."
+    },
+    {
+      "path": "tests/structure/test-verify-consent.sh",
+      "reason": "The only native-Windows branch skips H18, because the doctor and adoption recognizer refuses every command on win32, so the consent pre hook has no allowance to prove there. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it. Its Windows wall clock is unmeasured, and a blocking shard would have to be paid for by moving another suite off. On the PR gate, test-msys-special-plugin-module-boundaries.sh loads the consent module from a special plugin root through the doctor; no blocking shard drives the consent hooks themselves."
     }
   ]
 }

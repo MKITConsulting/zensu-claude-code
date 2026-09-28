@@ -1,7 +1,7 @@
 #!/bin/bash
 # V22-V24 own the ## Open report contracts the /zensu:converge chain-end offer
 # sits beside: the ordered backslash-then-pipe escaping rule for every carried
-# line, and the unrunnable-cross-check verdict. The offer itself is pinned by
+# line, and the full-suite verdict. The offer itself is pinned by
 # test-converge-skill.sh P3d/P3g.6.
 # Pins skills/self-review/SKILL.md (ported from /reflect, English-only) plus its
 # registration + cross-file version consistency (plugin.json, marketplace.json, README,
@@ -164,29 +164,24 @@ case "$OPEN_REGION_FLAT" in
     check "V22 ## Open escapes backslash before pipe in every carried line" FAIL ;;
 esac
 case "$OPEN_REGION_FLAT" in
-  *'EVIDENCE CROSS-CHECK UNAVAILABLE'*)
-    check "V23 ## Open surfaces an unrunnable cross-check instead of a clean Nothing open." PASS ;;
+  *'one row per advisory `FULL SUITE —` line that did not pass'*)
+    check "V23 ## Open carries an advisory full-suite verdict that did not pass instead of a clean Nothing open." PASS ;;
   *)
-    check "V23 ## Open surfaces an unrunnable cross-check instead of a clean Nothing open." FAIL ;;
+    check "V23 ## Open carries an advisory full-suite verdict that did not pass instead of a clean Nothing open." FAIL ;;
 esac
-if grep -qF 'EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` when the' "$SKILL_MD" \
-  && grep -qF 'Both verbatim cells follow the `## Open` escaping rule' "$SKILL_MD" \
-  && grep -qF 'into BOTH the `Evidence cross-check`' "$SKILL_MD" \
-  && grep -qF 'The library writes everything to STDOUT' "$SKILL_MD" \
-  && grep -qF 'An unreadable run log is deliberately' "$SKILL_MD" \
-  && grep -qF 'witness log unreadable' "$SKILL_MD"; then
-  check "V24 the unrunnable-cross-check verdict is defined for the What-I-built cell and sourced in Phase 4 step 2" PASS
+if grep -qF 'Both verbatim cells follow the `## Open` escaping rule' "$SKILL_MD" \
+  && grep -qF -- '**Full suite** takes the `FULL SUITE — …` lines `--chain-done` printed' "$SKILL_MD" \
+  && grep -qF -- '**Carry the full-suite verdict.**' "$SKILL_MD" \
+  && grep -qF -- 'state, advisory or not, including `escaped`' "$SKILL_MD"; then
+  check "V24 the Full suite verdict cell is defined and sourced from the terminus in Phase 4 finalize step 2" PASS
 else
-  check "V24 the unrunnable-cross-check verdict is defined for the What-I-built cell and sourced in Phase 4 step 2" FAIL
+  check "V24 the Full suite verdict cell is defined and sourced from the terminus in Phase 4 finalize step 2" FAIL
 fi
 
 # V25 — Phase 5 checkpoints are scoped, so the full suite runs only in the Phase 6 audit
 # and again in the /zensu:tdd convergence branch. This stage's fix round is the LAST edit
 # of the chain, so when it edits, its own re-run is the only thing standing between the
-# user and a closing verdict measured before that edit. test-tdd-manager-patches.sh DOES
-# read this file (R17-P11), but it pins only the two `| scope: full` spellings in this
-# paragraph — not the imperative itself nor its "tree that ships" reason, which are what
-# these two needles cover. Delete them and the rule goes with every row there still green.
+# user and a closing verdict measured before that edit.
 if grep -qF -- 'Phase 6 **step 1 full suite**' "$SKILL_MD" \
   && grep -qF -- 'the run whose verdict describes the tree that ships' "$SKILL_MD"; then
   check "V25 the self-review fix round re-runs the full suite over its own amended tree" PASS

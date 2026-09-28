@@ -17,9 +17,9 @@
 # off-phrases writes `{"active":false}` directly, so "normal mode" still works
 # after the model has drifted. It WRITES rather than deletes on purpose — under a
 # true default, removing the marker would re-enable the mode the user just left.
-# The marker is keyed by the resolved Session Control key, so a fresh session
-# always starts from the configured default and one session's choice never leaks
-# into another.
+# The marker is keyed by the resolved Session Control key, so a session with a new
+# key starts from the configured default, one that keeps its key keeps the mode,
+# and one session's choice never leaks into another.
 #
 # The marker root comes from zensu_resolve_project_dir, the same accessor the
 # writer uses. It is deliberately NOT $ZENSU_PROJECT_ROOT: Session Control records
@@ -35,7 +35,7 @@
 # The identity check itself exits 2, matching every other hook in this plugin.
 #
 # ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 20` on this
-# hook`s `hooks.json` registration is SIZED, not inherited from the 4 sibling entries
+# hook`s `hooks.json` registration is SIZED, not inherited from the 7 sibling entries
 # that carry 10: three `zensu_run_bounded` children are reachable in SERIES on one
 # invocation - the merged prompt-and-anchor child, the prompt-only RECOVERY child,
 # and the off-phrase marker write, 5 s each - on top of the `node` spawns paid

@@ -1,0 +1,218 @@
+---
+paths:
+  - "hooks/lib/session-auto-adopt-v1.js"
+  - "hooks/lib/claude-hook-session-v1.js"
+  - "hooks/lib/claude-session-control-v1.js"
+  - "hooks/lib/reviewer-capability-v1.js"
+  - "hooks/lib/review-evidence-hook-v1.js"
+  - "hooks/lib/zensu-session.sh"
+  - "hooks/stop-chain-enforcer.sh"
+  - "hooks/lib/session-adopt-report-v1.js"
+  - "tests/structure/session-auto-adopt-v1.test.js"
+  - "tests/structure/test-versioned-plugin-upgrade.sh"
+---
+
+# Automatic Adoption (`hooks/lib/session-auto-adopt-v1.js`)
+
+The adoption described in `.claude/rules/session-adoption.md` runs on its own: the first
+hook that binds a record the running installation may not serve by version, but
+`adoptableRecord` admits, re-mints it. `/zensu:adopt-session --confirm` is the manual
+fallback and the refusal report. Measured on 2026-09-15 across the 0.20.0 to 0.21.1
+update: six sessions needed the manual step within eight minutes and every adoption
+succeeded, so each deny was a false positive that cost the user a step.
+
+## The module
+
+ONE implementation serves every hook-side binder and the manual entry point.
+
+- **Ladder:** `createAutoAdopter` / `adoptForHook` / `previewAdoption` /
+  `autoAdoptEnabled` / `effectiveConfig` / `configLayers` / `deepMerge` /
+  `AUTO_ADOPT_OUTCOMES` / `AUTO_ADOPT_REASONS` / `CONFIG_KEY`.
+- **Rendering:** `STATE_NEUTRAL_REASONS` / `establishesNamedState` / `SAFE_TOKEN` /
+  `SAFE_PROVENANCE` / `safeProvenance` / `provenanceText` / `safeVersion` / `keptName` /
+  `leaseClause` / `operatorLine` / `doctorPointer` / `renderAdoptionNotice`.
+- **Core support:** `ADOPTION_REFUSED_CODE`, `SUPERSEDED_EXISTS_CODE`,
+  `isAdoptionRefusal`, `isSupersededRecordConflict`, `isLockTimeout`,
+  `supersededRecordFile` (the ONE spelling of the superseded name; it throws on a version
+  that fails `ADOPTION_SAFE_VERSION_RE`) and `ADOPTION_PROVENANCE`
+  (`recorded`, `no-workflow-document`, `unavailable`; the cause of `unavailable` travels
+  beside it as `provenanceCause`).
+
+The ladder is `adoptableRecord`, then the crash-resume check, then the opt-out, then
+`adoptContext` under the per-session records lock, then `discardSupersededLeases`. The
+first three rungs ARE `previewAdoption`, and `adoptForHook` starts from it, so the
+read-only report, the binder's `adoption-refusal` mode and the adoption cannot disagree
+about one record. The probe runs first, so `opted-out` only stands for a record that
+would otherwise have been adopted. The crash-resume check is an `lstat` of
+`supersededRecordFile(...)`: an interrupted adoption leaves that file behind and
+`adoptContext`'s `COPYFILE_EXCL` refuses every later attempt, a dangling link included.
+
+`adoptForHook` never throws. A typed refusal keeps its reason; a superseded-file
+conflict is `REFUSED / superseded-record-exists`; a lock timeout is
+`UNAVAILABLE / lock-timeout`; anything else is `UNAVAILABLE / adoption-failed`; a
+throwing sweep is carried as `sweep-failed` rather than reverting a swapped record. The
+verdict shape is fixed: every field is always present. The state fields `recorded`,
+`executing`, `orphanedProjectRoot` and `prunedPluginRoot` come off the probe, because
+`adoptableRecord` attaches them to refusals as well; never re-derive them. An
+`already-served` probe carries `recorded: null`, because the record on disk is already
+the re-minted one. The adapter passes the version it observed as `observedRecorded` on
+the REQUEST, and the module is the one place that puts it on the verdict.
+
+## Config: `hooks.sessionAutoAdopt`
+
+Read on the adoption path only, never on a healthy bind. `configLayers` resolves the
+files `_ZENSU_CFG_JS` in `hooks/lib/zensu-config.sh` reads: `ZENSU_CONFIG` verbatim as one
+layer, else the global file and the project overlay. Every fault degrades to ENABLED, so
+a broken config never switches a repair off silently.
+
+For this key `false` is STICKY: the automatic path is off when EITHER layer says so.
+Everywhere else the project overlay wins per key, but the overlay lives in a directory a
+session can write while no chain is armed, so project-wins would let a seeded `true`
+override an operator's global `false`. No shell reader consumes this key. `effectiveConfig`
+still answers the ordinary merged view. The project overlay is anchored on the ambient
+`CLAUDE_PROJECT_DIR`, exactly as `_ZENSU_CFG_JS` anchors it, not on the record's root.
+
+The manual `--confirm` path calls `adoptForHook` with `respectOptOut: false`, so the key
+switches the hooks off and never the command the user runs by hand.
+
+## Opt-in table
+
+`resolveHookSession(payload, environment, options)` adopts only under
+`options.autoAdopt` and requires the module LAZILY inside the failure path: the sweep
+requires the lease owner, which requires the binder, which requires the core, so a
+top-level require cycles.
+
+- **Opted in:** the CLI's hook-payload modes (every shell gate, the Stop hook, the consent
+  hooks), `revalidateSessionContext` in `reviewer-capability-v1.js`, both hooks in
+  `review-evidence-hook-v1.js` (same SubagentStart matcher as the adapter; they bind in
+  process through `bindAndDisclose`), and the adapter's resume/compact and SubagentStart
+  branches through `serveOrAdopt`.
+- **Never opted in:** `model-bind` (`zensu-doctor.sh` stays write-free and no `zensu-log.sh`
+  verb re-mints a record), `resolveFreshHookProject` and `bindFromModelEnvironment`.
+
+After an adoption the binder re-reads STRICTLY. An adopted record whose project root is
+gone re-throws the core's `context project root does not exist`, and the gates' orphan
+ladder takes over.
+
+## Races
+
+`adoptContext` runs under `withFileLock` and re-checks adoptability inside it, so the
+loser answers `already-served` and re-reads. A timeout maps to a deny, never to a partial
+adoption; `withFileLock` attaches `LOCK_TIMEOUT_CODE` and the adopter consults
+`isLockTimeout` first. `AUTO-2` and `AUTO-17` hold the records lock from a third process
+and require every racer to finish at or after the holder released.
+
+## Denies name the token
+
+The binder throws a typed error carrying the verdict. The `.*` gate renders it from
+`error.adoption` only when the verdict establishes a named state (a reader answered and
+the reason is not in `STATE_NEUTRAL_REASONS`); otherwise it falls through to its
+predicate arms. The shell gates capture the token through the `adoption-refusal` argv
+mode and pass it to `zensu_emit_hook_session_deny` as `$4`, the audience as `$5`. Entry-
+level tokens beside the seven `ADOPTION_REFUSALS`: `opted-out`, `adopted-concurrently`,
+`superseded-record-exists`, `not-completed`. The mode exits 1 when it cannot answer, which
+the wrappers render as `(unknown)`.
+
+`zensu_emit_named_bind_deny` has three paths below the named scopes: a state-neutral
+refusal appends one sentence to the generic scope; a lost race gets the `adoption-incomplete`
+scope; an empty answer leaves the scope unchanged. The Stop hook re-binds ONCE on
+`adopted-concurrently` and enforces the chain in that Stop; a failed re-bind blocks as
+before. The preview answers null, never `not-completed`, for a record that already serves
+while the strict bind still fails, because that failure was never an adoption one. That
+null is also what keeps the `orphaned-project-root` arm of the router reachable.
+
+Three token-dependent parts are hand-copied across the JS/shell boundary and pinned by the
+seam pin at the front of `test-versioned-plugin-upgrade.sh`, both ways and with exact arm
+counts:
+
+- **Verb:** `ADOPTION_INCOMPLETE_REASONS` render "it did not complete", everything else
+  "it was REFUSED".
+- **Remedy:** `ADOPTION_REFUSAL_REMEDIES` in `reviewer-capability-v1.js` against
+  `_zensu_adoption_refusal_remedy` in `zensu-session.sh`.
+- **Tail:** `GENERIC_ADOPTION_TAIL`, `OPTED_OUT_ADOPTION_TAIL`, `INCOMPLETE_ADOPTION_TAIL`,
+  kept as constants (not a map) because the remedy pin reads every `'token': 'sentence',`
+  line as a remedy arm. Remedy and tail join as `remedy; tail.` in every carrier.
+
+The `opted-out` remedy tells the model to report and ask the user, never to run
+`--confirm` itself. The shell side's public, shape-checked wrappers are
+`zensu_session_adoption_attempt` / `_remedy` / `_tail`. The token grammar has one JS owner,
+`SAFE_TOKEN`; its shell twin `ZENSU_SAFE_REFUSAL_RE` is not pinned against it. Every refusal
+screen fails closed: a module that will not load screens every token out, and an empty
+shell pattern refuses rather than matching everything.
+
+**Audience.** `_zensu_deny_audience` answers `main` or `child`. A child keeps the cause, the
+verb and the token and ends on `ZENSU_ADOPTION_CHILD_CLOSE`, the twin of the gate's
+`ADOPTION_CHILD_CLOSE`; the `adoption-incomplete` child form ends on its own retry sentence.
+An unknown principal gets `main`: a child shown the main wording still cannot run the
+command, while the main thread shown the child wording loses its one in-place remedy.
+
+## Disclosure
+
+`renderAdoptionNotice` serves the two model/user channels: the gate's announcement and the
+adapter's `systemMessage` plus `additionalContext`. `operatorLine` serves the stderr line of
+every process that performed an adoption, including one whose strict re-read then failed
+(`performedAdoption` reads the verdict off the error). The four screens are `safeVersion`,
+`safeProvenance`, `keptName` and `leaseClause`; `provenanceText` adds the provenance cause.
+`SAFE_PROVENANCE` admits no slash, because an error message is where a path arrives. The
+lease clause reads the count before choosing its sentence, so a refused sweep is never
+announced as "0 set aside". `doctorPointer` is conditional per provenance: only a
+`recorded` adoption wrote the history entry the doctor renders.
+
+The `.*` gate announces only an adoption its own process performed, on an ALLOW only
+(`judgePrincipal` returns the violation and `main` decides once), with `systemMessage` for
+every principal and `additionalContext` for the main thread alone. The adapter appends the
+model copy for MAIN only, because the notice names the superseded record, whose basename is
+the session selector confined contexts withhold.
+
+On the ordinary flow a UserPromptSubmit hook binds first after `/reload-plugins`, so a SHELL
+hook performs the adoption and prints nothing on allow. The user then sees it through the
+binder's stderr line (delivery unverified) and the doctor's `runtimeAdoptedRow`, which
+shares the provenance rows' single read (`sharedWorkflowRead`) and parses the version pair
+out of the history reason rather than echoing it. The binder exports `ZENSU_SESSION_ADOPTED`
+(`recorded -> executing`, or empty) for the planned install-lineage notice hook; no hook
+consumes it yet. Hooks that discard the binder's output leave an adoption traceable through
+the doctor alone: `grep -rn 'zensu_bind_hook_session' hooks/` and judge every hit that
+redirects stderr.
+
+## Bounds
+
+- It cannot move a running session onto a new version: a session keeps its install
+  directory until `/reload-plugins` runs in it.
+- It relaxes neither `runtimeLineageCompatible` nor `adoptableRecord`. A downgrade, a
+  non-sibling checkout, a foreign store and a moved schema are refused as before.
+- No bypass-ledger entry (adoption escapes no gate) and no record field (provenance is the
+  `RUNTIME_ADOPTED` history entry).
+- The opt-out is a session-writable config key and is not ledgered.
+- The `adoption-refusal` probe is a second node spawn, on the deny path only.
+- Not executed end to end: the `adoption-incomplete` scope through a real lost race (the
+  emitter and the routing are driven with a stubbed wrapper), the Stop hook's re-bind, and
+  the `.*` gate rendering `lock-timeout` or `adoption-failed`.
+- Windows is unmeasured: the upgrade suite is the last entry of `windows-shard-2`. Do not
+  raise the cap before a green Windows run supplies a figure.
+
+## Tests
+
+`tests/structure/test-versioned-plugin-upgrade.sh` grades the LAST COMMIT. `OPT_OUT_CONFIG`
+is passed PER DRIVE as a command-scoped `ZENSU_CONFIG=` prefix and never exported: a
+lineage or pruned deny row added without it adopts the shared record on its first drive,
+and every later row then grades a served session. `HERMETIC_CONFIG` (an empty object) is
+exported so no drive reads the runner's own `$HOME/.zensu/config.json`. The default-path
+rows are the `AUTO-*` family; name it as a family, never by an endpoint.
+
+## Version
+
+`patch`: no schema field, no strict key set, no hook added or re-matched, a new key read
+permissively by a new reader, no attestation change, and the gates deny strictly less.
+
+## Port-relevant
+
+Core half: the module (ladder with its crash-resume rung, the four screens, the renderer,
+`operatorLine`, `doctorPointer`, `configLayers` with its sticky `false`, `SAFE_TOKEN`,
+`STATE_NEUTRAL_REASONS`, `establishesNamedState`) plus the core's typed errors,
+`ADOPTION_PROVENANCE`, `supersededRecordFile`, and the state `adoptableRecord` attaches to
+refusals. Host half: the opt-in table, the `adoption-refusal` mode and its wrappers, the
+gate's copies of verb, remedy and tail, the audience input, the token argument of the named
+and generic scopes, the `adoption-incomplete` scope and the Stop re-bind, the adapter's
+`serveOrAdopt`, the operator line for every process that can adopt, and the doctor's
+adoption row. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this
+change.

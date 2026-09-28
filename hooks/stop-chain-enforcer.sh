@@ -146,7 +146,38 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # alongside the first. stdout is captured here, never leaked.
   if ORPHANED_PROJECT_ROOT="$(zensu_session_orphaned_project_root "$INPUT")" \
     && [ -n "$ORPHANED_PROJECT_ROOT" ]; then
-    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    # This is the OPERATOR channel: everything here goes to >&2, where a human reads
+    # it, so it keeps the complete `--restore-root --confirm` spelling that the
+    # model-read diagnostics deliberately withhold. That asymmetry is the same split
+    # CLAUDE.md records for _autopilot_workspace_refusal, and it is stated here so a
+    # later reader does not read it as a miss.
+    #
+    # The value reaches a transcript, so it takes the same bound the deny scope in
+    # zensu-session.sh applies to the same value — that file exports the constants
+    # beside the function for exactly this. Its only upstream check rejects
+    # [\u0000-\u001f\u007f] plus non-absolute and non-normalized, so U+2028, the
+    # bidi overrides and a forged `label : value` pair all reach here unfolded.
+    #
+    # THE BOUND IS `zensu_safe_display_path`, and this file no longer names the
+    # constants it reads. An earlier revision of this block claimed the guarantee
+    # was a set of presence tests written here WITHOUT `:-`, and cited R8p6 as
+    # forbidding a default — both halves described code that has since moved into
+    # the shared function, which reads every constant WITH `:-` and fails closed on
+    # its own explicit emptiness arms instead. R8p7 through R8p11 in
+    # tests/structure/test-restore-project-root.sh EXECUTE those arms through this
+    # hook's own slice, which is what holds the property now; R8p6 survives as a
+    # negative pin that this file does not re-spell the bound inline, with a
+    # control proving its needle still matches.
+    #
+    # The emptiness arms are the case neither shell regime catches on its own:
+    # MEASURED on bash 5.2.15, an empty
+    # ZENSU_SAFE_DISPLAY_PATH_RE made the `[[ =~ ]]` match everything and this arm
+    # printed a raw injected value; on bash 3.2.57 the same input already degraded,
+    # because an empty ERE is a regcomp error there.
+    if ! ORPHANED_PROJECT_ROOT="$(zensu_safe_display_path "$ORPHANED_PROJECT_ROOT")"; then
+      ORPHANED_PROJECT_ROOT="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm, which re-creates exactly that directory AND rebuilds the workflow document the removal took with it — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Or start a new session for further work." >&2
     exit 0
   fi
   # The THIRD release, and the ONLY one that has two halves. The record reads and
@@ -246,12 +277,12 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # enforcement claim is now BOUNDED to while the directory is missing, which
       # is also what makes it true: re-create the root and a later bind takes the
       # ZENSU_ROOT_STATE_PRESENT deferral arm below instead.
-      # The path itself is NOT interpolated: it would reach a transcript
-      # unfolded, while the doctor folds the same value through the adoption
-      # report's display allowlist. Naming /zensu:doctor instead is what the deny
-      # scope in zensu-session.sh already does, and it keeps the fold in one
-      # place rather than adding a second one here.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and re-creating exactly that directory FIRST is the better order: adoption then reads that document and checks its schema here, so a mismatch is named as workflow-schema-mismatch rather than surfacing later as an anonymous fail-closed deny at the first read. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, READ-ONLY Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
+      # The path itself is NOT interpolated here. The reason is no longer "the
+      # deny scope does not either" — that scope DOES print it now, bounded by
+      # ZENSU_SAFE_DISPLAY_PATH_RE — but this release is the COMBINED state, where
+      # the remedy is an adoption before any restore, so the path is not the fact
+      # the reader needs. Naming /zensu:doctor keeps this message about the order.
+      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, READ-ONLY Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
       exit 0
     fi
     if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
@@ -362,11 +393,32 @@ if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
   # bind-time branch does, and removing it would turn that race into the wedge
   # this hook no longer has.
   if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ ! -d "${ZENSU_PROJECT_ROOT}" ]; then
-    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${ZENSU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    # Same value class, same channel, therefore the same bound as the bind-time
+    # release above. This arm rendered the recorded root RAW until a review caught
+    # it, on a line the restore feature had just rewritten — and the justification
+    # for excluding `(` and `)` from ZENSU_SAFE_DISPLAY_PATH_RE cites this very
+    # file, so an unbounded arm here contradicted the rule the sibling enforces.
+    if ! TOCTOU_PROJECT_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT}")"; then
+      TOCTOU_PROJECT_ROOT="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${TOCTOU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm to re-create exactly that directory and rebuild the workflow document in one step — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise start a new session for further work." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: the recorded project root ${ZENSU_PROJECT_ROOT:-(unset)} exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    # Reached when the root EXISTS but disagrees, so the value is a real directory
+    # name rather than a vanished one — but it is the same value class on the same
+    # channel, and a bound that skips the cases where the value looks plausible is
+    # not a bound. `(unset)` stays the empty-value rendering; the fold decides the
+    # rest. DELIMITED like the two sibling arms above, because the fold's own owner
+    # states that what bounds sentence forgery is the delimiter and never the
+    # placement: a class-clean absolute path can carry a period and a following
+    # clause, and bare it reads as a continuation of this hook's own sentence.
+    if [ -z "${ZENSU_PROJECT_ROOT:-}" ]; then
+      MISMATCHED_PROJECT_ROOT="(unset)"
+    elif ! MISMATCHED_PROJECT_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT}")"; then
+      MISMATCHED_PROJECT_ROOT="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: the recorded project root (${MISMATCHED_PROJECT_ROOT}) exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_record_unusable_block
   fi
   exit 0
@@ -497,6 +549,17 @@ REVIEWER_SPAWN_ALLOW_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permis
 # unconditionally here rather than rebuilt per kind, because this surface is advisory
 # and a wrong kind would cost more than a redundant sentence.
 REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any deny rule naming the Agent tool first — while one stands, adding the allow rule changes nothing."
+# The receipt exit BOTH implementing-turn notices prescribe. It was hand-authored
+# twice, in two ~290-character strings differing in five characters, in a file that
+# already keeps module-scope constants for exactly this and interpolates them into
+# those same echoes. Nothing under tests/ grepped for either half, so a reword of
+# one copy could drift from the other with every check green. It is a FUNCTION and
+# not a bare constant because `complete_cmd` is computed inside the nudge, below
+# this point — the same ordering constraint the two constants above already state
+# about `LOG_COMMAND`.
+zensu_impl_receipt_exit() {
+  printf '%s' "run the /zensu:tdd Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
+}
 
 reviewer_spawn_denial_probe() {
   local lib probe
@@ -1512,7 +1575,7 @@ zensu_impl_stop_nudge() {
     else
       nudge_denial_attempt="Report the refusal and the rule above to the user in your next message rather than acting on it silently; if they say in this conversation that they have just lifted it, completing the implementation is the right next move — the chain issues its own ticket and spawns the reviewer, and a second refusal means stop and say so."
     fi
-    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
     return 0
   fi
   # Says what the probe MEASURES. `git status --porcelain` reports untracked
@@ -1531,7 +1594,7 @@ zensu_impl_stop_nudge() {
   # its own message, so the notice can go silent with the chain exactly where it
   # was — and a reader who took silence as progress would be wrong. The clause
   # names the conditions the code actually re-tests.
-  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
   return 0
 }
 

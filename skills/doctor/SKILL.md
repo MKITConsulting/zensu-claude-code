@@ -4,20 +4,25 @@ description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
   tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, lockfile-backed Playwright MCP config/readiness, and the browser
-  consent gate's registration plus its per-session execution marker), plugin integrity
+  from the repo's provider, whether playwright-cli is installed and its version, and the
+  browser consent gate's registration on the Bash matcher), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks, and whether the permission rules
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, whether THIS session's own workflow document is
-  there and usable and whether it was rebuilt rather than restored, each review
+  there and usable and whether it was rebuilt rather than restored, whether this
+  session's recorded project root was re-created by a restore rather than being the
+  one that was there before, each review
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
-  Autopilot run holding a working tree, any reviewer spawn
-  the host permission layer refused, expired pending-review surfaced).
+  Autopilot run holding a working tree, whether this session's app-managed worktree
+  carries the desktop-pool keep marker and still sits on its recorded branch, any reviewer spawn
+  the host permission layer refused, any claim this session audited against a root
+  that is not the anchor, this session's recorded delivery route, expired pending-review
+  surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -60,26 +65,25 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes), the lockfile-backed Playwright MCP
-probe validates `.mcp.json`, its manifest wiring, its integrity lock, and `npm`
-without installing or executing the package, and the remaining manifest/config/state reads are local
-files. A configured MCP row remains a warning until the loaded MCP tools are confirmed.
+(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
+`hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
+package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
+within four directories of the resolved binary — without running it. A manifest that names
+another package, exceeds 64 KiB, does not parse or carries no valid name and version is
+reported as such, and the binary is NOT run. Only when no manifest exists at all does the
+doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a
+five-second bound enforced on every host, never opening a browser; the version it prints is
+reported as self-reported, never as measured. The remaining manifest/config/state reads are
+local files.
 
 ## Phase 1: Run the diagnostics
 
 Use Claude's natively rendered `${CLAUDE_PLUGIN_ROOT}` directly.
-Before invoking the helper, inspect the tools
-already available in this Claude Code session — do not call the browser. Runtime readiness
-requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
-`browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
-`browser_fill_form`, `browser_wait_for`, `browser_console_messages`,
-`browser_network_requests`, and `browser_close`. Accept each
-suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`.
 
 Run **exactly one** of the two commands below as a single Bash call — the first
-when that complete tool set is loaded, the second otherwise. Nothing may be added
-to it: no `&&`, no `;`, no pipe, no redirection, no second command, no extra
-variable.
+when `${CLAUDE_PROJECT_DIR}` renders non-empty, the second otherwise. Nothing may
+be added to it: no `&&`, no `;`, no pipe, no redirection, no second command, no
+extra variable.
 
 That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
@@ -92,10 +96,8 @@ defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on it
 own separate justification — it WRITES, so it cannot borrow this one; see
 [Session Control](../../docs/session-control.md) "Unbindable sessions".
 
-Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
-assignment when the tool set is not loaded. The root preflight now lives inside
-`zensu-doctor.sh`, so an invalid root still prints the standardized doctor table
-fragment rather than an unformatted shell error.
+The root preflight lives inside `zensu-doctor.sh`, so an invalid root still prints
+the standardized doctor table fragment rather than an unformatted shell error.
 
 **If `${CLAUDE_PROJECT_DIR}` would render EMPTY, omit that assignment entirely
 rather than emitting `CLAUDE_PROJECT_DIR=`.** An empty value is not a rooted
@@ -117,17 +119,7 @@ rather than emitting an empty one, and when the block does collapse, report the
 missing block instead of reading its absence as health.
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
-```
-
-```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
-```
-
-The same two forms with `CLAUDE_PROJECT_DIR` dropped, for the empty-render case:
-
-```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 ```bash
@@ -146,11 +138,6 @@ Plugin integrity
 
 Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.
 ```
-
-The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but
-cannot prove that Claude loaded the MCP server, so it deliberately reports `configured` as
-a warning. The tools signal alone cannot bypass declaration validation. Never inject
-`ZDOC_PLAYWRIGHT=ready` directly and never infer readiness from a PATH `playwright` binary.
 
 Print its output verbatim to the user — it is already the formatted four-block
 table with a summary line. The helper always exits 0; a red ❌ is a finding in
@@ -288,6 +275,25 @@ classifier will refuse a spawn, not only when the whole table is green.
   parse it and cannot judge it. Say explicitly that the config loader has no size limit,
   so the file is not skipped for its size — but do not tell the user it is applied, or
   that it is ignored: neither is knowable from a row that never read the file.
+- **✅ config: hooks.defaultDeliveryRoute=tdd / =direct** → the project configured a default
+  delivery route, so the route question is skipped wherever its reader is on: `tdd` sends an
+  approved plan or a code request through the Zensu workflow, `direct` implements it
+  directly without the review chain. Relay the value, that a preference stated in the
+  user's own message decides only that request, and that `/zensu:delivery-route` changes
+  the route for the session. When the
+  row adds that a **half is off** (`hooks.autoTdd=false` or `hooks.tddReminder=false`),
+  the default decides only the other half, because each hook exits on its own flag before
+  it resolves the route; relay which half.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is configured but decides nothing** → both
+  readers are off (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so no hook ever
+  resolves the route and the value has no effect. Either turn a reader back on or remove
+  the key; do not tell the user the question is skipped.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is not tdd, direct or ask** → the value is
+  misspelled, quoted differently, or not a string; the hooks read it permissively as `ask`,
+  so the question the user meant to switch off is still asked. The value is shown as
+  written — a string without added quotes, anything else in its JSON spelling — cut at
+  40 characters with a trailing `…`. The fix is the config value itself — one of the three
+  lowercase words.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
@@ -362,86 +368,118 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
+  manifest beside the binary is the one the browser consent gate was measured against, and
+  `/zensu:verify-feature` drives the browser through it. The manifest vouches for the package,
+  not for the binary: a wrapper script in a directory that holds such a manifest reads the same.
+  Nothing to do.
+- **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
+  against** → the gate's argument parser, its ambient-variable names, the global-config keys and
+  the run-config schema were measured against another release, so a changed flag meaning in
+  this one would go unseen. The run-config helper therefore refuses to write a run config, and
+  `/zensu:verify-feature` cannot start until the measured version is installed. Relay the row
+  and the pinned install command it names; installing it or updating the plugin is the user's
+  decision.
+- **⚠️ playwright-cli: installed (…), but the version the browser consent gate was measured
+  against could not be read** → the gate module is missing or unreadable in this installation,
+  so nothing about the installed version was checked. Relay the row and suggest reinstalling
+  the plugin.
+- **⚠️ playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads
+  against the working directory of each call** → an empty entry (a leading or trailing `:`, or
+  `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the
+  `playwright-cli` PATH resolves, so which binary a later call runs depends on the directory it
+  runs in. The doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` and names the entry. Relay the row; removing that entry from PATH, or
+  moving it behind the directory that holds `playwright-cli`, is the user's decision.
+- **⚠️ playwright-cli: installed, and reports … when run, but no @playwright/cli package manifest
+  was found beside it** → no manifest exists beside an npm shim or within four directories of the
+  resolved binary, so the doctor asked the binary itself. A version a binary prints about
+  itself is never taken as measured, even when it matches, and the run-config helper refuses to
+  start `/zensu:verify-feature` on it. A wrapper script outside the package with no `package.json`
+  near it looks exactly like this, so the row also advises putting the directory npm installs
+  `playwright-cli` into first on PATH, ahead of any wrapper. Relay the row and the pinned install
+  command it names.
+- **⚠️ playwright-cli: the binary on PATH belongs to the package …, not @playwright/cli** → the
+  nearest `package.json` names another package, so the doctor did not run the binary at all, and
+  the run-config helper refuses to start `/zensu:verify-feature` on it. Relay the row with the
+  package it names; installing `@playwright/cli` with the pinned command is the user's decision.
+  A wrapper script with another package's `package.json` within four directories reads like this
+  too, and then the directory npm installs `playwright-cli` into also has to come first on PATH.
+- **⚠️ playwright-cli: the package manifest beside the binary on PATH could not be judged** →
+  the nearest `package.json` does not parse, exceeds 64 KiB, or carries no valid package name and
+  version, so the doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` on it. Relay the row and the pinned reinstall command it names.
+  A wrapper script with a `package.json` the doctor cannot judge within four directories, such as
+  a project manifest with no name, reads like this too, and then the directory npm installs
+  `playwright-cli` into also has to come first on PATH.
+- **⚠️ playwright-cli: installed, but its version could not be read** → no manifest exists and
+  the binary printed no version within five seconds, or the probe could not run. The run-config
+  helper refuses to start `/zensu:verify-feature` until it reads the version from the package
+  manifest. Relay the row and the pinned reinstall command it names.
+- **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.21` command the
+  row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
+  ships, which the run-config helper refuses unless it is the measured one. Never install it on
+  their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
-  set when Claude Code started, so the parent-environment policy governs every browser origin
-  and the consent prompt never fires this session. Only its top-level contract is checked
-  here; the broker judges each target when it starts. Nothing to do.
+  set when Claude Code started and passes the policy contract, so it governs every browser
+  origin and the consent prompt never fires this session; the browser consent gate admits only
+  its targets and, for navigation commands, their declared routes. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
-  registered on the broker's navigation tools, and a runtime recipe (`.zensu/runtime.yaml` or
-  `.zensu/autopilot.yaml`) is present. The first navigation to each loopback origin asks the
-  user through the permission prompt, and every further route on an approved origin then
-  proceeds without one; remote targets still need the policy.
+  registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
+  `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
+  session that reaches a new loopback origin asks the user through the permission prompt, and
+  every further route on an approved origin then proceeds without one; remote targets still
+  need the policy.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
   recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
-- **❌ verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (…)** → a parent-environment policy
-  IS set, but its value does not satisfy the contract the broker parses at start, so the
-  browser cannot open at all. Only the three top-level guards are repeated in this check —
-  the per-target rules stay the broker's — and the parenthesis names which one answered. The
-  user fixes that value in the environment that launches Claude Code, or unsets it to fall
-  back to consent mode. Never edit it from a Bash call: it is read once when the broker starts.
+- **❌ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)** → a
+  parent-environment policy IS set, but its value does not satisfy the policy contract, so the
+  browser consent gate denies every `zensu-verify` navigation. The parenthesis names the rule it
+  broke. The user fixes that value in the environment that launches Claude Code, or unsets it to
+  fall back to consent mode. Never edit it from a Bash call: the hooks read it from the
+  environment Claude Code started with.
+- **⚠️ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked (…)** →
+  a parent-environment policy IS set, but the plugin's own policy parser did not complete, so
+  the report judged nothing. This is a missing check, not an invalid policy: never tell the user
+  their value is wrong on the strength of this row. Run `/zensu:doctor` again; if the row
+  repeats, the plugin tree is damaged and the user reinstalls it.
 - **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
   project root, so it looked for no recipe at all. This is a missing check rather than a
   missing recipe; run `/zensu:doctor` from a session whose project root resolves.
-- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
-  broker script is missing, or `hooks/hooks.json` does not register the GATE on the
-  navigation matcher, or it does not register the RECORDER — the broker starts in consent mode
-  on the gate alone, so a missing recorder would prompt on every navigation and remember
-  nothing. Reinstall the plugin, or launch Claude Code with the parent-environment
-  policy, which needs no hook. The parenthesis names which piece is missing.
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its prefilter library
+  `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
+  `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
+  hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
+  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
+  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  Without the gate nothing judges a
+  `zensu-verify` session; without the recorder every navigation would prompt and nothing would
+  be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
+  config unless both hooks demonstrably answer registered, and a missing, symlinked or unloadable
+  decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot
+  drive a browser; tell the user not to start `/zensu:verify-feature` until this row clears. A
+  missing prefilter library makes it deny every call the skill issues, although a gated call that
+  splits `playwright` and `zensu-verify` with a backslash before `n`, `r` or `t` then passes
+  unjudged. A missing
+  prefilter library also makes it deny every other Bash call whose payload names `playwright` or
+  `zensu-verify`, with `prefilter library unavailable` — in a project whose path names either
+  word, every Bash call except the recognized `/zensu:doctor` and adoption commands — so tell the
+  user those denials share this cause. The parenthesis names the cause, and it names each hook
+  with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
+  `; ` when both apply; relay each state for the hook it names. A registration that could not
+  be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check
+  that could not be made, never as "not registered".
 - **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
   report says nothing about the browser path. This is a missing check rather than an
   all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
-- **✅ verify-feature gate: executed in this session** → a live marker whose NAME carries this
-  session's key records the gate deciding a navigation, so the gate is being exercised and not
-  merely registered. The rows above are derived from files on disk in the plugin's own tree and
-  cannot tell a session whose hooks ran from one whose hooks are switched off host-side; this row
-  gets closer. TWO bounds ride on it and neither is optional. The session binding is the
-  FILENAME, and `<project>/.zensu/state` is writable from any session in the project, so this is
-  evidence about a file rather than an attestation — `docs/gates.md` states that in as many
-  words. And this row reads under the session RECORD's project root, while the browser broker
-  anchors on its own working directory, so a green row here does not establish that the broker
-  will approve. Ordinarily nothing to do; if a navigation is nonetheless being refused, read the
-  broker's own refusal. TWO of its six refusal states name the tree it read under — the one for a
-  state directory it could not open, and the one for a marker walk that hit its budget — so a
-  refusal naming no tree is telling you something narrower rather than withholding it.
-- **✅ verify-feature gate: executed in this session, on a prompted origin** → the live marker
-  records the gate ASKING about the navigation rather than clearing it from memory. The marker is
-  written BEFORE the answer exists, so a prompt that was DECLINED leaves the same marker live for
-  its window — the residual `docs/gates.md` names — and this row therefore reports the question,
-  not the answer. The same two bounds as the row above apply. Ordinarily nothing to do.
-- **✅ verify-feature gate: registered, and no live execution marker was read for this session** →
-  the pair is installed and the state directory held no live marker. TWO ordinary causes, and
-  naming only the first is what this row used to do: no browser navigation has reached the gate
-  yet, OR a marker it wrote has passed the window the gate keeps markers for. The row therefore
-  says what the probe proved — no LIVE marker — rather than asserting that no navigation
-  occurred, and it is stated rather than left silent so that "installed" is never read as
-  "enforced". Nothing to do.
-- **⚠️ verify-feature gate: execution not checked** → no bound session key or no recorded
-  project root was available, so the session-keyed marker was never looked for AND none can be
-  written either: consent mode can still ask, and the broker then refuses the navigation for want
-  of a marker. A missing check rather than an all-clear. Do NOT read it as "this session has no
-  Session Control record" — the wrapper sets this state for every binding verdict except `bound`,
-  including the three where a valid record is sitting in plugin data and the binding row above
-  prescribes `/zensu:adopt-session`. Take the remedy from that row, or launch with the
-  parent-environment navigation policy, which needs no hook.
-- **⚠️ verify-feature gate: execution could not be judged** → the decision module did not load,
-  did not export the reader, the state directory could not be read, or the read hit the marker
-  budget before it could answer. A contract fault is reported as one rather than collapsing into
-  the benign row. Reinstall the plugin, check that `<project>/.zensu/state` is readable, and clear
-  stale `verify-consent-exec-*` files from it — and nothing else in that directory, which also
-  holds this session's workflow document, whose removal makes every tool deny until the session is
-  adopted again. That scope clause is the broker's own and is not optional here: Phase 3 below
-  forbids a glob, `find`, parent traversal or worktree discovery against this directory, so the
-  only sanctioned spelling is `rm -f` on the exact marker names you have listed and read. The
-  fourth cause is the one neither of the first two remedies touches, and it is the same condition
-  the broker names as "too many execution markers".
-- **⚠️ verify-feature gate: execution state not recognized (…)** → the wrapper reported a state
-  this report has no row for. A missing check rather than an all-clear; the parenthesis names the
-  value. Do NOT read it as the two halves having drifted — the wrapper derives its word from a
-  closed accept-list, so every value that derivation can produce already has a row above, and this
-  row is reachable only when a caller supplies `ZDOC_VERIFY_EXEC` itself. The renderer claims
-  exactly that much and no more, and so does this bullet.
+
+Every `verify-feature` row is derived from files on disk in the plugin's own tree. None of them
+can tell a session whose hooks run from one whose hooks are switched off host-side, and with the
+hooks off nothing in this plugin constrains `playwright-cli` — say so whenever the user asks
+whether browser verification is enforced, not only when a row is red.
+
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a
@@ -452,9 +490,26 @@ classifier will refuse a spawn, not only when the whole table is green.
   a different diagnosis with a different remedy: the record is intact, and the
   directory it names is gone (a deleted or recycled worktree), taking the
   workflow document under `<project_root>/.zensu/state/` with it. The row prints
-  that exact path. Unlike the row above, this one CAN be repaired in place:
-  re-create exactly the printed directory and the recorded session binds again.
-  Otherwise start a fresh session. Meanwhile the session is diagnosable but not
+  that exact path. Unlike the row above, this one CAN be repaired in place, and
+  the remedy is a COMMAND rather than a bare `mkdir`: run
+  `/zensu:adopt-session --restore-root` to report. That report is read-only, and you do NOT
+  run the repair yourself: relay its verdict and all three disclosure lines, then stop and
+  ask the user, exactly as `skills/adopt-session/SKILL.md` requires. Asking the user is the consent control for this
+  repair. The record-carried destination, the `not-served-by-executing-runtime` and `root-present` refusals
+  and the ancestor ladder are its safety bounds, not consent controls.
+  It re-creates exactly the printed directory **and** rebuilds the workflow
+  document the removal took with it — a hand-made directory leaves the second
+  half missing, and the capability gate then denies every tool with
+  `activated workflow CAS state is missing`. Say the cost whenever you offer it:
+  it restores the ANCHOR, not the work. The directory comes back empty, it is not
+  a git worktree, and the chain that lived there is gone rather than restored; the
+  user re-adds the worktree themselves with `git worktree add <path> <branch>`.
+  That is what the command PLANTS, and it is a forecast: when another run wins the
+  race and creates the directory first, this run never saw the contents. The row
+  described above probes the recorded root and reports what is there now, so relay
+  the row's own sentence rather than this forecast once the repair has run.
+  Otherwise start a fresh session. If the directory was MOVED rather than deleted,
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session is diagnosable but not
   workable — this read-only report runs, `Stop` is released rather than wedged,
   and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
@@ -522,20 +577,27 @@ classifier will refuse a spawn, not only when the whole table is green.
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
   diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
-  stay denied until that exact directory is re-created — a write cannot be
-  attributed to a project that is not there. The workflow document lived under
+  stay denied until that exact directory is re-created by
+  `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
+  requires the running installation to SERVE the record, which is exactly what the
+  adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
   do not tell the user their review chain resumes. If it was moved rather than
-  deleted, its state still exists there — and say the ORDER, because it decides
-  whether a check runs at all: re-creating exactly that directory **first** is the
-  better order. Adoption then reads that workflow document and verifies its schema,
-  so a genuine break is named as `workflow-schema-mismatch` with a remedy; adopting
-  first skips that check, because it is guarded on the document being reachable, and
-  a document restored afterwards surfaces a mismatch later as an anonymous
-  fail-closed deny. Re-creating first also yields a fully bound session rather than
-  an orphaned one. Never close this row by telling the user to adopt and then
-  restore — that is the order every offer implies and the one that loses the check.
+  deleted, its state still exists there — and say the ORDER, which depends on WHICH
+  of those two cases holds.
+  **If the directory was MOVED, moving it back by hand first is the better order**,
+  because adoption then reads the surviving workflow document and verifies its
+  schema, so a genuine break is named as `workflow-schema-mismatch` with a remedy;
+  adopting first skips that check, which is guarded on the document being reachable,
+  and a document restored afterwards surfaces a mismatch later as an anonymous
+  fail-closed deny. It also yields a fully bound session rather than an orphaned one.
+  **If the directory was DELETED, adoption MUST come first** and there is no choice
+  to offer: `--restore-root` refuses `not-served-by-executing-runtime` until this installation
+  serves the record, which is exactly what the adoption establishes. The schema check
+  is unreachable in that case whatever the order, because a rebuilt baseline is a
+  fresh document and there is nothing surviving to compare. Do not carry the
+  moved-case advice into the deleted case — it prescribes an order the code refuses.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares
@@ -615,9 +677,11 @@ classifier will refuse a spawn, not only when the whole table is green.
   chain parked: the chains that reach the bound are the ones still being worked on. This is not a wedge and not an
   error: the Stop hook releases in that state by design, which is exactly why
   nothing else reports it. Relay the count and the ONE exit the row prints — the
-  review chain, entered with `--tdd-complete` after the Phase 6 step 5b
-  edit-landing audit and with a usable `## Requirements` table in the plan, both
-  of which that verb refuses without while the tree is dirty. **Never offer the
+  review chain, entered with `--tdd-complete` after a Phase 6 step 5b
+  edit-landing audit whose receipt records a CLEAN verdict, and with a usable
+  `## Requirements` table in the plan. While the tree is dirty that verb refuses
+  a plan without the table, and it reads the receipt's VERDICT rather than its
+  existence, so a receipt that merely exists does not satisfy it. **Never offer the
   zero-change terminus here.** From this shape no review ticket has ever been
   consumed, so `--chain-done` is the unqualified no-ticket terminus, and after a
   mid-run commit its change-count guard measures zero and closes a chain in which
@@ -660,9 +724,37 @@ classifier will refuse a spawn, not only when the whole table is green.
   Owned by THIS session, or with the owner not established, the row names no
   release command, and you must not suggest one: a release applies a real `CANCEL`,
   so against your own live generation it ends the work you are doing. Owned by
-  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
-  says yes; that skill is the guided form and asks for the confirmation itself.
-  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  ANOTHER session, report it and offer `/zensu:autopilot-adopt` first — it continues the
+  run under this session — and `/zensu:autopilot-release` only if the user wants the run
+  cancelled instead, each only after the user says yes; both skills are the guided forms and
+  ask for the confirmation themselves. Adoption comes first because a cancel cannot be undone.
+  Never run the bare `zensu-log.sh --autopilot-adopt … --confirm` or
+  `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  **The owner-silence clause decides which of the two verbs is actually on offer, and it
+  outranks this bullet.** It is worded per verb because the two are not symmetric. The
+  RULE, not a list: any arm that says a verb REFUSES or ABORTS withholds that verb from
+  what you offer, while an arm saying its side could not be ESTABLISHED does NOT — an
+  unsettled side is relayed with its caveat, because withholding on it would leave the
+  irreversible cancel as the only thing on the table. Relay the remedy the row printed
+  rather than reconstructing one: it is rendered from the same judgement, and it also
+  carries obstacles the clause does not word, such as adoption's exit-4 refusal while
+  this session owns a nonterminal run of its own. Worked examples, which are examples and not the whole set: a
+  `live inner TDD chain` means adoption refuses that run with exit 3 before it reads
+  anything, so only the release is left; `both verbs abort on this beacon with exit 2`
+  leaves neither, so report the beacon instead — and note that a release-only exit-2
+  arm, an exit-7 future-dated stamp and a pointer that could not be read each narrow the
+  offer the same way. The window is per verb: `hooks.autopilotOwnerActivityTtlHours is 0`
+  means adoption skips its liveness check, and `hooks.autopilotReleaseOwnerActivityTtlHours is 0`
+  means the release skips its own, so a release then cancels the run even while its owner is
+  active — say so before the user answers. With no workflow document at all, the release stands
+  down and cancels unbounded; the clause says `both verbs stand down` whenever neither
+  verb refuses — which for adoption can be because it never reached that beacon at all,
+  a retired owner pointer being one such case — and says something else where a live
+  inner chain or an unreadable owner pointer leaves its side unsettled. Either way that
+  is the LEAST protected state, not the safest one. Relay the clause's own words; never
+  soften them into "the owner looks idle". Where the row leaves only the release on
+  offer, relay its reason too: the deciding stage is read from the run document, which
+  any session in this project can write.
   When the row says it `accepted the record on its SHAPE`, relay that too: the owner
   validates more than this row checks, and a record that fails the stricter check
   makes every Autopilot verb fail closed for the whole project — so the document
@@ -679,7 +771,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   never touches a run document.
 - **✅ autopilot: nonterminal durable run `<id>` … owned by THIS session** → the green form of
   the same row, and deliberately NOT a finding. The row calls such a run an
-  `ordinary run in progress`, which means this session's own active pointer still designates it
+  `ordinary run in progress`, which means the run document also passes the stricter check the
+  owner applies, and that this session's own active pointer still designates it
   and its stage is not `BLOCKED`. Say so and move on. It names no release command — releasing a
   run this session owns cancels its own live generation — and it does not suppress the green
   summary, which is why the arm exists. Every OTHER own-run form is a ⚠️, each stating a
@@ -721,6 +814,60 @@ classifier will refuse a spawn, not only when the whole table is green.
   document it has just refused, in a directory any session in the project can
   write. Leave the removal to the user, and never generalize this permission to
   the row above.
+- **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)
+  that are not the anchor** → the chain logged edits in another repository. Every
+  other row in this block can be green beside it: the anchor's own tree is clean,
+  its workflow document is healthy, and the review chain saw no diff for work that
+  really happened. Relay the roots the row names and the anchor beside them, and say
+  what is NOT covered — one edit-landing audit grades ONE root, so those claims were
+  reported rather than graded, and `/zensu:tdd` is single-root. The remedy is to run
+  the chain in the repository the claims name, or to land the work in the anchor.
+  Do NOT suggest re-running the audit against the foreign root: its receipt would
+  land where this session's terminus never reads it.
+- **⚠️ topology: this session's claims were NOT checked against the anchor** → a
+  missing check, not an all-clear. The renderer emits this lead-in for a CLASS of
+  causes, not one: an unreadable or unknown-schema edit-landing receipt, a run log
+  the receipt names that lies outside this project's `.zensu/logs/` or is not a
+  plain file, an inventory command that is absent from the plugin tree, one that
+  did not complete, and one that answered in a format this runtime does not
+  recognise, and — since the round that split it — no bound session key at all,
+  where the receipt cannot even be located. **Relay the cause the row itself
+  prints** — do not say the inventory command failed, because in the common case
+  it never ran. Say plainly that the check is missing rather than reporting the
+  topology as clean.
+- **The ABSENCE of a topology row is not evidence of a single-root chain.** The
+  run log is REDACTED on the way in: a claim under `$HOME` is
+  rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
+  no longer an absolute path when the audit reads it, no foreign root is derived
+  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
+  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
+  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  as proof that the chain stayed in one repository.
+- **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
+  session's delivery route is already decided, so the plan-approval hook and the
+  per-prompt reminder dispatch without the route question. Green because it is disclosed,
+  ordinary state — relay the value AND its source verbatim, and name the two ways to
+  change it: `/zensu:delivery-route` (`--tdd`, `--direct`, `--auto`) for the session,
+  `hooks.defaultDeliveryRoute` for the project. A `direct` route means code changes skip
+  the review chain and the evidence audits for this session; say so. A **half is off**
+  parenthetical means one reader is switched off, so the route decides only the other
+  half; for a `tdd` route the clause after it says which kind of change still reaches
+  `/zensu:tdd`.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
+  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: … — decides nothing this session** → both readers are off
+  (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
+  on a route; whatever the row names has no effect until a reader is turned back on.
+- **⚠️ delivery route: not checked / could not be read / state not recognized** → a
+  MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
+  root was available, and the row names which cause applies — the report ran without
+  `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` (there is no binding row then — run
+  `/zensu:doctor` inside the session), the session is bound but its recorded key or project
+  root failed the shape check (the binding row above is the valid-record one), or any other
+  binding verdict (read the binding row). **Could not be read:** the shared config library
+  did not answer, or the recorded project root could not be entered. **State not
+  recognized:** the wrapper reported a word this report has no row for. Point at
+  `/zensu:delivery-route --status` from the session for the hooks' own answer.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because
@@ -746,6 +893,42 @@ classifier will refuse a spawn, not only when the whole table is green.
   gone and the Stop guard now releases this session without asking for a reviewer. The
   row names the entry count, the timestamp and which state was repaired. Offer
   `/zensu:tdd` to re-arm if that work still needs a review.
+- **⚠️ state: this session's recorded project root was RE-CREATED** → the history
+  carries the reserved `PROJECT_ROOT_RESTORED` provenance entry, so the directory this
+  session is anchored to was planted by `/zensu:adopt-session --restore-root --confirm`
+  rather than being the one that was there before. It renders BESIDE the REBUILT row
+  above, not instead of it: that one is about the workflow document, this one about the
+  directory, and the restore writes both. Relay it with its cost — the repair restores
+  the anchor, **not the work**. The command itself plants an empty stub and runs no git.
+  The row names the entry count, the timestamp and how many components were planted.
+  **Read the cost sentence the row actually printed and relay THAT one.** Do not
+  describe the directory from what the repair plants: the row PROBES the recorded root
+  and reports what is there NOW, which a later `git worktree add` — in this session or
+  another terminal — will have changed. Every sentence below is relayed verbatim rather
+  than paraphrased, and the set is what the row prints rather than a number to count.
+  Two of them are about PROVENANCE, who finished the directory:
+  - "another run finished the directory" — this repair did not create it. It says
+    nothing about the contents; the CONTENTS sentence beside it does that.
+  - "exports no raced-completion token" — that provenance could not be checked at all.
+    A missing check, never an all-clear.
+
+  The rest are about CONTENTS, and exactly one of the three always prints:
+  - "nothing is checked out at that path now" — there is no `.git` entry there, so offer
+    `git worktree add` and note that `.zensu/state` is already under the root, so a plain
+    `git worktree add` refuses a non-empty target. It does not prove the files are
+    untracked: a recorded root nested inside a repository has no `.git` of its own, and
+    the row says so. Check that before repeating the offer.
+  - "entry exists there now" — a `.git` entry is at that path, so something else is
+    checked out. Offer nothing and do not re-create it. This arm renders ✅ rather than
+    ⚠️: the repair is settled, not a finding.
+  - "could not be read, so this report makes no claim about it" — the probe could not
+    answer. Relay it as a check that did not run: do not claim the directory is
+    untracked, do not offer `git worktree add`, and tell the user to look at the path
+    before writing to it.
+- **⚠️ state: … not checked for project-root restore provenance** → the report could
+  not read the restore phase token from the Session Control core, or the workflow
+  document did not read back. That is a MISSING CHECK, never an all-clear: relay it as
+  a check that did not run, and do not tell the user their project root is verified.
 - **✅ state: this session's Session Control record was ADOPTED across a plugin update** →
   informational, and the one place an automatic adoption stays visible after the fact: a
   plugin update landed while the session was running and a hook re-minted its record
@@ -758,7 +941,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   so the ABSENCE of this row is never evidence that no adoption happened; the kept record
   is then its only trace.
 - **⚠️ state: this session's workflow document was not checked for rebuild provenance**
-  (the row also reads `adoption provenance`, or `rebuild or adoption provenance`)
+  (the row also reads `adoption provenance`; an unreadable document produces one such
+  row per check)
   → either the core exported no phase token for that check or the document did not read
   back, so the check did NOT run. A missing check, never an all-clear, and never a claim
   that the document was not rebuilt or that the record was not adopted.
@@ -815,6 +999,135 @@ classifier will refuse a spawn, not only when the whole table is green.
   the next Stop in that project, so this row can clear without anyone acting on
   it. Offer no cleanup for either row: Phase 3 below is still the only write, and
   it covers `pending-review.json` alone.
+- **✅ worktree: not an app-managed worktree — … needs no keep marker** → the session runs
+  in a plain checkout, which the Claude Desktop worktree pool never reuses; nothing to do. The
+  sibling **✅ worktree: not under a .claude/worktrees container** says the same from a plugin
+  root that could not load the keep module.
+- **✅ worktree: keep marker present in … (N live session anchor(s))** → the
+  `.worktree-keep` file the `session-start-worktree-keep.sh` hook writes is in place, so the
+  desktop pool skips this directory both as a reuse candidate and in its idle reaper. Nothing
+  to do. The sibling **✅ worktree: keep marker present in … —
+  how many session anchors are live could not be read** says the marker is in place while the
+  anchor directory itself could not be listed, so the count is withheld rather than rendered
+  as zero.
+- **⚠️ worktree: anchors in … could not be read** → the session-anchor directory could not be
+  listed, so this check did not run. It is a missing check, not an all-clear, and no
+  live-anchor count and no rejected-anchor row can be trusted for that directory. When the
+  directory is past its bound and holds expired anchors, the row says that
+  the next prompt reaps the expired anchors it read, so the directory drains and the keep
+  marker is judged again once it is back under the bound; otherwise the row says
+  the keep marker is left as it stands. Relay the reason the row names and inspect the
+  directory by hand.
+- **✅ worktree: keep marker in … was not written by this plugin** → a marker someone placed
+  by hand. The plugin never removes it; the pool still honours it.
+- **✅ worktree: keep marker switched off (hooks.worktreeKeep=false)** → the check is
+  disabled by configuration, so the row says so instead of falling silent; the desktop pool
+  may reuse or reap the directory while a session is live in it. Report the flag.
+- **⚠️ worktree: keep marker still present although hooks.worktreeKeep=false — …** → a
+  marker this plugin wrote before the flag was switched off still keeps the directory out of
+  the desktop pool, and the row names what still holds it. When live session anchor(s) hold it,
+  the marker is released once those sessions end. When anchor file(s)
+  this build cannot validate sit beside it — usually the live anchor of a session on another
+  plugin version during an update — the row says to remove one by hand, but
+  only after confirming no session on another plugin version is live there; relay that. When
+  the anchor directory could not be read, the release pass leaves the marker as it stands,
+  except past the bound, where the row says the next SessionStart or SessionEnd in it reaps the
+  expired anchors it read and releases the marker once the directory is back under the bound.
+  When nothing holds it, the row says it stays
+  until the next SessionStart or SessionEnd in it releases the marker; a SessionStart in any
+  sibling worktree releases it too. Name the file, the hold and the flag; offer no cleanup,
+  since Phase 3 covers `pending-review.json` alone.
+- **✅ worktree: this session still sits on its recorded branch … in …** (or **… its recorded
+  detached HEAD in …**) → the branch, or the detached HEAD, this session recorded when it
+  started is still checked out; nothing to do.
+- **✅ worktree: no keep marker in … and this session is not bound** → the report ran without
+  a session binding, so the session's own anchor was not judged; the marker is absent because
+  no live anchor exists there. Nothing to do unless a binding row above names a fault.
+- **⚠️ worktree: keep marker MISSING in … while this session's anchor is live** → when the
+  row ends "the next prompt restores the marker", `user-prompt-worktree-keep.sh` publishes it
+  again at the next prompt. When the row says
+  the plugin does not create the marker there, it names why, and the plugin never writes a
+  marker git would report as untracked. Either git does not ignore `.worktree-keep`
+  although info/exclude lists it (an ignore rule such as `!.worktree-keep` re-includes it),
+  or it cannot add the marker to info/exclude (a symlinked, hard-linked or oversized exclude
+  file, an exclude file or directory the process cannot write, or an `info` entry that is not
+  a directory; the row names the reason), or git could not say whether it ignores the marker.
+  Relay the cause and let the user decide.
+  A row ending "restores it only once the anchor directory can be read" means the anchor
+  listing failed; see the anchor-directory row above. If the row persists across prompts
+  without either clause, the publish was refused (the link or the copy failed) or the prompt
+  hook is not running for this session — check the binding rows. Nothing to delete.
+- **⚠️ worktree: this session has no anchor in … yet** → the session started before the hook
+  existed, or its anchor was reaped; the next prompt writes one and adopts the branch checked
+  out then as its baseline without verification, and tells the session so once. Say that a
+  takeover before that point cannot be ruled out; nothing to delete.
+- **⚠️ worktree: this session's anchor in … names another worktree** → this session's anchor
+  records a different worktree root, so its branch baseline is not judged; the row says
+  the next prompt replaces it with this session's own record and adopts the branch checked out
+  then without verification. Say that a takeover before that point cannot be ruled out; the
+  row never prints the recorded root. Nothing to delete.
+- **⚠️ worktree: this session's anchor in … is stale — it no longer holds the keep marker**
+  → this session's anchor is older than its idle window (or was aged by a SessionEnd), so the
+  marker no longer protects the directory; the next prompt refreshes it. If the row persists
+  across prompts, the prompt hook is not running for this session — check the binding rows.
+- **⚠️ worktree: this build cannot validate this session's anchor in … (reason)** → the
+  object at this session's own anchor path failed validation, and the row names what happens
+  next. For an unparseable, misshapen or oversized record,
+  the next prompt replaces it with this session's own record; nothing to do. For a symlink,
+  a hard link or a directory at that path, the row says
+  the plugin never replaces a symlink, a hard link or a non-file there, and asks the user to
+  remove it by hand, after which the next prompt rewrites it; relay that. When a component of
+  `.zensu/state` on that path is a symlink or not a directory,
+  so the plugin neither reads nor writes anchors there, the row asks the user to fix that
+  component by hand; relay it. A row that ends with
+  this report cannot say whether the next prompt can replace it means the check named no
+  remedy this report knows; relay it and let the user inspect the file. Phase 3 covers
+  `pending-review.json` alone, so offer no cleanup here. The sibling **⚠️ worktree: this
+  session's anchor in … recorded no branch** means the anchor holds no branch baseline yet:
+  either the branch read failed when the session started, and the next prompt records the
+  current branch; or the read failed then and still fails, which the row states as "…
+  and still fails, so a takeover could not be ruled out", adding that
+  the next prompt records the branch once git can answer; or a rebase or bisect paused there
+  holds a detached HEAD (the row names it), and
+  the next prompt records the branch it returns to, or the branch checked out once it
+  finishes when git's record of that branch cannot be read. Say that a takeover before that
+  point cannot be ruled out; nothing to delete.
+- **⚠️ worktree: branch drift — … is now on branch X (HEAD …) but this session's anchor
+  recorded branch Y when it started** → unless the session switched branches itself, another
+  Claude session took over this directory: the desktop pool re-leased it and checked X out in
+  place. Relay the remedy the row prints verbatim — continue in a worktree NESTED inside this
+  directory (`git worktree add .claude/worktrees/<slug> Y`), never switch the shared directory
+  back to Y, never work in a sibling or temp-dir worktree (the desktop write-guard refuses
+  those as `sibling_worktree`), and if a review chain is armed in this session close it here
+  first, because its gates still measure this directory. If the session switched branches
+  itself, say so and stop; the row clears once Y is checked out again, and `/clear` records
+  the branch checked out then as a new baseline. While a rebase or bisect is paused after such
+  a drift was recorded, or while the current branch cannot be read, the row reads **branch
+  drift — this session's anchor recorded a move of … from … to …** and names the paused
+  operation or says the current branch could not be read; relay it the same way.
+- **✅ worktree: a paused rebase holds a detached HEAD in … — the branch check waits until it
+  finishes** (or **a paused bisect**) → a rebase or bisect is paused in this worktree with HEAD
+  detached, so the branch check is suspended until it finishes. The check cannot tell which
+  session started it. If this session started it, there is nothing to do. Otherwise another
+  session may have taken the directory: do not continue, abort or reset the operation here,
+  relay the row and ask the user.
+- **⚠️ worktree: current branch unreadable in …** → git could not answer for this worktree,
+  so a takeover could not be ruled out; name it and stop.
+- **⚠️ worktree: keep marker refused — … is not a plain file** → a symlink or a non-file sits
+  at the marker path. The plugin neither creates nor removes such an object; name it and let
+  the user inspect it. Phase 3 covers `pending-review.json` alone, so offer no cleanup here.
+- **⚠️ worktree: anchor file(s) this build cannot validate in … — names** → anchor files of
+  other sessions failed validation (this session's own anchor has its own row above). The row
+  says such a file is usually the live anchor of a session on another plugin version
+  and holds the keep marker, so the user may remove one by hand
+  only after confirming no such session is live there; relay that caution and name the files.
+  Phase 3 covers `pending-review.json` alone, so offer no cleanup here.
+- **⚠️ worktree: keep check NOT performed** and **⚠️ worktree: keep check NOT performed for
+  … (code or error kind)** → `hooks/lib/worktree-keep-v1.js` could not be loaded from this
+  plugin root, the project root under a `.claude/worktrees` container could not be inspected,
+  or the anchor directory could not be listed; the row names the fault code, or the error kind
+  (such as `SyntaxError`) when the fault carries no code, never the raw message. A missing
+  check, not an all-clear.
 
 If everything is green, say so in one line and stop — there is nothing to do,
 except that the line must carry the `~/.claude/settings.json` bound stated in

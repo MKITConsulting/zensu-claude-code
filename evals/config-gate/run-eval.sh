@@ -160,6 +160,7 @@ run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-reset-on-fresh-tdd.sh" "test-autofix-rounds-reset-on-fresh-tdd.sh"
+run_test "$EVAL_DIR/test-review-convergence-directive.sh"      "test-review-convergence-directive.sh"
 run_test "$EVAL_DIR/test-review-counters-state-location.sh"   "test-review-counters-state-location.sh"
 run_test "$EVAL_DIR/test-post-review-combined-summary.sh"     "test-post-review-combined-summary.sh"
 

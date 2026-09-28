@@ -143,7 +143,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN post-bash-witness.sh:ZENSU_TEST_WITNESS"
+SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"
@@ -153,7 +153,7 @@ for entry in $SITES; do
     check "P3 $hook_file records $gate_name via the shared recorder" FAIL
   fi
 done
-for hook_file in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh post-bash-witness.sh; do
+for hook_file in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh; do
   hf="$PLUGIN_DIR/hooks/$hook_file"
   if [ -f "$hf" ] && grep -qE 'tdd_record_bypass(_payload)? .*2>/dev/null \|\| true' "$hf"; then
     check "P3 $hook_file records fail-open" PASS
@@ -245,13 +245,13 @@ if [ -n "$SBOX" ]; then
   run_hook() {
     local hook="$1"
     STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" \
-      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= \
+      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= \
       bash "$PLUGIN_DIR/hooks/$hook" 2>/dev/null
   }
   run_hook_env() {
     local var="$1" hook="$2"
     STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" \
-      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= \
+      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= \
       env "$var=off" bash "$PLUGIN_DIR/hooks/$hook" 2>/dev/null
   }
   review_payload() {
@@ -280,6 +280,13 @@ if [ -n "$SBOX" ]; then
     check "P5a note+list round-trip with dedup" PASS
   else
     check "P5a note+list round-trip with dedup (got: $LIST)" FAIL
+  fi
+  run_log --bypass-note ZENSU_FULL_SUITE_GATE --session fx >/dev/null 2>&1
+  LIST_FS="$(run_log --bypass-list --session fx 2>/dev/null)"
+  if [ "$LIST_FS" = "ZENSU_TDD_GATE, ZENSU_CHAIN, ZENSU_FULL_SUITE_GATE" ]; then
+    check "P5a2 the full-suite escape is an allowlisted ledger gate and keeps the earlier entries" PASS
+  else
+    check "P5a2 the full-suite escape is an allowlisted ledger gate (got: $LIST_FS)" FAIL
   fi
   start_session fresh
   EMPTY="$(run_log --bypass-list --session fresh 2>/dev/null)"
@@ -361,13 +368,6 @@ if [ -n "$SBOX" ]; then
     check "P5h QUOTED inline prefix is honored AND recorded (got: $L3, allowed: $QUOTED_ALLOWED)" FAIL
   fi
 
-  OUT="$(printf '%s' '{"hook_event_name":"PostToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
-  L4="$(run_log --bypass-list --session hx 2>/dev/null)"
-  case "$L4" in
-    *ZENSU_TEST_WITNESS*) check "P5i witness env escape records (armed session)" PASS ;;
-    *)                    check "P5i witness env escape records (got: $L4)" FAIL ;;
-  esac
-
   OUT="$(printf '%s' '{"hook_event_name":"Stop","session_id":"hx"}' | run_hook_env ZENSU_CHAIN stop-chain-enforcer.sh)"
   L5="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$L5" in
@@ -419,8 +419,8 @@ if [ -n "$SBOX" ]; then
     *ZENSU_SECRET_SCAN*) check "P5o secret-scan env escape records" PASS ;;
     *)                   check "P5o secret-scan env escape records (got: $L8)" FAIL ;;
   esac
-  if [ "$L8" = "ZENSU_TDD_GATE, ZENSU_BASH_WRITE_GATE, ZENSU_TEST_WITNESS, ZENSU_CHAIN, ZENSU_MCP_GATE, ZENSU_SECRET_SCAN" ]; then
-    check "P5p cumulative ledger exact (order + dedup across all six gates)" PASS
+  if [ "$L8" = "ZENSU_TDD_GATE, ZENSU_BASH_WRITE_GATE, ZENSU_CHAIN, ZENSU_MCP_GATE, ZENSU_SECRET_SCAN" ]; then
+    check "P5p cumulative ledger exact (order + dedup across all five hook gates)" PASS
   else
     check "P5p cumulative ledger exact (got: $L8)" FAIL
   fi
@@ -456,14 +456,6 @@ if [ -n "$SBOX" ]; then
     check "P5r inactive session records nothing (tdd gate)" PASS
   else
     check "P5r inactive session records nothing (got: $L10)" FAIL
-  fi
-  start_session coldw
-  OUT="$(printf '%s' '{"hook_event_name":"PostToolUse","session_id":"coldw","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
-  L11="$(run_log --bypass-list --session coldw 2>/dev/null)"
-  if [ "$L11" = "none" ]; then
-    check "P5s inactive session records nothing (witness)" PASS
-  else
-    check "P5s inactive session records nothing (got: $L11)" FAIL
   fi
 
   start_session fx
@@ -512,6 +504,24 @@ if [ -n "$SBOX" ]; then
     check "P5y read filters junk AND duplicates from a crafted state file" PASS
   else
     check "P5y read filters junk AND duplicates (got: $L13)" FAIL
+  fi
+
+  start_session rx
+  run_log --tdd-begin --session rx >/dev/null 2>&1
+  RX_FILE="$SBOX/.zensu/state/tdd-phase-$(session_key rx).json"
+  STATE_FILE="$RX_FILE" node -e '
+    const fs = require("node:fs");
+    const state = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+    state.bypasses = ["ZENSU_TEST_WITNESS"];
+    fs.writeFileSync(process.env.STATE_FILE, JSON.stringify(state) + "\n");
+  '
+  L_RETIRED="$(run_log --bypass-list --session rx 2>/dev/null)"
+  run_log --bypass-note ZENSU_FULL_SUITE_GATE --session rx >/dev/null 2>&1
+  L_RETIRED2="$(run_log --bypass-list --session rx 2>/dev/null)"
+  if [ "$L_RETIRED" = "ZENSU_TEST_WITNESS" ] && [ "$L_RETIRED2" = "ZENSU_TEST_WITNESS, ZENSU_FULL_SUITE_GATE" ]; then
+    check "P5i the retired ZENSU_TEST_WITNESS entry an older installation wrote still renders and survives a later write" PASS
+  else
+    check "P5i the retired ZENSU_TEST_WITNESS entry still renders and survives a later write (got: $L_RETIRED / $L_RETIRED2)" FAIL
   fi
 
   JUNK_ROW="$(node -e 'const a=[];for(let i=0;i<40;i++)a.push("JUNK_"+i);process.stdout.write(JSON.stringify(a))' 2>/dev/null)"
@@ -574,7 +584,7 @@ if [ -n "$SBOX" ]; then
   STOP_ERR="$SBOX/stop-chain-off.err"
   printf '{"hook_event_name":"Stop","session_id":"sz"}\n' \
     | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" \
-      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_TEST_WITNESS= \
+      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= \
       env ZENSU_CHAIN=off bash "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh" >/dev/null 2>"$STOP_ERR"
   if grep -qF 'Gates bypassed during this session: ZENSU_TDD_GATE' "$STOP_ERR" 2>/dev/null; then
     check "P5j2 the ZENSU_CHAIN=off Stop release renders the ledger on stderr rather than ending the session silently" PASS
@@ -593,7 +603,7 @@ if [ -n "$SBOX" ]; then
   start_session dwx "$DWSBOX"
   run_log --tdd-begin --session dwx >/dev/null 2>&1
   DW_PAYLOAD="$(printf '{"hook_event_name":"PreToolUse","session_id":"dwx","tool_name":"Bash","cwd":%s,"tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf a >> ok.js; printf b >> src/t.js"}}' "$(printf '%s' "$DWSBOX" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(s)))')")"
-  OUT="$(printf '%s' "$DW_PAYLOAD" | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$DWSBOX" ZENSU_CONFIG="$SBOX/config.json" ZENSU_BSWGATE_TEMP_DIRS=/nonexistent-temp-root ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
+  OUT="$(printf '%s' "$DW_PAYLOAD" | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$DWSBOX" ZENSU_CONFIG="$SBOX/config.json" ZENSU_BSWGATE_TEMP_DIRS=/nonexistent-temp-root ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
   L14="$(run_log --bypass-list --session dwx 2>/dev/null)"
   case "$OUT" in
     *'"deny"'*)
@@ -631,7 +641,7 @@ if [ -n "$SBOX" ]; then
   printf '{"hooks":{"selfReview":false}}\n' > "$SBOX/config-nosr.json"
   run_delegate_nosr() {
     STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-nosr.json" \
-      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= \
+      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= \
       bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null
   }
   start_session dx
@@ -665,7 +675,7 @@ if [ -n "$SBOX" ]; then
   esac
   printf '{"hooks":{"selfReview":false,"combinedSummary":false}}\n' > "$SBOX/config-doubleoff.json"
   start_session dx
-  DOUT3="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  DOUT3="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
   case "$DOUT3" in
     *'as the last line of the ## Open section'*)
       check "P5x2 combinedSummary:false must NOT anchor the ledger to a ## Open section no summary renders" FAIL ;;
@@ -682,7 +692,7 @@ if [ -n "$SBOX" ]; then
   esac
   printf '{"hooks":{"selfReview":false,"autoFix":false}}\n' > "$SBOX/config-nosr-noautofix.json"
   start_session dx
-  DOUT4="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-nosr-noautofix.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  DOUT4="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-nosr-noautofix.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
   case "$DOUT4" in
     *'as the last line of the ## Open section'*)
       check "P5x4 autoFix:false + selfReview:false discloses via the TRAILING variant (got the ## Open-anchored one, which this branch never renders)" FAIL ;;
@@ -697,7 +707,7 @@ if [ -n "$SBOX" ]; then
   esac
   printf '{"hooks":{"autoFix":false}}\n' > "$SBOX/config-noautofix-sr.json"
   start_session dy
-  DOUT5="$(review_payload dy | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-noautofix-sr.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  DOUT5="$(review_payload dy | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-noautofix-sr.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
   case "$DOUT5" in
     *'Gates bypassed during this session:'*)
       check "P5x5 autoFix:false with selfReview ON does NOT duplicate the ledger the terminal stage renders" FAIL ;;

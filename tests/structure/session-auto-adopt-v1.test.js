@@ -26,7 +26,7 @@ const mod = require(MODULE_FILE);
 const realCore = require(CORE_FILE);
 
 const VERDICT_FIELDS = ['outcome', 'reason', 'recorded', 'executing', 'projectRoot', 'orphanedProjectRoot',
-  'prunedPluginRoot', 'supersededFile', 'provenance', 'leases', 'error'];
+  'prunedPluginRoot', 'supersededFile', 'provenance', 'provenanceCause', 'leases', 'error'];
 
 const REQUEST = Object.freeze({
   executingPluginRoot: '/plugins/zensu/0.21.1',
@@ -650,14 +650,34 @@ test('the operator line and the kept name are screens: a basename, two versions,
   assert.doesNotThrow(() => mod.operatorLine(null));
 });
 
+test('a failed provenance write keeps its cause: the verdict carries it and every renderer prints it', () => {
+  const unrecorded = { provenance: realCore.ADOPTION_PROVENANCE.UNAVAILABLE, provenanceCause: 'EACCES lock busy' };
+  const verdict = adopter({
+    adoptContext: () => ({
+      context: { plugin_root: '/plugins/zensu/0.21.1' }, supersededFile: '/records/scv1_x.superseded-0.20.0.json',
+      recorded: '0.20.0', executing: '0.21.1', projectRoot: '/work/project', orphanedProjectRoot: false,
+      prunedPluginRoot: false, ...unrecorded,
+    }),
+  }).instance.adoptForHook(REQUEST);
+  assert.equal(verdict.provenance, 'unavailable');
+  assert.equal(verdict.provenanceCause, 'EACCES lock busy');
+  assert.equal(adopter({}).instance.adoptForHook(REQUEST).provenanceCause, null);
+  assert.equal(mod.provenanceText(verdict), 'unavailable (EACCES lock busy)');
+  assert.equal(mod.provenanceText({ provenance: 'recorded' }), 'recorded');
+  assert.equal(mod.provenanceText({ provenance: 'unavailable', provenanceCause: 'ENOENT /Users/someone/x' }), 'unavailable ((unrenderable))');
+  assert.match(mod.operatorLine(verdict), /; provenance unavailable \(EACCES lock busy\); /);
+  assert.match(mod.renderAdoptionNotice(verdict, { where: 'on this tool call' }), /; provenance unavailable \(EACCES lock busy\); /);
+});
+
 test('the notice says what /zensu:doctor can actually show, per provenance', () => {
   // The doctor renders the RUNTIME_ADOPTED history entry and nothing else, so it has
   // an adoption to show only when a workflow document recorded one.
   assert.equal(realCore.ADOPTION_PROVENANCE.RECORDED, 'recorded');
   assert.equal(realCore.ADOPTION_PROVENANCE.NO_DOCUMENT, 'no-workflow-document');
+  assert.equal(realCore.ADOPTION_PROVENANCE.UNAVAILABLE, 'unavailable');
   const recorded = mod.doctorPointer({ outcome: 'adopted', provenance: realCore.ADOPTION_PROVENANCE.RECORDED });
   assert.match(recorded, /shows the adoption in its session-state block/);
-  for (const provenance of [realCore.ADOPTION_PROVENANCE.NO_DOCUMENT, 'unavailable: EACCES', null]) {
+  for (const provenance of [realCore.ADOPTION_PROVENANCE.NO_DOCUMENT, realCore.ADOPTION_PROVENANCE.UNAVAILABLE, null]) {
     const pointer = mod.doctorPointer({ outcome: 'adopted', provenance });
     assert.match(pointer, /has no entry for it and the kept record is its evidence/, String(provenance));
   }

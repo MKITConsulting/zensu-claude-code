@@ -114,7 +114,14 @@ fi
 # survives intact somewhere else, so the message may say no completion was
 # proven, but must NOT claim nothing existed to prove. Pinning the negative here
 # is what stops that overclaim from creeping back in.
-if grep -qF "Re-create exactly that directory" "$ERR1" \
+# The remedy is pinned as the COMMAND now, not as a bare "re-create that
+# directory". The bare form was INCOMPLETE: the workflow document lived under
+# the recorded root, so a hand-made directory leaves the session in a second
+# wedge where the capability gate denies every tool. The literal below is the
+# one a reader runs, and the cost clause beside it is what keeps the release
+# from reading as a promise to restore the work.
+if grep -qF -- "/zensu:adopt-session --restore-root --confirm" "$ERR1" \
+  && grep -qF "restores the anchor, not the work" "$ERR1" \
   && grep -qF "start a new session" "$ERR1" \
   && grep -qF "no completion was proven" "$ERR1" \
   && grep -qF "moved rather than deleted" "$ERR1" \
@@ -206,7 +213,7 @@ fi
 if ! grep -qF "context project root does not exist" "$ERR6" \
   && ! grep -qF "missing file" "$ERR1" \
   && ! grep -qF "no record for this session" "$ERR1" \
-  && ! grep -qF "Re-create exactly that directory" "$ERR6"; then
+  && ! grep -qF -- "--restore-root" "$ERR6"; then
   check "B6b the no-record and deleted-root diagnostics never collapse into one" PASS
 else
   check "B6b diagnostic distinction (b6='$(cat "$ERR6" 2>/dev/null)' b1='$(cat "$ERR1" 2>/dev/null)')" FAIL

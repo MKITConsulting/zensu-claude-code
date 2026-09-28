@@ -393,12 +393,18 @@ check "Z1 the scoping predicate reports zero changes for a clean project" "$(ver
 # whole gate deleted. The invocation is the one line that cannot survive that.
 grep -qF 'bash "$_rq_lib" --plan "$_rq_plan"' "$LOG"
 check "Z2 the gate really invokes the validation library" "$(verdict $?)"
-# The gate and the receipt gate must scope on ONE change count, not two.
-# One computation, and every consumer conjoins on it: the two gates and the two
-# bypass-ledger records (an escape from a gate that never ran is not an escape).
+# The gate and the receipt gate must scope on ONE change count, not two — but since
+# multi-repo stage 1 they no longer scope on the same PREDICATE. The receipt gate and
+# its ledger record conjoin on `_tc_armed`, which is that one count OR a logged claim;
+# THIS gate and its own ledger record still conjoin on the count alone, so the
+# zero-change chain this suite records as ungated stays ungated here. What must remain
+# true is that there is exactly ONE change-set computation, that `_tc_armed` is derived
+# from it rather than from a second one, and that all four consumers conjoin on one of
+# the two — an escape from a gate that never ran is not an escape either way.
 [ "$(grep -c '_tc_changes="\$(' "$LOG")" -eq 1 ] \
-  && [ "$(grep -c '\${_tc_changes:-0}" -gt 0' "$LOG")" -eq 4 ]
-check "Z3 both gates AND both ledger records scope on the same single change count" "$(verdict $?)"
+  && [ "$(grep -c '\${_tc_changes:-0}" -gt 0' "$LOG")" -eq 3 ] \
+  && [ "$(grep -c '"\$_tc_armed" -eq 1' "$LOG")" -eq 2 ]
+check "Z3 one change count: this gate and its ledger conjoin on it, the receipt gate through _tc_armed" "$(verdict $?)"
 # The count is computed UNCONDITIONALLY once a git HEAD resolves — not gated on
 # either switch. Gating it on "either gate armed" left the count at 0 when BOTH
 # were off, and the two bypass-ledger records conjoin on it, so neither escape
@@ -737,22 +743,36 @@ ERR_NO="$(bash "$LOG" --tdd-complete --session "$SID_NO" 2>&1 >/dev/null)"
 [ $? -eq 0 ] && printf '%s' "$ERR_NO" | grep -qF 'no --plan was passed and no plan could be derived'
 check "N3 a log path outside the project's .zensu/logs derives nothing" "$(verdict $?)"
 # A receipt this plugin did not write is not read: the schema discriminator binds.
+# Multi-repo stage 1 moved WHERE that binding is enforced. The receipt gate above
+# now reads the receipt's VERDICT rather than its existence, so an unknown schema
+# is refused there and this gate is never reached — a strictly stronger outcome
+# than the `REQUIREMENTS GATE UNRESOLVED` line this check used to pin. The
+# discriminator survives the move: `stage` wrote a same-stem plan with no
+# Requirements table, so a runtime that mined this receipt for a plan path would
+# reach that plan and refuse with the table verdict instead. Asserting that
+# verdict's ABSENCE is what still proves the receipt was not mined.
 SID_NS="rq-wrong-schema"
 activate_session "$SID_NS"
 stage "$SID_NS" "2026-01-01-1414_tdd-wrong-schema" "$BODIES/none.md"
 printf '{"schema":"something-else","log":"%s"}\n' \
   "$PROJ/.zensu/logs/2026-01-01-1414_tdd-wrong-schema.log" > "$(receipt_for "$SID_NS")"
 ERR_NS="$(bash "$LOG" --tdd-complete --session "$SID_NS" 2>&1 >/dev/null)"
-[ $? -eq 0 ] && printf '%s' "$ERR_NS" | grep -qF 'REQUIREMENTS GATE UNRESOLVED'
-check "N4 a receipt with a foreign schema is not mined for a plan path" "$(verdict $?)"
-# Malformed JSON degrades to "nothing derived", never to a crash or a pass claim.
+[ $? -ne 0 ] \
+  && printf '%s' "$ERR_NS" | grep -qF 'carries a schema this runtime does not know' \
+  && ! printf '%s' "$ERR_NS" | grep -qF 'PLAN REQUIREMENTS MISSING'
+check "N4 a receipt with a foreign schema is refused on its verdict, not mined for a plan path" "$(verdict $?)"
+# Malformed JSON is refused as unreadable, never as a crash and never as a plan
+# verdict. Same discriminator as N4: the staged same-stem plan is unusable, so a
+# runtime that reached the table gate would say so.
 SID_NM="rq-malformed"
 activate_session "$SID_NM"
 stage "$SID_NM" "2026-01-01-1515_tdd-malformed" "$BODIES/none.md"
 printf '{"schema":"edit-landing-v1","log":"broken\n' > "$(receipt_for "$SID_NM")"
 ERR_NM="$(bash "$LOG" --tdd-complete --session "$SID_NM" 2>&1 >/dev/null)"
-[ $? -eq 0 ] && printf '%s' "$ERR_NM" | grep -qF 'REQUIREMENTS GATE UNRESOLVED'
-check "N5 an unparseable receipt derives nothing and says so" "$(verdict $?)"
+[ $? -ne 0 ] \
+  && printf '%s' "$ERR_NM" | grep -qF 'does not parse as an edit-landing receipt' \
+  && ! printf '%s' "$ERR_NM" | grep -qF 'PLAN REQUIREMENTS MISSING'
+check "N5 an unparseable receipt is refused as unreadable, deriving no plan verdict" "$(verdict $?)"
 
 echo "== AC-004: the not-gated states, driven through the real verb =="
 # Z1 above only proves the predicate arithmetic. These drive --tdd-complete

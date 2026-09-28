@@ -1279,11 +1279,10 @@ fi
 # WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && grep -qF 'Known gap 1' "$ROOT/CLAUDE.md"; then
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" PASS
+    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js"; then
+  check "the review-evidence lease keeps the strict comparison" PASS
 else
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" FAIL
+  check "the review-evidence lease keeps the strict comparison" FAIL
 fi
 
 # AC-013 — a record and workflow document minted by the PREVIOUS RELEASE, from
@@ -1430,10 +1429,10 @@ fi
 # finished BEFORE this process probed.
 AUTO_ADOPT_UNIT="$ROOT/tests/structure/session-auto-adopt-v1.test.js"
 if [ -f "$AUTO_ADOPT_UNIT" ] && node --test "$AUTO_ADOPT_UNIT" >"$TMP/auto-adopt-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" 32; then
+  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" 33; then
   check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), driven from here)" PASS
 else
-  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= 32 registered — driven from here)" FAIL
+  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= 33 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/auto-adopt-unit.out" 2>/dev/null | head -40
 fi
@@ -1618,14 +1617,22 @@ ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/l
 # could re-add the assignment and every row below would stay green while the real
 # invocation was refused — a green enumeration over a command that never runs. The
 # skill is the only producer of that shape and no other suite reads it.
+#
+# THREE emitted forms, not two: the adoption report, its `--confirm` twin, and
+# the `--restore-root` report the project-root restore added. The fourth mode,
+# `--restore-root --confirm`, is named in prose as "the same command with
+# --confirm" rather than spelled again, so it adds no literal here. The COUNT is
+# hand-maintained and the `CLAUDE_PROJECT_DIR` conjunct beside it is the
+# load-bearing half — an added form has to be counted here deliberately, which is
+# exactly what caught the restore mode.
 ADOPT_SKILL_COMMANDS="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"' \
   "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md" 2>/dev/null || printf 0)"
-if [ "$ADOPT_SKILL_COMMANDS" = 2 ] \
+if [ "$ADOPT_SKILL_COMMANDS" = 3 ] \
     && ! grep -q 'CLAUDE_PROJECT_DIR.*zensu-session-adopt\.sh' \
       "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"; then
-  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR" PASS
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR" PASS
 else
-  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
 fi
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
@@ -1666,17 +1673,16 @@ done
 #   pre-bash-zensu-gate.sh   — exits 0 before it ever binds when the command
 #     carries no `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the
 #     adoption command carries none.
-#   pre-bash-witness.sh      — ADVISORY by construction: it emits no
-#     `permissionDecision` in either direction and always exits 0, because on
-#     PreToolUse a non-zero exit blocks the call and a witness that failed closed
-#     would break every Bash call in the session. See CLAUDE.md §"Witness Attempt
-#     Half"; `P12-A5` in test-post-bash-witness.sh pins that contract directly.
+#   pre-browser-navigation-consent.sh — exits 0 with no decision, before it
+#     resolves its plugin root or binds a session, whenever the payload names
+#     neither `playwright-cli` nor `@playwright/cli`, and the adoption command
+#     names neither.
 #
 # A THIRD entry needs its own sentence here. Do not add a name without one: the
 # value of this list is that every member states why it cannot deny.
 adopt_hook_expected() {
   case "$1" in
-    pre-bash-zensu-gate.sh|pre-bash-witness.sh) printf 'allow\n' ;;
+    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
     *) printf '%s\n' "$2" ;;
   esac
 }
@@ -3224,11 +3230,10 @@ EOF
   else
     check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state (unexpected:$PRUNED_GATE_FAILURES missing-from-enumeration:$PRUNED_ENUMERATION_MISSING)" FAIL
   fi
-  # The deny half, hook by hook, and the two names absent from this list are the
-  # two `adopt_hook_expected` exempts above, for the same reasons stated there:
-  # pre-bash-zensu-gate.sh exits before it binds for a command carrying no zensu
-  # verb, and pre-bash-witness.sh is advisory and emits no permissionDecision at
-  # all. Neither is a denier here, so neither is graded as one.
+  # The deny half, hook by hook. pre-bash-zensu-gate.sh is absent from this list
+  # for the reason `adopt_hook_expected` states above: it exits before it binds for
+  # a command carrying no zensu verb, so it is not a denier here and is not graded
+  # as one.
   PRUNED_PLAIN_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "echo probe")"
   PRUNED_DENY_FAILURES=''
   for hook_name in pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do

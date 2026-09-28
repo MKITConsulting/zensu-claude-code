@@ -107,9 +107,10 @@ const STATE_NEUTRAL_REASONS = Object.freeze([
   'probe-failed',
 ]);
 
-// Provenance is one of `recorded`, `no-workflow-document` or `unavailable: <why>`;
-// the third carries an error message, so it is bounded to a printable class
-// rather than trusted into a notice verbatim. The class admits NO slash: an error
+// Provenance is one of `recorded`, `no-workflow-document` or `unavailable`, and
+// the cause of the third travels beside it as `provenanceCause`, an error
+// message. Both are bounded to a printable class rather than trusted into a
+// notice verbatim. The class admits NO slash: an error
 // message is where a filesystem path arrives, and a path in a user-facing notice
 // is the one thing this screen exists to keep out. Such a message renders as
 // `(unrenderable)` here, and /zensu:doctor carries the detail.
@@ -129,6 +130,16 @@ function safeVersion(value) {
 
 function safeProvenance(value) {
   return typeof value === 'string' && SAFE_PROVENANCE.test(value) ? value : '(unrenderable)';
+}
+
+// The token plus its cause, for every renderer. A cause dropped here would be
+// deleted rather than bounded: the token alone says a provenance write failed
+// and nothing about why.
+function provenanceText(adoption) {
+  const cause = adoption && typeof adoption.provenanceCause === 'string' && adoption.provenanceCause !== ''
+    ? ` (${safeProvenance(adoption.provenanceCause)})`
+    : '';
+  return safeProvenance(adoption && adoption.provenance) + cause;
 }
 
 // The FOURTH shared screen: the kept record's BASENAME, never its path. It was
@@ -195,7 +206,7 @@ function leaseClause(leases) {
 // caller owns its own lead-in.
 function operatorLine(adoption) {
   return `adopted the Session Control record (${safeVersion(adoption && adoption.recorded)} -> ${safeVersion(adoption && adoption.executing)}); `
-    + `previous record kept as ${keptName(adoption)}; provenance ${safeProvenance(adoption && adoption.provenance)}; `
+    + `previous record kept as ${keptName(adoption)}; provenance ${provenanceText(adoption)}; `
     + `${leaseClause(adoption && adoption.leases)}`;
 }
 
@@ -232,7 +243,7 @@ function renderAdoptionNotice(adoption, options) {
   const orphan = adoption && adoption.orphanedProjectRoot
     ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
     : '';
-  return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption && adoption.provenance)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
+  return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
 }
 
 function errorMessage(error) {
@@ -313,6 +324,7 @@ function verdict(outcome, reason, extra) {
     prunedPluginRoot: false,
     supersededFile: null,
     provenance: null,
+    provenanceCause: null,
     leases: null,
     error: null,
   }, extra || {});
@@ -531,6 +543,7 @@ function createAutoAdopter(deps) {
       prunedPluginRoot: Boolean(adopted.prunedPluginRoot),
       supersededFile: typeof adopted.supersededFile === 'string' ? adopted.supersededFile : null,
       provenance: typeof adopted.provenance === 'string' ? adopted.provenance : null,
+      provenanceCause: typeof adopted.provenanceCause === 'string' ? adopted.provenanceCause : null,
       leases,
     });
   }
@@ -558,6 +571,7 @@ module.exports = {
   SAFE_TOKEN,
   SAFE_PROVENANCE,
   safeProvenance,
+  provenanceText,
   safeVersion,
   keptName,
   leaseClause,

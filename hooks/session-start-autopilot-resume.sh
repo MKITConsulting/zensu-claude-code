@@ -101,6 +101,8 @@ case "$SOURCE" in
     # Equal-match SessionStart hooks run concurrently. Prefer a valid existing
     # record on retries; while the first record is not yet present, use Claude's
     # stable project variable. The mutable payload cwd is never authoritative.
+    # TWIN: session-start-banner.sh resolves the root for its delivery-route
+    # disclosure through the same binder call; change the two together.
     NATIVE_PLUGIN_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PLUGIN_ROOT")" \
       || exit 0
     NATIVE_PLUGIN_DATA="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" \

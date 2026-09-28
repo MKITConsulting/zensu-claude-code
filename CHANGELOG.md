@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-28
+
+### Added
+
+- **tdd**: Run the full suite through a plugin-owned evidence runner and drop the Bash witness (#335)
+- **session-control**: Restore a vanished recorded project root (#312)
+- **review**: Converge the tdd auto-fix loop with a findings ledger and severity rubric (#325)
+- **worktree-keep**: Keep a live session's worktree out of the desktop pool (#318)
+- **pr-team-review**: Publish standalone reviews without asking first (#332)
+- **delivery-route**: Make the delivery-route answer session-sticky (#324)
+- **verify-feature**: Drive the browser through playwright-cli and drop the bundled MCP server (#319)
+- **pr-team-review**: Publish a verdict-first review layout (#322)
+- **autopilot**: Adopt a durable run across a session-id change (#300)
+- **multi-repo**: Detect and refuse cross-repository chains (stage 1) (#311)
+- **session-trail**: Offer a worktree move alternative on the present leg (#313)
+
+### Changed
+
+- **redact**: Remove the witness special cases left after the evidence runner (#337)
+- **reviewer-capability**: Pin the read-only allowlist and sweep host tool names (#333)
+- **reviewer-capability**: Pin that a reviewer or PLM handback stays denied on a bind failure (#334)
+- **session-trail**: Pin the one-session collapse on the PR, worktree and partial tiers (#330)
+- **verify-feature**: Align docs and rules with the playwright-cli consent gate (#329)
+- **deps**: Clear the eight open Dependabot alerts in dev tooling (#316)
+- Split CLAUDE.md into path-scoped rules and unpin its prose (#321)
+- **multi-repo**: Decide the codeRoots carrier and state its preconditions (#317)
+
+### Fixed
+
+- **owned-process**: Report 128 plus the real signal number (#336)
+- **eval**: Match plan-approval TUI phrases across escape-drawn spaces (#326)
+- **reviewer-capability**: Admit the host's SubagentHandback report tool (#331)
+- **vcs**: Surface forge CLI errors from the review publish paths (#328)
+- **session-trail**: Keep selectors off the invoking session and age sessions from turn records (#327)
+- **edit-landing**: Anchor the claim grammar and accept every dash spelling (#323)
+- **pr-team-review**: Read persona triggers as criteria, not closed file lists (#315)
+- **session-trail**: Honor queue remove operations in depth and prompt listing (#320)
+- **verify-feature**: Close the declared-safe argument hole in the transcript grader (#310)
+- **evidence**: Match witness claims that carry escaped quotes (#309)
+- **verify-feature**: Give the browser broker a unique MCP server key (#308)
+
+### Upgrade notes
+
+- **verify-feature**: `/zensu:verify-feature` now drives the browser through `playwright-cli`,
+  which you install once: `npm install -g @playwright/cli@0.1.21`. That is the version the
+  browser consent gate was measured against, and the run-config helper refuses to start a run
+  on any other. `brew install playwright-cli` is unpinned: it installs whichever version
+  Homebrew ships.
+- **verify-feature**: the plugin no longer ships a Playwright MCP server, so permission rules
+  for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing.
+  Delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask`
+  rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it
+  restricts nothing.
+
 ## [0.21.1] - 2026-09-15
 
 ### Added

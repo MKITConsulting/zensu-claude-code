@@ -43,8 +43,6 @@ AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
 ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
 PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
 VERIFY_RUNTIME="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
-PLAYWRIGHT_MCP="$ROOT/scripts/playwright-mcp.sh"
-PLAYWRIGHT_MCP_TEST="$ROOT/tests/structure/playwright-mcp-proxy.test.js"
 CORE_SNAPSHOT_BLOCK="$(awk '
   /^function readRegularFileSnapshot\(/ { capture=1 }
   /^function readRegularFile\(/ { capture=0 }
@@ -293,27 +291,17 @@ else
 fi
 
 if grep -qF 'MUTATING_CONTROL_CANARY_URL="$(jq -ebr '\''.url'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_ORIGIN="$(jq -ebr '\''.origin'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_POLICY="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn' "$CLAUDE_WRAPPER" \
-  && grep -qF 'json_quote "$MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1=' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''ZENSU_VERIFY_NAVIGATION_POLICY_V1='\'' \' "$CLAUDE_WRAPPER" \
+  && grep -qF 'json_quote "curl -fsS $MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
+  && ! grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$CLAUDE_WRAPPER" \
   && grep -qF '"${CLAUDE_ENV[@]}" claude "${CLAUDE_ARGS[@]}" "$FULL_PROMPT"' "$CLAUDE_WRAPPER" \
   && grep -qF 'SELFTEST_MUTATING_CONTROL_CANARY_URL=' "$CLAUDE_WRAPPER" \
   && grep -qF 'attack="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg url "$SELFTEST_MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --argjson block "$attack"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node -e' "$CLAUDE_WRAPPER_SELFTEST" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER" \
-  && grep -qF '"MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1="' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'local arg_conv_excl="$1"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'env_args+=( "MSYS2_ARG_CONV_EXCL=$arg_conv_excl" )' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_PROXY_HOST="$(cygpath -am "$PROXY")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_RUNTIME_DIR_HOST="$(cygpath -am "$RUNTIME_DIR")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF "run_sanitized_child '*' node \"\$POLICY_PROXY_HOST\"" "$PLAYWRIGHT_MCP" \
-  && grep -qF "test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {" "$PLAYWRIGHT_MCP_TEST"; then
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" PASS
+  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER"; then
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" PASS
 else
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" FAIL
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" FAIL
 fi
 
 if grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" "$CLAUDE_WRAPPER_SELFTEST" \
@@ -685,6 +673,30 @@ if [ "$(grep -cF 'process.platform !== '"'"'win32'"'"' && Number.isInteger(fs.co
   check "doctor renderer keeps a guarded O_NONBLOCK on all four opens and O_NOFOLLOW on the two session-writable readers" PASS
 else
   check "doctor renderer keeps a guarded O_NONBLOCK on all four opens and O_NOFOLLOW on the two session-writable readers" FAIL
+fi
+
+WORKTREE_KEEP="$ROOT/hooks/lib/worktree-keep-v1.js"
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollowFlag() | nonBlockFlag())' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_APPEND | noFollowFlag() | nonBlockFlag()' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'appendFlags | fs.constants.O_CREAT | fs.constants.O_EXCL' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.nlink !== 1' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.dev !== opened.dev || landed.ino !== opened.ino' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF 'fs.constants.O_APPEND | fs.constants.O_CREAT' "$WORKTREE_KEEP" \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o600)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o644)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.linkSync(temp, file)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.copyFileSync(temp, file, fs.constants.COPYFILE_EXCL)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF "fs.openSync(marker.file, 'wx'" "$WORKTREE_KEEP" \
+  && [ "$(grep -oF 'fs.openSync(' "$WORKTREE_KEEP" | wc -l | tr -d ' ')" -eq 4 ] \
+  && ! grep -qF 'readFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'appendFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$WORKTREE_KEEP"; then
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" PASS
+else
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

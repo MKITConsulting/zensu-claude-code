@@ -113,9 +113,34 @@ stance). `--verdict=APPROVE` still just annotates the note; it does not approve 
 
 ## No markdown tables
 
-Same hard rule as the GitHub path: no markdown tables in the summary body or inline
-discussions — GitLab's diff view squeezes them unreadably. Use numbered subsections + bullet
-lists with bold prefixes.
+Same hard rule as the GitHub path, with the same single carve-out: the four-column
+`### Test Coverage` counts table in the summary body. No other table in the summary body and
+none in the inline discussions — GitLab's diff view squeezes them unreadably. Use bold
+`F<n>` lead-ins and bullet lists instead.
+
+## Alerts, suggestions, and links
+
+The summary note and the discussions use the same Markdown as the GitHub path
+(`SKILL.md` Phase D). Four details differ on GitLab:
+
+- **Alerts.** GitLab renders the lower-case `> [!caution]` family from version 17.10 on. An
+  older self-managed instance shows a plain quote whose first line reads `[!caution]`; the
+  verdict sentence below it stays readable. The driver still puts `_Verdict: <EVENT>_` above
+  the body, so the submitted event is visible either way.
+- **Suggestions.** Spell the fence info string `suggestion:-0+0`. The offsets count lines
+  relative to the commented line, and the driver posts every inline discussion at one line,
+  so emit single-line suggestions only — never a multi-line one on GitLab. The conditions in
+  `rules/github-publish.md` § Suggested changes apply unchanged. GitLab applies a suggestion
+  only in a diff thread: when the driver degrades a finding to a positionless discussion, the
+  author can no longer apply its block from the merge request.
+- **Permalinks.** File links take the form `<base>/-/blob/<sha>/<path>#L<a>-<b>` and the
+  commit link `<base>/-/commit/<sha>`, where `<base>` is the MR `url` without its trailing
+  `/-/merge_requests/<iid>` (`rules/workflow.md` Phase D).
+- **References.** GitLab turns `#<n>` into an issue link and `!<n>` into a merge request
+  link. The `F<n>` finding IDs avoid both.
+
+`<details>`, `<summary>`, `<sub>`, and HTML comments work as on GitHub: GitLab's sanitizer
+allows the first three and hides the comments.
 
 ## Known limits (Phase-3 follow-ups)
 

@@ -465,6 +465,7 @@ function protectedAccessViolation(payload, trusted) {
     trusted.contextFile,
     path.join(trusted.pluginData, 'session-control'),
     path.join(trusted.pluginData, 'review-evidence'),
+    path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
@@ -510,13 +511,14 @@ function neutralViolation(payload, trusted) {
     ? payload.tool_name.split('__').at(-1)
     : null;
   if (zensuMcpTool && !ZENSU_MCP_READ_RE.test(zensuMcpTool)) {
-    return 'host-profile-v1 cannot invoke mutating Zensu MCP tools';
+    return 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
   }
 
   const protectedRoots = [
     trusted.contextFile,
     path.join(trusted.pluginData, 'session-control'),
     path.join(trusted.pluginData, 'review-evidence'),
+    path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
@@ -575,9 +577,20 @@ function neutralViolation(payload, trusted) {
   return null;
 }
 
+const HOST_HANDBACK_TOOL = 'SubagentHandback';
+const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
+
+function handbackViolation(payload, profile) {
+  const keys = Object.keys(payload.tool_input);
+  if (keys.length === 1 && keys[0] === 'message' && typeof payload.tool_input.message === 'string') {
+    return null;
+  }
+  return `${profile} may invoke ${HOST_HANDBACK_TOOL} only with exactly one string field, message`;
+}
+
 function readOnlyViolation(payload, trusted, profile) {
   if (!REVIEWER_READ_TOOLS.has(payload.tool_name)) {
-    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed`;
+    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} to deliver the final report`;
   }
   const violation = protectedAccessViolation(payload, trusted);
   return violation ? `${profile} ${violation}` : null;
@@ -631,7 +644,12 @@ function main() {
     // ancestors in the recorded project (`.zensu` and not `.zensu/state`: the mkdir
     // creates BOTH components, and `.zensu` is not inside `.zensu/state` — the adopt
     // header makes that argument and two carriers still spelled the narrower one),
-    // and carries its own justification in its
+    // and — under `--restore-root --confirm` only — the recorded project ROOT itself
+    // when that directory is what is gone. That fifth class is the only one that
+    // CREATES a directory rather than writing into one an earlier read already
+    // proved exists, which is why it is named here rather than folded into the
+    // document write: this enumeration IS the justification this gate's admission
+    // rests on. It carries its own justification in its
     // header. A
     // remedy the user cannot invoke is not a remedy.
     //
@@ -728,7 +746,7 @@ function main() {
     if (lineage) {
       const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case.`);
         return;
       }
       deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
@@ -753,6 +771,33 @@ function main() {
         return;
       }
       deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
+      return;
+    }
+    // The vanished recorded project root. This branch exists because the orphan
+    // RELAXATION far above is conjoined on PRINCIPALS.MAIN, so for every other
+    // principal the predicate is never consulted and control used to fall all the
+    // way to the generic `immutable context revalidation failed: ...` — a
+    // cause-free deny in a bind failure that has a name and an in-place repair,
+    // which is exactly what the neighbouring comment records as a regression this
+    // branch shipped once already for the lineage state.
+    //
+    // There is deliberately NO main-principal arm here, and copying the lineage
+    // branch's two-sided shape was the mistake. That branch is genuinely two-sided
+    // because `resolveIncompatibleRuntime` is not one of the relaxation disjuncts
+    // far above; `orphanedProjectRootSession` IS. The relaxation already RETURNS
+    // (allows) for MAIN in this state, so a MAIN arm here is reachable only if the
+    // recorded root is deleted between that call and this one — a race, not the
+    // steady state — and a ~500-character remedy maintained for no consumer tells
+    // the next reader that MAIN gets a deny it in fact never sees.
+    //
+    // What remains is the CAUSE half, which every non-main principal needs and used
+    // to be denied without: control fell all the way to the generic `immutable
+    // context revalidation failed: ...`, a cause-free deny in a bind failure that
+    // has a name and an in-place repair. The remedy is deliberately NOT named: a
+    // read-only principal is never the thread that can run it, and pointing one at
+    // a privileged write is the shape this file's own comment above calls a defect.
+    if (hookSession.orphanedProjectRootSession(payload)) {
+      deny("this session's Session Control record is readable and this installation serves it, but the project root it records no longer exists — a deleted or recycled worktree causes it. The workflow document lived under that directory, so no write can be attributed to a project that is not there. The repair re-creates a directory and rewrites the workflow document, so it is reserved for the main thread and is not available here — report this to the main thread rather than retrying.");
       return;
     }
     // The SECOND named cause, and the second one with an in-place remedy. It sits
@@ -812,10 +857,14 @@ function judgePrincipal(payload, bound, principal) {
       return `evidence-worker-v1 validation failed: ${error.message}`;
     }
   }
+  const profile = pathResolutionProfile(payload, principal);
+  if (payload.tool_name === HOST_HANDBACK_TOOL && HANDBACK_PROFILES.has(profile)) {
+    return handbackViolation(payload, profile) || null;
+  }
   try {
     trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
   } catch (error) {
-    return unusableWorkingDirectoryReason(pathResolutionProfile(payload, principal), error);
+    return unusableWorkingDirectoryReason(profile, error);
   }
   if (principal === principals.PRINCIPALS.REVIEWER) {
     try {
