@@ -57,10 +57,10 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    authentication, or screenshots. In POLICY mode an origin is approved when the
    parent-environment policy names it as a target with `evidenceMode: declared-safe`; the gate
    admits only those targets, and every route on them. In consent mode (the preflight printed
-   `consent`) the user approves the origin instead: the gate admits literal loopback origins
-   only and opens the host's permission prompt once per new loopback origin. Either way an
-   approved origin covers every page on it, at any path, including routes whose identifiers
-   change on every run; no route list is declared or checked, and a recipe's
+   `consent`) the user approves the origin instead: the gate admits loopback origins only (a
+   loopback IP or `localhost`) and opens the host's permission prompt once per new loopback
+   origin. Either way an approved origin covers every page on it, at any path, including routes
+   whose identifiers change on every run; no route list is declared or checked, and a recipe's
    `validate.evidenceSafety` block no longer gates navigation. Contract v1 supports only
    `declared-safe`; there is no trusted redaction-driver path. Wait for the user's answer;
    a refused prompt makes that origin's rows PARTIAL.

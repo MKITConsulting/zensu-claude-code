@@ -105,9 +105,10 @@ test('a local run writes an isolated, origin-restricted config inside the run di
 test('a local run refuses every origin the navigation floor refuses', async (t) => {
   const dir = runDir(t);
   const refused = [
-    ['http://localhost:5173', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
-    ['http://192.168.1.10:5173', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
-    ['https://example.com', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
+    ['http://app.localhost:5173', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['http://localhost.:5173', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['http://192.168.1.10:5173', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['https://example.com', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://user:pw@127.0.0.1:5173', FLOOR_REASONS.CREDENTIALS],
     ['http://127.0.0.1:5173/?token=x', FLOOR_REASONS.QUERY_OR_FRAGMENT],
     ['http://127.0.0.1:5173/#x', FLOOR_REASONS.QUERY_OR_FRAGMENT],
@@ -124,6 +125,17 @@ test('a local run refuses every origin the navigation floor refuses', async (t) 
   await assert.rejects(helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:1', '--origin', 'http://127.0.0.1:1/'], undefined, NO_POLICY, READY),
     /unique/);
   assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('a local run admits localhost and pins no address for it', async (t) => {
+  const dir = runDir(t);
+  const neverResolves = async (host) => { throw new Error(`resolved ${host}`); };
+  const result = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://localhost:4200', '--origin', 'http://localhost:9090'],
+    neverResolves, NO_POLICY, READY);
+  assert.deepEqual(result.origins, ['http://localhost:4200', 'http://localhost:9090']);
+  assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server']);
+  assert.deepEqual(result.config.network.allowedOrigins, ['http://localhost:4200', 'http://localhost:9090']);
+  assert.equal(consent.runConfigShape(result.config, result.configPath).ok, true);
 });
 
 test('a remote run pins every hostname to a public address and refuses the rest', async (t) => {
@@ -153,6 +165,7 @@ test('a remote run pins every hostname to a public address and refuses the rest'
     ['http://preview.example.com', FLOOR_REASONS.REMOTE_HTTPS],
     ['http://93.184.216.34', FLOOR_REASONS.REMOTE_HTTPS],
     ['https://127.0.0.1:8443', FLOOR_REASONS.REMOTE_HTTPS],
+    ['https://localhost:8443', FLOOR_REASONS.REMOTE_HTTPS],
     ['https://10.0.0.5', FLOOR_REASONS.REMOTE_NOT_PUBLIC],
   ];
   for (const [origin, reason] of refused) {
@@ -189,6 +202,9 @@ test('the run config follows the navigation policy: remote needs one, and a poli
 test('the policy check answers consent or policy per origin and refuses what the gate would refuse', async () => {
   const resolver = publicResolver({ 'preview.example.com': ['93.184.216.34'], 'internal.example.com': ['10.0.0.5'] });
   assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
+  assert.equal(await helper.checkPolicy(['local', 'http://localhost:5173', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
+  assert.equal(await helper.checkPolicy(['local', 'http://localhost:5173', 'declared-safe'],
+    policyEnv('local', [target('http://localhost:5173')]), resolver, READY), 'policy');
   await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], NO_POLICY, resolver, READY),
     (error) => error.message === consent.REASONS.REMOTE_NEEDS_POLICY);
   for (const local of [policyEnv('local', [target('http://127.0.0.1:5173')]), policyEnv('local', [target('http://127.0.0.1:5173', ['/login'])])]) {
@@ -331,10 +347,10 @@ test('the CLI prints the session, the config path and each origin, and exits 1 w
   const ok = spawnSync(process.execPath, [HELPER, '--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'], { encoding: 'utf8', env });
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(ok.stdout, `session=zensu-verify-run-abc123\nconfig=${path.join(dir, helper.CONFIG_NAME)}\nmode=consent\norigin=http://127.0.0.1:5173\n`);
-  const bad = spawnSync(process.execPath, [HELPER, '--run-dir', dir, '--mode', 'local', '--origin', 'http://localhost:5173'], { encoding: 'utf8', env });
+  const bad = spawnSync(process.execPath, [HELPER, '--run-dir', dir, '--mode', 'local', '--origin', 'http://app.localhost:5173'], { encoding: 'utf8', env });
   assert.equal(bad.status, 1);
   assert.equal(bad.stdout, '');
-  assert.equal(bad.stderr, `zensu verify browser config: ${FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK}\n`);
+  assert.equal(bad.stderr, `zensu verify browser config: ${FLOOR_REASONS.LOCAL_LOOPBACK_ONLY}\n`);
   const check = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:5173', 'declared-safe'], { encoding: 'utf8', env });
   assert.equal(check.status, 0, check.stderr);
   assert.equal(check.stdout, 'consent\n');

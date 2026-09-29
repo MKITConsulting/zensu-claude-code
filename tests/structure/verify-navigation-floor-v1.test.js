@@ -8,9 +8,11 @@ const path = require('node:path');
 const floor = require('../../hooks/lib/verify-navigation-floor-v1.js');
 const {
   FLOOR_REASONS,
+  LOCALHOST_NAME,
   MAX_POLICY_ROUTES,
   checkNavigationTarget,
   classifyOrigin,
+  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
@@ -26,7 +28,7 @@ test('the consent gate and the run-config helper require the floor module instea
   for (const file of [consentPath, helperPath]) {
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /verify-navigation-floor-v1\.js/, file);
-    for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isPublicAddress(',
+    for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isLocalHost(', 'function isPublicAddress(',
       'function resolveRemoteHost(', 'function classifyOrigin(', 'function normalizeRoute(', 'function parsePolicyTargets(',
       'function policyContractFault(']) {
       assert.equal(source.includes(own), false, `${path.basename(file)}: ${own}`);
@@ -71,13 +73,29 @@ test('navigation targets refuse credentials, query and fragment, and unknown sch
   assert.equal(checkNavigationTarget('wss://app.example.com/events', false).origin, 'https://app.example.com');
 });
 
-test('origin classification splits literal loopback from public https and refuses the rest', () => {
+test('the local-host predicate admits loopback IPs and the exact name localhost, never a suffix or an alias', () => {
+  assert.equal(LOCALHOST_NAME, 'localhost');
+  for (const host of ['localhost', 'LOCALHOST', 'LocalHost', '127.0.0.1', '127.9.9.9', '[::1]', '::1']) {
+    assert.equal(isLocalHost(host), true, host);
+  }
+  for (const host of ['localhost.', 'app.localhost', 'localhost.localdomain', 'localhost6', 'my-localhost', 'localhost.example.com',
+    '128.0.0.1', '::ffff:127.0.0.1', '10.0.0.5', '']) {
+    assert.equal(isLocalHost(host), false, host);
+  }
+  assert.equal(isLoopbackHost('localhost'), false);
+});
+
+test('origin classification splits loopback origins from public https and refuses the rest', () => {
   assert.equal(classifyOrigin('http://127.0.0.1:5173/inventory').mode, 'local');
   assert.equal(classifyOrigin('https://[::1]:8443/').mode, 'local');
   assert.equal(classifyOrigin('https://app.example.com/dashboard').mode, 'remote');
   assert.equal(classifyOrigin('https://93.184.216.34/').mode, 'remote');
-  assert.equal(classifyOrigin('http://localhost:5173/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
-  assert.equal(classifyOrigin('http://app.example.com/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+  assert.equal(classifyOrigin('http://localhost:5173/').mode, 'local');
+  assert.equal(classifyOrigin('https://LOCALHOST:8443/').mode, 'local');
+  assert.equal(classifyOrigin('ws://localhost:5173/events', false).mode, 'local');
+  for (const url of ['http://localhost.:5173/', 'http://app.localhost:5173/', 'http://localhost.localdomain:5173/', 'http://app.example.com/']) {
+    assert.equal(classifyOrigin(url).reason, FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, url);
+  }
   assert.equal(classifyOrigin('http://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_HTTPS);
   assert.equal(classifyOrigin('https://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('https://169.254.169.254/latest/meta-data').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
@@ -259,18 +277,18 @@ test('parsePolicyTargets names the route or origin fault it met', () => {
     { ok: false, fault: 'policy origins must be unique' });
 });
 
-test('parsePolicyTargets admits only literal loopback in local mode and only non-loopback https in remote mode', () => {
+test('parsePolicyTargets admits only loopback origins in local mode and only non-loopback https in remote mode', () => {
   const single = (mode, origin) => parsePolicyTargets(policyOf(mode, [{ ...POLICY_TARGET, origin }]));
-  for (const origin of ['http://127.0.0.1:4300', 'https://127.0.0.2:8443', 'http://[::1]:4300']) {
+  for (const origin of ['http://127.0.0.1:4300', 'https://127.0.0.2:8443', 'http://[::1]:4300', 'http://localhost:4300', 'https://localhost:8443']) {
     assert.equal(single('local', origin).ok, true, origin);
   }
-  for (const origin of ['http://localhost:4300', 'http://10.0.0.5:4300', 'https://app.example.com', 'ws://127.0.0.1:4300']) {
-    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK }, origin);
+  for (const origin of ['http://app.localhost:4300', 'http://localhost.:4300', 'http://10.0.0.5:4300', 'https://app.example.com', 'ws://127.0.0.1:4300']) {
+    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY }, origin);
   }
   for (const origin of ['https://app.example.com', 'https://93.184.216.34', 'https://[2606:2800:220:1:248:1893:25c8:1946]']) {
     assert.equal(single('remote', origin).ok, true, origin);
   }
-  for (const origin of ['http://app.example.com', 'https://127.0.0.1', 'https://[::1]:8443', 'ws://app.example.com']) {
+  for (const origin of ['http://app.example.com', 'https://127.0.0.1', 'https://[::1]:8443', 'https://localhost', 'ws://app.example.com']) {
     assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS }, origin);
   }
   for (const origin of ['https://10.0.0.5', 'https://169.254.169.254', 'https://[fc00::1]']) {

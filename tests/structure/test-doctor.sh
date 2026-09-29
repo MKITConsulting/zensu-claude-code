@@ -394,9 +394,13 @@ case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.
   *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
   *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
 esac
-case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://localhost:4300","evidenceMode":"declared-safe","routes":["/"]}]}')" in
-  *'is set but invalid (local navigation policy accepts literal loopback-IP origins only)'*) check "P1vk2 a per-target policy fault renders policy-invalid naming it" PASS ;;
+case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://app.localhost:4300","evidenceMode":"declared-safe","routes":["/"]}]}')" in
+  *'is set but invalid (local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost)'*) check "P1vk2 a per-target policy fault renders policy-invalid naming it" PASS ;;
   *) check "P1vk2 a per-target policy fault renders policy-invalid naming it" FAIL ;;
+esac
+case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://localhost:4300","evidenceMode":"declared-safe","routes":["/"]}]}')" in
+  *'environment policy active'*) check "P1vk3 a local policy naming localhost renders active" PASS ;;
+  *) check "P1vk3 a local policy naming localhost renders active" FAIL ;;
 esac
 # Every vf_live case above reaches its reason only because all three `unavailable` elifs
 # PASSED, so only their true side ever ran. This one drives the last of them: a synthetic

@@ -200,7 +200,29 @@ gate (`readPolicy`), the helper (`run`, `--check-policy`) and the doctor wrapper
 broker. DNS happens in exactly one place, the helper's `resolveRemoteHost` at run-config time, and
 the gate then requires the resulting pin for a remote hostname; a policy parse never resolves.
 
-**Consent mode** (no policy in the environment) admits literal loopback origins only and returns
+**`localhost` is a local origin, exactly and without a pin.** `isLocalHost` in the floor is the one
+answer to "is this origin local": a loopback IP (`127.0.0.0/8`, `[::1]`) or the exact name
+`localhost` in any letter case. `localhost.`, `app.localhost`, `localhost.localdomain` and every
+`/etc/hosts` alias stay refused. The name is safe because the BROWSER resolves it, not the operating
+system: Chromium's `HostResolverManager::ResolveLocally` answers `localhost` from `ServeLocalhost`
+with `[::1]` and `127.0.0.1` before any cache, HOSTS-file or DNS task (read in
+`net/dns/host_resolver_manager.cc` on chromium/chromium `main`, 2026-09-28). The one channel in the
+run config that sits above that step is a `--host-resolver-rules` MAP rule, so `runConfigShape`
+refuses a pin for `localhost` and the helper writes none for a local origin: a MAP rule carries ONE
+address, and measured on Chromium 1228 `MAP localhost 127.0.0.1` made a server bound only to
+`[::1]` unreachable. MEASURED with playwright-cli 0.1.21 driving Google Chrome 154.0.8037.57: a run
+config allowing two `localhost` origins reached a server bound only to `[::1]` and one bound only to
+`127.0.0.1`, a `fetch` between them passed, and a third `localhost` origin outside
+`allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` before its server saw a request.
+`localhost` and `127.0.0.1` stay different origins: a policy target or a consent for one never
+admits the other. Sites that move together: `LOCALHOST_NAME`, `isLocalHost`,
+`FLOOR_REASONS.LOCAL_LOOPBACK_ONLY` and `CONSENT_REMOTE_REASON` in the floor, both arms of
+`parsePolicyTargets`, `checkOrigin` in the helper, the localhost pin refusal in `runConfigShape`,
+and the operator accounts listed below. **Version for this delta: `patch`** — no schema field, key
+set, hook, matcher, config key or attestation moves; the gate asks where it denied, and relaxing an
+existing deny is not on the breaking list.
+
+**Consent mode** (no policy in the environment) admits loopback origins only and returns
 `permissionDecision: "ask"` for the first call that reaches each new origin — the host's prompt,
 which the model cannot answer. Consent is per ORIGIN. The gate reads no recipe and `promptText`
 names no route. The post hook records every executed gated call as
@@ -412,6 +434,10 @@ the real file to hold that.
   to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
   in that position now, and the doctor reports registration, never execution.
 - **Other session names are ungated** — see SCOPE.
+- **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
+  `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
+  stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
+  `*.localhost` stays refused although the same Chromium code resolves it to loopback too.
 - **The consent memory is forgeable:** a record written through a Bash redirect skips the prompt for
   that origin; the floor bounds the damage to loopback services.
 - **The run config is read twice** — by the gate at `open` and by the CLI at launch — so a file

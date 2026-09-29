@@ -39,7 +39,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
 | `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
-| `--attach=<origin>` | local only | none | Verify an app the user already runs on a literal loopback origin. Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
+| `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
 | `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin, for unattended runs and for hosts that keep the policy in their launch environment. |
 
@@ -148,7 +148,10 @@ own list, every call from a subagent, every call whose session or arguments are 
 literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
 gate reads that config itself: an isolated browser, the run's origins as
 `network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
-mode accepts literal loopback-IP origins only. Remote mode accepts only non-loopback HTTPS,
+mode accepts loopback origins only: a loopback IP or the exact name `localhost`, which the
+browser resolves to loopback itself; `app.localhost`, `localhost.` and every other hostname are
+refused. `localhost` and `127.0.0.1` are different origins — use the one the application
+expects, everywhere. Remote mode accepts only non-loopback HTTPS,
 rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/reserved,
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
@@ -166,8 +169,8 @@ the gate denies an `export` or an environment assignment on a command that carri
 `tab-new` — opens the host's own permission prompt to the user. Consent is per ORIGIN: once the
 user approves an origin, every further route on it proceeds without a prompt. Answering that
 prompt is the user's action; never answer it on their behalf, never work around a refusal, and
-treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: literal
-loopback origins only, no credentials, no query or fragment in a navigation, and the browser
+treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
+origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
 refuses every request to an origin outside the run config. A remote target is refused in consent
 mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
 remembers each approved ORIGIN for this session in
@@ -291,8 +294,8 @@ Claude's native placeholder substitution.
 ### Attach mode
 
 `--attach=<origin>` verifies an application the user already runs. The origin must pass the
-same literal-loopback rule as local mode (`http://127.0.0.1:<port>` or another loopback IP;
-never `localhost`). Boot nothing, seed nothing through the runtime, register no `down`
+same loopback rule as local mode (`http://127.0.0.1:<port>`, another loopback IP, or
+`http://localhost:<port>`; never another hostname). Boot nothing, seed nothing through the runtime, register no `down`
 command, and never stop, signal, or restart the attached process. Establish identity before
 the matrix: resolve the listening process with
 `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
@@ -319,7 +322,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DI
 ```
 
 Pass one `--origin` per origin the matrix needs — the application origin and, only when it
-differs, the validated authentication origin — and nothing else. The helper prints
+differs, the validated authentication origin (`auth.baseUrl`, which also names an API the
+application calls on another origin) — and nothing else. The helper prints
 `session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
 line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
 `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the

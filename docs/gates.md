@@ -443,10 +443,13 @@ session is prose, not a boundary.
 - **Navigation targets.** Every origin in the run config, and the URL of `open`, `goto` and
   `tab-new`, pass through the floor below.
 
-**The floor holds regardless of consent.** A `localhost` or any other hostname in local mode, a
-non-loopback `http` origin, a private, link-local, loopback-mapped or documentation address,
-credentials in the URL, and a query or fragment in a navigation are all refused. Consent mode
-admits **literal loopback origins only**. A remote target needs the parent policy: the run-config
+**The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
+`app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
+private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
+query or fragment in a navigation are all refused. Consent mode admits **loopback origins only**:
+a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with `[::1]`
+and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it, and the
+gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
 helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
 gate then requires, because an origin approved mid-session could not be pinned. The browser
 itself refuses every request to an origin outside `network.allowedOrigins`. It does NOT refuse a
