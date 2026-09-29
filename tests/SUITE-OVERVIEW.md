@@ -81,8 +81,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **155** — 148 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **148 structure suites + 5 offline evals = 153 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 155 − 148 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **156** — 149 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **149 structure suites + 5 offline evals = 154 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 156 − 149 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -153,7 +153,7 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (27)
+### Review chain & findings (28)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
 `deferred-review-fallback` · `finding-verification` ·
 `pending-review-ttl` ·
@@ -162,12 +162,13 @@ anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 `reset-review-limit-transaction` · `review-aspect-agent` · `review-convergence` · `review-judge` ·
 `review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
 `reviewer-readonly-v1` · `reviewer-spawn-allow` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
-`stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
+`stop-enforcer-escapes` · `stop-enforcer-latency` · `stop-enforcer-self-review-routing` ·
 `stop-enforcer-subagent-noop` · `stop-session-binding-recovery`
 
 The largest group. Covers the Stop-hook chain enforcer and its two-stage routing
 (code-reviewer → self-review), its escape hatches and anti-deadlock budget cap, the
-spawned-agent no-op, the read-only reviewer capability confinement, the finding
+spawned-agent no-op, the early exit for a Stop with nothing to enforce and the
+hook-wide deadline, the read-only reviewer capability confinement, the finding
 verification gate (findings graded against real source before they route), the
 one-shot review ticket CAS and budget rearm, deferred/pending review markers plus
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the

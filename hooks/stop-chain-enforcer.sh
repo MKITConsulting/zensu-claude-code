@@ -23,6 +23,12 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 INPUT=""
 IFS= read -r -d '' INPUT || true
 
+STOP_DEADLINE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-stop-deadline.sh"
+if [ -f "$STOP_DEADLINE_LIB" ] && [ ! -L "$STOP_DEADLINE_LIB" ]; then
+  source "$STOP_DEADLINE_LIB"
+  [ "${1:-}" = "$ZENSU_STOP_WORKER_FLAG" ] || zensu_stop_supervise "$0" "$INPUT"
+fi
+
 # These responses deliberately have no dynamic fields. Once a trusted main
 # Stop event has been authenticated, durable or inner state plus a missing
 # workflow library must never be interpreted as successful completion.
@@ -425,6 +431,28 @@ if [ ! -r "$SESSION_LIB" ] || [ ! -r "$CONFIG_LIB" ] || [ ! -r "$TDD_PHASE_LIB" 
   elif [ "$INNER_STATE_EXISTS" = "true" ]; then emit_inner_runtime_unavailable_block
   fi
   exit 0
+fi
+
+STOP_IDLE_PROBE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/stop-idle-probe-v1.js"
+zensu_stop_idle_verdict() {
+  local msys_env_exclusions
+  [ -f "$STOP_IDLE_PROBE" ] && [ ! -L "$STOP_IDLE_PROBE" ] || return 1
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ -n "${ZENSU_SESSION_KEY:-}" ] || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions ZENSU_IDLE_PROJECT_ROOT)" || return 1
+  (
+    cd -P -- "$(dirname "$STOP_IDLE_PROBE")" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" ZENSU_IDLE_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" \
+      ZENSU_IDLE_SESSION_KEY="$ZENSU_SESSION_KEY" node ./stop-idle-probe-v1.js </dev/null 2>/dev/null
+  )
+}
+if [ "$DURABLE_STATE_HINT_EXISTS" = "false" ] && [ "${ZENSU_CHAIN:-}" != "off" ]; then
+  case "$(zensu_stop_idle_verdict)" in
+    idle) exit 0 ;;
+    idle-bypasses)
+      source "$CONFIG_LIB"
+      if zensu_hook_enabled chainEnforcer; then exit 0; fi
+      ;;
+  esac
 fi
 
 read_field() {
