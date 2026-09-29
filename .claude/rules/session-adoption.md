@@ -240,7 +240,7 @@ root must NOT be recreated — the provenance write is guarded by the workflow d
 own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
 `<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
 LINEAGE and not the anchor: the adopted session lands in the ordinary
-orphaned-project-root state, where `Edit`, `Write`, `MultiEdit` and any WRITING Bash command still deny. The report says so before
+orphaned-project-root state, where `Edit`, `Write` and `MultiEdit` still deny, and so does any WRITING Bash command while the opt-in source-write gate is on. The report says so before
 and after `--confirm` and the doctor row says so too, because announcing an unqualified
 success there sends the user into a deny they were just told was repaired.
 
@@ -294,7 +294,8 @@ now worded as reachability, not as contents. That third arm exists because the c
 path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
 truthiness collapses the last two, which is precisely how a surface comes to assert a
 workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
-both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
+both halves — unconditional about the root probe, while its Bash half is itself bounded to
+the opt-in source-write gate being on, because at the default nothing denies a Bash write there: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
 `reviewer-capability-v1.js`, the COMBINED doctor row, and `skills/adopt-session/SKILL.md`.
 The plain lineage row is the one exception and states its clause CONDITIONALLY, on
 `ZDOC_BINDING_ROOT_UNKNOWN` — it is unconditionally true only that the row must not promise

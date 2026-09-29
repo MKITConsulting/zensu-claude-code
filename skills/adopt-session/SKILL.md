@@ -14,7 +14,7 @@ description: >
   runtime, sets the previous one aside unchanged, and records the takeover in the
   workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
-  also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
+  also gone the lineage break is cleared while Edit, Write, MultiEdit and, with the opt-in source-write gate on, writing Bash stay denied until that
   directory is re-created, which a SECOND mode, `--restore-root --confirm`, does in one step together with the
   workflow document the removal took with it — it restores the anchor and not the work, so the directory comes
   back empty and the chain that lived there is gone, unless another run finished that directory first, in which
@@ -27,7 +27,7 @@ description: >
   it, which is NOT a plugin update and which `--confirm` rebuilds in place — when
   /zensu:doctor reports that the recorded project root itself no longer exists, the ordinary
   shape after `git worktree remove`, which `--restore-root --confirm` repairs — when the
-  source-write gate denies `git add` in a sibling worktree of the same repository that this
+  opt-in source-write gate denies `git add` in a sibling worktree of the same repository that this
   session now works in, which `--reanchor --confirm`, run from inside that worktree, moves
   this session's anchor to once it finds no other live session there —
   or via /zensu:adopt-session. No network or API key. It never edits code, never touches the
@@ -219,9 +219,9 @@ lived under that root and is not reachable from this record; if it was moved rat
 than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
-in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
-diagnostics work again while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay
-denied until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
+in the ordinary orphaned-project-root state, so Bash and the read-only
+diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that
+WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
 announcing an unqualified success, or the user walks straight into a deny they
 were just told was fixed. The adoption never re-creates the deleted directory —
 `--restore-root` is the mode that does, and it is a SEPARATE run.
@@ -312,9 +312,10 @@ AND installation pruned — still refuses `record-unreadable`.
 
 A third mode, and its own question: the record is healthy and served, but this session
 now works in a DIFFERENT worktree of the same repository than the one its record names.
-Until the anchor moves, the source-write gate denies `git add` and new source writes in
-the worktree the session actually works in, and `zensu:review-aspect` reviewers are
-confined to the recorded worktree and cannot read the changed files.
+Until the anchor moves, the opt-in source-write gate, while it is on (`hooks.bashWriteGate:
+true`), denies `git add` and new source writes in the worktree the session actually works in,
+and at every setting `zensu:review-aspect` reviewers are confined to the recorded worktree
+and cannot read the changed files.
 
 Run it FROM INSIDE the worktree this session should be anchored to. The working
 directory of the command is the target; a subdirectory is fine, because the worktree's
@@ -400,8 +401,8 @@ the worktree the report named as `new anchor`, so the move lands where the user 
 cd -- '<new anchor, verbatim from the report>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-reanchor.sh" --confirm
 ```
 
-**What it keeps.** The source-write gate still compares every write against the one
-recorded root and is not weakened: the move refuses a worktree in which it finds another
+**What it keeps.** The source-write gate, whenever it is opted in, still compares every write
+against the one recorded root and is not weakened: the move refuses a worktree in which it finds another
 live session and a checkout that contains other worktrees, so it never widens this
 session over another session's tree that its sources show. It only changes which
 worktree of this repository counts as this session's own. The old worktree is outside
@@ -560,8 +561,8 @@ row, and read it before you describe the outcome. When the recorded project root
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
-READ-ONLY Bash and the read-only diagnostics work again, and `Edit`, `Write`, `MultiEdit` and any Bash
-command that WRITES stay denied until that exact directory is re-created. Say which of the two happened; never report the second as an
+Bash and the read-only diagnostics work again, and `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash
+command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints
@@ -594,6 +595,6 @@ directory that is gone and there is nothing to rebuild into. Report that NOTE;
 do not upgrade it to the rebuild recommendation, which is for the other shape.
 After a successful adoption, do not tell the user to restart — and when the
 recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
-and so does any Bash command the source-write gate can attribute as a write,
-until it is re-created — read-only Bash and the diagnostics do run — rather than
+and so does any Bash command the source-write gate can attribute as a write
+while that opt-in gate is on (`hooks.bashWriteGate: true`), until it is re-created — read-only Bash and the diagnostics do run — rather than
 reporting an unqualified success.

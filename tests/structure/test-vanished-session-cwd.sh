@@ -36,10 +36,11 @@ TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || {
 PROJECT="$TMP/project"
 PLUGIN_DATA="$TMP/plugin-data"
 TAMPERED_DATA="$TMP/tampered-plugin-data"
-CONFIG="$TMP/no-such-config.json"
+CONFIG="$TMP/gate-on-config.json"
 NO_TEMP_ROOT="$TMP/no-such-temp-root"
 SESSION_ID='vanished-cwd-test'
 mkdir -p "$RAW_TMP/project/src" "$RAW_TMP/plugin-data" "$RAW_TMP/tampered-plugin-data"
+printf '%s\n' '{"hooks":{"bashWriteGate":true}}' > "$RAW_TMP/gate-on-config.json"
 printf 'hello\n' > "$RAW_TMP/project/README.md"
 printf 'hello\n' > "$RAW_TMP/project/src/existing.txt"
 GONE="$PROJECT/.claude/worktrees/removed-worktree"

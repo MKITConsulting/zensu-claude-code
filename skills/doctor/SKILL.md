@@ -513,10 +513,10 @@ whether browser verification is enforced, not only when a row is red.
   described above probes the recorded root and reports what is there now, so relay
   the row's own sentence rather than this forecast once the repair has run.
   Otherwise start a fresh session. If the directory was MOVED rather than deleted,
-  moving it back is better than re-creating it, because its state is still there. Meanwhile the session is diagnosable but not
-  workable — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
-  project. Do NOT report this row as a missing record.
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed but
+  not edited — this read-only report runs, `Stop` is released rather than wedged,
+  and `Edit`, `Write` and `MultiEdit` stay denied because nothing can anchor a write to a
+  project, and so does any Bash command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`). Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
   the recorded one — strict `X.Y.Z`, equal major, equal minor while major is `0`,
@@ -557,8 +557,8 @@ whether browser verification is enforced, not only when a row is red.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
-  clears the lineage break while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied until that exact
-  directory is re-created. This row is reachable in that state — the doctor
+  clears the lineage break while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES while the
+  opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. This row is reachable in that state — the doctor
   falls back to it whenever the third-fact probe cannot answer — so offering the
   remedy without the clause would promise something this check did not establish.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
@@ -579,9 +579,9 @@ whether browser verification is enforced, not only when a row is red.
   retries by hand — that is the
   difference from the plain orphaned row, which the running installation already
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
-  the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
-  diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
-  stay denied until that exact directory is re-created by
+  the repair: adoption clears the LINEAGE break, so Bash and this
+  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES
+  while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created by
   `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
   requires the running installation to SERVE the record, which is exactly what the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under

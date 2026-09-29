@@ -2,6 +2,7 @@
 paths:
   - "hooks/lib/bash-source-write-parse.js"
   - "hooks/pre-bash-source-write-gate.sh"
+  - "hooks/lib/zensu-config.sh"
   - "hooks/lib/claude-path-v1.js"
   - "tests/structure/test-bash-source-write-gate.sh"
   - "tests/structure/git-repo-escape.test.js"
@@ -10,6 +11,32 @@ paths:
 # Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
+
+**The gate is OPT-IN.** `hooks/pre-bash-source-write-gate.sh` runs rules (A), (B) and (C) only
+when `zensu_hook_opted_in bashWriteGate` holds, which is an explicit boolean `true` in the
+merged Zensu config; absent, `false` or a quoted `"true"` leaves the gate off. The same reader
+backs `zensu_tdd_strict_enabled`, so the opt-in rule has one implementation. The Session
+Control rebind check (`BSWG_MODE=control`) sits ABOVE that config check and runs regardless,
+because it is a trust boundary rather than a convention — keep that order. The config check
+in turn sits ABOVE the bind, so at the default the no-anchor deny of the two relaxed bind
+states does not run either, and a project `.zensu/config.json` opt-in cannot reach it: that
+file lives under the project root the relaxed state has lost, so only a `~/.zensu/config.json`
+or `ZENSU_CONFIG` opt-in does. A foreign record is still refused at the default, by the
+all-tool capability gate rather than here. The default flipped
+on measured evidence: a seeded sample of 156 transcripts from September 2026 held 27 denies in
+11 sessions, none of which stopped a real mistake, while 14 blocked intended work (takeover
+moves, commits in a session's own worktree after the host moved it, multi-repository layouts)
+and 1,085 commands carried a gate-off prefix, which the auto-mode classifier refused 19 times.
+Every suite that exercises the rules therefore opts the gate in through a fixture of its own
+that sets `{"hooks":{"bashWriteGate":true}}` — `CFG_ON` in the gate suite, `$SBOX/config.json`
+in the bypass-ledger suite, the fixture's `.zensu/config.json` in the live e2e layer, and a
+`gate-on-config.json` elsewhere; a fixture that points at the defaults now tests a gate that
+does nothing. In the gate suite W5 and W5b pin the opt-in and the shared note, the W29 family
+the default-off behavior on a bound session, and the `d`-suffixed unbound rows plus W87e2 and
+W87g2 the same order in the relaxed and foreign-record states; `O29a2` and `O29f` in the
+orphaned-root suite and `P5h2`/`P5h4`/`P5z2` in the bypass-ledger suite do the same there. **Version: `patch`** — no schema
+field, strict key set, hook registration, matcher or attestation moves; only the default of a
+permissively read key and the deny wording change.
 
 Rule (C) of the PreToolUse(Bash) source-write gate denies a working-tree-mutating
 git subcommand whose target repository escapes the session root. Four module-scope
@@ -329,14 +356,18 @@ know is refused too, so the ladder decides only the reason` holds both arms. One
 weighed and declined: `WRAP` marks a wrapper TRANSPARENT so a rule can see through it, while the
 consent ladder exists to NAME a refusal, and one table would tie an admit-relevant set to a
 reason-only one. **A further coupling is
-PROSE rather than a table, and nothing pins it either:** the deny message rule (C) emits ends
-with a sentence naming the deliberate one-off escape prefix, and `skills/session-trail`'s
-move-alternative advice ASSERTS that it does — it tells the reader the refusal names the
-escape and deliberately declines to spell it, which is true only while that inline literal
-survives. It is an inline string here rather than a named constant, and a grep for its
-distinguishing words across `tests/` returns nothing, so a reword silently leaves a shipped
-skill pointing at a message that names nothing. Either pin the literal against its owner or
-re-check that skill by hand before rewording any deny text. And
+PROSE rather than a table:** every reason rules (A), (B) and (C) produce ends with `OPT_IN_NOTE`,
+which names `hooks.bashWriteGate` and leaves an intended command to the user, and never the
+escape prefix. On the unbound path the hook appends its binding paragraph after that reason, so
+the deny contains the note without ending on it. Four of the hook's own denies — the no-anchor deny, the two unbound parser failures and the
+empty recorded root — carry the same sentence through its `OPT_IN_NOTE` shell variable, a
+hand-copy that W5b holds equal to the parser's exported constant; the bound parser-failure
+deny names `hooks.bashWriteGate` in a remedy of its own, which W218 pins. `skills/session-trail` (SKILL.md flow 3 and the emitted `MOVE_ALTERNATIVE`) ASSERTS
+that shape — the refusal names the config key and no escape. W32, W33, W87 and W121 in
+`tests/structure/test-bash-source-write-gate.sh` pin the note's words and the prefix's
+absence on the parser side; `T35b` and `WT8v12`/`WT8v12b` pin each skill carrier's own
+wording, but nothing compares either against the parser, so re-check that skill by hand
+before rewording the note. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the
 skill's documented cleanup starts denying, which is what W181/W185-W187 exist to

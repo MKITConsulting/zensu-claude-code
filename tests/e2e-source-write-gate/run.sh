@@ -70,6 +70,7 @@ WORK="$(mktemp -d -t bswgate-e2e-XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 PROJ="$WORK/proj"; SIB="$WORK/sib"; FAKETMP="$WORK/faketmp"
 mkdir -p "$PROJ/src" "$SIB/src" "$FAKETMP"
+printf '%s\n' '{"hooks":{"bashWriteGate":true}}' > "$WORK/gate-on-config.json"
 ( cd "$PROJ" && git init -q && git config user.email e2e@zensu.dev && git config user.name e2e \
     && printf 'export const x = 1;\n' > src/app.ts && git add -A && git commit -qm init ) >/dev/null 2>&1
 ( cd "$SIB" && git init -q && git config user.email e2e@zensu.dev && git config user.name e2e \
@@ -90,13 +91,13 @@ gate() {
   payload "$1" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
     -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_BASH_WRITE_GATE -u ZENSU_MCP_GATE \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$WORK/plugin-data" \
-    ZENSU_CONFIG="$WORK/no-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
+    ZENSU_CONFIG="$WORK/gate-on-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
 }
 gate_reason() {
   payload "$1" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
     -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_BASH_WRITE_GATE -u ZENSU_MCP_GATE \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$WORK/plugin-data" \
-    ZENSU_CONFIG="$WORK/no-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null
+    ZENSU_CONFIG="$WORK/gate-on-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null
 }
 mkdir -p "$WORK/plugin-data"
 chmod 700 "$WORK/plugin-data"
@@ -148,6 +149,12 @@ if [ ! -d "$FIXTURE/.git" ]; then
   log "  TOTAL: $PASS/$TOTAL PASS ($FAIL FAIL)"
   exit 1
 fi
+if ! node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(c&&c.hooks&&c.hooks.bashWriteGate===true?0:1)' \
+    "$FIXTURE/.zensu/config.json" 2>/dev/null; then
+  check "fixture opts the gate in through .zensu/config.json (re-run ./setup-fixtures.sh)" FAIL
+  log "  TOTAL: $PASS/$TOTAL PASS ($FAIL FAIL)"
+  exit 1
+fi
 
 session_unavailable() {
   [ ! -s "$1" ] || grep -qiE 'weekly limit|usage limit|hit your .{0,20}limit|rate.?limit|reset[s]? (on|at|in| )|invalid api key|please run /login|not logged in|authentication_error|overloaded|credit balance' "$1" 2>/dev/null
@@ -161,7 +168,7 @@ log "▸ Live claude --print assertions"
 CAPTURED="$RESULTS_DIR/clobber-${TIMESTAMP}.captured.txt"
 PROMPT="Append the line // touched to the file src/sample.ts. Use a bash command with a redirect (echo >> src/sample.ts). Do not use the Edit or Write tool."
 log "Running (timeout ${TIMEOUT}s) claude --print: bash append to a tracked source file..."
-( cd "$FIXTURE" && timeout "$TIMEOUT" claude --print --plugin-dir "$PLUGIN_DIR" --permission-mode bypassPermissions "$PROMPT" ) > "$CAPTURED" 2>&1
+( cd "$FIXTURE" && env -u ZENSU_CONFIG timeout "$TIMEOUT" claude --print --plugin-dir "$PLUGIN_DIR" --permission-mode bypassPermissions "$PROMPT" ) > "$CAPTURED" 2>&1
 
 if session_unavailable "$CAPTURED"; then
   log "  SKIP  live — claude session unavailable: $(head -c 100 "$CAPTURED" 2>/dev/null | tr '\n' ' ')"
@@ -169,7 +176,7 @@ if session_unavailable "$CAPTURED"; then
 else
   check "L1 claude --print produced a real session reply (plugin loaded, hook active)" PASS
 
-  if grep -qiE 'git-tracked source|ZENSU_BASH_WRITE_GATE|write that would overwrite|source file OUTSIDE|bypasses the Edit/Write tools' "$CAPTURED" 2>/dev/null; then
+  if grep -qiE 'git-tracked source|hooks\.bashWriteGate|write that would overwrite|source file OUTSIDE|bypasses the Edit/Write tools' "$CAPTURED" 2>/dev/null; then
     check "L2 gate deny-reason surfaced (hook blocked the bash write to tracked source)" PASS
   else
     log "  OBSERVE  L2 no explicit deny-reason in reply — model phrasing varied or it used a non-bash path (best-effort; D1 proves the deny)"
@@ -190,7 +197,7 @@ else
   rm -f "$NEWFILE"
   PROMPT_FP="Create a NEW file src/created_by_e2e.ts containing the text export const e2e = true; — use a bash redirect (printf ... > src/created_by_e2e.ts). Do not use the Edit or Write tool."
   log "Running (timeout ${TIMEOUT}s) claude --print: bash create a NEW file (should be allowed)..."
-  ( cd "$FIXTURE" && timeout "$TIMEOUT" claude --print --plugin-dir "$PLUGIN_DIR" --permission-mode bypassPermissions "$PROMPT_FP" ) > "$CAPTURED_FP" 2>&1
+  ( cd "$FIXTURE" && env -u ZENSU_CONFIG timeout "$TIMEOUT" claude --print --plugin-dir "$PLUGIN_DIR" --permission-mode bypassPermissions "$PROMPT_FP" ) > "$CAPTURED_FP" 2>&1
   if session_unavailable "$CAPTURED_FP"; then
     log "  SKIP  L4 — claude session unavailable for the new-file probe"
   elif [ -f "$NEWFILE" ]; then

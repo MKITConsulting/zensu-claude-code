@@ -37,8 +37,8 @@ Six sites, all single-root.
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
 `zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
-`pre-bash-source-write-gate.sh:274-283` refuses an empty recorded root outright
-rather than letting the parser fall back to the payload cwd. The STATE anchor is
+`pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
+while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
 
@@ -79,14 +79,15 @@ chain-mechanics tests from having to fabricate a receipt. The `--chain-done`
 zero-change terminus is unchanged, and it is the half that stayed ambient and
 unscrubbed — see the paragraph above.
 
-**The write gate confines Bash writes, the edit gate does not confine paths.**
-Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:825`) and rule (C) at the same predicate
-for git targets (`:871`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:716`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
+**The write gate confines Bash writes while it is opted in, the edit gate does not confine
+paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
+(`hooks/lib/bash-source-write-parse.js:829`) and rule (C) at the same predicate
+for git targets (`:875`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:724`). `hooks/pre-edit-tdd-reminder.sh:139-166` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
-`Edit`/`Write` reach a sibling repository today and Bash writes do not. Neither of
+`Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
+opted in. Neither of
 the two other hooks on the `Bash` matcher confines a path to the project root, so
 neither needs changing: `pre-bash-zensu-gate.sh` carries no project-root reference
 at all, and `pre-write-secret-scan.sh:85` references one only through the
@@ -420,7 +421,7 @@ dropped: a dropped root is a root nothing audits.
 |---|---|---|
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:876` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
-| Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:825`, `:871` |
+| Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1438-1440`, `:2263-2265` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:573`, `:550` |
 
@@ -451,7 +452,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4687`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4689`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.

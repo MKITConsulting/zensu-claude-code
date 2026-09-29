@@ -33,11 +33,13 @@
 # inside a git command is still a write channel and is still checked, so
 # `git show HEAD:src/x.rs > src/x.rs` remains a rule (A) deny.
 #
-# Deliberately NOT a security boundary — an agent can still bypass via the escape
-# hatch (inline `ZENSU_BASH_WRITE_GATE=off` / `ZENSU_MCP_GATE=off`, the process-env
-# equivalents, or config `hooks.bashWriteGate:false`). It is a discipline nudge:
-# route source edits through the Edit/Write tools (observable, gate-aware) and stay
-# inside your own worktree.
+# Opt-in: rules (A)/(B)/(C) run only when config `hooks.bashWriteGate` is `true`,
+# while the Session Control rebind check below runs regardless. It is deliberately
+# NOT a security boundary — an agent can still bypass via the escape hatch (inline
+# `ZENSU_BASH_WRITE_GATE=off` / `ZENSU_MCP_GATE=off` or the process-env
+# equivalents), and the deny texts name the config key rather than that prefix. It
+# is a discipline nudge: route source edits through the Edit/Write tools
+# (observable, gate-aware) and stay inside your own worktree.
 #
 # Carve-outs, by rule. (A) and (B) never deny a NEW file inside the project, a
 # gitignored/untracked file, or a non-source extension; rule (C) applies neither
@@ -101,10 +103,11 @@ if [ -n "$CONTROL_REASON" ]; then
   exit 0
 fi
 
-# Config-disabled gate has no decision point — nothing to bypass, nothing to
-# ledger (kept ahead of the escape checks so all Bash gates share the order).
+# A gate that is not opted in has no decision point — nothing to bypass, nothing
+# to ledger (kept ahead of the escape checks so all Bash gates share the order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_hook_enabled bashWriteGate || exit 0
+zensu_hook_opted_in bashWriteGate || exit 0
+OPT_IN_NOTE="This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; if the command is intended, ask the user to run it or to switch the gate off."
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 ZENSU_SESSION_BOUND=true
@@ -216,13 +219,13 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
       cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
       BSWG_MODE=targets PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
     )"; then
-      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause. ${OPT_IN_NOTE}"
       exit 0
     fi
     case "$UNBOUND_TARGETS" in
       ''|__bypass__*) exit 0 ;;
     esac
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command
@@ -235,7 +238,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     BSWG_MODE= PAYLOAD= BSWG_REANCHOR= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
       node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
   )"; then
-    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause. ${OPT_IN_NOTE}"
     exit 0
   fi
   case "$UNBOUND_REASON" in
@@ -263,7 +266,7 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 # project root and inverts rules (B) and (C). The unbound branch above refuses
 # exactly that promotion; match it rather than tolerating it with `:-`.
 if [ -z "${ZENSU_PROJECT_ROOT:-}" ]; then
-  emit_deny "Blocked: this session's recorded project root is empty, so a Bash write cannot be judged against any project and the worktree-escape rules would treat the current directory as the project. Start a fresh Claude Code session."
+  emit_deny "Blocked: this session's recorded project root is empty, so a Bash write cannot be judged against any project and the worktree-escape rules would treat the current directory as the project. Start a fresh Claude Code session. ${OPT_IN_NOTE}"
   exit 0
 fi
 
@@ -274,7 +277,7 @@ if ! REASON="$(
   BSWG_MODE= PAYLOAD= BSWG_REANCHOR=1 CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
     node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
 )"; then
-  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. Two remedies are decided BEFORE the parser runs and therefore still work: set hooks.bashWriteGate:false in ~/.zensu/config.json, or export ZENSU_BASH_WRITE_GATE=off into the environment Claude Code was started from. An INLINE ZENSU_BASH_WRITE_GATE=off prefix does not help here — that one is decided inside the parser that is failing."
+  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. This gate is opt-in, and switching it off is decided BEFORE the parser runs, so that still works here: ask the user to set hooks.bashWriteGate to false in the Zensu config layer that enables it — a project .zensu/config.json overrides ~/.zensu/config.json, and ZENSU_CONFIG, when set, replaces both."
   exit 0
 fi
 case "$REASON" in
