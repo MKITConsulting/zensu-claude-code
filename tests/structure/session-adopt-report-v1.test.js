@@ -965,3 +965,32 @@ test('MAIN the provenance branches read the core vocabulary, not the literals', 
   const unavailable = run('unav-renamed');
   assert.ok(unavailable.out.includes('its provenance entry could not be written'));
 });
+
+test('MAIN the read-only preview: a preview that could not complete is named as such, never ADOPTABLE, and exits 1', () => {
+  // The fourth arm: not adoptable, not served, not refused. Deleting it falls through
+  // to ADOPTABLE and exit 0, which is the one answer this state must never give.
+  const { out, code } = runMain(seam({ autoAdopt: { previewAdoption: () => ({ outcome: 'unavailable', reason: 'probe-failed', supersededFile: null, leases: null, error: 'probe exploded' }) } }), false);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adoptable (probe-failed)'), out.slice(0, 80));
+  assert.ok(out.includes('The adoption check itself could not complete: probe exploded'));
+  assert.equal(out.includes('— ADOPTABLE'), false);
+  assert.equal(out.includes('Run the same command with --confirm to adopt'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a served answer whose lease sweep set leases aside reports them instead of "nothing was changed"', () => {
+  const leases = { discarded: 2, failed: [], unsafe: '', unsafeAt: '' };
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases, error: null }) } }), true);
+  assert.ok(out.includes(RACED));
+  assert.ok(out.includes('2 review-evidence lease(s) were set aside'));
+  assert.equal(out.includes('Nothing was changed here'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a served answer whose lease sweep moved nothing says nothing was changed', () => {
+  const leases = { discarded: 0, failed: [], unsafe: '', unsafeAt: '' };
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases, error: null }) } }), true);
+  assert.ok(out.includes(RACED));
+  assert.ok(out.includes('Nothing was changed here'));
+  assert.equal(out.includes('were set aside'), false);
+  assert.equal(code, 1);
+});

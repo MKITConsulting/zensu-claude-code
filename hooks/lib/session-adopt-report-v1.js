@@ -1478,8 +1478,23 @@ function main(deps = {}) {
     process.stdout.write("Zensu session adoption — NOT adopted (" + safe(adopted.reason) + ")\n\n");
     if (adopted.outcome === adopter.AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
       process.stdout.write("The record was adopted by a hook of this session while this command ran, so this\n");
-      process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
-      process.stdout.write("see the served state, or simply continue in the session.\n");
+      // A served answer still ran the lease sweep — adoptForHook completes every
+      // served outcome with it — and what it did travels on the result. "Nothing was
+      // changed" is true only when it set nothing aside and nothing failed; an older
+      // adopter without the predicate is read as having something to report.
+      const served = adopted.leases && typeof adopted.leases === "object" ? adopted.leases : null;
+      const worth = typeof adopter.sweepWorthReporting === "function" ? adopter.sweepWorthReporting(served) : true;
+      if (served === null) {
+        process.stdout.write("installation already serves it. No lease sweep result was recorded for this run,\n");
+        process.stdout.write("so re-run this command with --confirm to sweep the lease store.\n");
+      } else if (!worth) {
+        process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
+        process.stdout.write("see the served state, or simply continue in the session.\n");
+      } else {
+        process.stdout.write("installation already serves it. This run completed that adoption's review-evidence\n");
+        process.stdout.write("lease sweep, and what it did is below.\n");
+        reportLeaseWarnings(served);
+      }
     } else if (adopted.supersededFile) {
       // Named by the preview before the lock, or by adoptContext's own exclusive
       // copy under it; the same state either way, so the same rendering.

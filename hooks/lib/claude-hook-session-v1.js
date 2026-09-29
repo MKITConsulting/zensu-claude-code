@@ -463,6 +463,20 @@ function writeAdoptionOperatorLine(adoption, leadIn = BINDER_LEAD_IN) {
   }
 }
 
+// The line for an adoption a SIBLING performed whose lease sweep this process
+// completed. Written only when that sweep set leases aside or failed — the renderer
+// answers null otherwise — so an ordinary served bind stays silent, and a stuck
+// lease store is not absorbed by the process that found it.
+function writeServedSweepLine(servedSweep, leadIn = BINDER_LEAD_IN) {
+  if (!servedSweep) return;
+  try {
+    const line = autoAdoptModule().servedSweepLine(servedSweep);
+    if (line) process.stderr.write(`${leadIn}: ${line}\n`);
+  } catch {
+    process.stderr.write(`${leadIn}: completed the lease sweep of a sibling hook's adoption (details unavailable)\n`);
+  }
+}
+
 // Binds and DISCLOSES an adoption this process performed, on both halves: a bind
 // that returns carries the verdict on `binding.adoption`, and a bind whose strict
 // re-read then throws — a vanished project root — carries it on the error, which is
@@ -475,9 +489,11 @@ function bindAndDisclose(payload, environment = process.env, options = {}, leadI
   } catch (error) {
     const performed = performedAdoption(error);
     if (performed) writeAdoptionOperatorLine(performed, leadIn);
+    writeServedSweepLine(error && error.servedSweep, leadIn);
     throw error;
   }
   if (binding.adoption) writeAdoptionOperatorLine(binding.adoption, leadIn);
+  writeServedSweepLine(binding.servedSweep, leadIn);
   return binding;
 }
 
@@ -509,6 +525,7 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
 
   let context;
   let adoption = null;
+  let servedSweep = null;
   try {
     context = served();
   } catch (error) {
@@ -527,6 +544,10 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
       adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir),
     );
     if (verdict.outcome === OUTCOMES.ADOPTED) adoption = verdict;
+    // A sibling's adoption this process found served still ran the lease sweep
+    // (adoptForHook completes every served answer with it), and its result travels
+    // beside the binding rather than being absorbed here.
+    if (verdict.outcome === OUTCOMES.ALREADY_SERVED) servedSweep = verdict;
     if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
       // Re-read STRICTLY: the adopted record must serve itself. An adoption
       // whose recorded project root is gone legitimately re-throws here, and the
@@ -536,6 +557,7 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
         context = served();
       } catch (again) {
         again.adoption = adoption;
+        again.servedSweep = servedSweep;
         throw again;
       }
     } else {
@@ -558,6 +580,7 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
     recordsDir,
     sessionKey,
     adoption,
+    servedSweep,
   };
 }
 

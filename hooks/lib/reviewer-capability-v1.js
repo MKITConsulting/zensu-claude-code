@@ -127,22 +127,47 @@ const PRUNED_DOWNGRADE_CLAUSE = 'This predicate is deliberately blind to lineage
 // error — the adoption module could not be loaded, or the bind threw untyped.
 const UNBOUND_ADOPTION_REMEDY = 'Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state.';
 
-// An adoption THIS call performed, for a deny that follows it. The bind can adopt
-// and still fail — a missing workflow baseline, or a strict re-read that throws for
-// a reason no arm relaxes — and the deny then named the failure while the record it
-// had just re-minted, the superseded copy and the swept lease store went unsaid:
-// with provenance no-workflow-document the doctor has no entry either, so the kept
+// An adoption THIS call performed, for a deny that follows it: a bind-failure deny
+// after the bind adopted, and a capability deny after the bind adopted and the
+// principal then asked for a tool it may not use. The bind can adopt and still fail
+// — a missing workflow baseline, or a strict re-read that throws for a reason no arm
+// relaxes — and the deny then named the failure while the record it had just
+// re-minted, the superseded copy and the swept lease store went unsaid: with
+// provenance no-workflow-document the doctor has no entry either, so the kept
 // record was the only trace. Appended AFTER the cause, so the deny still leads with
-// what blocks the call, in the operator sentence the binder prints.
-function performedDisclosure(reason, performed) {
+// what blocks the call. The MAIN thread gets the operator sentence the binder
+// prints; every other principal gets the version pair alone, because the full
+// sentence names the kept record and its lease clause can name a command that
+// writes the immutable record (see confinedOperatorLine in session-auto-adopt-v1.js).
+function performedDisclosure(reason, performed, main) {
   let line;
   try {
-    line = autoAdoptModule().operatorLine(performed);
+    const renderers = autoAdoptModule();
+    line = main ? renderers.operatorLine(performed) : renderers.confinedOperatorLine(performed);
   } catch {
     line = 'adopted the Session Control record (details unavailable)';
   }
   const closed = /[.!?]$/.test(reason) ? reason : `${reason}.`;
   return `${closed} This call also ${line}.`;
+}
+
+// The user-facing half of that disclosure. The deny reason is model context, and
+// the gate wrapper discards stderr, so a deny that follows an adoption this call
+// performed carries the notice as its systemMessage for EVERY principal, as the
+// allow path does. Empty when the renderer cannot run: a module fault costs the
+// notice, never the deny.
+function adoptionNotice(adoption) {
+  try {
+    return autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call' });
+  } catch {
+    return '';
+  }
+}
+
+// A deny that follows an adoption THIS call performed: the disclosure appended to
+// the reason for the principal's audience, and the notice beside it for the user.
+function denyAfterAdoption(reason, performed, main) {
+  deny(performedDisclosure(reason, performed, main), adoptionNotice(performed));
 }
 
 // The announcement of an adoption THIS process performed. One JSON object on the
@@ -176,14 +201,18 @@ const MUTATING_FILE_TOOLS = new Set([
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
 
-function deny(reason) {
-  process.stdout.write(`${JSON.stringify({
+// `systemMessage` is optional and user-facing. It rides in the ONE object this run
+// writes, beside the decision, so the host's precedence is untouched.
+function deny(reason, systemMessage) {
+  const output = {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason: `reviewer-capability-v1 deny: ${reason}`,
     },
-  })}\n`);
+  };
+  if (typeof systemMessage === 'string' && systemMessage !== '') output.systemMessage = systemMessage;
+  process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
 function parsePayload() {
@@ -655,9 +684,12 @@ function main() {
   } catch (error) {
     // The adoption this bind PERFORMED, if any: the binder's own test, so the gate
     // and the binder cannot disagree about what counts as performed. Every deny
-    // below discloses it through denyBind; the relaxed allow announces it.
+    // below discloses it through denyBind — the operator sentence for the main
+    // thread, the version pair for any other principal, and the notice as the deny's
+    // systemMessage for the user; the relaxed allow announces it.
     const performed = hookSession.performedAdoption(error);
-    const denyBind = (reason) => deny(performed ? performedDisclosure(reason, performed) : reason);
+    const callerIsMain = principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN;
+    const denyBind = (reason) => (performed ? denyAfterAdoption(reason, performed, callerIsMain) : deny(reason));
     // Two states are not capability violations, and this hook runs on matcher
     // ".*" — so if it denies, it denies EVERY tool, /zensu:doctor included, and
     // the relaxation the Bash gate grants would never be reached.
@@ -856,7 +888,18 @@ function main() {
       denyBind("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
-    denyBind(`immutable context revalidation failed: ${error.message}`);
+    // A typed refusal that established no named state — record-unreadable,
+    // plugin-data-mismatch — reaches this generic deny carrying its token only inside
+    // the binder's message. The shell gates append ONE sentence naming the attempt,
+    // the token and its remedy to their generic deny, and the child form withholds the
+    // remedy; this gate appends the same sentence, so every gate agrees about the same
+    // refusal. HAND COPY of the `appended` sentence of zensu_emit_hook_session_deny in
+    // hooks/lib/zensu-session.sh, and like it appended only for a shape-valid token.
+    const refusal = core.isAdoptionRefusal(error) ? safeRefusal(error.reason) : '(unknown)';
+    const attempted = refusal === '(unknown)'
+      ? ''
+      : ` Zensu also tried to adopt the record automatically for this session and ${adoptionAttempt(refusal)}: ${refusal}. ${callerIsMain ? `${adoptionRefusalRemedy(refusal)}.` : ADOPTION_CHILD_CLOSE}`;
+    denyBind(`immutable context revalidation failed: ${error.message}${attempted}`);
     return;
   }
 
@@ -867,7 +910,13 @@ function main() {
   // than a module-level flag every later output path would have to remember.
   const violation = judgePrincipal(payload, trusted, principal);
   if (violation !== null) {
-    deny(violation);
+    // The bind above may have ADOPTED the record on this very call — a confined
+    // child's first tool call after /reload-plugins is exactly that — and a deny that
+    // dropped it left the adoption unsaid on every channel, since the wrapper
+    // discards stderr. The binder's own test decides what counts as performed.
+    const performed = hookSession.performedAdoption(trusted);
+    if (performed) denyAfterAdoption(violation, performed, principal === principals.PRINCIPALS.MAIN);
+    else deny(violation);
     return;
   }
   // Announce only an adoption THIS process performed: `trusted.adoption` is set by

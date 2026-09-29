@@ -11,6 +11,11 @@ paths:
   - "tests/structure/session-auto-adopt-v1.test.js"
   - "tests/structure/session-adopt-report-v1.test.js"
   - "tests/structure/test-versioned-plugin-upgrade.sh"
+  - "hooks/lib/session-control-core-v1.js"
+  - "hooks/lib/zensu-config.sh"
+  - "hooks/lib/zensu-doctor-report.js"
+  - "tests/structure/test-doctor.sh"
+  - "skills/adopt-session/**"
 ---
 
 # Automatic Adoption (`hooks/lib/session-auto-adopt-v1.js`)
@@ -30,9 +35,11 @@ ONE implementation serves every hook-side binder and the manual entry point.
   `autoAdoptEnabled` / `configLayers` / `AUTO_ADOPT_OUTCOMES` / `AUTO_ADOPT_REASONS` /
   `CONFIG_KEY`.
 - **Rendering:** `STATE_NEUTRAL_REASONS` / `establishesNamedState` / `SAFE_TOKEN` /
-  `SAFE_PROVENANCE` / `safeProvenance` / `provenanceText` / `keptName` / `leaseClause`, plus
+  `SAFE_PROVENANCE` / `safeProvenance` / `provenanceText` / `keptName` / `leaseClause` /
+  `sweepWorthReporting`, plus
   the renderers `createRenderers(core)` builds over the injected core: `safeVersion` /
-  `operatorLine` / `doctorPointer` / `renderAdoptionNotice`. The module-level exports are
+  `operatorLine` / `confinedOperatorLine` / `servedSweepLine` / `doctorPointer` /
+  `renderAdoptionNotice`. The module-level exports are
   the instance built over the real core, so a port that injects its own core gets renderers
   that judge against it.
 - **Core support:** `ADOPTION_REFUSED_CODE`, `SUPERSEDED_EXISTS_CODE`,
@@ -133,7 +140,11 @@ superseded copy, because `copyFileSync` carries the source's timestamps over on 
 The binder throws a typed error carrying the verdict. The `.*` gate renders it from
 `error.adoption` only when the verdict establishes a named state (a reader answered and
 the reason is not in `STATE_NEUTRAL_REASONS`); otherwise it falls through to its
-predicate arms. The shell gates capture the token through the `adoption-refusal` argv
+predicate arms, and its generic deny appends the state-neutral sentence the shell generic
+scope appends: the attempt lead-in, the verb and the token, then the remedy for the main
+thread and `ADOPTION_CHILD_CLOSE` for any other principal. The seam pin holds that
+lead-in to one spelling in the gate and two in the shell, and the remedy split to the
+`callerIsMain` selector. The shell gates capture the token through the `adoption-refusal` argv
 mode and pass it to `zensu_emit_hook_session_deny` as `$4`, the audience as `$5`. Entry-
 level tokens beside the seven `ADOPTION_REFUSALS`: `opted-out`, `adopted-concurrently`,
 `superseded-record-exists`, `not-completed`. The mode exits 1 when it cannot answer, which
@@ -179,12 +190,14 @@ An unknown principal gets `main`: a child shown the main wording still cannot ru
 command, while the main thread shown the child wording loses its one in-place remedy. The
 seam pin matches the gate's MAIN guard as the whole line and requires each child close to
 follow its MAIN block directly; `AUTO-26` drives both audiences through the lineage
-fallback arm with the adoption module removed from the executing root.
+fallback arm with the adoption module removed from the executing root, and `AUTO-26b`
+through the pruned fallback arm on the same root.
 
 ## Disclosure
 
-`renderAdoptionNotice` serves the two model/user channels: the gate's announcement and the
-adapter's `systemMessage` plus `additionalContext`. `operatorLine` serves every process
+`renderAdoptionNotice` serves the model/user channels: the gate's announcement, the
+`systemMessage` of a gate deny that follows an adoption, and the adapter's `systemMessage`
+plus `additionalContext`. `operatorLine` serves every process
 that performed an adoption and has no such channel. The binder's `bindAndDisclose` is the
 ONE bind-and-disclose policy for its CLI mode and the in-process evidence hook: it writes
 the operator line under the caller's own lead-in, on the success path and when the strict
@@ -198,12 +211,28 @@ provenance: only a `recorded` adoption wrote the history entry the doctor render
 The `.*` gate announces only an adoption its own process performed, on an ALLOW only
 (`judgePrincipal` returns the violation and `main` decides once), with `systemMessage` for
 every principal and `additionalContext` for the main thread alone. When its bind adopted
-and the call is then DENIED — a missing workflow baseline, or a strict re-read that no arm
-relaxes — every deny in its bind-failure catch appends the operator sentence after the
-cause (`performedDisclosure`, through `denyBind`), because with provenance
-`no-workflow-document` the doctor has no entry and the kept record is otherwise the only
-trace. The adapter appends the model copy for MAIN only, because the notice names the
-superseded record, whose basename is the session selector confined contexts withhold.
+and the call is then DENIED — a missing workflow baseline, a strict re-read that no arm
+relaxes, or the capability deny `judgePrincipal` returns — the deny names the adoption
+after the cause (`denyAfterAdoption`: `performedDisclosure` for the reason,
+`adoptionNotice` for the `systemMessage`), because with provenance `no-workflow-document`
+the doctor has no entry, the kept record is otherwise the only trace, and the gate wrapper
+discards stderr. The REASON follows the audience rule the adapter's model copy follows:
+the main thread gets `operatorLine`, every other principal `confinedOperatorLine`, the
+version pair alone. The full sentence names the superseded record, whose basename is the
+session selector confined contexts withhold, and its lease clause can name
+`/zensu:adopt-session --confirm`, which writes the immutable record. The `systemMessage`
+is user-facing and carries the whole notice for every principal. The seam pin holds the
+renderer choice, the audience expression, the bind-failure deny helper and the capability
+deny to their spellings; `AUTO-27`, `AUTO-27b` and `AUTO-29` drive the main, child and
+capability-deny halves.
+
+A SIBLING's adoption whose lease sweep this process completed — `adoptForHook` sweeps
+every served answer — is disclosed only when the sweep did something a reader must hear
+about: it set leases aside, was refused, or left leases stuck. `sweepWorthReporting` is
+the one predicate. Three surfaces carry it: `servedSweepLine` under the binder's lead-in
+(`bindAndDisclose` reads it off `binding.servedSweep` or `error.servedSweep`), the lease
+clause of the served notice, and the `--confirm` report's already-served arm, which
+reports the sweep instead of saying nothing was changed.
 
 On the ordinary flow a UserPromptSubmit hook binds first after `/reload-plugins`, so a SHELL
 hook performs the adoption and prints nothing on allow. The user then sees it through the
@@ -212,8 +241,12 @@ shares the provenance rows' single read (`sharedWorkflowRead`), parses the versi
 through `parseAdoptionReason` and takes the kept name from `supersededRecordName`. The
 binder exports `ZENSU_SESSION_ADOPTED` (`recorded -> executing`, or empty) for the planned
 install-lineage notice hook; no hook consumes it yet. Hooks that discard the binder's
-output leave an adoption traceable through the doctor alone:
-`grep -rn 'zensu_bind_hook_session' hooks/` and judge every hit that redirects stderr.
+output leave an adoption traceable through the doctor and the kept record alone:
+`grep -rn 'zensu_bind_hook_session' hooks/` and judge every hit that redirects stderr. Six
+sites discard it at the time of writing — the reviewer-spawn grant, both browser-consent
+hooks, the autopilot resume hook, the worktree-keep UserPromptSubmit hook, and the
+worktree-keep anchor both worktree-keep lifecycle hooks share — but that is a census; the
+grep is the rule.
 
 ## Bounds
 

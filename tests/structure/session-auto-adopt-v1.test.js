@@ -925,3 +925,37 @@ test('the adapter names an adoption it performed when the strict re-read still f
     /resume context: automatic adoption refused \(executing-runtime-older\); /,
   );
 });
+
+test('the confined sentence names the version pair and never the kept record or a command', () => {
+  // A deny after an adoption reaches confined principals too. The full operator line
+  // names the kept basename and, for a refused sweep, /zensu:adopt-session --confirm,
+  // which writes the immutable record; the confined form carries neither.
+  const refusedSweep = {
+    outcome: 'adopted', reason: 'adopted', recorded: '0.20.0', executing: '0.21.1',
+    supersededFile: '/records/scv1_x.superseded-0.20.0.json', provenance: 'recorded',
+    leases: { discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '/x' },
+  };
+  const full = mod.operatorLine(refusedSweep);
+  assert.match(full, /scv1_x\.superseded-0\.20\.0\.json/);
+  assert.match(full, /--confirm/);
+  const confined = mod.confinedOperatorLine(refusedSweep);
+  assert.equal(confined, 'adopted the Session Control record (0.20.0 -> 0.21.1) under the running installation');
+  assert.doesNotMatch(confined, /superseded|--confirm|\/zensu:/);
+  assert.match(mod.confinedOperatorLine({ recorded: 'x\ny', executing: '0.21.1' }), /\(\(unreadable\) -> 0\.21\.1\)/);
+});
+
+test('a served-completion sweep is reported when it moved or failed, and stays unsaid when clean', () => {
+  const served = (leases) => ({ outcome: 'already-served', reason: 'already-served', recorded: null, executing: '0.21.1', supersededFile: null, provenance: null, leases });
+  assert.equal(mod.servedSweepLine(served({ discarded: 0, failed: [], unsafe: '', unsafeAt: '' })), null);
+  assert.equal(mod.servedSweepLine(served(null)), null);
+  assert.equal(mod.servedSweepLine({ ...served({ discarded: 2, failed: [], unsafe: '' }), outcome: 'adopted' }), null);
+  assert.match(mod.servedSweepLine(served({ discarded: 2, failed: [], unsafe: '' })), /now served by 0\.21\.1\); 2 review-evidence lease\(s\) from before the update set aside/);
+  assert.match(mod.servedSweepLine(served({ discarded: 0, failed: [], unsafe: 'sweep-failed' })), /lease sweep was REFUSED \(sweep-failed\)/);
+  assert.equal(mod.sweepWorthReporting({ discarded: 0, failed: ['a'], unsafe: '' }), true);
+  // The served NOTICE carries the clause for a sweep that moved leases, not only for
+  // a refused or stuck one: a count of two set aside is a fact about the session.
+  const moved = mod.renderAdoptionNotice(served({ discarded: 2, failed: [], unsafe: '' }), { where: 'on this tool call' });
+  assert.match(moved, /serves the adopted record \(2 review-evidence lease\(s\) from before the update set aside/);
+  const clean = mod.renderAdoptionNotice(served({ discarded: 0, failed: [], unsafe: '' }), { where: 'on this tool call' });
+  assert.doesNotMatch(clean, /review-evidence lease/);
+});

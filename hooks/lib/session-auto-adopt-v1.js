@@ -181,6 +181,17 @@ function leaseClause(leases) {
   return `${discarded} review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered`;
 }
 
+// Whether a served-completion sweep did anything a reader must hear about: it set
+// leases aside, or it was refused or left leases stuck. A clean sweep that moved
+// nothing is the ordinary case and stays unsaid. A missing result is not reported
+// here; the renderers that must speak about it use leaseClause, which names it.
+function sweepWorthReporting(leases) {
+  if (!leases || typeof leases !== 'object') return false;
+  return (Number.isInteger(leases.discarded) && leases.discarded > 0)
+    || (typeof leases.unsafe === 'string' && leases.unsafe !== '')
+    || (Array.isArray(leases.failed) && leases.failed.length > 0);
+}
+
 // The renderers that read the CORE — the version screen reads its shape, the
 // doctor pointer its provenance vocabulary — are built over the core a caller
 // injects, so a port that injects its own core gets renderers that judge against
@@ -213,6 +224,26 @@ function createRenderers(core) {
     return `adopted the Session Control record (${pair(safeVersion(adoption && adoption.recorded), safeVersion(adoption && adoption.executing))}); `
       + `previous record kept as ${keptName(adoption)}; provenance ${provenanceText(adoption)}; `
       + `${leaseClause(adoption && adoption.leases)}`;
+  }
+
+  // The same adoption for a principal that is NOT the main thread: the version pair
+  // and nothing that names the session or a command. The kept basename is the
+  // session selector the evidence-worker and neutral contexts withhold, and the
+  // lease clause can name /zensu:adopt-session --confirm, which writes the immutable
+  // record and is the main thread's alone. One rule for every non-main principal,
+  // although the reviewer context already carries the session hash: the command is
+  // the reason that holds for all of them. The user still hears the whole notice.
+  function confinedOperatorLine(adoption) {
+    return `adopted the Session Control record (${pair(safeVersion(adoption && adoption.recorded), safeVersion(adoption && adoption.executing))}) under the running installation`;
+  }
+
+  // An adoption a SIBLING performed whose lease sweep THIS process completed: the
+  // winner releases the records lock before it sweeps, so a served outcome sweeps
+  // too, and a sweep that set leases aside or failed must not be absorbed. Null
+  // when it did nothing worth saying, so a caller writes a line only then.
+  function servedSweepLine(verdict) {
+    if (!verdict || verdict.outcome !== AUTO_ADOPT_OUTCOMES.ALREADY_SERVED || !sweepWorthReporting(verdict.leases)) return null;
+    return `completed the review-evidence lease sweep of an adoption a sibling hook performed (now served by ${safeVersion(verdict.executing)}); ${leaseClause(verdict.leases)}`;
   }
 
   // What /zensu:doctor can show about THIS adoption, stated per provenance. The
@@ -252,10 +283,7 @@ function createRenderers(core) {
       const span = typeof adoption.recorded === 'string'
         ? `from ${safeVersion(adoption.recorded)} to ${executing}`
         : `to ${executing}`;
-      const leases = adoption.leases;
-      const troubled = Boolean(leases) && typeof leases === 'object'
-        && ((typeof leases.unsafe === 'string' && leases.unsafe !== '') || (Array.isArray(leases.failed) && leases.failed.length > 0));
-      const sweepClause = troubled ? ` (${leaseClause(leases)})` : '';
+      const sweepClause = sweepWorthReporting(adoption.leases) ? ` (${leaseClause(adoption.leases)})` : '';
       return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record${sweepClause}. ${doctorPointer(adoption)}; nothing else to do.`;
     }
     const recorded = safeVersion(adoption && adoption.recorded);
@@ -266,7 +294,7 @@ function createRenderers(core) {
     return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
   }
 
-  return { safeVersion, operatorLine, doctorPointer, renderAdoptionNotice };
+  return { safeVersion, operatorLine, confinedOperatorLine, servedSweepLine, doctorPointer, renderAdoptionNotice };
 }
 
 function errorMessage(error) {
@@ -647,6 +675,9 @@ module.exports = {
   keptName,
   leaseClause,
   operatorLine: defaultAdopter.operatorLine,
+  confinedOperatorLine: defaultAdopter.confinedOperatorLine,
+  servedSweepLine: defaultAdopter.servedSweepLine,
+  sweepWorthReporting,
   doctorPointer: defaultAdopter.doctorPointer,
   // Exported for the unit layer: the candidate files are a hand mirror of
   // _ZENSU_STRICT_JS in hooks/lib/zensu-config.sh, and the suite pins the two.

@@ -183,10 +183,11 @@ function adoptionNotice(adoption, label) {
 //
 // An `already-served` verdict reached AFTER the strict serve failed means a
 // sibling hook on the same event adopted the record in the window between the
-// two reads. Two siblings bind on these events: the Autopilot resume hook, through
-// the CLI binder with its output discarded, and the review-evidence hook, IN
-// PROCESS through resolveHookSession — neither has a user channel of its own, so
-// that adoption is announced here. The bound is stated rather than implied: this
+// two reads. Three siblings bind on these events: the Autopilot resume hook and the
+// worktree-keep SessionStart hook, both through the CLI binder with its output
+// discarded, and the review-evidence hook on SubagentStart, IN PROCESS through
+// resolveHookSession — none has a user channel of its own, so that adoption is
+// announced here. The bound is stated rather than implied: this
 // notice exists only when THIS process read the old record first. A sibling that
 // finished before the first serve below leaves a record that simply serves, the
 // first serve succeeds, and nothing here knows an adoption happened — so ordering
