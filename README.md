@@ -116,7 +116,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
-| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
+| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run, or move its anchor to a sibling worktree of the same repository (`--reanchor`) |
 | `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
