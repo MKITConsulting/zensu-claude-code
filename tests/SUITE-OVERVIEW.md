@@ -114,6 +114,8 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
   child alive cannot silently wedge the whole runner.
 - **`BLOCK` state** — suites needing npm devDependencies (`node_modules` absent) are
   reported as *blocked, not run*, and still fail the overall result. No silent skip.
+  Membership is pinned too: a CI suite whose driver, or a unit file it drives,
+  requires a devDependency fails the watchdog suite until it joins that arm.
 - **Offline inventory count check** — executed suite count must equal the manifest count.
 
 ## 3. Deterministic structure suites — grouped by what they cover
@@ -271,22 +273,26 @@ GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (14)
+### Release & repo hygiene (15)
 `changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
 `file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
 `promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
-`run-all-required-offline-suites` · `run-all-sharding` · `version-sync`
+`run-all-required-offline-suites` · `run-all-sharding` · `version-sync` ·
+`workflow-dispatch-inputs`
 
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
 invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
-only reference existing files, that Promptfoo stays local-only, and the runner's own
-contract.
+only reference existing files, that Promptfoo stays local-only, that no workflow `run:`
+block template-expands a dispatcher-controlled expression, and the runner's own contract.
+`workflow-dispatch-inputs` needs `node_modules` → `BLOCK` without `npm ci`.
 
 ### Windows & portability (5)
 `bash32-portability` · `msys-runtime-boundaries` ·
 `msys-special-plugin-module-boundaries` · `windows-ci-contract` ·
 `windows-portability-guards`
+
+`windows-ci-contract` needs `node_modules` → `BLOCK` without `npm ci`.
 
 `test-bash32-portability.sh` is the odd one out here: its platform is macOS, not
 Windows. It is grouped with these because it guards the same KIND of defect — a
@@ -367,6 +373,7 @@ that suite's failure.
 | `verify-browser-config.test.js` | 14 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, a `localhost` origin written with no resolver pin, the public-address pins of a remote run, the policy gating of both modes, the per-origin `--check-policy` answer and the readiness refusal it runs first, the run-directory refusals, the readiness refusals with the cause and remedy each names, and the CLI contract |
 | `playwright-cli-version-v1.test.js` | 14 | `test-verify-consent.sh` (V7d) | the installed playwright-cli version identity the doctor and the run-config helper share: the `@playwright/cli` manifest the resolved binary belongs to, read without running it; a manifest naming another package or malformed, which is never executed; the npm shim sibling, read before any directory above the shim; the bounded `--version` self-report with stdin closed and the update notifier off; the PATH walk in shell order, with an empty or relative entry read against the working directory and named as unstable; and the key-per-line CLI |
 | `release-run-step.test.js` | 11 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
+| `workflow-dispatch-inputs.test.js` | 19 | `test-workflow-dispatch-inputs.sh` | dispatcher-controlled values reach `run:` scripts only through `env:` or a runner variable: no `run:` block in any workflow template-expands an `inputs` or `env` reference, or a `github` reference other than a dotted `sha`, `event_name`, `repository` or `server_url`, in any letter case (with a synthetic document proving the scan flags dotted, index and whole-context forms and no trusted one), every release step reading `SKIP_REASON`, `SKIP_TEST_GATE` or `VERSION_TYPE` maps it from that input, and prepare and publish carry one identical skip-request validation. EXECUTED through an emulated expression renderer: that validation against hostile, empty, whitespace-only, multi-line and edge-padded reasons; the release commit step in a throwaway repository followed by the publish gate's own decision block, for an ordinary release and a skipped one; that block's push default, which runs the gate unless the trailer reads `skipped`, its dispatch branches, the trailer outranking a dispatched reason with a notice only when the reasons differ, and a trailer without a reason, refused on push and left to the dispatch on a publish retry; both prepare evidence branches; the main-only guard against a hostile ref; and the version computation |
 | `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
 | `verify-feature-transcript-check.test.js` | 23 | `test-promptfoo-verify-feature.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module and the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument |
@@ -385,8 +392,8 @@ that suite's failure.
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (40
-files) against this table's 35 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (41
+files) against this table's 36 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
@@ -509,7 +516,8 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 - 4 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
 - 2 offline eval self-checks (`session-control`, `reset-review-limit`) plus
-  `test-workflow-checkout-credentials.sh` need `npm ci`; without `node_modules` they
+  `test-windows-ci-contract.sh`, `test-workflow-checkout-credentials.sh` and
+  `test-workflow-dispatch-inputs.sh` need `npm ci`; without `node_modules` they
   report `BLOCK` and the run is not green.
 - The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pretool/`,
   and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
