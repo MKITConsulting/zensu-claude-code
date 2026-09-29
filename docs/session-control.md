@@ -212,6 +212,32 @@ that project adopts it and runs the full chain once, then clears it. The orchest
 it itself with `zensu-log.sh --pending-review-done` when it reviewed in-script. Review is
 per-implementation over the aggregate diff — **never per spawned worker**.
 
+**Who holds an adopted review.** Adoption turns the marker into a claim
+(`pending-review.json.claim`) owned by the adopting session, and a lease decides how
+long that ownership lasts. Once the adopting `Stop` has emitted the review directive, the
+lease alone decides. The handoff starts it, and every later `Stop` of the owning session
+that blocks for that review renews it, so the claim stays with its session until
+`hooks.pendingReviewTtlHours` (default 6) pass without such a `Stop`; the next `Stop` of
+another session in the project may then adopt it. `0` means the lease never expires. Before the handoff the claim is held by
+the adopting `Stop` hook process, and only while the lease is fresh. A claim whose adopting
+`Stop` failed before it seeded its session is recoverable by the next `Stop` at once:
+assignment and seed run under one lock, so that `Stop` can no longer finish the seed.
+
+The recorded process id never extends the lease. Process ids are reused, and on Windows no
+process start identity exists to tell a reused id from the original, so a live-looking id
+is no evidence that the owner still runs. Linux and macOS compare the stored start identity
+with the live process's and reject an impostor whenever both can be read; when either
+cannot (the claim stored none, `ps` timed out, `/proc/<pid>/stat` was unreadable), a
+live-looking id counts as the owner, as it always does on Windows. Either way, a `Stop` that
+dies between adoption and handoff can keep its claim from another session for at most the
+lease, while its own session recovers it on its next `Stop`.
+
+On Windows the locks that serialize these steps still decide whether their holder is gone by
+its process id alone. A lock whose holder was killed without releasing it stays held while an unrelated
+process reuses that id, and every acquisition then fails with `timed out acquiring external
+process lock` or `timed out acquiring per-session lock` until that process exits. This gap is
+known and not yet closed.
+
 ## Unbindable sessions
 
 Every gate binds the running session to its immutable Session Control record before it decides anything, and a failed bind normally denies. There are **two** relaxed states plus **two named-but-not-relaxed** states, and the table below **together with the two paragraphs that follow it** is the authoritative account of them. The table carries a column for the first three only: a fourth column would repeat the third's cells verbatim, so the pruned state is stated once, in its own paragraph, instead. The first two share one argument — no workflow document is reachable, so no review chain and no Autopilot run exist to enforce and nothing is waived by relaxing — and they are separate predicates, never one widened check, because they are different diagnoses with different remedies. The third and fourth are described below them and are deliberately outside that argument.

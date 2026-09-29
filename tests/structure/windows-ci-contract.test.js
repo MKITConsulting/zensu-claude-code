@@ -86,7 +86,7 @@ const expectedProfiles = [
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
-const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';
+const expectedCommandDigest = '414ad2fac4e140780998a3a2c98d3cf546ff346fa98418337c4d76a42c315378';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -129,6 +129,10 @@ const expectedShardHomes = {
   'stop-enforcer-self-review-routing': 'windows-shard-7',
   'session-trail-lineage': 'windows-shard-8',
 };
+const expectedShardTails = {
+  'windows-shard-4': 'deferred-claim-adoption',
+  'windows-shard-8': 'plan-payload-path-transport',
+};
 
 test('measured shard rebalances stay where they were moved', () => {
   const homes = new Map();
@@ -140,6 +144,9 @@ test('measured shard rebalances stay where they were moved', () => {
   }
   for (const [suiteId, expectedProfile] of Object.entries(expectedShardHomes)) {
     assert.equal(homes.get(suiteId), expectedProfile, `${suiteId} shard home`);
+  }
+  for (const [profileId, suiteId] of Object.entries(expectedShardTails)) {
+    assert.equal(manifest.profiles[profileId].suites.at(-1).id, suiteId, `${profileId} runs ${suiteId} last`);
   }
 });
 
