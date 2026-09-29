@@ -1319,7 +1319,7 @@ fi
 # ── T26-T29 — the write-anchor routing rule and its carriers ────────────────
 # The skill tells a takeover to work in the target worktree, and the Bash
 # source-write gate refuses to commit there: the session's project root is minted
-# at SessionStart and nothing re-anchors it. Editing and testing still succeed,
+# at SessionStart and only /zensu:adopt-session --reanchor moves it. Editing and testing still succeed,
 # because no Edit-matcher hook compares a path against that root — so the failure
 # surfaces only at `git commit`, after the work is done. These pins hold the
 # disclosure and the route in the file, since prose is the entire fix.

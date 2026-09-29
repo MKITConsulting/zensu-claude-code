@@ -24,8 +24,11 @@ description: >
   missing` — a served record whose baseline a deleted and re-created worktree took with
   it, which is NOT a plugin update and which `--confirm` rebuilds in place — when
   /zensu:doctor reports that the recorded project root itself no longer exists, the ordinary
-  shape after `git worktree remove`, which `--restore-root --confirm` repairs — or via
-  /zensu:adopt-session. No network or API key. It never edits code, never touches the
+  shape after `git worktree remove`, which `--restore-root --confirm` repairs — when the
+  source-write gate denies `git add` in a sibling worktree of the same repository that this
+  session now works in, which `--reanchor --confirm`, run from inside that worktree, moves
+  this session's anchor to once it finds no other live session there —
+  or via /zensu:adopt-session. No network or API key. It never edits code, never touches the
   workflow document's decision fields, and never bypasses a review.
 ---
 
@@ -84,6 +87,13 @@ state, which sets aside superseded lease records. Nothing is re-minted and the
 record is untouched — but a reader who takes "refuse" to mean "does nothing at
 all" would be wrong about the lease store.
 
+A fourth state belongs here and binds perfectly well: the session has moved on to
+work in a DIFFERENT worktree of the same repository — typically one it created itself
+with `git worktree add` — while its record still names the worktree it started in.
+Every Zensu gate anchors on that recorded root, so `git add` in the worktree the session
+really works in is denied as a write "OUTSIDE this session's worktree/project root", and
+the deny names `/zensu:adopt-session --reanchor`. That is the `--reanchor` mode below.
+
 ## Do NOT Use For
 
 - A session that is binding normally — with TWO exceptions, which are the whole
@@ -109,6 +119,10 @@ all" would be wrong about the lease store.
 - Any bind failure other than the declared-incompatible lineage and the pruned
   minting installation — the refusal table in Phase 1 below names each one and its
   own remedy.
+- Moving this session into a worktree in which another live session is found, into a
+  checkout that contains its own root or other worktrees, into another repository, or to
+  a directory outside git. `--reanchor` refuses each of these by design; a Claude Code
+  session started in that directory is the route there.
 
 ## What This Skill Does
 
@@ -227,9 +241,13 @@ matters at least as much here: this is the mode that creates a directory.
 **The destination is carried from the record and never from an argument.** Neither
 literal takes a value, and the PreToolUse gate admits no other token, so no
 invocation can name a directory. The anchor does not MOVE; only the path the record
-already names is created. Re-anchoring a record to a caller-named directory was
-considered and refused — a session may delete its own root, so a caller-named anchor
-would be a cross-project write escape — and this mode is not a step toward it.
+already names is created. Re-anchoring a record to an arbitrary caller-named directory
+was considered and refused — a session may delete its own root, so a caller-named
+anchor would be a cross-project write escape — and this mode is not a step toward it.
+The one anchor move that exists is `--reanchor` below, and it is bounded rather than
+caller-named: the recorded root must still exist, the target must be a registered
+worktree of that same repository that contains neither the recorded root nor another
+worktree, and it refuses a worktree in which it finds another live session.
 
 **It restores the anchor, not the work — as a FORECAST of what it plants.** When another
 run wins the race, the report says it never saw the contents instead, and `/zensu:doctor`
@@ -275,6 +293,108 @@ version are taken on the record's word there — the stated cost, and the reason
 a record is adopted once rather than served. The COMBINED state — project root gone
 AND installation pruned — still refuses `record-unreadable`.
 
+### `--reanchor` — moving the anchor to a sibling worktree of the same repository
+
+A third mode, and its own question: the record is healthy and served, but this session
+now works in a DIFFERENT worktree of the same repository than the one its record names.
+Until the anchor moves, the source-write gate denies `git add` and new source writes in
+the worktree the session actually works in, and `zensu:review-aspect` reviewers are
+confined to the recorded worktree and cannot read the changed files.
+
+Run it FROM INSIDE the worktree this session should be anchored to. The working
+directory of the command is the target; a subdirectory is fine, because the worktree's
+top-level is what moves in. No argument names the target, so render the `cd` into it as
+part of the command rather than relying on the Bash tool's current directory:
+
+```bash
+cd -- '<the worktree to move to>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-reanchor.sh"
+```
+
+Read-only — it reports `MOVABLE` or `NOT MOVABLE (<reason>)` and writes nothing. **With
+`--confirm`** it re-mints this session's Session Control record with the new project root
+and nothing else changed — the same installation, runtime digest, version and
+`created_at` — and sets the previous record aside unchanged as
+`<session-key>.superseded-reanchor-<UTC stamp>.json`. It then creates this session's
+workflow document under the new worktree when there is none, writes one
+`PROJECT_ROOT_REANCHORED` history entry into the new AND the old workflow document, sets
+aside review-evidence leases bound to the old root, moves this session's `tdd-mode`,
+`delivery-route` and `zen-mode` markers to the new worktree, and, while
+`hooks.worktreeKeep` is on, ages this session's keep anchor in the old worktree and
+writes one in the new one. The move takes effect from the next tool call for the
+source-write gate, the reviewers and the `zensu-log.sh` verbs. The host does not move: it
+keeps this session's start directory, and the Bash tool returns there after a command that
+leaves it. Paths a Zensu skill builds from the working directory — the plan, run log and
+edit-landing audit of `/zensu:tdd` — then name the old worktree, so prefix each such command
+with a `cd` into the new anchor, and start a fresh session there for a new `/zensu:tdd`
+chain.
+
+The target is verified, never trusted. It refuses unless every one of these holds:
+
+- the record reads strictly and this installation serves it — after a plugin update
+  that breaks the lineage, adopt first;
+- the recorded project root still EXISTS inside a git worktree, because a root that is
+  gone cannot prove which repository it belonged to — `--restore-root` is the mode for
+  that state;
+- the command's directory is inside a git worktree of the SAME repository (the same git
+  common directory), and that worktree is registered with git and not prunable;
+- it is not already the anchor, it does not contain the recorded root — that would widen
+  the anchor instead of moving it — and no other registered worktree lies inside it;
+- this session's workflow document under the recorded root is readable and holds no open
+  work: no armed chain short of its terminus, no open skill workflow, no linked Autopilot
+  run, no pending review rearm and no claimed deferred review. That evidence is bound to
+  the old root and is never carried across;
+- no Autopilot run this session owns under the recorded root is still open. The Autopilot
+  state library answers that, so a run no chain links yet counts too; a run at `DONE` or
+  `CANCELLED` does not, and a run state or lock the library cannot read refuses. Cancel an
+  open run of this session through `--autopilot-event --event CANCEL`:
+  `/zensu:autopilot-release` refuses the caller's own run;
+- no other live session is found in that worktree. A live session is found when this
+  Claude Code configuration's live-session registry (`<config dir>/sessions/`) lists it
+  with a working directory or a Zensu-recorded project root there, or when its
+  worktree-keep anchor there is live — an anchor this build cannot validate counts as
+  well. A session that only edits files there by absolute path is none of these, which is
+  why the report lists the target's uncommitted paths;
+- that evidence is complete: the registry is readable, lists THIS session, and every entry
+  of a live process in it can be read.
+
+Its refusals, each of which writes nothing and prints its own remedy: `session-id-unusable`,
+`private-record-store-unsafe`, `record-unreadable`, `recorded-root-missing`,
+`not-served-by-executing-runtime`, `plugin-data-mismatch`, `workflow-document-unusable`,
+`workflow-in-progress`, `autopilot-state-unverifiable`, `recorded-root-not-in-a-worktree`,
+`target-not-in-a-worktree`, `different-repository`, `target-not-a-registered-worktree`,
+`already-anchored`, `target-contains-recorded-root`, `target-contains-other-worktrees`,
+`target-workflow-document-unusable`, `claimed-by-live-session`,
+`live-sessions-unverifiable` and `verdict-unavailable`. Render the reason, its remedy
+and every detail line verbatim.
+
+**Confirm with the user before adding `--confirm` here too.** `--confirm` is an argument
+anyone who can run the command can add, so this step is the consent. Run the read-only
+form, relay both roots and the uncommitted paths it lists verbatim together with its
+detection bound — a session visible to none of its sources, for example one started under
+another `CLAUDE_CONFIG_DIR` without a keep anchor, or one that only edits there by
+absolute path, is not detected — and only after the user agrees run the confirm form from
+the worktree the report named as `new anchor`, so the move lands where the user agreed:
+
+```bash
+cd -- '<new anchor, verbatim from the report>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-reanchor.sh" --confirm
+```
+
+**What it keeps.** The source-write gate still compares every write against the one
+recorded root and is not weakened: the move refuses a worktree in which it finds another
+live session and a checkout that contains other worktrees, so it never widens this
+session over another session's tree that its sources show. It only changes which
+worktree of this repository counts as this session's own. The old worktree is outside
+this session from then on, including for reviewers.
+
+Its `--confirm` output is `MOVED` with a row per fact, including which session markers
+moved; a marker that could not move keeps its setting under the old root, where this
+session no longer reads it. Relay every `WARNING:` line: one
+about the lease store means a lease still bound to the old root could not be set aside
+and review-evidence operations of this session keep failing until it is moved by hand,
+and one about provenance means the move is real but not recorded in that history. Exit
+codes: `0` for a report or a clean move, `1` for a refusal, a failure, or a move whose
+lease sweep was incomplete, `2` for a bad argument.
+
 Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
@@ -283,7 +403,8 @@ Main thread only: a reviewer or neutral child is refused by every gate.
 > That state has its own mode, `--restore-root`, documented under Prerequisites above —
 > including its own confirm-with-the-user step, which the four steps below do not cover.
 > Read that section before emitting anything, and never emit `--restore-root --confirm`
-> from here.
+> from here. The same holds for a session that works in a sibling worktree of the same
+> repository: that is `--reanchor`, with its own consent step.
 
 **Step 1 of 4 — report.** Run the read-only form. It changes nothing.
 
@@ -387,6 +508,11 @@ that prefix must carry a rooted literal value; an empty one is refused, which is
 one reason the form above passes only the variable the script actually reads.
 Emit the command exactly as written above; do not wrap it, redirect it, or chain
 anything onto it.
+
+`--reanchor` runs a different script, `hooks/lib/zensu-session-reanchor.sh`, and the
+bind-failure recognizer admits it in NO shape: it runs only in a session whose binding
+works, where the ordinary Bash gates judge it like any other command. Its only argument
+is `--confirm`, at most once.
 
 ## Response Style
 

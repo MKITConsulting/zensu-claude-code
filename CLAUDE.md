@@ -157,3 +157,4 @@ Each entry names the section title, what it covers, and its rule file.
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Worktree Keep (`hooks/lib/worktree-keep-v1.js` + three advisory hooks)** — keeping a live session's worktree out of the Claude Desktop pool, and the drift notice when it is taken anyway: `.claude/rules/worktree-keep.md`
 - **Restoring a Vanished Recorded Project Root (`restoreRootVerdict` / `restoreWorkflowProjectRoot`)** — re-creating a recorded project root a removed worktree took with it: `.claude/rules/restore-vanished-project-root.md`
+- **Session Re-anchor (`reanchorVerdict` / `performReanchor`)** — the verified move of a session's anchor to a sibling worktree of the same repository, and the deny texts that point at it: `.claude/rules/session-reanchor.md`

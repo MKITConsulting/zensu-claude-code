@@ -336,9 +336,9 @@ expect_eq "R5c  a reserved reason prefix is refused" "2" "$P2RC"
 # the helper carries an arm for each half AND that both write paths still call it: `export -f`
 # makes `_tdd_write_phase_critical` directly invocable in a child shell, so neither call is a
 # redundant inner copy and deleting either re-opens forged provenance from a subshell.
-GUARDS="$(grep -c 'Pp\]\[Rr\]\[Oo\]\[Jj\]\[Ee\]\[Cc\]\[Tt\]_' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
+GUARDS="$(grep -c 'Pp\]\[Rr\]\[Oo\]\[Jj\]\[Ee\]\[Cc\]\[Tt\]_\[Rr\]\[Oo\]\[Oo\]\[Tt\]_\[Rr\]\[Ee\]\[Ss\]' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
 expect_eq "R5d  the extracted guard carries the reserved phase" "1" "$GUARDS"
-GUARDS2="$(grep -c 'Pp\]\[Rr\]\[Oo\]\[Jj\]\[Ee\]\[Cc\]\[Tt\]-' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
+GUARDS2="$(grep -c 'Pp\]\[Rr\]\[Oo\]\[Jj\]\[Ee\]\[Cc\]\[Tt\]-\[Rr\]\[Oo\]\[Oo\]\[Tt\]-\[Rr\]\[Ee\]\[Ss\]' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
 expect_eq "R5e  the extracted guard carries the reserved reason prefix" "1" "$GUARDS2"
 GUARDS3="$(grep -c '_tdd_reserved_provenance "$phase" "$reason"' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
 expect_eq "R5e2 both write paths still call the extracted guard" "2" "$GUARDS3"

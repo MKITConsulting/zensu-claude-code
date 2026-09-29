@@ -120,9 +120,9 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (16)
+### Session Control & workflow state (17)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
-`session-control-sandbox-hook-integration` · `session-id-v1` ·
+`session-control-sandbox-hook-integration` · `session-id-v1` · `session-reanchor` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
@@ -132,7 +132,8 @@ Covers the canonical CAS workflow document, immutable session binding, the share
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
 state verbs, the SessionStart banner, a vanished live working directory under an
-intact binding, and the worktree-keep marker, anchor and drift lifecycle that keeps an
+intact binding, the verified re-anchor of a session record to a sibling worktree of the same
+repository, and the worktree-keep marker, anchor and drift lifecycle that keeps an
 app-managed worktree out of the Claude Desktop pool while a session is bound to it. `session-control-claude` alone carries ~140
 assertions.
 
@@ -365,6 +366,7 @@ that suite's failure.
 | `reviewer-spawn-denial-v1.test.js` | 37 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 27 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
+| `session-reanchor-v1.test.js` | 67 | `test-session-reanchor.sh` (E0a) | verified re-anchor of a session record to a sibling worktree of the same repository: git identity and worktree registration, every refusal reason including the Autopilot-run rung (a lease it cannot take, a shell that prints no run, a BASH_ENV file, and its place after the cheap refusals) and the two containment refusals, the live-session claim probe (registry working directory, recorded project root, worktree-keep anchors) and its fail-closed arms, the re-mint under the repository and session locks with its set-aside record and two-sided provenance, the project-root lease filter, the keep-anchor and session-marker moves, and both renderers, including quoted uncommitted file names read without optional git locks |
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 46 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
