@@ -779,7 +779,7 @@ fi
 # The false bypass-ledger claim, pinned NEGATIVELY in both doc carriers it was copied
 # into. `hooks.chainEnforcer=false` is a config-disabled gate, and this repo's own
 # authoritative residual list says config-disabled gates are deliberately not ledgered —
-# only the eight ZENSU_* env escapes are. The positive anchor keeps the check from
+# only the nine ZENSU_* env escapes are. The positive anchor keeps the check from
 # passing on a file that lost the row entirely.
 # Assembled from two halves so this file never holds the forbidden literal verbatim —
 # the scan covers this suite too, and a check that contains its own needle can never pass.

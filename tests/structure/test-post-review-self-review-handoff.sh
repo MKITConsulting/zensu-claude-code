@@ -450,6 +450,16 @@ else
   check "P14b bound-chain converge suppression (ticket unavailable)" FAIL
 fi
 
+if printf '%s' "$CTX_C" | grep -qF -- '--acceptance-status --log <run log>' \
+  && printf '%s' "$CTX_C" | grep -qF 'An ACCEPTANCE refusal follows the same remedy rule' \
+  && ! printf '%s' "$CTX_A" | grep -qF -- '--acceptance-status' \
+  && [ -n "${CTX_E2:-}" ] && ! printf '%s' "$CTX_E2" | grep -qF -- '--acceptance-status' \
+  && ! printf '%s' "$CTX_E2" | grep -qF 'An ACCEPTANCE refusal'; then
+  check "P14c only the standalone self-review-off close re-verifies acceptance" PASS
+else
+  check "P14c only the standalone self-review-off close re-verifies acceptance" FAIL
+fi
+
 # --- F: standalone claims fail closed around every live/corrupt Outer state ---
 OUTER_PREFLIGHT_OK=true
 for outer_case in same-owner foreign-owner corrupt-pointer corrupt-run; do

@@ -29,7 +29,12 @@ verb (`--tdd-begin`, `--tdd-reset`) and for a Stop release, where a clean ENOENT
 nothing was ever recorded. It re-raises `tdd_bypasses`' status, so `--bypass-list` still
 exits **3** on a non-zero read — distinct from its pre-existing exit 2 for an unavailable
 session identity. `tdd_add_bypass`'s own dedupe is the one exception: it consumes the raw
-value inside a `case` word and discards the status by design. Adding a sixth rendering
+value inside a `case` word and discards the status by design. `tdd_bypass_recorded` is a
+membership test, not a rendering site: it answers 0 only when a readable ledger names the
+gate, so an unreadable or absent document reads as "not recorded". The acceptance transport
+uses it to learn that an earlier call of the chain escaped the edit-landing gate; on "not
+recorded" the gate resolves the chain as if no escape happened, `unresolved` on a changed tree
+and `not-applicable` on a clean one. Adding a sixth rendering
 site means calling the helper, never re-rolling the mapping; both message constants live
 beside `ZENSU_BYPASS_GATE_ALLOWLIST` and neither sentence may be hand-copied into a
 consumer.

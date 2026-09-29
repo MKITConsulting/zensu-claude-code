@@ -37,7 +37,7 @@
 # requirements history for converge to audit against.
 #
 # Usage:
-#   zensu-plan-requirements.sh --plan <path>
+#   zensu-plan-requirements.sh [--list] --plan <path>
 #
 #   --plan  the TDD plan document to judge (required)
 #
@@ -50,12 +50,14 @@
 set -u
 
 PLAN_FILE=""
+LIST=0
 
 die() { echo "zensu-plan-requirements.sh: $1" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --plan) [ $# -ge 2 ] || die "--plan requires a value"; PLAN_FILE="$2"; shift 2 ;;
+    --list) LIST=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -88,7 +90,7 @@ esac
 # form `name=value` as a variable assignment and then reads standard input
 # instead, and a leading `-` parses as an option. Both are reachable through an
 # explicit --plan. The program never uses FILENAME, so the redirect costs nothing.
-SUMMARY="$(awk '
+AWK_OUT="$(awk -v list="$LIST" '
   { sub(/\r$/, "") }
   # A fenced code block is DATA, not structure. Without this a plan that merely
   # illustrates the table shape inside a ``` fence reads as having a real table,
@@ -168,6 +170,22 @@ SUMMARY="$(awk '
       # fallback steps aside to the other visible column instead of guessing.
       col = req_col
       if (col == 0 || col == idcol) col = (idcol == 3 ? 2 : 3)
+      if (list) {
+        raw = (col != idcol && n >= col) ? cell[col] : ""
+        gsub(/[[:space:]]+/, " ", raw)
+        sub(/^ /, "", raw)
+        sub(/ $/, "", raw)
+        lead = tolower(raw)
+        sub(/^[*_~` ]+/, "", lead)
+        state = "active"
+        if (lead ~ /^[(]deprecated[)]/ || lead ~ /^[[]deprecated[]]/ || lead == "deprecated" || lead ~ /^deprecated[ ]*:/ || lead ~ /^deprecated[ ]*—/ || lead ~ /^deprecated[ ]*–/ || lead ~ /^deprecated[ ]+-[ ]/) state = "deprecated"
+        bare = raw
+        gsub(/[{][^{}]*[}]/, "", bare)
+        gsub(/[[:space:]]/, "", bare)
+        if (bare == "") state = "placeholder"
+        ids = split(probe, idlist, ",")
+        for (k = 1; k <= ids; k++) printf "%s\t%s\t%s\n", idlist[k], state, raw
+      }
       if (col != idcol && n >= col) {
         text = cell[col]
         # A cell counts as filled only if something remains once every `{...}`
@@ -182,6 +200,17 @@ SUMMARY="$(awk '
   }
   END { printf "%d %d %d %d", heading + 0, rows + 0, filled + 0, fence + 0 }
 ' < "$PLAN_FILE" 2>/dev/null)" || die "could not read plan: $PLAN_FILE"
+
+SUMMARY="$(printf '%s\n' "$AWK_OUT" | tail -n 1)"
+ROWS_OUT=""
+[ "$LIST" -eq 1 ] && ROWS_OUT="$(printf '%s\n' "$AWK_OUT" | sed '$d')"
+say() {
+  if [ "$LIST" -eq 1 ]; then printf '%s\n' "$1" >&2; else printf '%s\n' "$1"; fi
+}
+emit_rows() {
+  [ "$LIST" -eq 1 ] && [ -n "$ROWS_OUT" ] && printf '%s\n' "$ROWS_OUT"
+  return 0
+}
 
 [ -n "$SUMMARY" ] || die "plan summary is empty: $PLAN_FILE"
 set -- $SUMMARY
@@ -201,7 +230,7 @@ esac
 [ "$FENCE_OPEN" -eq 0 ] || die "plan has an unterminated code fence, so the document could not be parsed: $PLAN_FILE"
 
 if [ "$HEADING" -eq 0 ]; then
-  echo "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"
+  say "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"
   exit 3
 fi
 # The two exit-4 states are DIFFERENT edits and must not share one message. Zero
@@ -210,12 +239,14 @@ fi
 # verdict this exit was designed for. Telling the first author to "fill the table"
 # points them at an edit they already made.
 if [ "$ROWS" -eq 0 ]; then
-  echo "PLAN REQUIREMENTS UNRECOGNIZED — ${PLAN_FILE}: the section holds no row with a recognizable AC-###/FR-### id. A row is recognized when one cell reduces to the id alone once **bold**, \`code\`, ~~strike~~ and [link](target) decoration is removed; a comma-separated list and a trailing letter (AC-001a) are accepted"
+  say "PLAN REQUIREMENTS UNRECOGNIZED — ${PLAN_FILE}: the section holds no row with a recognizable AC-###/FR-### id. A row is recognized when one cell reduces to the id alone once **bold**, \`code\`, ~~strike~~ and [link](target) decoration is removed; a comma-separated list and a trailing letter (AC-001a) are accepted"
   exit 4
 fi
 if [ "$FILLED" -eq 0 ]; then
-  echo "PLAN REQUIREMENTS EMPTY — ${PLAN_FILE}: the section holds ${ROWS} AC/FR row(s), none with a filled-in requirement"
+  emit_rows
+  say "PLAN REQUIREMENTS EMPTY — ${PLAN_FILE}: the section holds ${ROWS} AC/FR row(s), none with a filled-in requirement"
   exit 4
 fi
-echo "PLAN REQUIREMENTS OK — ${PLAN_FILE}: ${FILLED}/${ROWS} AC/FR row(s) filled in"
+emit_rows
+say "PLAN REQUIREMENTS OK — ${PLAN_FILE}: ${FILLED}/${ROWS} AC/FR row(s) filled in"
 exit 0

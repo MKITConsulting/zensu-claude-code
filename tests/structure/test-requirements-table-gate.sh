@@ -128,6 +128,47 @@ bash "$REQ" --plan "$FIX/quotes-braces.md" >/dev/null 2>&1
 check "L6 a requirement that merely quotes {braces} counts as filled" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/rows-after-subheading.md" >/dev/null 2>&1
 check "L7 a '### ' subheading does not close the Requirements section" "$(verdict $?)"
+
+cat > "$FIX/list.md" <<'PLAN'
+# TDD Plan: list
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001, AC-002 | two ids share one row | spec |
+| **AC-003** | (deprecated) replaced by AC-004 | spec |
+| AC-004 | [Deprecated] superseded | spec |
+| AC-005 | Deprecated: no longer needed | spec |
+| AC-006 | deprecated — dropped from scope | spec |
+| AC-007 | _(deprecated)_ decorated marker | spec |
+| AC-008 | `deprecated`-flag handling | spec |
+| AC-009 | Deprecated-flag handling | spec |
+| AC-010 | deprecated | spec |
+| AC-011 | deprecated - old path | spec |
+| FR-001 | an FR row | spec |
+| AC-012 | {placeholder} | spec |
+PLAN
+LIST_WANT="$(printf '%s\t%s\t%s\n' \
+  AC-001 active 'two ids share one row' \
+  AC-002 active 'two ids share one row' \
+  AC-003 deprecated '(deprecated) replaced by AC-004' \
+  AC-004 deprecated '[Deprecated] superseded' \
+  AC-005 deprecated 'Deprecated: no longer needed' \
+  AC-006 deprecated 'deprecated — dropped from scope' \
+  AC-007 deprecated '_(deprecated)_ decorated marker' \
+  AC-008 active '`deprecated`-flag handling' \
+  AC-009 active 'Deprecated-flag handling' \
+  AC-010 deprecated 'deprecated' \
+  AC-011 deprecated 'deprecated - old path' \
+  FR-001 active 'an FR row' \
+  AC-012 placeholder '{placeholder}')"
+LIST_OK=1
+for list_locale in C en_US.UTF-8; do
+  LIST_HAVE="$(LC_ALL="$list_locale" bash "$REQ" --list --plan "$FIX/list.md" 2>/dev/null)" || LIST_OK=0
+  [ "$LIST_HAVE" = "$LIST_WANT" ] || LIST_OK=0
+done
+[ "$LIST_OK" -eq 1 ]
+check "L24 --list expands a comma list, keeps the narrow deprecated markers and an unmarked row active, in both locales" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/rows-outside.md" >/dev/null 2>&1
 [ $? -eq 4 ]
 check "L8 an AC row under a LATER '## ' section is not counted" "$(verdict $?)"
@@ -1011,7 +1052,8 @@ awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF '_tdd_native_path "$_tc
 check "MB1 the root is translated into the native namespace before it crosses into node" "$(verdict $?)"
 awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF '_tdd_native_path "$_tc_receipt"'
 check "MB2 the receipt path is translated too" "$(verdict $?)"
-awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'path.relative(root, resolved).split(path.sep).join("/")'
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'main(["receipt-log"])' \
+  && grep -qF "logRel: path.relative(root, resolved).split(path.sep).join('/')" "$PLUGIN_DIR/hooks/lib/edit-landing-receipt-v1.js"
 check "MB3 what comes back is project-relative, never a native absolute path" "$(verdict $?)"
 # The only basename inside the derivation operates on `_rq_rel`, the
 # project-relative suffix — never on a native path handed back from node.
