@@ -601,8 +601,9 @@ const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 // the restore arm it was about. That require-time benefit is the whole of it, and
 // the second half this comment used to claim was unearned: a skewed core does NOT
 // reach the no-remedy text through the shipped entry point, because
-// `main()` resolves `core.restoreRootVerdict` unguarded and CALLS it
-// above the table, so it throws before the table is consulted and the outer catch
+// `main()` resolves `restoreRootVerdict` on the core it runs against
+// (`adoptionCore`, the module's own unless a caller injects one) unguarded and
+// CALLS it above the table, so it throws before the table is consulted and the outer catch
 // around main() turns that into a refusal with exit 1. The EMPTY table is reached
 // only by a caller that hands `renderRestoreVerdict` a verdict of its own, which is
 // the unit suite. The table is built on first use and memoized.

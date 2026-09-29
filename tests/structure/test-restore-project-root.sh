@@ -2119,8 +2119,8 @@ else check "R11n3 the skill names both arms of that remedy" FAIL; fi
 # require-time one is real and measured. The second — that a skewed core "yields an
 # EMPTY table, so every refusal falls through to the no-remedy text" — is only true
 # for a caller that hands `renderRestoreVerdict` a verdict of its own, which is the unit
-# suite: `main()` resolves `core.restoreRootVerdict` unguarded and CALLS it above the
-# table, so on the very core the guard is written for, main() throws there first and the
+# suite: `main()` resolves `restoreRootVerdict` on the core it runs against unguarded and
+# CALLS it above the table, so on the very core the guard is written for, main() throws there first and the
 # outer catch turns it into a refusal with exit 1. And the same comment never said why the sibling `REMEDY` table
 # may stay eager, which is the criterion a later reader needs: ADOPTION_REFUSALS
 # predates every core this file can be paired with under the lineage rule.
@@ -2140,8 +2140,10 @@ else check "R14b the comment states the criterion that keeps the sibling table e
 # `undefined`, calling it threw a TypeError, the catch printed THREW and the row asserted
 # exactly that — it passed against an intact core, against the skewed clone, and with the
 # guard it grades removed. The property did not disappear, it MOVED: `main()` resolves
-# `core.restoreRootVerdict` unguarded and CALLS it above the table, so the shipped entry
-# point is the only caller that can reach it. Drive `main()`.
+# `restoreRootVerdict` on the core it runs against — `adoptionCore`, which is the module's
+# own required core unless a caller injects one, so the skewed file on disk IS what main()
+# calls — unguarded and CALLS it above the table, so the shipped entry point is the only
+# caller that can reach it. Drive `main()`.
 #
 # THREE arms, because a single one is what went vacuous. The skewed arm must THROW and the
 # message must NAME the symbol, so a throw from somewhere else cannot satisfy it. The
@@ -2154,9 +2156,9 @@ else check "R14b the comment states the criterion that keeps the sibling table e
 R14C_OUT="$(REPORT="$R14_REPORT" CORE="$CORE" DATA="$GONE_DATA" SESSION=gone ROOT="$PLUGIN_DIR" node -e '
   const fs = require("node:fs"); const os = require("node:os"); const path = require("node:path");
   const lib = path.dirname(process.env.REPORT);
-  const ANCHOR = "core.restoreRootVerdict(request)";
-  const GUARD = "(typeof core.restoreRootVerdict === \"function\" "
-    + "? core.restoreRootVerdict(request) : { ok: false, reason: \"guarded\" })";
+  const ANCHOR = "adoptionCore.restoreRootVerdict(request)";
+  const GUARD = "(typeof adoptionCore.restoreRootVerdict === \"function\" "
+    + "? adoptionCore.restoreRootVerdict(request) : { ok: false, reason: \"guarded\" })";
   const build = (skew, guard) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zensu-r14-"));
     for (const n of fs.readdirSync(lib)) {
