@@ -6,13 +6,6 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "autopilot-bound-payload-windows",
-          "runner": "bash",
-          "path": "tests/structure/test-autopilot-bound-payload-windows.sh",
-          "args": [],
-          "timeoutMs": 300000
-        },
-        {
           "id": "autopilot-state-machine",
           "runner": "bash",
           "path": "tests/structure/test-autopilot-state-machine.sh",
@@ -28,13 +21,6 @@
             "C6a,C6b,C7,C7-renew,C8"
           ],
           "timeoutMs": 900000
-        },
-        {
-          "id": "deferred-review-fallback",
-          "runner": "bash",
-          "path": "tests/structure/test-deferred-review-fallback.sh",
-          "args": [],
-          "timeoutMs": 300000
         },
         {
           "id": "installed-plugin-provisioner",
@@ -300,6 +286,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "autopilot-bound-payload-windows",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-bound-payload-windows.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
           "id": "bash-source-write-gate",
           "runner": "bash",
           "path": "tests/structure/test-bash-source-write-gate.sh",
@@ -359,6 +352,13 @@
       "platform": "win32",
       "profileTimeoutMs": 1800000,
       "suites": [
+        {
+          "id": "deferred-review-fallback",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-fallback.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
         {
           "id": "review-worker-evidence-lease",
           "runner": "bash",

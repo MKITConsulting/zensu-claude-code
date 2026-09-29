@@ -128,6 +128,8 @@ const expectedShardHomes = {
   'plan-payload-path-transport': 'windows-shard-8',
   'stop-enforcer-self-review-routing': 'windows-shard-7',
   'session-trail-lineage': 'windows-shard-8',
+  'autopilot-bound-payload-windows': 'windows-shard-6',
+  'deferred-review-fallback': 'windows-shard-8',
 };
 const expectedShardTails = {
   'windows-shard-4': 'deferred-claim-adoption',

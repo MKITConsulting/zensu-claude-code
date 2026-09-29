@@ -51,6 +51,17 @@ It runs LAST because its cap is the largest: the three caps sum to 1980000 ms ag
 starving the suite behind it. `expectedShardTails` in `tests/structure/windows-ci-contract.test.js`
 pins that position. Re-measure on the next green Windows run and replace these figures.
 
+**`windows-shard-1` paid for `C7-renew` the same way.** Run 36625440255 exhausted that shard's
+envelope at 1800264 ms: `tdd-no-flock-external-lease` was granted 9579 ms and overran it, and
+three suites behind it never ran. `C7-renew` itself took about 96 s of `deferred-lease-refresh`'s
+739185 ms. The rest was a slow runner: the suite's other four cases took about 40% longer, and
+`autopilot-state-machine` 28% longer (791429 ms), than on main's run 36622193312 (616598 ms),
+whose shard 1 summed 1357 s. So the shard was already close to its envelope on a slow runner.
+`autopilot-bound-payload-windows` (116728 and 128775 ms on those two runs) moved to
+`windows-shard-6`, which measured 1027 and 695 s, and `deferred-review-fallback` (116501 and
+99509 ms) moved to `windows-shard-8`, which measured 882 and 1083 s, ahead of its pinned tail.
+`expectedShardHomes` pins both homes. Re-measure shard 1 on the next green Windows run.
+
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
 outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is

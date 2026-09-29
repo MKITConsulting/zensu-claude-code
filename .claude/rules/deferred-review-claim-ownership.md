@@ -105,9 +105,8 @@ without a seed `vacuous:1/1/0/1`, so each missing entry point trips the guard on
 registered in `tests/structure/deferred-review-claim-cases.test.js`. `C2f-reuse`, `C7-reuse`,
 `C7-identity` and `L3` run in `deferred-claim-adoption` on `windows-shard-4`, `C4t` and
 `C4s-transfer` in `deferred-transfer-reset` on `windows-shard-6`, and `C7-renew` in
-`deferred-lease-refresh` on `windows-shard-1`. That suite measured 451854 ms for its other four
-cases on run 36344267696, whose windows-shard-1 job summed 1344726 ms of its 1800000 ms
-envelope; `C7-renew` adds three `Stop` runs, ESTIMATED at about 100 s there. The budget of
+`deferred-lease-refresh` on `windows-shard-1`, where it measured about 96 s on run 36625440255.
+Two suites moved off that shard to pay for it. Those measurements, the budget of
 `deferred-claim-adoption` and its position on its shard are recorded in
 `.claude/rules/windows-budget-best-solution-first.md`.
 
