@@ -221,8 +221,8 @@ bound_arm() {
   export CLAUDE_PROJECT_DIR="$project"
   cd "$project" || return 1
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$sid" || return 1
-  autopilot_begin_run "$run" "$sid" "$project" false "$validate" >/dev/null 2>&1 || return 1
-  autopilot_apply_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$APPROVED_SHA\"}" "$project" "$sid" >/dev/null 2>&1 || return 1
+  autopilot_begin_run "$run" "$ZENSU_SESSION_KEY" "$project" false "$validate" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" "plan-$run" PLAN_APPROVED "{\"approvedPlanSha256\":\"$APPROVED_SHA\"}" "$project" >/dev/null 2>&1 || return 1
   bash "$LOG" --tdd-begin --session "$sid" --autopilot-run "$run" --autopilot-attempt 1 \
     --autopilot-return-stage GATES --chain-id "$chain" >/dev/null 2>&1 || return 1
   write_plan "$project"

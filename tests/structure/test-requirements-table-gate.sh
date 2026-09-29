@@ -453,11 +453,12 @@ check "Z3 one change count: this gate and its ledger conjoin on it, the receipt 
 # Line ORDER, not a proximity window: a distance window has to be widened every
 # time a comment lands in between, and it silently stops discriminating when the
 # regression fits inside the slack.
+ARM_LN="$(grep -n '^      --tdd-complete)' "$LOG" | head -1 | cut -d: -f1)"
 COUNT_LN="$(grep -n '_tc_changes="\$(' "$LOG" | head -1 | cut -d: -f1)"
-SWITCH_LN="$(grep -nE 'ZENSU_(EDIT_LANDING|REQUIREMENTS)_GATE:-on' "$LOG" | head -1 | cut -d: -f1)"
+SWITCH_LN="$(awk -v start="${ARM_LN:-0}" 'NR > start && /ZENSU_(EDIT_LANDING|REQUIREMENTS)_GATE:-on/ { print NR; exit }' "$LOG")"
 HEAD_LN="$(grep -n 'if _tc_git -C "\$_tc_root" rev-parse --verify --quiet HEAD' "$LOG" | head -1 | cut -d: -f1)"
-[ -n "$COUNT_LN" ] && [ -n "$SWITCH_LN" ] && [ -n "$HEAD_LN" ] \
-  && [ "$HEAD_LN" -lt "$COUNT_LN" ] && [ "$COUNT_LN" -lt "$SWITCH_LN" ]
+[ -n "$ARM_LN" ] && [ -n "$COUNT_LN" ] && [ -n "$SWITCH_LN" ] && [ -n "$HEAD_LN" ] \
+  && [ "$ARM_LN" -lt "$HEAD_LN" ] && [ "$HEAD_LN" -lt "$COUNT_LN" ] && [ "$COUNT_LN" -lt "$SWITCH_LN" ]
 check "Z4 the change count is computed on a resolvable HEAD BEFORE any switch is consulted" "$(verdict $?)"
 ! awk '/--tdd-complete\)/,/^        ;;/' "$LOG" \
   | grep -qF 'ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] || [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off"'
