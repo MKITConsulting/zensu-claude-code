@@ -8,7 +8,7 @@ End-to-end reference for the Zensu main-thread implementation workflow: vanilla 
 
 ## 1. Overview
 
-**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code. It runs in **vanilla implementation mode by default**: no RED→GREEN ceremony, while the plan, evidence audits, and review chain stay enforced. With `hooks.tddImplementation:true`, it additionally declares RED → IMPL → GREEN → REFACTOR transitions and a PreToolUse FSM gate blocks edits that violate the strict cycle (see §5). Strict is also reachable without touching config: `/zensu:tdd-mode --strict` records it for the session, and a calling skill can carry its own default into the spec as a single `TDD-MODE: strict` line — which is how `/zensu:pr-fix-findings` runs strict out of the box.
+**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code. It runs in **vanilla implementation mode by default**: no RED→GREEN ceremony, while the plan, evidence audits, and review chain stay enforced. With `hooks.tddImplementation:true`, it additionally declares RED → IMPL → GREEN → REFACTOR transitions and a PreToolUse FSM gate blocks edits that violate the strict cycle (see §5). Strict is also reachable without touching config: `/zensu:tdd-mode --strict` records it for the session, and a specification can ask for it with a single `TDD-MODE: strict` line. `/zensu:pr-fix-findings` writes no such line, so its fix chains follow the session's mode — vanilla out of the box.
 
 **When to invoke.**
 

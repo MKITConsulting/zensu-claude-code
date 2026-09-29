@@ -958,8 +958,8 @@ case "${1:-}" in
         # Mode precedence, resolved ONCE here and then frozen into this chain
         # generation's `vanilla` flag:
         #   1. the session override /zensu:tdd-mode recorded for this session
-        #   2. --tdd-mode strict, the CALLER's own default (e.g. the strict
-        #      default /zensu:pr-fix-findings asks for) — escalation only
+        #   2. --tdd-mode strict, the CALLER's own default (a single
+        #      `TDD-MODE: strict` line in the specification) — escalation only
         #   3. hooks.tddImplementation
         #   4. vanilla
         # The user's explicit session choice therefore outranks a skill's default,

@@ -16,7 +16,7 @@ main-thread skills       /zensu:tdd         Zensu Dashboard
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
-**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a skill can request it per run (`/zensu:pr-fix-findings` asks for strict). Both modes keep the evidence audits and guaranteed read-only review chain: five parallel specialist aspects → optional judge (default on) → consume-mode code-reviewer → auto-fix loop → self-review.
+**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and guaranteed read-only review chain: five parallel specialist aspects → optional judge (default on) → consume-mode code-reviewer → auto-fix loop → self-review.
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -26,7 +26,7 @@ The Implementation layer shows both modes: **vanilla** skips the RED→GREEN
 ceremony and lets the edit gate pass through; **strict** enforces it. The mode is
 resolved once at `--tdd-begin` from the ladder in the decision node below —
 `hooks.tddImplementation` (default `false`) is rank 3 of it, and both a
-`/zensu:tdd-mode` session choice and a calling skill's own `--tdd-mode strict`
+`/zensu:tdd-mode` session choice and a caller's own `--tdd-mode strict`
 default outrank the flag. The review chain and evidence audits run in both.
 
 ```mermaid
