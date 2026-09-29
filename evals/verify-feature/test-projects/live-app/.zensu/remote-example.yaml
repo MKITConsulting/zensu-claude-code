@@ -14,6 +14,5 @@ validate:
     contractVersion: 1
     mode: declared-safe
     dataClassification: pre-classified-non-sensitive
-    routes: ["/"]
     containsPersonalData: false
     containsSecrets: false

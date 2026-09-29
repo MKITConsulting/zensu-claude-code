@@ -178,7 +178,7 @@ function isInstructedCommand(command) {
   }
   if (!isPluginScript(words[1], RUN_CONFIG_HELPER)) return false;
   if (words[2] === '--check-policy') {
-    return words.length === 7 && HELPER_MODES.includes(words[3]) && words[6] === 'declared-safe';
+    return words.length === 6 && HELPER_MODES.includes(words[3]) && words[5] === 'declared-safe';
   }
   return isRunConfigInvocation(words.slice(2));
 }

@@ -104,10 +104,11 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 `verify-feature: consent mode ready`). Then:
 
 - The first `playwright-cli` call of the run that reaches a new origin — opening the browser,
-  `goto` or `tab-new` — opens a permission prompt naming the origin, the session, the routes the
-  run declares synthetic-safe and the consequence: answering Yes lets the model open and read
-  any page on that origin, screenshots included, for the rest of the session. The model cannot
-  answer that prompt.
+  `goto` or `tab-new` — opens a permission prompt naming the origin, the session and the
+  consequence: answering Yes lets the model open and read any page on that origin, screenshots
+  included, for the rest of the session. The model cannot answer that prompt. The approval covers
+  every page at any path, protected pages included once you log in yourself, so a route whose
+  identifiers change on every run needs no declaration.
 - Approved origins are remembered for the session in
   `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
   passes without a second prompt. The report's `Consent` block lists every record.
@@ -136,11 +137,11 @@ enforces the policy exactly as in the sections below.
 ### Guided setup and attach mode
 
 `/zensu:verify-feature --setup` detects the stack from tracked files, proposes `up`,
-`ready`, a port variable and the synthetic-safe routes with the evidence file for each
-proposal, asks one confirmation question, and writes `.zensu/runtime.yaml`
+`ready`, a port variable and, when seed or fixture code proves it, the application's data
+classification, with the evidence file for each proposal, asks one confirmation question, and writes `.zensu/runtime.yaml`
 (`.zensu/autopilot.yaml` keeps working as an alias and is tried second). It never invents a
 value it has no evidence for, never edits other project files, and never commits unasked.
-Add `--print-policy` to render the policy JSON for the recipe's origin and routes, for CI or
+Add `--print-policy` to render the policy JSON for the recipe's origin, for CI or
 for a host that keeps the policy in its launch environment.
 
 `--attach=http://127.0.0.1:<port>` verifies an application you already run: nothing is
@@ -157,11 +158,11 @@ PARTIAL instead.
 So the variable has to be exported by the shell that launches Claude Code:
 
 ```bash
-ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4173","evidenceMode":"declared-safe","routes":["/","/inventory"]}]}' claude
+ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4173","evidenceMode":"declared-safe"}]}' claude
 ```
 
-Changing the origin, the mode, or the route list means exiting Claude Code and launching it
-again with the new value.
+Changing the origin or the mode means exiting Claude Code and launching it again with the new
+value.
 
 ### Policy shape (contract version 1)
 
@@ -169,24 +170,24 @@ again with the new value.
 |---|---|
 | `version` | the integer `1` |
 | `mode` | `local` or `remote`; it must match the `--mode` the skill runs in |
-| `targets` | 1 to 8 entries; each carries exactly `origin`, `evidenceMode`, and `routes` |
+| `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
 | `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
-| `routes` | 1 to 64 page paths per target; each starts with `/`, carries no `?`, `#`, or `*`, is already normalized, and is unique |
+| `routes` | not part of the contract; a list a policy written for the earlier contract still carries is checked for its shape — 1 to 64 page paths, each starting with `/`, carrying no `?`, `#`, or `*`, already normalized and unique — and then ignored, so it narrows nothing |
 
-No other key is accepted at either level. Routes are matched exactly on the pathname:
-`/inventory` covers neither `/inventory/` nor `/inventory/42`, and the root page needs its own
-`/` entry. Routes belong to the origin they sit under and are never combined across targets.
-The gate applies the route rule to the navigation commands it sees — opening the browser,
-`goto` and `tab-new`. It does not see a navigation the page itself makes, and the API and asset
-requests a page makes only have to hit an origin in the run config.
+No other key is accepted at either level. A target approves its origin, and with it every page
+on that origin at any path — `/teams/42/sprints/7` as much as `/` — so a route whose identifiers
+change on every run needs no declaration. An approval never carries over to another origin: the
+gate judges the origin of every navigation command it sees — opening the browser, `goto` and
+`tab-new` — and the API and asset requests a page makes only have to hit an origin in the run
+config.
 
 ### Checking the policy before the run
 
-The skill runs this preflight for every route before its first browser call:
+The skill runs this preflight once for every origin before its first browser call:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" "<route>" declared-safe
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" declared-safe
 ```
 
 It judges the target exactly as the gate does and starts no browser. Before it judges the target
@@ -207,14 +208,13 @@ The messages you will meet:
 | `remote-target-needs-parent-environment-policy: …` | a remote target with no policy in the launch environment |
 | `local navigation policy accepts literal loopback-IP origins only` | a local origin uses `localhost` or another hostname |
 | `<origin>: origin is not a target of the navigation policy` | the origin is not listed; a different port is enough |
-| `<origin><route>: route is not approved for evidence by the navigation policy` | the route is not in that origin's `routes` |
-| `route must be an absolute, normalized, query-free pathname` | the route being checked carries `?`, `#`, `*` or a dot segment, or does not start with `/` |
+| `usage: verify-browser-config.js --check-policy <local\|remote> <origin> declared-safe` | the call carries an operand the preflight does not take, such as the route the earlier contract checked; drop it |
 | `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
 | `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
 
 `/zensu:doctor` checks the policy's contract too and reports an invalid one as
 `verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)`; the preflight above
-is the only check of a particular origin and route.
+is the only check of a particular origin.
 
 ## 2. Local mode
 
@@ -240,7 +240,7 @@ that worktree on an origin the policy already names.
 
 ```bash
 export VERIFY_PORT=4173
-export ZENSU_VERIFY_NAVIGATION_POLICY_V1="{\"version\":1,\"mode\":\"local\",\"targets\":[{\"origin\":\"http://127.0.0.1:${VERIFY_PORT}\",\"evidenceMode\":\"declared-safe\",\"routes\":[\"/\",\"/inventory\"]}]}"
+export ZENSU_VERIFY_NAVIGATION_POLICY_V1="{\"version\":1,\"mode\":\"local\",\"targets\":[{\"origin\":\"http://127.0.0.1:${VERIFY_PORT}\",\"evidenceMode\":\"declared-safe\"}]}"
 claude
 ```
 
@@ -271,11 +271,11 @@ nothing fits:
 The design decisions behind consent mode, its residuals and the alternatives that were weighed
 are recorded in [verify-feature-consent-spec.md](verify-feature-consent-spec.md).
 
-Steps 1 and 2 read the recipe the CONSENT gate reads too, and the gate resolves it in exactly one
-place: `resolveRecipeFile` in `hooks/lib/verify-consent-v1.js`, which prefers `.zensu/runtime.yaml`
-over `.zensu/autopilot.yaml` and skips a symlinked candidate. `--config=<path>` steers the SKILL
-and is not consulted by the gate, so a recipe passed that way declares no synthetic-safe routes to
-the consent prompt.
+The consent gate reads no recipe: its prompt names no route. `/zensu:doctor` resolves the
+recipe in exactly one place, `resolveRecipeFile` in `hooks/lib/verify-consent-v1.js`, which
+prefers `.zensu/runtime.yaml` over `.zensu/autopilot.yaml` and skips a symlinked candidate, to
+tell `consent mode ready` from `consent mode ready, no runtime recipe`. `--config=<path>` steers
+the SKILL and is not consulted there.
 
 A candidate recipe is accepted only when all of this is explicit and consistent:
 
@@ -322,7 +322,6 @@ validate:
     contractVersion: 1
     mode: declared-safe
     dataClassification: synthetic
-    routes: ["/", "/inventory"]
     containsPersonalData: false
     containsSecrets: false
 ```
@@ -342,11 +341,11 @@ The script behind it is yours. The contract it has to meet:
   for byte as a standalone Bash call on success, failure, and cancellation, so it must also
   succeed when nothing is running any more.
 
-`evidenceSafety.routes` lists the exact page paths whose DOM and screenshots may reach the
-model, under the same origin the policy names. `declared-safe` is a claim that checked-in
-fixtures or seed data make those pages synthetic or pre-classified non-sensitive. A route
-missing from this block, or a block that fails validation, is skipped and reported PARTIAL
-rather than captured.
+`evidenceSafety` is optional and gates nothing: `declared-safe` records the claim that
+checked-in fixtures or seed data make the application synthetic or pre-classified
+non-sensitive. Which pages may reach the model is decided by the origin alone — every page, at
+any path, on an origin the policy names or you approved at the consent prompt. A `routes` list
+left in the block by the earlier contract is ignored.
 
 A complete working example is the eval fixture:
 `evals/verify-feature/test-projects/live-app/.zensu/autopilot.yaml`, with
@@ -360,7 +359,7 @@ Remote mode proves code that is already deployed. It boots nothing and needs no 
 recipe; it needs the policy and a validated base URL.
 
 ```bash
-ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://preview.example.com","evidenceMode":"declared-safe","routes":["/","/inventory"]}]}' claude
+ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://preview.example.com","evidenceMode":"declared-safe"}]}' claude
 ```
 
 ```
@@ -375,10 +374,10 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 - The base URL is validated in memory before anything else happens: absolute, `https://`, no
   userinfo, no query, no fragment. A signed or token-bearing preview link is rejected and
   never echoed; use a credential-free entry URL plus a visible login in the headed browser.
-- Authentication is credential-blind. Protected routes need a recipe (`--config=<path>`)
-  whose `validate.evidenceSafety` covers each of them exactly, and you log in yourself in the
-  browser the skill opens. Without that, authenticated scenarios are skipped and the run is
-  PARTIAL. A configured `auth.appOrigin` must equal the validated base URL's origin exactly.
+- Authentication is credential-blind: you log in yourself in the browser the skill opens, and
+  every page of the policy's origin is then in scope, protected pages included, at any path.
+  Without a login, authenticated scenarios are skipped and the run is PARTIAL. A configured
+  `auth.appOrigin` must equal the validated base URL's origin exactly.
 - Remote mode verifies what is deployed at that URL, not the files in your worktree. The skill
   says so before its first browser call, and the verdict stays PARTIAL unless a deployment
   identity ties that URL to the branch under test.
@@ -389,7 +388,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 |---|---|---|
 | PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode` | fix the policy's mode, or unset it to use consent mode for a local target |
 | PARTIAL; reason starts `remote-target-needs-parent-environment-policy` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
-| the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
+| the permission prompt was answered No | you declined the origin | re-run and answer Yes. Nothing in the recipe replaces that answer: consent is per origin, and there is no route list to declare |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |

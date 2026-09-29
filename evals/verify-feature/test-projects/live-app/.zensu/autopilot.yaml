@@ -32,6 +32,5 @@ validate:
     contractVersion: 1
     mode: declared-safe
     dataClassification: synthetic
-    routes: ["/"]
     containsPersonalData: false
     containsSecrets: false

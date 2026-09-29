@@ -175,6 +175,21 @@ function policyContractFault(raw) {
 }
 
 const MAX_POLICY_ROUTES = 64;
+const POLICY_TARGET_KEYS = Object.freeze(['evidenceMode', 'origin']);
+const LEGACY_POLICY_TARGET_KEYS = Object.freeze(['evidenceMode', 'origin', 'routes']);
+const TARGET_CONTRACT_FAULT = 'policy target contract is invalid; v1 supports declared-safe evidence only';
+
+function legacyRoutesFault(rawRoutes) {
+  if (!Array.isArray(rawRoutes) || rawRoutes.length < 1 || rawRoutes.length > MAX_POLICY_ROUTES) return TARGET_CONTRACT_FAULT;
+  const routes = new Set();
+  for (const route of rawRoutes) {
+    const normalizedRoute = normalizeRoute(route);
+    if (normalizedRoute === null) return 'policy route must be an absolute query-free pathname';
+    if (routes.has(normalizedRoute)) return 'policy routes must be normalized and unique';
+    routes.add(normalizedRoute);
+  }
+  return '';
+}
 
 function parsePolicyTargets(raw) {
   const fault = policyContractFault(raw);
@@ -182,20 +197,13 @@ function parsePolicyTargets(raw) {
   const value = JSON.parse(raw);
   const targets = new Map();
   for (const rawTarget of value.targets) {
-    const targetKeys = Object.keys(rawTarget || {}).sort();
-    if (JSON.stringify(targetKeys) !== JSON.stringify(['evidenceMode', 'origin', 'routes'])
-        || rawTarget.evidenceMode !== 'declared-safe'
-        || !Array.isArray(rawTarget.routes) || rawTarget.routes.length < 1
-        || rawTarget.routes.length > MAX_POLICY_ROUTES) {
-      return { ok: false, fault: 'policy target contract is invalid; v1 supports declared-safe evidence only' };
+    const targetKeys = JSON.stringify(Object.keys(rawTarget || {}).sort());
+    const legacy = targetKeys === JSON.stringify(LEGACY_POLICY_TARGET_KEYS);
+    if ((!legacy && targetKeys !== JSON.stringify(POLICY_TARGET_KEYS)) || rawTarget.evidenceMode !== 'declared-safe') {
+      return { ok: false, fault: TARGET_CONTRACT_FAULT };
     }
-    const routes = new Set();
-    for (const route of rawTarget.routes) {
-      const normalizedRoute = normalizeRoute(route);
-      if (normalizedRoute === null) return { ok: false, fault: 'policy route must be an absolute query-free pathname' };
-      if (routes.has(normalizedRoute)) return { ok: false, fault: 'policy routes must be normalized and unique' };
-      routes.add(normalizedRoute);
-    }
+    const routesFault = legacy ? legacyRoutesFault(rawTarget.routes) : '';
+    if (routesFault) return { ok: false, fault: routesFault };
     if (typeof rawTarget.origin !== 'string') return { ok: false, fault: 'policy origin must be a string' };
     let parsed;
     try { parsed = new URL(rawTarget.origin); }
@@ -215,7 +223,7 @@ function parsePolicyTargets(raw) {
     } else if (net.isIP(hostname) && !isPublicAddress(hostname)) {
       return { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC };
     }
-    targets.set(parsed.origin, { origin: parsed.origin, hostname, routes });
+    targets.set(parsed.origin, { origin: parsed.origin, hostname });
   }
   return { ok: true, mode: value.mode, targets };
 }
@@ -223,7 +231,9 @@ function parsePolicyTargets(raw) {
 module.exports = {
   CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
+  LEGACY_POLICY_TARGET_KEYS,
   MAX_POLICY_ROUTES,
+  POLICY_TARGET_KEYS,
   checkNavigationTarget,
   parsePolicyTargets,
   policyContractFault,

@@ -55,8 +55,8 @@ function policyEnv(mode, targets) {
   return { ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode, targets }) };
 }
 
-function target(origin, routes = ['/']) {
-  return { origin, evidenceMode: 'declared-safe', routes };
+function target(origin, routes) {
+  return routes === undefined ? { origin, evidenceMode: 'declared-safe' } : { origin, evidenceMode: 'declared-safe', routes };
 }
 
 function publicResolver(map) {
@@ -186,41 +186,43 @@ test('the run config follows the navigation policy: remote needs one, and a poli
     { ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' }, READY), new RegExp(consent.REASONS.POLICY_INVALID));
 });
 
-test('the policy check answers consent or policy and refuses what the gate would refuse', async () => {
+test('the policy check answers consent or policy per origin and refuses what the gate would refuse', async () => {
   const resolver = publicResolver({ 'preview.example.com': ['93.184.216.34'], 'internal.example.com': ['10.0.0.5'] });
-  assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', '/login', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
-  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', '/', 'declared-safe'], NO_POLICY, resolver, READY),
+  assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
+  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], NO_POLICY, resolver, READY),
     (error) => error.message === consent.REASONS.REMOTE_NEEDS_POLICY);
-  const local = policyEnv('local', [target('http://127.0.0.1:5173', ['/', '/login'])]);
-  assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', '/login', 'declared-safe'], local, resolver, READY), 'policy');
-  await assert.rejects(helper.checkPolicy(['local', 'http://127.0.0.1:5173', '/admin', 'declared-safe'], local, resolver, READY),
-    new RegExp(consent.REASONS.NOT_POLICY_ROUTE));
-  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', '/', 'declared-safe'], local, resolver, READY), /mode does not match/);
+  for (const local of [policyEnv('local', [target('http://127.0.0.1:5173')]), policyEnv('local', [target('http://127.0.0.1:5173', ['/login'])])]) {
+    assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', 'declared-safe'], local, resolver, READY), 'policy');
+    await assert.rejects(helper.checkPolicy(['local', 'http://127.0.0.1:5174', 'declared-safe'], local, resolver, READY),
+      new RegExp(consent.REASONS.NOT_POLICY_TARGET));
+    await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], local, resolver, READY), /mode does not match/);
+  }
   const remote = policyEnv('remote', [target('https://preview.example.com'), target('https://internal.example.com')]);
-  assert.equal(await helper.checkPolicy(['remote', 'https://preview.example.com', '/', 'declared-safe'], remote, resolver, READY), 'policy');
-  await assert.rejects(helper.checkPolicy(['remote', 'https://internal.example.com', '/', 'declared-safe'], remote, resolver, READY), /non-public/);
+  assert.equal(await helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], remote, resolver, READY), 'policy');
+  await assert.rejects(helper.checkPolicy(['remote', 'https://internal.example.com', 'declared-safe'], remote, resolver, READY), /non-public/);
   const usage = [
     [],
-    ['local', 'http://127.0.0.1:5173', '/'],
-    ['local', 'http://127.0.0.1:5173', '/', 'redacted'],
-    ['staging', 'http://127.0.0.1:5173', '/', 'declared-safe'],
-    ['local', 'http://127.0.0.1:5173', '/', 'declared-safe', 'extra'],
+    ['local', 'http://127.0.0.1:5173'],
+    ['local', 'http://127.0.0.1:5173', 'redacted'],
+    ['staging', 'http://127.0.0.1:5173', 'declared-safe'],
+    ['local', 'http://127.0.0.1:5173', '/', 'declared-safe'],
+    ['local', 'http://127.0.0.1:5173', 'declared-safe', 'extra'],
   ];
   for (const argv of usage) await assert.rejects(helper.checkPolicy(argv, NO_POLICY, resolver, READY), /usage/, JSON.stringify(argv));
-  for (const route of ['login', '/a?b=1', '/a#b', '/a/../b', '/a*']) {
-    await assert.rejects(helper.checkPolicy(['local', 'http://127.0.0.1:5173', route, 'declared-safe'], NO_POLICY, resolver, READY),
-      /absolute, normalized/, route);
+  for (const origin of ['http://127.0.0.1:5173/login', 'http://127.0.0.1:5173/?a=1', 'http://127.0.0.1:5173/#b']) {
+    await assert.rejects(helper.checkPolicy(['local', origin, 'declared-safe'], NO_POLICY, resolver, READY),
+      /must not carry a path|query or fragment/, origin);
   }
 });
 
 test('the policy check refuses before any verdict unless both consent hooks and the measured playwright-cli are ready', async (t) => {
   const resolver = publicResolver({ 'preview.example.com': ['93.184.216.34'] });
-  const local = ['local', 'http://127.0.0.1:5173', '/', 'declared-safe'];
+  const local = ['local', 'http://127.0.0.1:5173', 'declared-safe'];
   await assert.rejects(helper.checkPolicy(local, NO_POLICY, resolver, { ...READY, installedVersion: installedAs({ source: 'manifest', version: '0.1.20', owner: '@playwright/cli' }) }),
     (error) => error.message.startsWith('playwright-cli 0.1.20 is installed') && error.message.includes(`\`${PINNED}\``));
   await assert.rejects(helper.checkPolicy(local, NO_POLICY, resolver, { ...READY, pluginRoot: pluginRoot(t, { hooks: {} }) }),
     (error) => error.message.startsWith('the browser consent gate is not ready') && error.message.includes('/zensu:doctor'));
-  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', '/', 'declared-safe'], NO_POLICY, resolver, { ...READY, installedVersion: installedAs({ source: 'absent' }) }),
+  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], NO_POLICY, resolver, { ...READY, installedVersion: installedAs({ source: 'absent' }) }),
     (error) => error.message.startsWith('playwright-cli is not on PATH'));
   assert.equal(await helper.checkPolicy(local, NO_POLICY, resolver, READY), 'consent');
   const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-no-cli-')));
@@ -333,10 +335,10 @@ test('the CLI prints the session, the config path and each origin, and exits 1 w
   assert.equal(bad.status, 1);
   assert.equal(bad.stdout, '');
   assert.equal(bad.stderr, `zensu verify browser config: ${FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK}\n`);
-  const check = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:5173', '/', 'declared-safe'], { encoding: 'utf8', env });
+  const check = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:5173', 'declared-safe'], { encoding: 'utf8', env });
   assert.equal(check.status, 0, check.stderr);
   assert.equal(check.stdout, 'consent\n');
-  const refused = spawnSync(process.execPath, [HELPER, '--check-policy', 'remote', 'https://preview.example.com', '/', 'declared-safe'], { encoding: 'utf8', env });
+  const refused = spawnSync(process.execPath, [HELPER, '--check-policy', 'remote', 'https://preview.example.com', 'declared-safe'], { encoding: 'utf8', env });
   assert.equal(refused.status, 1);
   assert.equal(refused.stdout, '');
   assert.equal(refused.stderr, `zensu verify browser config: ${consent.REASONS.REMOTE_NEEDS_POLICY}\n`);
