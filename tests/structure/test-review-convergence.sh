@@ -279,5 +279,15 @@ node -e '
 check "LC1 the default auto-fix budget is one fix round" "$(grep_ok "$ROOT/hooks/lib/zensu-config.sh" '_zensu_config_bounded_int autoFixMaxRounds 1 1 99')"
 check "LC1b configuration.md documents the default of one fix round" "$(grep_ok "$CONFIG_DOC" 'Integer loop guard (default `1`')"
 check "LC1c config.example.json ships one fix round" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.autoFixMaxRounds===1?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC2 the delegate reads hooks.criticalReproduction behind the verification gate" "$(grep_ok "$DELEGATE" 'zensu_hook_enabled criticalReproduction && zensu_hook_enabled findingVerification')"
+check "LC2b the convergence clause requires a reproduction for a re-review CRITICAL" "$(grep_ok "$DELEGATE" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
+check "LC2c step 4c carries stage 3" "$(grep_ok "$TDD_MD" '**Stage 3 (reproduction, re-reviews only, config-gated).**')"
+check "LC2d the log line is named" "$(grep_ok "$TDD_MD" 'FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE>')"
+check "LC2e self-review fixes only reproduced re-review CRITICALs" "$(grep_ok "$SELF_REVIEW_MD" 'CRITICAL finding from a re-review is a must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "LC2f the rubric doc states the rule" "$(grep_ok "$RUBRIC_DOC" 'a CRITICAL finding of a re-review routes only when a failing test reproduces it')"
+check "LC2g configuration.md documents criticalReproduction" "$(grep_ok "$CONFIG_DOC" '| `criticalReproduction` |')"
+check "LC2h config.example.json ships criticalReproduction" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.criticalReproduction===true?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC2i the max-rounds hand-off names the reproduction rule" "$(grep_ok "$DELEGATE" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
 finish

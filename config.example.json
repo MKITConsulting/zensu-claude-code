@@ -25,6 +25,7 @@
     "incrementalReviewRounds": true,
     "aspectActivation": true,
     "reviewConvergence": true,
+    "criticalReproduction": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "sessionAutoAdopt": true,

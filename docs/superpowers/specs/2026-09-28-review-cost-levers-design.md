@@ -89,10 +89,13 @@ Non-goals
   graded VERIFIED, the main thread writes or extends a test that fails on the current tree and runs it through
   the evidence runner with `--scope scoped`, so a record exists.
   - `REPRODUCED` — the finding routes as today; the test stays as a regression test.
-  - `NOT-REPRODUCED` — the test passes; the finding is downgraded to IMPORTANT, deferred, and listed under
-    `## Open` as "CRITICAL (not reproduced)".
+  - `NOT-REPRODUCED` — the test passes; the finding leaves the loop through the existing
+    `[Deferred — do not fix]` annotation, keeps "CRITICAL (not reproduced)" in its text and CRITICAL in its
+    `deferred` ledger line, and is listed under `## Open`. It is never `parked`, because a parked entry is a
+    self-review must-fix.
   - `NOT-TESTABLE` — the main thread states in one line why no test can express it (for example a secret in a
-    log); the finding keeps CRITICAL but is deferred to `## Open` for a human, never looped.
+    log); the finding leaves the loop the same way and is listed under `## Open` for a human, never looped.
+- Stage 3 runs inside the Finding Verification Gate, so `hooks.findingVerification: false` switches it off too.
 - Every stage-3 verdict is logged as `FINDING REPRODUCTION — <ledger-id> <verdict> <record-or-reason>` and
   carried into the CHAIN-END SUMMARY.
 - New key `hooks.criticalReproduction` (default `true`); `false` restores today's re-review routing.

@@ -46,6 +46,24 @@ alone reads the ledger, so its findings already account for what earlier rounds 
 Everything else is deferred and ledgered right away: `parked` when it is IMPORTANT, `deferred`
 otherwise.
 
+**A re-review CRITICAL needs a reproduction (`hooks.criticalReproduction`, default on).**
+Stage 3 of the `/zensu:tdd` step 4c gate runs only inside the Finding Verification Gate and only
+on a re-review: every CRITICAL finding stage 2 graded `VERIFIED` must fail a test run through the
+evidence runner with `--scope scoped` before it routes, logged as
+`FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE> <record or reason>`.
+A `NOT-REPRODUCED` or `NOT-TESTABLE` finding leaves the loop through the existing
+`[Deferred — do not fix]` annotation and a `deferred` ledger line that keeps CRITICAL. It never
+becomes `parked`, because a parked entry is a self-review must-fix and this finding is not. A
+fourth annotation was rejected: both delegate arms enumerate exactly three do-not-fix
+annotations, so a new one would route. The delegate reads the flag together with
+`findingVerification`, because stage 3 does not exist with that gate off. Coupled sites:
+`REPRODUCTION_RULE` inside `CONVERGENCE_CLAUSE` and the self-review hand-off sentence in
+`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/tdd/SKILL.md` (in-line, under the
+433-line cap), the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
+`docs/review-severity.md`, the `criticalReproduction` row of `docs/configuration.md`,
+`config.example.json`, LC2 to LC2j in `tests/structure/test-review-convergence.sh`, and RP0 to
+RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
+
 **FAIL-OPEN IS THE CONTRACT.** The classification runs only for a re-review launched from the
 post-review directive AND only when `review-round-scope-v1.js` and `review-ledger-v1.js` both
 answer `status=ok`. Any other answer routes that review exactly as before and logs

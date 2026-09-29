@@ -328,6 +328,7 @@ git commit -m "feat(review): default the auto-fix loop to one fix round"
 **Interfaces:**
 - Produces: config key `hooks.criticalReproduction` (boolean, default `true`, read with `zensu_hook_enabled`).
 - Produces: run-log line `FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE> <record id or one-line reason>`.
+- Refined during implementation: a `NOT-REPRODUCED` or `NOT-TESTABLE` finding leaves the loop through the existing `[Deferred — do not fix]` annotation instead of an IMPORTANT downgrade, because both delegate arms route IMPORTANT findings and enumerate exactly three do-not-fix annotations, and a `parked` IMPORTANT entry would be a self-review must-fix. The delegate reads the flag together with `findingVerification`, and the max-rounds sentence goes into the self-review hand-off only. RP0 to RP5 in `evals/config-gate/test-review-convergence-directive.sh` render the directives, and LC2i and LC2j pin the hand-off and the annotation.
 
 - [ ] **Step 1: Add failing checks** before `finish` in `tests/structure/test-review-convergence.sh`
 
