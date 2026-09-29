@@ -362,19 +362,22 @@ if grep -qF 'validate the supplied base URL entirely' "$SKILL_MD" \
 else
   check "P4p unsafe remote URLs stop before every post-Skill tool" FAIL
 fi
-if grep -qF '`validate.evidenceSafety` block' "$SKILL_MD" \
-  && grep -qF 'fail-closed schema' "$SKILL_MD" \
-  && grep -qF 'which prints the page title and writes a snapshot of the page' "$SKILL_MD" \
+if grep -qF 'The evidence boundary is the ORIGIN, never the route.' <<<"$SKILL_FLAT" \
+  && grep -qF 'which prints the page title and writes a snapshot of the page' <<<"$SKILL_FLAT" \
+  && grep -qF 'A page on an origin that is not approved is never opened' <<<"$SKILL_FLAT" \
+  && grep -qF '`validate.evidenceSafety` block' "$SKILL_MD" \
+  && ! grep -qE 'exact-route|exact route' "$SKILL_MD" "$BROWSER_MD" \
   && grep -qF 'mode: declared-safe' "$AUTOPILOT_CONFIG" \
   && grep -qF 'the only mode supported by contract v1' "$AUTOPILOT_CONFIG" \
   && ! grep -qF 'redactionDriver' "$AUTOPILOT_CONFIG" \
   && grep -qF 'contractVersion' "$AUTOPILOT_CONFIG" \
   && grep -qF 'literal `false`' "$AUTOPILOT_CONFIG" \
-  && grep -qF 'Every protected route' "$AUTOPILOT_CONFIG" \
-  && grep -qF 'enforce this fail-closed boundary before navigation' "$BROWSER_MD"; then
-  check "P4q protected DOM and visual evidence is safe before model ingestion" PASS
+  && ! grep -qF 'Every protected route' "$AUTOPILOT_CONFIG" \
+  && ! grep -qE 'routes: \["' "$AUTOPILOT_CONFIG" \
+  && grep -qF 'enforce this fail-closed origin boundary before navigation' <<<"$BROWSER_FLAT"; then
+  check "P4q protected DOM and visual evidence reaches the model only from an approved origin, at any path" PASS
 else
-  check "P4q protected DOM and visual evidence is safe before model ingestion" FAIL
+  check "P4q protected DOM and visual evidence reaches the model only from an approved origin, at any path" FAIL
 fi
 if grep -qF 'A future gate may re-enable opaque state only when it admits a path-contained setter and hard-denies every getter/exporter.' <<<"$SKILL_FLAT"; then
   check "P4g browser state commands stay denied until a narrow gate exists" PASS
@@ -391,7 +394,7 @@ fi
 if grep -qF 'ORIGIN="$(parent_origin)"' "$RUNTIME_CONTROLLER" \
   && grep -qF 'APP_BASE_URL="$ORIGIN"' "$RUNTIME_CONTROLLER" \
   && grep -qF 'Resolve the planned application origin before starting any resource' "$ZENSU_MD" \
-  && grep -qF -- '--check-policy local "$APP_ORIGIN" "/" declared-safe' "$ZENSU_MD" \
+  && grep -qF -- '--check-policy local "$APP_ORIGIN" declared-safe' "$ZENSU_MD" \
   && grep -qF 'Use visible manual browser login' "$ZENSU_MD"; then
   check "P4i local auth waits for the exact frontend origin and stays visible" PASS
 else
@@ -455,11 +458,13 @@ if grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$SKILL_MD" \
 else
   check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" FAIL
 fi
-if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe' "$SKILL_MD" \
-  && grep -qF 'It prints `consent` or `policy` and exits `0`, or' "$SKILL_MD"; then
-  check "P4u every route runs the run-config helper's --check-policy preflight" PASS
+if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe' "$SKILL_MD" \
+  && grep -qF 'as a standalone preflight once for every origin the run needs.' <<<"$SKILL_FLAT" \
+  && grep -qF 'It prints `consent` or `policy` and exits `0`, or exits `1` with a named reason.' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'exact-page-route' "$SKILL_MD"; then
+  check "P4u every origin runs the run-config helper's --check-policy preflight, with no route operand" PASS
 else
-  check "P4u every route runs the run-config helper's --check-policy preflight" FAIL
+  check "P4u every origin runs the run-config helper's --check-policy preflight, with no route operand" FAIL
 fi
 if grep -qF 'never copy raw console output' "$SKILL_MD" && grep -qF 'Strip query strings/fragments' "$SKILL_MD"; then
   check "P4f console/network evidence is sanitized before reporting" PASS
@@ -614,8 +619,8 @@ fi
 if grep -qF '| `--print-policy` | with `--setup` | off |' "$SKILL_MD" \
   && grep -qF '## 5. `--print-policy`' "$SETUP_MD" \
   && grep -qF "ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node" "$SETUP_MD" \
-  && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" "<route>" declared-safe' "$SETUP_MD" \
-  && grep -qF '`policy` on stdout with exit `0` means the rendered JSON approves that route.' "$SETUP_MD" \
+  && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" declared-safe' "$SETUP_MD" \
+  && grep -qF '`policy` on stdout with exit `0` means the rendered JSON approves that origin, and with it every route on it.' <<<"$SETUP_FLAT" \
   && grep -qF 'the project-level settings files are not the place, because the session can write them.' <<<"$SETUP_FLAT"; then
   check "P6l --print-policy renders the policy, proves it with --check-policy, and keeps it out of project settings" PASS
 else
@@ -626,10 +631,11 @@ TEMPLATE_VERDICT="$(node -e '
   const floor = require(process.argv[2]);
   const match = fs.readFileSync(process.argv[1], "utf8").match(/`(\{"version":1,[^`]*\})`/);
   if (!match) { process.stdout.write("policy template not found"); process.exit(1); }
-  const rendered = match[1].split("<port>").join("5173").split("<declared routes>").join(JSON.stringify("/"));
+  const rendered = match[1].split("<port>").join("5173");
   const parsed = floor.parsePolicyTargets(rendered);
   if (!parsed.ok) { process.stdout.write(String(parsed.fault)); process.exit(1); }
   if (parsed.mode !== "local") { process.stdout.write("mode " + parsed.mode); process.exit(1); }
+  if (JSON.parse(rendered).targets.some((target) => Object.prototype.hasOwnProperty.call(target, "routes"))) { process.stdout.write("the template still declares routes"); process.exit(1); }
 ' "$SETUP_MD" "$FLOOR_MODULE" 2>&1)"
 TEMPLATE_RC=$?
 if [ "$TEMPLATE_RC" = "0" ]; then
@@ -637,33 +643,40 @@ if [ "$TEMPLATE_RC" = "0" ]; then
 else
   check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled ($TEMPLATE_VERDICT)" FAIL
 fi
-CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" declared-safe 2>/dev/null)"
 CHECK_CONSENT_RC=$?
 if [ "$CHECK_CONSENT_RC" = "0" ] && [ "$CHECK_CONSENT_OUT" = "consent" ]; then
-  check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy" PASS
+  check "P6n --check-policy prints consent and exits 0 for a loopback origin without a policy" PASS
 else
-  check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy (rc=$CHECK_CONSENT_RC out=$CHECK_CONSENT_OUT)" FAIL
+  check "P6n --check-policy prints consent and exits 0 for a loopback origin without a policy (rc=$CHECK_CONSENT_RC out=$CHECK_CONSENT_OUT)" FAIL
 fi
-CHECK_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","routes":["/"],"evidenceMode":"declared-safe"}]}'
-CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+CHECK_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe"}]}'
+CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" declared-safe 2>/dev/null)"
 CHECK_POLICY_RC=$?
 if [ "$CHECK_POLICY_RC" = "0" ] && [ "$CHECK_POLICY_OUT" = "policy" ]; then
-  check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves" PASS
+  check "P6o --check-policy prints policy and exits 0 for an origin the launch policy approves" PASS
 else
-  check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
+  check "P6o --check-policy prints policy and exits 0 for an origin the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
 fi
-CHECK_ROUTE_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
-CHECK_ROUTE_RC=$?
-case "$CHECK_ROUTE_OUT" in
-  *'route is not approved for evidence by the navigation policy'*) CHECK_ROUTE_NAMED=true ;;
-  *) CHECK_ROUTE_NAMED=false ;;
+CHECK_ORIGIN_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>&1)"
+CHECK_ORIGIN_RC=$?
+CHECK_ROUTE_OPERAND_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
+CHECK_ROUTE_OPERAND_RC=$?
+case "$CHECK_ORIGIN_OUT" in
+  *'origin is not a target of the navigation policy'*) CHECK_ORIGIN_NAMED=true ;;
+  *) CHECK_ORIGIN_NAMED=false ;;
 esac
-if [ "$CHECK_ROUTE_RC" = "1" ] && [ "$CHECK_ROUTE_NAMED" = "true" ]; then
-  check "P6p --check-policy exits 1 naming the reason for a route the launch policy does not approve" PASS
+case "$CHECK_ROUTE_OPERAND_OUT" in
+  *'usage: verify-browser-config.js --check-policy <local|remote> <origin> declared-safe'*) CHECK_ROUTE_OPERAND_NAMED=true ;;
+  *) CHECK_ROUTE_OPERAND_NAMED=false ;;
+esac
+if [ "$CHECK_ORIGIN_RC" = "1" ] && [ "$CHECK_ORIGIN_NAMED" = "true" ] \
+  && [ "$CHECK_ROUTE_OPERAND_RC" = "1" ] && [ "$CHECK_ROUTE_OPERAND_NAMED" = "true" ]; then
+  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage" PASS
 else
-  check "P6p --check-policy exits 1 naming the reason for a route the launch policy does not approve (rc=$CHECK_ROUTE_RC out=$CHECK_ROUTE_OUT)" FAIL
+  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
 fi
-CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" "/" declared-safe 2>&1)"
+CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
 case "$CHECK_REMOTE_OUT" in
   *'remote-target-needs-parent-environment-policy'*) CHECK_REMOTE_NAMED=true ;;

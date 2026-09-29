@@ -200,17 +200,63 @@ gate (`readPolicy`), the helper (`run`, `--check-policy`) and the doctor wrapper
 broker. DNS happens in exactly one place, the helper's `resolveRemoteHost` at run-config time, and
 the gate then requires the resulting pin for a remote hostname; a policy parse never resolves.
 
-**Consent mode** (no policy in the environment) admits literal loopback origins only and returns
+**`localhost` is a local origin, exactly and without a pin.** `isLocalHost` in the floor is the one
+answer to "is this origin local": a loopback IP (`127.0.0.0/8`, `[::1]`) or the exact name
+`localhost` in any letter case. `localhost.`, `app.localhost`, `localhost.localdomain` and every
+`/etc/hosts` alias stay refused. The name is safe because the BROWSER resolves it, not the operating
+system: Chromium's `HostResolverManager::ResolveLocally` answers `localhost` from `ServeLocalhost`
+with `[::1]` and `127.0.0.1` before any cache, HOSTS-file or DNS task (read in
+`net/dns/host_resolver_manager.cc` on chromium/chromium `main`, 2026-09-28). The one channel in the
+run config that sits above that step is a `--host-resolver-rules` MAP rule, so `runConfigShape`
+refuses a pin for `localhost` and the helper writes none for a local origin: a MAP rule carries ONE
+address, and measured on Chromium 1228 `MAP localhost 127.0.0.1` made a server bound only to
+`[::1]` unreachable. MEASURED with playwright-cli 0.1.21 driving Google Chrome 154.0.8037.57: a run
+config allowing two `localhost` origins reached a server bound only to `[::1]` and one bound only to
+`127.0.0.1`, a `fetch` between them passed, and a third `localhost` origin outside
+`allowedOrigins` failed with `net::ERR_BLOCKED_BY_CLIENT` before its server saw a request.
+`localhost` and `127.0.0.1` stay different origins: a policy target or a consent for one never
+admits the other. Sites that move together: `LOCALHOST_NAME`, `isLocalHost`,
+`FLOOR_REASONS.LOCAL_LOOPBACK_ONLY` and `CONSENT_REMOTE_REASON` in the floor, both arms of
+`parsePolicyTargets`, `checkOrigin` in the helper, the localhost pin refusal in `runConfigShape`,
+and the operator accounts listed below. **Version for this delta: `patch`** — no schema field, key
+set, hook, matcher, config key or attestation moves; the gate asks where it denied, and relaxing an
+existing deny is not on the breaking list.
+
+**Consent mode** (no policy in the environment) admits loopback origins only and returns
 `permissionDecision: "ask"` for the first call that reaches each new origin — the host's prompt,
-which the model cannot answer. Consent is per ORIGIN; the recipe's declared routes are prompt
-CONTEXT (`promptText`) and steer nothing. The post hook records every executed gated call as
+which the model cannot answer. Consent is per ORIGIN. The gate reads no recipe and `promptText`
+names no route. The post hook records every executed gated call as
 `(origin, route, decidedBy, at)` in `<project>/.zensu/state/verify-consent-<session key>.json`
 (`O_EXCL` temp plus rename, contained by `memoryPathAllowed`, never through a symlink). `decidedBy`
 names an OBSERVATION — `asked`, `remembered`, `policy-mode` — never a human decision: PostToolUse
 carries no evidence of how the prompt was answered, and the host fires no PostToolUse event for a
 failed Bash call, so a failed navigation is never recorded and asks again. **Policy mode** asks
-nothing: policy targets only, declared routes only on navigation commands, a remote hostname only
-with its pin; an invalid policy denies every gated navigation with the broken rule named.
+nothing: policy target origins only, every route on them, a remote hostname only with its pin; an
+invalid policy denies every gated navigation with the broken rule named.
+
+**The evidence boundary is the ORIGIN in both modes; the route gate is retired.** An approved
+origin — a consent-prompt Yes, or a policy target with `evidenceMode: declared-safe` — covers
+every page on it at any path. The per-route layer failed in practice: pages whose path carries
+identifiers minted on every run (`/teams/:teamId/sprints/:sprintId`) could never be listed
+exactly, so every protected scenario on them ended PARTIAL. What was removed: the gate's
+`NOT_POLICY_ROUTE` refusal, the recipe route reader behind the prompt's route line
+(`declaredRoutesFromRecipe`, `readRecipeRoutes`, `promptRoutes`), the route operand of
+`--check-policy`, the monorepo controller's `/`-in-routes requirement, and the exact-route
+coverage the skill demanded of `validate.evidenceSafety`, which is now an optional
+data-classification declaration that gates nothing. Do not reintroduce routes as prompt context
+either: a listed route reads to the human as a limit nothing enforces. **Compatibility is
+one-directional and deliberate:** `parsePolicyTargets` accepts a target with exactly
+`evidenceMode` and `origin` (`POLICY_TARGET_KEYS`) or with a `routes` list beside them
+(`LEGACY_POLICY_TARGET_KEYS`); `legacyRoutesFault` still shape-checks that list at
+`MAX_POLICY_ROUTES`, so a malformed legacy list still invalidates the policy, and a well-formed
+one is then dropped rather than enforced. What still binds per call is unchanged: the floor (no credentials,
+query or fragment in a navigation), `network.allowedOrigins`, the resolver pins and the
+redirect check. **Version: `patch`.** No schema field, attestation, hook or matcher moves, and
+the gate denies strictly less. The one entry that reads close is the strict key set:
+`parsePolicyTargets` is one, but it reads the launch environment, which no runtime writes, and
+every installation carrying this change accepts a superset of what an older one accepted, so no
+runtime is left unable to read what another wrote. A releaser who prefers the letter of that
+entry picks `minor`; the argument above is why this file does not.
 
 **No execution marker, and why.** The MCP-era gate wrote a per-session marker so that a SEPARATE
 process, the broker, could tell whether the gate had run before it self-approved an origin. With no
@@ -375,12 +421,15 @@ lets `/zensu:adopt-session` carry an in-flight session across this release.
 **Permission rules do not migrate.** Every rule written for the old browser tools —
 `mcp__plugin_zensu_playwright__…` in 0.21.1 and earlier, `mcp__plugin_zensu_zensu-browser__…` on
 unreleased builds after it — matches nothing now; a `deny` or `ask` there silently stops restricting
-the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. The
-`### Upgrade notes` block under `## [Unreleased]` in `CHANGELOG.md` carries this break and the
-`playwright-cli` prerequisite into the release: the workflow prints the generated section directly
-under that heading, ahead of the block, so the block closes the new release section and its notes.
-`P9b` in `tests/structure/test-verify-feature-skill.sh` runs the workflow's own two awk programs over
-the real file to hold that.
+the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. This break
+and the `playwright-cli` prerequisite shipped in the `### Upgrade notes` block of the `0.22.0`
+section of `CHANGELOG.md`. It was written under `## [Unreleased]`: the workflow prints the
+generated section directly under that heading, ahead of the block, so the block closes the new
+release section and its notes. `P9b` in `tests/structure/test-verify-feature-skill.sh` runs the
+workflow's own two awk programs over the real file to hold that, and `P9d` holds that the
+released block survives the next release. `P9` follows only the block that names
+`mcp__plugin_zensu_playwright__`; a later block under `## [Unreleased]`, such as the route
+retirement's, rides the same mechanism with no check of its own.
 
 **Known gaps, accepted and named:**
 
@@ -388,12 +437,14 @@ the real file to hold that.
   to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
   in that position now, and the doctor reports registration, never execution.
 - **Other session names are ungated** — see SCOPE.
+- **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
+  `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
+  stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
+  `*.localhost` stays refused although the same Chromium code resolves it to loopback too.
 - **The consent memory is forgeable:** a record written through a Bash redirect skips the prompt for
   that origin; the floor bounds the damage to loopback services.
 - **The run config is read twice** — by the gate at `open` and by the CLI at launch — so a file
   swapped in between is followed. It lives under the project, where the session can write.
-- **In policy mode routes are enforced on navigation commands only**; an in-page navigation to an
-  undeclared route on an approved origin is seen by no hook.
 - **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run
   is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a prompt.
 - **The gate is textual.** It judges what the command TEXT names. A CLI or session name assembled

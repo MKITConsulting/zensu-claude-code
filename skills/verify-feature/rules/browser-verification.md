@@ -51,27 +51,24 @@ with element refs such as `e21`; target elements by those refs. Every navigating
 
 ## 1. Establish the observation baseline
 
-0. Before navigating to protected content, validate the checked-in recipe's
-   `validate.evidenceSafety` block under `../../autopilot/rules/config.md`: exact route coverage
-   must prove synthetic/pre-classified non-sensitive data. Contract v1 supports only
-   `declared-safe`; there is no trusted redaction-driver path. Because `open` and `goto` print
-   the page title and write a snapshot of the page, enforce this fail-closed boundary before navigation,
-   authentication restore, or screenshots. Without a valid covering declaration, do not open
-   the protected route and report PARTIAL.
-   In POLICY mode the gate admits only the policy's targets, and navigation commands only to
-   its declared routes; the policy must bind the same exact page route to the same origin with
-   `evidenceMode: declared-safe`. In consent mode (the preflight printed `consent`) the ORIGIN
-   half of that boundary holds with the user in the loop instead of the policy: the gate
-   admits literal loopback origins only and opens the host's permission prompt once per new
-   loopback origin. The ROUTE half does NOT hold — nothing enforces routes in consent mode,
-   because the human consented to the whole origin — so binding a page route to its evidence is
-   a prose obligation on you here, not a boundary anything checks. Wait for the user's answer;
+0. The evidence boundary is the ORIGIN, never the route. Because `open` and `goto` print the
+   page title and write a snapshot of the page, open a page — protected or not — only on an
+   approved origin, and enforce this fail-closed origin boundary before navigation,
+   authentication, or screenshots. In POLICY mode an origin is approved when the
+   parent-environment policy names it as a target with `evidenceMode: declared-safe`; the gate
+   admits only those targets, and every route on them. In consent mode (the preflight printed
+   `consent`) the user approves the origin instead: the gate admits loopback origins only (a
+   loopback IP or `localhost`) and opens the host's permission prompt once per new loopback
+   origin. Either way an approved origin covers every page on it, at any path, including routes
+   whose identifiers change on every run; no route list is declared or checked, and a recipe's
+   `validate.evidenceSafety` block no longer gates navigation. Contract v1 supports only
+   `declared-safe`; there is no trusted redaction-driver path. Wait for the user's answer;
    a refused prompt makes that origin's rows PARTIAL.
    Never re-issue a refused navigation and never try another spelling of the same target to avoid the prompt.
    The session consent memory named in SKILL.md is yours to READ for the report and never to
    write, edit or delete: a record you place there skips the human's prompt for that origin.
-1. Open the run-config session at the resolved base URL and route only after that declaration
-   and the policy preflight pass.
+1. Open the run-config session at the resolved base URL and route only after the policy
+   preflight passes.
 2. Read the `Page URL` line of every navigating call. An origin outside the run config means a
    server redirect left the approved set: stop driving that page, collect no evidence from it,
    and report the scenario PARTIAL.

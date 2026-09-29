@@ -39,9 +39,9 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
 | `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
-| `--attach=<origin>` | local only | none | Verify an app the user already runs on a literal loopback origin. Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
+| `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
-| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and routes, for unattended runs and for hosts that keep the policy in their launch environment. |
+| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin, for unattended runs and for hosts that keep the policy in their launch environment. |
 
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
@@ -130,12 +130,13 @@ Before any browser call, resolve which of the two modes this session is in. **Po
 a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claude Code, declared
 by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
 ordinary case for a user who has not configured anything. Run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
-as a standalone preflight for every route. It prints `consent` or `policy` and exits `0`, or
-exits `1` with a named reason. In policy mode the parent JSON must bind each exact page route to
-its validated origin with the `declared-safe` mode described in the config contract. Contract
-v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is not
-proven safe stops with PARTIAL.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe`
+as a standalone preflight once for every origin the run needs. It prints `consent` or `policy`
+and exits `0`, or exits `1` with a named reason. In policy mode the parent JSON must name each
+validated origin as a target with the `declared-safe` mode described in the config contract. A
+target covers every route on its origin: no route list is declared or checked, so pages whose
+path carries identifiers that change on every run are covered too. Contract v1 intentionally
+supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
@@ -147,13 +148,16 @@ own list, every call from a subagent, every call whose session or arguments are 
 literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
 gate reads that config itself: an isolated browser, the run's origins as
 `network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
-mode accepts literal loopback-IP origins only. Remote mode accepts only non-loopback HTTPS,
+mode accepts loopback origins only: a loopback IP or the exact name `localhost`, which the
+browser resolves to loopback itself; `app.localhost`, `localhost.` and every other hostname are
+refused. `localhost` and `127.0.0.1` are different origins — use the one the application
+expects, everywhere. Remote mode accepts only non-loopback HTTPS,
 rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/reserved,
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
 rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
-target stops before browser use with PARTIAL; the gate admits only its targets, and navigation
-commands only to its declared routes. **In CONSENT mode** there is no policy to be missing and
+target stops before browser use with PARTIAL; the gate admits only its target origins, and every
+route on them. **In CONSENT mode** there is no policy to be missing and
 the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
 because remote verification keeps the policy. Never try to configure the variable from a child
 Bash call in either mode — the hooks read it from the environment Claude Code started with, and
@@ -165,8 +169,8 @@ the gate denies an `export` or an environment assignment on a command that carri
 `tab-new` — opens the host's own permission prompt to the user. Consent is per ORIGIN: once the
 user approves an origin, every further route on it proceeds without a prompt. Answering that
 prompt is the user's action; never answer it on their behalf, never work around a refusal, and
-treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: literal
-loopback origins only, no credentials, no query or fragment in a navigation, and the browser
+treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
+origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
 refuses every request to an origin outside the run config. A remote target is refused in consent
 mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
 remembers each approved ORIGIN for this session in
@@ -270,8 +274,11 @@ Claude's native placeholder substitution.
      facts. Never invent commands.
    In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
-   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
-   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then that port on the
+   loopback origin the application expects — `http://127.0.0.1:$ZENSU_VERIFY_PORT`, or
+   `http://localhost:$ZENSU_VERIFY_PORT` when the recipe's `validate.baseUrlCommand` prints it or
+   the app's CORS allow-list, cookies or auth callback name `localhost` — and the first
+   navigation to it asks the user. The
    MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
    `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
    for the run, so a reused run directory keeps the port it already recorded. Never derive the
@@ -290,8 +297,8 @@ Claude's native placeholder substitution.
 ### Attach mode
 
 `--attach=<origin>` verifies an application the user already runs. The origin must pass the
-same literal-loopback rule as local mode (`http://127.0.0.1:<port>` or another loopback IP;
-never `localhost`). Boot nothing, seed nothing through the runtime, register no `down`
+same loopback rule as local mode (`http://127.0.0.1:<port>`, another loopback IP, or
+`http://localhost:<port>`; never another hostname). Boot nothing, seed nothing through the runtime, register no `down`
 command, and never stop, signal, or restart the attached process. Establish identity before
 the matrix: resolve the listening process with
 `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
@@ -305,7 +312,7 @@ user.
 
 Use only the supplied/configured base URL. Do not boot or tear down remote infrastructure.
 Keep mutations minimal and use disposable records with recognizable run-specific names. The
-parent-environment policy from Phase 0 is mandatory for every remote route; without it the
+parent-environment policy from Phase 0 is mandatory for every remote origin; without it the
 helper and the gate refuse the target, and the run stops before `open` with PARTIAL. The
 redirect check from Phase 0 applies to every navigation.
 
@@ -318,7 +325,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DI
 ```
 
 Pass one `--origin` per origin the matrix needs — the application origin and, only when it
-differs, the validated authentication origin — and nothing else. The helper prints
+differs, the validated authentication origin (`auth.baseUrl`, which also names an API the
+application calls on another origin) — and nothing else. The helper prints
 `session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
 line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
 `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
@@ -357,15 +365,18 @@ and exporters, so admitting them would violate the credential-blind boundary. Do
 another session. A future gate may re-enable opaque state only when it admits a path-contained
 setter and hard-denies every getter/exporter.
 
-Before authenticating or navigating to any protected route—including an initial `open` or
-`goto`, which prints the page title and writes a snapshot of the page—validate the selected recipe's
-`validate.evidenceSafety` block using the fail-closed schema and exact-route coverage in
-`../autopilot/rules/config.md`. Every route in scope must be proved synthetic/pre-classified
-non-sensitive by `mode: declared-safe`, and in policy mode must also appear under the same origin
-target in the parent-environment policy. If the block is absent, invalid, or
-does not cover a route exactly, do not restore auth or navigate to that protected content; skip
-the scenario and report PARTIAL. Final-report redaction is too late. The same boundary applies
-to screenshots.
+The evidence boundary is the ORIGIN, never the route. Before authenticating or navigating to
+any protected page—including an initial `open` or `goto`, which prints the page title and
+writes a snapshot of the page—its origin must be approved: in policy mode by a
+parent-environment policy target that names that origin with `evidenceMode: declared-safe`, in
+consent mode by the user's answer to the permission prompt the gate raises for that origin. An
+approved origin covers every page on it, at any path, including routes whose identifiers change
+on every run; no route list is declared, matched or checked. A page on an origin that is not
+approved is never opened, and a refused prompt makes that origin's scenarios PARTIAL.
+Final-report redaction is too late. The same boundary applies to screenshots. A recipe's
+`validate.evidenceSafety` block (`../autopilot/rules/config.md`) is an optional declaration of
+the application's data classification; it no longer gates navigation, and a `routes` list left
+in it is ignored.
 
 Use this order:
 
@@ -434,8 +445,7 @@ Use this format:
   origin — the recorder cannot observe how the human answered, only that the navigation then
   executed), `remembered` (any route on an origin already present in the memory — the route is
   never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
-  it). In consent mode also name the recipe
-  that supplied the declared routes shown IN the prompt, and every prompt the user refused.
+  it). In consent mode also name every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 
 Verdict rules:

@@ -8,9 +8,11 @@ const path = require('node:path');
 const floor = require('../../hooks/lib/verify-navigation-floor-v1.js');
 const {
   FLOOR_REASONS,
+  LOCALHOST_NAME,
   MAX_POLICY_ROUTES,
   checkNavigationTarget,
   classifyOrigin,
+  isLocalHost,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
@@ -26,7 +28,7 @@ test('the consent gate and the run-config helper require the floor module instea
   for (const file of [consentPath, helperPath]) {
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /verify-navigation-floor-v1\.js/, file);
-    for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isPublicAddress(',
+    for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isLocalHost(', 'function isPublicAddress(',
       'function resolveRemoteHost(', 'function classifyOrigin(', 'function normalizeRoute(', 'function parsePolicyTargets(',
       'function policyContractFault(']) {
       assert.equal(source.includes(own), false, `${path.basename(file)}: ${own}`);
@@ -71,13 +73,29 @@ test('navigation targets refuse credentials, query and fragment, and unknown sch
   assert.equal(checkNavigationTarget('wss://app.example.com/events', false).origin, 'https://app.example.com');
 });
 
-test('origin classification splits literal loopback from public https and refuses the rest', () => {
+test('the local-host predicate admits loopback IPs and the exact name localhost, never a suffix or an alias', () => {
+  assert.equal(LOCALHOST_NAME, 'localhost');
+  for (const host of ['localhost', 'LOCALHOST', 'LocalHost', '127.0.0.1', '127.9.9.9', '[::1]', '::1']) {
+    assert.equal(isLocalHost(host), true, host);
+  }
+  for (const host of ['localhost.', 'app.localhost', 'localhost.localdomain', 'localhost6', 'my-localhost', 'localhost.example.com',
+    '128.0.0.1', '::ffff:127.0.0.1', '10.0.0.5', '']) {
+    assert.equal(isLocalHost(host), false, host);
+  }
+  assert.equal(isLoopbackHost('localhost'), false);
+});
+
+test('origin classification splits loopback origins from public https and refuses the rest', () => {
   assert.equal(classifyOrigin('http://127.0.0.1:5173/inventory').mode, 'local');
   assert.equal(classifyOrigin('https://[::1]:8443/').mode, 'local');
   assert.equal(classifyOrigin('https://app.example.com/dashboard').mode, 'remote');
   assert.equal(classifyOrigin('https://93.184.216.34/').mode, 'remote');
-  assert.equal(classifyOrigin('http://localhost:5173/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
-  assert.equal(classifyOrigin('http://app.example.com/').reason, FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+  assert.equal(classifyOrigin('http://localhost:5173/').mode, 'local');
+  assert.equal(classifyOrigin('https://LOCALHOST:8443/').mode, 'local');
+  assert.equal(classifyOrigin('ws://localhost:5173/events', false).mode, 'local');
+  for (const url of ['http://localhost.:5173/', 'http://app.localhost:5173/', 'http://localhost.localdomain:5173/', 'http://app.example.com/']) {
+    assert.equal(classifyOrigin(url).reason, FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, url);
+  }
   assert.equal(classifyOrigin('http://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_HTTPS);
   assert.equal(classifyOrigin('https://10.0.0.5/').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('https://169.254.169.254/latest/meta-data').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
@@ -107,10 +125,9 @@ test('the navigation target refuses a non-string target instead of coercing it',
   assert.equal(classifyOrigin('http://127.0.0.1:9999/').mode, 'local');
 });
 
-// normalizeRoute's production consumers include normalizeRoutes() in hooks/lib/verify-consent-v1.js,
-// which builds the route list the human reads in the consent prompt, parsePolicyTargets() in the
-// floor module, which validates the navigation policy's declared routes, and checkPolicy() in
-// scripts/verify-browser-config.js, which validates the route a --check-policy call names.
+// normalizeRoute's one production consumer is legacyRoutesFault() in the floor module, which
+// validates the route list a navigation policy written before the route gate was retired may
+// still carry; the list is validated and then dropped, never enforced.
 // Its own truth table was graded by nothing. The load-bearing conjunct is the final
 // `normalized === route`: without it a declared `/a/../b` renders as written while naming a
 // different path, and `//evil.example.com/x` -- which a URL parser reads as a host -- renders
@@ -156,35 +173,35 @@ test('the contract check names which guard refused and keeps the three causes di
   assert.equal(policyContractFault(JSON.stringify({ version: 1, mode: 'local', targets: [target] })), '');
 });
 
-const POLICY_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' });
+const POLICY_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' });
+const LEGACY_POLICY_TARGET = Object.freeze({ ...POLICY_TARGET, routes: ['/'] });
 
 function policyOf(mode, targets) {
   return JSON.stringify({ version: 1, mode, targets });
 }
 
-test('parsePolicyTargets maps each target to its canonical origin, hostname and route set', () => {
+test('parsePolicyTargets maps each target to its canonical origin and hostname, and drops a legacy route list', () => {
+  assert.deepEqual(floor.POLICY_TARGET_KEYS, ['evidenceMode', 'origin']);
+  assert.deepEqual(floor.LEGACY_POLICY_TARGET_KEYS, ['evidenceMode', 'origin', 'routes']);
   const local = parsePolicyTargets(policyOf('local', [
-    { origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' },
+    { origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' },
     { origin: 'http://[::1]:4301', routes: ['/a'], evidenceMode: 'declared-safe' },
   ]));
   assert.equal(local.ok, true);
   assert.equal(local.mode, 'local');
   assert.deepEqual([...local.targets.keys()], ['http://127.0.0.1:4300', 'http://[::1]:4301']);
-  const first = local.targets.get('http://127.0.0.1:4300');
-  assert.equal(first.origin, 'http://127.0.0.1:4300');
-  assert.equal(first.hostname, '127.0.0.1');
-  assert.deepEqual([...first.routes], ['/', '/login']);
-  assert.equal(local.targets.get('http://[::1]:4301').hostname, '::1');
+  assert.deepEqual(local.targets.get('http://127.0.0.1:4300'), { origin: 'http://127.0.0.1:4300', hostname: '127.0.0.1' });
+  assert.deepEqual(local.targets.get('http://[::1]:4301'), { origin: 'http://[::1]:4301', hostname: '::1' });
 
   const remote = parsePolicyTargets(policyOf('remote', [
-    { origin: 'https://App.Example.com', routes: ['/'], evidenceMode: 'declared-safe' },
+    { origin: 'https://App.Example.com', evidenceMode: 'declared-safe' },
     { origin: 'https://93.184.216.34:8443', routes: ['/x'], evidenceMode: 'declared-safe' },
   ]));
   assert.equal(remote.ok, true);
   assert.equal(remote.mode, 'remote');
   assert.deepEqual([...remote.targets.keys()], ['https://app.example.com', 'https://93.184.216.34:8443']);
   assert.equal(remote.targets.get('https://app.example.com').hostname, 'app.example.com');
-  assert.deepEqual([...remote.targets.get('https://93.184.216.34:8443').routes], ['/x']);
+  assert.equal(Object.prototype.hasOwnProperty.call(remote.targets.get('https://93.184.216.34:8443'), 'routes'), false);
 });
 
 test('parsePolicyTargets refuses a top-level contract fault with the shared check\'s own reason', () => {
@@ -207,25 +224,31 @@ test('parsePolicyTargets refuses a top-level contract fault with the shared chec
   assert.equal(eight.targets.size, 8);
 });
 
-test('parsePolicyTargets refuses a target outside the declared-safe contract and bounds its routes at MAX_POLICY_ROUTES', () => {
+test('parsePolicyTargets refuses a target outside the declared-safe contract and still bounds a legacy route list at MAX_POLICY_ROUTES', () => {
   assert.equal(MAX_POLICY_ROUTES, 64);
   const contract = { ok: false, fault: 'policy target contract is invalid; v1 supports declared-safe evidence only' };
   const refused = [
     { ...POLICY_TARGET, evidenceMode: 'other' },
-    { origin: POLICY_TARGET.origin, routes: POLICY_TARGET.routes },
+    { ...LEGACY_POLICY_TARGET, evidenceMode: 'other' },
+    { origin: POLICY_TARGET.origin },
+    { origin: POLICY_TARGET.origin, routes: LEGACY_POLICY_TARGET.routes },
     { ...POLICY_TARGET, extra: true },
+    { ...LEGACY_POLICY_TARGET, extra: true },
     { ...POLICY_TARGET, routes: [] },
     { ...POLICY_TARGET, routes: '/' },
+    { ...POLICY_TARGET, routes: null },
     null,
     'http://127.0.0.1:4300',
   ];
   for (const target of refused) {
     assert.deepEqual(parsePolicyTargets(policyOf('local', [target])), contract, JSON.stringify(target));
   }
+  assert.equal(parsePolicyTargets(policyOf('local', [POLICY_TARGET])).ok, true);
+  assert.equal(parsePolicyTargets(policyOf('local', [LEGACY_POLICY_TARGET])).ok, true);
   const routes = (count) => Array.from({ length: count }, (_unused, index) => `/r${index}`);
   const atBound = parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES) }]));
   assert.equal(atBound.ok, true);
-  assert.equal(atBound.targets.get(POLICY_TARGET.origin).routes.size, MAX_POLICY_ROUTES);
+  assert.deepEqual(atBound.targets.get(POLICY_TARGET.origin), { origin: POLICY_TARGET.origin, hostname: '127.0.0.1' });
   assert.deepEqual(parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES + 1) }])), contract);
 });
 
@@ -254,18 +277,18 @@ test('parsePolicyTargets names the route or origin fault it met', () => {
     { ok: false, fault: 'policy origins must be unique' });
 });
 
-test('parsePolicyTargets admits only literal loopback in local mode and only non-loopback https in remote mode', () => {
+test('parsePolicyTargets admits only loopback origins in local mode and only non-loopback https in remote mode', () => {
   const single = (mode, origin) => parsePolicyTargets(policyOf(mode, [{ ...POLICY_TARGET, origin }]));
-  for (const origin of ['http://127.0.0.1:4300', 'https://127.0.0.2:8443', 'http://[::1]:4300']) {
+  for (const origin of ['http://127.0.0.1:4300', 'https://127.0.0.2:8443', 'http://[::1]:4300', 'http://localhost:4300', 'https://localhost:8443']) {
     assert.equal(single('local', origin).ok, true, origin);
   }
-  for (const origin of ['http://localhost:4300', 'http://10.0.0.5:4300', 'https://app.example.com', 'ws://127.0.0.1:4300']) {
-    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK }, origin);
+  for (const origin of ['http://app.localhost:4300', 'http://localhost.:4300', 'http://10.0.0.5:4300', 'https://app.example.com', 'ws://127.0.0.1:4300']) {
+    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY }, origin);
   }
   for (const origin of ['https://app.example.com', 'https://93.184.216.34', 'https://[2606:2800:220:1:248:1893:25c8:1946]']) {
     assert.equal(single('remote', origin).ok, true, origin);
   }
-  for (const origin of ['http://app.example.com', 'https://127.0.0.1', 'https://[::1]:8443', 'ws://app.example.com']) {
+  for (const origin of ['http://app.example.com', 'https://127.0.0.1', 'https://[::1]:8443', 'https://localhost', 'ws://app.example.com']) {
     assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS }, origin);
   }
   for (const origin of ['https://10.0.0.5', 'https://169.254.169.254', 'https://[fc00::1]']) {

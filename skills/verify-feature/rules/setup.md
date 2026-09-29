@@ -39,11 +39,12 @@ For every service the evidence names, propose:
   scoped command only when the evidence names one (a Compose project name per run, a PID file
   the start command writes).
 
-Propose the evidence declaration: the page routes the changed code exposes (from the router,
-never guessed), and `dataClassification: synthetic` only when seed or fixture code proves the
-routes render no user, tenant, credential, or production-derived content. Without that proof,
-propose `pre-classified-non-sensitive` only if the user confirms it, otherwise leave the route
-list empty and say the routes will stay PARTIAL until declared.
+Propose the optional data-classification declaration for the whole application:
+`dataClassification: synthetic` only when seed or fixture code proves the application renders
+no user, tenant, credential, or production-derived content, and `pre-classified-non-sensitive`
+only if the user confirms it; without either, leave the block out. Never propose a route list:
+the evidence boundary is the approved origin, which covers every page on it, and `routes` is no
+longer read.
 
 ## 3. One confirmation round
 
@@ -69,7 +70,6 @@ validate:
   evidenceSafety:
     contractVersion: 1
     mode: declared-safe
-    routes: ["/", "/login"]
     dataClassification: synthetic
     containsPersonalData: false
     containsSecrets: false
@@ -84,12 +84,13 @@ when present.
 ## 5. `--print-policy`
 
 With `--print-policy`, render the parent-environment policy for the recipe instead of
-starting anything: `{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:<port>","evidenceMode":"declared-safe","routes":[<declared routes>]}]}`,
+starting anything: `{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:<port>","evidenceMode":"declared-safe"}]}`,
 with `<port>` taken from `--port=<n>` when given, else from
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`. Print it, then run
-`ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" "<route>" declared-safe`
-for every declared route, with the rendered JSON assigned on that command only, and report
-each exit code: `policy` on stdout with exit `0` means the rendered JSON approves that route.
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" declared-safe`
+once, with the rendered JSON assigned on that command only, and report its exit code: `policy`
+on stdout with exit `0` means the rendered JSON approves that origin, and with it every route on
+it. The policy carries no route list.
 Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
 job's `env`, or the `env` block of `~/.claude/settings.json`) and that the project-level
 settings files are not the place, because the session can write them.

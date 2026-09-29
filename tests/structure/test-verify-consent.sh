@@ -121,10 +121,10 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
     check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 14 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 111 "verify-consent-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR" 15 "verify-navigation-floor-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 112 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 13 "verify-browser-config.test.js"
+run_unit "V7c browser-config" "$UNIT_CONFIG" 14 "verify-browser-config.test.js"
 run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
@@ -135,16 +135,18 @@ else
   check "V8 the consent module and the run-config helper share the one floor module" FAIL
 fi
 
-if ! grep -qF 'ZENSU_VERIFY_DECLARED_ROUTES' "$MODULE"; then
-  check "V8b the decision module takes its declared routes only from the guarded recipe read" PASS
+if ! grep -qE 'ZENSU_VERIFY_DECLARED_ROUTES|declaredRoutes|readRecipeRoutes|NOT_POLICY_ROUTE' "$MODULE"; then
+  check "V8b the decision module reads no declared route list and carries no route refusal" PASS
 else
-  check "V8b the decision module takes its declared routes only from the guarded recipe read" FAIL
+  check "V8b the decision module reads no declared route list and carries no route refusal" FAIL
 fi
-if grep -qF 'ZENSU_VERIFY_PROJECT_ROOT' "$MODULE" && grep -qF 'resolveRecipeFile' "$MODULE" \
-  && grep -qF "'runtime.yaml', 'autopilot.yaml'" "$MODULE"; then
-  check "V8b-control the module resolves the recipe itself from the project root, in one place" PASS
+if grep -qF 'ZENSU_VERIFY_PROJECT_ROOT' "$MODULE" && grep -qF 'function resolveRecipeFile(' "$MODULE" \
+  && [ "$(grep -cF 'resolveRecipeFile(' "$MODULE")" -eq 1 ] \
+  && grep -qF "'runtime.yaml', 'autopilot.yaml'" "$MODULE" \
+  && grep -qF 'mod.resolveRecipeFile(' "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; then
+  check "V8b-control the scan above read the real module, which keeps the recipe resolver for /zensu:doctor and never calls it" PASS
 else
-  check "V8b-control the module resolves the recipe itself from the project root, in one place" FAIL
+  check "V8b-control the scan above read the real module, which keeps the recipe resolver for /zensu:doctor and never calls it" FAIL
 fi
 if [ -r "$PRE_HOOK" ] && [ -r "$POST_HOOK" ] \
   && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$PRE_HOOK" \
@@ -650,11 +652,14 @@ memory_has "http://127.0.0.1:4200" "/envonly" "remembered" \
   && check "H8b a zensu-verify session named by the environment is gated" PASS \
   || check "H8b a zensu-verify session named by the environment is gated" FAIL
 
-for url in "http://localhost:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" \
+for url in "http://app.localhost:4200/" "http://localhost.:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" \
   "http://127.0.0.1:4200/?t=1" "http://127.0.0.1:4200/#x" "file:///etc/passwd"; do
   [ "$(pre_verdict "$CLI goto $url" "$SID" "$PROJ")" = "DENY" ] \
     && check "H9 the floor denies $url" PASS || check "H9 the floor denies $url" FAIL
 done
+[ "$(pre_verdict "$CLI goto http://localhost:4395/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H9b the exact name localhost asks like a loopback IP" PASS \
+  || check "H9b the exact name localhost asks like a loopback IP" FAIL
 case "$(pre_reason "$CLI goto https://app.example.com/" "$SID" "$PROJ")" in
   *'parent-environment navigation policy'*) check "H9a a remote target is refused in consent mode, naming the policy it needs" PASS ;;
   *) check "H9a a remote target is refused in consent mode, naming the policy it needs" FAIL ;;
@@ -709,25 +714,31 @@ rm -f "$GLOBAL_HOME/.playwright/cli.config.json"
   || check "H11e-control removing the global config restores the prompt" FAIL
 
 printf '%s\n' 'version: 1' 'validate:' '  evidenceSafety:' '    routes: ["/", "/inventory"]' > "$PROJ/.zensu/runtime.yaml"
-case "$(pre_reason "$CLI goto http://127.0.0.1:4340/inventory" "$SID" "$PROJ")" in
-  *'synthetic-safe: /, /inventory.'*) check "H12 the prompt shows the routes the bound project's recipe declares" PASS ;;
-  *) check "H12 the prompt shows the routes the bound project's recipe declares" FAIL ;;
+BOUND_PROMPT="$(pre_reason "$CLI goto http://127.0.0.1:4340/inventory" "$SID" "$PROJ")"
+case "$BOUND_PROMPT" in
+  *'synthetic-safe'*|*'/inventory'*|'') check "H12 the prompt names no route even when the bound project's recipe still lists some" FAIL ;;
+  *'Consent is per origin, never per route.'*) check "H12 the prompt names no route even when the bound project's recipe still lists some" PASS ;;
+  *) check "H12 the prompt names no route even when the bound project's recipe still lists some" FAIL ;;
 esac
-case "$(pre_reason "$CLI goto http://127.0.0.1:4340/inventory" "no-such-session" "$PROJ")" in
-  *'synthetic-safe'*) check "H12-control an unbound session has no project root to read a recipe from" FAIL ;;
-  '') check "H12-control an unbound session has no project root to read a recipe from" FAIL ;;
-  *) check "H12-control an unbound session has no project root to read a recipe from" PASS ;;
-esac
+UNBOUND_PROMPT="$(pre_reason "$CLI goto http://127.0.0.1:4340/inventory" "no-such-session" "$PROJ")"
+if [ -n "$UNBOUND_PROMPT" ] && [ "$BOUND_PROMPT" = "$UNBOUND_PROMPT" ]; then
+  check "H12-control the bound prompt equals the unbound one, so no recipe input reaches it" PASS
+else
+  check "H12-control the bound prompt equals the unbound one, so no recipe input reaches it" FAIL
+fi
 rm -f "$PROJ/.zensu/runtime.yaml"
 
-VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","routes":["/","/login"],"evidenceMode":"declared-safe"}]}'
-[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/login" "$SID" "$PROJ")" = "NONE" ] \
-  && check "H13 policy mode admits a declared route of a policy target without a prompt" PASS \
-  || check "H13 policy mode admits a declared route of a policy target without a prompt" FAIL
-case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_reason "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" in
-  *'route is not approved for evidence by the navigation policy'*) check "H13a policy mode denies an undeclared route" PASS ;;
-  *) check "H13a policy mode denies an undeclared route" FAIL ;;
-esac
+VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}]}'
+LEGACY_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","routes":["/","/login"],"evidenceMode":"declared-safe"}]}'
+if [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/login" "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/teams/t-81/sprints/s-7" "$SID" "$PROJ")" = "NONE" ]; then
+  check "H13 policy mode admits every route of a policy target without a prompt" PASS
+else
+  check "H13 policy mode admits every route of a policy target without a prompt" FAIL
+fi
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$LEGACY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" = "NONE" ] \
+  && check "H13a a legacy policy route list no longer narrows its origin: an unlisted route passes" PASS \
+  || check "H13a a legacy policy route list no longer narrows its origin: an unlisted route passes" FAIL
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_reason "$CLI goto http://127.0.0.1:4200/login" "$SID" "$PROJ")" in
   *'origin is not a target of the navigation policy'*) check "H13b policy mode denies a non-target even when the consent memory remembers it" PASS ;;
   *) check "H13b policy mode denies a non-target even when the consent memory remembers it" FAIL ;;
@@ -745,7 +756,7 @@ COUNT_BEFORE="$(memory_count)"
 post_run "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ" '{"tool_response":{"stdout":"","stderr":"","interrupted":true}}' >/dev/null
 post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
-post_run "$CLI goto http://localhost:4200/" "$SID" "$PROJ" >/dev/null
+post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
 [ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
@@ -757,7 +768,7 @@ COUNT_AFTER="$(memory_count)"
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4200/x" "no-such-session" "$PROJ")" = "ASK" ] \
   && check "H15 an unbound session asks for an origin the bound session remembers" PASS \
   || check "H15 an unbound session asks for an origin the bound session remembers" FAIL
-[ "$(pre_verdict "$CLI goto http://localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
+[ "$(pre_verdict "$CLI goto http://app.localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
   && check "H15a the floor holds without a bound session" PASS \
   || check "H15a the floor holds without a bound session" FAIL
 BEFORE="$(ls -A "$PROJ/.zensu/state" | LC_ALL=C sort | tr '\n' ' ')"
@@ -869,18 +880,25 @@ case "$POST_MISMATCH_ERR" in *'CLAUDE_PLUGIN_ROOT'*) MISMATCH_SAID=1 ;; *) MISMA
   && check "V32a the non-blocking mismatch still names its cause on stderr" PASS \
   || check "V32a the non-blocking mismatch still names its cause on stderr" FAIL
 
-if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD"; then
-  check "V34a the template carries no key the adapter and the autopilot contract never read" PASS
+TEMPLATE_ROUTES_RE='^[[:space:]]*routes:'
+if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD" \
+  && ! grep -qE "$TEMPLATE_ROUTES_RE" "$SETUP_MD"; then
+  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" PASS
 else
-  check "V34a the template carries no key the adapter and the autopilot contract never read" FAIL
+  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" FAIL
 fi
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD"; then
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" PASS
 else
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" FAIL
 fi
+if printf '  evidenceSafety:\n    routes: ["/", "/login"]\n' | grep -qE "$TEMPLATE_ROUTES_RE"; then
+  check "V34a-control2 the routes scan above catches the template line the route contract shipped" PASS
+else
+  check "V34a-control2 the routes scan above catches the template line the route contract shipped" FAIL
+fi
 # V34b executes the round trip: the policy template SHIPPED in rules/setup.md is extracted,
-# filled with a port and a route, and fed to the run-config helper's own --check-policy.
+# filled with a port, and fed to the run-config helper's own --check-policy.
 POLICY_TEMPLATE="$(node -e '
   const text = require("fs").readFileSync(process.argv[1], "utf8");
   const m = text.match(/\{"version":1,"mode":"local","targets":\[[^\n]*?\}\]\}/);
@@ -891,14 +909,18 @@ if [ -n "$POLICY_TEMPLATE" ]; then
 else
   check "V34b-control the policy template is extractable from rules/setup.md" FAIL
 fi
-RENDERED_POLICY="$(printf '%s' "$POLICY_TEMPLATE" | sed -e 's|<port>|45173|' -e 's|\[<declared routes>\]|["/"]|')"
+RENDERED_POLICY="$(printf '%s' "$POLICY_TEMPLATE" | sed -e 's|<port>|45173|')"
 case "$RENDERED_POLICY" in
-  *'<port>'*|*'<declared routes>'*|'') check "V34b-control2 every placeholder in the template was substituted" FAIL ;;
+  *'<'*|'') check "V34b-control2 every placeholder in the template was substituted" FAIL ;;
   *) check "V34b-control2 every placeholder in the template was substituted" PASS ;;
+esac
+case "$RENDERED_POLICY" in
+  *'"routes"'*) check "V34b-control3 the rendered policy declares no route list" FAIL ;;
+  *) check "V34b-control3 the rendered policy declares no route list" PASS ;;
 esac
 CHECK_POLICY_OUT=""
 if [ -n "$RENDERED_POLICY" ]; then
-  CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
+  CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45173' declared-safe 2>/dev/null)"
 fi
 [ "$CHECK_POLICY_OUT" = "policy" ] \
   && check "V34b the policy rules/setup.md renders is accepted by the helper it tells the model to run" PASS \
@@ -906,17 +928,17 @@ fi
 NEG_RC=0
 NEG_ERR=""
 if [ -n "$RENDERED_POLICY" ]; then
-  NEG_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45173' '/admin' declared-safe 2>&1 >/dev/null)" || NEG_RC=$?
+  NEG_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45174' declared-safe 2>&1 >/dev/null)" || NEG_RC=$?
 fi
-NOT_POLICY_ROUTE_TEXT="$(node -e 'process.stdout.write(require(process.argv[1]).REASONS.NOT_POLICY_ROUTE)' "$MODULE" 2>/dev/null)"
+NOT_POLICY_TARGET_TEXT="$(node -e 'process.stdout.write(require(process.argv[1]).REASONS.NOT_POLICY_TARGET)' "$MODULE" 2>/dev/null)"
 case "$NEG_RC:$NEG_ERR" in
-  1:*"$NOT_POLICY_ROUTE_TEXT"*)
-    [ -n "$NOT_POLICY_ROUTE_TEXT" ] \
-      && check "V34b-neg an undeclared route is refused against that same rendered policy, for the route" PASS \
-      || check "V34b-neg an undeclared route is refused against that same rendered policy (no reason text)" FAIL ;;
-  *) check "V34b-neg an undeclared route is refused against that same rendered policy, for the route (rc=$NEG_RC: ${NEG_ERR:-<none>})" FAIL ;;
+  1:*"$NOT_POLICY_TARGET_TEXT"*)
+    [ -n "$NOT_POLICY_TARGET_TEXT" ] \
+      && check "V34b-neg another origin is refused against that same rendered policy, for the origin" PASS \
+      || check "V34b-neg another origin is refused against that same rendered policy (no reason text)" FAIL ;;
+  *) check "V34b-neg another origin is refused against that same rendered policy, for the origin (rc=$NEG_RC: ${NEG_ERR:-<none>})" FAIL ;;
 esac
-CONSENT_CHECK_OUT="$(config_helper --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
+CONSENT_CHECK_OUT="$(config_helper --check-policy local 'http://127.0.0.1:45173' declared-safe 2>/dev/null)"
 [ "$CONSENT_CHECK_OUT" = "consent" ] \
   && check "V34c without a policy the helper reports consent mode" PASS \
   || check "V34c without a policy the helper reports consent mode (got: ${CONSENT_CHECK_OUT:-<none>})" FAIL

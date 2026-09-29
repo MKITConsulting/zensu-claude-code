@@ -8,7 +8,6 @@ const path = require('node:path');
 const {
   FLOOR_REASONS,
   classifyOrigin,
-  normalizeRoute,
   resolveRemoteHost,
 } = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 const consent = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-consent-v1.js'));
@@ -22,7 +21,7 @@ const SESSION_PREFIX = consent.SESSION_PREFIX;
 const MAX_ORIGINS = consent.MAX_RUN_ORIGINS;
 const MODES = Object.freeze(['local', 'remote']);
 const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...]';
-const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> <route> declared-safe';
+const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> declared-safe';
 
 function parseArgs(argv) {
   const options = { runDir: null, mode: null, origins: [] };
@@ -64,7 +63,7 @@ function checkOrigin(rawOrigin, mode) {
   if (parsed.pathname !== '/') throw new Error('an origin must not carry a path');
   const classified = classifyOrigin(parsed.origin);
   if (mode === 'local') {
-    if (!classified.ok || classified.mode !== 'local') throw new Error(FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+    if (!classified.ok || classified.mode !== 'local') throw new Error(FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
     return classified;
   }
   if (parsed.protocol !== 'https:') throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
@@ -87,15 +86,13 @@ function policyVerdict(url, policy, navigation) {
 }
 
 async function checkPolicy(argv, env = process.env, resolver = dns.promises.lookup, readiness = defaultReadiness()) {
-  if (argv.length !== 4 || !MODES.includes(argv[0]) || argv[3] !== 'declared-safe') throw new Error(CHECK_USAGE);
+  if (argv.length !== 3 || !MODES.includes(argv[0]) || argv[2] !== 'declared-safe') throw new Error(CHECK_USAGE);
   checkReadiness(readiness, env);
-  const [mode, rawOrigin, route] = argv;
+  const [mode, rawOrigin] = argv;
   const classified = checkOrigin(rawOrigin, mode);
-  if (normalizeRoute(route) === null) throw new Error('route must be an absolute, normalized, query-free pathname');
   const policy = consent.readPolicy(env);
   if (policy && policy.ok && policy.mode !== mode) throw new Error('navigation policy mode does not match');
-  const verdict = policyVerdict(new URL(route, `${classified.origin}/`).href, policy, true);
-  if (verdict.origin !== classified.origin) throw new Error('navigation origin does not match the route it was checked with');
+  policyVerdict(`${classified.origin}/`, policy, true);
   if (mode === 'remote') await resolveRemoteHost(classified.hostname, resolver);
   return policy ? 'policy' : 'consent';
 }
