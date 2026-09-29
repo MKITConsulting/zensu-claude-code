@@ -3,6 +3,7 @@ paths:
   - "hooks/lib/reviewer-spawn-denial-v1.js"
   - "tests/structure/reviewer-spawn-denial-v1.test.js"
   - "tests/structure/test-stop-enforcer-self-review-routing.sh"
+  - "tests/structure/test-stop-enforcer-reviewer-denial-note.sh"
 ---
 
 # Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
@@ -368,6 +369,38 @@ read the shard's remaining budget. Note also that summing a shard's `timeoutMs` 
 and comparing that to `profileTimeoutMs` proves nothing — EVERY shard exceeds it by
 design, because the per-suite values are individual caps and not a shared budget.
 
+**THE SUITE WAS SPLIT, and the "why 25 minutes" question now has a measured answer.** The
+file ran the full Stop hook 47 times and started 19 sessions. On green run 36556263889 each
+single-Stop check (T21, T21a, T37, T42, T45) took 19.0-19.9 s on the Windows runner, and the
+two cap loops, nine Stops each, took 216.0 s (T24) and 275.0 s (T30) of that run's 1551.3 s.
+Run 36511537256 on #340, whose diff touched nothing this suite reads, then reported
+`TIMED_OUT stop-enforcer-self-review-routing (1700190ms)` after its 62nd check, T30, with
+every check before it green. It reached T36b at 877.8 s against 681.5 s on 36556263889, so
+a runner 29% slower than the green one was enough. Two changes landed together:
+
+- The note lifecycle — T23-T25, T27-T32 and T35 — moved to
+  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, alone on a new
+  `windows-shard-9`. The routing file keeps T1-T22, T26, T33-T34 and T36-T59, alone on
+  `windows-shard-7`, and lost a trailing `start_session` that no check read.
+- T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
+  reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
+  `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for
+  their cap cases, and the DEFAULT cap of 8 stays pinned by E3 in
+  `test-stop-enforcer-escapes.sh`. Together with the dropped session, the two files run 39
+  Stops and 18 sessions where the one file ran 47 and 19.
+
+Both caps are 1200000 ms, taken from the per-check timestamps of the 14 green `main` runs
+from 36246568272 to 36556263889, each reporting 67 PASS: the routing part took
+480.8-828.4 s and the note part 478.9-835.2 s. Each cap therefore sits about 45% over its
+part's slowest green figure, leaves 600 s of its shard's envelope unspent so an overrun
+surfaces as a suite `TIMED_OUT`, and still covers the timed-out run's routing work (877.8 s
+through T36b) with a quarter to spare. The note part's range was measured BEFORE its loops
+were cut, so it bounds the trimmed file from above; the first green run of the two files is
+the figure to budget against from then on. These figures live here with their run ids,
+because the contract-test note beside `windows-shard-7` records only the earlier 1700000
+raise. Growth in either file is paid for the way this split was — a shard of its own or a
+cheaper check — never by a raise past its measured range.
+
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
 `subagent_type` is the reviewer; (2) the host's own `is_error === true`; (3) the
@@ -400,9 +433,10 @@ that Stop reaches its refused-spawn branch — both inner-guard escapes
 escape branch, and the BLOCKED-outer release that owns the current inner
 generation — plus the cap path once the chain has converged, and the writing path
 itself on a `clear` verdict. Treat that as the rule, not the list: a NEW release
-path added above the routing branches needs the same call. T23/T29/T30/T31/T32 pin
-the ones reachable from the routing suite. The Autopilot-escape sites need a
-durable run, which that suite never builds, so their pins live in
+path added above the routing branches needs the same call. T23/T29/T30/T31/T32 in
+`tests/structure/test-stop-enforcer-reviewer-denial-note.sh` pin the ones reachable
+without a durable run. The Autopilot-escape sites need one, which that suite never
+builds, so their pins live in
 `tests/structure/test-autopilot-stop-enforcer.sh` instead: S14 covers the
 terminal-stage escape and S15 the audited one, which are different lines. The
 BLOCKED-outer release remains unpinned.

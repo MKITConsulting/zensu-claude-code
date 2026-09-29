@@ -344,7 +344,7 @@
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1700000
+          "timeoutMs": 1200000
         }
       ]
     },
@@ -377,6 +377,19 @@
           "id": "plan-payload-path-transport",
           "runner": "bash",
           "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
+        }
+      ]
+    },
+    "windows-shard-9": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "stop-enforcer-reviewer-denial-note",
+          "runner": "bash",
+          "path": "tests/structure/test-stop-enforcer-reviewer-denial-note.sh",
           "args": [],
           "timeoutMs": 1200000
         }

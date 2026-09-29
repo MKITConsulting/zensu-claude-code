@@ -41,9 +41,7 @@ const expectedProfiles = [
   //
   // 14% is thin against the 29% run-to-run spread this repo records for THIS suite,
   // and 1800000 is the hard envelope, so the raise cannot be larger without moving
-  // `timeout-minutes` and every profile's `profileTimeoutMs` together. The durable
-  // fix is the one shard 8 got: find why this suite needs 25 minutes on Windows.
-  // Until then, expect this cap to bind again.
+  // `timeout-minutes` and every profile's `profileTimeoutMs` together.
   'windows-shard-7',
   // Shard 8 now carries two suites; it was created for one. Measured on run 32998414210, `session-trail-lineage`
   // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
@@ -84,9 +82,10 @@ const expectedProfiles = [
   // binds before the profile envelope and a slow run surfaces as a suite TIMED_OUT
   // rather than as an abort that truncates the tail silently.
   'windows-shard-8',
+  'windows-shard-9',
 ];
-const expectedCommandCount = 43;
-const expectedCommandDigest = '414ad2fac4e140780998a3a2c98d3cf546ff346fa98418337c4d76a42c315378';
+const expectedCommandCount = 44;
+const expectedCommandDigest = '95dde0afc248197c505b0c46037796120deeecadcaab5b5950e3eec96600d9c5';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -127,6 +126,7 @@ test('manifest and audited command catalog expose one exact bounded profile inve
 const expectedShardHomes = {
   'plan-payload-path-transport': 'windows-shard-8',
   'stop-enforcer-self-review-routing': 'windows-shard-7',
+  'stop-enforcer-reviewer-denial-note': 'windows-shard-9',
   'session-trail-lineage': 'windows-shard-8',
   'autopilot-bound-payload-windows': 'windows-shard-6',
   'deferred-review-fallback': 'windows-shard-8',
