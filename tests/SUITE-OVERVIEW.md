@@ -395,8 +395,8 @@ that suite's failure.
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (41
-files) against this table's 36 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (43
+files) against this table's 38 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
