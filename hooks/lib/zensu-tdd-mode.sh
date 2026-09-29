@@ -12,8 +12,8 @@
 # Switching therefore governs the NEXT chain and never the running one — the
 # frozen flag is what the edit gate reads, so no mid-chain flip can un-gate a
 # strict session or re-arm a vanilla one. The precedence both points apply is:
-#   1. this session marker  2. `--tdd-begin --tdd-mode strict` (a skill's own
-#   default, e.g. /zensu:pr-fix-findings; escalation only)
+#   1. this session marker  2. `--tdd-begin --tdd-mode strict` (a caller's own
+#   default from a `TDD-MODE: strict` spec line; escalation only)
 #   3. hooks.tddImplementation  4. vanilla
 # so a user's explicit session choice is never overruled by a skill, and rank 2
 # can only RAISE the discipline — the value travels through a model-read spec
