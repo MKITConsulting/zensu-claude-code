@@ -199,15 +199,15 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, evidence & secrets (10)
-`artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`evidence-run` · `full-suite-gate` · `plugin-data-guard` · `secret-scan-gate` ·
-`skill-workflow-markers` · `verify-consent`
+### Bash gates, evidence & secrets (11)
+`acceptance-gate` · `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` ·
+`bypass-ledger` · `evidence-run` · `full-suite-gate` · `plugin-data-guard` ·
+`secret-scan-gate` · `skill-workflow-markers` · `verify-consent`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
 the bypass ledger (gate escapes only — ~100 assertions), the evidence runner and the
-`--chain-done` full-suite gate, the build-time guard that a skill never runs a zensu
+`--chain-done` full-suite gate, the acceptance verification gate, the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
 plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
 three chain states with an in-project allow control each and an armed-state premise, all four
@@ -354,7 +354,8 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-run-v1.test.js` | 50 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, retention |
+| `evidence-run-v1.test.js` | 54 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention |
+| `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |

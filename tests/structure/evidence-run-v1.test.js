@@ -190,6 +190,25 @@ test('the tree id is stable for the same content and survives a commit', () => {
   assert.equal(evr.computeTree(root, scratch).tree, edited.tree);
 });
 
+test('a same-size edit in the second of the last index write still changes the tree id', () => {
+  const root = gitRepo();
+  sh(root, 'git config core.trustctime false && git config core.checkStat minimal');
+  const scratch = tempDir('scratch');
+  const file = path.join(root, 'a.txt');
+  const staged = Math.floor(Date.now() / 1000) - 5;
+  fs.utimesSync(file, staged, staged);
+  sh(root, 'git add a.txt');
+  const base = evr.computeTree(root, scratch);
+  fs.writeFileSync(file, 'owe\n');
+  fs.utimesSync(file, staged, staged);
+  fs.utimesSync(path.join(root, '.git', 'index'), staged, staged);
+  assert.match(sh(root, 'git --no-optional-locks status --porcelain'), /^ M a\.txt/m);
+  const edited = evr.computeTree(root, scratch);
+  assert.notEqual(edited.tree, base.tree);
+  const blob = sh(root, 'git hash-object a.txt').trim();
+  assert.match(sh(root, `git ls-tree ${edited.tree} a.txt`), new RegExp(blob));
+});
+
 test('the tree id sees untracked files but ignores .zensu', () => {
   const root = gitRepo();
   const scratch = tempDir('scratch');
@@ -594,6 +613,43 @@ test('retention keeps the newest records per session and drops their logs', asyn
   assert.equal(recordsOf(data).length, 3);
   const logs = fs.readdirSync(path.join(data, 'evidence-run', 'v1', 'logs', SESSION));
   assert.equal(logs.length, 3);
+});
+
+test('an acceptance run fingerprints the tree on both ends and names it in its lines', async () => {
+  const root = gitRepo();
+  const data = pluginData();
+  const result = await runIn(root, data, { scope: 'acceptance', command: 'true' });
+  assert.equal(result.code, 0);
+  const [record] = recordsOf(data);
+  assert.equal(record.scope, 'acceptance');
+  assert.match(record.tree_start, /^[0-9a-f]{40}/);
+  assert.equal(record.tree_end, record.tree_start);
+  assert.match(result.line, new RegExp(`^EVIDENCE RUN — scope=acceptance exit=0 duration=[0-9.]+s tree=${record.tree_end.slice(0, 12)} record=${record.id}`));
+});
+
+test('acceptance runs never satisfy or block the full-suite verdict', async () => {
+  const root = gitRepo();
+  const data = pluginData();
+  await runIn(root, data, { scope: 'acceptance', command: 'true' });
+  await runIn(root, data, { scope: 'acceptance', command: 'exit 4' });
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'missing');
+  await runIn(root, data, { command: 'true' });
+  await runIn(root, data, { scope: 'acceptance', command: 'exit 4' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+});
+
+test('retention is per scope, so acceptance runs never evict the newest full record', async () => {
+  const root = gitRepo();
+  const data = pluginData();
+  await runIn(root, data, { command: 'true', limits: { maxRecordsPerSession: 2 } });
+  for (let index = 0; index < 4; index += 1) {
+    await runIn(root, data, { scope: 'acceptance', command: 'true', limits: { maxRecordsPerSession: 2 } });
+  }
+  const scopes = recordsOf(data).map((record) => record.scope);
+  assert.deepEqual(scopes.filter((scope) => scope === 'full').length, 1);
+  assert.deepEqual(scopes.filter((scope) => scope === 'acceptance').length, 2);
+  assert.equal(verdictFor(root, data).state, 'pass');
 });
 
 test('idle sessions are swept and the current one is kept', () => {
