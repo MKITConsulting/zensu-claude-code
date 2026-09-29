@@ -24,7 +24,11 @@ hook and the broker had each been enforcing a different rule; the acceptance cri
 carry the implemented rule, not the original one. §6.2's "local/remote lock", §6.7's
 autopilot claim, §6.9's state table and §7 step 5 describe the original design; the
 implemented behaviour is in `docs/gates.md` § Browser Consent Gate and `docs/verify-feature.md`
-§ 0.
+§ 0. On 2026-09-28 AC-018 was amended in place, keeping its id, to admit the exact name
+`localhost` beside loopback IPs, and AC-003 was narrowed with it: Chromium answers `localhost`
+itself, with `[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so the name no longer
+needs the trust in DNS that refusing it avoided. The 2026-09-02 measurement below that refuses
+`localhost` records the rule then in force.
 
 ## 1. Problem
 
@@ -380,7 +384,7 @@ session can write.
 |----|-------------|--------|
 | AC-001 | With `ZENSU_VERIFY_NAVIGATION_POLICY_V1` unset and the consent hook registered, the broker starts in `consent` mode and `browser_navigate` to `http://127.0.0.1:<port>/` succeeds after the PreToolUse hook returned `ask`. | spec §6.2 |
 | AC-002 | With the variable unset and the consent hook absent from `hooks/hooks.json`, the broker starts in `deny` mode and every navigation is refused exactly as today. | spec §6.2 |
-| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a `localhost` hostname, a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. | spec §6.2, §6.3 |
+| AC-003 | In consent mode a navigation to a non-loopback `http` origin, a hostname other than the exact name `localhost` (`app.localhost` and `localhost.` included), a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. Narrowed 2026-09-28 with AC-018. | spec §6.2, §6.3 |
 | AC-004 | The PreToolUse hook returns `ask` for the first navigation to each new loopback origin, and `allow` for every navigation to an origin the session consent memory already holds, whatever its route. | spec §6.3 |
 | AC-005 | The PostToolUse hook records exactly `(origin, route, decidedBy, at)` after an executed navigation — and no route set — and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
 | AC-006 | A sub-request or redirect to an origin outside the broker's approved set is blocked in consent mode. | spec §6.2 |
@@ -395,7 +399,7 @@ session can write.
 | AC-015 | The hook pair has no config off-switch; `ESCAPE_STEMS` and `ZENSU_BYPASS_GATE_ALLOWLIST` are unchanged. | spec §6.3 |
 | AC-016 | `docs/configuration.md` hook count, every `#hooks-N` anchor and the `docs/gates.md` gate count match the registered hooks. | spec §7 step 7 |
 | AC-017 | The SessionStart banner prints one consent-mode line when no policy is present in the environment AND the hook pair plus the decision module are present in the plugin root — it does NOT read `hooks.json`, and its own text points at `/zensu:doctor` for the registration. Silenceable by `hooks.sessionBanner` like its siblings. | spec §6.9 |
-| AC-018 | Consent mode admits literal-loopback origins only; a remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. | spec §6.2 |
+| AC-018 | Consent mode admits loopback origins only — a loopback IP or, since 2026-09-28, the exact name `localhost`, which Chromium resolves to `[::1]` and `127.0.0.1` itself; a run config that pins `localhost` to an address is refused. A remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. | spec §6.2 |
 | FR-001 | The floor predicates exist in exactly one module required by both the broker and the hook. | spec §7 step 1 |
 | FR-002 | The consent decision and prompt text exist in exactly one module with a `node --test` driver. | spec §6.3 |
 | FR-003 | **deprecated** — replaced by FR-005. The port reservation helper ships under `scripts/` and the eval imports it from there. | spec §7 step 5 |

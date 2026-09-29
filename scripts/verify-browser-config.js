@@ -64,7 +64,7 @@ function checkOrigin(rawOrigin, mode) {
   if (parsed.pathname !== '/') throw new Error('an origin must not carry a path');
   const classified = classifyOrigin(parsed.origin);
   if (mode === 'local') {
-    if (!classified.ok || classified.mode !== 'local') throw new Error(FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+    if (!classified.ok || classified.mode !== 'local') throw new Error(FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
     return classified;
   }
   if (parsed.protocol !== 'https:') throw new Error(FLOOR_REASONS.REMOTE_HTTPS);

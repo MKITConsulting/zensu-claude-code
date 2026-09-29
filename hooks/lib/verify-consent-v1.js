@@ -1173,6 +1173,7 @@ function runConfigShape(config, configPath) {
       const host = pin[1].toLowerCase();
       const address = pin[2].replace(/^\[|\]$/g, '');
       if (net.isIP(host) || pins.has(host)) return fail('the run config pins an address literal or pins a host twice');
+      if (floor.isLocalHost(host)) return fail('the run config pins localhost, which the browser must resolve to loopback itself');
       if (!floor.isPublicAddress(address)) return fail('the run config pins a host to an address that is not globally routable');
       pins.set(host, address);
     }
