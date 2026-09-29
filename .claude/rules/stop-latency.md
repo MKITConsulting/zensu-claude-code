@@ -73,11 +73,11 @@ kills both groups at once.
   the path that did not finish. It also follows this hook's rule for "could not evaluate, no
   corruption seen": release, and say no completion was proven.
 - **Bounds.** Default 45 s; `ZENSU_STOP_DEADLINE_SECONDS` clamps to 10–75 s; host `timeout` 90 s.
-  `L19` pins host ≥ ceiling + 10 and ≤ 120. 45 s, not 30 s, because Windows CI runs the
-  Stop-heavy `stop-enforcer-self-review-routing` suite 4.7× slower than ubuntu (1482 s against
-  318 s), so an armed Windows Stop is estimated at 10–25 s — unmeasured per Stop — and a deadline
-  inside that range would silently stop enforcing there. The floor keeps a lowered value above
-  an ordinary macOS or Linux armed Stop.
+  `L19` pins host ≥ ceiling + 10 and ≤ 120. 45 s, not 30 s, because an armed Stop is slow on
+  Windows: the routing suite's single-Stop checks took 19.0–19.9 s each on the Windows runner
+  (green run 36556263889, session setup included), and a deadline near that figure would
+  silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
+  Linux armed Stop.
 
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
