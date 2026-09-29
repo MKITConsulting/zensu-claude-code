@@ -541,6 +541,7 @@ git commit -m "feat(review): add the lean three-perspective panel to aspect acti
 - Consumes: `activate` / CLI flags from Task B3.
 - Produces: `zensu_review_panel` — prints `lean` (default, also on any unreadable config) or `full`.
 - Produces: config key `hooks.reviewPanel` (`"lean"` | `"full"`).
+- Refined during implementation: step 3 passes `--round <round>` (`re` on a re-review the post-review directive launched), because re-reviews follow the same skill step; the convergence clause runs its helpers before classifying when no judge runs; `test-incremental-review-rounds.sh` I5 to I7 pin the full panel and I5b the lean default; I17 and R16 count the new directive needle; LP1 to LP4 render the lean and full directives.
 
 - [ ] **Step 1: Add failing checks** before `finish` in `tests/structure/test-review-convergence.sh`
 

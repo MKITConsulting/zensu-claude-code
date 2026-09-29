@@ -495,6 +495,14 @@ zensu_autofix_include_suggestions() {
   [ "$val" = "1" ]
 }
 
+zensu_review_panel() {
+  command -v node >/dev/null 2>&1 || { printf 'lean'; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var p=j.hooks&&j.hooks.reviewPanel;process.stdout.write(p==="full"?"full":"lean")' 2>/dev/null)
+  [ -z "$val" ] && val="lean"
+  printf '%s' "$val"
+}
+
 zensu_combined_summary_enabled() {
   command -v node >/dev/null 2>&1 || return 0
   local val

@@ -24,6 +24,7 @@
     "findingVerification": true,
     "incrementalReviewRounds": true,
     "aspectActivation": true,
+    "reviewPanel": "lean",
     "reviewConvergence": true,
     "criticalReproduction": true,
     "reviewSpawnScopeSentence": true,

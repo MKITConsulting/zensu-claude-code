@@ -183,7 +183,7 @@ n="$(grep -cF -- '${CONVERGENCE_CLAUSE}' "$DELEGATE")"
                || check "R15 both severity arms interpolate the clause (${n}x, want 2)" FAIL
 RULE_LINES="$(grep -F 'IMPORTANT_RULE="' "$DELEGATE")"
 for needle in 'step 4c Finding Verification Gate' 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
-              'status=empty or status=degraded' 'always keeps the full cumulative diff' 'hooks.aspectActivation skips one' \
+              'status=empty or status=degraded' 'always keeps the full cumulative diff' 'aspect-activation-v1.js --panel ${PANEL} --round re' \
               're-run the FULL test suite over the current tree in the FOREGROUND' '${CLAUDE_PLUGIN_ROOT}'; do
   case "$CLAUSE_LINE$RULE_LINES" in
     *"$needle"*) check "R16 the clause lines avoid a per-line counted phrase [$needle]" FAIL ;;
@@ -288,6 +288,21 @@ check "LC2f the rubric doc states the rule" "$(grep_ok "$RUBRIC_DOC" 'a CRITICAL
 check "LC2g configuration.md documents criticalReproduction" "$(grep_ok "$CONFIG_DOC" '| `criticalReproduction` |')"
 check "LC2h config.example.json ships criticalReproduction" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.criticalReproduction===true?"PASS":"FAIL")' "$CONFIG_EX")"
 check "LC2i the max-rounds hand-off names the reproduction rule" "$(grep_ok "$DELEGATE" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "LC3 the panel getter exists and defaults to lean" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG=/nonexistent zensu_review_panel' _ "$ROOT" | grep -qx lean && echo PASS || echo FAIL)"
+LC3_CFG="$(mktemp)"
+printf '%s\n' '{"hooks":{"reviewPanel":"full"}}' > "$LC3_CFG"
+check "LC3a the panel getter reads full" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG="$2" zensu_review_panel' _ "$ROOT" "$LC3_CFG" | grep -qx full && echo PASS || echo FAIL)"
+printf '%s\n' '{"hooks":{"reviewPanel":"wide"}}' > "$LC3_CFG"
+check "LC3j an unknown panel value reads as lean" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG="$2" zensu_review_panel' _ "$ROOT" "$LC3_CFG" | grep -qx lean && echo PASS || echo FAIL)"
+rm -f "$LC3_CFG"
+check "LC3b step 3 resolves the panel and the round" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js" --panel <panel> --round <round>')"
+check "LC3c the fix-round directive re-reviews with the round flag" "$([ "$(grep -cF 'aspect-activation-v1.js --panel ${PANEL} --round re' "$DELEGATE")" -eq 2 ] && echo PASS || echo FAIL)"
+check "LC3d the judge re-runs only on the full panel" "$([ "$(grep -cF 're-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full' "$DELEGATE")" -eq 2 ] && echo PASS || echo FAIL)"
+check "LC3e step 4b skips the judge on a lean re-review" "$(grep_ok "$TDD_MD" 'On a re-review with the lean panel, skip this step')"
+check "LC3f the aspect agent knows correctness" "$(grep_ok "$ASPECT_MD" '   - correctness: control flow, boundaries, null/error paths, races, resource handling, plus test-source assertions')"
+check "LC3g the aspect agent knows design" "$(grep_ok "$ASPECT_MD" '   - design: dependency direction, layering, module boundaries, integration contracts, plus repository guidance')"
+check "LC3h configuration.md documents reviewPanel" "$(grep_ok "$CONFIG_DOC" '| `reviewPanel` |')"
+check "LC3i config.example.json ships the lean panel" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.reviewPanel==="lean"?"PASS":"FAIL")' "$CONFIG_EX")"
 check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
 finish

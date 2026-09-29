@@ -56,7 +56,7 @@ and its second line is `REVIEW-TICKET: <ticket>`, where `<ticket>` matches
 `[A-Za-z0-9_-]+`. Merely containing or quoting the marker elsewhere is not consume mode;
 neither is a ticket header elsewhere in the prompt. With
 that exact two-line header, validate that the same prompt also contains a
-complete REVIEW PACKET v1. Do not re-run the five perspectives, build, or tests.
+complete REVIEW PACKET v1. Do not re-run the panel's perspectives, build, or tests.
 Deduplicate and sort the supplied findings, then render the report below.
 Preserve supplied finding text; do not invent evidence.
 

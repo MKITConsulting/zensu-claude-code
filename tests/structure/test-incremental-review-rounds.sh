@@ -142,7 +142,7 @@ check "I16 tdd skill spawns all five when activation is unavailable" "$(grep_ok 
 # appear TWICE — a one-sided edit is the failure this counts rather than greps.
 for needle in 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
               'status=empty or status=degraded' 'always keeps the full cumulative diff' \
-              'hooks.aspectActivation skips one'; do
+              'aspect-activation-v1.js --panel ${PANEL} --round re'; do
   n="$(grep -cF -- "$needle" "$DELEGATE")"
   [ "$n" -eq 2 ] && check "I17 both delegate arms carry [$needle] (${n}x)" PASS \
                  || check "I17 both delegate arms carry [$needle] (${n}x, want 2)" FAIL

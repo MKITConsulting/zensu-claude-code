@@ -72,6 +72,7 @@ render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoF
 render_rounds repro-off '{"hooks":{"autoFix":true,"criticalReproduction":false}}'
 render_rounds repro-fv-off '{"hooks":{"autoFix":true,"findingVerification":false}}'
 render_rounds one-round '{"hooks":{"autoFix":true}}'
+render_rounds full-panel '{"hooks":{"autoFix":true,"reviewPanel":"full"}}'
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL
@@ -205,6 +206,11 @@ check "RP2 the default hand-off names the reproduction rule for self-review" "$(
 check "RP3 criticalReproduction off drops the rule from the clause" "$(lacks "$RPOFF1" 'FINDING REPRODUCTION')"
 check "RP4 criticalReproduction off drops the rule from the hand-off" "$(lacks "$RPOFF2" 'FINDING REPRODUCTION')"
 check "RP5 findingVerification off drops the rule, since stage 3 lives in that gate" "$(lacks "$RPFV1" 'FINDING REPRODUCTION')"
+FULL1="$(context_of "$TMP_DIR/full-panel/round-1.json")"
+check "LP1 the default fix round re-reviews with the lean panel" "$(has "$ONE1" 'aspect-activation-v1.js --panel lean --round re answers spawn')"
+check "LP2 the default fix round keeps the judge for the full panel only" "$(has "$ONE1" 'only when hooks.reviewJudge is enabled and hooks.reviewPanel is full')"
+check "LP3 reviewPanel full re-reviews with the full panel" "$(has "$FULL1" 'aspect-activation-v1.js --panel full --round re answers spawn')"
+check "LP4 no unexpanded panel variable reaches the model" "$(lacks "$ONE1" '${PANEL}')"
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"
