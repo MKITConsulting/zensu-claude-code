@@ -6594,9 +6594,12 @@ fi
 # systemMessage goes out — while the model-facing copy names the superseded record,
 # whose basename is the session selector every confined context withholds, so a child
 # gets none. And stdout carries exactly ONE JSON object per run: a child whose call
-# adopts and is then DENIED by its own profile must produce the deny alone. Both were
+# adopts and is then DENIED by its own profile must produce ONE object, the deny,
+# which carries the adoption itself — the version pair alone in its reason, the whole
+# notice as its systemMessage — and never a second object after it. Both were
 # unexecuted — handing the notice to every principal, or announcing after a deny,
-# left every row green.
+# left every row green — and the capability deny then dropped the adoption on every
+# channel, since the gate wrapper discards stderr.
 AUTO_KID_READ_SESSION='versioned-upgrade-auto-child-read'
 AUTO_KID_READ_RECORD="$ADOPT_RECORDS_DIR/$(auto_key "$AUTO_KID_READ_SESSION").json"
 if auto_session_start "$AUTO_KID_READ_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
@@ -6633,14 +6636,17 @@ if auto_session_start "$AUTO_KID_EDIT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
     let parsed;
     try { parsed = JSON.parse(lines[0]); } catch (_error) { process.stdout.write("unparseable"); process.exit(0); }
     if (parsed?.hookSpecificOutput?.permissionDecision !== "deny") { process.stdout.write("not-a-deny"); process.exit(0); }
-    if (Object.prototype.hasOwnProperty.call(parsed, "systemMessage")) { process.stdout.write("deny-with-notice"); process.exit(0); }
-    if (!String(parsed.hookSpecificOutput.permissionDecisionReason || "").includes("cannot invoke Edit")) { process.stdout.write("wrong-deny"); process.exit(0); }
+    const reason = String(parsed.hookSpecificOutput.permissionDecisionReason || "");
+    if (!reason.includes("cannot invoke Edit")) { process.stdout.write("wrong-deny"); process.exit(0); }
+    if (!reason.includes("This call also adopted the Session Control record (0.17.0 -> 0.18.0) under the running installation.")) { process.stdout.write("no-disclosure"); process.exit(0); }
+    if (reason.includes(".superseded-") || reason.includes("/zensu:adopt-session")) { process.stdout.write("leaks-selector-or-command"); process.exit(0); }
+    if (!String(parsed.systemMessage || "").includes("adopted automatically on this tool call")) { process.stdout.write("no-notice"); process.exit(0); }
     process.stdout.write("ok");
   ' 2>/dev/null)" || AUTO_KID_EDIT_SHAPE=threw
   if [ "$AUTO_KID_EDIT_DECISION" = deny ] && [ "$AUTO_KID_EDIT_SHAPE" = ok ] \
       && [ "$(auto_record_version "$AUTO_KID_EDIT_RECORD")" = 0.18.0 ] \
       && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_KID_EDIT_SESSION")" = 1 ]; then
-    check "AUTO-24 a reviewer child whose Edit performs the adoption and is then denied by its own profile emits exactly one JSON object, the deny, with no notice after it, over one recorded adoption" PASS
+    check "AUTO-24 a reviewer child whose Edit performs the adoption and is then denied by its own profile emits exactly one JSON object, the deny, naming the version pair in its reason and carrying the notice as its systemMessage, over one recorded adoption" PASS
   else
     check "AUTO-24 a reviewer child whose Edit adopts and is denied (decision=$AUTO_KID_EDIT_DECISION shape=$AUTO_KID_EDIT_SHAPE version=$(auto_record_version "$AUTO_KID_EDIT_RECORD") entries=$(auto_adopted_entries "$PROJECT" "$AUTO_KID_EDIT_SESSION"))" FAIL
     head -c 400 "$AUTO_KID_EDIT_OUT" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$TMP/auto-child-edit.err" 2>/dev/null; printf '\n'
@@ -6860,37 +6866,6 @@ if auto_session_start "$AUTO_BASE_KID_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
   fi
 else
   check "AUTO-27b fixture: the child baseline-gone session registers under the candidate root" FAIL
-fi
-
-# AUTO-29 — an adoption the capability gate performs on a call the PRINCIPAL rule
-# then denies. A confined child's first tool call after /reload-plugins binds,
-# adopts, passes the workflow revalidation and asks for a tool its profile does not
-# grant; that deny dropped the adoption on every channel, since the gate wrapper
-# discards stderr. Healthy root, intact baseline, a reviewer child writing.
-AUTO_CAP_SESSION='versioned-upgrade-auto-capability-deny'
-AUTO_CAP_KEY="$(auto_key "$AUTO_CAP_SESSION")"
-AUTO_CAP_RECORD="$ADOPT_RECORDS_DIR/$AUTO_CAP_KEY.json"
-if auto_session_start "$AUTO_CAP_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
-    && [ -f "$AUTO_CAP_RECORD" ]; then
-  AUTO_CAP_OUT="$TMP/auto-capability.out"
-  AUTO_CAP_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
-    "$(auto_agent_payload "$AUTO_CAP_SESSION" Write 'zensu:review-aspect')" "$AUTO_CAP_OUT" "$TMP/auto-capability.err")"
-  AUTO_CAP_REASON="$(auto_reason_of "$AUTO_CAP_OUT")"
-  AUTO_CAP_SYSTEM="$(auto_stdout_field "$AUTO_CAP_OUT" systemMessage)"
-  if [ "$AUTO_CAP_DECISION" = deny ] \
-      && printf '%s' "$AUTO_CAP_REASON" | grep -qF 'This call also adopted the Session Control record (0.17.0 -> 0.18.0) under the running installation.' \
-      && ! printf '%s' "$AUTO_CAP_REASON" | grep -qF '.superseded-' \
-      && ! printf '%s' "$AUTO_CAP_REASON" | grep -qF '/zensu:adopt-session' \
-      && printf '%s' "$AUTO_CAP_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
-      && [ "$(auto_record_version "$AUTO_CAP_RECORD")" = 0.18.0 ] \
-      && [ -f "$ADOPT_RECORDS_DIR/$AUTO_CAP_KEY.superseded-0.17.0.json" ]; then
-    check "AUTO-29 a capability deny after an adoption the gate performed on the same call discloses it: the version pair in the child's reason, the whole notice to the user, and the record re-minted" PASS
-  else
-    check "AUTO-29 a capability deny after an adoption performed on the same call (decision=$AUTO_CAP_DECISION version=$(auto_record_version "$AUTO_CAP_RECORD"))" FAIL
-    printf '  reason: %s\n  system: %s\n' "$(printf '%s' "$AUTO_CAP_REASON" | head -c 500)" "$(printf '%s' "$AUTO_CAP_SYSTEM" | head -c 300)"
-  fi
-else
-  check "AUTO-29 fixture: the capability-deny session registers under the candidate root" FAIL
 fi
 
 # AUTO-28 — the Stop hook's ONE re-bind after a sibling won the records lock. The

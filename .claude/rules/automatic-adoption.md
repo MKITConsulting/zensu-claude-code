@@ -223,7 +223,7 @@ session selector confined contexts withhold, and its lease clause can name
 `/zensu:adopt-session --confirm`, which writes the immutable record. The `systemMessage`
 is user-facing and carries the whole notice for every principal. The seam pin holds the
 renderer choice, the audience expression, the bind-failure deny helper and the capability
-deny to their spellings; `AUTO-27`, `AUTO-27b` and `AUTO-29` drive the main, child and
+deny to their spellings; `AUTO-27`, `AUTO-27b` and `AUTO-24` drive the main, child and
 capability-deny halves.
 
 A SIBLING's adoption whose lease sweep this process completed — `adoptForHook` sweeps
@@ -247,6 +247,19 @@ sites discard it at the time of writing — the reviewer-spawn grant, both brows
 hooks, the autopilot resume hook, the worktree-keep UserPromptSubmit hook, and the
 worktree-keep anchor both worktree-keep lifecycle hooks share — but that is a census; the
 grep is the rule.
+
+## Operator-facing accounts
+
+Every surface below states what the automatic path does, and each moves with it:
+`docs/session-control.md` "Unbindable sessions" (the adoption paragraph, including its
+binding-hook roster and its disclosure channels, and the `.*` gate row of the per-gate
+table), `docs/gates.md`, `docs/tdd-manager-workflow.md`, `docs/operations.md`, the
+`hooks.sessionAutoAdopt` and Stop-hook rows of `docs/configuration.md`,
+`config.example.json`, `README.md`, `skills/adopt-session/SKILL.md` (the entry-level
+tokens and the deny after an adoption that landed) and `skills/doctor/SKILL.md` (the
+adoption row). This is a census, and the rule is the search:
+
+`grep -rlE 'sessionAutoAdopt|adopted automatically|automatic adoption' README.md docs skills config.example.json`
 
 ## Bounds
 

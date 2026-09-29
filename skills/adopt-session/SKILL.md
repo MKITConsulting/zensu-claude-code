@@ -358,6 +358,15 @@ the binder could not answer at all. A refusal that establishes no named state �
 `record-unreadable`, `plugin-data-mismatch` — rides on the generic bind-failure deny
 as one appended sentence rather than on the lineage or pruned wording.
 
+A deny can also follow an automatic adoption that DID land on the same call — the
+workflow document was missing, or the tool is one the principal may not use. The cause
+still leads, and the deny then says `This call also adopted the Session Control record
+(<recorded> -> <executing>)`. That is a completed adoption to report, not a refusal to
+repair: answer the cause the deny names — for a missing workflow document that is its
+own `--confirm` rebuild, which needs the user's yes as Step 2 below states — and never
+run `--confirm` to repeat the adoption. `/zensu:doctor` shows the adoption afterwards
+when a workflow document recorded it.
+
 **Step 2 of 3 — adopt.** The same adoption runs automatically on every hook bind, so
 this form exists for a refusal and for the opt-out — and `--confirm` is a token you
 supply yourself, not a consent the user gave. TWO of its uses therefore need the
