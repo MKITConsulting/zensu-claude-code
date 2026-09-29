@@ -261,7 +261,7 @@ function createRenderers(core) {
     const recorded = safeVersion(adoption && adoption.recorded);
     const kept = keptName(adoption);
     const orphan = adoption && adoption.orphanedProjectRoot
-      ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
+      ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports whether it can be re-created in place, now that this installation serves the record.'
       : '';
     return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
   }

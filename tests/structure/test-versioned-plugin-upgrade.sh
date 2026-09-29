@@ -6104,8 +6104,11 @@ if auto_session_start "$AUTO_GONE_SESSION" "$AUTO_GONE_PROJECT" "$SYNTHETIC_CAND
   # The record SERVES by now and the bind still fails — on the vanished root, which
   # was never an adoption failure. The refusal mode must therefore answer NOTHING
   # (exit 1), and the shell deny must not blame an adoption for it: answering
-  # `not-completed` here told the reader to retry a call no retry can fix. The
-  # absence needle is guarded by a positive one on the SAME capture.
+  # `not-completed` here told the reader to retry a call no retry can fix. That
+  # empty answer is what routes the Edit gate to the router's orphaned-project-root
+  # scope, whose remedy is the in-place restore — the scope an adopted gone-root
+  # session is actually in. The absence needle is guarded by a positive one on the
+  # SAME capture, and the notice must name the same restore.
   AUTO_GONE_TOKEN="$(auto_refusal_token "$AUTO_GONE_SESSION")"
   AUTO_GONE_EDIT_REASON="$(auto_reason_of "$TMP/auto-gone-edit.out")"
   AUTO_GONE_STOP_ERR="$TMP/auto-gone-stop.err"; AUTO_GONE_STOP_OUT="$TMP/auto-gone-stop.out"; AUTO_GONE_STOP_RC=0
@@ -6117,20 +6120,23 @@ if auto_session_start "$AUTO_GONE_SESSION" "$AUTO_GONE_PROJECT" "$SYNTHETIC_CAND
   AUTO_GONE_SYSTEM="$(auto_stdout_field "$TMP/auto-gone.out" systemMessage)"
   if [ "$AUTO_GONE_DECISION" = allow ] && [ "$AUTO_GONE_EDIT_DECISION" = deny ] \
       && [ "$AUTO_GONE_TOKEN" = rc=1 ] \
-      && printf '%s' "$AUTO_GONE_EDIT_REASON" | grep -qF 'so every stateful Zensu tool fails closed' \
+      && printf '%s' "$AUTO_GONE_EDIT_REASON" | grep -qF 'the project root it records no longer exists' \
+      && printf '%s' "$AUTO_GONE_EDIT_REASON" | grep -qF '/zensu:adopt-session --restore-root' \
       && ! printf '%s' "$AUTO_GONE_EDIT_REASON" | grep -qF 'tried to adopt the record automatically' \
       && printf '%s' "$AUTO_GONE_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
       && printf '%s' "$AUTO_GONE_SYSTEM" | grep -qF 'The recorded project root is still gone, so Edit, Write, MultiEdit' \
+      && printf '%s' "$AUTO_GONE_SYSTEM" | grep -qF '/zensu:adopt-session --restore-root reports whether it can be re-created in place' \
       && [ "$(auto_record_version "$AUTO_GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$AUTO_GONE_RECORD" 2>/dev/null)" = "$AUTO_GONE_ROOT_BEFORE" ] \
       && [ ! -e "$AUTO_GONE_PROJECT" ] \
       && [ "$AUTO_GONE_STOP_RC" = 0 ] && [ ! -s "$AUTO_GONE_STOP_OUT" ] \
       && grep -qF 'no longer exists' "$AUTO_GONE_STOP_ERR" \
       && ! grep -qF 'declares an incompatible lineage' "$AUTO_GONE_STOP_ERR"; then
-    check "AUTO-11 a gone-root record adopts on the first hook contact, announces it with the orphan clause, keeps its absent anchor, still denies Edit without blaming the adoption (the refusal mode answers nothing), and Stop takes the orphan release" PASS
+    check "AUTO-11 a gone-root record adopts on the first hook contact, announces it with the orphan clause and the restore, keeps its absent anchor, still denies Edit on the orphaned-root scope without blaming the adoption (the refusal mode answers nothing), and Stop takes the orphan release" PASS
   else
     check "AUTO-11 a gone-root record adopts on the first hook contact (read=$AUTO_GONE_DECISION edit=$AUTO_GONE_EDIT_DECISION token='$AUTO_GONE_TOKEN' version=$(auto_record_version "$AUTO_GONE_RECORD") stop-rc=$AUTO_GONE_STOP_RC)" FAIL
     head -c 300 "$TMP/auto-gone.err" 2>/dev/null; printf '\n'; head -c 300 "$AUTO_GONE_STOP_ERR" 2>/dev/null; printf '\n'
+    printf 'edit reason: %.300s\nsystem: %.300s\n' "$AUTO_GONE_EDIT_REASON" "$AUTO_GONE_SYSTEM"
   fi
 else
   check "AUTO-11 fixture: the gone-root session registers under the candidate root" FAIL
