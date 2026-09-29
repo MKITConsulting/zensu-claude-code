@@ -541,7 +541,8 @@ test('direct Bash browser access fails while the instructed helper spellings pas
     `/Applications/Chromium.app/Contents/MacOS/Chromium --headless --dump-dom ${ORIGIN}/`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode local --origin ${ORIGIN} --exec chromium`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-free-port.js --from 5173 --then chrome`,
-    `node ${BROWSER_WORD_PLUGIN}/scripts/other.js --check-policy local ${ORIGIN} / declared-safe`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/other.js --check-policy local ${ORIGIN} declared-safe`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${ORIGIN} / declared-safe`,
   ]) {
     assert.equal(reportOnlyCommand(command), false, command);
   }
@@ -549,8 +550,8 @@ test('direct Bash browser access fails while the instructed helper spellings pas
     'command -v playwright-cli',
     'playwright-cli install-browser',
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-free-port.js --from 5173`,
-    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${ORIGIN} / declared-safe`,
-    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.com / declared-safe`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${ORIGIN} declared-safe`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.com declared-safe`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode local --origin ${ORIGIN}`,
     `node "${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js" --run-dir "${RUN_DIR}" --mode remote --origin "https://example.com"`,
     `cat ${CONFIG}`,
@@ -561,14 +562,14 @@ test('direct Bash browser access fails while the instructed helper spellings pas
 
 test('a declared-safe policy check cannot launder a browser launch through its arguments', () => {
   const launder = (argument) => reportOnlyCommand(
-    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${argument} / declared-safe`);
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${argument} declared-safe`);
 
   assert.equal(launder('"$(npx playwright open)"'), false);
   assert.equal(launder('"`npx playwright open`"'), false);
   assert.equal(launder("'http://127.0.0.1:1;npx playwright open'"), false);
   assert.equal(launder('http://127.0.0.1:1\\;npx'), false);
   assert.equal(reportOnlyCommand(
-    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local http://127.0.0.1:1 / trusted-redaction`), false);
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local http://127.0.0.1:1 trusted-redaction`), false);
 
   assert.equal(launder('"http://127.0.0.1:1"'), true);
   assert.equal(launder("'http://127.0.0.1:1'"), true);

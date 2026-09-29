@@ -132,10 +132,24 @@ exit 0
 STUB
 chmod +x "$STUBS"/*
 
-POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe","routes":["/"]}]}'
+POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe"}]}'
 COMMON_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
 
 PLANNED_ORIGIN="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" 2>&1)"
+
+LEGACY_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe","routes":["/teams"]}]}'
+LEGACY_ORIGIN="$(env PATH="$STUBS:$PATH" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$LEGACY_POLICY" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" 2>&1)"
+if [ "$PLANNED_ORIGIN" = 'http://127.0.0.1:45173' ] && [ "$LEGACY_ORIGIN" = 'http://127.0.0.1:45173' ]; then
+  check "a policy target authorizes its origin without a route list, and a legacy route list that omits / is ignored" PASS
+else
+  check "a policy target authorizes its origin without a route list, and a legacy route list that omits / is ignored (got '$PLANNED_ORIGIN' / '$LEGACY_ORIGIN')" FAIL
+fi
+MALFORMED_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe","routes":"/"}]}'
+if ! env PATH="$STUBS:$PATH" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$MALFORMED_POLICY" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" >/dev/null 2>&1; then
+  check "a policy target whose legacy routes value is not a list is refused" PASS
+else
+  check "a policy target whose legacy routes value is not a list is refused" FAIL
+fi
 if [ "$LOOPBACK_AVAILABLE" = 1 ]; then
 UP_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" up "$RUN_DIR" "$WORKTREE" 2>&1)"
 UP_RC=$?

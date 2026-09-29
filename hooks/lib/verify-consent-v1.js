@@ -148,7 +148,6 @@ const REASONS = Object.freeze({
   GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the run config resolver pins',
   POLICY_INVALID: 'the navigation policy in the launch environment is invalid',
   NOT_POLICY_TARGET: 'origin is not a target of the navigation policy',
-  NOT_POLICY_ROUTE: 'route is not approved for evidence by the navigation policy',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   NEW_ORIGIN: 'new-origin-needs-consent',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
@@ -160,7 +159,7 @@ const SHAPE_REASONS = Object.freeze([
 const FINAL_REASONS = Object.freeze([
   'PAYLOAD_UNREADABLE', 'COMMAND_TOO_LARGE', 'NOT_MAIN_THREAD', 'SESSION_MALFORMED', 'INDIRECT', 'UNJUDGED_BODY', 'ENV_BUILTIN',
   'AMBIENT_TEXT', 'REDEFINED', 'COMMAND_DENIED', 'FLAG_DENIED', 'CONFIG_REQUIRED', 'OPEN_OUTSIDE_CONFIG', 'BROWSER_NOT_CHROMIUM',
-  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NOT_POLICY_ROUTE', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
+  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
   'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED',
 ]);
 const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
@@ -1017,17 +1016,6 @@ function appendRecord(memoryPath, record, options = {}) {
   return { ok: true, records, duplicate: false };
 }
 
-function normalizeRoutes(declaredRoutes) {
-  if (!Array.isArray(declaredRoutes)) return [];
-  const routes = [];
-  for (const route of declaredRoutes) {
-    const normalized = floor.normalizeRoute(route);
-    if (normalized !== null && !routes.includes(normalized)) routes.push(normalized);
-  }
-  return routes;
-}
-
-const MAX_RECIPE_BYTES = 262144;
 const RECIPE_NAMES = Object.freeze(['runtime.yaml', 'autopilot.yaml']);
 
 function resolveRecipeFile(projectRoot) {
@@ -1047,86 +1035,11 @@ function resolveRecipeFile(projectRoot) {
   return '';
 }
 
-function declaredRoutesFromRecipe(text) {
-  const lines = String(text).split(/\r?\n/);
-  const validateAt = lines.findIndex((line) => /^validate:\s*$/.test(line));
-  if (validateAt === -1) return [];
-  let start = -1;
-  for (let index = validateAt + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line.trim()) continue;
-    const indent = (line.match(/^\s*/) || [''])[0].length;
-    if (indent <= 0) break;
-    if (/^\s*evidenceSafety:\s*$/.test(line)) { start = index; break; }
-  }
-  if (start === -1) return [];
-  const blockIndent = (lines[start].match(/^\s*/) || [''])[0].length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line.trim()) continue;
-    const indent = (line.match(/^\s*/) || [''])[0].length;
-    if (indent <= blockIndent) break;
-    const flow = line.match(/^\s*routes:\s*\[(.*)\]\s*$/);
-    if (flow) {
-      return normalizeRoutes(flow[1].split(',').map((item) => item.trim().replace(/^["']|["']$/g, '')).filter(Boolean));
-    }
-    if (/^\s*routes:\s*$/.test(line)) {
-      const routes = [];
-      for (let inner = index + 1; inner < lines.length; inner += 1) {
-        const item = lines[inner].match(/^\s*-\s*(.+?)\s*$/);
-        if (!item) break;
-        routes.push(item[1].replace(/^["']|["']$/g, ''));
-      }
-      return normalizeRoutes(routes);
-    }
-  }
-  return [];
-}
-
-function readRecipeRoutes(recipeFile) {
-  if (typeof recipeFile !== 'string' || !recipeFile) return [];
-  let info;
-  try { info = fs.lstatSync(recipeFile); }
-  catch (_error) { return []; }
-  if (!info.isFile() || info.size > MAX_RECIPE_BYTES) return [];
-  try {
-    return declaredRoutesFromRecipe(fs.readFileSync(recipeFile, 'utf8'));
-  } catch (_error) {
-    return [];
-  }
-}
-
-const MAX_PROMPT_ROUTE = 120;
-const MAX_PROMPT_ROUTES = 12;
-const MAX_PROMPT_ROUTES_TEXT = 320;
-
-function promptRoute(route) {
-  const clean = (typeof route === 'string' ? route : '').replace(/[\u0000-\u001f\u007f]/g, '');
-  return clean.length > MAX_PROMPT_ROUTE ? `${clean.slice(0, MAX_PROMPT_ROUTE)}…` : clean;
-}
-
-function promptRoutes(routes) {
-  const shown = [];
-  let width = 0;
-  for (const route of routes.slice(0, MAX_PROMPT_ROUTES)) {
-    const rendered = promptRoute(route);
-    const cost = shown.length === 0 ? rendered.length : rendered.length + 2;
-    if (shown.length > 0 && width + cost > MAX_PROMPT_ROUTES_TEXT) break;
-    shown.push(rendered);
-    width += cost;
-  }
-  const dropped = routes.length - shown.length;
-  const list = shown.join(', ');
-  return dropped > 0 ? `${list} (and ${dropped} more)` : list;
-}
-
-function promptText({ origins, session, declaredRoutes }) {
-  const routes = normalizeRoutes(declaredRoutes);
+function promptText({ origins, session }) {
   const plural = origins.length > 1;
   const lines = [];
   lines.push(`The playwright-cli browser session ${session} is about to reach ${origins.join(', ')} (local loopback).`);
   lines.push(`Answering Yes approves ${plural ? 'these origins' : 'this origin'} for the rest of this Claude Code session: the model may then open, read and interact with (click, type, submit forms on) any page on ${plural ? 'them' : 'it'}, screenshots included, without asking again. Consent is per origin, never per route.`);
-  if (routes.length > 0) lines.push(`The run declares these routes as synthetic-safe: ${promptRoutes(routes)}.`);
   lines.push(`Answer No to keep the browser away from ${plural ? 'them' : 'it'}; the run then reports PARTIAL.`);
   return lines.join(' ');
 }
@@ -1267,11 +1180,9 @@ function readPolicy(env) {
 }
 
 function readInputs(env) {
-  const projectRoot = env.ZENSU_VERIFY_PROJECT_ROOT || '';
   return {
     memoryPath: env.ZENSU_VERIFY_CONSENT_MEMORY || '',
-    projectRoot,
-    declaredRoutes: readRecipeRoutes(resolveRecipeFile(projectRoot)),
+    projectRoot: env.ZENSU_VERIFY_PROJECT_ROOT || '',
     policy: readPolicy(env),
   };
 }
@@ -1282,9 +1193,7 @@ function judgeOrigin(rawUrl, options) {
   const { origin, pathname: route, mode, hostname } = classified;
   if (options.policy) {
     if (!options.policy.ok) return { deny: `${REASONS.POLICY_INVALID}: ${options.policy.fault}` };
-    const target = options.policy.targets.get(origin);
-    if (!target) return { deny: `${origin}: ${REASONS.NOT_POLICY_TARGET}` };
-    if (options.navigation && !target.routes.has(route)) return { deny: `${origin}${route}: ${REASONS.NOT_POLICY_ROUTE}` };
+    if (!options.policy.targets.has(origin)) return { deny: `${origin}: ${REASONS.NOT_POLICY_TARGET}` };
     if (mode === 'remote' && !net.isIP(hostname) && options.pins && !options.pins.has(hostname)) {
       return { deny: `${origin}: the run config carries no resolver pin for this remote host` };
     }
@@ -1354,7 +1263,7 @@ function principalOf(payload) {
   catch (_error) { return ''; }
 }
 
-function evaluate({ command, payload, env, records, declaredRoutes, policy, platform }) {
+function evaluate({ command, payload, env, records, policy, platform }) {
   if (typeof command !== 'string' || command === '') return { verdict: 'none' };
   const marks = commandMarkers(command, env);
   if (!marks.cli) return { verdict: 'none' };
@@ -1392,7 +1301,7 @@ function evaluate({ command, payload, env, records, declaredRoutes, policy, plat
   }
   if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
   if (fresh.length > 0) {
-    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session, declaredRoutes }) };
+    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session }) };
   }
   return { verdict: 'none', plan };
 }
@@ -1430,7 +1339,6 @@ function runPre(payload, env, out, err) {
     payload,
     env,
     records: memory.records,
-    declaredRoutes: inputs.declaredRoutes,
     policy: inputs.policy,
   });
   if (!memory.ok && decision.verdict === 'ask') err.write(`zensu: verify consent memory ignored (${memory.reason}); the call asks again\n`);
@@ -1456,7 +1364,6 @@ function runPost(payload, env, err) {
     payload,
     env,
     records: memory.records,
-    declaredRoutes: inputs.declaredRoutes,
     policy: inputs.policy,
   });
   if (decision.verdict === 'deny' || !Array.isArray(decision.plan) || decision.plan.length === 0) {
@@ -1533,10 +1440,6 @@ module.exports = {
   FINAL_REASONS,
   GLOBAL_CONFIG_HARMLESS,
   MAX_MEMORY_BYTES,
-  MAX_PROMPT_ROUTE,
-  MAX_PROMPT_ROUTES,
-  MAX_PROMPT_ROUTES_TEXT,
-  MAX_RECIPE_BYTES,
   MAX_RECORDS,
   MAX_RUN_ORIGINS,
   MEMORY_NAME_PREFIX,
@@ -1560,7 +1463,6 @@ module.exports = {
   commandMarkers,
   consentHookRegistered,
   consentRecorderRegistered,
-  declaredRoutesFromRecipe,
   emptyMemory,
   evaluate,
   globalConfigFault,
@@ -1569,18 +1471,14 @@ module.exports = {
   judgeOrigin,
   lexShell,
   memoryPathAllowed,
-  normalizeRoutes,
   parseCliArgs,
   payloadFromRaw,
   preEnvelope,
-  promptRoute,
-  promptRoutes,
   promptText,
   readConsentMemory,
   readInputs,
   readMemory,
   readPolicy,
-  readRecipeRoutes,
   readRunConfig,
   recordingStream,
   resolveRecipeFile,

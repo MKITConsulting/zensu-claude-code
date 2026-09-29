@@ -150,6 +150,13 @@ tdd_state_file() {
   echo "${project_root}/.zensu/state/tdd-phase-${resolved}.json"
 }
 
+tdd_edit_landing_receipt() {
+  local state_file key
+  state_file="$(tdd_state_file "${1:-}")" || return 1
+  key="$(basename "$state_file")"; key="${key#tdd-phase-}"; key="${key%.json}"
+  printf '%s\n' "$(dirname "$state_file")/edit-landing-${key}.json"
+}
+
 _tdd_bound_project_root() {
   local state_file="${1:-}" session_id="${2:-}" expected project_root native_project_root
   [ -n "$state_file" ] && [ -n "$session_id" ] || return 1
@@ -2777,7 +2784,7 @@ tdd_has_red_fail() {
 # document renders: `text` for a terminus that must disclose, the default
 # `empty` for a clearing verb, where a clean ENOENT means nothing was recorded.
 
-ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_FULL_SUITE_GATE"
+ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_FULL_SUITE_GATE ZENSU_ACCEPTANCE_GATE"
 ZENSU_BYPASS_UNREADABLE_TEXT="UNREADABLE — workflow state could not be validated; this is NOT a clean ledger"
 ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this session; this is NOT a clean ledger"
 
@@ -3012,6 +3019,16 @@ tdd_bypasses() {
   value="${result#*$'\n'}"
   [ "$value" = "$result" ] && value=""
   echo "$value"
+}
+
+tdd_bypass_recorded() {
+  local state_file="${1:-}" gate="${2:-}" value entry
+  [ -n "$gate" ] || return 1
+  value="$(tdd_bypasses "$state_file" 2>/dev/null)" || return 1
+  for entry in $(printf '%s' "$value" | tr ',' ' '); do
+    [ "$entry" = "$gate" ] && return 0
+  done
+  return 1
 }
 
 zensu_bypass_display() {

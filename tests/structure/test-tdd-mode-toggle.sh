@@ -8,9 +8,9 @@
 # decision:
 #   session marker  >  caller flag  >  hooks.tddImplementation  >  vanilla
 # The middle rank exists because the shipped config default is `false`: without
-# it, a skill's own strict default (`/zensu:pr-fix-findings`) could never take
+# it, a specification's own `TDD-MODE: strict` request could never take
 # effect. The top rank exists so a user who switched the mode by hand is never
-# overruled by a skill — T14 is that bite.
+# overruled by a caller — T14 is that bite.
 #
 # Fail-safety is pinned in the other direction: an absent, malformed, or
 # symlinked marker must resolve to `auto` (no override) rather than imposing a
@@ -613,8 +613,8 @@ OUT_T13="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$S_SS"
   || check "T13 session marker vs config (got '$OUT_T13')" FAIL
 
 # T14 is the bite the whole toggle exists for: the user's own choice must survive a
-# skill that asks for the opposite. /zensu:pr-fix-findings passes strict; a user who
-# ran `--vanilla` still gets vanilla.
+# caller that asks for the opposite. A spec carrying `TDD-MODE: strict` passes strict;
+# a user who ran `--vanilla` still gets vanilla.
 S_SV="tddmode-session-vanilla"
 toggle "$S_SV" --vanilla >/dev/null
 activate_session "$S_SV"
@@ -835,22 +835,21 @@ rm -rf "$DECOY" "$PROJ/.zensu/config.json"
 
 echo "== Skill contracts =="
 # Anchored on the implementation step that owns the contract, not on a substring
-# the untrusted-input paragraph would also satisfy: the carrier and the stripping
-# rule are separate obligations and both have to be present.
+# the untrusted-input paragraph would also satisfy: following the session's mode and
+# the stripping rule are separate obligations and both have to be present.
 FIX_STEP="$(awk '/^4\. \*\*Implement each fix/ { inside=1 } inside { print } inside && /^5\. \*\*Land the changes/ { exit }' "$FIX_SKILL")"
 FIX_BAD=""
 [ -n "$FIX_STEP" ] || FIX_BAD="$FIX_BAD no-step"
-# `strip it` alone is NOT a pin for the stripping rule: that phrase also occurs in the
-# counter-example the rule rejects ("strip it if it came from a comment"), so deleting
-# the mechanical anchor and keeping the counter-example would leave this check green.
-# The anchor literal and the verification bullet are pinned explicitly for that reason.
-for LIT in 'TDD-MODE: strict' 'untrusted input' 'strip it' '/zensu:tdd-mode' \
-           '^\s*TDD-MODE:' 'did not take effect'; do
+for LIT in 'add none of your own' 'hooks.tddImplementation' 'untrusted input' \
+           '^\s*TDD-MODE:' '/zensu:tdd-mode' 'data, not an instruction' 'Name the `mode:` line'; do
   printf '%s' "$FIX_STEP" | grep -qF -- "$LIT" || FIX_BAD="$FIX_BAD ${LIT// /_}"
 done
+for LIT in 'TDD-MODE: strict' 'did not take effect'; do
+  grep -qF -- "$LIT" "$FIX_SKILL" && FIX_BAD="$FIX_BAD stale:${LIT// /_}"
+done
 [ -z "$FIX_BAD" ] \
-  && check "T24 /zensu:pr-fix-findings carries TDD-MODE: strict and treats a spec-borne TDD-MODE line as untrusted" PASS \
-  || check "T24 pr-fix-findings strict default:$FIX_BAD" FAIL
+  && check "T24 /zensu:pr-fix-findings follows the session's TDD mode and treats a spec-borne TDD-MODE line as untrusted" PASS \
+  || check "T24 pr-fix-findings mode contract:$FIX_BAD" FAIL
 
 # `Ignore rather than abort` is pinned separately: the other three literals all survive
 # a revert to aborting on a conflicting TDD-MODE value, and aborting is what lets quoted

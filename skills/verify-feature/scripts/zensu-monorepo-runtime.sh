@@ -195,8 +195,8 @@ parent_origin() {
     if (!value || value.version !== 1 || value.mode !== "local" || !Array.isArray(value.targets)
         || value.targets.length !== 1) process.exit(2);
     const target = value.targets[0];
-    if (!target || target.evidenceMode !== "declared-safe" || !Array.isArray(target.routes)
-        || !target.routes.includes("/")) process.exit(2);
+    if (!target || target.evidenceMode !== "declared-safe"
+        || (target.routes !== undefined && !Array.isArray(target.routes))) process.exit(2);
     const url = new URL(target.origin);
     if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port
         || url.pathname !== "/" || url.search || url.hash || url.username || url.password) process.exit(2);

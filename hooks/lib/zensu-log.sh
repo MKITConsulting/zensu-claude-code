@@ -103,7 +103,7 @@ _zensu_evr_prepare() {
     echo "$label: no temporary directory available" >&2
     return 2
   }
-  trap 'rm -rf "$_evr_dir"' EXIT
+  trap 'rm -rf "$_evr_dir" ${_avr_dir:+"$_avr_dir"}' EXIT
   _evr_dir_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_evr_dir")" || {
     echo "$label: the temporary directory cannot be resolved" >&2
     return 2
@@ -164,6 +164,132 @@ _zensu_full_suite_gate() {
   return 1
 }
 
+_zensu_avr_prepare() {
+  local label="$1" session="${2:-}" light="${3:-0}" receipt state_file
+  if ! command -v node >/dev/null 2>&1; then
+    echo "$label: node is required for acceptance records" >&2
+    return 2
+  fi
+  command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  _avr_lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/acceptance-verify-v1.js")" || {
+    echo "$label: the acceptance module cannot be resolved" >&2
+    return 2
+  }
+  _avr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || {
+    echo "$label: CLAUDE_PLUGIN_DATA does not name a usable directory" >&2
+    return 2
+  }
+  _avr_receipt=""
+  _avr_escaped_el=0
+  if [ "$light" != "1" ]; then
+    receipt="$(tdd_edit_landing_receipt "$session" 2>/dev/null)" || receipt=""
+    if [ -z "$receipt" ]; then
+      echo "$label: this session's edit-landing receipt path cannot be resolved" >&2
+      return 2
+    fi
+    _avr_receipt="$(_tdd_native_path "$receipt")" || {
+      echo "$label: this session's edit-landing receipt path cannot be resolved" >&2
+      return 2
+    }
+    if [ -n "${_avr_log:-}" ]; then
+      case "$_avr_log" in
+        (/*|[A-Za-z]:*) ;;
+        (*) _avr_log="$PWD/$_avr_log" ;;
+      esac
+      _avr_log="$(_tdd_native_path "$_avr_log")" || {
+        echo "$label: --log cannot be resolved" >&2
+        return 2
+      }
+    fi
+    [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && _avr_escaped_el=1
+    state_file="$(tdd_state_file "$session" 2>/dev/null)" || state_file=""
+    if [ "$_avr_escaped_el" = "0" ] && [ -n "$state_file" ] \
+      && tdd_bypass_recorded "$state_file" ZENSU_EDIT_LANDING_GATE; then
+      _avr_escaped_el=1
+    fi
+  fi
+  _avr_dir="$(mktemp -d 2>/dev/null)" || {
+    echo "$label: no temporary directory available" >&2
+    return 2
+  }
+  trap 'rm -rf ${_evr_dir:+"$_evr_dir"} "$_avr_dir"' EXIT
+  _avr_dir_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_avr_dir")" || {
+    echo "$label: the temporary directory cannot be resolved" >&2
+    return 2
+  }
+  printf '%s' "$(zensu_evidence_acceptance_gate)" > "$_avr_dir/gate-mode"
+  _avr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _avr_bash="bash"
+  _avr_msys_excl="$(zensu_msys_env_exclusions ZENSU_AVR_LIB ZENSU_AVR_DIR ZENSU_AVR_PLUGIN_DATA \
+    ZENSU_AVR_PROJECT_ROOT ZENSU_AVR_RECEIPT ZENSU_AVR_LOG ZENSU_AVR_BASH)" || _avr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+  return 0
+}
+
+_zensu_avr_node() {
+  MSYS2_ENV_CONV_EXCL="$_avr_msys_excl" \
+  ZENSU_AVR_LIB="$_avr_lib" \
+  ZENSU_AVR_DIR="$_avr_dir_native" \
+  ZENSU_AVR_PLUGIN_DATA="$_avr_data" \
+  ZENSU_AVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_AVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_AVR_RECEIPT="$_avr_receipt" \
+  ZENSU_AVR_LOG="${_avr_log:-}" \
+  ZENSU_AVR_AC="${_avr_ac:-}" \
+  ZENSU_AVR_VERDICT="${_avr_verdict:-}" \
+  ZENSU_AVR_DRIVER="${_avr_driver:-}" \
+  ZENSU_AVR_EVIDENCE_RUN="${_avr_evidence_run:-}" \
+  ZENSU_AVR_ESCAPE="${_avr_escape:-0}" \
+  ZENSU_AVR_BOUND="${_avr_bound:-0}" \
+  ZENSU_AVR_VALIDATE="${_avr_validate:-}" \
+  ZENSU_AVR_EDIT_LANDING_ESCAPED="${_avr_escaped_el:-0}" \
+  ZENSU_AVR_BASH="${_avr_bash:-bash}" \
+  ZENSU_AVR_LABEL="$1" \
+  ZENSU_AVR_MODE="$2" \
+    node -e 'require(process.env.ZENSU_AVR_LIB).main([process.env.ZENSU_AVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_AVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+}
+
+_zensu_autopilot_validate_option() {
+  local run_json
+  command -v autopilot_read_run >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null \
+    || return 0
+  run_json="$(autopilot_read_run "${1:-}" 2>/dev/null)" || return 0
+  ZENSU_AVR_RUN_JSON="$run_json" node -e 'try { const state = JSON.parse(process.env.ZENSU_AVR_RUN_JSON); const value = state && state.options ? state.options.validate : undefined; process.stdout.write(value === true ? "on" : value === false ? "off" : ""); } catch (_) {}' 2>/dev/null || true
+}
+
+_zensu_acceptance_gate() {
+  local session="$1" rc=0
+  _avg_lines=""
+  _avr_bound="${2:-0}"
+  _avr_validate="${3:-}"
+  _avr_escape=0
+  if [ "$_avr_bound" = "1" ]; then
+    _zensu_avr_prepare "zensu-log.sh --chain-done" "$session" 1 2>/dev/null || return 0
+    _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || _avg_lines=""
+    return 0
+  fi
+  [ "${ZENSU_ACCEPTANCE_GATE:-on}" = "off" ] && _avr_escape=1
+  if ! _zensu_avr_prepare "zensu-log.sh --chain-done" "$session"; then
+    if [ "$_avr_escape" = "1" ]; then
+      tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+      return 0
+    fi
+    [ "$(zensu_evidence_acceptance_gate)" = "advisory" ] && return 0
+    return 1
+  fi
+  _avg_lines="$(_zensu_avr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
+  if [ "$(cat "$_avr_dir/verdict-state" 2>/dev/null)" = "escaped" ]; then
+    tdd_record_bypass "$session" ZENSU_ACCEPTANCE_GATE >/dev/null 2>&1 || true
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
+  echo "zensu-log.sh --chain-done: the chain stays open; resolve the ACCEPTANCE refusal above, then run --chain-done again." >&2
+  return 1
+}
+
+_evr_dir=""
+_avr_dir=""
+
 case "${1:-}" in
   --evidence-run)
     evr_cmd=""
@@ -186,8 +312,8 @@ case "${1:-}" in
       esac
     done
     case "$_evr_scope" in
-      full|lint|build|coverage|scoped) ;;
-      *) echo "zensu-log.sh --evidence-run: --scope must be one of full, lint, build, coverage, scoped" >&2; exit 2 ;;
+      full|lint|build|coverage|scoped|acceptance) ;;
+      *) echo "zensu-log.sh --evidence-run: --scope must be one of full, lint, build, coverage, scoped, acceptance" >&2; exit 2 ;;
     esac
     case "$_evr_show" in
       tail|all) ;;
@@ -215,6 +341,69 @@ case "${1:-}" in
       fi
     fi
     exit "$evr_rc"
+    ;;
+  --acceptance-record|--acceptance-status)
+    avr_verb="$1"
+    avr_start=""
+    _avr_log=""
+    _avr_ac=""
+    _avr_verdict=""
+    _avr_driver=""
+    _avr_evidence_run=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --log) _avr_log="${2:-}"; shift 2 || break ;;
+        --start) avr_start="${2:-}"; shift 2 || break ;;
+        --ac|--verdict|--driver|--evidence-run)
+          if [ "$avr_verb" != "--acceptance-record" ]; then
+            echo "zensu-log.sh $avr_verb: unknown argument: $1" >&2
+            exit 2
+          fi
+          case "$1" in
+            --ac) _avr_ac="${2:-}" ;;
+            --verdict) _avr_verdict="${2:-}" ;;
+            --driver) _avr_driver="${2:-}" ;;
+            --evidence-run) _avr_evidence_run="${2:-}" ;;
+          esac
+          shift 2 || break
+          ;;
+        *) echo "zensu-log.sh $avr_verb: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_avr_log" ]; then
+      echo "zensu-log.sh $avr_verb: --log <this chain's run log> is required" >&2
+      exit 2
+    fi
+    avr_log_arg="$_avr_log"
+    if ! avr_session="$(zensu_resolve_session_id)" || [ -z "$avr_session" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    _zensu_avr_prepare "zensu-log.sh $avr_verb" "$avr_session" || exit 2
+    if [ "$avr_verb" = "--acceptance-status" ]; then
+      _zensu_avr_node "zensu-log.sh --acceptance-status" status
+      exit $?
+    fi
+    if [ -t 0 ]; then
+      echo "zensu-log.sh --acceptance-record: pass the evidence text on stdin through a quoted heredoc" >&2
+      exit 2
+    fi
+    head -c 65536 > "$_avr_dir/evidence"
+    _zensu_avr_node "zensu-log.sh --acceptance-record" record
+    avr_rc=$?
+    if [ "$avr_rc" -eq 0 ] && [ -s "$_avr_dir/run-log-line" ]; then
+      avr_line="$(cat "$_avr_dir/run-log-line")"
+      if [ -n "$avr_start" ]; then
+        bash "$0" append --log "$avr_log_arg" --message "$avr_line" --start "$avr_start" >/dev/null \
+          || echo "zensu-log.sh --acceptance-record: the run-log line could not be appended to $avr_log_arg" >&2
+      else
+        bash "$0" append --log "$avr_log_arg" --message "$avr_line" >/dev/null \
+          || echo "zensu-log.sh --acceptance-record: the run-log line could not be appended to $avr_log_arg" >&2
+      fi
+    fi
+    exit "$avr_rc"
     ;;
   --session-key)
     session_val="$(zensu_resolve_session_id)" || {
@@ -966,8 +1155,8 @@ case "${1:-}" in
         # Mode precedence, resolved ONCE here and then frozen into this chain
         # generation's `vanilla` flag:
         #   1. the session override /zensu:tdd-mode recorded for this session
-        #   2. --tdd-mode strict, the CALLER's own default (e.g. the strict
-        #      default /zensu:pr-fix-findings asks for) — escalation only
+        #   2. --tdd-mode strict, the CALLER's own default (a single
+        #      `TDD-MODE: strict` line in the specification) — escalation only
         #   3. hooks.tddImplementation
         #   4. vanilla
         # The user's explicit session choice therefore outranks a skill's default,
@@ -1076,9 +1265,7 @@ case "${1:-}" in
             rm -f "$dest" 2>/dev/null
             return 1
           }
-          begin_key="$(basename "$begin_state_file")"
-          begin_key="${begin_key#tdd-phase-}"; begin_key="${begin_key%.json}"
-          begin_receipt="$(dirname "$begin_state_file")/edit-landing-${begin_key}.json"
+          begin_receipt="$(tdd_edit_landing_receipt "$session_val")" || begin_receipt=""
           # `-e || -L` and NOT `-f && ! -L`: the narrower guard skipped the call
           # entirely for a symlinked receipt, so the function's own three-state
           # verdict was unreachable and the disclosure could never fire for the
@@ -1143,8 +1330,11 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-complete: current-session workflow path unavailable" >&2
           exit 1
         fi
-        _tc_key="$(basename "$_tc_state")"; _tc_key="${_tc_key#tdd-phase-}"; _tc_key="${_tc_key%.json}"
-        _tc_receipt="$(dirname "$_tc_state")/edit-landing-${_tc_key}.json"
+        _tc_receipt="$(tdd_edit_landing_receipt "$session_val")" || _tc_receipt=""
+        if [ -z "$_tc_receipt" ]; then
+          echo "zensu-log.sh --tdd-complete: current-session edit-landing receipt path unavailable" >&2
+          exit 1
+        fi
         # The root comes from the accessor that OWNS it, not from path surgery over
         # `tdd_state_file`'s layout: that layout belongs to another function, and a
         # change to it would leave this silently mis-rooted with no error. This
@@ -1659,98 +1849,18 @@ case "${1:-}" in
             # would be malformed and every skill-supplied --plan refused.
             _rq_native_root="$(_tdd_native_path "$_tc_root" 2>/dev/null || printf '%s' "$_tc_root")"
             _rq_native_receipt="$(_tdd_native_path "$_tc_receipt" 2>/dev/null || printf '%s' "$_tc_receipt")"
-            _rq_rel="$(ZENSU_RQ_RECEIPT="$_rq_native_receipt" ZENSU_RQ_ROOT="$_rq_native_root" node -e '
-              try {
-                const fs = require("fs"), path = require("path");
-                // ONE artifact, TWO reads inside one invocation of this verb, about
-                // two hundred lines apart with a `bash … --inventory` child between
-                // them. This one used to be `lstatSync` followed by `readFileSync`:
-                // a SECOND path resolution, with no O_NOFOLLOW and no O_NONBLOCK.
-                // `.zensu/state/` is writable from inside the session, so replacing
-                // the receipt with a FIFO in that window made `readFileSync` block
-                // in open(2) forever — and the call site is a bare command
-                // substitution with `|| true`, which tests an exit status and can do
-                // nothing about a hang. It now opens a descriptor and judges THAT,
-                // exactly as the verdict reader above does.
-                let fd = -1, j = null;
-                try {
-                  const C = fs.constants;
-                  let flags = C.O_RDONLY;
-                  if (Number.isInteger(C.O_NOFOLLOW)) flags |= C.O_NOFOLLOW;
-                  if (Number.isInteger(C.O_NONBLOCK)) flags |= C.O_NONBLOCK;
-                  fd = fs.openSync(process.env.ZENSU_RQ_RECEIPT, flags);
-                  const st = fs.fstatSync(fd);
-                  if (!st.isFile() || st.size > 4 * 1024 * 1024) process.exit(0);
-                  const buf = Buffer.allocUnsafe(st.size);
-                  let off = 0;
-                  while (off < st.size) {
-                    const n = fs.readSync(fd, buf, off, st.size - off, off);
-                    if (n <= 0) break;
-                    off += n;
-                  }
-                  if (off !== st.size) process.exit(0);
-                  j = JSON.parse(buf.toString("utf8"));
-                } finally { if (fd >= 0) { try { fs.closeSync(fd); } catch (e2) {} } }
-                // TWO schema versions are accepted, and the discriminator is what
-                // tells them apart rather than the value shape. `edit-landing-v1`
-                // persisted `log` as the caller spelled `--log`; `edit-landing-v2`
-                // persists it project-relative. Holding one schema name over two
-                // value domains would leave this reader guessing from a leading
-                // slash — and a plugin upgrade landing between the step 5b audit and
-                // `--tdd-complete` is explicitly SERVED by the runtime-lineage rule,
-                // so a v1 receipt read by this code is a supported state, not a
-                // corruption. Both are resolved the same way below and judged by
-                // CONTAINMENT, never by spelling.
-                const rqSchemaVersion = !j ? 0
-                  : j.schema === "edit-landing-v2" ? 2
-                  : j.schema === "edit-landing-v1" ? 1 : 0;
-                if (!rqSchemaVersion || typeof j.log !== "string" || j.log === "") process.exit(0);
-                // The receipt is a gate input the session can write, so it gets the
-                // same treatment the plan reader gets: no symlink, regular file
-                // only, and a bounded read.
-                // Both sides are canonicalized before they are compared. On macOS
-                // a temp root is spelled /var/... by the caller and /private/var/...
-                // by realpath, and an uncanonicalized comparison rejects the very
-                // path it was handed — a containment check that fails open into
-                // "no derived plan" instead of doing its job.
-                const canon = (p) => { try { return fs.realpathSync(p); } catch (e) { return path.resolve(p); } };
-                const root = canon(path.resolve(process.env.ZENSU_RQ_ROOT));
-                const logsDirRaw = path.join(root, ".zensu", "logs");
-                // Canonicalizing a SYMLINKED logs directory would compare the link
-                // target against itself and admit anything the link points at, so
-                // the directory itself is refused rather than resolved through.
-                try { if (fs.lstatSync(logsDirRaw).isSymbolicLink()) process.exit(0); } catch (e) {}
-                const logsDir = canon(logsDirRaw);
-                const relLogs = path.relative(root, logsDir);
-                // Same anchored test the plan check uses seven lines down, including
-                // the isAbsolute arm: on win32 path.relative returns an ABSOLUTE
-                // path when the two sides are on different drives, so the `..`
-                // prefix test alone would pass a logs dir on another drive.
-                if (relLogs === ".." || relLogs.startsWith(".." + path.sep) || path.isAbsolute(relLogs)) process.exit(0);
-                // A project-relative `log` (what a v2 writer persists) needs no
-                // namespace translation at all. An ABSOLUTE value is a v1 receipt or
-                // an out-of-project log, and it is judged by where it RESOLVES, not
-                // by how it is spelled. The previous rule rejected any leading-slash
-                // value on win32 outright; that turned a perfectly readable legacy
-                // receipt into no-derivation, which — because the shipped skill
-                // always passes --plan — became a hard `exit 1` rather than a
-                // warning. A foreign-namespace value still fails, but it fails at the
-                // containment test below, which is the check that can actually tell:
-                // win32 path.resolve splices a POSIX `/d/a/...` under the current
-                // drive, and the spliced result is not inside logsDir.
-                const raw = path.resolve(root, j.log);
-                const resolved = path.join(canon(path.dirname(raw)), path.basename(raw));
-                const rel = path.relative(logsDir, resolved);
-                // Anchored, not a bare `startsWith("..")`: a real file named
-                // `..bak.log` inside the directory is INSIDE it, and the unanchored
-                // form rejects it. CLAUDE.md names this exact defect elsewhere.
-                if (rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) process.exit(0);
-                if (!resolved.endsWith(".log")) process.exit(0);
-                // Project-RELATIVE, so the shell never applies basename/dirname to a
-                // foreign-namespace absolute path.
-                process.stdout.write(path.relative(root, resolved).split(path.sep).join("/"));
-              } catch (e) {}
-            ' 2>/dev/null || true)"
+            _rq_lib="$(_tdd_native_path "${CLAUDE_PLUGIN_ROOT}/hooks/lib/edit-landing-receipt-v1.js" 2>/dev/null || printf '%s' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/edit-landing-receipt-v1.js")"
+            _rq_rc=0
+            _rq_rel="$(ZENSU_ELR_LIB="$_rq_lib" ZENSU_ELR_RECEIPT="$_rq_native_receipt" ZENSU_ELR_PROJECT_ROOT="$_rq_native_root" node -e 'process.exitCode = require(process.env.ZENSU_ELR_LIB).main(["receipt-log"])' 2>/dev/null)" || _rq_rc=$?
+            case "$_rq_rc" in
+              (0|3) ;;
+              (*)
+                echo "zensu-log.sh --tdd-complete: the edit-landing receipt reader could not run (exit ${_rq_rc}): ${_rq_lib}. The plan was NOT judged." >&2
+                echo "Reinstall the plugin and run /zensu:doctor; the executing installation is not intact." >&2
+                exit 1
+                ;;
+            esac
+            [ "$_rq_rc" -eq 0 ] || _rq_rel=""
             if [ -n "$_rq_rel" ]; then
               # `_rq_rel` is project-relative with `/` separators by construction,
               # so basename/dirname are safe here on every host.
@@ -2094,8 +2204,12 @@ case "${1:-}" in
           if [ "$(tdd_chain_done "$(tdd_state_file "$session_val")")" != "true" ]; then
             if [ "$claimed_ticket_seen" = "true" ]; then
               _fsg_lines=""
+              _avg_lines=""
               if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
-                _zensu_full_suite_gate "$session_val" || exit 1
+                chain_gate_rc=0
+                _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
+                _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
+                [ "$chain_gate_rc" -eq 0 ] || exit 1
               fi
               tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || {
                 chain_done_rc=$?
@@ -2103,6 +2217,7 @@ case "${1:-}" in
                 exit "$chain_done_rc"
               }
               [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
+              [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
             else
               chain_change_count="unknown"
               if command -v git >/dev/null 2>&1 \
@@ -2150,11 +2265,13 @@ case "${1:-}" in
         }
         IFS=$'\t' read -r done_run done_attempt done_chain done_outcome <<<"$done_fields"
         _fsg_lines=""
+        _avg_lines=""
         case "$done_outcome" in
           pass)
             if [ "$claimed_ticket_seen" != "true" ] \
               || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
               _zensu_full_suite_gate "$session_val" || exit 1
+              _zensu_acceptance_gate "$session_val" 1 "$(_zensu_autopilot_validate_option "$done_run")" || exit 1
             fi
             ;;
           max-rounds)
@@ -2172,6 +2289,7 @@ case "${1:-}" in
         chain_done_rc=$?
         if [ "$chain_done_rc" -eq 0 ]; then
           [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
+          [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
           zensu_render_terminus_bypasses "$session_val"
         fi
         exit "$chain_done_rc"

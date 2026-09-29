@@ -66,7 +66,7 @@ for ((attempt=0; attempt<200; attempt++)); do
 done
 [ -s "$PORT_FILE" ] || { echo "verify-feature eval: failed to reserve fixture port" >&2; exit 1; }
 export ZENSU_VERIFY_FIXTURE_PORT="$(sed -n '1p' "$PORT_FILE")"
-export ZENSU_VERIFY_NAVIGATION_POLICY_V1="$(printf '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:%s","evidenceMode":"declared-safe","routes":["/"]}]}' "$ZENSU_VERIFY_FIXTURE_PORT")"
+export ZENSU_VERIFY_NAVIGATION_POLICY_V1="$(printf '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:%s","evidenceMode":"declared-safe"}]}' "$ZENSU_VERIFY_FIXTURE_PORT")"
 
 cd "$EVAL_DIR"
 node "$OWNED_PROCESS" promptfoo eval \

@@ -21,7 +21,8 @@ const SESSION = 'zensu-verify-run1';
 const AT = '2026-09-22T12:00:00.000Z';
 const MAIN = Object.freeze({});
 const SUBAGENT = Object.freeze({ agent_id: 'agent-1', agent_type: 'general-purpose' });
-const LOCAL_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' });
+const LOCAL_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' });
+const LEGACY_LOCAL_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' });
 const DENIED = 'Zensu browser consent gate denied the playwright-cli call: ';
 
 function tempDir(t, prefix = 'zensu-consent-') {
@@ -50,7 +51,6 @@ function decide(command, options = {}) {
     payload: options.payload || MAIN,
     env: options.env || {},
     records: options.records || [],
-    declaredRoutes: options.declaredRoutes || [],
     policy: options.policy || null,
     platform: options.platform,
   });
@@ -893,15 +893,15 @@ test('open refuses an ambient PLAYWRIGHT_MCP_ override and a global config that 
   assert.equal(denied(openCommand(file, 'http://127.0.0.1:4200/'), { env }), REASONS.GLOBAL_BROWSER_NOT_CHROMIUM);
 });
 
-test('a first loopback navigation asks with a prompt naming the session, the origin and the declared routes', () => {
-  const decision = decide(cli('goto http://127.0.0.1:4200/login'), { declaredRoutes: ['/', '/login'] });
+test('a first loopback navigation asks with a prompt naming the session and the origin, never a route', () => {
+  const decision = decide(cli('goto http://127.0.0.1:4200/teams/t-81/sprints/s-7'));
   assert.equal(decision.verdict, 'ask');
   assert.equal(decision.reason, REASONS.NEW_ORIGIN);
   assert.deepEqual(decision.origins, ['http://127.0.0.1:4200']);
-  assert.deepEqual(decision.plan, [{ origin: 'http://127.0.0.1:4200', route: '/login', decidedBy: 'asked' }]);
-  assert.equal(decision.prompt, consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION, declaredRoutes: ['/', '/login'] }));
+  assert.deepEqual(decision.plan, [{ origin: 'http://127.0.0.1:4200', route: '/teams/t-81/sprints/s-7', decidedBy: 'asked' }]);
+  assert.equal(decision.prompt, consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION }));
   assert.match(decision.prompt, /zensu-verify-run1 is about to reach http:\/\/127\.0\.0\.1:4200 \(local loopback\)/);
-  assert.match(decision.prompt, /synthetic-safe: \/, \/login\./);
+  assert.doesNotMatch(decision.prompt, /\/teams|synthetic-safe/);
 });
 
 test('a remembered origin passes without a prompt on any route while another origin still asks', () => {
@@ -970,14 +970,22 @@ test('a subagent is refused on a zensu-verify session and ignored on any other c
   assert.deepEqual(decide('playwright-cli -s=mine snapshot', { payload: SUBAGENT }), { verdict: 'none' });
 });
 
-test('policy mode admits a declared route of a policy target without a prompt and refuses the rest', () => {
+test('policy mode admits every route of a policy target without a prompt and refuses every other origin', () => {
+  for (const target of [LOCAL_TARGET, LEGACY_LOCAL_TARGET]) {
+    const policy = policyOf('local', [target]);
+    for (const route of ['/', '/login', '/admin', '/teams/t-81/sprints/s-7']) {
+      assert.deepEqual(decide(cli(`goto http://127.0.0.1:4300${route}`), { policy }),
+        { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route, decidedBy: 'policy-mode' }] }, `${JSON.stringify(target)} ${route}`);
+    }
+    assert.equal(denied(cli('goto http://127.0.0.1:4301/'), { policy }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
+  }
   const policy = policyOf('local', [LOCAL_TARGET]);
-  assert.deepEqual(decide(cli('goto http://127.0.0.1:4300/login'), { policy }),
-    { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/login', decidedBy: 'policy-mode' }] });
-  assert.equal(denied(cli('goto http://127.0.0.1:4301/'), { policy }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
-  assert.equal(denied(cli('goto http://127.0.0.1:4300/admin'), { policy }), `http://127.0.0.1:4300/admin: ${REASONS.NOT_POLICY_ROUTE}`);
   assert.equal(denied(cli('goto http://localhost:4300/'), { policy }), `http://localhost:4300: ${REASONS.NOT_POLICY_TARGET}`);
   assert.equal(denied(cli('goto http://app.localhost:4300/'), { policy }), FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+  assert.equal(denied(cli(`goto 'http://127.0.0.1:4300/login?next=/admin'`), { policy }), FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  const named = policyOf('local', [{ origin: 'http://localhost:4300', evidenceMode: 'declared-safe' }]);
+  assert.deepEqual(decide(cli('goto http://localhost:4300/teams/t-81/sprints/s-7'), { policy: named }),
+    { verdict: 'none', plan: [{ origin: 'http://localhost:4300', route: '/teams/t-81/sprints/s-7', decidedBy: 'policy-mode' }] });
   assert.deepEqual(decide(cli('snapshot'), { policy }), { verdict: 'none', plan: [] });
   const invalid = consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' });
   assert.equal(denied(cli('goto http://127.0.0.1:4300/'), { policy: invalid }), `${REASONS.POLICY_INVALID}: policy contains unknown or missing keys`);
@@ -991,7 +999,7 @@ test('policy mode judges the run config against the policy and needs a resolver 
     { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/', decidedBy: 'policy-mode' }] });
   const outside = runConfig(t, ['http://127.0.0.1:4301']);
   assert.equal(denied(openCommand(outside.file), { env, policy: local }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
-  const remote = policyOf('remote', [{ origin: 'https://app.example.com', routes: ['/'], evidenceMode: 'declared-safe' }]);
+  const remote = policyOf('remote', [{ origin: 'https://app.example.com', evidenceMode: 'declared-safe' }]);
   const unpinned = runConfig(t, ['https://app.example.com']);
   assert.equal(denied(openCommand(unpinned.file), { env, policy: remote }),
     'https://app.example.com: the run config carries no resolver pin for this remote host');
@@ -1310,7 +1318,7 @@ test('runPre emits the ask and deny envelopes in the PreToolUse shape', () => {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'ask',
-      permissionDecisionReason: consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION, declaredRoutes: [] }),
+      permissionDecisionReason: consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION }),
     },
   });
   const refused = sink();
@@ -1325,13 +1333,14 @@ test('runPre emits the ask and deny envelopes in the PreToolUse shape', () => {
   assert.equal(err.text(), '');
 });
 
-test('runPre reads the session memory and the recipe routes its environment names', (t) => {
+test('runPre reads the session memory its environment names and no route from a recipe', (t) => {
   const { root, memory } = project(t);
   fs.writeFileSync(path.join(root, '.zensu', 'runtime.yaml'), ['version: 1', 'validate:', '  evidenceSafety:', '    routes: ["/", "/login"]', ''].join('\n'));
   const env = { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
   const asked = sink();
   assert.equal(consent.runPre(bash(cli('goto http://127.0.0.1:4200/login')), env, asked, sink()), true);
-  assert.match(JSON.parse(asked.text()).hookSpecificOutput.permissionDecisionReason, /synthetic-safe: \/, \/login\./);
+  assert.equal(JSON.parse(asked.text()).hookSpecificOutput.permissionDecisionReason,
+    consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION }));
   assert.equal(consent.appendRecord(memory, record('http://127.0.0.1:4200', '/login'), { projectRoot: root }).ok, true);
   const quiet = sink();
   assert.equal(consent.runPre(bash(cli('goto http://127.0.0.1:4200/other')), env, quiet, sink()), false);
@@ -1351,13 +1360,15 @@ test('runPre discloses an unreadable memory on stderr and asks again', (t) => {
 
 test('runPre answers policy mode from the launch environment without a prompt', () => {
   const env = { ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode: 'local', targets: [LOCAL_TARGET] }) };
-  const quiet = sink();
-  assert.equal(consent.runPre(bash(cli('goto http://127.0.0.1:4300/login')), env, quiet, sink()), false);
-  assert.equal(quiet.text(), '');
+  for (const route of ['/login', '/teams/t-81/sprints/s-7']) {
+    const quiet = sink();
+    assert.equal(consent.runPre(bash(cli(`goto http://127.0.0.1:4300${route}`)), env, quiet, sink()), false, route);
+    assert.equal(quiet.text(), '', route);
+  }
   const refused = sink();
-  assert.equal(consent.runPre(bash(cli('goto http://127.0.0.1:4300/admin')), env, refused, sink()), true);
+  assert.equal(consent.runPre(bash(cli('goto http://127.0.0.1:4301/admin')), env, refused, sink()), true);
   assert.equal(JSON.parse(refused.text()).hookSpecificOutput.permissionDecisionReason,
-    `${DENIED}http://127.0.0.1:4300/admin: ${REASONS.NOT_POLICY_ROUTE}`);
+    `${DENIED}http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
 });
 
 test('runPre denies a subagent on a zensu-verify session', () => {
@@ -1560,32 +1571,31 @@ test('one registration reader serves the consent probes and the grant row, each 
   assert.match(report, /require\('\.\/hook-registration-v1\.js'\)/);
 });
 
-test('promptText states the session, the origin, the per-origin grant and the declared routes', () => {
-  const single = consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION, declaredRoutes: ['/', '/login', '/a/../b'] });
+test('promptText states the session, the origin and the per-origin grant', () => {
+  const single = consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION });
   assert.equal(single, [
     `The playwright-cli browser session ${SESSION} is about to reach http://127.0.0.1:4200 (local loopback).`,
     'Answering Yes approves this origin for the rest of this Claude Code session: the model may then open, read and interact with (click, type, submit forms on) any page on it, screenshots included, without asking again. Consent is per origin, never per route.',
-    'The run declares these routes as synthetic-safe: /, /login.',
     'Answer No to keep the browser away from it; the run then reports PARTIAL.',
   ].join(' '));
-  const plural = consent.promptText({ origins: ['http://127.0.0.1:4200', 'http://[::1]:4201'], session: SESSION, declaredRoutes: [] });
+  const plural = consent.promptText({ origins: ['http://127.0.0.1:4200', 'http://[::1]:4201'], session: SESSION });
   assert.match(plural, /reach http:\/\/127\.0\.0\.1:4200, http:\/\/\[::1\]:4201 \(local loopback\)/);
   assert.match(plural, /approves these origins/);
   assert.match(plural, /any page on them/);
   assert.match(plural, /keep the browser away from them/);
-  assert.doesNotMatch(plural, /synthetic-safe/);
 });
 
-test('the prompt route list is bounded in characters, count and width', () => {
-  assert.equal(consent.promptRoute(`/a${String.fromCharCode(1)}b${String.fromCharCode(0x7f)}`), '/ab');
-  assert.equal(consent.promptRoute(`/${'x'.repeat(200)}`), `/${'x'.repeat(consent.MAX_PROMPT_ROUTE - 1)}…`);
-  assert.equal(consent.promptRoute(42), '');
-  const many = Array.from({ length: consent.MAX_PROMPT_ROUTES + 3 }, (_unused, index) => `/r${index}`);
-  assert.equal(consent.promptRoutes(many), `${many.slice(0, consent.MAX_PROMPT_ROUTES).join(', ')} (and 3 more)`);
-  const wide = Array.from({ length: 5 }, (_unused, index) => `/${String(index).repeat(100)}`);
-  const rendered = consent.promptRoutes(wide);
-  assert.equal(rendered.startsWith(`${wide[0]}, ${wide[1]}, ${wide[2]}`), true);
-  assert.match(rendered, / \(and 2 more\)$/);
+test('the gate keeps no route contract of its own: no route reason, no route list and no recipe route reader', () => {
+  assert.equal(Object.values(REASONS).some((reason) => /\broute\b/.test(reason)), false);
+  for (const retired of ['NOT_POLICY_ROUTE', 'declaredRoutesFromRecipe', 'readRecipeRoutes', 'normalizeRoutes', 'promptRoute',
+    'promptRoutes', 'MAX_PROMPT_ROUTE', 'MAX_PROMPT_ROUTES', 'MAX_PROMPT_ROUTES_TEXT', 'MAX_RECIPE_BYTES']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(consent, retired), false, retired);
+    assert.equal(Object.prototype.hasOwnProperty.call(REASONS, retired), false, retired);
+  }
+  assert.equal(Object.prototype.hasOwnProperty.call(consent.readInputs({}), 'declaredRoutes'), false);
+  const policy = policyOf('local', [LEGACY_LOCAL_TARGET]);
+  assert.equal(policy.ok, true);
+  assert.deepEqual(Object.keys(policy.targets.get('http://127.0.0.1:4300')).sort(), ['hostname', 'origin']);
 });
 
 test('every refusal belongs to exactly one class, and only a shape denial carries the re-issue note', () => {
@@ -1635,19 +1645,16 @@ test('readPolicy is absent without the variable and names the fault of an invali
     { ok: false, fault: 'policy contains unknown or missing keys' });
 });
 
-test('the recipe routes come from runtime.yaml before autopilot.yaml, in flow or block form', (t) => {
+test('the recipe file resolves to runtime.yaml before autopilot.yaml and never through a symlink', (t) => {
   const root = tempDir(t);
   const zensu = path.join(root, '.zensu');
   fs.mkdirSync(zensu);
   assert.equal(consent.resolveRecipeFile(root), '');
   assert.equal(consent.resolveRecipeFile(''), '');
-  fs.writeFileSync(path.join(zensu, 'autopilot.yaml'), ['validate:', '  evidenceSafety:', '    routes:', '      - /', '      - "/inventory"', ''].join('\n'));
+  fs.writeFileSync(path.join(zensu, 'autopilot.yaml'), ['validate:', '  driver: browser', ''].join('\n'));
   assert.equal(consent.resolveRecipeFile(root), path.join(zensu, 'autopilot.yaml'));
-  assert.deepEqual(consent.readRecipeRoutes(consent.resolveRecipeFile(root)), ['/', '/inventory']);
-  fs.writeFileSync(path.join(zensu, 'runtime.yaml'), ['validate:', '  evidenceSafety:', "    routes: ['/settings', '/a/../b']", ''].join('\n'));
+  fs.writeFileSync(path.join(zensu, 'runtime.yaml'), ['validate:', '  driver: browser', ''].join('\n'));
   assert.equal(consent.resolveRecipeFile(root), path.join(zensu, 'runtime.yaml'));
-  assert.deepEqual(consent.readRecipeRoutes(consent.resolveRecipeFile(root)), ['/settings']);
-  assert.deepEqual(consent.declaredRoutesFromRecipe('validate:\n  driver: browser\n'), []);
   if (process.platform !== 'win32') {
     fs.rmSync(path.join(zensu, 'runtime.yaml'));
     fs.symlinkSync(path.join(zensu, 'autopilot.yaml'), path.join(zensu, 'runtime.yaml'));

@@ -125,10 +125,9 @@ test('the navigation target refuses a non-string target instead of coercing it',
   assert.equal(classifyOrigin('http://127.0.0.1:9999/').mode, 'local');
 });
 
-// normalizeRoute's production consumers include normalizeRoutes() in hooks/lib/verify-consent-v1.js,
-// which builds the route list the human reads in the consent prompt, parsePolicyTargets() in the
-// floor module, which validates the navigation policy's declared routes, and checkPolicy() in
-// scripts/verify-browser-config.js, which validates the route a --check-policy call names.
+// normalizeRoute's one production consumer is legacyRoutesFault() in the floor module, which
+// validates the route list a navigation policy written before the route gate was retired may
+// still carry; the list is validated and then dropped, never enforced.
 // Its own truth table was graded by nothing. The load-bearing conjunct is the final
 // `normalized === route`: without it a declared `/a/../b` renders as written while naming a
 // different path, and `//evil.example.com/x` -- which a URL parser reads as a host -- renders
@@ -174,35 +173,35 @@ test('the contract check names which guard refused and keeps the three causes di
   assert.equal(policyContractFault(JSON.stringify({ version: 1, mode: 'local', targets: [target] })), '');
 });
 
-const POLICY_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' });
+const POLICY_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' });
+const LEGACY_POLICY_TARGET = Object.freeze({ ...POLICY_TARGET, routes: ['/'] });
 
 function policyOf(mode, targets) {
   return JSON.stringify({ version: 1, mode, targets });
 }
 
-test('parsePolicyTargets maps each target to its canonical origin, hostname and route set', () => {
+test('parsePolicyTargets maps each target to its canonical origin and hostname, and drops a legacy route list', () => {
+  assert.deepEqual(floor.POLICY_TARGET_KEYS, ['evidenceMode', 'origin']);
+  assert.deepEqual(floor.LEGACY_POLICY_TARGET_KEYS, ['evidenceMode', 'origin', 'routes']);
   const local = parsePolicyTargets(policyOf('local', [
-    { origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' },
+    { origin: 'http://127.0.0.1:4300', evidenceMode: 'declared-safe' },
     { origin: 'http://[::1]:4301', routes: ['/a'], evidenceMode: 'declared-safe' },
   ]));
   assert.equal(local.ok, true);
   assert.equal(local.mode, 'local');
   assert.deepEqual([...local.targets.keys()], ['http://127.0.0.1:4300', 'http://[::1]:4301']);
-  const first = local.targets.get('http://127.0.0.1:4300');
-  assert.equal(first.origin, 'http://127.0.0.1:4300');
-  assert.equal(first.hostname, '127.0.0.1');
-  assert.deepEqual([...first.routes], ['/', '/login']);
-  assert.equal(local.targets.get('http://[::1]:4301').hostname, '::1');
+  assert.deepEqual(local.targets.get('http://127.0.0.1:4300'), { origin: 'http://127.0.0.1:4300', hostname: '127.0.0.1' });
+  assert.deepEqual(local.targets.get('http://[::1]:4301'), { origin: 'http://[::1]:4301', hostname: '::1' });
 
   const remote = parsePolicyTargets(policyOf('remote', [
-    { origin: 'https://App.Example.com', routes: ['/'], evidenceMode: 'declared-safe' },
+    { origin: 'https://App.Example.com', evidenceMode: 'declared-safe' },
     { origin: 'https://93.184.216.34:8443', routes: ['/x'], evidenceMode: 'declared-safe' },
   ]));
   assert.equal(remote.ok, true);
   assert.equal(remote.mode, 'remote');
   assert.deepEqual([...remote.targets.keys()], ['https://app.example.com', 'https://93.184.216.34:8443']);
   assert.equal(remote.targets.get('https://app.example.com').hostname, 'app.example.com');
-  assert.deepEqual([...remote.targets.get('https://93.184.216.34:8443').routes], ['/x']);
+  assert.equal(Object.prototype.hasOwnProperty.call(remote.targets.get('https://93.184.216.34:8443'), 'routes'), false);
 });
 
 test('parsePolicyTargets refuses a top-level contract fault with the shared check\'s own reason', () => {
@@ -225,25 +224,31 @@ test('parsePolicyTargets refuses a top-level contract fault with the shared chec
   assert.equal(eight.targets.size, 8);
 });
 
-test('parsePolicyTargets refuses a target outside the declared-safe contract and bounds its routes at MAX_POLICY_ROUTES', () => {
+test('parsePolicyTargets refuses a target outside the declared-safe contract and still bounds a legacy route list at MAX_POLICY_ROUTES', () => {
   assert.equal(MAX_POLICY_ROUTES, 64);
   const contract = { ok: false, fault: 'policy target contract is invalid; v1 supports declared-safe evidence only' };
   const refused = [
     { ...POLICY_TARGET, evidenceMode: 'other' },
-    { origin: POLICY_TARGET.origin, routes: POLICY_TARGET.routes },
+    { ...LEGACY_POLICY_TARGET, evidenceMode: 'other' },
+    { origin: POLICY_TARGET.origin },
+    { origin: POLICY_TARGET.origin, routes: LEGACY_POLICY_TARGET.routes },
     { ...POLICY_TARGET, extra: true },
+    { ...LEGACY_POLICY_TARGET, extra: true },
     { ...POLICY_TARGET, routes: [] },
     { ...POLICY_TARGET, routes: '/' },
+    { ...POLICY_TARGET, routes: null },
     null,
     'http://127.0.0.1:4300',
   ];
   for (const target of refused) {
     assert.deepEqual(parsePolicyTargets(policyOf('local', [target])), contract, JSON.stringify(target));
   }
+  assert.equal(parsePolicyTargets(policyOf('local', [POLICY_TARGET])).ok, true);
+  assert.equal(parsePolicyTargets(policyOf('local', [LEGACY_POLICY_TARGET])).ok, true);
   const routes = (count) => Array.from({ length: count }, (_unused, index) => `/r${index}`);
   const atBound = parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES) }]));
   assert.equal(atBound.ok, true);
-  assert.equal(atBound.targets.get(POLICY_TARGET.origin).routes.size, MAX_POLICY_ROUTES);
+  assert.deepEqual(atBound.targets.get(POLICY_TARGET.origin), { origin: POLICY_TARGET.origin, hostname: '127.0.0.1' });
   assert.deepEqual(parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES + 1) }])), contract);
 });
 

@@ -115,14 +115,19 @@ table in the chain-end summary, and the converge offer it renders), and `skills/
 three times (Phase 6 step 6c's "If the plan has no `## Requirements` table (legacy plan), skip
 silently"; the step-10 converge offer, which this thread renders when `hooks.selfReview` is
 disabled; and the vanilla-mode statement that the table and the `Covers` mapping stay binding).
-A change to what counts as a usable table has to reach all seven. Two further containment
-predicates were added by this gate — the JS one inside the `node -e` reader and the shell one in
-the explicit channel — which extend the hand-copied `within()` / `isInside()` family this file
-already tracks; neither is reachable from a unit layer, because the JS half lives in a `node -e`
-string argument rather than a required module. That placement is a KNOWN COST, not an oversight:
-it is why the Windows namespace defect in the derivation had to be found by review rather than by
-a `path.win32` unit test, and extracting the resolver into a module is the standing fix.
-**The two copies do not enforce the same bound**, which the cost note alone would not tell you:
+A change to what counts as a usable table has to reach all seven. An EIGHTH reader is
+mechanical and shares this library's own parser: `--list` prints every recognized row with its
+state (`active`, `deprecated`, `placeholder`), and `hooks/lib/acceptance-verify-v1.js` takes its
+criteria from it (`.claude/rules/acceptance-verification-gate.md`). Two further containment
+predicates were added by this gate — the JS one in the derived-channel reader and the shell one
+in the explicit channel — which extend the hand-copied `within()` / `isInside()` family this file
+already tracks. The standing fix for the JS half is TAKEN: the reader is `receiptRunLog` /
+`resolveRunLog` in the built-ins-only `edit-landing-receipt-v1.js`, which `--tdd-complete` runs
+through `main(['receipt-log'])` and `acceptance-verify-v1.js` requires, unit-tested in
+`acceptance-verify-v1.test.js`, so the derivation and the acceptance gate resolve the plan
+through one reader. An exit other than 0 (a log) or 3 (none) refuses `--tdd-complete`, because
+a reader that cannot run is not a verdict about the plan.
+**The two copies do not enforce the same bound**:
 the JS half accepts anything that does not ESCAPE `.zensu/logs/` — including a subdirectory —
 while the shell half requires exact directory equality for `.zensu/plans/`. Low impact (a looser
 logs bound only changes the derived stem) but it is a divergence, not one rule in two places.

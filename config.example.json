@@ -43,6 +43,7 @@
   },
   "evidence": {
     "fullSuiteCommand": "",
-    "fullSuiteGate": "required"
+    "fullSuiteGate": "required",
+    "acceptanceGate": "required"
   }
 }

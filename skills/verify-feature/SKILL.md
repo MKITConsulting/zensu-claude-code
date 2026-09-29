@@ -8,7 +8,9 @@ description: >
   browser consent gate, and reports DOM/data, visual, console, and network evidence. Remote mode clearly
   distinguishes deployed code from unpushed worktree changes and keeps authentication
   credential-blind through visible manual login only.
-  Does not fix code or write committed tests. Use when the user asks to verify/test a
+  Does not fix code or write committed tests. In --chain mode it verifies every acceptance
+  criterion of a running /zensu:tdd chain on this worktree and records one verdict per
+  criterion for the chain's terminus gate. Use when the user asks to verify/test a
   worktree, test a feature live, run an end-to-end smoke check, validate a preview, or
   invokes /zensu:verify-feature.
 ---
@@ -41,7 +43,8 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
 | `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
-| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and routes, for unattended runs and for hosts that keep the policy in their launch environment. |
+| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin, for unattended runs and for hosts that keep the policy in their launch environment. |
+| `--chain --log <run log>` | no | off | Verify every active `AC-###` criterion of the running `/zensu:tdd` chain and record one verdict per criterion for its terminus gate. Local only. See §Chain mode. |
 
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
@@ -72,6 +75,68 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
   confirmation even when they are part of a scenario.
 - **Owned teardown only.** Stop only processes, containers, and temporary files created by
   this run. Never use broad `pkill`, shared container names, or cleanup outside the run dir.
+
+## Chain mode (`--chain`)
+
+`/zensu:tdd` Phase 6 step 6d and `/zensu:self-review` invoke this skill with
+`--chain --log <run log>`, so that every acceptance criterion of the running chain is
+verified live before the chain can close. Everything above still binds. Chain mode changes
+only these points:
+
+1. **Scope is the plan, complete and bounded.** Run
+   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --acceptance-status --log <run log>`.
+   It lists every active `AC-###` criterion of the chain's plan with its state on the current
+   tree, and its summary line names the remedy for what does not pass. Verify every criterion
+   that is `missing`, `stale` or `partial`, and every criterion after an `invalid` summary. Skip
+   one that already passes on this tree, and never re-drive one that fails on this tree: it needs
+   a code change first. `FR-###` rows and deprecated criteria are out of scope. The list is the
+   complete feature boundary: build one or more P0 rows per criterion and no other rows.
+2. **Local only.** Refuse `--mode=remote`, because a deployed URL runs other code than this
+   tree and every record binds to this tree. `--attach` is allowed, but when Phase 2 cannot
+   prove that the attached process serves this worktree, each verdict it yields is at most
+   `partial`.
+3. **Use the cheapest driver that can observe the criterion,** named as in
+   `skills/autopilot/rules/drivers.md`: `browser` through this skill's `playwright-cli` flow;
+   `mobile` in the iOS Simulator or the Android emulator, through a host simulator tool or a
+   Maestro flow; `desktop-native` through the host's desktop automation; and `api`, `cli`,
+   `async`, `iac`, `custom`, `library` or `artifact` as one shell check that exits 0 exactly
+   when the criterion holds. The credential-blind rules above bind every driver: never the
+   autopilot `storageState` login, and never a secret in a command or in the evidence. An
+   exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its
+   own output (`curl -fsS -o /dev/null http://127.0.0.1:<port>/…`, `<command> >/dev/null 2>&1`),
+   because the evidence runner prints the tail of that output to you. A criterion that needs a
+   token file, ambient credentials or a non-loopback host is `partial`.
+4. **The plugin observes every exit-code check.** Run the check through
+   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope acceptance --cmd '<check>' --log <run log>`
+   and cite the `record=er1_…` id of its summary line. The check must leave the working tree
+   unchanged, tracked and untracked non-ignored files alike, so it writes any output outside the
+   project or to a gitignored path: a run that changed the tree cannot back a verdict. A Maestro
+   flow runs the same way.
+5. **Record each criterion right after you observe it,** never batched at the end:
+
+   ```bash
+   CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --acceptance-record --ac AC-001 --verdict pass --driver browser --log <run log> <<'EVIDENCE'
+   What was exercised and what was observed, in one or two sentences.
+   EVIDENCE
+   ```
+
+   Add `--evidence-run <er1 id>` for an observed check; its exit code must agree with the
+   verdict. The evidence names the observation in English, whatever language this conversation
+   is in, because it lands in the run log. It never carries a credential, a raw console line,
+   personal data, or a page value the Phase 5 rules would redact. It never names the browser
+   CLI or the `zensu-verify-…` session, because the browser consent gate refuses such a call;
+   name the route or page and what it showed. `pass` needs the proof the Phase 5 PASS rule
+   demands for that criterion: for an observed driver the cited exit-0 run is that proof, and the
+   DOM/data-and-visual rule binds the UI drivers. Anything not proven is `partial` with the
+   reason, and `partial` blocks the chain exactly like `fail`.
+6. **Never end the turn to wait.** When a manual login or a consent prompt is needed, ask with
+   `AskUserQuestion` whether the user has finished it, then continue in the same turn. A
+   criterion the user cannot unblock now is `partial`.
+7. **Boot on the same loopback origin** as an earlier pass of this chain. Consent is remembered
+   per origin, so the same port asks nothing twice.
+8. **Report** in the Phase 5 format and name the criterion id first in every Scenario cell
+   (`AC-001 — …`). Run `--acceptance-status` once more after the last record and put its
+   lines under the table. The verdict line follows the Phase 5 verdict rules.
 
 ## Phase 0 — Resolve scope and target
 
@@ -130,12 +195,13 @@ Before any browser call, resolve which of the two modes this session is in. **Po
 a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claude Code, declared
 by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
 ordinary case for a user who has not configured anything. Run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
-as a standalone preflight for every route. It prints `consent` or `policy` and exits `0`, or
-exits `1` with a named reason. In policy mode the parent JSON must bind each exact page route to
-its validated origin with the `declared-safe` mode described in the config contract. Contract
-v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is not
-proven safe stops with PARTIAL.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe`
+as a standalone preflight once for every origin the run needs. It prints `consent` or `policy`
+and exits `0`, or exits `1` with a named reason. In policy mode the parent JSON must name each
+validated origin as a target with the `declared-safe` mode described in the config contract. A
+target covers every route on its origin: no route list is declared or checked, so pages whose
+path carries identifiers that change on every run are covered too. Contract v1 intentionally
+supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
@@ -155,8 +221,8 @@ rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
 rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
-target stops before browser use with PARTIAL; the gate admits only its targets, and navigation
-commands only to its declared routes. **In CONSENT mode** there is no policy to be missing and
+target stops before browser use with PARTIAL; the gate admits only its target origins, and every
+route on them. **In CONSENT mode** there is no policy to be missing and
 the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
 because remote verification keeps the policy. Never try to configure the variable from a child
 Bash call in either mode — the hooks read it from the environment Claude Code started with, and
@@ -273,8 +339,11 @@ Claude's native placeholder substitution.
      facts. Never invent commands.
    In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
-   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
-   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then that port on the
+   loopback origin the application expects — `http://127.0.0.1:$ZENSU_VERIFY_PORT`, or
+   `http://localhost:$ZENSU_VERIFY_PORT` when the recipe's `validate.baseUrlCommand` prints it or
+   the app's CORS allow-list, cookies or auth callback name `localhost` — and the first
+   navigation to it asks the user. The
    MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
    `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
    for the run, so a reused run directory keeps the port it already recorded. Never derive the
@@ -308,7 +377,7 @@ user.
 
 Use only the supplied/configured base URL. Do not boot or tear down remote infrastructure.
 Keep mutations minimal and use disposable records with recognizable run-specific names. The
-parent-environment policy from Phase 0 is mandatory for every remote route; without it the
+parent-environment policy from Phase 0 is mandatory for every remote origin; without it the
 helper and the gate refuse the target, and the run stops before `open` with PARTIAL. The
 redirect check from Phase 0 applies to every navigation.
 
@@ -361,15 +430,18 @@ and exporters, so admitting them would violate the credential-blind boundary. Do
 another session. A future gate may re-enable opaque state only when it admits a path-contained
 setter and hard-denies every getter/exporter.
 
-Before authenticating or navigating to any protected route—including an initial `open` or
-`goto`, which prints the page title and writes a snapshot of the page—validate the selected recipe's
-`validate.evidenceSafety` block using the fail-closed schema and exact-route coverage in
-`../autopilot/rules/config.md`. Every route in scope must be proved synthetic/pre-classified
-non-sensitive by `mode: declared-safe`, and in policy mode must also appear under the same origin
-target in the parent-environment policy. If the block is absent, invalid, or
-does not cover a route exactly, do not restore auth or navigate to that protected content; skip
-the scenario and report PARTIAL. Final-report redaction is too late. The same boundary applies
-to screenshots.
+The evidence boundary is the ORIGIN, never the route. Before authenticating or navigating to
+any protected page—including an initial `open` or `goto`, which prints the page title and
+writes a snapshot of the page—its origin must be approved: in policy mode by a
+parent-environment policy target that names that origin with `evidenceMode: declared-safe`, in
+consent mode by the user's answer to the permission prompt the gate raises for that origin. An
+approved origin covers every page on it, at any path, including routes whose identifiers change
+on every run; no route list is declared, matched or checked. A page on an origin that is not
+approved is never opened, and a refused prompt makes that origin's scenarios PARTIAL.
+Final-report redaction is too late. The same boundary applies to screenshots. A recipe's
+`validate.evidenceSafety` block (`../autopilot/rules/config.md`) is an optional declaration of
+the application's data classification; it no longer gates navigation, and a `routes` list left
+in it is ignored.
 
 Use this order:
 
@@ -438,8 +510,7 @@ Use this format:
   origin — the recorder cannot observe how the human answered, only that the navigation then
   executed), `remembered` (any route on an origin already present in the memory — the route is
   never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
-  it). In consent mode also name the recipe
-  that supplied the declared routes shown IN the prompt, and every prompt the user refused.
+  it). In consent mode also name every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 
 Verdict rules:
