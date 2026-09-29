@@ -8,7 +8,7 @@
 # project-local, global):
 #   hooks.autoFixIncludeSuggestions=true  -> route ALL severities
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
-#   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
+#   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 1)
 #
 # Review-round state is a validated field in the same per-session CAS workflow
 # document as the TDD FSM; there is no independently writable counter file.

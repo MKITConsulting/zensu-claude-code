@@ -558,7 +558,7 @@ _zensu_config_bounded_int() {
 # read `j.context.*` and are therefore not omitted members of this family — folding
 # them in would mean widening this contract with a namespace parameter, which is a
 # different decision from the one taken here.
-zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 5 1 99; }
+zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 1 1 99; }
 zensu_pending_review_ttl_hours()  { _zensu_config_bounded_int pendingReviewTtlHours 6 0 8760; }
 zensu_impl_stop_nudge_after()     { _zensu_config_bounded_int implStopNudgeAfter 12 0 999999; }
 zensu_worktree_keep_idle_hours()  { _zensu_config_bounded_int worktreeKeepIdleHours 72 1 8760; }

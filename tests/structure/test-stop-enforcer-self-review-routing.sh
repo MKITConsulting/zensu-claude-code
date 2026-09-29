@@ -33,7 +33,8 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"
 PROJ="$(cd "$PROJ" && pwd -P)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"   # force defaults -> selfReview enabled
+export ZENSU_CONFIG="$STATE_DIR/max-rounds-5.json"   # autoFixMaxRounds pinned to 5, other defaults -> selfReview enabled
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT

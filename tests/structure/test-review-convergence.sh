@@ -276,4 +276,8 @@ node -e '
 ' "$MANIFEST" && check "R38 this suite is registered in ciStructureTests" PASS \
              || check "R38 this suite is registered in ciStructureTests" FAIL
 
+check "LC1 the default auto-fix budget is one fix round" "$(grep_ok "$ROOT/hooks/lib/zensu-config.sh" '_zensu_config_bounded_int autoFixMaxRounds 1 1 99')"
+check "LC1b configuration.md documents the default of one fix round" "$(grep_ok "$CONFIG_DOC" 'Integer loop guard (default `1`')"
+check "LC1c config.example.json ships one fix round" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.autoFixMaxRounds===1?"PASS":"FAIL")' "$CONFIG_EX")"
+
 finish

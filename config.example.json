@@ -7,7 +7,7 @@
     "autopilotEnforcer": true,
     "autoFix": true,
     "autoFixIncludeSuggestions": false,
-    "autoFixMaxRounds": 5,
+    "autoFixMaxRounds": 1,
     "combinedSummary": true,
     "selfReview": true,
     "pulseSession": true,
