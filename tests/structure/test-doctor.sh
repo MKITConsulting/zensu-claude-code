@@ -8030,7 +8030,7 @@ CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P
       step: "",
       phase: core.ADOPTION_HISTORY_PHASE,
       ts: "2026-09-15T19:15:00.000Z",
-      reason: core.ADOPTION_HISTORY_REASON_PREFIX + "0.20.0 -> 0.21.1",
+      reason: core.formatAdoptionReason("0.20.0", "0.21.1"),
     }]);
     fs.writeFileSync(file, JSON.stringify(doc));
   ' >/dev/null 2>&1 || P6_ADOPTED_RC=$?
@@ -8093,6 +8093,66 @@ case "$P6_NOADOPT_OUT" in
   *) check "P6t3 a core exporting no adoption phase fell silent (got: $P6_NOADOPT_OUT)" FAIL ;;
 esac
 rm -rf "$P6_NOADOPT"
+
+# P6t4 — the kept NAME comes from the core that writes it. A hand-spelled
+# `key + '.superseded-' + version + '.json'` renders byte-identically to the core's
+# own name, so P6t cannot tell the two apart: a copied core whose supersededRecordName
+# answers a probe name must put THAT name in the row.
+P6_KEPTNAME="$SBOX/plug-keptname"
+rm -rf "$P6_KEPTNAME"
+cp -R "$SBOX/plug" "$P6_KEPTNAME"
+P6_KEPTNAME_PATCHED=no
+if [ -f "$P6_KEPTNAME/hooks/lib/session-control-core-v1.js" ] \
+    && perl -0pi -e 's/^(function supersededRecordName\(key, recordedVersion\) \{\n)/$1  return "p6t4-probe-kept-name.json";\n/m' \
+      "$P6_KEPTNAME/hooks/lib/session-control-core-v1.js" \
+    && grep -qF 'p6t4-probe-kept-name.json' "$P6_KEPTNAME/hooks/lib/session-control-core-v1.js"; then
+  P6_KEPTNAME_PATCHED=yes
+fi
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{ step: "", phase: core.ADOPTION_HISTORY_PHASE, ts: "2026-09-15T19:15:00.000Z",
+      reason: core.formatAdoptionReason("0.20.0", "0.21.1") }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1
+P6_KEPTNAME_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_KEPTNAME" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_KEPTNAME_PATCHED:$P6_KEPTNAME_OUT" in
+  yes:*"was ADOPTED across a plugin update"*"kept beside the new one as p6t4-probe-kept-name.json"*)
+    check "P6t4 the kept record's name in the adoption row comes from the core's supersededRecordName" PASS ;;
+  *) check "P6t4 the adoption row does not take the kept name from the core (patched=$P6_KEPTNAME_PATCHED got: $P6_KEPTNAME_OUT)" FAIL ;;
+esac
+rm -rf "$P6_KEPTNAME"
+
+# P6t5 — the STAMP is a session-writable field too, and the validator admits more
+# than the timestamp this repair writes: V8's legacy parser skips parenthesized text,
+# so a `ts` carrying a newline and a forged row validates. The row must keep it on its
+# own line — a forged `❌  binding:` row would tell the user their session is unbound.
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{ step: "", phase: core.ADOPTION_HISTORY_PHASE,
+      ts: "2026-09-05 (x\n❌  binding: p6t5 forged row)",
+      reason: core.formatAdoptionReason("0.20.0", "0.21.1") }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1
+P6_FORGED_TS="$(run_report_own bound "$P6_KEY")"
+if printf '%s\n' "$P6_FORGED_TS" | grep -qE '^[[:space:]]*❌  binding: p6t5 forged row'; then
+  check "P6t5 a hostile adoption timestamp forged a report row" FAIL
+elif printf '%s' "$P6_FORGED_TS" | grep -qF 'was ADOPTED across a plugin update'; then
+  check "P6t5 a hostile adoption timestamp stays inside the adoption row and forges no row" PASS
+else
+  check "P6t5 the adoption row went missing under a hostile timestamp (got: $P6_FORGED_TS)" FAIL
+fi
 
 # P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
 # except nlink, so it is the shape a presence test admits. The row must NOT offer

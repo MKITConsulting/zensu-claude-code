@@ -406,8 +406,10 @@ function shellQuote(value) {
 
 // The adoption request this file hands to session-auto-adopt-v1.js. Built once so
 // its two callers — resolveHookSession and the `adoption-refusal` mode — cannot
-// disagree about the seven keys the ladder reads. The capability gate is NOT a
-// caller: it reaches the ladder through resolveHookSession's `autoAdopt` option.
+// disagree about the seven keys this file supplies. The ladder reads an eighth,
+// `observedRecorded`, which only the SessionStart adapter can know and this file
+// deliberately never sets. The capability gate is NOT a caller: it reaches the
+// ladder through resolveHookSession's `autoAdopt` option.
 function adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir) {
   return {
     executingPluginRoot: executedPluginRoot,
@@ -448,12 +450,35 @@ function performedAdoption(error) {
   }
 }
 
-function writeAdoptionOperatorLine(adoption) {
+const BINDER_LEAD_IN = 'claude hook session binder';
+
+// The operator line under the lead-in of the process that PERFORMED the adoption:
+// an adoption the in-process evidence hook performed is that hook's, and naming the
+// binder there attributed it to a process that never ran.
+function writeAdoptionOperatorLine(adoption, leadIn = BINDER_LEAD_IN) {
   try {
-    process.stderr.write(`claude hook session binder: ${autoAdoptModule().operatorLine(adoption)}\n`);
+    process.stderr.write(`${leadIn}: ${autoAdoptModule().operatorLine(adoption)}\n`);
   } catch {
-    process.stderr.write('claude hook session binder: adopted the Session Control record (details unavailable)\n');
+    process.stderr.write(`${leadIn}: adopted the Session Control record (details unavailable)\n`);
   }
+}
+
+// Binds and DISCLOSES an adoption this process performed, on both halves: a bind
+// that returns carries the verdict on `binding.adoption`, and a bind whose strict
+// re-read then throws — a vanished project root — carries it on the error, which is
+// re-thrown after the line. ONE implementation for this file's CLI mode and every
+// in-process caller, so the disclosure policy is spelled once.
+function bindAndDisclose(payload, environment = process.env, options = {}, leadIn = BINDER_LEAD_IN) {
+  let binding;
+  try {
+    binding = resolveHookSession(payload, environment, options);
+  } catch (error) {
+    const performed = performedAdoption(error);
+    if (performed) writeAdoptionOperatorLine(performed, leadIn);
+    throw error;
+  }
+  if (binding.adoption) writeAdoptionOperatorLine(binding.adoption, leadIn);
+  return binding;
 }
 
 function resolveHookSession(payload, environment = process.env, options = {}) {
@@ -803,27 +828,20 @@ function main() {
   // Hook-payload binds adopt; model-bind never does. The doctor and the
   // zensu-log verbs bind through model-bind and must stay write-free — the
   // PreToolUse hooks that gated the Bash call carrying them have already adopted.
-  const binding = resolveHookSession(payload, process.env, { autoAdopt: process.argv[2] !== 'model-bind' });
-  if (binding.adoption) {
-    const adopted = binding.adoption;
-    // ONE line, because the gate suites admit a bounded number of stderr lines
-    // per hook run. Debug channel: whether a hook's stderr reaches the user on
-    // exit 0 is unverified, so the user-facing announcement travels elsewhere (the
-    // SessionStart adapter, the capability gate, the doctor).
-    //
-    // State the ORDER, because it decides which of those actually speaks. After a
-    // /reload-plugins the first bound contact of a turn is a UserPromptSubmit shell
-    // hook, which binds through this very mode — so on the ordinary flow THIS
-    // invocation adopts, and the capability gate's allow-path announcement is never
-    // reached: by the time a tool call arrives the record already serves. That
-    // leaves this line and /zensu:doctor as the only trace of such an adoption
-    // until a hook consumes ZENSU_SESSION_ADOPTED.
-    // Every interpolated value goes through the same screens the two
-    // user-facing renderers apply: the version shape, the provenance class, the
-    // superseded BASENAME, and the lease clause that tells a refused sweep from a
-    // clean one. The transcript renders this line verbatim.
-    writeAdoptionOperatorLine(adopted);
-  }
+  // ONE operator line per adoption, because the gate suites admit a bounded number
+  // of stderr lines per hook run. Debug channel: whether a hook's stderr reaches the
+  // user on exit 0 is unverified, so the user-facing announcement travels elsewhere
+  // (the SessionStart adapter, the capability gate, the doctor).
+  //
+  // State the ORDER, because it decides which of those actually speaks. After a
+  // /reload-plugins the first bound contact of a turn is a UserPromptSubmit shell
+  // hook, which binds through this very mode — so on the ordinary flow THIS
+  // invocation adopts, and the capability gate's allow-path announcement is never
+  // reached: by the time a tool call arrives the record already serves. That leaves
+  // this line and /zensu:doctor as the only trace of such an adoption until a hook
+  // consumes ZENSU_SESSION_ADOPTED. Every interpolated value goes through the same
+  // screens the user-facing renderers apply.
+  const binding = bindAndDisclose(payload, process.env, { autoAdopt: process.argv[2] !== 'model-bind' });
 
   const values = {
     ZENSU_CLAUDE_PLUGIN_ROOT: binding.pluginRoot,
@@ -833,7 +851,7 @@ function main() {
     ZENSU_PROJECT_ROOT: binding.projectRoot,
     // Sixth export, UNCONDITIONAL so the eval'd set keeps one shape: empty when
     // this invocation adopted nothing, `recorded -> executing` when it did.
-    ZENSU_SESSION_ADOPTED: binding.adoption ? `${binding.adoption.recorded} -> ${binding.adoption.executing}` : '',
+    ZENSU_SESSION_ADOPTED: binding.adoption ? core.formatAdoptionPair(binding.adoption.recorded, binding.adoption.executing) : '',
   };
   for (const [name, value] of Object.entries(values)) {
     process.stdout.write(`export ${name}=${shellQuote(value)}\n`);
@@ -844,13 +862,8 @@ if (require.main === module) {
   try {
     main();
   } catch (error) {
-    // An adoption this invocation PERFORMED whose strict re-read then failed — a
-    // vanished project root — is still an adoption: the record was re-minted, a
-    // superseded copy written and the lease store swept. resolveHookSession hangs
-    // that verdict on the error it re-throws, and only a PERFORMED adoption
-    // carries one, so the line is written before the failure that follows it.
-    const performed = performedAdoption(error);
-    if (performed) writeAdoptionOperatorLine(performed);
+    // An adoption this invocation PERFORMED whose strict re-read then failed was
+    // already disclosed by bindAndDisclose, before the failure that follows it.
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
   }
@@ -864,8 +877,10 @@ module.exports = {
   // `scv1_<64hex>`, i.e. the name of a record file in the store — an accepted
   // identity there while the sibling modes refuse exactly that shape.
   validateSessionId,
-  // For the in-process adopters (the review-evidence hook): the same operator line
-  // the CLI mode prints, so an adoption performed outside the CLI is not silent.
+  // For the in-process adopters (the review-evidence hook, the capability gate):
+  // the same bind-and-disclose policy and operator line the CLI mode uses, so an
+  // adoption performed outside the CLI is not silent.
+  bindAndDisclose,
   writeAdoptionOperatorLine,
   performedAdoption,
   orphanedProjectRootSession,

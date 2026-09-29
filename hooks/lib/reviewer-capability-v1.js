@@ -10,15 +10,16 @@ const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
 const doctorInvocation = require('./zensu-doctor-invocation.js');
 
-// The FOURTH consumer of the `recorded`/`executing` pair, and the one outside the
-// shell family that shares a degradation policy. `zensu_emit_hook_session_deny`,
+// A consumer of the `recorded`/`executing` pair outside the shell family that
+// shares its degradation policy. `zensu_emit_hook_session_deny`,
 // stop-chain-enforcer.sh and zensu-doctor.sh all hold the pair to a shape before
 // printing it, because a plugin_version is only requireText-validated: a newline
 // in it splits one deny reason into several that read as separate hook messages.
-// The same alternation, the same `(unreadable)` substitution. A FIFTH consumer,
-// session-auto-adopt-v1.js's notice renderer, CONSUMES the core's
-// ADOPTION_SAFE_VERSION_RE rather than copying the alternation, so the three
-// hand copies CLAUDE.md's version-shape census names stay three.
+// The same alternation, the same `(unreadable)` substitution. The adoption
+// renderers in session-auto-adopt-v1.js and the /zensu:doctor adoption row CONSUME
+// the core's ADOPTION_SAFE_VERSION_RE (the doctor through parseAdoptionReason)
+// rather than copying the alternation, so the hand copies the version-shape census
+// in .claude/rules/session-adoption.md names do not grow.
 const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const safeVersion = (value) => (
   typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
@@ -26,8 +27,14 @@ const safeVersion = (value) => (
 
 // session-auto-adopt-v1.js is required LAZILY, and the reason is cost, not a
 // cycle: nothing that module loads requires this file. This gate runs on every
-// tool call of every session, the adoption path runs once per plugin update, and
-// the module pulls in the lease sweep — so the hot path does not pay for it.
+// tool call of every session, the module pulls in the lease sweep, and the
+// adoption path runs only when the strict bind FAILS — once per plugin update in
+// the ordinary case. ONE state runs it on every call: a recorded project root that
+// is gone under a lineage this installation serves. The strict read fails each
+// time, the probe answers already-served, and the call pays the probe's orphan
+// read (a runtime-digest walk) plus an idempotent lease sweep on top of the orphan
+// read the relaxation below performs. That cost is unmeasured and stated as a
+// bound in .claude/rules/automatic-adoption.md.
 const autoAdoptModule = () => require('./session-auto-adopt-v1.js');
 
 // The refusal token of a failed automatic adoption reaches the deny reason the
@@ -103,6 +110,40 @@ const adoptionTail = (reason) => {
 // rewording one arm alone left the pin green. HAND COPY of
 // ZENSU_ADOPTION_CHILD_CLOSE in hooks/lib/zensu-session.sh, pinned for equality.
 const ADOPTION_CHILD_CLOSE = 'The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.';
+
+// The two CAUSES and the two limit clauses the typed arm and the fallback arms below
+// both render. Spelled once here, because the typed and fallback copies had already
+// drifted apart: the typed lineage clause lacked the --restore-root ordering the
+// fallback carried, and the typed pruned clause lacked the fresh-session case. The
+// two clauses are HAND COPIES of the `incompatible-runtime` and `pruned-plugin-root`
+// scopes of zensu_emit_hook_session_deny in hooks/lib/zensu-session.sh, pinned
+// sentence for sentence by the seam pin at the front of
+// tests/structure/test-versioned-plugin-upgrade.sh.
+const lineageCause = (recorded, executing) => `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing.`;
+const prunedCause = (recorded, executing) => `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record.`;
+const ORPHAN_LIMIT_CLAUSE = 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case.';
+const PRUNED_DOWNGRADE_CLAUSE = 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.';
+// The remedy of the two FALLBACK arms, reached when no typed verdict travels on the
+// error — the adoption module could not be loaded, or the bind threw untyped.
+const UNBOUND_ADOPTION_REMEDY = 'Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state.';
+
+// An adoption THIS call performed, for a deny that follows it. The bind can adopt
+// and still fail — a missing workflow baseline, or a strict re-read that throws for
+// a reason no arm relaxes — and the deny then named the failure while the record it
+// had just re-minted, the superseded copy and the swept lease store went unsaid:
+// with provenance no-workflow-document the doctor has no entry either, so the kept
+// record was the only trace. Appended AFTER the cause, so the deny still leads with
+// what blocks the call, in the operator sentence the binder prints.
+function performedDisclosure(reason, performed) {
+  let line;
+  try {
+    line = autoAdoptModule().operatorLine(performed);
+  } catch {
+    line = 'adopted the Session Control record (details unavailable)';
+  }
+  const closed = /[.!?]$/.test(reason) ? reason : `${reason}.`;
+  return `${closed} This call also ${line}.`;
+}
 
 // The announcement of an adoption THIS process performed. One JSON object on the
 // allow path carrying no permissionDecision, so the host's deny > defer > ask >
@@ -612,6 +653,11 @@ function main() {
     // digest before any principal-specific capability decision is considered.
     trusted = revalidateSessionContext(payload);
   } catch (error) {
+    // The adoption this bind PERFORMED, if any: the binder's own test, so the gate
+    // and the binder cannot disagree about what counts as performed. Every deny
+    // below discloses it through denyBind; the relaxed allow announces it.
+    const performed = hookSession.performedAdoption(error);
+    const denyBind = (reason) => deny(performed ? performedDisclosure(reason, performed) : reason);
     // Two states are not capability violations, and this hook runs on matcher
     // ".*" — so if it denies, it denies EVERY tool, /zensu:doctor included, and
     // the relaxation the Bash gate grants would never be reached.
@@ -662,16 +708,10 @@ function main() {
           || hookSession.orphanedProjectRootSession(payload)
           || doctorInvocation.isRecognizedInvocation(payload))) {
       // An adoption performed on THIS bind whose strict re-read then threw on the
-      // vanished project root: the binder attaches that verdict to the re-thrown
-      // error, and the relaxed allow is where the user has to hear about it —
-      // the orphan clause of the notice is what says Edit and Write stay denied.
-      // The binder attaches a verdict only for an adoption it PERFORMED, so its
-      // presence is the whole test; the outcome is compared against the module's
-      // own constant rather than a literal that a rename would silently orphan.
-      if (error && error.adoption
-          && error.adoption.outcome === autoAdoptModule().AUTO_ADOPT_OUTCOMES.ADOPTED) {
-        announceAdoption(error.adoption, { model: true });
-      }
+      // vanished project root: the relaxed allow is where the user has to hear
+      // about it — the orphan clause of the notice is what says Edit and Write
+      // stay denied.
+      if (performed) announceAdoption(performed, { model: true });
       return;
     }
     // The binder ADOPTS before it denies now, so a typed refusal here means the
@@ -698,18 +738,16 @@ function main() {
       // answered: a pruned minting installation is its own named state, and the
       // downgrade sentence stays with it because that predicate is blind to lineage.
       const cause = adoption.prunedPluginRoot
-        ? `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record. ${attempt}`
-        : `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing. ${attempt}`;
+        ? `${prunedCause(recorded, executing)} ${attempt}`
+        : `${lineageCause(recorded, executing)} ${attempt}`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        const tail = adoption.prunedPluginRoot
-          ? 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back.'
-          : 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.';
-          // ONE joiner, the shell scopes' own: `remedy; tail.` The tails start in lower
-        // case, so a full stop before them rendered a sentence starting mid-word.
-        deny(`${cause} ${adoptionRefusalRemedy(reason)}; ${adoptionTail(reason)}. Both stay reachable in this state. ${tail}`);
+        const limit = adoption.prunedPluginRoot ? PRUNED_DOWNGRADE_CLAUSE : ORPHAN_LIMIT_CLAUSE;
+        // The joiner is `remedy; tail.` The tails start in lower case, so a full
+        // stop before them rendered a sentence starting mid-word.
+        denyBind(`${cause} ${adoptionRefusalRemedy(reason)}; ${adoptionTail(reason)}. Both stay reachable in this state. ${limit}`);
         return;
       }
-      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
+      denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The FIFTH denier in the incompatible-runtime state, and it used to be the
@@ -744,12 +782,12 @@ function main() {
     // constrained child is told what happened and who can fix it.
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
+      const cause = lineageCause(safeVersion(lineage.recorded), safeVersion(lineage.executing));
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case.`);
+        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${ORPHAN_LIMIT_CLAUSE}`);
         return;
       }
-      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
+      denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The other named state with the same in-place remedy, and the FIFTH denier
@@ -765,12 +803,12 @@ function main() {
       // the REMEDY, a command that writes the immutable record, is the main thread's
       // alone. It handed `--confirm` to every principal, in the one arm reached when
       // the adoption module itself could not be loaded.
-      const cause = `this session's Session Control record is intact, but the Zensu installation that minted it (version ${safeVersion(pruned.recorded)}) has been removed from the plugin cache, so the running installation (${safeVersion(pruned.executing)}) cannot re-verify the record.`;
+      const cause = prunedCause(safeVersion(pruned.recorded), safeVersion(pruned.executing));
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. The refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+        denyBind(`${cause} ${UNBOUND_ADOPTION_REMEDY} ${PRUNED_DOWNGRADE_CLAUSE}`);
         return;
       }
-      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
+      denyBind(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The vanished recorded project root. This branch exists because the orphan
@@ -797,7 +835,7 @@ function main() {
     // read-only principal is never the thread that can run it, and pointing one at
     // a privileged write is the shape this file's own comment above calls a defect.
     if (hookSession.orphanedProjectRootSession(payload)) {
-      deny("this session's Session Control record is readable and this installation serves it, but the project root it records no longer exists — a deleted or recycled worktree causes it. The workflow document lived under that directory, so no write can be attributed to a project that is not there. The repair re-creates a directory and rewrites the workflow document, so it is reserved for the main thread and is not available here — report this to the main thread rather than retrying.");
+      denyBind("this session's Session Control record is readable and this installation serves it, but the project root it records no longer exists — a deleted or recycled worktree causes it. The workflow document lived under that directory, so no write can be attributed to a project that is not there. The repair re-creates a directory and rewrites the workflow document, so it is reserved for the main thread and is not available here — report this to the main thread rather than retrying.");
       return;
     }
     // The SECOND named cause, and the second one with an in-place remedy. It sits
@@ -815,10 +853,10 @@ function main() {
       // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
       // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
       // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
-      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
+      denyBind("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
-    deny(`immutable context revalidation failed: ${error.message}`);
+    denyBind(`immutable context revalidation failed: ${error.message}`);
     return;
   }
 
@@ -904,4 +942,10 @@ module.exports = {
   adoptionTail,
   ADOPTION_INCOMPLETE_REASONS,
   ADOPTION_CHILD_CLOSE,
+  ORPHAN_LIMIT_CLAUSE,
+  PRUNED_DOWNGRADE_CLAUSE,
+  UNBOUND_ADOPTION_REMEDY,
+  lineageCause,
+  prunedCause,
+  performedDisclosure,
 };

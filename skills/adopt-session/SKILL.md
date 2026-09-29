@@ -320,13 +320,14 @@ forge another one. Render whatever you get verbatim; do NOT un-escape it, and do
 report it as damage.
 
 Every refusal a user can see is in the table below. Most are `adoptableRecord`
-verdicts; TWO are emitted by the ENTRY POINT and are marked as such —
-`private-record-store-unsafe` before those verdicts are ever reached, and
-`superseded-record-exists` after they passed. Each prints its own remedy inline, so
-render that verbatim too.
+verdicts; THREE are emitted by the ENTRY POINT and are marked as such —
+`session-id-unusable` and `private-record-store-unsafe` before those verdicts are
+ever reached, and `superseded-record-exists` after they passed. Each prints its own
+remedy inline, so render that verbatim too.
 
 | Reason | Meaning |
 |--------|---------|
+| `session-id-unusable` | Entry-point refusal, raised before anything is read: the session identity the command was given is empty, malformed, or a DERIVED Session Control identifier rather than the raw host session id. Nothing is read and nothing is changed, and the record store is not implicated — a fresh Claude Code session is the way forward. |
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation merely pruned from the cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. |

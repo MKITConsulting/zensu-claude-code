@@ -5248,23 +5248,20 @@ function runtimeAdoptedRow(core, projectRoot, key, sharedRead) {
   // the version pair parsed out of it is, and that is held to the version shape.
   var stamp = provenanceSlot((last && typeof last.ts === 'string') ? last.ts : '', '');
   var rendered = provenanceRendering(stamp, { text: '', present: false, ok: true, bracket: false });
-  var prefix = typeof core.ADOPTION_HISTORY_REASON_PREFIX === 'string' ? core.ADOPTION_HISTORY_REASON_PREFIX : '';
-  var shape = core.ADOPTION_SAFE_VERSION_RE instanceof RegExp ? core.ADOPTION_SAFE_VERSION_RE : null;
+  // The GRAMMAR comes from the core that writes the entry: `parseAdoptionReason` holds
+  // both halves to the version shape and answers null for anything else, so a reader
+  // here cannot drift from the writer, and the pair is rendered with the core's own
+  // separator. A core without the parser renders the pair as unrecorded.
   var reason = (last && typeof last.reason === 'string') ? last.reason : '';
-  var from = '';
-  var to = '';
-  if (prefix !== '' && shape !== null && reason.indexOf(prefix) === 0) {
-    var pair = reason.slice(prefix.length).split(' -> ');
-    if (pair.length === 2 && shape.test(pair[0]) && shape.test(pair[1])) {
-      from = pair[0];
-      to = pair[1];
-    }
-  }
-  var span = from !== '' ? ' (' + from + ' -> ' + to + ')' : ' (the version pair is not recorded in a readable form)';
+  var parsed = typeof core.parseAdoptionReason === 'function' ? core.parseAdoptionReason(reason) : null;
+  var from = parsed ? parsed.recorded : '';
+  var span = parsed && typeof core.formatAdoptionPair === 'function'
+    ? ' (' + core.formatAdoptionPair(parsed.recorded, parsed.executing) + ')'
+    : ' (the version pair is not recorded in a readable form)';
   // The NAME comes from the core that writes it, never from a suffix spelled here.
   var kept = '';
-  if (from !== '' && typeof core.supersededRecordFile === 'function') {
-    try { kept = path.basename(core.supersededRecordFile('', key, from)); } catch (e) { kept = ''; }
+  if (from !== '' && typeof core.supersededRecordName === 'function') {
+    try { kept = core.supersededRecordName(key, from); } catch (e) { kept = ''; }
   }
   line(OK, 'state: this session\'s Session Control record was ADOPTED across a plugin update — '
     + adoptions.length + (adoptions.length === 1 ? ' entry' : ' entries')

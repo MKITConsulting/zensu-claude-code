@@ -22,24 +22,15 @@ function readPayload(expectedEvent) {
 }
 
 // Binds with the automatic adoption opted in, and DISCLOSES an adoption this
-// process performed. This hook binds IN PROCESS, never through the CLI binder, so
-// the binder's one operator line was never written for it: an adoption landing
-// here re-minted the record, kept a superseded copy and swept the lease store
-// without a line anywhere — and on SubagentStop no sibling adapter exists to speak
-// for it. Both halves are covered: a bind that returns carries the verdict on
-// `binding.adoption`, and a bind whose strict re-read then throws carries it on the
-// error, exactly as the CLI mode reads it.
+// process performed under THIS hook's lead-in. This hook binds IN PROCESS, never
+// through the CLI binder, so without the binder's bind-and-disclose an adoption
+// landing here re-minted the record, kept a superseded copy and swept the lease
+// store without a line anywhere — and on SubagentStop no sibling adapter exists to
+// speak for it.
+const LEAD_IN = 'review-evidence-hook-v1';
+
 function bindAndDisclose(payload) {
-  let binding;
-  try {
-    binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
-  } catch (error) {
-    const performed = hookSession.performedAdoption(error);
-    if (performed) hookSession.writeAdoptionOperatorLine(performed);
-    throw error;
-  }
-  if (binding.adoption) hookSession.writeAdoptionOperatorLine(binding.adoption);
-  return binding;
+  return hookSession.bindAndDisclose(payload, process.env, { autoAdopt: true }, LEAD_IN);
 }
 
 function start() {
@@ -64,11 +55,10 @@ function start() {
 function stop() {
   const payload = readPayload('SubagentStop');
   if (!leases.kindForAgentType(payload.agent_type)) return;
-  // Opts into the automatic adoption: this hook runs on the same SubagentStart
-  // matcher as the session-control adapter and in parallel with it, so without
-  // adopting here it could bind-fail in the adoption window, mint no lease, and
-  // leave the reviewer denied for the whole review. The records lock serializes
-  // the two; the loser sees already-served and re-reads.
+  // Opts into the automatic adoption for its own reason: no adapter binds on
+  // SubagentStop, so an adoption that fell due while the worker ran lands HERE or
+  // not at all — and without it the bind fails and the worker's result is lost
+  // along with the lease retirement.
   const binding = bindAndDisclose(payload);
   const outcome = leases.storeWorkerResult(payload, binding);
   if (outcome.action === 'block') {
@@ -86,7 +76,13 @@ function main() {
   else stop();
 }
 
-try { main(); } catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
+// The entry point runs only when this file IS the hook, so requiring it — the unit
+// layer does — runs no hook and reads no stdin.
+if (require.main === module) {
+  try { main(); } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { LEAD_IN, bindAndDisclose };

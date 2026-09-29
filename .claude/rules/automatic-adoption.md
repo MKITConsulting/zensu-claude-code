@@ -9,6 +9,7 @@ paths:
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/session-adopt-report-v1.js"
   - "tests/structure/session-auto-adopt-v1.test.js"
+  - "tests/structure/session-adopt-report-v1.test.js"
   - "tests/structure/test-versioned-plugin-upgrade.sh"
 ---
 
@@ -26,17 +27,23 @@ succeeded, so each deny was a false positive that cost the user a step.
 ONE implementation serves every hook-side binder and the manual entry point.
 
 - **Ladder:** `createAutoAdopter` / `adoptForHook` / `previewAdoption` /
-  `autoAdoptEnabled` / `effectiveConfig` / `configLayers` / `deepMerge` /
-  `AUTO_ADOPT_OUTCOMES` / `AUTO_ADOPT_REASONS` / `CONFIG_KEY`.
+  `autoAdoptEnabled` / `configLayers` / `AUTO_ADOPT_OUTCOMES` / `AUTO_ADOPT_REASONS` /
+  `CONFIG_KEY`.
 - **Rendering:** `STATE_NEUTRAL_REASONS` / `establishesNamedState` / `SAFE_TOKEN` /
-  `SAFE_PROVENANCE` / `safeProvenance` / `provenanceText` / `safeVersion` / `keptName` /
-  `leaseClause` / `operatorLine` / `doctorPointer` / `renderAdoptionNotice`.
+  `SAFE_PROVENANCE` / `safeProvenance` / `provenanceText` / `keptName` / `leaseClause`, plus
+  the renderers `createRenderers(core)` builds over the injected core: `safeVersion` /
+  `operatorLine` / `doctorPointer` / `renderAdoptionNotice`. The module-level exports are
+  the instance built over the real core, so a port that injects its own core gets renderers
+  that judge against it.
 - **Core support:** `ADOPTION_REFUSED_CODE`, `SUPERSEDED_EXISTS_CODE`,
   `isAdoptionRefusal`, `isSupersededRecordConflict`, `isLockTimeout`,
-  `supersededRecordFile` (the ONE spelling of the superseded name; it throws on a version
-  that fails `ADOPTION_SAFE_VERSION_RE`) and `ADOPTION_PROVENANCE`
-  (`recorded`, `no-workflow-document`, `unavailable`; the cause of `unavailable` travels
-  beside it as `provenanceCause`).
+  `supersededRecordName` / `supersededRecordFile` (the ONE spelling of the superseded
+  name; both throw on a version that fails `ADOPTION_SAFE_VERSION_RE`), the history-reason
+  grammar `ADOPTION_PAIR_SEPARATOR` / `formatAdoptionPair` / `formatAdoptionReason` /
+  `parseAdoptionReason` (the writer, the renderers, the binder's `ZENSU_SESSION_ADOPTED` and
+  the doctor row all go through it), and `ADOPTION_PROVENANCE` (`recorded`,
+  `no-workflow-document`, `unavailable`; the cause of `unavailable` travels beside it as
+  `provenanceCause`).
 
 The ladder is `adoptableRecord`, then the crash-resume check, then the opt-out, then
 `adoptContext` under the per-session records lock, then `discardSupersededLeases`. The
@@ -47,10 +54,20 @@ would otherwise have been adopted. The crash-resume check is an `lstat` of
 `supersededRecordFile(...)`: an interrupted adoption leaves that file behind and
 `adoptContext`'s `COPYFILE_EXCL` refuses every later attempt, a dangling link included.
 
+The preview is WRITE-FREE, and two consumers rest on that: the report's read-only path,
+whose write-free premise the PreToolUse recognizer's admission of the command rests on,
+and the binder's `adoption-refusal` mode. `adoptForHook` completes every SERVED answer
+with the lease sweep — at probe time, under the lock, and when a lock timeout is followed
+by one more probe that finds the record served — because a sibling's adoption is not
+complete until its sweep ran, and the winner sweeps only after it released the lock. The
+sweep is idempotent and runs against the canonical executing root, the spelling leases
+record.
+
 `adoptForHook` never throws. A typed refusal keeps its reason; a superseded-file
 conflict is `REFUSED / superseded-record-exists`; a lock timeout is
-`UNAVAILABLE / lock-timeout`; anything else is `UNAVAILABLE / adoption-failed`; a
-throwing sweep is carried as `sweep-failed` rather than reverting a swapped record. The
+`UNAVAILABLE / lock-timeout` unless the re-probe finds the record served, which is then
+`ALREADY_SERVED / adopted-concurrently`; anything else is `UNAVAILABLE / adoption-failed`;
+a throwing sweep is carried as `sweep-failed` rather than reverting a swapped record. The
 verdict shape is fixed: every field is always present. The state fields `recorded`,
 `executing`, `orphanedProjectRoot` and `prunedPluginRoot` come off the probe, because
 `adoptableRecord` attaches them to refusals as well; never re-derive them. An
@@ -60,17 +77,20 @@ the REQUEST, and the module is the one place that puts it on the verdict.
 
 ## Config: `hooks.sessionAutoAdopt`
 
-Read on the adoption path only, never on a healthy bind. `configLayers` resolves the
-files `_ZENSU_CFG_JS` in `hooks/lib/zensu-config.sh` reads: `ZENSU_CONFIG` verbatim as one
-layer, else the global file and the project overlay. Every fault degrades to ENABLED, so
-a broken config never switches a repair off silently.
+Read on the adoption path only, never on a healthy bind. `configLayers` reads the
+candidate files of `_ZENSU_STRICT_JS` in `hooks/lib/zensu-config.sh`: `ZENSU_CONFIG`
+verbatim as one layer, else the global file (only when `HOME` is a non-empty string) and
+the project overlay. The unit suite pins the two candidate sets against each other.
 
-For this key `false` is STICKY: the automatic path is off when EITHER layer says so.
-Everywhere else the project overlay wins per key, but the overlay lives in a directory a
+For this key `false` is STICKY, the combining rule `_ZENSU_STRICT_JS` applies as well: the
+automatic path is off when EITHER layer says so. The overlay lives in a directory a
 session can write while no chain is armed, so project-wins would let a seeded `true`
-override an operator's global `false`. No shell reader consumes this key. `effectiveConfig`
-still answers the ordinary merged view. The project overlay is anchored on the ambient
-`CLAUDE_PROJECT_DIR`, exactly as `_ZENSU_CFG_JS` anchors it, not on the record's root.
+override an operator's global `false`. The two readers differ in ONE direction,
+deliberately: a malformed layer WITHDRAWS the capability grant the strict shell reader
+guards, while here every fault degrades to ENABLED, because the enabled state runs a
+repair rather than a bypass. No shell reader consumes this key. The project overlay is
+anchored on the ambient `CLAUDE_PROJECT_DIR`, as the shell readers anchor it, not on the
+record's root.
 
 The manual `--confirm` path calls `adoptForHook` with `respectOptOut: false`, so the key
 switches the hooks off and never the command the user runs by hand.
@@ -83,10 +103,13 @@ requires the lease owner, which requires the binder, which requires the core, so
 top-level require cycles.
 
 - **Opted in:** the CLI's hook-payload modes (every shell gate, the Stop hook, the consent
-  hooks), `revalidateSessionContext` in `reviewer-capability-v1.js`, both hooks in
-  `review-evidence-hook-v1.js` (same SubagentStart matcher as the adapter; they bind in
-  process through `bindAndDisclose`), and the adapter's resume/compact and SubagentStart
-  branches through `serveOrAdopt`.
+  hooks), `revalidateSessionContext` in `reviewer-capability-v1.js`, both halves of
+  `review-evidence-hook-v1.js`, and the adapter's resume/compact and SubagentStart
+  branches through `serveOrAdopt`. The evidence hook opts in for two different reasons:
+  its start half shares the SubagentStart matcher with the adapter and races it, and its
+  stop half runs on SubagentStop, where no adapter binds, so an adoption that fell due
+  while the worker ran lands there or the worker's result is lost with its lease
+  retirement.
 - **Never opted in:** `model-bind` (`zensu-doctor.sh` stays write-free and no `zensu-log.sh`
   verb re-mints a record), `resolveFreshHookProject` and `bindFromModelEnvironment`.
 
@@ -97,10 +120,13 @@ ladder takes over.
 ## Races
 
 `adoptContext` runs under `withFileLock` and re-checks adoptability inside it, so the
-loser answers `already-served` and re-reads. A timeout maps to a deny, never to a partial
-adoption; `withFileLock` attaches `LOCK_TIMEOUT_CODE` and the adopter consults
-`isLockTimeout` first. `AUTO-2` and `AUTO-17` hold the records lock from a third process
-and require every racer to finish at or after the holder released.
+loser answers `already-served`, completes the sweep and re-reads. A timeout maps to a deny,
+never to a partial adoption; `withFileLock` attaches `LOCK_TIMEOUT_CODE` and the adopter
+consults `isLockTimeout` first. `AUTO-2` and `AUTO-17` hold the records lock from a third
+process and require two proofs of waiting: every racer finished at or after the holder
+released, and the re-minted record was written no earlier than one second before the
+release. The second does not rest on the racers' run time; it reads the RECORD and not the
+superseded copy, because `copyFileSync` carries the source's timestamps over on macOS.
 
 ## Denies name the token
 
@@ -121,9 +147,8 @@ before. The preview answers null, never `not-completed`, for a record that alrea
 while the strict bind still fails, because that failure was never an adoption one. That
 null is also what keeps the `orphaned-project-root` arm of the router reachable.
 
-Three token-dependent parts are hand-copied across the JS/shell boundary and pinned by the
-seam pin at the front of `test-versioned-plugin-upgrade.sh`, both ways and with exact arm
-counts:
+Token-dependent parts are hand-copied across the JS/shell boundary and pinned by the seam
+pin at the front of `test-versioned-plugin-upgrade.sh`, both ways and with exact arm counts:
 
 - **Verb:** `ADOPTION_INCOMPLETE_REASONS` render "it did not complete", everything else
   "it was REFUSED".
@@ -131,7 +156,14 @@ counts:
   `_zensu_adoption_refusal_remedy` in `zensu-session.sh`.
 - **Tail:** `GENERIC_ADOPTION_TAIL`, `OPTED_OUT_ADOPTION_TAIL`, `INCOMPLETE_ADOPTION_TAIL`,
   kept as constants (not a map) because the remedy pin reads every `'token': 'sentence',`
-  line as a remedy arm. Remedy and tail join as `remedy; tail.` in every carrier.
+  line as a remedy arm. Remedy and tail join as `remedy; tail.` in the `.*` gate and in the
+  Stop hook's four release arms. The two named shell scopes put
+  `The record is NOT damaged and NOT missing;` between them, and that join is unpinned.
+- **Limit clauses:** `ORPHAN_LIMIT_CLAUSE` and `PRUNED_DOWNGRADE_CLAUSE` are rendered by the
+  gate's typed arm AND its fallback arms, and are spelled word for word in the
+  `incompatible-runtime` and `pruned-plugin-root` scopes; the pin checks both the render
+  sites and the shell text. `lineageCause` / `prunedCause` / `UNBOUND_ADOPTION_REMEDY` are
+  the gate's other shared spellings.
 
 The `opted-out` remedy tells the model to report and ask the user, never to run
 `--confirm` itself. The shell side's public, shape-checked wrappers are
@@ -144,35 +176,44 @@ shell pattern refuses rather than matching everything.
 verb and the token and ends on `ZENSU_ADOPTION_CHILD_CLOSE`, the twin of the gate's
 `ADOPTION_CHILD_CLOSE`; the `adoption-incomplete` child form ends on its own retry sentence.
 An unknown principal gets `main`: a child shown the main wording still cannot run the
-command, while the main thread shown the child wording loses its one in-place remedy.
+command, while the main thread shown the child wording loses its one in-place remedy. The
+seam pin matches the gate's MAIN guard as the whole line and requires each child close to
+follow its MAIN block directly; `AUTO-26` drives both audiences through the lineage
+fallback arm with the adoption module removed from the executing root.
 
 ## Disclosure
 
 `renderAdoptionNotice` serves the two model/user channels: the gate's announcement and the
-adapter's `systemMessage` plus `additionalContext`. `operatorLine` serves the stderr line of
-every process that performed an adoption, including one whose strict re-read then failed
-(`performedAdoption` reads the verdict off the error). The four screens are `safeVersion`,
-`safeProvenance`, `keptName` and `leaseClause`; `provenanceText` adds the provenance cause.
-`SAFE_PROVENANCE` admits no slash, because an error message is where a path arrives. The
-lease clause reads the count before choosing its sentence, so a refused sweep is never
-announced as "0 set aside". `doctorPointer` is conditional per provenance: only a
-`recorded` adoption wrote the history entry the doctor renders.
+adapter's `systemMessage` plus `additionalContext`. `operatorLine` serves every process
+that performed an adoption and has no such channel. The binder's `bindAndDisclose` is the
+ONE bind-and-disclose policy for its CLI mode and the in-process evidence hook: it writes
+the operator line under the caller's own lead-in, on the success path and when the strict
+re-read then fails (`performedAdoption` reads the verdict off the error). The four screens
+are `safeVersion`, `safeProvenance`, `keptName` and `leaseClause`; `provenanceText` adds
+the provenance cause. `SAFE_PROVENANCE` admits no slash, because an error message is where
+a path arrives. The lease clause reads the count before choosing its sentence, so a
+refused sweep is never announced as "0 set aside". `doctorPointer` is conditional per
+provenance: only a `recorded` adoption wrote the history entry the doctor renders.
 
 The `.*` gate announces only an adoption its own process performed, on an ALLOW only
 (`judgePrincipal` returns the violation and `main` decides once), with `systemMessage` for
-every principal and `additionalContext` for the main thread alone. The adapter appends the
-model copy for MAIN only, because the notice names the superseded record, whose basename is
-the session selector confined contexts withhold.
+every principal and `additionalContext` for the main thread alone. When its bind adopted
+and the call is then DENIED — a missing workflow baseline, or a strict re-read that no arm
+relaxes — every deny in its bind-failure catch appends the operator sentence after the
+cause (`performedDisclosure`, through `denyBind`), because with provenance
+`no-workflow-document` the doctor has no entry and the kept record is otherwise the only
+trace. The adapter appends the model copy for MAIN only, because the notice names the
+superseded record, whose basename is the session selector confined contexts withhold.
 
 On the ordinary flow a UserPromptSubmit hook binds first after `/reload-plugins`, so a SHELL
 hook performs the adoption and prints nothing on allow. The user then sees it through the
 binder's stderr line (delivery unverified) and the doctor's `runtimeAdoptedRow`, which
-shares the provenance rows' single read (`sharedWorkflowRead`) and parses the version pair
-out of the history reason rather than echoing it. The binder exports `ZENSU_SESSION_ADOPTED`
-(`recorded -> executing`, or empty) for the planned install-lineage notice hook; no hook
-consumes it yet. Hooks that discard the binder's output leave an adoption traceable through
-the doctor alone: `grep -rn 'zensu_bind_hook_session' hooks/` and judge every hit that
-redirects stderr.
+shares the provenance rows' single read (`sharedWorkflowRead`), parses the version pair
+through `parseAdoptionReason` and takes the kept name from `supersededRecordName`. The
+binder exports `ZENSU_SESSION_ADOPTED` (`recorded -> executing`, or empty) for the planned
+install-lineage notice hook; no hook consumes it yet. Hooks that discard the binder's
+output leave an adoption traceable through the doctor alone:
+`grep -rn 'zensu_bind_hook_session' hooks/` and judge every hit that redirects stderr.
 
 ## Bounds
 
@@ -184,9 +225,17 @@ redirects stderr.
   `RUNTIME_ADOPTED` history entry).
 - The opt-out is a session-writable config key and is not ledgered.
 - The `adoption-refusal` probe is a second node spawn, on the deny path only.
+- A recorded project root that is gone under a lineage this installation serves runs the
+  adoption path on EVERY bind: the strict read fails, the probe's orphan read measures the
+  runtime digest, `adoptForHook` runs the idempotent lease sweep, and the `.*` gate's
+  relaxation then performs its own orphan read — two digest walks and one sweep per tool
+  call where there was one walk. The cost is unmeasured. Memoizing the digest per process
+  was declined: the core's own suite measures a tree, edits it and measures again inside
+  one process.
 - Not executed end to end: the `adoption-incomplete` scope through a real lost race (the
-  emitter and the routing are driven with a stubbed wrapper), the Stop hook's re-bind, and
-  the `.*` gate rendering `lock-timeout` or `adoption-failed`.
+  emitter and the routing are driven with a stubbed wrapper, and the Stop re-bind with a
+  stubbed session library in `AUTO-28`), and the `.*` gate rendering `lock-timeout` or
+  `adoption-failed`.
 - Windows is unmeasured: the upgrade suite is the last entry of `windows-shard-2`. Do not
   raise the cap before a green Windows run supplies a figure.
 
@@ -197,7 +246,11 @@ is passed PER DRIVE as a command-scoped `ZENSU_CONFIG=` prefix and never exporte
 lineage or pruned deny row added without it adopts the shared record on its first drive,
 and every later row then grades a served session. `HERMETIC_CONFIG` (an empty object) is
 exported so no drive reads the runner's own `$HOME/.zensu/config.json`. The default-path
-rows are the `AUTO-*` family; name it as a family, never by an endpoint.
+rows are the `AUTO-*` family; name it as a family, never by an endpoint. The fixture-free
+emitter rows run at the HEAD of Part E, so a truncated Windows run costs session-minting
+rows rather than the only executed cases of the shell emitter's scopes. The report's
+`main()` takes a `deps` seam (request builder, core, adopter) that its unit file drives for
+the `--confirm` arms, the preview arms and the provenance branches.
 
 ## Version
 
@@ -206,13 +259,17 @@ permissively by a new reader, no attestation change, and the gates deny strictly
 
 ## Port-relevant
 
-Core half: the module (ladder with its crash-resume rung, the four screens, the renderer,
-`operatorLine`, `doctorPointer`, `configLayers` with its sticky `false`, `SAFE_TOKEN`,
-`STATE_NEUTRAL_REASONS`, `establishesNamedState`) plus the core's typed errors,
-`ADOPTION_PROVENANCE`, `supersededRecordFile`, and the state `adoptableRecord` attaches to
-refusals. Host half: the opt-in table, the `adoption-refusal` mode and its wrappers, the
-gate's copies of verb, remedy and tail, the audience input, the token argument of the named
-and generic scopes, the `adoption-incomplete` scope and the Stop re-bind, the adapter's
-`serveOrAdopt`, the operator line for every process that can adopt, and the doctor's
-adoption row. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this
-change.
+Core half: the module's ladder with its crash-resume rung, the sticky-`false` combining
+rule over the layers a host hands it, the four screens, the renderers built over the
+injected core, `SAFE_TOKEN`, `STATE_NEUTRAL_REASONS` and `establishesNamedState`, plus the
+core's typed errors, `ADOPTION_PROVENANCE`, the reason grammar, `supersededRecordName` /
+`supersededRecordFile`, and the state `adoptableRecord` attaches to refusals. Host half:
+`configLayers` (it reads this host's variable names and config layout), the opt-in table,
+`bindAndDisclose` and its lead-ins, the `adoption-refusal` mode and its wrappers, the gate's
+copies of verb, remedy, tail and the two limit clauses, the audience input, the token
+argument of the named and generic scopes, the `adoption-incomplete` scope and the Stop
+re-bind, the adapter's `serveOrAdopt`, the doctor's adoption row, and the membership of
+`ZENSU_SESSION_ADOPTED` in every unset and export list of `zensu-session.sh` plus the
+pre-source unset in `session-start-autopilot-resume.sh` — an export line without those
+lists carries a stale pair into the next hook. `zensu-codex`, `zensu-kiro` and
+`zensu-antigravity` were NOT included in this change.

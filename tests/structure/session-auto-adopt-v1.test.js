@@ -124,6 +124,7 @@ test('an adoptable record is adopted, and the sweep result travels verbatim', ()
   assert.equal(verdict.projectRoot, '/work/project');
   assert.deepEqual(verdict.leases, sweepResult);
   assert.equal(calls.adopt, 1);
+  assert.equal(calls.adoptable, 1, 'adoptForHook starts from the preview and never walks the probe twice');
   assert.deepEqual(sweepCalls, [{ pluginData: REQUEST.pluginData, key: 'scv1_session-id', root: '/plugins/zensu/0.21.1' }]);
   for (const field of VERDICT_FIELDS) assert.ok(field in verdict, field);
 });
@@ -135,14 +136,16 @@ test('every core refusal reason maps to REFUSED and already-served to ALREADY_SE
   // would fail here instead of silently agreeing with a stub.
   const readerMustNotRun = () => { throw new Error('the module must not re-read the record'); };
   for (const reason of Object.values(realCore.ADOPTION_REFUSALS)) {
-    const { instance, calls } = adopter({
+    let probes = 0;
+    const { instance, calls, sweepCalls } = adopter({
       readContext: readerMustNotRun,
       readOrphanedProjectRootContext: readerMustNotRun,
       readPrunedPluginRootContext: readerMustNotRun,
       executingPluginVersion: readerMustNotRun,
-      adoptableRecord: () => ({
-        ok: false, reason, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: true,
-      }),
+      adoptableRecord: () => {
+        probes += 1;
+        return { ok: false, reason, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: true };
+      },
     });
     const verdict = instance.adoptForHook(REQUEST);
     const expected = reason === 'already-served' ? 'already-served' : 'refused';
@@ -155,16 +158,67 @@ test('every core refusal reason maps to REFUSED and already-served to ALREADY_SE
     assert.equal(verdict.prunedPluginRoot, true, 'the state flag travels with the refusal');
     assert.equal(verdict.orphanedProjectRoot, false);
     assert.equal(calls.adopt, 0, `adoptContext must not run for ${reason}`);
+    assert.equal(probes, 1, `one probe for ${reason}`);
+    // A served record is an adoption another process performed, and it is complete
+    // only once the lease sweep has run: that outcome sweeps, every refusal does not.
+    assert.equal(sweepCalls.length, reason === 'already-served' ? 1 : 0, `sweep for ${reason}`);
+    assert.equal(verdict.leases === null, reason !== 'already-served', `leases for ${reason}`);
     for (const field of VERDICT_FIELDS) assert.ok(field in verdict, field);
   }
 });
 
-test('a concurrent winner is reported as ALREADY_SERVED / adopted-concurrently', () => {
-  const { instance } = adopter({ adoptContext: () => { throw refusalError('already-served'); } });
+test('a concurrent winner is reported as ALREADY_SERVED / adopted-concurrently, and its sweep is completed here', () => {
+  const sweepResult = { discarded: 1, failed: [], unsafe: '', unsafeAt: '' };
+  const { instance, sweepCalls } = adopter({ adoptContext: () => { throw refusalError('already-served'); } }, sweepResult);
   const verdict = instance.adoptForHook(REQUEST);
   assert.equal(verdict.outcome, 'already-served');
   assert.equal(verdict.reason, 'adopted-concurrently');
-  assert.equal(verdict.leases, null);
+  // The winner releases the records lock before it sweeps, so the loser would bind
+  // against superseded leases; the idempotent sweep runs here too, against the
+  // executing root in the spelling the lease store records.
+  assert.deepEqual(verdict.leases, sweepResult);
+  assert.deepEqual(sweepCalls, [{ pluginData: REQUEST.pluginData, key: 'scv1_session-id', root: REQUEST.executingPluginRoot }]);
+  const canonical = adopter({ adoptContext: () => { throw refusalError('already-served'); } }, sweepResult,
+    { fs: { realpathSync: { native: (root) => '/canonical' + root } } });
+  canonical.instance.adoptForHook(REQUEST);
+  assert.equal(canonical.sweepCalls[0].root, '/canonical/plugins/zensu/0.21.1');
+  const throwing = adopter({ adoptContext: () => { throw refusalError('already-served'); } }, new Error('lease store gone'));
+  assert.equal(throwing.instance.adoptForHook(REQUEST).leases.unsafe, 'sweep-failed');
+});
+
+test('a lock timeout asks the probe once more, and a record that serves by then is a sibling adoption', () => {
+  let probes = 0;
+  let adopts = 0;
+  const { instance, sweepCalls } = adopter({
+    adoptableRecord: () => {
+      probes += 1;
+      return probes === 1
+        ? { ok: true, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false, context: {} }
+        : { ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1' };
+    },
+    adoptContext: () => { adopts += 1; throw new Error('session-control-v1: timed out acquiring per-session lock'); },
+  });
+  const verdict = instance.adoptForHook(REQUEST);
+  assert.equal(verdict.outcome, 'already-served');
+  assert.equal(verdict.reason, 'adopted-concurrently');
+  assert.equal(verdict.recorded, '0.20.0', 'the version this session came from, carried off the first probe');
+  assert.equal(probes, 2);
+  assert.equal(adopts, 1);
+  assert.equal(sweepCalls.length, 1);
+  // A probe that still answers adoptable, or throws, leaves the timeout standing.
+  const stillOld = adopter({ adoptContext: () => { throw new Error('session-control-v1: timed out acquiring per-session lock'); } });
+  assert.equal(stillOld.instance.adoptForHook(REQUEST).reason, 'lock-timeout');
+  assert.equal(stillOld.sweepCalls.length, 0);
+  let thrown = 0;
+  const probeThrows = adopter({
+    adoptableRecord: () => {
+      thrown += 1;
+      if (thrown > 1) throw new Error('probe broke');
+      return { ok: true, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: false, context: {} };
+    },
+    adoptContext: () => { throw new Error('session-control-v1: timed out acquiring per-session lock'); },
+  });
+  assert.equal(probeThrows.instance.adoptForHook(REQUEST).reason, 'lock-timeout');
 });
 
 test('a typed refusal thrown under the lock keeps its reason', () => {
@@ -376,6 +430,24 @@ test('previewAdoption performs no write and answers ADOPTABLE for an adoptable r
   assert.equal(calls.adopt, 0);
 });
 
+test('previewAdoption does not sweep a served record: the completing sweep belongs to adoptForHook', () => {
+  // The preview backs the report's read-only path and the binder's adoption-refusal
+  // mode, and both rest on it writing nothing. The lease sweep MOVES files, so a
+  // served answer from the preview carries no lease result, while the same answer
+  // from adoptForHook carries the sweep it ran.
+  const served = { adoptableRecord: () => ({ ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1' }) };
+  const preview = adopter(served, { discarded: 0, failed: [] });
+  const previewed = preview.instance.previewAdoption(REQUEST);
+  assert.equal(previewed.outcome, 'already-served');
+  assert.equal(previewed.leases, null);
+  assert.equal(preview.sweepCalls.length, 0, 'the preview never sweeps');
+  const hook = adopter(served, { discarded: 2, failed: [] });
+  const adopted = hook.instance.adoptForHook(REQUEST);
+  assert.equal(adopted.outcome, 'already-served');
+  assert.deepEqual(adopted.leases, { discarded: 2, failed: [] });
+  assert.equal(hook.sweepCalls.length, 1, 'adoptForHook completes the sibling adoption');
+});
+
 test('an invalid request is UNAVAILABLE / invalid-request and never reaches the core', () => {
   const { instance, calls } = adopter({});
   for (const bad of [null, {}, { ...REQUEST, sessionId: '' }, { ...REQUEST, recordsDir: 7 }]) {
@@ -462,7 +534,7 @@ test('the real adoptableRecord attaches the state to a refusal it reaches past t
   assert.deepEqual(stateless, ['adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE)']);
 });
 
-test('the config reader mirrors the shell precedence: explicit file, then global merged with the project overlay', () => {
+test('the config reader reads the strict shell candidates as separate layers: explicit file, else global and project overlay', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-auto-adopt-'));
   const home = path.join(root, 'home');
   const project = path.join(root, 'project');
@@ -475,15 +547,14 @@ test('the config reader mirrors the shell precedence: explicit file, then global
 
   write(globalFile, { hooks: { sessionAutoAdopt: false, other: true } });
   write(projectFile, { hooks: { sessionAutoAdopt: true } });
-  // The MERGED view keeps the precedence every other reader applies: project wins.
-  const projectWins = mod.effectiveConfig({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux');
-  assert.equal(projectWins.hooks.sessionAutoAdopt, true);
-  assert.equal(projectWins.hooks.other, true);
-  // ...and the DECISION does not follow it. For this key `false` is sticky: the
-  // overlay lives in a directory a session can write, so an overlay `true` must not
-  // be able to switch back on what the operator switched off globally. This row
-  // asserted `true` while the merged precedence decided, which is the direction
-  // that let a seeded overlay re-enable an unprompted adoption.
+  // The layers are read APART, global first — no merged view decides this key.
+  const layers = mod.configLayers({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux');
+  assert.equal(layers[0].hooks.sessionAutoAdopt, false);
+  assert.equal(layers[0].hooks.other, true);
+  assert.equal(layers[1].hooks.sessionAutoAdopt, true);
+  // For this key `false` is sticky: the overlay lives in a directory a session can
+  // write, so an overlay `true` must not be able to switch back on what the
+  // operator switched off globally.
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
     .autoAdoptEnabled({ HOME: home, CLAUDE_PROJECT_DIR: project }), false);
   assert.equal(mod.configLayers({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux').length, 2);
@@ -511,10 +582,76 @@ test('the config reader mirrors the shell precedence: explicit file, then global
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
     .autoAdoptEnabled({}), true);
 
-  write(projectFile, { hooks: { __proto__: { sessionAutoAdopt: false }, constructor: { x: 1 } } });
-  const merged = mod.effectiveConfig({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux');
-  assert.equal(Object.prototype.hasOwnProperty.call(merged.hooks, 'constructor'), false);
+  // A `__proto__` key is an ordinary own key of the parsed layer, never the key the
+  // decision reads, so it neither disables the path nor pollutes a prototype.
+  write(projectFile, '{"hooks":{"__proto__":{"sessionAutoAdopt":false}}}');
+  assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
+    .autoAdoptEnabled({ HOME: home, CLAUDE_PROJECT_DIR: project }), true);
+  assert.equal({}.sessionAutoAdopt, undefined);
+
+  // No HOME, no global layer: joined onto an empty string the path would be
+  // RELATIVE and resolve against the hook's working directory.
+  const stat = [];
+  const recorder = { statSync: (file) => { stat.push(file); throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } };
+  assert.deepEqual(mod.configLayers({ HOME: '', CLAUDE_PROJECT_DIR: project }, 'linux', recorder).length, 1);
+  assert.deepEqual(stat, [path.join(project, '.zensu', 'config.json')]);
+  assert.equal(mod.configLayers({}, 'linux', recorder).length, 0);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// The strict shell reader guards the capability grant with the same sticky rule over
+// the same files; the two candidate sets are pinned against each other here, because
+// nothing else compares them. The shell program is extracted from its carrier and
+// run in a sandbox with a stubbed environment.
+test('the candidate files equal those of _ZENSU_STRICT_JS in zensu-config.sh', () => {
+  const vm = require('node:vm');
+  const shell = fs.readFileSync(path.join(LIB, 'zensu-config.sh'), 'utf8');
+  const match = /^_ZENSU_STRICT_JS='([^']*)'$/m.exec(shell);
+  assert.ok(match, '_ZENSU_STRICT_JS must be a single-quoted one-line assignment');
+  const shellCands = (env) => {
+    const sandbox = { process: { env }, require };
+    vm.runInNewContext(`${match[1]}; globalThis.__out = cands();`, sandbox);
+    return JSON.parse(JSON.stringify(sandbox.__out));
+  };
+  const moduleCands = (env) => {
+    const stat = [];
+    const recorder = { statSync: (file) => { stat.push(file); throw Object.assign(new Error('absent'), { code: 'ENOENT' }); } };
+    mod.configLayers(env, 'linux', recorder);
+    return stat;
+  };
+  for (const env of [
+    { HOME: '/h', CLAUDE_PROJECT_DIR: '/p' },
+    { HOME: '/h' },
+    { CLAUDE_PROJECT_DIR: '/p' },
+    { HOME: '', CLAUDE_PROJECT_DIR: '/p' },
+    { ZENSU_CONFIG: '/explicit.json', HOME: '/h', CLAUDE_PROJECT_DIR: '/p' },
+    {},
+  ]) {
+    assert.deepEqual(moduleCands(env), shellCands(env), JSON.stringify(env));
+  }
+});
+
+test('the renderers that read the core are built over the injected core', () => {
+  const bare = mod.createAutoAdopter({ core: {}, sweep: stubSweep().sweep, readConfig: () => ({}) });
+  // A core without the version shape renders no version it cannot judge.
+  assert.equal(bare.safeVersion('0.20.0'), '(unreadable)');
+  // ...and a core without the provenance vocabulary takes the conditional pointer.
+  assert.match(bare.doctorPointer({ outcome: 'adopted', provenance: 'recorded' }), /when a workflow document recorded it/);
+  assert.match(bare.operatorLine({ recorded: '0.20.0', executing: '0.21.1' }), /\(\(unreadable\) -> \(unreadable\)\)/);
+  const real = mod.createAutoAdopter({ core: realCore, sweep: stubSweep().sweep, readConfig: () => ({}) });
+  assert.equal(real.safeVersion('0.20.0'), '0.20.0');
+  assert.match(real.operatorLine({ recorded: '0.20.0', executing: '0.21.1' }), /\(0\.20\.0 -> 0\.21\.1\)/);
+  assert.equal(mod.safeVersion('0.20.0'), '0.20.0');
+});
+
+test('a sibling adoption whose sweep here was refused says so in the served notice, and a clean one does not', () => {
+  const base = { outcome: 'already-served', reason: 'adopted-concurrently', recorded: '0.20.0', executing: '0.21.1' };
+  const clean = mod.renderAdoptionNotice({ ...base, leases: { discarded: 0, failed: [], unsafe: '' } }, { where: 'on this tool call' });
+  assert.doesNotMatch(clean, /lease/);
+  const refused = mod.renderAdoptionNotice({ ...base, leases: { discarded: 0, failed: [], unsafe: 'locked' } }, { where: 'on this tool call' });
+  assert.match(refused, /serves the adopted record \(the review-evidence lease sweep was REFUSED \(locked\)/);
+  const stuck = mod.renderAdoptionNotice({ ...base, leases: { discarded: 1, failed: ['a'], unsafe: '' } }, { where: 'on this tool call' });
+  assert.match(stuck, /left STUCK/);
 });
 
 test('the default instance is wired to the real core and sweep', () => {

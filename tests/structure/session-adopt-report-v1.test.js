@@ -825,3 +825,143 @@ test('WB the surviving-evidence cap bounds a session-writable directory', () => 
   assert.deepEqual(survivingEvidence(root, ''), []);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ── main(): the adoption half through its unit seam ───────────────────────────
+//
+// The --confirm outcome split and the read-only preview arms were reachable only
+// through a real store and a racing hook, so no case held them and swapping two of
+// their bodies stayed green. main() takes the request builder, the core and the
+// shared adopter as a seam; everything else is the real module.
+
+const SEAM_REQUEST = Object.freeze({
+  recordsDir: '/records',
+  sessionId: 'report-unit-session',
+  host: 'claude',
+  pluginData: '/data',
+  executingPluginRoot: '/plugins/zensu/0.21.1',
+});
+const SEAM_ADOPTABLE = Object.freeze({
+  ok: true,
+  recorded: '0.20.0',
+  executing: '0.21.1',
+  orphanedProjectRoot: false,
+  prunedPluginRoot: false,
+  context: { project_root: '/work/project' },
+});
+
+function seam(overrides) {
+  const realCore = CORE();
+  const realAdopter = require(path.join(LIB, 'session-auto-adopt-v1.js'));
+  return {
+    buildRequest: () => ({ ...SEAM_REQUEST }),
+    core: { ...realCore, adoptableRecord: () => SEAM_ADOPTABLE, ...(overrides.core || {}) },
+    autoAdopt: { ...realAdopter, ...(overrides.autoAdopt || {}) },
+  };
+}
+
+// Runs main() with stdout captured and the process exit code isolated. main() is
+// synchronous, so nothing else writes to stdout inside the window.
+function runMain(deps, confirm) {
+  const { main } = report();
+  const saved = { id: process.env.ZADOPT_SESSION_ID, confirm: process.env.ZADOPT_CONFIRM, mode: process.env.ZADOPT_MODE };
+  const savedExit = process.exitCode;
+  const write = process.stdout.write;
+  const chunks = [];
+  process.env.ZADOPT_SESSION_ID = SEAM_REQUEST.sessionId;
+  if (confirm) process.env.ZADOPT_CONFIRM = '1'; else delete process.env.ZADOPT_CONFIRM;
+  delete process.env.ZADOPT_MODE;
+  process.exitCode = undefined;
+  process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  let code;
+  try {
+    main(deps);
+  } finally {
+    process.stdout.write = write;
+    code = process.exitCode;
+    process.exitCode = savedExit;
+    for (const [key, name] of [['id', 'ZADOPT_SESSION_ID'], ['confirm', 'ZADOPT_CONFIRM'], ['mode', 'ZADOPT_MODE']]) {
+      if (saved[key] === undefined) delete process.env[name]; else process.env[name] = saved[key];
+    }
+  }
+  return { out: chunks.join(''), code: code === undefined ? 0 : code };
+}
+
+const RACED = 'adopted by a hook of this session while this command ran';
+const UNDER_LOCK = 'refused under the records lock';
+const INCOMPLETE = 'the adoption itself did not complete: ';
+
+test('MAIN the --confirm arms: a sibling that adopted meanwhile is named as served, and exits 1', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'adopted-concurrently', supersededFile: null, leases: null, error: null }) } }), true);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adopted (adopted-concurrently)'), out.slice(0, 80));
+  assert.ok(out.includes(RACED));
+  assert.equal(out.includes(UNDER_LOCK), false);
+  assert.equal(out.includes(INCOMPLETE), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a refusal that first appears under the lock is named as refused, and exits 1', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'refused', reason: 'workflow-schema-mismatch', supersededFile: null, leases: null, error: null }) } }), true);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adopted (workflow-schema-mismatch)'), out.slice(0, 80));
+  assert.ok(out.includes(UNDER_LOCK));
+  assert.equal(out.includes(RACED), false);
+  assert.equal(out.includes('simply continue'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: an adoption that did not complete names its cause, and exits 1', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'unavailable', reason: 'lock-timeout', supersededFile: null, leases: null, error: 'timed out acquiring per-session lock' }) } }), true);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adopted (lock-timeout)'), out.slice(0, 80));
+  assert.ok(out.includes(INCOMPLETE + 'timed out acquiring per-session lock'));
+  assert.equal(out.includes(RACED), false);
+  assert.equal(out.includes(UNDER_LOCK), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the read-only preview: a record served by the time of the preview renders as the probe would, never ADOPTABLE', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { previewAdoption: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases: null, error: null }) } }), false);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adoptable (already-served)'), out.slice(0, 80));
+  assert.ok(out.includes(report().REMEDY['already-served'].slice(0, 40)));
+  assert.equal(out.includes('— ADOPTABLE'), false);
+  assert.equal(out.includes('Run the same command with --confirm to adopt'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the read-only preview: a refusal the preview finds is named with its remedy, never ADOPTABLE', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { previewAdoption: () => ({ outcome: 'refused', reason: 'executing-runtime-older', supersededFile: null, leases: null, error: null }) } }), false);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adoptable (executing-runtime-older)'), out.slice(0, 80));
+  assert.ok(out.includes(report().REMEDY['executing-runtime-older'].slice(0, 40)));
+  assert.equal(out.includes('— ADOPTABLE'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the read-only preview: an adoptable preview is the one answer that reads ADOPTABLE and exits 0', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { previewAdoption: () => ({ outcome: 'adoptable', reason: 'adoptable', supersededFile: null, leases: null, error: null }) } }), false);
+  assert.ok(out.startsWith('Zensu session adoption — ADOPTABLE'), out.slice(0, 80));
+  assert.ok(out.includes('Run the same command with --confirm to adopt'));
+  assert.equal(code, 0);
+});
+
+test('MAIN the provenance branches read the core vocabulary, not the literals', () => {
+  // A renamed token must still route to its own branch. With the literals, a
+  // successful adoption without a workflow document fell to "its provenance entry
+  // could not be written" — false, with nothing failing.
+  const vocabulary = { RECORDED: 'rec-renamed', NO_DOCUMENT: 'nodoc-renamed', UNAVAILABLE: 'unav-renamed' };
+  const adopted = (provenance) => ({
+    outcome: 'adopted', reason: 'adopted', recorded: '0.20.0', executing: '0.21.1', projectRoot: '/work/project',
+    orphanedProjectRoot: false, prunedPluginRoot: false, supersededFile: '/records/scv1_x.superseded-0.20.0.json',
+    provenance, provenanceCause: null, leases: { discarded: 0, failed: [], unsafe: '', unsafeAt: '' }, error: null,
+  });
+  const run = (provenance) => runMain(seam({
+    core: { ADOPTION_PROVENANCE: vocabulary },
+    autoAdopt: { adoptForHook: () => adopted(provenance) },
+  }), true);
+  const noDocument = run('nodoc-renamed');
+  assert.ok(noDocument.out.includes('this session has no usable workflow document'));
+  assert.equal(noDocument.out.includes('its provenance entry could not be written'), false);
+  assert.equal(noDocument.code, 0);
+  const recorded = run('rec-renamed');
+  assert.equal(recorded.out.includes('its provenance entry could not be written'), false);
+  assert.equal(recorded.out.includes('no usable workflow document'), false);
+  const unavailable = run('unav-renamed');
+  assert.ok(unavailable.out.includes('its provenance entry could not be written'));
+});

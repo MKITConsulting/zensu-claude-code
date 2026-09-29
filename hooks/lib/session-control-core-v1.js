@@ -1885,6 +1885,30 @@ const ADOPTION_PROVENANCE = Object.freeze({
   UNAVAILABLE: 'unavailable',
 });
 
+// The version pair an adoption records, in ONE grammar. The history entry's reason,
+// the binder's ZENSU_SESSION_ADOPTED export line and the doctor's adoption row all
+// spell or parse `<recorded> -> <executing>`; a reader that re-parsed the pair by
+// hand would drift from this writer silently, rendering every real adoption as an
+// unreadable pair. The parser holds both halves to the version shape, because the
+// reason is read back out of a document the session can write.
+const ADOPTION_PAIR_SEPARATOR = ' -> ';
+
+function formatAdoptionPair(recorded, executing) {
+  return `${recorded}${ADOPTION_PAIR_SEPARATOR}${executing}`;
+}
+
+function formatAdoptionReason(recorded, executing) {
+  return `${ADOPTION_HISTORY_REASON_PREFIX}${formatAdoptionPair(recorded, executing)}`;
+}
+
+function parseAdoptionReason(reason) {
+  if (typeof reason !== 'string' || reason.indexOf(ADOPTION_HISTORY_REASON_PREFIX) !== 0) return null;
+  const pair = reason.slice(ADOPTION_HISTORY_REASON_PREFIX.length).split(ADOPTION_PAIR_SEPARATOR);
+  if (pair.length !== 2) return null;
+  if (!ADOPTION_SAFE_VERSION_RE.test(pair[0]) || !ADOPTION_SAFE_VERSION_RE.test(pair[1])) return null;
+  return { recorded: pair[0], executing: pair[1] };
+}
+
 // The two ways adoptContext refuses under its own lock, as CODES a caller can
 // branch on rather than prose it has to substring-match — the same reason the
 // baseline repair carries BASELINE_ALREADY_PRESENT_CODE. A hook that adopts
@@ -1917,11 +1941,18 @@ function isSupersededRecordConflict(error) {
 // before the shape guard runs — a later caller handing a refusal's `recorded` in
 // would have joined an unscreened string into a path. It throws; every caller
 // either holds an accepted verdict or treats the throw as "no such file".
-function supersededRecordFile(recordsDir, key, recordedVersion) {
+// The basename alone is its own export because a renderer that needs only the NAME
+// — the doctor's adoption row — has no records directory to hand in, and calling
+// the path form with an empty directory was a call off its contract.
+function supersededRecordName(key, recordedVersion) {
   if (typeof recordedVersion !== 'string' || !ADOPTION_SAFE_VERSION_RE.test(recordedVersion)) {
     fail('superseded record name needs a recorded version of the safe shape');
   }
-  return path.join(recordsDir, `${key}.superseded-${recordedVersion}.json`);
+  return `${key}.superseded-${recordedVersion}.json`;
+}
+
+function supersededRecordFile(recordsDir, key, recordedVersion) {
+  return path.join(recordsDir, supersededRecordName(key, recordedVersion));
 }
 
 // Performs the adoption re-checked UNDER the records lock. The precondition is
@@ -2076,7 +2107,7 @@ function adoptContext(options) {
           step: '',
           phase: ADOPTION_HISTORY_PHASE,
           ts: nowIso(),
-          reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+          reason: formatAdoptionReason(adopted.recorded, adopted.executing),
         });
         state.history = history;
         return state;
@@ -5587,6 +5618,10 @@ module.exports = {
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
   ADOPTION_PROVENANCE,
+  ADOPTION_PAIR_SEPARATOR,
+  formatAdoptionPair,
+  formatAdoptionReason,
+  parseAdoptionReason,
   adoptableRecord,
   adoptContext,
   // PRODUCTION consumers: hooks/lib/session-auto-adopt-v1.js branches on the two
@@ -5597,6 +5632,7 @@ module.exports = {
   SUPERSEDED_EXISTS_CODE,
   isAdoptionRefusal,
   isSupersededRecordConflict,
+  supersededRecordName,
   supersededRecordFile,
   LOCK_TIMEOUT_CODE,
   isLockTimeout,
