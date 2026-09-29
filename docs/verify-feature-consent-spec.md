@@ -12,6 +12,14 @@ below about the broker, its start modes, its execution marker or the MCP tool na
 retired design. The current behaviour is in `docs/gates.md` § Browser Consent Gate and
 `docs/verify-feature.md`; this document stays as the record of the consent-mode decisions.
 
+**The route layer was retired too.** The evidence boundary is now the ORIGIN in both modes: an
+approved origin covers every page on it at any path, the prompt names no route, a policy target
+needs no `routes` list (one a policy still carries is accepted when well formed and ignored),
+`--check-policy` takes no route operand, and `validate.evidenceSafety` no longer gates
+navigation. Pages whose path carries identifiers minted on every run could never be declared
+exactly, so every protected scenario on them ended PARTIAL. Every statement below about declared
+routes, route coverage or a route-level `ask` describes the retired design.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)

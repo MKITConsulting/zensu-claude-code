@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **verify-feature**: the browser consent gate no longer checks routes. An origin approved at the
+  consent prompt, or named as a target of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`, now covers every
+  page on it at any path, so pages whose path carries identifiers minted on every run can be
+  verified. A policy's `routes` list and a recipe's `validate.evidenceSafety.routes` are no
+  longer read: a policy that still carries a well-formed `routes` list stays valid, and the list
+  narrows nothing. If you relied on it to keep the browser away from part of an origin, that
+  restriction is gone, so approve only origins whose every page the model may see.
+- **verify-feature**: the run-config preflight takes the origin only,
+  `verify-browser-config.js --check-policy <local|remote> <origin> declared-safe`; a call that
+  still passes a route operand is refused with that usage line.
+
 ## [0.22.0] - 2026-09-28
 
 ### Added

@@ -457,7 +457,7 @@ function toolBlock() {
 
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
-  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits only its targets and declared routes');
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits only its target origins, and every route on them');
   else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per new loopback origin of a zensu-verify playwright-cli session and then admits every route on it, and a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');

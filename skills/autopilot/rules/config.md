@@ -60,10 +60,9 @@ validate:
   navigationBroker:        # policy mode of /zensu:verify-feature; optional in consent mode
     contractVersion: 1
     policyEnv: ZENSU_VERIFY_NAVIGATION_POLICY_V1
-  evidenceSafety:           # optional; required before protected DOM/visual evidence reaches AI
+  evidenceSafety:           # optional; declares the application's data classification, gates nothing
     contractVersion: 1      # required literal integer
     mode: declared-safe     # the only mode supported by contract v1
-    routes: ["/exact/path"] # page-navigation paths only; no API/resource paths
     dataClassification: synthetic # synthetic | pre-classified-non-sensitive (declared-safe)
     containsPersonalData: false   # must be literal false (declared-safe)
     containsSecrets: false        # must be literal false (declared-safe)
@@ -84,15 +83,17 @@ to `api`, every other AC's live proof is skipped and named in the report, and it
 The key keeps its name so existing recipes stay valid; it declares POLICY mode.
 `/zensu:verify-feature` accepts only contract version `1` with the literal parent-environment
 key `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. The environment value is JSON with exactly
-`{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe","routes":["/exact/page-path"]}]}`
+`{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe"}]}`
 and is read from the environment Claude Code started with, by the browser consent gate (the
 Bash-matcher hook pair that judges each `playwright-cli` call whose command text names the CLI
 and a `zensu-verify` session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one) and
 by `scripts/verify-browser-config.js`. It is never a command the model may set during the run: a
 child-process export reaches neither the hooks nor the browser. Every selected
-application/authentication origin and every model-visible route must be present exactly or
-navigation remains PARTIAL. A dynamically chosen origin cannot be authorized from inside an
+application/authentication origin must be present exactly or navigation remains PARTIAL; a
+target covers every route on its origin, so no route list is declared. A policy written for an
+earlier contract may still carry a `routes` list: it is accepted when well formed and then
+ignored, so it narrows nothing. A dynamically chosen origin cannot be authorized from inside an
 already-running Claude session: launch the session with the exact origin policy first, or use a
 separate discovery run and restart with that policy. Without the variable
 `/zensu:verify-feature` runs in consent mode, which admits loopback origins only and
@@ -107,34 +108,28 @@ mode every origin must be non-loopback HTTPS; the run-config helper rejects any 
 is not globally routable and pins each hostname to an approved address for the browser process,
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser
 refuses every request to an origin outside the run config, and the gate reapplies the
-credential/query/fragment rule and the route list to every navigation command. A server
+credential/query/fragment rule to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. Missing/invalid declarations, mode mismatches, wildcard origins/routes,
-unsupported evidence modes, or unsupported policy versions fail closed. Each target binds its
-own origin to its own page-navigation routes, so routes are never combined across origins.
-Contract v1 supports only `declared-safe`; protected or sensitive content that cannot satisfy
-that declaration remains PARTIAL before navigation.
+every navigation. Missing/invalid declarations, mode mismatches, wildcard origins,
+unsupported evidence modes, or unsupported policy versions fail closed. Each target approves
+its own origin only, so an approval never carries over to another origin.
+Contract v1 supports only `declared-safe`; content on an origin that is not approved remains
+PARTIAL before navigation.
 
-### `validate.evidenceSafety` — fail-closed model-visible evidence contract
+### `validate.evidenceSafety` — optional data-classification declaration
 
-This block is a security boundary used by `/zensu:verify-feature`, not a descriptive label.
-It is considered valid only after the selected committed recipe and every referenced path are
-inspected. `contractVersion` must be the literal integer `1`. Missing fields, unknown
-modes/classifications, string booleans, wildcard routes, or routes containing a query or
-fragment reject the declaration; protected navigation remains PARTIAL.
+The evidence boundary of `/zensu:verify-feature` is the ORIGIN, never the route: an origin the
+user approved through the consent prompt, or that the parent-environment policy names with
+`evidenceMode: declared-safe`, covers every page on it, at any path. This block therefore gates
+no navigation. It records the recipe's claim about the application's data, and it is optional.
+When present it is read as follows; `contractVersion` must be the literal integer `1`.
 
-- `routes` is a non-empty list of page-navigation pathnames, never API/resource request paths.
-  Normalize the requested route with the
-  already-validated application origin, remove dot segments, and compare the resulting
-  pathname exactly. Every protected route in the matrix must have an exact entry. Entries do
-  not inherit to child routes and percent-encoded segments are not decoded for broader matches.
 - `mode: declared-safe` requires `dataClassification` to be exactly `synthetic` or
   `pre-classified-non-sensitive`, and both `containsPersonalData` and `containsSecrets` to be
-  literal `false`. This is appropriate only when checked-in fixture/seed code proves that the
-  covered route cannot render user, tenant, credential, or production-derived content.
-An absent or invalid block never downgrades the privacy requirement. It only prevents protected
-DOM/visual collection and forces a PARTIAL result; unauthenticated synthetic routes may still
-be verified under the ordinary evidence rules.
+  literal `false`. Claim it only when checked-in fixture/seed code proves that the application
+  cannot render user, tenant, credential, or production-derived content.
+- `routes` is no longer part of the contract. A recipe written for an earlier contract may still
+  carry it; it is ignored and restricts nothing.
 
 ## Concrete instance — the zensu-monorepo (verified values)
 

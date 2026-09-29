@@ -454,24 +454,27 @@ helper resolves each hostname once, refuses a non-public or mixed answer, and wr
 gate then requires, because an origin approved mid-session could not be pinned. The browser
 itself refuses every request to an origin outside `network.allowedOrigins`. It does NOT refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. In consent mode
-nothing enforces routes — the human consented to the whole origin.
+line after every navigating call and stops a scenario that left the approved set. In neither mode
+does anything enforce routes: the evidence boundary is the origin, which the human approves in
+consent mode and the launch policy names in policy mode, and an approved origin covers every page
+on it, at any path.
 
 **Consent and memory.** With no parent policy the PreToolUse hook returns
 `permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
 first call that reaches each new loopback origin. Consent is per ORIGIN: once an origin is
 approved, every route on it passes silently for the rest of the session, which is what the
-prompt says. The runtime recipe's declared routes are prompt CONTEXT — they tell the human what
-the run intends to visit — and steer no decision. The PostToolUse hook records an executed call
-as `(origin, route, decidedBy, at)` in `<project>/.zensu/state/verify-consent-<session-key>.json`,
+prompt says; the prompt names no route, and no recipe input reaches it. The PostToolUse hook
+records an executed call as `(origin, route, decidedBy, at)` in
+`<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
 The decision, the prompt text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
 run-config helper uses too, so there is one floor, not two.
 
-**With a parent policy present the gate asks nothing.** It admits only the policy's targets,
-navigation commands only to their declared routes, and a remote hostname only when the run
-config pins it; the PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
+**With a parent policy present the gate asks nothing.** It admits only the policy's target
+origins, every route on them, and a remote hostname only when the run config pins it; a
+`routes` list a policy written for the earlier contract still carries is accepted when well
+formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
 contract denies every `zensu-verify` navigation, with the broken rule named.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
@@ -537,12 +540,16 @@ through Bash.
 - **The consent memory is a file in a directory the session can write** through a Bash
   redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
   other loopback services.
+- **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
+  browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
+  Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
+  Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
+  check green. `*.localhost` stays refused although the same Chromium code resolves it to
+  loopback too.
 - **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
   it again when it starts the browser, so a file swapped in between is followed. The run
   directory sits under the project, where the session can write.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
-- **In policy mode routes are enforced on navigation commands only.** An in-page navigation to
-  an undeclared route on an approved origin is not seen by any hook.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
   even one set or left empty in the same command, an ANSI-C escape inside a name, such as

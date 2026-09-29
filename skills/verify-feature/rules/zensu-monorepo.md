@@ -49,14 +49,14 @@ navigation preflight to accept it:
 
 ```bash
 APP_ORIGIN="$(bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE")"
-node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy local "$APP_ORIGIN" "/" declared-safe
+node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy local "$APP_ORIGIN" declared-safe
 bash "$ZENSU_RUNTIME_CONTROLLER" up "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 bash "$ZENSU_RUNTIME_CONTROLLER" ready "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 ```
 
 Run every controller/preflight action as its own Bash invocation. If policy resolution or
 preflight fails, do not start or navigate. Report PARTIAL with instructions to launch a new
-Claude session with the exact origin and evidence-route policy. A child Bash command cannot
+Claude session with the exact origin policy. A child Bash command cannot
 change the environment the browser consent gate reads.
 
 Without a parent policy the gate runs in consent mode and the same three commands still
@@ -69,7 +69,8 @@ that origin opens the host's permission prompt to the user, and a refused prompt
 PARTIAL after `down`.
 
 With a parent policy, before `up` that environment must authorize exactly one target containing a
-literal `http://127.0.0.1:<port>` origin, page route `/`, and `declared-safe` evidence mode.
+literal `http://127.0.0.1:<port>` origin and `declared-safe` evidence mode; that target covers
+every route on the origin, so no route list is needed.
 `up` uses that exact frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at
 `55432` and `8090`, creates per-run database/JWT secrets and a private runtime lease,
