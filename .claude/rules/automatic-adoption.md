@@ -197,7 +197,10 @@ through the pruned fallback arm on the same root.
 
 `renderAdoptionNotice` serves the model/user channels: the gate's announcement, the
 `systemMessage` of a gate deny that follows an adoption, and the adapter's `systemMessage`
-plus `additionalContext`. `operatorLine` serves every process
+plus `additionalContext`. Its closing follows the call: `denied: true` closes it on the deny
+that followed the adoption rather than on "nothing else to do", and an orphaned adoption
+closes on the adoption alone, because its orphan clause names a directory still to
+re-create. `operatorLine` serves every process
 that performed an adoption and has no such channel. The binder's `bindAndDisclose` is the
 ONE bind-and-disclose policy for its CLI mode and the in-process evidence hook: it writes
 the operator line under the caller's own lead-in, on the success path and when the strict
@@ -208,7 +211,7 @@ a path arrives. The lease clause reads the count before choosing its sentence, s
 refused sweep is never announced as "0 set aside". `doctorPointer` is conditional per
 provenance: only a `recorded` adoption wrote the history entry the doctor renders.
 
-The `.*` gate announces only an adoption its own process performed, on an ALLOW only
+The `.*` gate announces an adoption only when its own process performed it, on an ALLOW only
 (`judgePrincipal` returns the violation and `main` decides once), with `systemMessage` for
 every principal and `additionalContext` for the main thread alone. When its bind adopted
 and the call is then DENIED — a missing workflow baseline, a strict re-read that no arm
@@ -226,13 +229,23 @@ renderer choice, the audience expression, the bind-failure deny helper and the c
 deny to their spellings; `AUTO-27`, `AUTO-27b` and `AUTO-24` drive the main, child and
 capability-deny halves.
 
-A SIBLING's adoption whose lease sweep this process completed — `adoptForHook` sweeps
-every served answer — is disclosed only when the sweep did something a reader must hear
+The lease sweep of a SERVED answer — `adoptForHook` sweeps every one, after a sibling's
+adoption and on every bind of a served record whose recorded project root is gone, where
+no adoption happened — is disclosed only when the sweep did something a reader must hear
 about: it set leases aside, was refused, or left leases stuck. `sweepWorthReporting` is
-the one predicate. Three surfaces carry it: `servedSweepLine` under the binder's lead-in
-(`bindAndDisclose` reads it off `binding.servedSweep` or `error.servedSweep`), the lease
-clause of the served notice, and the `--confirm` report's already-served arm, which
-reports the sweep instead of saying nothing was changed.
+the one predicate, and `servedSweepLine` names the served record, never a sibling's
+adoption, because the verdict cannot tell the two cases apart. Five surfaces carry it:
+`servedSweepLine` under the binder's lead-in (`bindAndDisclose` reads it off
+`binding.servedSweep` or `error.servedSweep`); the `.*` gate, whose wrapper discards
+stderr, as a `systemMessage` for every principal on an allow and on a deny that follows
+no adoption, plus `additionalContext` for the main thread on an allow
+(`servedSweepNotice`, read off `trusted.servedSweep` or `error.servedSweep`, which
+`revalidateSessionContext` re-attaches when the workflow check after the bind throws);
+the adapter's failure message when the strict re-read after a served answer still fails;
+the lease clause of the served notice; and the `--confirm` report's already-served arm,
+which reports the sweep instead of saying nothing was changed and names a refused sweep
+as refused rather than completed. `AUTO-29` drives the binder and the gate in both
+directions.
 
 On the ordinary flow a UserPromptSubmit hook binds first after `/reload-plugins`, so a SHELL
 hook performs the adoption and prints nothing on allow. The user then sees it through the
@@ -278,6 +291,10 @@ adoption row). This is a census, and the rule is the search:
   call where there was one walk. The cost is unmeasured. Memoizing the digest per process
   was declined: the core's own suite measures a tree, edits it and measures again inside
   one process.
+- In that same state a refused or stuck lease store is reported on EVERY bind that sweeps
+  it — the binder's stderr line, and the `.*` gate's `systemMessage` on every tool call —
+  for as long as it persists. Nothing latches it: a persistent fault the user must repair
+  is what the disclosure exists for, and a store the sweep finds clean stays silent.
 - Not executed end to end: the `adoption-incomplete` scope through a real lost race (the
   emitter and the routing are driven with a stubbed wrapper, and the Stop re-bind with a
   stubbed session library in `AUTO-28`), and the `.*` gate rendering `lock-timeout` or

@@ -147,8 +147,11 @@ function performedDisclosure(reason, performed, main) {
   } catch {
     line = 'adopted the Session Control record (details unavailable)';
   }
-  const closed = /[.!?]$/.test(reason) ? reason : `${reason}.`;
-  return `${closed} This call also ${line}.`;
+  return `${closeSentence(reason)} This call also ${line}.`;
+}
+
+function closeSentence(text) {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 // The user-facing half of that disclosure. The deny reason is model context, and
@@ -158,7 +161,7 @@ function performedDisclosure(reason, performed, main) {
 // notice, never the deny.
 function adoptionNotice(adoption) {
   try {
-    return autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call' });
+    return autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call', denied: true });
   } catch {
     return '';
   }
@@ -181,12 +184,24 @@ function denyAfterAdoption(reason, performed, main) {
 // adapter uses too, so the superseded basename, the provenance screen and the
 // lease clause (a REFUSED sweep is not "0 set aside") cannot drift between them.
 function announceAdoption(adoption, options) {
-  const text = autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call' });
+  announce(autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call' }), options);
+}
+
+function announce(text, options) {
   const output = { systemMessage: text };
   if (options && options.model === true) {
     output.hookSpecificOutput = { hookEventName: 'PreToolUse', additionalContext: text };
   }
   process.stdout.write(`${JSON.stringify(output)}\n`);
+}
+
+function servedSweepNotice(servedSweep) {
+  try {
+    const line = autoAdoptModule().servedSweepLine(servedSweep);
+    return line ? `zensu: ${line}` : '';
+  } catch {
+    return '';
+  }
 }
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
@@ -373,6 +388,7 @@ function revalidateSessionContext(payload) {
     };
   } catch (error) {
     if (binding.adoption && error && typeof error === 'object' && !error.adoption) error.adoption = binding.adoption;
+    if (binding.servedSweep && error && typeof error === 'object' && !error.servedSweep) error.servedSweep = binding.servedSweep;
     throw error;
   }
 }
@@ -688,8 +704,9 @@ function main() {
     // thread, the version pair for any other principal, and the notice as the deny's
     // systemMessage for the user; the relaxed allow announces it.
     const performed = hookSession.performedAdoption(error);
+    const sweepNotice = servedSweepNotice(error && error.servedSweep);
     const callerIsMain = principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN;
-    const denyBind = (reason) => (performed ? denyAfterAdoption(reason, performed, callerIsMain) : deny(reason));
+    const denyBind = (reason) => (performed ? denyAfterAdoption(reason, performed, callerIsMain) : deny(reason, sweepNotice));
     // Two states are not capability violations, and this hook runs on matcher
     // ".*" — so if it denies, it denies EVERY tool, /zensu:doctor included, and
     // the relaxation the Bash gate grants would never be reached.
@@ -744,6 +761,7 @@ function main() {
       // about it — the orphan clause of the notice is what says Edit and Write
       // stay denied.
       if (performed) announceAdoption(performed, { model: true });
+      else if (sweepNotice) announce(sweepNotice, { model: true });
       return;
     }
     // The binder ADOPTS before it denies now, so a typed refusal here means the
@@ -899,7 +917,7 @@ function main() {
     const attempted = refusal === '(unknown)'
       ? ''
       : ` Zensu also tried to adopt the record automatically for this session and ${adoptionAttempt(refusal)}: ${refusal}. ${callerIsMain ? `${adoptionRefusalRemedy(refusal)}.` : ADOPTION_CHILD_CLOSE}`;
-    denyBind(`immutable context revalidation failed: ${error.message}${attempted}`);
+    denyBind(`immutable context revalidation failed: ${attempted === '' ? error.message : closeSentence(error.message)}${attempted}`);
     return;
   }
 
@@ -916,7 +934,7 @@ function main() {
     // discards stderr. The binder's own test decides what counts as performed.
     const performed = hookSession.performedAdoption(trusted);
     if (performed) denyAfterAdoption(violation, performed, principal === principals.PRINCIPALS.MAIN);
-    else deny(violation);
+    else deny(violation, servedSweepNotice(trusted.servedSweep));
     return;
   }
   // Announce only an adoption THIS process performed: `trusted.adoption` is set by
@@ -925,7 +943,10 @@ function main() {
   // half; see announceAdoption for why the model half is the main thread's alone.
   if (trusted.adoption) {
     announceAdoption(trusted.adoption, { model: principal === principals.PRINCIPALS.MAIN });
+    return;
   }
+  const sweepNotice = servedSweepNotice(trusted.servedSweep);
+  if (sweepNotice) announce(sweepNotice, { model: principal === principals.PRINCIPALS.MAIN });
 }
 
 // The per-principal capability judgement, after the bind and the workflow

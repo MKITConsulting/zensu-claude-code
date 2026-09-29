@@ -396,7 +396,7 @@ REMEDY_LOCKSTEP="$(
     const disclosureSites = [
       /^\s*line = main \? renderers\.operatorLine\(performed\) : renderers\.confinedOperatorLine\(performed\);$/m,
       /^\s*const callerIsMain = principals\.classifyPreToolPayload\(payload\) === principals\.PRINCIPALS\.MAIN;$/m,
-      /^\s*const denyBind = \(reason\) => \(performed \? denyAfterAdoption\(reason, performed, callerIsMain\) : deny\(reason\)\);$/m,
+      /^\s*const denyBind = \(reason\) => \(performed \? denyAfterAdoption\(reason, performed, callerIsMain\) : deny\(reason, sweepNotice\)\);$/m,
       /^\s*if \(performed\) denyAfterAdoption\(violation, performed, principal === principals\.PRINCIPALS\.MAIN\);$/m,
     ];
     disclosureSites.forEach((site, index) => {
@@ -1025,12 +1025,13 @@ gate_decision_from() {
   # disagreement, and the core's own refusal of a vanished project root. A stack
   # trace still fails on its unprefixed lines, and a fixture fault now fails on
   # its own text.
-  # TWO further forms since the binder adopts: the ONE line it prints after an
-  # adoption it performed, and the refusal line that carries the original
-  # diagnostic behind `automatic adoption <outcome> (<reason>); `. Both are
-  # prefix-anchored to their fixed lead-ins; a stack trace still fails.
+  # THREE further forms since the binder adopts: the ONE line it prints after an
+  # adoption it performed, the line it prints after a lease sweep it ran while
+  # binding a record this installation already serves, and the refusal line that
+  # carries the original diagnostic behind `automatic adoption <outcome> (<reason>); `.
+  # All three are prefix-anchored to their fixed lead-ins; a stack trace still fails.
   if [ -s "$err" ] \
-    && grep -qvE '^(claude hook session binder: context plugin root is not a compatible lineage of the executing plugin|claude hook session binder: automatic adoption (refused|opted-out|unavailable|adoptable|already-served) \([a-z-]+\); |claude hook session binder: adopted the Session Control record \(|claude hook session binder: completed the review-evidence lease sweep of an adoption a sibling hook performed \(|session-control-v1: context project root does not exist)' "$err"; then
+    && grep -qvE '^(claude hook session binder: context plugin root is not a compatible lineage of the executing plugin|claude hook session binder: automatic adoption (refused|opted-out|unavailable|adoptable|already-served) \([a-z-]+\); |claude hook session binder: adopted the Session Control record \(|claude hook session binder: ran the review-evidence lease sweep while binding a record this installation already serves \(|session-control-v1: context project root does not exist)' "$err"; then
     printf 'hook-stderr\n'
     return
   fi
@@ -5039,8 +5040,9 @@ rm -f "$BASELINE_DOC"
 if [ "$BASELINE_TAMPER_DENY" = deny ] \
     && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'immutable context revalidation failed' \
     && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'activated workflow CAS state is unsafe' \
+    && ! printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'tried to adopt the record automatically' \
     && ! printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'the workflow document it anchors is missing'; then
-  check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild" PASS
+  check "AC-D07b a hard-linked document keeps the generic wording, is offered no rebuild and gets no adoption sentence appended" PASS
 else
   check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild (decision=$BASELINE_TAMPER_DENY)" FAIL
   printf '%s\n' "$BASELINE_TAMPER_REASON" | head -c 300
@@ -6343,6 +6345,38 @@ else
   check "AUTO-15b fixture: the evidence gone-root session registers under the candidate root" FAIL
 fi
 
+AUTO_EVSTOP_SESSION='versioned-upgrade-auto-evidence-stop'
+AUTO_EVSTOP_KEY="$(auto_key "$AUTO_EVSTOP_SESSION")"
+AUTO_EVSTOP_RECORD="$ADOPT_RECORDS_DIR/$AUTO_EVSTOP_KEY.json"
+if auto_session_start "$AUTO_EVSTOP_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_EVSTOP_RECORD" ]; then
+  AUTO_EVSTOP_ERR="$TMP/auto-evidence-stop.err"
+  EVENT=SubagentStop SESSION="$AUTO_EVSTOP_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      agent_type: "zensu:plan-review-worker",
+      agent_id: "agent-partb-1",
+    }));
+  ' | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/review-evidence-subagent-stop.sh" >"$TMP/auto-evidence-stop.out" 2>"$AUTO_EVSTOP_ERR" || true
+  if [ "$(auto_record_version "$AUTO_EVSTOP_RECORD")" = 0.18.0 ] \
+      && [ -f "$ADOPT_RECORDS_DIR/$AUTO_EVSTOP_KEY.superseded-0.17.0.json" ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_EVSTOP_SESSION")" = 1 ] \
+      && ! grep -qF 'automatic adoption ' "$AUTO_EVSTOP_ERR" \
+      && grep -qF "review-evidence-hook-v1: adopted the Session Control record (0.17.0 -> 0.18.0); previous record kept as $AUTO_EVSTOP_KEY.superseded-0.17.0.json; provenance recorded; 0 review-evidence lease(s) from before the update set aside" "$AUTO_EVSTOP_ERR" \
+      && ! grep -qF 'claude hook session binder: adopted' "$AUTO_EVSTOP_ERR"; then
+    check "AUTO-15c the review-evidence SubagentStop hook adopts the parent record before it stores a worker result, and discloses it under its own lead-in" PASS
+  else
+    check "AUTO-15c the review-evidence SubagentStop hook adopts the parent record (version=$(auto_record_version "$AUTO_EVSTOP_RECORD") entries=$(auto_adopted_entries "$PROJECT" "$AUTO_EVSTOP_SESSION"))" FAIL
+    head -c 300 "$AUTO_EVSTOP_ERR" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-15c fixture: the evidence-stop session registers under the candidate root" FAIL
+fi
+
 # AUTO-16 — the binder's own export line: the sixth export names the pair on the
 # invocation that adopted and is empty on the next, the stderr line carries the
 # screened basename and the lease clause, and the adoption-refusal mode exits 1
@@ -6494,6 +6528,7 @@ if auto_session_start "$AUTO_TAMPER_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_RO
       && ! printf '%s' "$AUTO_TAMPER_REASON" | grep -qF 'has been removed from the plugin cache' \
       && ! printf '%s' "$AUTO_TAMPER_REASON" | grep -qF '(unreadable)' \
       && printf '%s' "$AUTO_TAMPER_REASON" | grep -qF 'Zensu also tried to adopt the record automatically for this session and it was REFUSED: record-unreadable.' \
+      && printf '%s' "$AUTO_TAMPER_REASON" | grep -qF 'context session hash mismatch. Zensu also tried to adopt' \
       && printf '%s' "$AUTO_TAMPER_REASON" | grep -qF 'could not be re-verified against the installation that minted it' \
       && printf '%s' "$AUTO_TAMPER_KID_REASON" | grep -qF 'it was REFUSED: record-unreadable. The repair writes the immutable record and is reserved for the main thread' \
       && ! printf '%s' "$AUTO_TAMPER_KID_REASON" | grep -qF '/zensu:adopt-session' \
@@ -6503,7 +6538,7 @@ if auto_session_start "$AUTO_TAMPER_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_RO
       && ! printf '%s' "$AUTO_TAMPER_SHELL_REASON" | grep -qF '(unreadable)' \
       && [ "$(head -n 1 "$AUTO_TAMPER_BEFORE")" != digest-failed ] \
       && cmp -s "$AUTO_TAMPER_BEFORE" "$AUTO_TAMPER_AFTER"; then
-    check "AUTO-18 an altered record is refused as record-unreadable, no deny dresses it in the lineage or pruned wording or invents a version pair, both deny paths still name the token, and the store is byte-identical" PASS
+    check "AUTO-18 an altered record is refused as record-unreadable, no deny dresses it in the lineage or pruned wording or invents a version pair, both deny paths still name the token in a sentence of its own, and the store is byte-identical" PASS
   else
     check "AUTO-18 an altered record (pristine='$AUTO_TAMPER_PRISTINE' token='$AUTO_TAMPER_TOKEN')" FAIL
     printf '%s' "$AUTO_TAMPER_REASON" | head -c 400; printf '\n'
@@ -6809,10 +6844,12 @@ if auto_session_start "$AUTO_BASE_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT
         && printf '%s' "$AUTO_BASE_REASON" | grep -qF 'the workflow document it anchors is missing' \
         && printf '%s' "$AUTO_BASE_REASON" | grep -qF "This call also adopted the Session Control record (0.17.0 -> 0.18.0); previous record kept as $AUTO_BASE_KEY.superseded-0.17.0.json; provenance no-workflow-document" \
         && printf '%s' "$(auto_stdout_field "$AUTO_BASE_OUT" systemMessage)" | grep -qF 'adopted automatically on this tool call' \
+        && printf '%s' "$(auto_stdout_field "$AUTO_BASE_OUT" systemMessage)" | grep -qF 'this tool call was still denied, for the reason its deny names.' \
+        && ! printf '%s' "$(auto_stdout_field "$AUTO_BASE_OUT" systemMessage)" | grep -qF 'nothing else to do' \
         && [ "$(auto_record_version "$AUTO_BASE_RECORD")" = 0.18.0 ] \
         && [ -f "$ADOPT_RECORDS_DIR/$AUTO_BASE_KEY.superseded-0.17.0.json" ] \
         && [ ! -e "$AUTO_BASE_DOC" ]; then
-      check "AUTO-27 an adoption the capability gate performs on a call its missing workflow baseline then denies is named in that deny, after the cause, with the kept record's basename, and the notice rides on the deny as its systemMessage" PASS
+      check "AUTO-27 an adoption the capability gate performs on a call its missing workflow baseline then denies is named in that deny, after the cause, with the kept record's basename, and the notice rides on the deny as its systemMessage, closing on that deny rather than on nothing else to do" PASS
     else
       check "AUTO-27 an adoption performed on a call the missing baseline denies (decision=$AUTO_BASE_DECISION version=$(auto_record_version "$AUTO_BASE_RECORD"))" FAIL
       printf '%s' "$AUTO_BASE_REASON" | head -c 600; printf '\n'
@@ -6853,6 +6890,8 @@ if auto_session_start "$AUTO_BASE_KID_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
         && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF '.superseded-' \
         && ! printf '%s' "$AUTO_BASE_KID_DISCLOSURE" | grep -qF -- '--confirm' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
+        && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'this tool call was still denied, for the reason its deny names.' \
+        && ! printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'nothing else to do' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF "$AUTO_BASE_KID_KEY.superseded-0.17.0.json" \
         && [ "$(auto_record_version "$AUTO_BASE_KID_RECORD")" = 0.18.0 ] \
         && [ -f "$ADOPT_RECORDS_DIR/$AUTO_BASE_KID_KEY.superseded-0.17.0.json" ]; then
@@ -6952,6 +6991,61 @@ if [ -n "$AUTO_REBIND_ROOT" ] && grep -qF 'AUTO-28' "$AUTO_REBIND_ROOT/hooks/lib
   fi
 else
   check "AUTO-28 fixture: a sibling install with the test overrides could not be prepared or registered" FAIL
+fi
+
+AUTO_SWEEP_SESSION='versioned-upgrade-auto-served-sweep'
+AUTO_SWEEP_PROJECT="$TMP/auto-served-sweep-project"
+AUTO_SWEEP_KEY="$(auto_key "$AUTO_SWEEP_SESSION")"
+AUTO_SWEEP_RECORD="$ADOPT_RECORDS_DIR/$AUTO_SWEEP_KEY.json"
+AUTO_CLEAN_SESSION='versioned-upgrade-auto-served-clean'
+AUTO_CLEAN_PROJECT="$TMP/auto-served-clean-project"
+AUTO_CLEAN_RECORD="$ADOPT_RECORDS_DIR/$(auto_key "$AUTO_CLEAN_SESSION").json"
+mkdir -p "$AUTO_SWEEP_PROJECT" "$AUTO_CLEAN_PROJECT"
+if auto_session_start "$AUTO_SWEEP_SESSION" "$AUTO_SWEEP_PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && auto_session_start "$AUTO_CLEAN_SESSION" "$AUTO_CLEAN_PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_SWEEP_RECORD" ] && [ -f "$AUTO_CLEAN_RECORD" ]; then
+  rm -rf "$AUTO_SWEEP_PROJECT" "$AUTO_CLEAN_PROJECT"
+  mkdir -p "$CANONICAL_SHARED_DATA/review-evidence/v1/records"
+  printf 'not a directory\n' >"$CANONICAL_SHARED_DATA/review-evidence/v1/records/$AUTO_SWEEP_KEY"
+  AUTO_SWEEP_LINE='ran the review-evidence lease sweep while binding a record this installation already serves (0.17.0); the review-evidence lease sweep was REFUSED (source) and set aside nothing'
+  auto_served_bind() {
+    printf '%s' "$(auto_read_payload "$1")" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/claude-hook-session-v1.js" >/dev/null 2>"$2" || true
+  }
+  auto_served_bind "$AUTO_SWEEP_SESSION" "$TMP/auto-served-sweep-1.err"
+  auto_served_bind "$AUTO_SWEEP_SESSION" "$TMP/auto-served-sweep-2.err"
+  auto_served_bind "$AUTO_CLEAN_SESSION" "$TMP/auto-served-clean.err"
+  AUTO_SWEEP_MAIN_OUT="$TMP/auto-served-sweep-main.out"
+  AUTO_SWEEP_MAIN="$(gate_decision_from "$SYNTHETIC_CANDIDATE_ROOT" pre-reviewer-capability-gate.sh \
+    "$(auto_read_payload "$AUTO_SWEEP_SESSION")" "$AUTO_SWEEP_MAIN_OUT" "$TMP/auto-served-sweep-main.err")"
+  AUTO_SWEEP_KID_OUT="$TMP/auto-served-sweep-kid.out"
+  AUTO_SWEEP_KID="$(gate_decision_from "$SYNTHETIC_CANDIDATE_ROOT" pre-reviewer-capability-gate.sh \
+    "$(auto_agent_payload "$AUTO_SWEEP_SESSION" Read 'zensu:review-aspect')" "$AUTO_SWEEP_KID_OUT" "$TMP/auto-served-sweep-kid.err")"
+  AUTO_CLEAN_MAIN_OUT="$TMP/auto-served-clean-main.out"
+  AUTO_CLEAN_MAIN="$(gate_decision_from "$SYNTHETIC_CANDIDATE_ROOT" pre-reviewer-capability-gate.sh \
+    "$(auto_read_payload "$AUTO_CLEAN_SESSION")" "$AUTO_CLEAN_MAIN_OUT" "$TMP/auto-served-clean-main.err")"
+  if grep -qF "claude hook session binder: $AUTO_SWEEP_LINE" "$TMP/auto-served-sweep-1.err" \
+      && grep -qF "claude hook session binder: $AUTO_SWEEP_LINE" "$TMP/auto-served-sweep-2.err" \
+      && ! grep -qF 'sibling' "$TMP/auto-served-sweep-1.err" \
+      && grep -qF 'context project root does not exist' "$TMP/auto-served-sweep-1.err" \
+      && ! grep -qF 'lease sweep' "$TMP/auto-served-clean.err" \
+      && grep -qF 'context project root does not exist' "$TMP/auto-served-clean.err" \
+      && [ "$AUTO_SWEEP_MAIN" = allow ] \
+      && printf '%s' "$(auto_stdout_field "$AUTO_SWEEP_MAIN_OUT" systemMessage)" | grep -qF "zensu: $AUTO_SWEEP_LINE" \
+      && [ "$AUTO_SWEEP_KID" = deny ] \
+      && printf '%s' "$(auto_stdout_field "$AUTO_SWEEP_KID_OUT" systemMessage)" | grep -qF "zensu: $AUTO_SWEEP_LINE" \
+      && [ "$AUTO_CLEAN_MAIN" = allow ] && [ ! -s "$AUTO_CLEAN_MAIN_OUT" ] \
+      && [ "$(auto_record_version "$AUTO_SWEEP_RECORD")" = 0.17.0 ] \
+      && [ ! -e "$ADOPT_RECORDS_DIR/$AUTO_SWEEP_KEY.superseded-0.17.0.json" ]; then
+    check "AUTO-29 a lease sweep run while binding a served record whose project root is gone is named as that and never as a sibling's adoption: the binder prints it on every bind while the store stays refused, the all-tool gate carries it as a systemMessage on the relaxed allow and on the child deny, and a clean sweep stays unsaid on both" PASS
+  else
+    check "AUTO-29 the served-record lease sweep disclosure (main=$AUTO_SWEEP_MAIN child=$AUTO_SWEEP_KID clean=$AUTO_CLEAN_MAIN version=$(auto_record_version "$AUTO_SWEEP_RECORD"))" FAIL
+    printf '  binder: %s\n  gate: %s\n' "$(head -c 400 "$TMP/auto-served-sweep-1.err" 2>/dev/null)" "$(head -c 400 "$AUTO_SWEEP_MAIN_OUT" 2>/dev/null)"
+  fi
+  rm -f "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$AUTO_SWEEP_KEY"
+else
+  check "AUTO-29 fixture: the served-sweep sessions register under the candidate root" FAIL
 fi
 
 printf '%s\n' '----' \

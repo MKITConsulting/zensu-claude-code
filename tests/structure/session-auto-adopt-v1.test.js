@@ -949,7 +949,8 @@ test('a served-completion sweep is reported when it moved or failed, and stays u
   assert.equal(mod.servedSweepLine(served({ discarded: 0, failed: [], unsafe: '', unsafeAt: '' })), null);
   assert.equal(mod.servedSweepLine(served(null)), null);
   assert.equal(mod.servedSweepLine({ ...served({ discarded: 2, failed: [], unsafe: '' }), outcome: 'adopted' }), null);
-  assert.match(mod.servedSweepLine(served({ discarded: 2, failed: [], unsafe: '' })), /now served by 0\.21\.1\); 2 review-evidence lease\(s\) from before the update set aside/);
+  assert.match(mod.servedSweepLine(served({ discarded: 2, failed: [], unsafe: '' })), /^ran the review-evidence lease sweep while binding a record this installation already serves \(0\.21\.1\); 2 review-evidence lease\(s\) from before the update set aside/);
+  assert.doesNotMatch(mod.servedSweepLine(served({ discarded: 0, failed: [], unsafe: 'locked' })), /sibling|completed/);
   assert.match(mod.servedSweepLine(served({ discarded: 0, failed: [], unsafe: 'sweep-failed' })), /lease sweep was REFUSED \(sweep-failed\)/);
   assert.equal(mod.sweepWorthReporting({ discarded: 0, failed: ['a'], unsafe: '' }), true);
   // The served NOTICE carries the clause for a sweep that moved leases, not only for
@@ -958,4 +959,46 @@ test('a served-completion sweep is reported when it moved or failed, and stays u
   assert.match(moved, /serves the adopted record \(2 review-evidence lease\(s\) from before the update set aside/);
   const clean = mod.renderAdoptionNotice(served({ discarded: 0, failed: [], unsafe: '' }), { where: 'on this tool call' });
   assert.doesNotMatch(clean, /review-evidence lease/);
+});
+
+test('the notice closes on the deny that followed it, and an orphaned adoption closes on the adoption alone', () => {
+  const base = {
+    outcome: 'adopted', reason: 'adopted', recorded: '0.20.0', executing: '0.21.1',
+    supersededFile: '/records/scv1_x.superseded-0.20.0.json', provenance: 'recorded',
+    orphanedProjectRoot: false, leases: { discarded: 0, failed: [], unsafe: '', unsafeAt: '' },
+  };
+  assert.match(mod.renderAdoptionNotice(base, { where: 'on this tool call' }), /; nothing else to do\.$/);
+  const denied = mod.renderAdoptionNotice(base, { where: 'on this tool call', denied: true });
+  assert.match(denied, /session-state block; this tool call was still denied, for the reason its deny names\.$/);
+  assert.doesNotMatch(denied, /nothing else to do/);
+  const servedDenied = mod.renderAdoptionNotice({ ...base, outcome: 'already-served', reason: 'already-served', supersededFile: null, provenance: null, leases: null }, { where: 'on this tool call', denied: true });
+  assert.match(servedDenied, /; this tool call was still denied, for the reason its deny names\.$/);
+  assert.doesNotMatch(servedDenied, /nothing else to do/);
+  const orphan = mod.renderAdoptionNotice({ ...base, orphanedProjectRoot: true }, { where: 'on this tool call' });
+  assert.match(orphan, /project root is still gone/);
+  assert.match(orphan, /; nothing else to do for the adoption itself\.$/);
+  const orphanDenied = mod.renderAdoptionNotice({ ...base, orphanedProjectRoot: true }, { where: 'on this tool call', denied: true });
+  assert.match(orphanDenied, /; this tool call was still denied, for the reason its deny names\.$/);
+});
+
+test('the adapter names the lease sweep of a served answer when the strict re-read still fails, and rethrows the read error when the sweep was clean', () => {
+  const adapter = require(path.join(LIB, 'claude-session-control-v1.js'));
+  const core = {
+    readContext: () => { throw new Error('session-control-v1: context project root does not exist'); },
+    servesRecordedRuntime: () => true,
+  };
+  const servedWith = (leases) => ({
+    ...mod,
+    adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', recorded: null, executing: '0.21.1', supersededFile: null, provenance: null, leases, error: null }),
+  });
+  assert.throws(
+    () => adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session',
+      { core, autoAdopt: servedWith({ discarded: 0, failed: [], unsafe: 'source', unsafeAt: '/x' }) }),
+    /resume context: ran the review-evidence lease sweep while binding a record this installation already serves \(0\.21\.1\); the review-evidence lease sweep was REFUSED \(source\).* — but the strict re-read still fails: session-control-v1: context project root does not exist/,
+  );
+  assert.throws(
+    () => adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session',
+      { core, autoAdopt: servedWith({ discarded: 0, failed: [], unsafe: '', unsafeAt: '' }) }),
+    (error) => error.message === 'session-control-v1: context project root does not exist',
+  );
 });

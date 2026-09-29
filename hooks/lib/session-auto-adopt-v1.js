@@ -237,13 +237,17 @@ function createRenderers(core) {
     return `adopted the Session Control record (${pair(safeVersion(adoption && adoption.recorded), safeVersion(adoption && adoption.executing))}) under the running installation`;
   }
 
-  // An adoption a SIBLING performed whose lease sweep THIS process completed: the
-  // winner releases the records lock before it sweeps, so a served outcome sweeps
-  // too, and a sweep that set leases aside or failed must not be absorbed. Null
-  // when it did nothing worth saying, so a caller writes a line only then.
+  // The lease sweep THIS process ran while binding a record the executing
+  // installation already serves. Every served outcome sweeps: after a sibling's
+  // adoption, because the winner releases the records lock before it sweeps, and on
+  // every bind of a served record whose recorded project root is gone, where no
+  // adoption happened at all — so the line names the served record, never a
+  // sibling's adoption the verdict cannot tell apart. A sweep that set leases aside
+  // or failed must not be absorbed. Null when it did nothing worth saying, so a
+  // caller writes a line only then.
   function servedSweepLine(verdict) {
     if (!verdict || verdict.outcome !== AUTO_ADOPT_OUTCOMES.ALREADY_SERVED || !sweepWorthReporting(verdict.leases)) return null;
-    return `completed the review-evidence lease sweep of an adoption a sibling hook performed (now served by ${safeVersion(verdict.executing)}); ${leaseClause(verdict.leases)}`;
+    return `ran the review-evidence lease sweep while binding a record this installation already serves (${safeVersion(verdict.executing)}); ${leaseClause(verdict.leases)}`;
   }
 
   // What /zensu:doctor can show about THIS adoption, stated per provenance. The
@@ -278,20 +282,23 @@ function createRenderers(core) {
   // the pair rather than printing a number nobody measured.
   function renderAdoptionNotice(adoption, options) {
     const where = options && typeof options.where === 'string' && options.where !== '' ? options.where : 'on this hook';
+    const denied = Boolean(options) && options.denied === true;
+    const deniedClosing = 'this tool call was still denied, for the reason its deny names';
     const executing = safeVersion(adoption && adoption.executing);
     if (adoption && adoption.outcome === AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
       const span = typeof adoption.recorded === 'string'
         ? `from ${safeVersion(adoption.recorded)} to ${executing}`
         : `to ${executing}`;
       const sweepClause = sweepWorthReporting(adoption.leases) ? ` (${leaseClause(adoption.leases)})` : '';
-      return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record${sweepClause}. ${doctorPointer(adoption)}; nothing else to do.`;
+      return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record${sweepClause}. ${doctorPointer(adoption)}; ${denied ? deniedClosing : 'nothing else to do'}.`;
     }
     const recorded = safeVersion(adoption && adoption.recorded);
     const kept = keptName(adoption);
     const orphan = adoption && adoption.orphanedProjectRoot
       ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports whether it can be re-created in place, now that this installation serves the record.'
       : '';
-    return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
+    const closing = denied ? deniedClosing : (orphan ? 'nothing else to do for the adoption itself' : 'nothing else to do');
+    return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; ${closing}.`;
   }
 
   return { safeVersion, operatorLine, confinedOperatorLine, servedSweepLine, doctorPointer, renderAdoptionNotice };

@@ -982,6 +982,7 @@ test('MAIN the --confirm arms: a served answer whose lease sweep set leases asid
   const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases, error: null }) } }), true);
   assert.ok(out.includes(RACED));
   assert.ok(out.includes('2 review-evidence lease(s) were set aside'));
+  assert.ok(out.includes("This run completed that adoption's review-evidence\nlease sweep, and what it did is below.\n"));
   assert.equal(out.includes('Nothing was changed here'), false);
   assert.equal(code, 1);
 });
@@ -992,5 +993,35 @@ test('MAIN the --confirm arms: a served answer whose lease sweep moved nothing s
   assert.ok(out.includes(RACED));
   assert.ok(out.includes('Nothing was changed here'));
   assert.equal(out.includes('were set aside'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a served answer with no lease sweep result says so and names the command that sweeps', () => {
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases: null, error: null }) } }), true);
+  assert.ok(out.includes(RACED));
+  assert.ok(out.includes('installation already serves it. No lease sweep result was recorded for this run,\nso re-run this command with --confirm to sweep the lease store.\n'));
+  assert.equal(out.includes('Nothing was changed here'), false);
+  assert.equal(out.includes('This run completed'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a served answer whose lease sweep was refused says so instead of claiming it completed', () => {
+  const leases = { discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '' };
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases, error: null }) } }), true);
+  assert.ok(out.includes(RACED));
+  assert.ok(out.includes("This run ran that adoption's review-evidence lease\nsweep, and the sweep was REFUSED; what it found is below.\n"));
+  assert.ok(out.includes('WARNING: the review-evidence lease store is LOCKED, so no lease was inspected or\n'));
+  assert.equal(out.includes('This run completed'), false);
+  assert.equal(out.includes('Nothing was changed here'), false);
+  assert.equal(code, 1);
+});
+
+test('MAIN the --confirm arms: a served answer whose lease sweep left leases stuck names them', () => {
+  const leases = { discarded: 0, failed: ['lease-a'], unsafe: '', unsafeAt: '' };
+  const { out, code } = runMain(seam({ autoAdopt: { adoptForHook: () => ({ outcome: 'already-served', reason: 'already-served', supersededFile: null, leases, error: null }) } }), true);
+  assert.ok(out.includes(RACED));
+  assert.ok(out.includes("This run completed that adoption's review-evidence\nlease sweep, and what it did is below.\n"));
+  assert.ok(out.includes('WARNING: 1 review-evidence lease(s) could NOT be set aside: [lease-a]\n'));
+  assert.equal(out.includes('Nothing was changed here'), false);
   assert.equal(code, 1);
 });

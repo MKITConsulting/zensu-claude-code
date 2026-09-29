@@ -1490,6 +1490,10 @@ function main(deps = {}) {
       } else if (!worth) {
         process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
         process.stdout.write("see the served state, or simply continue in the session.\n");
+      } else if (leasesScope(served) !== "") {
+        process.stdout.write("installation already serves it. This run ran that adoption's review-evidence lease\n");
+        process.stdout.write("sweep, and the sweep was REFUSED; what it found is below.\n");
+        reportLeaseWarnings(served);
       } else {
         process.stdout.write("installation already serves it. This run completed that adoption's review-evidence\n");
         process.stdout.write("lease sweep, and what it did is below.\n");

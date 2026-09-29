@@ -463,17 +463,19 @@ function writeAdoptionOperatorLine(adoption, leadIn = BINDER_LEAD_IN) {
   }
 }
 
-// The line for an adoption a SIBLING performed whose lease sweep this process
-// completed. Written only when that sweep set leases aside or failed — the renderer
-// answers null otherwise — so an ordinary served bind stays silent, and a stuck
-// lease store is not absorbed by the process that found it.
+// The line for the lease sweep this process ran while binding a record the
+// executing installation already serves — after a sibling's adoption, or on a
+// served record whose project root is gone. Written only when that sweep set leases
+// aside or failed — the renderer answers null otherwise — so an ordinary served
+// bind stays silent, and a stuck lease store is not absorbed by the process that
+// found it.
 function writeServedSweepLine(servedSweep, leadIn = BINDER_LEAD_IN) {
   if (!servedSweep) return;
   try {
     const line = autoAdoptModule().servedSweepLine(servedSweep);
     if (line) process.stderr.write(`${leadIn}: ${line}\n`);
   } catch {
-    process.stderr.write(`${leadIn}: completed the lease sweep of a sibling hook's adoption (details unavailable)\n`);
+    process.stderr.write(`${leadIn}: ran the review-evidence lease sweep while binding a record this installation already serves (details unavailable)\n`);
   }
 }
 
@@ -544,9 +546,9 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
       adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir),
     );
     if (verdict.outcome === OUTCOMES.ADOPTED) adoption = verdict;
-    // A sibling's adoption this process found served still ran the lease sweep
-    // (adoptForHook completes every served answer with it), and its result travels
-    // beside the binding rather than being absorbed here.
+    // A served answer still ran the lease sweep (adoptForHook completes every one
+    // with it: a sibling's adoption, or a served record whose project root is
+    // gone), and its result travels beside the binding rather than being absorbed.
     if (verdict.outcome === OUTCOMES.ALREADY_SERVED) servedSweep = verdict;
     if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
       // Re-read STRICTLY: the adopted record must serve itself. An adoption
@@ -900,9 +902,10 @@ module.exports = {
   // `scv1_<64hex>`, i.e. the name of a record file in the store — an accepted
   // identity there while the sibling modes refuse exactly that shape.
   validateSessionId,
-  // For the in-process adopters (the review-evidence hook, the capability gate):
-  // the same bind-and-disclose policy and operator line the CLI mode uses, so an
-  // adoption performed outside the CLI is not silent.
+  // For the in-process review-evidence hook: the same bind-and-disclose policy and
+  // operator line the CLI mode uses, so an adoption performed outside the CLI is not
+  // silent. The capability gate binds through resolveHookSession instead, because
+  // its wrapper discards stderr; it discloses on its own systemMessage.
   bindAndDisclose,
   writeAdoptionOperatorLine,
   performedAdoption,

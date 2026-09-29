@@ -243,6 +243,8 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
         if (verdict.outcome === OUTCOMES.ADOPTED) {
           fail(`${label}: ${autoAdopt.operatorLine(verdict)} — but the strict re-read still fails: ${again.message}`);
         }
+        const sweepLine = typeof autoAdopt.servedSweepLine === 'function' ? autoAdopt.servedSweepLine(verdict) : null;
+        if (sweepLine) fail(`${label}: ${sweepLine} — but the strict re-read still fails: ${again.message}`);
         throw again;
       }
     }
