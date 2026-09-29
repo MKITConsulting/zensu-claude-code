@@ -561,15 +561,18 @@ echo "== One artifact, two reads, one hardening =="
 # The window is a race, so it cannot be staged deterministically from a fixture.
 # The property that CAN be checked is the one that closes it: read #2 opens a
 # descriptor and judges THAT, exactly as read #1 does.
-# The end anchor is the command substitution's own closing line. A range whose end
+# The end anchor is the reader function's own closing brace. A range whose end
 # pattern never matches runs to EOF in awk, and the whole rest of the file then
 # satisfies every needle below — which is exactly what the first spelling of this
 # check did, reporting PASS for an O_NOFOLLOW that lives 700 lines further down.
-RQ_READER="$(awk "/_rq_rel=\"\\\$\(ZENSU_RQ_RECEIPT=/,/^            ' 2>\/dev\/null \|\| true\)\"/" "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
+RQ_MODULE="$PLUGIN_DIR/hooks/lib/edit-landing-receipt-v1.js"
+RQ_READER="$(awk '/^function readBoundedJson\(/,/^}$/' "$RQ_MODULE")"
 RQ_READER_LINES="$(printf '%s\n' "$RQ_READER" | grep -c .)"
-LOG_ALL_LINES="$(grep -c . "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
-{ [ "$RQ_READER_LINES" -gt 10 ] && [ "$RQ_READER_LINES" -lt "$LOG_ALL_LINES" ]; }
-check "W4-control the reader was extracted and the range is still bounded" "$(verdict $?)"
+MODULE_ALL_LINES="$(grep -c . "$RQ_MODULE")"
+{ [ "$RQ_READER_LINES" -gt 10 ] && [ "$RQ_READER_LINES" -lt "$MODULE_ALL_LINES" ] \
+  && grep -qF 'main(["receipt-log"])' "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
+  && grep -qF 'readBoundedJson(options.receiptPath' "$RQ_MODULE"; }
+check "W4-control the requirements gate reads the receipt through the module's extracted, bounded reader" "$(verdict $?)"
 # Comment lines are stripped: the absence assertion below is about CODE, and the
 # comment recording why the old spelling was wrong legitimately names it.
 RQ_CODE="$(printf '%s\n' "$RQ_READER" | grep -vE '^[[:space:]]*//')"
@@ -649,7 +652,7 @@ echo "== The accepted-schema set has FOUR spellings and no owner =="
 SCH_LIB="$PLUGIN_DIR/hooks/lib"
 SCH_WRITER="$(grep -c 'schema: "edit-landing-v2"' "$SCH_LIB/zensu-edit-landing.sh" 2>/dev/null)"; SCH_WRITER="${SCH_WRITER:-0}"
 SCH_VERDICT="$(grep -c 'j.schema !== "edit-landing-v1" && j.schema !== "edit-landing-v2"' "$SCH_LIB/zensu-log.sh" 2>/dev/null)"; SCH_VERDICT="${SCH_VERDICT:-0}"
-SCH_DERIVE="$(grep -c 'j.schema === "edit-landing-v1"' "$SCH_LIB/zensu-log.sh" 2>/dev/null)"; SCH_DERIVE="${SCH_DERIVE:-0}"
+SCH_DERIVE="$(grep -cF "RECEIPT_SCHEMAS = Object.freeze({ 'edit-landing-v1': 1, 'edit-landing-v2': 2 })" "$SCH_LIB/edit-landing-receipt-v1.js" 2>/dev/null)"; SCH_DERIVE="${SCH_DERIVE:-0}"
 SCH_DOCTOR="$(grep -cF "RECEIPT_SCHEMAS = ['edit-landing-v1', 'edit-landing-v2']" "$SCH_LIB/zensu-doctor-report.js" 2>/dev/null)"; SCH_DOCTOR="${SCH_DOCTOR:-0}"
 { [ "$SCH_WRITER" -ge 1 ] && [ "$SCH_VERDICT" -ge 1 ] && [ "$SCH_DERIVE" -ge 1 ] && [ "$SCH_DOCTOR" -ge 1 ]; }
 check "SCH1 all four accepted-schema spellings are present and agree on edit-landing-v1/v2" "$(verdict $?)"
@@ -662,7 +665,7 @@ check "SCH1-control the pin is not matching an arbitrary schema name" "$(verdict
 # writer and the readers disagree about the accepted SET. The negative arm is
 # what closes that direction, and it covers all four carriers rather than one.
 SCH_EXTRA=0
-for _sch_f in "$SCH_LIB/zensu-edit-landing.sh" "$SCH_LIB/zensu-log.sh" "$SCH_LIB/zensu-doctor-report.js"; do
+for _sch_f in "$SCH_LIB/zensu-edit-landing.sh" "$SCH_LIB/zensu-log.sh" "$SCH_LIB/edit-landing-receipt-v1.js" "$SCH_LIB/zensu-doctor-report.js"; do
   _sch_hits="$(grep -oE 'edit-landing-v[0-9]+' "$_sch_f" 2>/dev/null | grep -vE 'edit-landing-v[12]$' | wc -l | tr -d ' ')"
   _sch_hits="${_sch_hits:-0}"
   [ "$_sch_hits" -eq 0 ] || SCH_EXTRA=$((SCH_EXTRA + _sch_hits))

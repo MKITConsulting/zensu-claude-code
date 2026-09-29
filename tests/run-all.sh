@@ -313,7 +313,7 @@ for t in "$TESTS_DIR"/structure/test-*.sh; do
     in_shard "structure/$base" || continue
   fi
   case "$base" in
-    test-workflow-checkout-credentials.sh)
+    test-windows-ci-contract.sh|test-workflow-checkout-credentials.sh|test-workflow-dispatch-inputs.sh)
       deps_ready || { block_suite "structure/$base"; continue; }
       ;;
   esac

@@ -42,8 +42,8 @@ applies to it exactly as it does to the gates. So membership here says something
 SPELLING, never about what the variable does.
 
 **State the two counts, because they are NOT the same number and the gap is the point.**
-`ESCAPE_STEMS` now holds TEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
-`hooks/lib/zensu-tdd-phase.sh` holds NINE names, and `docs/configuration.md` §"Visible opt-outs"
+`ESCAPE_STEMS` now holds ELEVEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
+`hooks/lib/zensu-tdd-phase.sh` holds TEN names, and `docs/configuration.md` §"Visible opt-outs"
 stays the authoritative ledger roster. TWO stems are therefore in the set and not in the
 ledger, and `ZENSU_SESSION_LINEAGE` is not the first: `ZENSU_AUTOPILOT` was already one,
 because its escape is recorded as an audited `BLOCKED` transition rather than as a ledger

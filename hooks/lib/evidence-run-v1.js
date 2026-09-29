@@ -11,7 +11,8 @@ const { scan } = require('./secret-patterns.js');
 
 const SCHEMA = 'evidence-run-v1';
 const STORE_SEGMENTS = Object.freeze(['evidence-run', 'v1']);
-const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped']);
+const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped', 'acceptance']);
+const TREE_SCOPES = Object.freeze(['full', 'acceptance']);
 const RECORD_STATES = Object.freeze(['running', 'completed', 'interrupted']);
 const GATE_MODES = Object.freeze(['required', 'advisory']);
 const VERDICT_STATES = Object.freeze([
@@ -355,7 +356,11 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
   const temporaryIndex = path.join(scratchDirectory, `index-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
   try {
     const source = indexPath.stdout.trim();
-    if (source && fs.existsSync(source)) fs.copyFileSync(source, temporaryIndex);
+    if (source && fs.existsSync(source)) {
+      const indexStat = fs.statSync(source);
+      fs.copyFileSync(source, temporaryIndex);
+      fs.utimesSync(temporaryIndex, indexStat.atime, indexStat.mtime);
+    }
     const env = { GIT_INDEX_FILE: temporaryIndex };
     const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
     if (!added.ok) return { tree: null, reason: added.reason };
@@ -423,7 +428,7 @@ function shortTree(tree) {
 }
 
 function treeLabel(record) {
-  if (record.scope !== 'full') return 'n/a';
+  if (!TREE_SCOPES.includes(record.scope)) return 'n/a';
   if (record.tree_start && record.tree_end && record.tree_start !== record.tree_end) {
     return `mutated-during-run (${shortTree(record.tree_start)} -> ${shortTree(record.tree_end)})`;
   }
@@ -671,13 +676,22 @@ function prune(locations, limits, keepIds) {
   } catch {
     return 0;
   }
-  const excess = names.length - limits.maxRecordsPerSession;
+  const byScope = new Map();
+  for (const name of names) {
+    const loaded = readRecordFile(path.join(locations.records, name), limits);
+    const scope = loaded.record && SCOPES.includes(loaded.record.scope) ? loaded.record.scope : '';
+    if (!byScope.has(scope)) byScope.set(scope, []);
+    byScope.get(scope).push(name);
+  }
   let removed = 0;
-  for (const name of names.slice(0, Math.max(0, excess))) {
-    const id = name.slice(0, -5);
-    if (keepIds && keepIds.includes(id)) continue;
-    try { fs.unlinkSync(path.join(locations.records, name)); removed += 1; } catch { }
-    try { fs.unlinkSync(path.join(locations.logs, `${id}.log`)); } catch { }
+  for (const group of byScope.values()) {
+    const excess = group.length - limits.maxRecordsPerSession;
+    for (const name of group.slice(0, Math.max(0, excess))) {
+      const id = name.slice(0, -5);
+      if (keepIds && keepIds.includes(id)) continue;
+      try { fs.unlinkSync(path.join(locations.records, name)); removed += 1; } catch { }
+      try { fs.unlinkSync(path.join(locations.logs, `${id}.log`)); } catch { }
+    }
   }
   try {
     for (const name of fs.readdirSync(locations.logs)) {
@@ -808,7 +822,7 @@ function run(options) {
     const logPath = path.join(locations.logs, `${id}.log`);
     const scriptPath = path.join(locations.scratch, `run-${id}.sh`);
     const startedAt = new Date();
-    const treeStart = options.scope === 'full' ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
+    const treeStart = TREE_SCOPES.includes(options.scope) ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
     const record = {
       schema: SCHEMA,
       id,
@@ -896,7 +910,7 @@ function run(options) {
       else if (interruptedBy) exitCode = 128 + signalNumber(interruptedBy);
       else if (code === null || code === undefined) exitCode = 128 + signalNumber(signal);
       else exitCode = code;
-      const treeEnd = options.scope === 'full' ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
+      const treeEnd = TREE_SCOPES.includes(options.scope) ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
       let logInfo = { bytes: null, truncated: false };
       try { logInfo = truncateLogMiddle(logPath, limits); } catch { }
       const final = {
@@ -1000,6 +1014,7 @@ async function main(argv, env = process.env) {
 module.exports = {
   SCHEMA,
   SCOPES,
+  TREE_SCOPES,
   RECORD_STATES,
   GATE_MODES,
   VERDICT_STATES,
