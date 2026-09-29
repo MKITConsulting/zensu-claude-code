@@ -274,8 +274,11 @@ Claude's native placeholder substitution.
      facts. Never invent commands.
    In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
-   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
-   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then that port on the
+   loopback origin the application expects — `http://127.0.0.1:$ZENSU_VERIFY_PORT`, or
+   `http://localhost:$ZENSU_VERIFY_PORT` when the recipe's `validate.baseUrlCommand` prints it or
+   the app's CORS allow-list, cookies or auth callback name `localhost` — and the first
+   navigation to it asks the user. The
    MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
    `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
    for the run, so a reused run directory keeps the port it already recorded. Never derive the

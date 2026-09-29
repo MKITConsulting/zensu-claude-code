@@ -140,11 +140,13 @@ if ! grep -qE 'ZENSU_VERIFY_DECLARED_ROUTES|declaredRoutes|readRecipeRoutes|NOT_
 else
   check "V8b the decision module reads no declared route list and carries no route refusal" FAIL
 fi
-if grep -qF 'ZENSU_VERIFY_PROJECT_ROOT' "$MODULE" && grep -qF 'resolveRecipeFile' "$MODULE" \
-  && grep -qF "'runtime.yaml', 'autopilot.yaml'" "$MODULE"; then
-  check "V8b-control the module resolves the recipe itself from the project root, in one place" PASS
+if grep -qF 'ZENSU_VERIFY_PROJECT_ROOT' "$MODULE" && grep -qF 'function resolveRecipeFile(' "$MODULE" \
+  && [ "$(grep -cF 'resolveRecipeFile(' "$MODULE")" -eq 1 ] \
+  && grep -qF "'runtime.yaml', 'autopilot.yaml'" "$MODULE" \
+  && grep -qF 'mod.resolveRecipeFile(' "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; then
+  check "V8b-control the scan above read the real module, which keeps the recipe resolver for /zensu:doctor and never calls it" PASS
 else
-  check "V8b-control the module resolves the recipe itself from the project root, in one place" FAIL
+  check "V8b-control the scan above read the real module, which keeps the recipe resolver for /zensu:doctor and never calls it" FAIL
 fi
 if [ -r "$PRE_HOOK" ] && [ -r "$POST_HOOK" ] \
   && ! grep -qE 'runtime\.yaml|autopilot\.yaml' "$PRE_HOOK" \
@@ -878,15 +880,22 @@ case "$POST_MISMATCH_ERR" in *'CLAUDE_PLUGIN_ROOT'*) MISMATCH_SAID=1 ;; *) MISMA
   && check "V32a the non-blocking mismatch still names its cause on stderr" PASS \
   || check "V32a the non-blocking mismatch still names its cause on stderr" FAIL
 
-if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD"; then
-  check "V34a the template carries no key the adapter and the autopilot contract never read" PASS
+TEMPLATE_ROUTES_RE='^[[:space:]]*routes:'
+if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD" \
+  && ! grep -qE "$TEMPLATE_ROUTES_RE" "$SETUP_MD"; then
+  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" PASS
 else
-  check "V34a the template carries no key the adapter and the autopilot contract never read" FAIL
+  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" FAIL
 fi
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD"; then
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" PASS
 else
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" FAIL
+fi
+if printf '  evidenceSafety:\n    routes: ["/", "/login"]\n' | grep -qE "$TEMPLATE_ROUTES_RE"; then
+  check "V34a-control2 the routes scan above catches the template line the route contract shipped" PASS
+else
+  check "V34a-control2 the routes scan above catches the template line the route contract shipped" FAIL
 fi
 # V34b executes the round trip: the policy template SHIPPED in rules/setup.md is extracted,
 # filled with a port, and fed to the run-config helper's own --check-policy.

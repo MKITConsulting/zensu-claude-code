@@ -248,8 +248,8 @@ either: a listed route reads to the human as a limit nothing enforces. **Compati
 one-directional and deliberate:** `parsePolicyTargets` accepts a target with exactly
 `evidenceMode` and `origin` (`POLICY_TARGET_KEYS`) or with a `routes` list beside them
 (`LEGACY_POLICY_TARGET_KEYS`); `legacyRoutesFault` still shape-checks that list at
-`MAX_POLICY_ROUTES`, so no policy that was invalid before becomes valid, and the list is then
-dropped rather than enforced. What still binds per call is unchanged: the floor (no credentials,
+`MAX_POLICY_ROUTES`, so a malformed legacy list still invalidates the policy, and a well-formed
+one is then dropped rather than enforced. What still binds per call is unchanged: the floor (no credentials,
 query or fragment in a navigation), `network.allowedOrigins`, the resolver pins and the
 redirect check. **Version: `patch`.** No schema field, attestation, hook or matcher moves, and
 the gate denies strictly less. The one entry that reads close is the strict key set:
@@ -421,12 +421,15 @@ lets `/zensu:adopt-session` carry an in-flight session across this release.
 **Permission rules do not migrate.** Every rule written for the old browser tools —
 `mcp__plugin_zensu_playwright__…` in 0.21.1 and earlier, `mcp__plugin_zensu_zensu-browser__…` on
 unreleased builds after it — matches nothing now; a `deny` or `ask` there silently stops restricting
-the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. The
-`### Upgrade notes` block under `## [Unreleased]` in `CHANGELOG.md` carries this break and the
-`playwright-cli` prerequisite into the release: the workflow prints the generated section directly
-under that heading, ahead of the block, so the block closes the new release section and its notes.
-`P9b` in `tests/structure/test-verify-feature-skill.sh` runs the workflow's own two awk programs over
-the real file to hold that.
+the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. This break
+and the `playwright-cli` prerequisite shipped in the `### Upgrade notes` block of the `0.22.0`
+section of `CHANGELOG.md`. It was written under `## [Unreleased]`: the workflow prints the
+generated section directly under that heading, ahead of the block, so the block closes the new
+release section and its notes. `P9b` in `tests/structure/test-verify-feature-skill.sh` runs the
+workflow's own two awk programs over the real file to hold that, and `P9d` holds that the
+released block survives the next release. `P9` follows only the block that names
+`mcp__plugin_zensu_playwright__`; a later block under `## [Unreleased]`, such as the route
+retirement's, rides the same mechanism with no check of its own.
 
 **Known gaps, accepted and named:**
 

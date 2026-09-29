@@ -540,6 +540,12 @@ through Bash.
 - **The consent memory is a file in a directory the session can write** through a Bash
   redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
   other loopback services.
+- **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
+  browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
+  Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
+  Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
+  check green. `*.localhost` stays refused although the same Chromium code resolves it to
+  loopback too.
 - **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
   it again when it starts the browser, so a file swapped in between is followed. The run
   directory sits under the project, where the session can write.
