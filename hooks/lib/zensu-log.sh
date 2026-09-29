@@ -269,6 +269,10 @@ case "${1:-}" in
         echo "zensu-log.sh --phase: PROJECT_ROOT_RESTORED is written only by the project-root restore; it is the provenance record of a re-created project root and cannot be minted by a caller" >&2
         exit 2
         ;;
+      [Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Rr][Oo][Oo][Tt]_[Rr][Ee][Aa][Nn][Cc][Hh][Oo][Rr][Ee][Dd])
+        echo "zensu-log.sh --phase: PROJECT_ROOT_REANCHORED is written only by the session re-anchor; it is the provenance record of a moved project root and cannot be minted by a caller" >&2
+        exit 2
+        ;;
     esac
     case "$reason_val" in
       [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *)
@@ -289,6 +293,10 @@ case "${1:-}" in
         ;;
       "project-root-restored: "*)
         echo "zensu-log.sh --phase: a 'project-root-restored: ' reason is reserved for the project-root restore" >&2
+        exit 2
+        ;;
+      [Pp][Rr][Oo][Jj][Ee][Cc][Tt]-[Rr][Oo][Oo][Tt]-[Rr][Ee][Aa][Nn][Cc][Hh][Oo][Rr][Ee][Dd]:\ *)
+        echo "zensu-log.sh --phase: a 'project-root-reanchored: ' reason is reserved for the session re-anchor" >&2
         exit 2
         ;;
     esac

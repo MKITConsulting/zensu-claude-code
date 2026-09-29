@@ -1840,15 +1840,74 @@ function adoptableRecord(options) {
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
 
-// Performs the adoption re-checked UNDER the records lock. The precondition is
-// deliberately evaluated twice — once by the caller to report, once here to act
-// — because between the two the plugin could have changed again.
-function adoptContext(options) {
+function contextRecordLocation(options) {
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
   const locksDir = ensureDescendantDirectory(pluginData, path.join(path.dirname(recordsDir), 'locks'));
   const key = sessionKey(options.sessionId);
-  const file = contextRecordFile(recordsDir, key);
+  return { pluginData, recordsDir, locksDir, key, file: contextRecordFile(recordsDir, key) };
+}
+
+function supersedeContextRecord(file, supersededFile, next) {
+  // The existence check is the COPY's own O_EXCL, never a separate existsSync:
+  // that call resolves through symlinks, so a dangling link at the superseded
+  // name would answer false and copyFileSync would then write the record
+  // through it — and the rollback would unlink the link, leaving the collateral
+  // write behind. COPYFILE_EXCL refuses both, atomically, with no TOCTOU window.
+  // COPY aside, then replace in place — never rename-then-create. A rename
+  // first leaves a window in which `<key>.json` resolves to nothing, and a
+  // clean ENOENT there is `unregisteredSession`, the MOST relaxed state of all
+  // (the Stop hook releases on it). A process death in that window would turn
+  // a repairable lineage break into a permanently record-less session with a
+  // live workflow document still on disk — strictly worse than what is being
+  // repaired, and beyond the reach of any rollback.
+  //
+  // copyFileSync rather than linkSync on purpose: atomicWriteJson refuses a
+  // target with nlink > 1, so a hard link would make the very next step fail.
+  // atomicWriteJson writes a temp file and renames it over the target, so at
+  // every instant the record name resolves to either the old bytes or the new.
+  try {
+    fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      // Names the file, because this is also the crash-resume shape — a death
+      // between the copy and the swap leaves it behind — and the session has
+      // no other write channel to find it with.
+      fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+    }
+    throw error;
+  }
+  try {
+    atomicWriteJson(file, next);
+  } catch (error) {
+    // atomicWriteJson commits by rename and then re-checks the parent
+    // directory's identity, so a throw can land AFTER the new record is in
+    // place. Unlinking the copy then would destroy the only remaining bytes of
+    // the superseded record while the adoption has in fact landed — the one
+    // outcome worse than reporting a failure. Re-read the record and keep the
+    // copy when the new bytes are already there.
+    let committed = false;
+    let readable = false;
+    try {
+      committed = JSON.stringify(readJson(file)) === JSON.stringify(next);
+      readable = true;
+    } catch { readable = false; }
+    // Only an unambiguous "not committed" removes the copy. An unreadable
+    // re-read is INDETERMINATE, and if the record did commit that copy is the
+    // last readable image of the superseded record — deleting it on a guess is
+    // the one outcome worse than reporting a failure.
+    if (readable && !committed) {
+      try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
+    }
+    throw error;
+  }
+}
+
+// Performs the adoption re-checked UNDER the records lock. The precondition is
+// deliberately evaluated twice — once by the caller to report, once here to act
+// — because between the two the plugin could have changed again.
+function adoptContext(options) {
+  const { pluginData, recordsDir, locksDir, key, file } = contextRecordLocation(options);
 
   const adopted = withFileLock(locksDir, key, () => {
     const verdict = adoptableRecord({ ...options, pluginData, recordsDir });
@@ -1887,58 +1946,7 @@ function adoptContext(options) {
       recordsDir,
       `${key}.superseded-${verdict.recorded}.json`,
     );
-    // The existence check is the COPY's own O_EXCL, never a separate existsSync:
-    // that call resolves through symlinks, so a dangling link at the superseded
-    // name would answer false and copyFileSync would then write the record
-    // through it — and the rollback would unlink the link, leaving the collateral
-    // write behind. COPYFILE_EXCL refuses both, atomically, with no TOCTOU window.
-    // COPY aside, then replace in place — never rename-then-create. A rename
-    // first leaves a window in which `<key>.json` resolves to nothing, and a
-    // clean ENOENT there is `unregisteredSession`, the MOST relaxed state of all
-    // (the Stop hook releases on it). A process death in that window would turn
-    // a repairable lineage break into a permanently record-less session with a
-    // live workflow document still on disk — strictly worse than what is being
-    // repaired, and beyond the reach of any rollback.
-    //
-    // copyFileSync rather than linkSync on purpose: atomicWriteJson refuses a
-    // target with nlink > 1, so a hard link would make the very next step fail.
-    // atomicWriteJson writes a temp file and renames it over the target, so at
-    // every instant the record name resolves to either the old bytes or the new.
-    try {
-      fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
-    } catch (error) {
-      if (error && error.code === 'EEXIST') {
-        // Names the file, because this is also the crash-resume shape — a death
-        // between the copy and the swap leaves it behind — and the session has
-        // no other write channel to find it with.
-        fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
-      }
-      throw error;
-    }
-    try {
-      atomicWriteJson(file, next);
-    } catch (error) {
-      // atomicWriteJson commits by rename and then re-checks the parent
-      // directory's identity, so a throw can land AFTER the new record is in
-      // place. Unlinking the copy then would destroy the only remaining bytes of
-      // the superseded record while the adoption has in fact landed — the one
-      // outcome worse than reporting a failure. Re-read the record and keep the
-      // copy when the new bytes are already there.
-      let committed = false;
-      let readable = false;
-      try {
-        committed = JSON.stringify(readJson(file)) === JSON.stringify(next);
-        readable = true;
-      } catch { readable = false; }
-      // Only an unambiguous "not committed" removes the copy. An unreadable
-      // re-read is INDETERMINATE, and if the record did commit that copy is the
-      // last readable image of the superseded record — deleting it on a guess is
-      // the one outcome worse than reporting a failure.
-      if (readable && !committed) {
-        try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
-      }
-      throw error;
-    }
+    supersedeContextRecord(file, supersededFile, next);
     return {
       context: next,
       supersededFile,
@@ -5496,6 +5504,8 @@ module.exports = {
   ADOPTION_HISTORY_REASON_PREFIX,
   adoptableRecord,
   adoptContext,
+  contextRecordLocation,
+  supersedeContextRecord,
   // The read-only path helper. Exported because SessionStart needs to ASK where
   // the document is without creating it — workflowStateFile resolves through
   // ensureDescendantDirectory and mkdirs every missing component, which is right
@@ -5619,6 +5629,7 @@ module.exports = {
   renderHostContext,
   stampWorkflowState,
   initializeWorkflowState,
+  initializeWorkflowStateDetailed,
   mutateWorkflowState,
   transitionWorkflowState,
   resetReviewBudget,

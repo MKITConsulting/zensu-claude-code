@@ -353,8 +353,12 @@ attestation change.
   WORK into a nested worktree, but every record-root-anchored verb — the completion gate's change
   set, the edit-landing audit, the implementing-turn probe, the run log — keeps reading the outer
   directory, which now holds the taker's checkout. The remedy text and `docs/worktree-keep.md`
-  say so; a Session Control re-anchor verb is the standing fix for this case as well as the
-  recycle case.
+  say so. The Session Control re-anchor verb (`/zensu:adopt-session --reanchor`,
+  `.claude/rules/session-reanchor.md`) does NOT fix this case while the chain is armed: it refuses
+  `workflow-in-progress` until the chain reaches its terminus, because that evidence is bound to
+  the old root. After that it can move the anchor into the nested worktree, and a new chain
+  then belongs in a fresh session started there: the paths a skill builds from the working
+  directory follow the host's start directory, not the moved anchor.
 - **The feature engages only for a session that STARTED inside `.claude/worktrees/<name>`.** The
   record root and the SessionStart `cwd` are what the three verbs key on, so a session that starts
   in the origin checkout and creates its worktree by hand — this repository's own mandated flow —
@@ -405,9 +409,11 @@ attestation change.
   victim must already carry that exact name — narrow enough to be a residual rather than a
   primitive, and named here rather than left to be rediscovered. A descriptor-relative walk is the
   durable fix and Node exposes no `unlinkat`.
-- **The RECYCLE case is NOT addressed.** When the app moves a session to a fresh worktree, the
-  Session Control anchor stays on the old directory; that needs a re-anchor verb in Session
-  Control and is a separate feature.
+- **The RECYCLE case is addressed only by hand.** When the app moves a session to a fresh
+  worktree, the Session Control anchor stays on the old directory. `/zensu:adopt-session
+  --reanchor`, run from the fresh worktree, moves it there when the old directory still exists,
+  the fresh one is a registered worktree of the same repository, and no other live session is
+  found in it; nothing runs it automatically, and no hook tells the session to.
 - **An UNBOUND session gets no disclosure.** The prompt hook reads the anchor under the RECORDED
   project root, so every relaxable bind failure in §"Relaxable Bind Failures" exits it silently;
   the doctor row is the only surface there.

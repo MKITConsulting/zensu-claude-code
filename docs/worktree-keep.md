@@ -64,6 +64,12 @@ drift disclosure at all, which is listed under Limits below. A payload that name
   until twice its idle window, so a takeover between the end and a later resume is still
   disclosed. An anchor it cannot validate is removed when it is a regular file, a hard link
   included; a symlink, a non-file or a broken `.zensu/state` component is left in place.
+- **`/zensu:adopt-session --reanchor --confirm`** is not a hook, but it moves the record's
+  project root to another worktree of the same repository, and the anchor moves with it while
+  `hooks.worktreeKeep` is on: this session's anchor in the old worktree is aged exactly as
+  SessionEnd ages it, and one is written in the new worktree exactly as a fresh SessionStart
+  writes it. Another session's live anchor in the target, or one this build cannot validate,
+  makes the move refuse, because it marks a worktree that session may still be working in.
 
 With `hooks.worktreeKeep` off, the SessionStart and SessionEnd hooks run a release pass instead:
 they remove this session's anchor and every marker this plugin wrote that nothing holds any

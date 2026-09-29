@@ -60,6 +60,17 @@ The team-review identity check is a THIRD shape: it resolves the owner from the 
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
 
+**`autopilot_read_active_strict` asks the owner-scoped question with the lease kept apart from
+the verdict.** `autopilot_read_active` ends in `_autopilot_locked_run`, so its exit 1 also covers a
+storage-safety failure, a failed acquisition and a failed release. The strict verb runs the worker
+through `_autopilot_active_probe`, which always returns 0 and carries the worker's status in
+`_ZENSU_AP_ACTIVE_WORKER_RC` beside the record in `_ZENSU_AP_ACTIVE_RECORD` — the same intra-file
+channel shape as `_autopilot_hold_probe` — and answers 0 with the run printed, 1 for the worker's own
+"no run" or an absent state directory, 2 for an orphaned, hidden or inconsistent run, 3 for a
+refused call and 5 for every lease, storage or path fault. Its one caller is
+`hooks/lib/session-reanchor-v1.js`, which names it across the file boundary; the hook call sites
+keep `autopilot_read_active` and read its 1 as "no run".
+
 **The two deferred-review fences ask the owner-independent question and then WEIGH the
 answer; that is not a fourth shape and it is not owner-scoping.** They still call
 `_autopilot_read_workspace_critical` and a foreign run is still fully visible to them —

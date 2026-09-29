@@ -468,6 +468,7 @@ _tdd_reserved_provenance() {
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
     [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]_[Rr][Ee][Bb][Uu][Ii][Ll][Tt]) return 0 ;;
     [Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Rr][Oo][Oo][Tt]_[Rr][Ee][Ss][Tt][Oo][Rr][Ee][Dd]) return 0 ;;
+    [Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Rr][Oo][Oo][Tt]_[Rr][Ee][Aa][Nn][Cc][Hh][Oo][Rr][Ee][Dd]) return 0 ;;
   esac
   case "${2:-}" in
     [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *) return 0 ;;
@@ -475,6 +476,7 @@ _tdd_reserved_provenance() {
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
     [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]-[Rr][Ee][Bb][Uu][Ii][Ll][Tt]:\ *) return 0 ;;
     [Pp][Rr][Oo][Jj][Ee][Cc][Tt]-[Rr][Oo][Oo][Tt]-[Rr][Ee][Ss][Tt][Oo][Rr][Ee][Dd]:\ *) return 0 ;;
+    [Pp][Rr][Oo][Jj][Ee][Cc][Tt]-[Rr][Oo][Oo][Tt]-[Rr][Ee][Aa][Nn][Cc][Hh][Oo][Rr][Ee][Dd]:\ *) return 0 ;;
   esac
   return 1
 }

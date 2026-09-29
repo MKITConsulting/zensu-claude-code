@@ -31,7 +31,10 @@ was considered and REFUSED — a session may delete its own root, so a caller-na
 be a cross-project write escape. Nothing here accepts one: the path is `context.project_root`,
 so the anchor never MOVES and the source-write gate keeps comparing against exactly the root it
 compared against before. Do NOT "generalize" this into a mode that takes a destination; that is
-the refused design, not an extension of this one. State the bound as the script header does —
+the refused design, not an extension of this one. The one anchor move that exists is the bounded
+same-repository re-anchor in `.claude/rules/session-reanchor.md`: a separate script that no
+bind-failure recognizer admits, and it refuses when the recorded root is gone, so it never
+competes with this mode for the state this mode repairs. State the bound as the script header does —
 `CLAUDE_PLUGIN_DATA` is still a caller-supplied literal and the private records directory is
 what bounds it — never as "every location is derived from the record".
 

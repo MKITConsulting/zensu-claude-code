@@ -122,8 +122,8 @@ is covered by (C) when it escapes the session root. Like the CLI gate this is a
 work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
 files and run tests there — on the main thread no Edit-matcher hook compares a path against the
 project root, and the all-tool capability gate that does compare exempts the main principal — but its
-first `git add`/`git commit` denies, because the session root is minted at SessionStart and nothing
-re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
+first `git add`/`git commit` denies, because the session root is minted at SessionStart and only
+the verified move below re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
 `git worktree add .claude/worktrees/<name>` every worktree sits inside the main checkout and a session
 anchored there commits in all of them. The blocked shapes are a sibling worktree, another repository,
 and the main checkout addressed from inside a worktree. The route is a session whose own anchor
@@ -148,6 +148,28 @@ repository, existing anchor, resolved branch) are what stand in for that. A work
 created inside its own node process would not be seen either, which is why it renders instead.
 `/zensu:session-trail` flow 3 owns the routing rule and the nine `CONTINUE` states; this section
 names only the one refusal that bounds the offer above.
+
+**A fourth route moves the anchor instead of the work.** When the worktree belongs to the SAME
+repository, `/zensu:adopt-session --reanchor`, run from inside it, re-mints this session's Session
+Control record with that worktree's top-level as its project root — after verifying that the recorded
+root still exists, that the target is a registered, non-prunable worktree with the same git common
+directory that contains neither the recorded root nor another registered worktree, that no open review
+chain, workflow or Autopilot run of this session is bound to the old root, and that no other live
+session is found in the target — started there, anchored there, or keeping a worktree-keep anchor
+there. It refuses rather than guesses when that last question cannot be answered. A session that only
+edits files in the target by absolute path is not found, which is why the report lists the target's
+uncommitted paths. Without `--confirm` it is read-only; `--confirm` is an argument the model can supply
+as easily as the user, so the consent is the skill's step that relays the report and waits for the
+user's agreement. From the next tool call rules (B) and (C) compare against the new root, so the old
+worktree is outside this session from then on. It is the bounded form of a design that stays refused:
+nothing moves the anchor to a directory an argument names, into another repository, over another
+worktree, or into a worktree in which another live session is found, which is the contamination this
+gate exists to prevent. `docs/session-control.md` §"Unbindable sessions" carries its conditions and
+gaps. The deny texts point at it: in a session with a usable record, the rule (B) deny and the
+repository and designation arms of rule (C) name `/zensu:adopt-session --reanchor`; the worktree-operand
+arm does not, because moving the anchor does not change which tree that command destroys. No deny
+names a worktree other than the one the command addressed. An earlier rule (C) text recommended
+`git -C '<recorded root>' <verb> …`, which would have staged into the wrong worktree.
 
 A plain `--resume` **re-anchors nothing**, and that is why the route works rather than a caveat
 against it: `FRESH_SESSION_SOURCES` in `hooks/lib/claude-session-control-v1.js` is
