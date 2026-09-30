@@ -45,6 +45,7 @@
     "test-evidence-run.sh",
     "test-file-exists-replacement.sh",
     "test-finding-verification.sh",
+    "test-full-suite-ci.sh",
     "test-full-suite-gate.sh",
     "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",

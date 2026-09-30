@@ -51,6 +51,13 @@ id` pins it with `core.checkStat minimal`, so it reproduces on hosts whose git k
 stat data, and it backdates the file and its index entry five seconds, so the copy always lands
 in a later second than the recorded mtime whatever the host's timing.
 
+**`full` and `scoped` runs carry a tree** (`TREE_SCOPES`); `lint`, `build` and `coverage`
+stay untreed. `--if-stale` works for both: for `full` it reads the newest `full` record, for
+`scoped` the newest run of the same command. A local chain's verdict still reads only `full`
+records. A chain whose full suite runs in CI reads its `scoped` runs through `decideCi` and
+may close as `deferred-ci`, a passing state that is never persisted. That mode, its policy and
+its stores are described in `.claude/rules/full-suite-ci-deferral.md`.
+
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure
 is `unavailable` and blocks under `required`: a `safe.directory` refusal also exits 128,

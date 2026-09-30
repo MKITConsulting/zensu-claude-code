@@ -45,6 +45,11 @@
   "evidence": {
     "fullSuiteCommand": "",
     "fullSuiteGate": "required",
+    "fullSuiteRunner": "",
+    "ci": {
+      "workflow": "",
+      "job": ""
+    },
     "acceptanceGate": "required"
   }
 }
