@@ -85,7 +85,7 @@ const expectedProfiles = [
   'windows-shard-9',
 ];
 const expectedCommandCount = 44;
-const expectedCommandDigest = 'e272868b7badac4f7e1edbc2d33eca6478d09775410df977f2004d5fd8b2cb60';
+const expectedCommandDigest = '95dde0afc248197c505b0c46037796120deeecadcaab5b5950e3eec96600d9c5';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -128,6 +128,12 @@ const expectedShardHomes = {
   'stop-enforcer-self-review-routing': 'windows-shard-7',
   'stop-enforcer-reviewer-denial-note': 'windows-shard-9',
   'session-trail-lineage': 'windows-shard-8',
+  'autopilot-bound-payload-windows': 'windows-shard-6',
+  'deferred-review-fallback': 'windows-shard-8',
+};
+const expectedShardTails = {
+  'windows-shard-4': 'deferred-claim-adoption',
+  'windows-shard-8': 'plan-payload-path-transport',
 };
 
 test('measured shard rebalances stay where they were moved', () => {
@@ -140,6 +146,9 @@ test('measured shard rebalances stay where they were moved', () => {
   }
   for (const [suiteId, expectedProfile] of Object.entries(expectedShardHomes)) {
     assert.equal(homes.get(suiteId), expectedProfile, `${suiteId} shard home`);
+  }
+  for (const [profileId, suiteId] of Object.entries(expectedShardTails)) {
+    assert.equal(manifest.profiles[profileId].suites.at(-1).id, suiteId, `${profileId} runs ${suiteId} last`);
   }
 });
 

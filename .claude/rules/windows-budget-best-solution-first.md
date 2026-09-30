@@ -10,11 +10,11 @@ paths:
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The suite cap was raised 300000 -> 600000, matching its siblings, but **the cap is
-not the ceiling that binds** and the measurement says which one is. On the last
-green run `windows-shard-4` completed in **1591 s** against its `profileTimeoutMs`
-of 1800000 — roughly **209 s of headroom for the whole shard**. A suite never
-receives its configured `timeoutMs`; it receives the shard's remaining budget, so
-raising this number buys nothing while the shard is that close to its own ceiling.
+not the ceiling that binds** and the measurement says which one is. When that cap was
+raised, `windows-shard-4` completed in **1591 s** against its `profileTimeoutMs` of
+1800000 — roughly **209 s of headroom for the whole shard**. A suite never receives
+its configured `timeoutMs`; it receives the shard's remaining budget, so raising a cap
+buys nothing while the shard is that close to its own ceiling.
 
 The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
 it builds five fixture plugin trees, and it now also drives
@@ -42,9 +42,25 @@ was not slow; it was not paid for. `plan-payload-path-transport` moved to
 `windows-shard-8`, which the contract test's own note measures at roughly 292 s of
 work; moving the 180000 ms suite instead would have left this shard at 1718167 ms,
 which is a budget set AT the measurement. Shard 4 now holds
-`best-solution-first`, `deferred-claim-adoption` and `tdd-state-junction-safety`, near
-1024 s. Re-measure both shards on the next green Windows run and replace these
-figures; the headroom sentence above still describes the shard as it was.
+`best-solution-first`, `tdd-state-junction-safety` and `deferred-claim-adoption`, in that
+order. Run 36344267696 (its windows-shard-4 job was green at d0bdb9e2) measured them at
+49843, 116868 and 701522 ms, 868233 ms of suite time. `deferred-claim-adoption` has since
+gained the reused-PID cases and `L3`, an ESTIMATED 150 s more, and its cap rose to 1200000 ms.
+It runs LAST because its cap is the largest: the three caps sum to 1980000 ms against the
+1800000 ms envelope, so a slow run of it must surface as its own `TIMED_OUT` instead of
+starving the suite behind it. `expectedShardTails` in `tests/structure/windows-ci-contract.test.js`
+pins that position. Re-measure on the next green Windows run and replace these figures.
+
+**`windows-shard-1` paid for `C7-renew` the same way.** Run 36625440255 exhausted that shard's
+envelope at 1800264 ms: `tdd-no-flock-external-lease` was granted 9579 ms and overran it, and
+three suites behind it never ran. `C7-renew` itself took about 96 s of `deferred-lease-refresh`'s
+739185 ms. The rest was a slow runner: the suite's other four cases took about 40% longer, and
+`autopilot-state-machine` 28% longer (791429 ms), than on main's run 36622193312 (616598 ms),
+whose shard 1 summed 1357 s. So the shard was already close to its envelope on a slow runner.
+`autopilot-bound-payload-windows` (116728 and 128775 ms on those two runs) moved to
+`windows-shard-6`, which measured 1027 and 695 s, and `deferred-review-fallback` (116501 and
+99509 ms) moved to `windows-shard-8`, which measured 882 and 1083 s, ahead of its pinned tail.
+`expectedShardHomes` pins both homes. Re-measure shard 1 on the next green Windows run.
 
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key

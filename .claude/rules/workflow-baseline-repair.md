@@ -217,7 +217,9 @@ new one — the shape it refuses is byte-identical.
   document can be in. It reads its phase token from the LOADED core rather than from a
   literal, so a rename reports a missing check instead of silently deleting the row;
   `P6r`-`P6r4` in `tests/structure/test-doctor.sh` pin the row, its cost-and-remedy
-  wording, the history control and both halves of that token rule.
+  wording, the history control and both halves of that token rule. It shares ONE read of
+  the document with the restore row and the adoption row through `sharedWorkflowRead`;
+  each row discloses its own missing check, and the `P6t` family pins the adoption row.
 - **The SessionStart self-heal is not user-confirmed.** A session could delete its own
   document and wait for an automatic compaction. The history entry makes that visible —
   and since the doctor row above it is visible to a USER rather than only to a guard

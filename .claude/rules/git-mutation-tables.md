@@ -208,11 +208,15 @@ that — unlike `ZENSU_BASH_WRITE_GATE=off` — lands no bypass-ledger entry.
 
 **The MSYS drive rule is SHARED, not copied.** `claude-path-v1.js` exports
 `msysDrivePrefix` as a TOTAL function — anything that is not an MSYS drive spelling comes
-back unchanged — and each consumer applies its own policy on top. There are FOUR, not
-two: `normalizeHostPathInput` in that same file, `msysToDrive` in the parser,
-`hooks/lib/zensu-doctor-invocation.js`, and — the first outside `hooks/` —
-`hostPath` in `skills/session-trail/scripts/trail.mjs`, whose policy is a third one
-again (it FAILS when the module cannot be loaded). The two the sentence below
+back unchanged — and each consumer applies its own policy on top. The consumers are a
+GREP — `grep -rn 'msysDrivePrefix' hooks skills` — and not a bound. As of this writing:
+`normalizeHostPathInput` in that same file, `msysToDrive` in the parser,
+`hooks/lib/zensu-doctor-invocation.js`, `configLayers` in
+`hooks/lib/session-auto-adopt-v1.js` (a driveless MSYS spelling of a config path falls
+to "adoption enabled", because a config that cannot be read must not switch a repair
+off), and — the first outside `hooks/` — `hostPath` in
+`skills/session-trail/scripts/trail.mjs`, whose policy is a further one again (it FAILS
+when the module cannot be loaded). The two the sentence below
 contrasts are the two whose policies are opposites: its own
 `normalizeHostPathInput` layers a fail-closed-by-THROWING policy for the session-control
 trust boundary, while `msysToDrive` in the parser declines that policy. It has to: the

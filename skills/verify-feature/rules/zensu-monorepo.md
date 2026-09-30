@@ -79,6 +79,29 @@ literal loopback. Secrets are stored mode `0600` beneath the run directory solel
 controller actions; never read, print, or pass that file to another tool. The persistent JSON
 state contains no secret values or killable PIDs.
 
+## Keeping up with the monorepo
+
+The controller hard-codes the start contract of two services it does not own, so a monorepo
+change can break it without any change here. Both contracts are pinned by
+`tests/structure/test-zensu-runtime-controller.sh`, whose stubs record the exact argv and
+environment the controller hands each service.
+
+- **Backend environment.** The backend refuses to boot when a required variable is missing
+  (`validateConfigs` in `backend/cmd/zensu/main.go`); the controller then reports only that
+  `ready` failed, and the cause is the `invalid config:` line in `backend.log`. Since monorepo
+  PR #778 that includes `TRUSTED_PROXY_CIDRS`. The controller passes `none`
+  (`middleware.TrustedProxiesNone`), the value for a backend that receives client connections
+  directly: no forwarding header is trusted, so every request is attributed to its TCP peer,
+  which in this single-user loopback run is the Vite dev server's proxy. The backend logs a
+  `WARN` that the trust set is empty; that is expected here. When the monorepo makes another
+  variable required, add it to the backend environment in the controller and to the expected
+  environment in that suite in the same change.
+- **Frontend flags.** The frontend starts as `pnpm dev --host 127.0.0.1 --port <port>
+  --strictPort`. Never put a literal `--` between the script name and the flags: npm strips it,
+  but pnpm forwards it, and Vite then ignores every flag after it. Vite falls back to
+  `localhost`, which Node 26 resolves to `[::1]` only, and to its default port `5173`, so
+  `ready` fails on `127.0.0.1` and a planned origin on `5173` matches only by accident.
+
 `ready` authenticates both supervisors with the private lease, verifies the container's
 lease-hash label, then checks PostgreSQL readiness, `/api/health`, and the frontend origin. A
 sleep alone is never readiness evidence. The controller never uses the repository's
@@ -113,3 +136,25 @@ private lease, stops their complete child process groups, verifies the unique Po
 container name and lease-hash label, and then removes internal secret/state files. Mutable JSON
 alone can never authorize a signal or container removal. The parent skill removes the unique run
 directory. Never use `pkill`, kill by a broad command pattern, or remove another worktree's resource.
+
+`down` is idempotent, and a rerun after a failed teardown converges:
+
+- The supervisor waits until its process group is gone (`ESRCH`). While the group holds only
+  exited processes that are not reaped yet, macOS answers `EPERM` instead, and right after
+  `SIGTERM` that is the normal state of a group whose processes all exit at once. `EPERM`
+  therefore never fails a stop: the wait goes on until the group is gone, and an `EPERM` that
+  outlasts it means no process is left to signal, so the stop succeeds without `SIGKILL`.
+- An endpoint file that no supervisor answers (the supervisor client exits `3`) is left by a
+  supervisor that died. It counts as stopped only when nothing answers on that service's port,
+  the same check that runs when the endpoint file is missing. A port that still answers fails
+  the teardown and keeps the state for a later `down`.
+- The Claude Code Bash sandbox allows signals and process inspection only within the same
+  sandbox (`(allow signal (target same-sandbox))`, `(allow process-info* (target
+  same-sandbox))`), so a later Bash call can neither signal a process an earlier call started
+  nor list it with `lsof`. Teardown never signals from the calling shell: it stops services
+  through the supervisor protocol, and its port check connects to `127.0.0.1:<port>` in
+  addition to asking `lsof`. `up` uses the same port check for the ports it picks.
+
+Residual: a supervisor that is killed while its service has not bound its port yet, for
+example while `go run` still compiles, leaves a process that no check sees. A `down` in that
+window reports stopped, and the process binds the port later.

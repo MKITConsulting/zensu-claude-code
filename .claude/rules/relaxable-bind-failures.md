@@ -125,13 +125,17 @@ present by construction. The lineage predicate matches TWO states, and they are 
 DIFFERENT reasons: with the recorded project root still present a workflow document is
 reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
 gone the document is not reachable from this record, and what stands in for the guarantee is
-that the state has a real in-place repair — adoption, a user action leaving provenance —
+that the state has a real in-place repair — adoption, which re-mints the record under the
+records lock and leaves provenance, automatically on the next hook bind or by hand —
 rather than a silent waiver. A consumer that says anything about the workflow document must
 ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
 `zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it.
-What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` now spells FIVE
-scopes, two of which — `incompatible-runtime` and `pruned-plugin-root` — take the two
-versions as positional arguments. FIVE gates can deny
+What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` spells SEVEN
+scopes, listed above the emitter in `zensu-session.sh`. Two of them — `incompatible-runtime`
+and `pruned-plugin-root` — take the two versions as their first positional arguments, the
+adoption token as `$4` and the audience as `$5`; `adoption-incomplete` takes the token
+and the audience alone, because a lost race establishes no version pair (see
+`.claude/rules/automatic-adoption.md`). FIVE gates can deny
 in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
