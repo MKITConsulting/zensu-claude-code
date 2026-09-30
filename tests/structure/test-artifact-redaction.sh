@@ -680,11 +680,11 @@ else
   check "R27 append refuses a plans/ destination (rc=$RC)" FAIL
 fi
 
-# ── R28: the SHIPPED recipe works with no CLAUDE_PROJECT_DIR ─────────
-# skills/tdd/SKILL.md Phase 2 renders `{log_file}` from `${CLAUDE_PROJECT_DIR:-.}`
-# and runs `append --truncate` as the first write of every run. That variable is
+# ── R28: a relative recipe works with no CLAUDE_PROJECT_DIR ──────────
+# skills/tdd/SKILL.md Phase 2 once rendered `{log_file}` relative to the cwd
+# and ran `append --truncate` as the first write of every run. That variable is
 # absent from the model's Bash environment on this host, so a `--truncate` gated
-# on it would break every run — an earlier revision did exactly that. The
+# on it would break every such caller — an earlier revision did exactly that. The
 # destructive mode is constrained by the module (logs bucket, canonicalized
 # directory, descriptor-judged) rather than by an ambient
 # variable the caller sets anyway.
@@ -696,9 +696,9 @@ mkdir -p "$UNBOUND_DIR"
   --message "TDD STARTED — shipped recipe" >/dev/null 2>&1 )
 RC=$?
 if [ "$RC" -eq 0 ] && grep -qF 'TDD STARTED' "$UNBOUND_DIR/2026-01-01-0019_tdd-shipped.log"; then
-  check "R28 the shipped --truncate recipe works with CLAUDE_PROJECT_DIR unset" PASS
+  check "R28 a relative --truncate recipe works with CLAUDE_PROJECT_DIR unset" PASS
 else
-  check "R28 the shipped --truncate recipe works with CLAUDE_PROJECT_DIR unset (rc=$RC)" FAIL
+  check "R28 a relative --truncate recipe works with CLAUDE_PROJECT_DIR unset (rc=$RC)" FAIL
 fi
 
 # ── R44: the DESTRUCTIVE mode binds even with no CLAUDE_PROJECT_DIR ──
@@ -706,7 +706,7 @@ fi
 # undefined, and `append` maps an empty CLAUDE_PROJECT_DIR to exactly that, so
 # containment reduces to SHAPE: any absolute --log resolving to a real
 # <anyroot>/.zensu/logs/<name>.log is an accepted destination. Since the shipped
-# recipe runs with that variable unset (R28), unbound is the DEFAULT path, and
+# recipe ran with that variable unset (R28), unbound was the DEFAULT path, and
 # the redirect-carrying form this verb replaced WAS judged against the session
 # root by the source-write gate — so the change narrowed an existing control.
 #
@@ -718,8 +718,8 @@ fi
 # second is worth denying a working call shape over. The additive residual is
 # therefore open by decision, and is documented as a bound rather than dropped.
 #
-# R28 is the discrimination partner: the shipped --truncate recipe runs from the
-# project root with a relative path, so the cwd IS the derived root.
+# R28 is the discrimination partner: a relative --truncate recipe run from the
+# project root makes the cwd the derived root.
 S3_A="$WORK/xproj/a/.zensu/logs"
 S3_B="$WORK/xproj/b/.zensu/logs"
 mkdir -p "$S3_A" "$S3_B"
@@ -1146,7 +1146,7 @@ else
 fi
 
 # ── R54: the SHIPPED Phase 2 recipe is executed, not re-typed ────────
-# R28 asserts a hand-typed twin of the Phase 2 create command, so a flag that
+# R28 asserts a hand-typed variant of the Phase 2 create command, so a flag that
 # drifts in `skills/tdd/SKILL.md` — the file every run actually reads — is
 # invisible to the suite while R28 stays green against the copy in the test. This
 # arm extracts the line from the shipped skill, substitutes only the documented
@@ -1154,7 +1154,7 @@ fi
 # spelling rather than a line number, so a moved section does not silently make
 # the extraction match nothing: an empty extraction FAILS here.
 #
-# The residue guard names the three placeholders by hand rather than matching a
+# The residue guard names the four placeholders by hand rather than matching a
 # generic `{word}`: the recipe legitimately contains `${CLAUDE_PLUGIN_ROOT}` and
 # `${CLAUDE_PLUGIN_DATA}`, which a generic pattern reads as unsubstituted.
 RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/tdd/SKILL.md")"
@@ -1163,28 +1163,25 @@ RECIPE_CMD="${RECIPE_CMD%\`}"
 RECIPE_PROJ="$WORK/recipe-proj"
 mkdir -p "$RECIPE_PROJ"
 RECIPE_LOG_REL='.zensu/logs/2026-01-01-0054_tdd-recipe.log'
-# The replacement is built in its own single-quoted variable: writing the
-# `${CLAUDE_PROJECT_DIR:-.}` spelling inline inside `${var//pat/repl}` needs
-# backslashes, and bash does NOT strip them from a replacement string — the
-# recipe then ran with a literal `$\{` and wrote nothing.
-RECIPE_LOG_SPELL='"${CLAUDE_PROJECT_DIR:-.}/'"$RECIPE_LOG_REL"'"'
+RECIPE_LOG_SPELL='"{project_root}/'"$RECIPE_LOG_REL"'"'
 RECIPE_CMD="${RECIPE_CMD//\{log_file\}/$RECIPE_LOG_SPELL}"
+RECIPE_CMD="${RECIPE_CMD//\{project_root\}/$RECIPE_PROJ}"
 RECIPE_CMD="${RECIPE_CMD//\{title\}/Recipe extraction}"
 RECIPE_CMD="${RECIPE_CMD//\{N\}/3}"
 if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
-  && ! printf '%s' "$RECIPE_CMD" | grep -qE '\{log_file\}|\{title\}|\{N\}'; then
-  ( cd "$RECIPE_PROJ" && env HOME="$FAKE_HOME" \
-      CLAUDE_PROJECT_DIR="$RECIPE_PROJ" \
+  && ! printf '%s' "$RECIPE_CMD" | grep -qE '\{log_file\}|\{project_root\}|\{title\}|\{N\}'; then
+  ( cd "$WORK" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
       CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
       CLAUDE_PLUGIN_DATA="${ZENSU_TEST_PLUGIN_DATA:-$WORK/plugin-data}" \
       SESSION_EPOCH=1767225600 \
       bash -c "$RECIPE_CMD" ) >/dev/null 2>&1
   RC54=$?
   if [ "$RC54" -eq 0 ] && [ -f "$RECIPE_PROJ/$RECIPE_LOG_REL" ] \
-    && grep -qF 'TDD STARTED — Recipe extraction | steps: 3' "$RECIPE_PROJ/$RECIPE_LOG_REL"; then
-    check "R54 the shipped Phase 2 recipe, extracted and executed, creates the run log" PASS
+    && grep -qF 'TDD STARTED — Recipe extraction | steps: 3' "$RECIPE_PROJ/$RECIPE_LOG_REL" \
+    && [ ! -e "$WORK/$RECIPE_LOG_REL" ]; then
+    check "R54 the shipped Phase 2 recipe, extracted and run from outside the project with CLAUDE_PROJECT_DIR unset, creates the run log under {project_root}" PASS
   else
-    check "R54 the shipped Phase 2 recipe, extracted and executed, creates the run log (rc=$RC54)" FAIL
+    check "R54 the shipped Phase 2 recipe, extracted and run from outside the project with CLAUDE_PROJECT_DIR unset, creates the run log under {project_root} (rc=$RC54)" FAIL
   fi
 else
   check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/SKILL.md" FAIL

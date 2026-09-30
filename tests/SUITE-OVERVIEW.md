@@ -355,7 +355,7 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-run-v1.test.js` | 54 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention |
+| `evidence-run-v1.test.js` | 55 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
@@ -395,8 +395,8 @@ that suite's failure.
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (41
-files) against this table's 36 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (43
+files) against this table's 38 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR

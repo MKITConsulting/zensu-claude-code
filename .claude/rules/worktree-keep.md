@@ -356,9 +356,9 @@ attestation change.
   say so. The Session Control re-anchor verb (`/zensu:adopt-session --reanchor`,
   `.claude/rules/session-reanchor.md`) does NOT fix this case while the chain is armed: it refuses
   `workflow-in-progress` until the chain reaches its terminus, because that evidence is bound to
-  the old root. After that it can move the anchor into the nested worktree, and a new chain
-  then belongs in a fresh session started there: the paths a skill builds from the working
-  directory follow the host's start directory, not the moved anchor.
+  the old root. After that it can move the anchor into the nested worktree, and a new chain can
+  start in the same session: `/zensu:tdd` and the skills it hands off to read the anchor from
+  `zensu-log.sh --project-root` and run their commands there, and `--evidence-run` follows it.
 - **The feature engages only for a session that STARTED inside `.claude/worktrees/<name>`.** The
   record root and the SessionStart `cwd` are what the three verbs key on, so a session that starts
   in the origin checkout and creates its worktree by hand — this repository's own mandated flow —

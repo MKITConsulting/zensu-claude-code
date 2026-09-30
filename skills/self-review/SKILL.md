@@ -109,11 +109,14 @@ finalizing the current chain.
 
 List every file you changed or created in this session. You know these from your
 own context — no parsing needed. Cross-check by running the `/zensu:tdd`
-Phase 6 step 5b b) enumeration UNCHANGED — resolve
-`TOP="$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --show-toplevel)"` HERE and
-require `[ -n "$TOP" ] && [ -d "$TOP" ]` before ANY `git -C "$TOP"` (an empty
-`TOP` makes `git -C ""` enumerate whatever repo the cwd happens to be; an
-unresolvable root takes 5b's no-work-tree branch, never an unanchored run) —
+Phase 6 step 5b b) enumeration UNCHANGED — resolve the bound project root with
+`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`
+and `TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` HERE, never from
+the working directory, which after `/zensu:adopt-session --reanchor` is no longer
+the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ]`
+before ANY `git -C "$TOP"` (an empty value makes `git -C ""` enumerate whatever
+repo the cwd happens to be; an unresolvable root takes 5b's no-work-tree branch,
+never an unanchored run) —
 then use `git -C "$TOP" -c core.quotePath=false diff --name-only HEAD` plus
 `git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard`
 (without `core.quotePath=false` git C-quotes non-ASCII paths and no fixed-string
@@ -176,7 +179,7 @@ Bash carries no `CLAUDE_PROJECT_DIR` and would otherwise skip the project config
 hook reads, with
 `CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off' _ "${CLAUDE_PLUGIN_ROOT}"`,
 and on `off` skip this paragraph and add no ledger rows to `## Open`. On `on`, run
-`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$(git rev-parse --show-toplevel)"`
+`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$TOP"`
 over the run log of the `/zensu:tdd` chain this stage closes: the log that chain has been
 writing to in this session, never a log resolved by recency. When that path is not known in
 this session, skip the ledger. On `status=ok` or `status=partial`, every entry in state
@@ -227,6 +230,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
+  Run every test, build or other project command of this round as
+  `cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`
+  printed in Phase 1: the Bash tool returns to the session's start directory, which after
+  `/zensu:adopt-session --reanchor` is not the bound root. `--evidence-run` needs no prefix.
   Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
   the `/zensu:tdd` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:

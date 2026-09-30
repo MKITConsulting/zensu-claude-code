@@ -31,6 +31,18 @@ block, because the bind overwrites that variable. A new binding the verb exports
 join `CHILD_SCRUBBED_ENV`, or the suite under test sees it; `test-evidence-run.sh` E7
 pins the current set.
 
+**The command runs where the fingerprint looks.** `runDirectory` keeps the caller's working
+directory when it lies in the git work tree of the bound project root, and otherwise runs the
+command in the project root and says so on stderr. Work-tree identity decides first: a nested
+worktree, an embedded clone or a submodule inside the root is another work tree, which the
+fingerprint does not measure. Path containment decides only for a root outside git. The tree
+fingerprint and the verdict are bound to the project root, so a run from another worktree — the
+Bash tool's start directory after `/zensu:adopt-session --reanchor` — would certify a tree it never
+tested. The same-work-tree arm keeps a session recorded in a subdirectory able to run its suite
+from the worktree top. `test-evidence-run.sh` E8, E8b and E8c pin the three directions, and the
+unit case `a working directory outside the work tree of the project root runs the command in the
+project root` pins both arms, the `<root>-x` prefix sibling and a caller outside git.
+
 **The tree fingerprint never touches the real index.** It copies the index, runs
 `git add -A -- .` and then `git rm -r --cached .zensu` on the copy, and writes the tree.
 Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is

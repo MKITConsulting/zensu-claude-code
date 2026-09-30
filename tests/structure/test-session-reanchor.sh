@@ -391,5 +391,264 @@ else
   check "E9i tdd-mode marker after the move (mode='$MODE')" FAIL
 fi
 
+echo "=== E10: a /zensu:tdd chain in the new anchor, driven from the start directory ==="
+SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+SKILL_SR="$PLUGIN_DIR/skills/self-review/SKILL.md"
+SKILL_VF="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
+span_in() {
+  node -e '
+    let text = require("fs").readFileSync(process.argv[1], "utf8");
+    if (process.argv[4] !== "") {
+      const at = text.indexOf(process.argv[4]);
+      text = at === -1 ? "" : text.slice(at);
+    }
+    const spans = (text.match(/`[^`\n]*`/g) || []).map((s) => s.slice(1, -1));
+    const hit = spans.find((s) => s.includes(process.argv[2]) && (process.argv[3] === "" || s.endsWith(process.argv[3])));
+    process.stdout.write(hit || "");
+  ' "$1" "$2" "${3:-}" "${4:-}" 2>/dev/null
+}
+skill_span() { span_in "$SKILL_TDD" "$@"; }
+spans_agree() {
+  node -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8");
+    const spans = (text.match(/`[^`\n]*`/g) || []).map((s) => s.slice(1, -1))
+      .filter((s) => s.includes(process.argv[2]) && s.endsWith(process.argv[3]));
+    process.stdout.write(spans.length >= 2 && spans.every((s) => s === spans[0]) ? String(spans.length) : "0");
+  ' "$SKILL_TDD" "$1" "$2" 2>/dev/null
+}
+E10_TS="2026-09-30-0000"
+E10_SLUG="reanchor-e2e"
+E10_LOG_DEF="$(skill_span '/.zensu/logs/{SESSION_TS}_tdd-{slug}.log')"
+E10_PLAN_DEF="$(skill_span '/.zensu/plans/{SESSION_TS}_tdd-{slug}.md')"
+E10_ROOT_CMD="$(skill_span 'zensu-log.sh" --project-root')"
+E10_BASE_CMD="$(skill_span 'BASELINE_SHA=$(git -C')"
+E10_BEGIN="$(skill_span 'hooks/lib/zensu-log.sh" --tdd-begin' '--tdd-begin')"
+E10_RECIPE="$(skill_span 'append --truncate --log {log_file}')"
+E10_AUDIT="$(skill_span 'zensu-edit-landing.sh" --log {log_file}')"
+E10_COMPLETE="$(skill_span 'zensu-log.sh" --tdd-complete --plan {plan_file}' '{plan_file}' '10. **Close implementation')"
+E10_COMPLETE_AGREE="$(spans_agree 'zensu-log.sh" --tdd-complete --plan {plan_file}' '{plan_file}')"
+E10_CD="$(skill_span 'cd "{project_root}" && ' '<command>')"
+E10_EVR="$(skill_span "--evidence-run --scope full --cmd '{full_test_cmd}' --log {log_file}")"
+E10_SR_ROOT="$(span_in "$SKILL_SR" 'PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA=' '--project-root)"')"
+E10_SR_TOP="$(span_in "$SKILL_SR" 'TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"')"
+E10_VF_ROOT="$(span_in "$SKILL_VF" 'GIT_ROOT="$(git -C "$ANCHOR" rev-parse --show-toplevel)"')"
+if [ -n "$E10_LOG_DEF" ] && [ -n "$E10_PLAN_DEF" ] && [ -n "$E10_ROOT_CMD" ] && [ -n "$E10_BASE_CMD" ] \
+  && [ -n "$E10_BEGIN" ] && [ -n "$E10_RECIPE" ] && [ -n "$E10_AUDIT" ] && [ -n "$E10_COMPLETE" ] \
+  && [ "${E10_COMPLETE_AGREE:-0}" -ge 2 ] && [ -n "$E10_CD" ] && [ -n "$E10_EVR" ] \
+  && [ -n "$E10_SR_ROOT" ] && [ -n "$E10_SR_TOP" ] && [ -n "$E10_VF_ROOT" ]; then
+  check "E10a every path and command the chain needs is extracted from the tdd, self-review and verify-feature skills" PASS
+else
+  check "E10a extraction (log='$E10_LOG_DEF' plan='$E10_PLAN_DEF' root='$E10_ROOT_CMD' base='$E10_BASE_CMD' begin='$E10_BEGIN' recipe='$E10_RECIPE' audit='$E10_AUDIT' complete='$E10_COMPLETE' agree='$E10_COMPLETE_AGREE' cd='$E10_CD' evr='$E10_EVR' sr-root='$E10_SR_ROOT' sr-top='$E10_SR_TOP' vf-root='$E10_VF_ROOT')" FAIL
+fi
+E10_ROOT=""
+render() {
+  local c="$1"
+  c="${c//\{log_file\}/$E10_LOG_DEF}"
+  c="${c//\{plan_file\}/$E10_PLAN_DEF}"
+  c="${c//\{project_root\}/$E10_ROOT}"
+  c="${c//\{SESSION_TS\}/$E10_TS}"
+  c="${c//\{slug\}/$E10_SLUG}"
+  c="${c//\{session_id\}/$SID}"
+  c="${c//\{title\}/re-anchor end to end}"
+  c="${c//\{N\}/1}"
+  printf '%s' "$c"
+}
+unrendered() {
+  case "$1" in
+    (*'{log_file}'*|*'{plan_file}'*|*'{project_root}'*|*'{SESSION_TS}'*|*'{slug}'*|*'{session_id}'*|*'{title}'*|*'{N}'*|*'{full_test_cmd}'*|*'<command>'*) return 0 ;;
+    (*) return 1 ;;
+  esac
+}
+E10_OUT=""; E10_ERR=""; E10_RC=0; E10_BASE=""; E10_EPOCH="$(date +%s)"
+from_start() {
+  E10_OUT="$(cd "$A" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$DATA" BASELINE_SHA="$E10_BASE" SESSION_EPOCH="$E10_EPOCH" bash -c "$1" 2>"$STATE_DIR/e10.err")"
+  E10_RC=$?
+  E10_ERR="$(head -c 600 "$STATE_DIR/e10.err" 2>/dev/null)"
+}
+e10_fail() { check "$1 (rc=$E10_RC)" FAIL; printf '%s\n' "$E10_OUT" "$E10_ERR" | head -8 | sed 's/^/        /'; }
+chain_state() {
+  CORE="$CORE" ROOT="$1" SID="$SID" node -e '
+    const core = require(process.env.CORE);
+    const s = core.readWorkflowState({ projectRoot: process.env.ROOT, sessionId: process.env.SID });
+    process.stdout.write(s && s.active === true ? "armed" : "idle");
+  ' 2>/dev/null
+}
+state_digest() { { cat "$RECORD"; find "$A/.zensu/state" "$B/.zensu/state" -type f -exec cksum {} + | LC_ALL=C sort; } | cksum; }
+
+printf '{"mode":"vanilla"}\n' > "$A/.zensu/state/tdd-mode-$KEY.json"
+reanchor_from "$B" "$CONFIG" --confirm
+if [ "$RA_RC" -eq 0 ] && contains "$RA_OUT" "re-anchor — MOVED" && [ "$(record_root)" = "$B" ]; then
+  check "E10b a third move anchors the session in the sibling worktree again" PASS
+else
+  check "E10b third move (rc=$RA_RC)" FAIL
+  printf '%s\n' "$RA_OUT" | head -12 | sed 's/^/        /'
+fi
+g -C "$B" commit -q --allow-empty -m b-only
+
+DIGEST_BEFORE="$(state_digest)"
+from_start "$E10_ROOT_CMD"
+E10_ROOT="$E10_OUT"
+if [ "$E10_RC" -eq 0 ] && [ "$E10_ROOT" = "$B" ] && [ "$(cd "$A" && pwd -P)" != "$B" ]; then
+  check "E10c --project-root, run from the start directory with CLAUDE_PROJECT_DIR unset, prints the new anchor" PASS
+else
+  e10_fail "E10c --project-root from the start directory (printed '$E10_ROOT')"
+fi
+expect_eq "E10d --project-root writes nothing: the record and both state directories are unchanged" "$DIGEST_BEFORE" "$(state_digest)"
+from_start "$E10_ROOT_CMD --session x"
+if [ "$E10_RC" -eq 2 ] && [ -z "$E10_OUT" ] && contains "$E10_ERR" "takes no arguments"; then
+  check "E10e --project-root refuses an extra argument with exit 2 and prints no root" PASS
+else
+  e10_fail "E10e --project-root with an extra argument"
+fi
+E10F_OUT="$(cd "$A" && env -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID CLAUDE_PLUGIN_DATA="$DATA" bash "$LOG" --project-root 2>/dev/null)"
+E10F_RC=$?
+if [ "$E10F_RC" -ne 0 ] && [ -z "$E10F_OUT" ]; then
+  check "E10f without a bindable session --project-root fails and prints no root" PASS
+else
+  check "E10f unbound --project-root (rc=$E10F_RC out='$E10F_OUT')" FAIL
+fi
+
+E10_BASE_RUN="$(render "$E10_BASE_CMD")"
+from_start "$E10_BASE_RUN; printf '%s' \"\$BASELINE_SHA\""
+E10_BASE="$E10_OUT"
+B_HEAD="$(git -C "$B" rev-parse HEAD 2>/dev/null)"
+A_HEAD="$(git -C "$A" rev-parse HEAD 2>/dev/null)"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_BASE_RUN" && [ -n "$E10_BASE" ] && [ "$E10_BASE" = "$B_HEAD" ] && [ "$E10_BASE" != "$A_HEAD" ]; then
+  check "E10g the skill's baseline capture reads the new anchor's HEAD, not the start directory's" PASS
+else
+  e10_fail "E10g baseline capture (got '$E10_BASE', new anchor '$B_HEAD', start '$A_HEAD')"
+fi
+
+from_start "$E10_BEGIN"
+if [ "$E10_RC" -eq 0 ] && contains "$E10_OUT" "mode: vanilla" \
+  && [ "$(chain_state "$B") $(chain_state "$A")" = "armed idle" ]; then
+  check "E10h --tdd-begin from the start directory arms the chain under the new anchor" PASS
+else
+  e10_fail "E10h --tdd-begin from the start directory"
+fi
+
+E10_LOG_PATH="$(render '{log_file}')"; E10_LOG_PATH="${E10_LOG_PATH#\"}"; E10_LOG_PATH="${E10_LOG_PATH%\"}"
+E10_PLAN_PATH="$(render '{plan_file}')"; E10_PLAN_PATH="${E10_PLAN_PATH#\"}"; E10_PLAN_PATH="${E10_PLAN_PATH%\"}"
+case "$E10_PLAN_PATH" in
+  ("$B"/.zensu/plans/*)
+    mkdir -p "$(dirname "$E10_PLAN_PATH")"
+    printf '# TDD Plan: re-anchor end to end\n\n## Requirements\n| ID | Requirement | Source |\n|----|-------------|--------|\n| AC-001 | The chain completes in the new anchor | spec |\n' > "$E10_PLAN_PATH"
+    ;;
+  (*) check "E10 the rendered {plan_file} lies under the new anchor (got '$E10_PLAN_PATH')" FAIL ;;
+esac
+E10_RECIPE_RUN="$(render "$E10_RECIPE")"
+from_start "$E10_RECIPE_RUN"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_RECIPE_RUN" && [ "$E10_LOG_PATH" = "$B/.zensu/logs/${E10_TS}_tdd-${E10_SLUG}.log" ] \
+  && grep -qF 'TDD STARTED — re-anchor end to end' "$E10_LOG_PATH" 2>/dev/null \
+  && [ ! -e "$A/.zensu/logs/${E10_TS}_tdd-${E10_SLUG}.log" ]; then
+  check "E10i the Phase 2 log recipe creates the run log under the new anchor and nothing under the start directory" PASS
+else
+  e10_fail "E10i Phase 2 log recipe (log '$E10_LOG_PATH')"
+fi
+
+printf 'reanchored\n' >> "$B/README.md"
+from_start "bash \"\$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh\" append --log $(render '{log_file}') --message 'S1 IMPL completed — files: README.md'"
+E10_AUDIT_RUN="$(render "$E10_AUDIT")"
+from_start "$E10_AUDIT_RUN"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_AUDIT_RUN" && contains "$E10_OUT" "EDIT LANDED" \
+  && [ -f "$B/.zensu/state/edit-landing-$KEY.json" ] && [ ! -e "$A/.zensu/state/edit-landing-$KEY.json" ]; then
+  check "E10j the skill-rendered edit-landing audit grades the claim in the new anchor and writes its receipt there" PASS
+else
+  e10_fail "E10j edit-landing audit from the start directory"
+fi
+
+E10_COMPLETE_RUN="$(render "$E10_COMPLETE")"
+from_start "$E10_COMPLETE_RUN"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_COMPLETE_RUN"; then
+  check "E10k --tdd-complete --plan {plan_file} from the start directory accepts the chain in the new anchor" PASS
+else
+  e10_fail "E10k --tdd-complete --plan from the start directory"
+fi
+
+E10_CD_RUN="$(render "$E10_CD")"; E10_CD_RUN="${E10_CD_RUN//<command>/pwd -P}"
+from_start "$E10_CD_RUN"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_CD_RUN" && [ "$E10_OUT" = "$B" ]; then
+  check "E10l the Phase 1 rule runs a project command from the start directory inside the new anchor" PASS
+else
+  e10_fail "E10l the Phase 1 cd rule (printed '$E10_OUT')"
+fi
+
+E10_EVR_RUN="$(render "$E10_EVR")"; E10_EVR_RUN="${E10_EVR_RUN//\{full_test_cmd\}/pwd -P}"
+from_start "$E10_EVR_RUN"
+if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_EVR_RUN" && printf '%s\n' "$E10_OUT" | grep -qxF "$B" \
+  && ! printf '%s\n' "$E10_OUT" | grep -qxF "$(cd "$A" && pwd -P)" \
+  && contains "$E10_ERR" "so the command runs in $B" \
+  && grep -qF 'EVIDENCE RUN — scope=full exit=0' "$E10_LOG_PATH" 2>/dev/null; then
+  check "E10m the Phase 6 step 1 evidence run from the start directory runs the suite in the new anchor" PASS
+else
+  e10_fail "E10m Phase 6 step 1 evidence run from the start directory"
+fi
+
+from_start "ROOT=\"\$CLAUDE_PLUGIN_ROOT\"; $E10_SR_ROOT; $E10_SR_TOP; printf '%s' \"\$TOP\""
+if [ "$E10_RC" -eq 0 ] && [ "$E10_OUT" = "$B" ]; then
+  check "E10n /zensu:self-review derives its TOP from the new anchor when run from the start directory" PASS
+else
+  e10_fail "E10n self-review root derivation (printed '$E10_OUT')"
+fi
+
+from_start "$E10_VF_ROOT; printf '%s' \"\$GIT_ROOT\""
+if [ "$E10_RC" -eq 0 ] && [ "$E10_OUT" = "$B" ]; then
+  check "E10o /zensu:verify-feature --chain resolves its git root in the new anchor when run from the start directory" PASS
+else
+  e10_fail "E10o verify-feature git root (printed '$E10_OUT')"
+fi
+
+bound_root_verb() {
+  mkdir -p "$2"
+  start_payload "$1" "$2" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$DATA" \
+    bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null 2>&1
+  VERB_OUT="$(cd "$2" && env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$1" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$DATA" bash "$LOG" --project-root 2>"$STATE_DIR/unsafe.err")"
+  VERB_RC=$?
+}
+
+reanchor_promise() {
+  node -e '
+    const m = require(process.argv[1]);
+    const root = process.argv[2];
+    const report = m.renderReanchorVerdict({ ok: true, recordedRoot: "/r", targetRoot: root, targetDocument: "missing", uncommitted: [] }, false).text;
+    const outcome = m.renderReanchorOutcome({ ok: true, previousRoot: "/r", projectRoot: root, supersededFile: "/s", documentCreated: true, provenance: "recorded", previousProvenance: "recorded", leases: { discarded: 0, failed: [] }, keep: { state: "moved", faults: [] } }).text;
+    const say = (text) => (/can start in this session/.test(text) ? "promise" : /cannot\s+run there/.test(text) ? "withheld" : "neither");
+    process.stdout.write(`${say(report)} ${say(outcome)}`);
+  ' "$PLUGIN_DIR/hooks/lib/session-reanchor-v1.js" "$1"
+}
+
+E10P_BAD=""
+E10Q_BAD=""
+E10P_N=0
+for UNSAFE_NAME in 'root-with-"-in-it' 'root-with-$HOME-in-it' 'root-with-`-in-it' 'root-with-\-in-it'; do
+  E10P_N=$((E10P_N + 1))
+  bound_root_verb "c0ffee0$E10P_N-a7db-4cd4-a76e-2c47c46ee59e" "$STATE_DIR/$UNSAFE_NAME"
+  if [ "$VERB_RC" -ne 2 ] || [ -n "$VERB_OUT" ] \
+    || ! grep -qF 'contains a double quote, a dollar sign, a backtick or a backslash' "$STATE_DIR/unsafe.err"; then
+    E10P_BAD="$E10P_BAD [$UNSAFE_NAME rc=$VERB_RC out='$VERB_OUT' err='$(head -1 "$STATE_DIR/unsafe.err")']"
+  fi
+  PROMISE="$(reanchor_promise "$STATE_DIR/$UNSAFE_NAME")"
+  [ "$PROMISE" = "withheld withheld" ] || E10Q_BAD="$E10Q_BAD [$UNSAFE_NAME: $PROMISE]"
+done
+SAFE_ROOT="$STATE_DIR/root with 'quote' and space"
+bound_root_verb "c0ffee05-a7db-4cd4-a76e-2c47c46ee59e" "$SAFE_ROOT"
+if [ "$VERB_RC" -ne 0 ] || [ "$VERB_OUT" != "$SAFE_ROOT" ]; then
+  E10P_BAD="$E10P_BAD [control rc=$VERB_RC out='$VERB_OUT' err='$(head -1 "$STATE_DIR/unsafe.err")']"
+fi
+PROMISE="$(reanchor_promise "$SAFE_ROOT")"
+[ "$PROMISE" = "promise promise" ] || E10Q_BAD="$E10Q_BAD [control: $PROMISE]"
+if [ -z "$E10P_BAD" ] && [ "$E10P_N" -eq 4 ]; then
+  check "E10p --project-root refuses a bound root holding each of the four characters the shell re-parses in double quotes, and prints a root with a space and a single quote" PASS
+else
+  check "E10p --project-root refusal of the four characters and the control root:$E10P_BAD" FAIL
+fi
+if [ -z "$E10Q_BAD" ]; then
+  check "E10q the re-anchor report and outcome withhold the chain promise for exactly the roots --project-root refuses" PASS
+else
+  check "E10q the re-anchor report and outcome withhold the chain promise for exactly the roots --project-root refuses:$E10Q_BAD" FAIL
+fi
+
 echo "session-reanchor: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

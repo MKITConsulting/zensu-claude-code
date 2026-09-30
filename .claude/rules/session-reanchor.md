@@ -154,9 +154,63 @@ The re-anchor runs only in a bound session, the recognizer admits it in no shape
 (`test-session-reanchor.sh` E8), and the user-facing spelling stays `/zensu:adopt-session
 --reanchor` because the skill routes that argument to the other script.
 
+**Skills follow the anchor through `zensu-log.sh --project-root`.** The verb prints the
+`CLAUDE_PROJECT_DIR` its binding case exports — the record's `project_root`, validated by
+`zensu_resolve_project_dir` — writes nothing, and refuses any argument with exit 2. The host keeps
+the Bash tool in the session's start directory, and `CLAUDE_PROJECT_DIR` is unset there, so a path
+a skill builds from `${CLAUDE_PROJECT_DIR:-.}` names the previous root after a move while every
+`--*` verb binds the new one. `/zensu:tdd` therefore reads `{project_root}` once in Phase 0 and
+derives `{log_file}`, `{plan_file}`, `BASELINE_SHA`, the edit-landing `--project`, the step 10.1
+plan bound, `TOP`, the plan template and the persona directory from it, and it runs every project
+command it prescribes — test runs, checkpoints, the build, coverage and the step 5 `stat` — as
+`cd "{project_root}" && …`. Phase 2's `--truncate` carries `CLAUDE_PROJECT_DIR="{project_root}"`,
+because `append` without that variable binds a destructive write to the working directory, which
+is the previous root after a move. `/zensu:self-review` derives `TOP` and its ledger root from the
+verb and runs its fix round's commands in it, `/zensu:converge` discovers plans under it,
+`/zensu:verify-feature --chain` resolves its git root from it and runs its commands there, a
+recorded `down` included, and the three `--tdd-complete` refusal remedies name it instead of the
+ambient spelling. Every `cd` into the root is spelled without `--`: the root is absolute, and
+`bash-source-write-parse.js` takes the token after `cd` as the directory, an accepted gap its header
+names, so `cd -- "<root>"` would scope rules (B) and (C) to `<cwd>/--`. Every plan glob keeps the
+root inside double quotes (`"{project_root}"/.zensu/plans/*_tdd-*.md`), because the verb refuses
+none of the characters a glob or word splitting acts on.
+
+**The skills paste the root into double-quoted shell source, so the verb refuses a root it cannot
+paste safely.** A root holding a double quote, a dollar sign, a backtick or a backslash exits 2 with
+the reason and prints nothing: inside double quotes the shell would re-parse it, so a skill command
+would expand a variable or run a command substitution instead of naming the directory. The
+ambient spelling it replaced was a parameter expansion and never re-parsed. Session Control itself
+rejects only control characters, and on Git Bash the verb prints the MSYS spelling, so a backslash
+never reaches it there. The move itself still accepts such a target, because rules (B) and (C)
+and the reviewer confinement need no pasted path; `UNPASTABLE_ROOT_RE` in `session-reanchor-v1.js`
+tests the same four characters, and for a matching target the MOVABLE report and the MOVED outcome
+withhold the promise that a chain can start there. The two predicates are a hand copy: E10p runs
+the verb and E10q both renderers over the same five roots, one per character plus a control with
+a space and a single quote, so a character added to one side and not the other fails there.
+
+**`--evidence-run` follows the anchor on its own.** `runDirectory` in `evidence-run-v1.js` keeps
+the caller's working directory when it lies in the git work tree of the bound root, and runs the
+command in the bound root with a notice on stderr otherwise. Work-tree identity decides first,
+because a nested worktree, an embedded clone or a submodule inside the root is another work tree
+that the fingerprint does not measure; path containment decides only for a root outside git. The
+tree fingerprint and the verdict were always bound to the record's root, so a run from the previous
+worktree would have certified the new tree with a suite that tested the old one. The same-work-tree
+rule keeps a session recorded in a subdirectory able to run its suite from the worktree top.
+
+`test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
+`${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start
+directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md`,
+`skills/self-review/SKILL.md` and `skills/verify-feature/SKILL.md`. Rewording the `{log_file}` or
+`{plan_file}` definition, the Phase 0, Phase 2, step 5b a) or step 10.1 command, the Phase 1 `cd`
+rule, the Phase 6 step 1 evidence run, self-review's root derivation or verify-feature's git root
+fails E10a there with the extraction named; the step 10.1 command is read from step 10 itself and
+must match the Mandatory command protocol's spelling.
+
 **Version: `patch`.** No record or workflow schema field, no strict key set, no hook added,
-removed or re-matched, no config key, no attestation change; a new history VALUE, a new script and
-reworded deny texts.
+removed or re-matched, no config key, no attestation change; a new history VALUE, a new script,
+reworded deny texts, a read-only `zensu-log.sh` verb whose only callers are skills of the same
+installation, and an evidence runner that picks its working directory differently while writing
+the same record shape.
 
 **Known gaps:** a session visible to no source — another `CLAUDE_CONFIG_DIR` and no keep
 anchor — is not detected, and neither is one that only edits the target by absolute path; the
@@ -167,12 +221,15 @@ does not take it; an Autopilot run ANOTHER session drives in the target is not c
 library keeps a run's state under its owner's project root, so a run whose workspace is the target
 while its state sits under another worktree is visible neither to this probe nor to the library's
 own workspace fences, and a fresh session started in the target has the same reach; the host keeps
-the session's start directory and the Bash tool returns there, so a path a Zensu skill builds from
-the working directory — `/zensu:tdd`'s plan, run log, baseline and edit-landing audit — names the
-old root while `zensu-log.sh` binds the new one, which is why the report and the skill send a new
-chain to a fresh session in the new anchor (the standing fix is a read-only `zensu-log.sh` verb
-printing the bound root for skills to derive those paths from); open work under the old root must
-reach its end first;
+the session's start directory and the Bash tool returns there, so a command the user runs outside
+the skills named above needs a `cd` into the new anchor, and what other skills read through the
+working directory — `/zensu:plan-review`'s plan and persona discovery, `/zensu:setup`'s
+project-local config target, the load-time overlays of `/zensu:tdd` and `/zensu:cover`, the
+templates of `/zensu:autopilot` and `/zensu:pilot`, and the checkout `/zensu:autopilot` opens its
+pull request from — still comes from the start directory's worktree of the same repository; a
+project whose root holds a double quote, a dollar sign, a backtick or a backslash cannot run
+`/zensu:tdd`, because `--project-root` refuses it; open work under the old root must reach its end
+first;
 `/zensu:doctor` has no row for a session working outside its anchor; Windows is unmeasured, since
 the suite is in `ciStructureTests` but in no Windows CI profile; the ports (`zensu-codex`,
 `zensu-kiro`, `zensu-antigravity`) were not changed.

@@ -331,6 +331,21 @@ function workTree(projectRoot, limits = LIMITS) {
   return { applicable: null, reason: `git rev-parse failed: ${(stderr.trim().split('\n')[0] || `exit ${result.status}`).slice(0, 160)}` };
 }
 
+function runDirectory(projectRoot, requested, limits = LIMITS) {
+  if (!requested) return { cwd: projectRoot, moved: false };
+  const anchor = git(projectRoot, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+  const top = anchor.ok ? anchor.stdout.trim() : '';
+  if (top !== '') {
+    const here = git(requested, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+    return here.ok && here.stdout.trim() === top ? { cwd: requested, moved: false } : { cwd: projectRoot, moved: true };
+  }
+  const relative = path.relative(projectRoot, requested);
+  if (relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
+    return { cwd: requested, moved: false };
+  }
+  return { cwd: projectRoot, moved: true };
+}
+
 function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
   const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree']);
   if (!inside.ok || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
@@ -823,6 +838,10 @@ function run(options) {
     const scriptPath = path.join(locations.scratch, `run-${id}.sh`);
     const startedAt = new Date();
     const treeStart = TREE_SCOPES.includes(options.scope) ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
+    const where = runDirectory(projectRoot, options.cwd, limits);
+    if (where.moved) {
+      say(stderr, `zensu evidence-run: the working directory is not in the work tree of the bound project root, so the command runs in ${projectRoot}`);
+    }
     const record = {
       schema: SCHEMA,
       id,
@@ -830,7 +849,7 @@ function run(options) {
       project_root: projectRoot,
       scope: options.scope,
       command: resolved.command,
-      cwd: options.cwd || projectRoot,
+      cwd: where.cwd,
       state: 'running',
       pid: process.pid,
       started_at: startedAt.toISOString(),
@@ -885,7 +904,7 @@ function run(options) {
     if (!interruptedBy) {
       try {
         child = childProcess.spawn(options.bashPath || 'bash', ['--noprofile', '--norc', scriptPath], {
-          cwd: options.cwd || projectRoot,
+          cwd: where.cwd,
           env: childEnvironment(options.env || process.env, options.callerProjectDir),
           stdio: ['ignore', logDescriptor, logDescriptor],
           detached: process.platform !== 'win32',
@@ -1034,6 +1053,7 @@ module.exports = {
   listRecords,
   gitEnvironment,
   workTree,
+  runDirectory,
   computeTree,
   changedPaths,
   pidAlive,
