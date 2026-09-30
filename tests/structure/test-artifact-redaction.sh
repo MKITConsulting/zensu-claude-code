@@ -989,7 +989,7 @@ else
 fi
 
 # ── R49: the sweep processes a bounded number of artifacts ───────────
-# The git scope (R62-R80) drops what a checkout merely rewrote, but when git
+# The git scope (R62-R81) drops what a checkout merely rewrote, but when git
 # cannot be asked — this fixture is no repository — every in-window artifact is
 # a candidate, and the next tool call would redact all of them synchronously
 # inside a PostToolUse hook with no cap and no declared timeout. The cap is per
@@ -1352,6 +1352,29 @@ if [ "$OUT80" = 'null ["modified"]' ]; then
   check "R80 below the repository root the sweep still drops the unchanged artifact and keeps the modified one" PASS
 else
   check "R80 below the repository root the sweep still drops the unchanged artifact and keeps the modified one (got: $OUT80)" FAIL
+fi
+
+# ── R81: an artifact git status cannot see is kept, not skipped ──────
+NEST_PROJ="$WORK/nested"
+NEST_PLAN="$NEST_PROJ/.zensu/plans/2026-01-01-0081_tdd-nested.md"
+mkdir -p "$NEST_PROJ/.zensu/plans"
+printf 'NESTED %s\n' "$FOREIGN_USER" > "$NEST_PLAN"
+if git init -q --template= "$NEST_PROJ" >/dev/null 2>&1 \
+  && git init -q --template= "$NEST_PROJ/.zensu" >/dev/null 2>&1; then
+  OUT81="$(node -e '
+    const r = require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });
+    process.stdout.write(r.fallback + " " + (r.targets.includes(process.argv[3]) ? 1 : 0));
+  ' "$REDACT" "$NEST_PROJ" "$NEST_PLAN" 2>&1)"
+  NEST_STATUS="$(git -C "$NEST_PROJ" -c core.fsmonitor=false status --porcelain \
+    --untracked-files=all -- .zensu/plans .zensu/logs 2>&1)"
+else
+  OUT81="the fixture repositories could not be created"
+  NEST_STATUS="unknown"
+fi
+if [ "$OUT81" = "null 1" ] && [ -z "$NEST_STATUS" ]; then
+  check "R81 an artifact inside a nested repository, which git status does not list, is still swept" PASS
+else
+  check "R81 an artifact inside a nested repository, which git status does not list, is still swept (got: $OUT81 status=[$NEST_STATUS])" FAIL
 fi
 
 # ── R52: the scanner guard acts on its own predicate ─────────────────

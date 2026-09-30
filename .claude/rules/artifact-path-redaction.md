@@ -241,7 +241,8 @@ failure for this net. Bound: an artifact committed before any main-thread pass r
 it (a subagent write committed by the next Bash call, or a hand-rolled append committed
 in the same call) is clean to git and never swept, and `assume-unchanged` hides a
 modification the same way. Coupled sites: `sweepTargets` returns `{ targets, fallback }`,
-read by the hook and by R48, R49 and R62-R80; `GIT_ENV_SCRUB` is a THIRD hand-copy of
+read by the hook and by R48, R49 and R62-R81 (R81 is the check that fails, on any OS, if
+the scope decides from `git status` alone); `GIT_ENV_SCRUB` is a THIRD hand-copy of
 the list in `worktree-keep-v1.js` (`GIT_ENV_SCRUB`) and `evidence-run-v1.js`
 (`GIT_SCRUBBED_ENV`), and nothing pins the three against each other.
 
