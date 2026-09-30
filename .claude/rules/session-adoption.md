@@ -119,8 +119,9 @@ not this state), and returns only on a clean `lstat` ENOENT — a present root f
 and `plugin_version` are shape-checked only and taken on the record's word. What
 still binds the record: session hash, schema, principal profiles, `plugin_data`
 equality, the recorded project root existing, the sibling cache directory, and the
-workflow document's schema. That is why such a record is **adopted once, with
-`--confirm`, and never served** — serving stays strict at every strict read site
+workflow document's schema. That is why such a record is **adopted once — automatically at
+the first hook contact, or by hand with `--confirm` — and never served** — serving stays
+strict at every strict read site
 (`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
 SessionStart resume/compact, SubagentStart), and the re-minted record is
 re-verifiable again.
@@ -132,14 +133,17 @@ No consumer has to order the two, and the state is reachable under a compatible
 lineage as well (three patch releases inside one minor while a session lives),
 where the remedy is the same. The binder modes `pruned-plugin-root` /
 `model-pruned-plugin-root` print the same two-field `recorded<TAB>executing` pair,
-so the five parsers of that pair read it unchanged. **Sites that move together:**
+so every parser of that pair reads it unchanged — the parse sites are a GREP, stated in
+the wire-format bullet below. **Sites that move together:**
 the reader, the waiver and the helper in the core plus its exports;
 `resolvePrunedPluginRoot` / `prunedPluginRootSession` and the mode pair in the
 binder; `zensu_session_pruned_plugin_root` / `_model` and the `pruned-plugin-root`
-scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`, which now spells
-FIVE scopes; the pruned branch beside the lineage branch in all four binding gates
+scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`; the pruned branch beside
+the lineage branch, which lives ONCE — in `zensu_emit_named_bind_deny`, which all four
+binding gates
 (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
-`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) and the self-worded FIFTH
+`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) call rather than spelling the
+ladder themselves — and the self-worded FIFTH
 denier in `reviewer-capability-v1.js` — five deniers, the same set as the lineage
 state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
 `stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
@@ -249,7 +253,7 @@ instead of the generic "start a fresh session" that would now contradict the doc
 gives; the third fact travels on its own mode pair, `orphaned-incompatible-root` and
 `model-orphaned-incompatible-root`. Do NOT relax `resolveOrphanedProjectRoot` to accept
 an incompatible lineage instead: that would let an incompatible runtime SERVE a session
-with no user decision and no provenance, which is what the lineage rule exists to prevent.
+with no schema check and no provenance, which is what the lineage rule exists to prevent.
 Re-anchoring the record to a live directory was also considered and refused — a session
 may delete its own root, so a caller-named anchor would become a cross-project write
 escape.
@@ -331,11 +335,13 @@ exact drift in its own words ("state the base or the count means nothing"):
   reads greener than an unpinned one. When adding a member, pin it in both files before
   writing any comment that says both are covered.
 - the `recorded<TAB>executing` wire format — one producer
-  (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
-  `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
-  `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
+  (`claude-hook-session-v1.js`) and its shell parsers, which are a GREP and not a list:
+  run `grep -rnF '##*$' hooks/` and judge every hit that is not a comment. The
+  shell gates reach the pair through ONE site, `zensu_emit_named_bind_deny` in
+  `zensu-session.sh`, which parses it once for the lineage arm and once for the pruned
+  one; `zensu-doctor.sh` and `stop-chain-enforcer.sh` are the other two files that do.
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
-  field: adding a third field silently redirects all five rather than failing.
+  field: adding a third field silently redirects every one of them rather than failing.
 - the version-shape rule, spelled THREE times for three different hazards —
   `ADOPTION_SAFE_VERSION_RE` in `session-control-core-v1.js` (a version reaches a
   FILENAME), `ZENSU_SAFE_VERSION_RE` in `zensu-session.sh` (a version reaches a
@@ -343,7 +349,12 @@ exact drift in its own words ("state the base or the count means nothing"):
   in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
   reason, which that gate spells itself rather than through
   `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
-  keep them in step. A FOURTH spelling of the same alternation lives OUTSIDE production,
+  keep them in step. `safeVersion` in `session-auto-adopt-v1.js` — the adoption notice's
+  version screen, which the `.*` gate, the SessionStart adapter and the binder's stderr
+  line all consume — is NOT a fourth copy: it CONSUMES the core's exported
+  `ADOPTION_SAFE_VERSION_RE` and substitutes `(unreadable)`, so it is a further
+  substitution SITE on the first member, not a further spelling.
+  A FOURTH spelling of the same alternation lives OUTSIDE production,
   in `tests/structure/test-versioned-plugin-upgrade.sh`'s `AC-C20b` precondition, which
   re-spells it to decide whether its shared fixture still fails the shape. It holds
   nothing in lockstep and is not a member of the three — but a widening that leaves it
@@ -614,9 +625,9 @@ revision. An uncommitted change under `hooks/` or `skills/` is therefore reporte
 GREEN against the previous commit, which is not a hypothetical: a real regression in
 `discardSupersededLeases` shipped that way for a full review round, because every
 measurement of it had been taken before the commit that carried it. Test-file edits
-DO take effect immediately, and SEVERAL rows read the working tree — the four unit
-drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep and
-the adoption report), the three seam pins hoisted to the front of the file so a
+DO take effect immediately, and SEVERAL rows read the working tree — the unit
+drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep, the
+adoption report and the automatic adopter; count them by grep), the three seam pins hoisted to the front of the file so a
 Windows timeout cannot drop them, the committed-tree check beside them, the
 lease-gap grep, and AC-013 — each labelled `WORKING TREE, not HEAD` in place. The
 count is deliberately NOT written out, matching the rule the suite states about

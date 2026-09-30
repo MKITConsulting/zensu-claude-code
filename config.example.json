@@ -27,6 +27,7 @@
     "reviewConvergence": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
+    "sessionAutoAdopt": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12,
     "autopilotOwnerActivityTtlHours": 1,
