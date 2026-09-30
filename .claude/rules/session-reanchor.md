@@ -43,8 +43,12 @@ and `_tdd_locked_run` returns 1 for a storage-safety failure, a failed lock acqu
 release as well, so its exit 1 cannot tell "no run" from "could not look". The strict verb runs the
 worker under the lease through a probe that always returns 0, as `autopilot_workspace_hold_report`
 does, and answers 1 only for the worker's own "no run" or an absent state directory, 2 for an
-orphaned, hidden or inconsistent run, 3 for a refused call and 5 for every lease, storage or path
-fault. Exit 0 is open unless the stage is `DONE` or `CANCELLED`; every other outcome, a library
+orphaned, hidden or inconsistent run, 3 for a refused call and 5 for a lease, storage or path
+fault. When the lease cannot be taken it looks once more without it, and gives the locked read's
+answer only when that read-only look proves no run or finds a `DONE` or `CANCELLED` own run
+(`.claude/rules/autopilot-active-read.md`), so a session without an active run re-anchors under a
+held lease while one whose look finds a nonterminal run refuses. Exit 0 is open unless the stage
+is `DONE` or `CANCELLED`; every other outcome, a library
 that fails to load (exit 97), a timeout and a missing shell included, refuses as
 `autopilot-state-unverifiable`. Do not re-implement the run inventory here: the library's owner
 scoping and orphan rules are the point. The verb is called by name across the file boundary, so

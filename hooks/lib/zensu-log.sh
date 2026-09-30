@@ -729,7 +729,7 @@ case "${1:-}" in
       exit 2
     }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
+    autopilot_read_active_strict "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
     _zensu_status_rc=$?
     # rc 1 means THIS session owns no run BY THE OWNER-KEYED POINTER, and the
     # worker says so as `state file absent: autopilot-active-<hash>.json`. That
@@ -807,6 +807,9 @@ case "${1:-}" in
         printf 'zensu-log.sh --autopilot-status: this session owns no durable Autopilot run, and whether any run holds this working tree could NOT be determined (status %s) — that is a missing check, not an all-clear. The autopilot row of /zensu:doctor reads the same records without taking the project lease.\n' \
           "$_zensu_hold_rc" >&2
       fi
+    fi
+    if [ "$_zensu_status_rc" -eq 5 ]; then
+      printf 'zensu-log.sh --autopilot-status: the project-local Autopilot state could not be read, because its lock could not be taken or its storage or path failed a safety check, so whether this session owns a run is unknown. That is not a no-run answer; retry once the concurrent Autopilot operation has finished, and if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease.\n' >&2
     fi
     exit "$_zensu_status_rc"
     ;;

@@ -882,7 +882,7 @@ OUTER_JSON=""
 if [ -r "$AUTOPILOT_STATE_LIB" ]; then
   # shellcheck disable=SC1090
   source "$AUTOPILOT_STATE_LIB"
-  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+  if OUTER_JSON="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     OUTER_STATUS=0
   else
     OUTER_STATUS=$?
@@ -903,6 +903,11 @@ emit_block() {
   '
   echo
 }
+
+if [ "$OUTER_STATUS" -eq 5 ]; then
+  emit_block "Zensu Autopilot Stop denied: the project-local Autopilot state could not be read, because its lock could not be taken or its storage or path failed a safety check, so whether this session owns an active run is unknown. That is not a no-run answer. Retry the Stop once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease. Do not infer completion."
+  exit 0
+fi
 
 # A corrupt/orphaned outer inventory is authoritative and must fail closed
 # before deferred-review adoption, inner counters, or any other mutation.
@@ -1055,7 +1060,7 @@ outer_finish() {
       # Stage/event generation changed after reconciliation but before the
       # capped mutation. Re-route exactly once from fresh state so the response
       # names the new action and the stale generation remains byte-stable.
-      if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+      if OUTER_JSON="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
         OUTER_STATUS=0
         outer_finish true
       else
