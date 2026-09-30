@@ -39,6 +39,18 @@ tree came out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`,
 its reason text reaches committed run-log lines. Over 20000 untracked files or 512 MiB,
 or on a git failure, the record carries no tree and names the reason.
 
+**The copy keeps the real index's atime and mtime.** git trusts a stat match only when the
+entry's mtime is older than the index file's own mtime (the racy-git check), so a copy with a
+fresh mtime made git trust a stale stat: a same-size edit in the second of the last index write
+fingerprinted the committed blob, and `test-acceptance-gate.sh` A9 caught it. The copied
+timestamps have millisecond precision, which rounds toward earlier and only makes more entries
+racy. The stat is taken BEFORE the copy: a concurrent git that replaces the index between the
+two would otherwise give the old content the newer mtime, so fewer entries would count as racy.
+The unit case `a same-size edit in the second of the last index write still changes the tree
+id` pins it with `core.checkStat minimal`, so it reproduces on hosts whose git keeps sub-second
+stat data, and it backdates the file and its index entry five seconds, so the copy always lands
+in a later second than the recorded mtime whatever the host's timing.
+
 **`full` and `scoped` runs carry a tree** (`TREE_SCOPES`); `lint`, `build` and `coverage`
 stay untreed. `--if-stale` works for both: for `full` it reads the newest `full` record, for
 `scoped` the newest run of the same command. A local chain's verdict still reads only `full`
@@ -69,6 +81,12 @@ ticket out of the ledger (`test-full-suite-gate.sh` F9).
 a work tree (F14). The bypass allowlist keeps `ZENSU_TEST_WITNESS` as a retired name,
 because the ledger write path FILTERS existing entries through the allowlist: removing a
 name silently erases it from every adopted chain's ledger.
+
+**Scopes.** `full` and `acceptance` fingerprint the tree at both ends (`TREE_SCOPES`); only
+`full` feeds the full-suite verdict, and an `acceptance` run is the observed evidence an
+acceptance record cites (`.claude/rules/acceptance-verification-gate.md`). Retention keeps the
+newest `maxRecordsPerSession` records PER SCOPE, so a chain's acceptance checks never evict its
+newest full record.
 
 **Config**: `evidence.fullSuiteCommand` is the runner's default for `--scope full`, and
 an explicit `--cmd` that differs from it is refused. `evidence.fullSuiteGate` is

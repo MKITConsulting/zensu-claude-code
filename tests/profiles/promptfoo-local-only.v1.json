@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "ciStructureTests": [
+    "test-acceptance-gate.sh",
     "test-agent-context.sh",
     "test-artifact-redaction.sh",
     "test-autopilot-adopt-cli.sh",
@@ -112,6 +113,7 @@
     "test-smoke-main-thread-chain.sh",
     "test-state-verb-diagnostics.sh",
     "test-stop-enforcer-escapes.sh",
+    "test-stop-enforcer-reviewer-denial-note.sh",
     "test-stop-enforcer-self-review-routing.sh",
     "test-stop-enforcer-subagent-noop.sh",
     "test-stop-session-binding-recovery.sh",
@@ -144,6 +146,7 @@
     "test-windows-ci-contract.sh",
     "test-windows-portability-guards.sh",
     "test-workflow-checkout-credentials.sh",
+    "test-workflow-dispatch-inputs.sh",
     "test-workflow-scope.sh",
     "test-worktree-keep.sh",
     "test-zen-mode.sh",

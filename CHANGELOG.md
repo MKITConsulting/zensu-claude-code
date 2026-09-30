@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **verify-feature**: the run-config preflight takes the origin only,
   `verify-browser-config.js --check-policy <local|remote> <origin> declared-safe`; a call that
   still passes a route operand is refused with that usage line.
+- **tdd**: a standalone `/zensu:tdd` chain now closes only when every active `AC-###`
+  criterion of its plan was verified live on the tree that ships. Phase 6 step 6d runs
+  `/zensu:verify-feature --chain`, and `--chain-done` refuses while a criterion lacks a
+  `pass`. Set `evidence.acceptanceGate` to `advisory` in `.zensu/config.json` to disclose
+  the verdict instead of refusing, or run one terminus with `ZENSU_ACCEPTANCE_GATE=off`,
+  which the bypass ledger records. Autopilot-bound chains are not gated: their VALIDATE
+  stage verifies every criterion unless the run was started with `--no-validate`, and the
+  terminus line says which. A max-rounds close with `hooks.selfReview` off is not gated
+  either, as for the full suite, and its summary shows acceptance as not checked.
 
 ## [0.22.0] - 2026-09-28
 

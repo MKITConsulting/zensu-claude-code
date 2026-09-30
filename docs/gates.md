@@ -5,8 +5,9 @@ completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, and which a logged
 claim arms even when the anchor's tree is clean (discipline patch 10 in
 [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here — and ONE
-terminus refusal at `--chain-done`, §Full-Suite Gate. Seven of the nine are
+and §Requirements-Table Gate below, which has its own section here — and TWO
+terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
+Eight of the ten are
 convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
 two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
 escape hatch, and neither is a security boundary on its own: the first closes one
@@ -770,7 +771,7 @@ Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow 
 - **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
 - **State.** Phase markers persist at `.zensu/state/tdd-phase-<scv1-session-key>.json`. Every atomic mutation increments the record revision, and each step's history remains auditable from the file.
-- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate enforces **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, the calling skill's own `--tdd-mode` default (`/zensu:pr-fix-findings` asks for `strict`) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
+- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate enforces **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, a caller's own `--tdd-mode strict` default (a specification carrying a single `TDD-MODE: strict` line) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + edit landing + build verification), real-time progress log at `.zensu/logs/`.
 
@@ -893,4 +894,78 @@ reads the newest record, never a claim in the run log.
   The gate stops a chain from closing on a missing, red or stale run by accident; it does not
   stop a model that forges a record on purpose.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-13, four-channel logging.
+## Acceptance Verification Gate
+
+A standalone reviewed chain closes only when every active acceptance criterion of its plan was
+verified live on the tree that ships. The one exception is a max-rounds close with
+`hooks.selfReview` off, described under **Where it applies**. A criterion is an `AC-###` row of
+the plan's `## Requirements` table whose Requirement cell does not start with `(deprecated)`,
+`[deprecated]` or the word `deprecated` followed by a separator. `FR-###` rows are not verified
+live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before the review, and
+`/zensu:self-review` runs it again when review rounds made the records stale.
+
+- **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
+  <pass|fail|partial> --driver <driver> --log <run log> [--evidence-run <id>]`, with the
+  evidence text on stdin. The driver names come from `skills/autopilot/rules/drivers.md`.
+  - **Observed:** `api`, `cli`, `async`, `iac`, `custom`, `library` and `artifact` are decided
+    by an exit code. So the check must run through
+    `zensu-log.sh --evidence-run --scope acceptance`, and the record must cite that run. A pass
+    needs exit 0, a fail needs a non-zero exit, and a run that changed the tree while it ran is
+    refused.
+  - **Attested:** `browser`, `mobile` and `desktop-native` are driven by the model and recorded
+    with the evidence text alone.
+
+  The verb refuses an unknown or deprecated id, empty or secret-matching evidence, and a run
+  log whose stem differs from the one this session's edit-landing receipt records. It appends
+  one `ACCEPTANCE — AC-001 pass | driver=… | tree=… | record=…` line to the run log.
+- **What it reads.** Records live in `$CLAUDE_PLUGIN_DATA/acceptance-verify/v1/records/<session
+  key>/`. Each one carries the tree fingerprint the full-suite gate uses (`.zensu` excluded) and a
+  digest of the criterion text. The plan is the one named by this session's edit-landing receipt.
+  `zensu-log.sh --acceptance-status --log <run log>` prints every criterion's state on the
+  current tree and exits 0 only when all active criteria pass. Its summary line carries the same
+  remedy segments as a refusal.
+- **Criterion states.** `pass`, `fail`, `partial`, `missing`, `stale` (a later edit, or the
+  criterion text changed since it was verified) and `deprecated`. A criterion that is
+  deprecated, or whose row was removed from the table, while its newest record is not `pass` is
+  `dropped` and blocks: deprecating or deleting a failing criterion never closes a chain.
+- **What it prints.** One line, `ACCEPTANCE — <state> | <cause> | plan: <plan> | gate: <mode>`.
+  Passing states: `pass` (the cause gives the observed and attested split, and an earlier
+  non-pass verdict on the same tree adds a `flaky` line), `pass-tree-unverified`,
+  `not-applicable` (no edit-landing receipt and no changed file, or no git repository) and
+  `escaped`. Refusing states: `incomplete` (names every criterion that does not pass, with a cause
+  for the first twelve), `no-criteria` (the plan declares no active `AC-###` criterion),
+  `unresolved` (no receipt names the chain's plan while the tree has changes), `invalid` (the
+  newest record does not validate) and `unavailable`. A refusal exits `1` and leaves the chain
+  open. A refusal line ends with one segment per remedy that applies:
+  - `run: /zensu:verify-feature --chain --log <run log>` when verifying again can change the
+    verdict: a `missing`, `stale` or `partial` criterion, or an `invalid` record.
+  - `fix:` when a criterion fails on the current tree. Only a code change can turn it, so
+    verifying the same tree again is never the remedy.
+  - `add:` for `no-criteria`, and `restore:` for a `dropped` criterion.
+
+  An `unresolved` cause names its own remedy, and `unavailable` names none.
+- **Where it applies.** The ticket-bound standalone terminus only. Both terminus gates are
+  evaluated before either refuses, so one run of `--chain-done` names every problem. A bound
+  Autopilot chain that closes with outcome `pass` prints `ACCEPTANCE — not-checked`, and the
+  cause says whether the run's VALIDATE stage validates every criterion, whether the run was
+  started with `--no-validate` so nothing was validated, or whether the option could not be read.
+  Its other outcomes print nothing. The unqualified zero-change terminus is exempt and prints
+  nothing, and a wrong ticket never reaches the verdict. A max-rounds close with
+  `hooks.selfReview` off is never blocked by this gate or the full-suite gate: a standalone chain
+  runs no terminus there, and a bound one discards the terminus output. The chain-end summary
+  then shows both as not checked.
+- **Modes.** `evidence.acceptanceGate` is `required` (default) or `advisory`, which prints the same
+  verdict marked `(advisory, not blocking)` and closes the chain. An unknown value acts as
+  `required`, and the first line says so.
+- **Bypass** with `ZENSU_ACCEPTANCE_GATE=off`, recorded in the bypass ledger only where the gate
+  applies. A chain the gate finds `not-applicable` prints that state and records no escape.
+- **What it does not prove.** An attested verdict is written by the model, so the gate proves
+  that every criterion was verified and recorded on the current tree, not that the model looked
+  honestly. An observed verdict proves only that a command the model chose exited as recorded on
+  this tree: the command is not bound to the criterion, and one run may back several criteria.
+  Records live in the same kind of private store as the full-suite records, so a Bash redirect
+  from the main thread can forge one. The gate stops a chain from closing on a criterion that
+  nobody verified, or one verified before a later edit; it does not stop a model that forges a
+  record on purpose.
+
+**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-14, four-channel logging.

@@ -3,9 +3,9 @@ name: tdd-mode
 description: >
   [Zensu] Switch this session's implementation discipline between strict RED→GREEN
   TDD and vanilla, without editing any config file. Records a session-scoped choice
-  that outranks both `hooks.tddImplementation` and any skill's own default — so
-  `/zensu:pr-fix-findings`, which asks for strict TDD by default, follows the
-  switch too. The choice governs the next chain armed by `--tdd-begin`; a running
+  that outranks both `hooks.tddImplementation` and any caller's own default — so
+  every `/zensu:tdd` run in the session, the fix chains of `/zensu:pr-fix-findings`
+  included, follows the switch. The choice governs the next chain armed by `--tdd-begin`; a running
   chain keeps the mode it froze. Use when the user says "with TDD", "strict TDD",
   "run everything with red-green tests", "TDD on", "no TDD for now", "TDD off",
   "switch TDD mode", "back to the default", or invokes /zensu:tdd-mode. To change
@@ -47,7 +47,8 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 
 That writes a session-scoped marker under `.zensu/state/` holding
 `{"mode":"strict"}`. The next `/zensu:tdd` run arms strict and echoes
-`mode: strict` at `--tdd-begin`.
+`mode: strict` at `--tdd-begin`. That includes the fix chains
+`/zensu:pr-fix-findings` runs, which carry no mode of their own.
 
 Then confirm in one line, in the user's own language, and continue with whatever
 they were doing.
@@ -57,9 +58,6 @@ they were doing.
 ```
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-mode.sh" --vanilla
 ```
-
-This is the one way to run `/zensu:pr-fix-findings` WITHOUT strict TDD, since its
-own default asks for strict.
 
 Choosing vanilla is a mode choice, not a gate escape — vanilla is the shipped
 default — so it records no bypass-ledger entry. It is not a way around a finding,
@@ -89,7 +87,8 @@ Never delete the marker file by hand.
 The two `released` forms are what distinguish a deliberate `--auto` from a session
 that never chose. It resolves ranks 1, 3 and 4 only: a caller's `--tdd-mode strict`
 exists just at the moment of arming, so `--status` can say `vanilla (config)` while
-the next `/zensu:pr-fix-findings` run legitimately arms strict.
+the next run whose specification carries a `TDD-MODE: strict` line legitimately arms
+strict.
 
 When a chain is already armed and its frozen mode disagrees with the resolved
 session mode, `--status` appends the running chain's mode and says the choice takes
@@ -104,8 +103,8 @@ report for a given chain.
 `zensu-log.sh --tdd-begin` resolves the mode once, in this order:
 
 1. **this session's marker** — what this skill records
-2. **the caller's own default** — `--tdd-begin --tdd-mode strict`, e.g. the strict
-   default `/zensu:pr-fix-findings` asks for
+2. **the caller's own default** — `--tdd-begin --tdd-mode strict`, passed when the
+   specification carries a single `TDD-MODE: strict` line
 3. **`hooks.tddImplementation`**
 4. **vanilla**
 

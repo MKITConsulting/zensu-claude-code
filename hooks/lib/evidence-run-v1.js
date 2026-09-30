@@ -11,8 +11,8 @@ const { scan } = require('./secret-patterns.js');
 
 const SCHEMA = 'evidence-run-v1';
 const STORE_SEGMENTS = Object.freeze(['evidence-run', 'v1']);
-const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped']);
-const TREE_SCOPES = Object.freeze(['full', 'scoped']);
+const SCOPES = Object.freeze(['full', 'lint', 'build', 'coverage', 'scoped', 'acceptance']);
+const TREE_SCOPES = Object.freeze(['full', 'scoped', 'acceptance']);
 const TEST_SCOPES = Object.freeze(['full', 'scoped']);
 const RECORD_STATES = Object.freeze(['running', 'completed', 'interrupted']);
 const GATE_MODES = Object.freeze(['required', 'advisory']);
@@ -358,7 +358,11 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
   const temporaryIndex = path.join(scratchDirectory, `index-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
   try {
     const source = indexPath.stdout.trim();
-    if (source && fs.existsSync(source)) fs.copyFileSync(source, temporaryIndex);
+    if (source && fs.existsSync(source)) {
+      const indexStat = fs.statSync(source);
+      fs.copyFileSync(source, temporaryIndex);
+      fs.utimesSync(temporaryIndex, indexStat.atime, indexStat.mtime);
+    }
     const env = { GIT_INDEX_FILE: temporaryIndex };
     const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
     if (!added.ok) return { tree: null, reason: added.reason };
@@ -783,13 +787,22 @@ function prune(locations, limits, keepIds) {
   } catch {
     return 0;
   }
-  const excess = names.length - limits.maxRecordsPerSession;
+  const byScope = new Map();
+  for (const name of names) {
+    const loaded = readRecordFile(path.join(locations.records, name), limits);
+    const scope = loaded.record && SCOPES.includes(loaded.record.scope) ? loaded.record.scope : '';
+    if (!byScope.has(scope)) byScope.set(scope, []);
+    byScope.get(scope).push(name);
+  }
   let removed = 0;
-  for (const name of names.slice(0, Math.max(0, excess))) {
-    const id = name.slice(0, -5);
-    if (keepIds && keepIds.includes(id)) continue;
-    try { fs.unlinkSync(path.join(locations.records, name)); removed += 1; } catch { }
-    try { fs.unlinkSync(path.join(locations.logs, `${id}.log`)); } catch { }
+  for (const group of byScope.values()) {
+    const excess = group.length - limits.maxRecordsPerSession;
+    for (const name of group.slice(0, Math.max(0, excess))) {
+      const id = name.slice(0, -5);
+      if (keepIds && keepIds.includes(id)) continue;
+      try { fs.unlinkSync(path.join(locations.records, name)); removed += 1; } catch { }
+      try { fs.unlinkSync(path.join(locations.logs, `${id}.log`)); } catch { }
+    }
   }
   try {
     for (const name of fs.readdirSync(locations.logs)) {

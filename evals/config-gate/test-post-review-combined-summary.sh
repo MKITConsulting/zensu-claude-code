@@ -177,13 +177,13 @@ HOOK_SCHEMA="$(printf '%s' "$HOOK_CTX" | awk '/^## What I built/{f=1} /^## TL;DR
 SKILL_SCHEMA="$(awk '/^### Final report/{f=1} f&&/^```/{c++; if(c>=2) exit} f&&c>=1{print}' "$SKILL_MD_PARITY")"
 [ -n "$HOOK_SCHEMA" ] && check "literal control: the hook summary schema is extractable" PASS || check "literal control: the hook summary schema is extractable" FAIL
 [ -n "$SKILL_SCHEMA" ] && check "literal control: the self-review Final report is extractable" PASS || check "literal control: the self-review Final report is extractable" FAIL
-for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — ' 'PASS — 0 findings, nothing to fix'; do
+for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'ACCEPTANCE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — ' 'PASS — 0 findings, nothing to fix'; do
   case "$HOOK_SCHEMA" in
     *"$lit"*) check "verbatim literal survives in the hook summary schema: $lit" PASS ;;
     *)        check "verbatim literal survives in the hook summary schema: $lit" FAIL ;;
   esac
 done
-for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — '; do
+for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'ACCEPTANCE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — '; do
   case "$SKILL_SCHEMA" in
     *"$lit"*) check "verbatim literal survives in the self-review Final report: $lit" PASS ;;
     *)        check "verbatim literal survives in the self-review Final report: $lit" FAIL ;;
@@ -349,6 +349,13 @@ case "$OUT" in
     check "max-rounds + flag on: auto-fix history lists no-fix/verification rounds" FAIL ;;
 esac
 
+case "$OUT" in
+  *"write 🟡 not checked (max-rounds) as the Full suite verdict and 🟡 not-checked (max-rounds) as the Acceptance verdict"*)
+    check "max-rounds + flag on: the ungated close names its Full suite and Acceptance values" PASS ;;
+  *)
+    check "max-rounds + flag on: the ungated close names its Full suite and Acceptance values" FAIL ;;
+esac
+
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "combinedSummary": false, "selfReview": false}}
 EOF
@@ -370,6 +377,13 @@ case "$OUT" in
     check "max-rounds + flag off: output must NOT contain 'CHAIN-END SUMMARY'" FAIL ;;
   *)
     check "max-rounds + flag off: output must NOT contain 'CHAIN-END SUMMARY'" PASS ;;
+esac
+
+case "$OUT" in
+  *"not-checked (max-rounds)"*)
+    check "max-rounds + flag off: no summary, so no verdict values are named" FAIL ;;
+  *)
+    check "max-rounds + flag off: no summary, so no verdict values are named" PASS ;;
 esac
 
 echo "----"

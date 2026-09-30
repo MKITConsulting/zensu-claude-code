@@ -46,6 +46,25 @@ contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules
 and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
 replace them.
 
+## Inside a `/zensu:tdd` chain (`--chain`)
+
+A standalone `/zensu:tdd` chain runs this skill in `--chain` mode: at Phase 6 step 6d, before
+the review, and again in `/zensu:self-review` when review rounds changed the tree. In that mode
+the skill verifies every active `AC-###` criterion of the chain's plan on this worktree, with the
+cheapest driver that can observe it: the browser for a UI criterion, a simulator for a mobile
+app, and a shell check for an API, a CLI or a queue. A shell check runs through the plugin's
+evidence runner, so the plugin records its real exit code; it reaches only an unauthenticated
+loopback target and discards its own output, because the runner shows the tail of that output
+to the model. The skill records one verdict per criterion, and the chain closes only when every
+active criterion has a `pass` on the tree that ships
+([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
+that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs
+a code change first. Remote mode is refused there, because a deployed URL runs other code than
+the tree the records bind to. The consent and policy rules below apply unchanged. In consent
+mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
+Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
+run was started with `--no-validate`, and the chain's terminus line says which.
+
 ## How the browser is fenced
 
 Every run writes a **run config** into its own run directory with

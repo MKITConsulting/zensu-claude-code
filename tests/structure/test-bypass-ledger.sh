@@ -143,7 +143,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE"
+SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN lib/zensu-log.sh:ZENSU_FULL_SUITE_GATE lib/zensu-log.sh:ZENSU_ACCEPTANCE_GATE"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"

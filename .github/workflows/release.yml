@@ -65,7 +65,7 @@ on:
         default: false
         type: boolean
       skip_reason:
-        description: 'Why the test gate is being skipped (required when skip_test_gate is true; recorded in the commit, the evidence and the job summary)'
+        description: 'Why the test gate is being skipped, on a single line with no leading or trailing whitespace (required when skip_test_gate is true; recorded in the commit, the evidence and the job summary)'
         required: false
         default: ''
         type: string
@@ -102,6 +102,8 @@ jobs:
 
       - name: Compute next version
         id: ver
+        env:
+          VERSION_TYPE: ${{ inputs.version_type }}
         run: |
           set -euo pipefail
           LATEST="$(git tag -l 'v*' | sort -V | tail -1)"
@@ -110,7 +112,7 @@ jobs:
           fi
           echo "Latest tag: $LATEST"
           IFS='.' read -r MA MI PA <<< "${LATEST#v}"
-          case "${{ inputs.version_type }}" in
+          case "$VERSION_TYPE" in
             major) MA=$((MA + 1)); MI=0; PA=0 ;;
             minor) MI=$((MI + 1)); PA=0 ;;
             patch) PA=$((PA + 1)) ;;
@@ -187,18 +189,30 @@ jobs:
       # later. Fail before anything is committed or pushed rather than after.
       - name: Validate test-gate skip request
         if: ${{ inputs.skip_test_gate }}
+        env:
+          SKIP_REASON: ${{ inputs.skip_reason }}
         run: |
           set -euo pipefail
-          REASON="${{ inputs.skip_reason }}"
-          if [ -z "${REASON//[[:space:]]/}" ]; then
+          if [ -z "${SKIP_REASON//[[:space:]]/}" ]; then
             echo "::error::skip_test_gate requires a non-empty skip_reason"
             exit 1
           fi
-          echo "::warning::Test gate will be SKIPPED for this release. Reason: $REASON"
+          if [[ "$SKIP_REASON" == *$'\n'* || "$SKIP_REASON" == *$'\r'* ]]; then
+            echo "::error::skip_reason must be a single line"
+            exit 1
+          fi
+          if [[ "$SKIP_REASON" == [[:space:]]* || "$SKIP_REASON" == *[[:space:]] ]]; then
+            echo "::error::skip_reason must not start or end with whitespace"
+            exit 1
+          fi
+          echo "::warning::Test gate will be SKIPPED for this release. Reason: $SKIP_REASON"
 
       - name: Create release commit
         id: release_commit
         if: ${{ !inputs.dry_run }}
+        env:
+          SKIP_TEST_GATE: ${{ inputs.skip_test_gate }}
+          SKIP_REASON: ${{ inputs.skip_reason }}
         run: |
           set -euo pipefail
           BR="release/${{ steps.ver.outputs.tag }}"
@@ -210,11 +224,11 @@ jobs:
           # inputs. The publish job is push-triggered by this commit landing on main,
           # where `inputs.*` is empty, so a trailer is the only carrier that reaches
           # it. It is also the copy a human reads in the release PR.
-          if [ "${{ inputs.skip_test_gate }}" = "true" ]; then
+          if [ "$SKIP_TEST_GATE" = "true" ]; then
             git commit \
               -m "chore(release): bump version to ${{ steps.ver.outputs.version }}" \
               -m "Release-Test-Gate: skipped" \
-              -m "Release-Test-Gate-Reason: ${{ inputs.skip_reason }}"
+              -m "Release-Test-Gate-Reason: $SKIP_REASON"
           else
             git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
           fi
@@ -226,6 +240,9 @@ jobs:
 
       - name: Record deterministic exact-commit runtime evidence
         if: ${{ !inputs.dry_run }}
+        env:
+          SKIP_TEST_GATE: ${{ inputs.skip_test_gate }}
+          SKIP_REASON: ${{ inputs.skip_reason }}
         run: |
           set -euo pipefail
           EXPECTED_SHA="${{ steps.release_commit.outputs.sha }}"
@@ -234,9 +251,9 @@ jobs:
           # Only the suite run is optional. The exact-SHA pin, the clean-tree
           # check and the runtime digest still bind the bytes that ship, so a
           # skipped release is unverified — never unattributed.
-          if [ "${{ inputs.skip_test_gate }}" = "true" ]; then
+          if [ "$SKIP_TEST_GATE" = "true" ]; then
             GATE=skipped
-            GATE_REASON="${{ inputs.skip_reason }}"
+            GATE_REASON="$SKIP_REASON"
             echo "::warning::Deterministic release gate SKIPPED — the suite did not run against $EXPECTED_SHA. Reason: $GATE_REASON"
           else
             GATE=passed
@@ -325,10 +342,30 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
-          test "${{ github.ref }}" = refs/heads/main || {
+          test "$GITHUB_REF" = refs/heads/main || {
             echo "::error::publish mode may only be dispatched on main"
             exit 1
           }
+
+      - name: Validate test-gate skip request
+        if: ${{ inputs.skip_test_gate }}
+        env:
+          SKIP_REASON: ${{ inputs.skip_reason }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SKIP_REASON//[[:space:]]/}" ]; then
+            echo "::error::skip_test_gate requires a non-empty skip_reason"
+            exit 1
+          fi
+          if [[ "$SKIP_REASON" == *$'\n'* || "$SKIP_REASON" == *$'\r'* ]]; then
+            echo "::error::skip_reason must be a single line"
+            exit 1
+          fi
+          if [[ "$SKIP_REASON" == [[:space:]]* || "$SKIP_REASON" == *[[:space:]] ]]; then
+            echo "::error::skip_reason must not start or end with whitespace"
+            exit 1
+          fi
+          echo "::warning::Test gate will be SKIPPED for this release. Reason: $SKIP_REASON"
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -381,6 +418,9 @@ jobs:
           fi
 
       - name: Deterministic exact-main-SHA gate
+        env:
+          SKIP_TEST_GATE: ${{ inputs.skip_test_gate }}
+          SKIP_REASON: ${{ inputs.skip_reason }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
@@ -391,13 +431,29 @@ jobs:
           # may also pass the input directly. Absent both, the gate runs: the skip
           # is opt-in on every path.
           COMMIT_MSG="$(git log -1 --format=%B HEAD)"
+          SKIP_TRAILER=false
+          printf '%s\n' "$COMMIT_MSG" | grep -qE '^Release-Test-Gate:[[:space:]]*skipped[[:space:]]*$' && SKIP_TRAILER=true
+          TRAILER_REASON="$(printf '%s\n' "$COMMIT_MSG" | sed -n 's/^Release-Test-Gate-Reason:[[:space:]]*//p' | head -1)"
           GATE_REASON=""
-          if printf '%s\n' "$COMMIT_MSG" | grep -qE '^Release-Test-Gate:[[:space:]]*skipped[[:space:]]*$'; then
+          if [ "$SKIP_TRAILER" = true ] && [ -n "${TRAILER_REASON//[[:space:]]/}" ]; then
             GATE=skipped
-            GATE_REASON="$(printf '%s\n' "$COMMIT_MSG" | sed -n 's/^Release-Test-Gate-Reason:[[:space:]]*//p' | head -1)"
-          elif [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.skip_test_gate }}" = "true" ]; then
-            GATE=skipped
-            GATE_REASON="${{ inputs.skip_reason }}"
+            GATE_REASON="$TRAILER_REASON"
+            if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SKIP_REASON" != "$GATE_REASON" ]; then
+              echo "::notice::the release commit's Release-Test-Gate-Reason is recorded instead of the dispatched skip_reason"
+            fi
+          elif [ "$SKIP_TRAILER" = true ] && [ "${{ github.event_name }}" != workflow_dispatch ]; then
+            echo "::error::the release commit skips the test gate without a Release-Test-Gate-Reason"
+            exit 1
+          elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            if [ "$SKIP_TRAILER" = true ]; then
+              echo "::notice::the release commit's Release-Test-Gate trailer carries no Release-Test-Gate-Reason, so this dispatch decides the gate"
+            fi
+            if [ "$SKIP_TEST_GATE" = "true" ]; then
+              GATE=skipped
+              GATE_REASON="$SKIP_REASON"
+            else
+              GATE=passed
+            fi
           else
             GATE=passed
           fi
