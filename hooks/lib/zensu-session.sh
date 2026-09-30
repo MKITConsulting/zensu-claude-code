@@ -1120,23 +1120,28 @@ zensu_resolve_project_dir() {
 # That direction is what makes a silent failure survivable; before the emptiness
 # conjuncts, a scrubbed child rendered the RAW value on glibc, and the injected
 # duplicate `permissionDecision` key then won under last-key-wins parsing.
-export ZENSU_SAFE_VERSION_RE ZENSU_SAFE_REFUSAL_RE ZENSU_ADOPTION_CHILD_CLOSE \
-  ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
-  ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE \
-  2>/dev/null || true
-export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
-  zensu_safe_display_path \
-  _zensu_session_binder_mode zensu_emit_named_bind_deny \
-  zensu_session_unregistered \
-  zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
-  zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
-  zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
-  zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
-  zensu_session_adoption_refusal zensu_session_adoption_remedy _zensu_adoption_refusal_remedy \
-  zensu_session_adoption_attempt _zensu_adoption_attempt \
-  zensu_session_adoption_tail _zensu_adoption_tail \
-  _zensu_deny_audience _zensu_load_agent_context \
-  zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+case "${OSTYPE:-}" in
+  msys*|cygwin*|mingw*|win32*) ;;
+  *)
+    export ZENSU_SAFE_VERSION_RE ZENSU_SAFE_REFUSAL_RE ZENSU_ADOPTION_CHILD_CLOSE \
+      ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
+      ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE \
+      2>/dev/null || true
+    export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+      zensu_safe_display_path \
+      _zensu_session_binder_mode zensu_emit_named_bind_deny \
+      zensu_session_unregistered \
+      zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
+      zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
+      zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
+      zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
+      zensu_session_adoption_refusal zensu_session_adoption_remedy _zensu_adoption_refusal_remedy \
+      zensu_session_adoption_attempt _zensu_adoption_attempt \
+      zensu_session_adoption_tail _zensu_adoption_tail \
+      _zensu_deny_audience _zensu_load_agent_context \
+      zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+    ;;
+esac
 # The underscore-private helpers in that list are there for CLOSURE, not as API: an
 # exported function that reaches a child shell runs there without this file, so
 # every helper it calls has to travel with it. zensu_emit_named_bind_deny calls

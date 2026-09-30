@@ -1381,7 +1381,7 @@ expect_eq "R8h3 the locale pin precedes every scope arm" "before" "$R8_LOCALE_PO
 R8_EXPORTED=0
 for R8_CONST in ZENSU_SAFE_VERSION_RE ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
   ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE; do
-  sed -n '/^export ZENSU_SAFE_VERSION_RE/,/|| true/p' "$SESSION_SH" \
+  sed -n '/^[[:space:]]*export ZENSU_SAFE_VERSION_RE/,/|| true/p' "$SESSION_SH" \
     | grep -qF "$R8_CONST" && R8_EXPORTED=$((R8_EXPORTED+1))
 done
 expect_eq "R8h4 every shape constant travels with the exported function" "6" "$R8_EXPORTED"
