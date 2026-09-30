@@ -4180,6 +4180,11 @@ function deferredOwnerProcessIsAlive(claim) {
   return actual === null || actual === claim.ownerProcessStartIdentity;
 }
 
+function deferredReviewClaimHeld(claim, claimStale) {
+  if (claimStale === true) return false;
+  return claim.handoffEmitted === true || deferredOwnerProcessIsAlive(claim);
+}
+
 function deferredReviewStateIsIdle(state) {
   return state.active === false
     && state.implComplete === false
@@ -4268,19 +4273,16 @@ function deferredReviewOwnedByOther(options) {
     return false;
   }
 
-  const ownerAlive = deferredOwnerProcessIsAlive(stableClaim);
+  const claimStale = deferredReviewClaimIsStale(secondClaim, ttlHours);
   if (state.deferredReviewClaim !== stableClaim.claimId) {
     return stableClaim.handoffEmitted === false
       && deferredReviewStateCanSeed(state)
-      && ownerAlive;
+      && deferredReviewClaimHeld(stableClaim, claimStale);
   }
   if (state.chainDone === true || state.active !== true || state.implComplete !== true) {
     return false;
   }
-  return ownerAlive || (
-    stableClaim.handoffEmitted === true
-    && !deferredReviewClaimIsStale(secondClaim, ttlHours)
-  );
+  return deferredReviewClaimHeld(stableClaim, claimStale);
 }
 
 function cancelStalePreparedDeferredReviewTransfer(options, claim, inspectedState) {
@@ -4399,17 +4401,13 @@ function inspectDeferredReviewOwner(options) {
     fail('deferred-review transfer target state does not match its receipt');
   }
 
-  const ownerAlive = deferredOwnerProcessIsAlive(claim);
   const exactClaim = state.deferredReviewClaim === claim.claimId;
   if (!exactClaim) {
     if (claim.handoffEmitted === true) {
       return { status: 'cancelled', ownerRevision: state.revision, claim };
     }
-    if (deferredReviewStateCanSeed(state) && !ownerAlive) {
+    if (deferredReviewStateCanSeed(state)) {
       return { status: 'unseeded', ownerRevision: state.revision, claim };
-    }
-    if (deferredReviewStateCanSeed(state) && ownerAlive) {
-      return { status: 'owned', ownerRevision: state.revision, claim };
     }
     fail('deferred-review claim does not match its owner workflow state');
   }
@@ -4422,7 +4420,7 @@ function inspectDeferredReviewOwner(options) {
   if (contexts.ownerSessionId === contexts.currentSessionId) {
     return { status: 'current', ownerRevision: state.revision, claim };
   }
-  if (ownerAlive || (claim.handoffEmitted === true && options.claimStale !== true)) {
+  if (deferredReviewClaimHeld(claim, options.claimStale)) {
     return { status: 'owned', ownerRevision: state.revision, claim };
   }
   return { status: 'transfer', ownerRevision: state.revision, claim };
@@ -4454,10 +4452,7 @@ function retireDeferredReviewOwner(options) {
   const alreadyRetired = deferredReviewStateIsRetired(current, claim.transfer);
   if (alreadyRetired) return current;
   if (typeof options.claimStale !== 'boolean') fail('claimStale must be boolean');
-  if (
-    deferredOwnerProcessIsAlive(claim)
-    || (claim.handoffEmitted === true && options.claimStale !== true)
-  ) {
+  if (deferredReviewClaimHeld(claim, options.claimStale)) {
     fail('deferred-review owner is still live or its handoff lease is fresh');
   }
   if (
@@ -4492,10 +4487,7 @@ function retireDeferredReviewOwner(options) {
       if (!sameClaimValue(latest.claim, claim)) {
         fail('deferred-review claim changed during retirement');
       }
-      if (
-        deferredOwnerProcessIsAlive(latest.claim)
-        || (latest.claim.handoffEmitted === true && options.claimStale !== true)
-      ) {
+      if (deferredReviewClaimHeld(latest.claim, options.claimStale)) {
         fail('deferred-review owner became live before retirement');
       }
       return commitWorkflowStateUnderLock(target, state, {
