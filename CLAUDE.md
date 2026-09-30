@@ -127,7 +127,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
-- **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, and the lease checks: `.claude/rules/autopilot-active-read.md`
+- **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, the same separation in the Stop reconcile and the public workspace read, and the lease checks: `.claude/rules/autopilot-active-read.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **Foreign-Chain Row (`zensu-doctor.sh` + `zensu-doctor-report.js`)** — the `/zensu:doctor` rows about chains and their record anchor: `.claude/rules/foreign-chain-row.md`
 - **Implementing-Phase Turn Counter (`hooks/stop-chain-enforcer.sh` + `zensu-tdd-phase.sh`)** — the `implStopCount` nudge and the shared watchdog ladder: `.claude/rules/implementing-phase-turn-counter.md`

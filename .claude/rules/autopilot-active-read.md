@@ -18,7 +18,8 @@ paths:
 `autopilot_read_active` answers whether THIS session owns an active durable run, and it ends in
 `_autopilot_locked_run`. `_tdd_locked_run` returns 1 for a storage-safety failure, a failed
 acquisition and a failed release, so the verb's exit 1 also means "could not look". This file
-records how the strict form keeps the two apart and which caller uses which verb. The scope of
+records how the strict form keeps the two apart and which caller uses which verb, and how the Stop
+hook's reconcile and the public workspace read keep the same separation in place. The scope of
 the question itself, owner-scoped versus workspace, is `.claude/rules/autopilot-run-scope.md`.
 
 **`autopilot_read_active_strict` keeps the lease apart from the verdict.** It runs the worker
@@ -70,8 +71,8 @@ the lenient verb is never mistaken for an oversight. The verdicts:
   `ACTIVE_STATE_UNREADABLE`, and `P7g` plants unsafe storage.
 - **`stop-chain-enforcer.sh`, the initial outer read — strict.** Exit 1 sets
   `OUTER_PRESENT=false`, and a session whose standalone chain is still implementing then
-  reaches `outer_finish`, where `autopilot_reconcile_stop_active` reads the same fault as 1
-  and releases. A lease that stayed unavailable therefore let the Stop through for a session
+  reaches `outer_finish`, where `autopilot_reconcile_stop_active` read the same fault as 1
+  and released. A lease that stayed unavailable therefore let the Stop through for a session
   that owns an active run: `S16a` measured no decision at all from the unchanged hook, and a
   block naming the run once the lease was free. 5 blocks with its own reason AHEAD of the
   "corrupt or unsafe" arm, because that arm prescribes repair or cancellation, the wrong
@@ -124,11 +125,11 @@ the lenient verb is never mistaken for an oversight. The verdicts:
 `tests/structure/lib-autopilot-lease.sh`: `with_autopilot_lease` runs one command inside
 `core.acquireExternalProcessLock` with `lockDirectory` `<root>/.zensu/state` and
 `resourcePath` `<root>/.zensu/state/autopilot`, and `autopilot_lease_hold_start` /
-`autopilot_lease_hold_stop` hold it from a background process for `S16b`, which must be
-contended mid-hook. A held-lease read waits out the core's bounded acquisition, 200 attempts
+`autopilot_lease_hold_stop` hold it from a background process for `S16b`, `S16f` and `S16g`,
+which must be contended mid-hook. A held-lease read waits out the core's bounded acquisition, 200 attempts
 at 50 ms, before it answers or looks, so every such check costs at least ten seconds; about
 twelve per read was measured on a loaded macOS host. The checks whose outcome a lease-free run
-would share (`P7f`, `P7h`, `S16c`, `S16e`, `O2d`, `O2e`, `O2g`, `W34`, `W36`) also require an
+would share (`P7f`, `P7h`, `S16c`, `S16e`, `O2d`, `O2e`, `O2g`, `O2h`, `W34`, `W36`) also require an
 elapsed time of at least eight seconds, so a helper that silently took no lease cannot pass them;
 `P7i` needs no such bound, because a lease-free run of it answers `CORRUPT_ACTIVE_STATE`, which
 the check refuses. The unsafe-storage checks
@@ -141,15 +142,79 @@ because the hook no longer calls the lenient verb there; a fixture that stubs
 `tests/structure/test-deferred-review-fallback.sh` requires that its Stop is not the
 unreadable-state block, so the seed-write failure it names stays the path it measures.
 
+**The Stop reconcile and the public workspace read keep the same separation IN PLACE.**
+`autopilot_reconcile_stop_active` and `autopilot_read_workspace` also ended in
+`_autopilot_locked_run` and read a lease fault as 1, so `outer_finish` and the Autopilot escape
+branch released on the reconcile's 1, and the post-review standalone preflight read the workspace
+read's 1 as "free". The strict initial read closed only the case in which the lease was
+unavailable when the Stop began. Both verbs now run their worker through a probe that always
+returns 0 — `_autopilot_reconcile_probe` with `_ZENSU_AP_RECONCILE_RECORD` and
+`_ZENSU_AP_RECONCILE_WORKER_RC`, and the existing `_autopilot_hold_probe`, whose channel the
+workspace read now shares with `autopilot_workspace_hold_report` — and answer 5 for a lease,
+storage or path fault. Neither got a `_strict` twin, because every caller of each verb needed the
+strict answer: a lenient twin would be a public verb with no production caller, the shape
+`.claude/rules/autopilot-run-scope.md` records deleting as `autopilot_workspace_hold_sentence`
+and `autopilot_workspace_hold_is_own`.
+
+- **`autopilot_reconcile_stop_active`** answers 0 with the reconciled record, 1 when this
+  session provably owns no active run, 3 for a refused call and 5 for a fault it could not
+  resolve, and passes every other worker status through unchanged. It is a MUTATING verb, and a
+  status from its transition half, such as a rejected BLOCK, is a refusal of the reconcile
+  rather than a lease fault, so it keeps the "could not be reconciled safely" arm. When the
+  lease cannot be taken it takes the owner-scoped look, `_autopilot_active_read_without_lease`,
+  because the locked reconcile's answer for no run and for an own `DONE` or `CANCELLED` run is
+  exactly the read's: it prints that record and mutates nothing. An own nonterminal run stays 5,
+  because the locked reconcile would mutate it and a look cannot.
+- **`autopilot_read_workspace`** answers 0 with the holder printed, 1 when the tree is PROVEN
+  free, 2 for an inconsistent inventory and 5 for a fault; root and workspace resolution
+  failures, which answered 2, answer 5. Its look, `_autopilot_workspace_read_without_lease`,
+  gives 1 only when the worker proves the tree free. A holder it sees without the lease stays 5,
+  not 0: that holder may be mid-transition, and its one caller refuses on both. The 1 is sound
+  for the reason the contention fence states: a run published after that read linearizes after
+  it, and every write that makes or unmakes a holder is one atomic replace of a run record. The
+  contract its header states is unchanged: 0 held, 1 free, anything else is treated as held.
+
+The callers, judged by the same test:
+
+- **`stop-chain-enforcer.sh`, the `outer_finish` reconcile — 5 gets its own arm.** It blocks
+  with the unreadable-state reason of the initial read, AHEAD of the "could not be reconciled
+  safely" arm, which prescribes repair or cancellation. That reason is ONE assignment,
+  `OUTER_UNREADABLE_REASON`, interpolated by the initial read, this arm and the escape arm, so
+  the three cannot drift apart. `S16f` in `tests/structure/test-autopilot-stop-enforcer.sh`
+  takes the lease right after the initial read returns, through a copied runtime whose library
+  wraps `autopilot_read_active_strict`, over an own `PLANNING` run with no inner chain; the
+  unchanged hook released that Stop with no decision.
+- **`stop-chain-enforcer.sh`, the Autopilot escape branch — 5 gets its own arm.** The branch
+  runs only when the initial read found an own run, and it released on the reconcile's 1
+  WITHOUT auditing `BLOCKED`, so a lease lost between the two reads turned an audited escape
+  into an unaudited release. 5 denies the escape with the same reason; the generic "could not
+  be proven safely" block stays for every other status. `S16g` drives it through the same
+  runtime with `ZENSU_AUTOPILOT=off` and requires the run record unchanged; the unchanged hook
+  released.
+- **`post-review-tdd-delegate.sh`, the standalone workspace preflight — no edit.** It already
+  treats every status other than 1 as held, so the verb's 5 ends the hook before the claim and
+  the ticket stays unconsumed; the missing piece was the verb. `O2h` in
+  `tests/structure/test-post-review-outer-ownership-root.sh` holds the lease for the whole hook
+  while a foreign run holds the tree and this session owns none, so the owner-scoped look
+  answers 1 and the workspace read decides; the unchanged hook claimed the ticket and routed the
+  review.
+
+The operator account is the `stop-chain-enforcer.sh` row in `docs/configuration.md`: a run that is
+still active is never released unaudited, by the escape or by the reconcile.
+
+The looks are what keep a session WITHOUT an active run moving. `S16c` and `S16e` hold the lease
+for the whole hook, so their Stops now pass the reconcile's look as well as the initial read's,
+and `O2e` and `O2g` pass the workspace look; each still requires the release or the claim.
+Neither look adds an acquisition wait: `_tdd_locked_run` already waited out the core's bounded
+acquisition before the old verbs answered 1, and a look is one unlocked worker run. `S16f` and
+`S16g` wait one acquisition each and `O2h` two. `O2h` requires eight seconds, because a lease-free
+run would share its refusal with `O2b`. `S16f` and `S16g` prove the hold through the helper's
+`ready` signal instead, and neither needs a time bound: a lease-free run of either reaches the
+ordinary stage block or the audited escape, and neither carries the unreadable-state reason the
+two checks require.
+
 **Known gaps, accepted and named:**
 
-- `autopilot_reconcile_stop_active` and `autopilot_read_workspace` also end in
-  `_autopilot_locked_run`, so each still reads a lease fault as 1: `outer_finish` and the
-  escape branch release on the reconcile's 1, and the post-review workspace preflight reads
-  its 1 as "free". The strict initial read closes the case in which the lease is unavailable
-  when the Stop begins; a lease that becomes unavailable after that read and before the
-  reconcile still releases the Stop. A strict form of each verb is the fix and is NOT in this
-  change.
 - A lease fault that does not clear blocks every Stop and every plan approval, and fails every
   `--autopilot-status` read, of a session that OWNS a nonterminal run in that project root,
   `BLOCKED` included, or whose own state is orphaned or inconsistent, because the look answers 5
@@ -166,9 +231,18 @@ unreadable-state block, so the seed-write failure it names stays the path it mea
   read-only lease row naming the artifact, its owner pid, whether that pid is alive and whether
   a start identity was recorded is the missing diagnostic and is not in this change.
 - The post-review standalone preflight refuses without a word. A session whose look found its
-  run, or whose storage is unsafe, keeps its ticket and gets no directive, and the next Stop's
-  resume directive orders the review again. The refusal is the point for an owned run; the
-  silence is the residual.
+  run, whose workspace read could not prove the tree free, or whose storage is unsafe, keeps its
+  ticket and gets no directive, and the next Stop's resume directive orders the review again.
+  The refusal is the point for an owned run and for a held tree; the silence is the residual.
+- A reconcile worker status of 5 renders the unreadable-state reason too. The worker answers 5
+  when a temp file beside the run record or its atomic replace fails, which is a storage fault
+  but neither a lock nor a safety check, so the cause the reason names is approximate there. Its
+  remedy, a retry and then `/zensu:doctor`, still fits.
+- The CI weights of `tests/structure/test-autopilot-stop-enforcer.sh` and
+  `tests/structure/test-post-review-outer-ownership-root.sh` in
+  `tests/profiles/ci-shard-weights.v1.json` were not re-derived: `S16f` and `S16g` add one
+  acquisition wait each and `O2h` two. That file takes a measured CI figure, never an estimate.
+  Neither suite is on a blocking Windows PR shard.
 - Windows is unmeasured for the added checks. `P7e`, `P7f`, `P7h` and `P7i` sit in the suite
   that `tests/profiles/windows-ci.v1.json` places on the blocking `windows-shard-5`, and `W33`,
   `W34` and `W36` in the one on `windows-shard-1`; each adds at least one ten-second
@@ -183,4 +257,7 @@ change. The new Stop block reason, the new plan-gate code and exit 5 of `--autop
 are outputs every existing consumer already treats as fail-closed, and the look answers only
 what the locked read gives for the same state. The release that ships it still takes
 the strictest class of every commit since the previous tag, including the re-anchor work this
-change stacks on.
+change stacks on. The in-place separation of the reconcile and the workspace read is `patch` on
+the same walk: two library verbs answer 5 where they answered 1 or 2, every caller of both ships
+in the same tree as the verbs, no hook, matcher, key set, schema field, config key or attestation
+moves, and the two new Stop arms block where the old ones blocked or released.

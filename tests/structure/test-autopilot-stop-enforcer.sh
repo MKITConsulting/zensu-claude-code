@@ -2012,4 +2012,57 @@ if [ "$ELAPSED16E" -ge 8 ] \
   check "S16e a held Autopilot lease does not block the Stop of a session whose own run is cancelled" PASS
 else check "S16e held lease over a cancelled own run (elapsed=${ELAPSED16E}s out=$(printf '%s' "$OUT16E" | context))" FAIL; fi
 
+LATE_LEASE_PLUGIN="$TMP/lease-after-read-plugin"; copy_runtime "$LATE_LEASE_PLUGIN"
+LATE_LEASE_PLUGIN="$(cd "$LATE_LEASE_PLUGIN" && pwd -P)"
+printf '%s\n' \
+  'source "$REAL_AUTOPILOT_STATE_LIB"' \
+  'source "$ZENSU_LEASE_HELPER"' \
+  'eval "_zensu_unleased_$(declare -f autopilot_read_active_strict)"' \
+  'autopilot_read_active_strict() {' \
+  '  local rc=0' \
+  '  _zensu_unleased_autopilot_read_active_strict "$@" || rc=$?' \
+  '  autopilot_lease_hold_start "$ZENSU_LEASE_ROOT" "$ZENSU_LEASE_SIGNALS" || return 1' \
+  '  return "$rc"' \
+  '}' > "$LATE_LEASE_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
+late_lease_stop() {
+  local project="$1" sid="$2" signals="$3" autopilot="${4:-}"
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" \
+    | CLAUDE_PROJECT_DIR="$project" CLAUDE_PLUGIN_ROOT="$LATE_LEASE_PLUGIN" \
+      ZENSU_CONFIG="$TMP/missing.json" ZENSU_CHAIN= ZENSU_AUTOPILOT="$autopilot" \
+      REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_LEASE_HELPER="$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh" \
+      ZENSU_LEASE_ROOT="$project" ZENSU_LEASE_SIGNALS="$signals" \
+      bash "$LATE_LEASE_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null
+}
+
+P16F="$TMP/lease-after-read-reconcile"; start "$P16F" stop_run_lease_reconcile stop_session_lease_reconcile
+RF16F="$(autopilot_run_file stop_run_lease_reconcile "$P16F")"
+BEFORE16F="$(digest "$RF16F")"
+bind_runtime_session "$LATE_LEASE_PLUGIN" "$P16F" stop_session_lease_reconcile lease-reconcile
+SIGNALS16F="$TMP/lease-reconcile-signals"
+OUT16F="$(late_lease_stop "$P16F" stop_session_lease_reconcile "$SIGNALS16F")"
+HELD16F=false; [ -f "$SIGNALS16F/ready" ] && HELD16F=true
+RELEASED16F=false; autopilot_lease_hold_stop "$SIGNALS16F" && RELEASED16F=true
+if [ "$HELD16F" = true ] && [ "$RELEASED16F" = true ] \
+  && [ "$(printf '%s' "$OUT16F" | decision)" = block ] \
+  && printf '%s' "$OUT16F" | grep -qF 'Zensu Autopilot Stop denied: the project-local Autopilot state could not be read' \
+  && ! printf '%s' "$OUT16F" | grep -qF 'Repair or explicitly cancel' \
+  && [ "$BEFORE16F" = "$(digest "$RF16F")" ]; then
+  check "S16f a lease taken after the initial read blocks Stop at the outer_finish reconcile instead of releasing it" PASS
+else check "S16f lease at the outer_finish reconcile (held=$HELD16F released=$RELEASED16F out=$(printf '%s' "$OUT16F" | context))" FAIL; fi
+
+P16G="$TMP/lease-after-read-escape"; start "$P16G" stop_run_lease_escape stop_session_lease_escape
+RF16G="$(autopilot_run_file stop_run_lease_escape "$P16G")"
+BEFORE16G="$(digest "$RF16G")"
+bind_runtime_session "$LATE_LEASE_PLUGIN" "$P16G" stop_session_lease_escape lease-escape
+SIGNALS16G="$TMP/lease-escape-signals"
+OUT16G="$(late_lease_stop "$P16G" stop_session_lease_escape "$SIGNALS16G" off)"
+HELD16G=false; [ -f "$SIGNALS16G/ready" ] && HELD16G=true
+RELEASED16G=false; autopilot_lease_hold_stop "$SIGNALS16G" && RELEASED16G=true
+if [ "$HELD16G" = true ] && [ "$RELEASED16G" = true ] \
+  && [ "$(printf '%s' "$OUT16G" | decision)" = block ] \
+  && printf '%s' "$OUT16G" | grep -qF 'Zensu Autopilot escape denied: the project-local Autopilot state could not be read' \
+  && [ "$BEFORE16G" = "$(digest "$RF16G")" ]; then
+  check "S16g a lease taken after the initial read denies the Autopilot escape instead of releasing it unaudited" PASS
+else check "S16g lease at the escape reconcile (held=$HELD16G released=$RELEASED16G out=$(printf '%s' "$OUT16G" | context))" FAIL; fi
+
 echo "----"; echo "test-autopilot-stop-enforcer: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

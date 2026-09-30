@@ -240,6 +240,19 @@ else
   check "O2b1 review ticket was consumed despite the foreign-holder refusal" FAIL
 fi
 
+arm outer-leased-foreign || { echo "O2h fixture failed" >&2; exit 1; }
+LEASED_FOREIGN_STATE="$(tdd_state_file "$ARMED_KEY")"
+autopilot_begin_run outer-leased-foreign-run outer_leased_foreign_session "$ARMED_PROJECT" >/dev/null 2>&1 \
+  || { echo "O2h fixture: foreign outer run could not be started" >&2; exit 1; }
+START2H=$SECONDS
+OUT2H="$(run_hook_leased "$ARMED_PROJECT" "$ARMED_TICKET")"; RC2H=$?
+ELAPSED2H=$((SECONDS - START2H))
+if [ "$RC2H" -eq 0 ] && [ "$ELAPSED2H" -ge 8 ] && [ -z "$OUT2H" ] && ! ticket_consumed "$LEASED_FOREIGN_STATE"; then
+  check "O2h a held Autopilot lease does not read a foreign-held working tree as free, so the unbound claim is refused" PASS
+else
+  check "O2h a held lease must not read the workspace as free (rc=$RC2H elapsed=${ELAPSED2H}s out='$OUT2H')" FAIL
+fi
+
 # --- O2c the same foreign run holding a DIFFERENT tree of the same project ---
 # The mandatory positive control. Without it, refusing every foreign run —
 # which is strictly more than the occupancy question asks — would leave O2b

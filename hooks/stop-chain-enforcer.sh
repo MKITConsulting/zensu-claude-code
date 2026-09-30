@@ -904,8 +904,10 @@ emit_block() {
   echo
 }
 
+OUTER_UNREADABLE_REASON="the project-local Autopilot state could not be read, because its lock could not be taken or its storage or path failed a safety check, so whether this session owns an active run is unknown. That is not a no-run answer. Retry the Stop once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease. Do not infer completion."
+
 if [ "$OUTER_STATUS" -eq 5 ]; then
-  emit_block "Zensu Autopilot Stop denied: the project-local Autopilot state could not be read, because its lock could not be taken or its storage or path failed a safety check, so whether this session owns an active run is unknown. That is not a no-run answer. Retry the Stop once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease. Do not infer completion."
+  emit_block "Zensu Autopilot Stop denied: ${OUTER_UNREADABLE_REASON}"
   exit 0
 fi
 
@@ -995,6 +997,7 @@ if [ "$OUTER_STATUS" -eq 0 ] && { [ "${ZENSU_AUTOPILOT:-}" = "off" ] || ! zensu_
     # reason the inner-guard escapes below do: once it releases, this session's
     # Stop never routes the inner chain again, so nothing else could remove it.
     if [ "$OUTER_STATUS" -eq 1 ]; then reviewer_denial_note_clear; exit 0; fi
+    if [ "$OUTER_STATUS" -eq 5 ]; then emit_block "Zensu Autopilot escape denied: ${OUTER_UNREADABLE_REASON}"; exit 0; fi
     emit_block "Zensu Autopilot escape denied: current durable state could not be proven safely."
     exit 0
   fi
@@ -1031,6 +1034,7 @@ outer_finish() {
     OUTER_STATUS=$reconcile_rc
     case "$reconcile_rc" in
       1) return 0 ;;
+      5) emit_block "Zensu Autopilot Stop denied: ${OUTER_UNREADABLE_REASON}"; return 0 ;;
       *) emit_block "Zensu Autopilot Stop denied: project-local durable state could not be reconciled safely. Repair or explicitly cancel it; do not infer completion."; return 0 ;;
     esac
   fi
