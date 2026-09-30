@@ -30,17 +30,20 @@ that fails CLOSED, and it says so in its own wording: it is not a verdict about 
 receipt's contents.
 
 **Both accepted schema names live in FOUR places, and the pin is what holds them
-together:** the writer in `zensu-edit-landing.sh`, this reader, the requirements gate's own
-inline node reader a hundred lines below it in the same verb, and `RECEIPT_SCHEMAS` in
+together:** the writer in `zensu-edit-landing.sh`, this reader, `RECEIPT_SCHEMAS` in
+`hooks/lib/edit-landing-receipt-v1.js` (the requirements gate's derived channel and the
+acceptance gate both read the receipt through it), and `RECEIPT_SCHEMAS` in
 `hooks/lib/zensu-doctor-report.js`. A fifth value domain — what `log` means per schema —
 is re-encoded in the last two. Adding `edit-landing-v3` means all four, and
 `tests/structure/test-tdd-complete-receipt-gate.sh` SCH1 compares the four spellings so a
 one-sided edit fails loudly rather than degrading one consumer silently. **The standing fix
-is one OWNER**, a host-neutral module exporting the set that the doctor `require`s and both
-`node -e` programs load by an env-supplied path — the transport this file already uses for
-`session-control-core-v1.js`. It was not taken in the round that added the pin because the
-writer's node program is the most heavily pinned code in that library; take it at the next
-change that has to re-author that program anyway.
+is one OWNER, and it is HALF taken.** `edit-landing-receipt-v1.js` is a built-ins-only module
+that exports the set: the requirements gate's derived channel loads it by an env-supplied path
+(`ZENSU_ELR_LIB`), the transport this file already uses for `session-control-core-v1.js`, and
+`acceptance-verify-v1.js` `require`s it. The writer, the terminus verdict reader and the doctor
+still carry their own spellings. Move them onto the module at the next change that has to
+re-author the writer's node program anyway, because that program is the most heavily pinned
+code in the library.
 
 **The requirement is armed by a CLAIM, not only by a dirty tree.** `_tc_armed` is true
 when the anchor's change count is non-zero OR when a claim was logged, which is what
@@ -245,17 +248,17 @@ reads. Comparison uses the raw values; rendering uses a copy with no control byt
 backtick and a bounded length — the same treatment the doctor's topology row gives a
 claim root.
 
-**TWO standing fixes are named here rather than taken, each with its trigger.** The
-receipt FILENAME is hand-derived in FIVE places — the writer, both `zensu-log.sh`
-verbs, and TWO in the doctor renderer (`claimTopologyRow`'s join and
-`someClaimReceiptPresent`'s `/^edit-landing-.+\.json$/`) — with no owner and no pin. The count
-moved because a change ADDED a site rather than touching two, which the stated trigger below
-cannot see, so extend it to fire on a new site as well; the failure is silent in the dangerous
-direction, since a rename that updates the four leaves the regex matching nothing and the
-no-key topology row then goes quiet and reads as a clean topology, while `SCH1` pins only the
-four SCHEMA spellings; the durable answer is a `tdd_edit_landing_receipt` accessor
-beside `tdd_state_file` in `zensu-tdd-phase.sh`, and the trigger is the next change
-that has to touch any two of the four. And ONE artifact still has TWO readers inside
+**TWO standing fixes are named here, and the first is HALF taken.** The receipt FILENAME has
+one accessor, `tdd_edit_landing_receipt` beside `tdd_state_file` in `zensu-tdd-phase.sh`, and
+`--tdd-begin`, `--tdd-complete` and the acceptance transport (`_zensu_avr_prepare`) call it.
+Three sites still hand-derive the name, with no pin: the writer in `zensu-edit-landing.sh`, and
+TWO in the doctor renderer (`claimTopologyRow`'s join and `someClaimReceiptPresent`'s
+`/^edit-landing-.+\.json$/`). The failure is silent in the dangerous direction: a rename that
+updates the accessor and the writer leaves the regex matching nothing, and the no-key topology
+row then goes quiet and reads as a clean topology, while `SCH1` pins only the SCHEMA spellings.
+The writer can call the accessor; the doctor renderer is JavaScript and needs a pin instead. Take
+either at the next change that touches one of the three sites or adds another one. And ONE
+artifact still has TWO readers inside
 `--tdd-complete`: `_tc_receipt_verdict`'s hardened descriptor-side read, and the requirements
 gate's own read a hundred lines below it, which re-parses the same session-writable file with
 a window in between. **State what that second reader IS, because an earlier revision of this

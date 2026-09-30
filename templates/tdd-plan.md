@@ -49,3 +49,4 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 ## Final Verification
 - All test suites pass, and the full suite is recorded green on the final tree by the evidence runner (`--evidence-run --scope full`)
 - Coverage report generated for changed files (threshold: {threshold})
+- Every active `AC-###` criterion verified live on the final tree (`/zensu:verify-feature --chain`, one `--acceptance-record` per criterion); a dropped criterion keeps its row, marked `(deprecated) <text>`

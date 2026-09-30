@@ -209,6 +209,8 @@ assert_case "neutral Read of an unprotected plugin-data path stays allowed (cont
 assert_case "neutral Read cannot open a full-suite evidence record" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN_DATA/evidence-run/v1/records/scv1_x/er1_x.json\"}"
 assert_case "neutral Grep cannot search the full-suite evidence store" deny arbitrary-custom Grep "{\"pattern\":\"exit_code\",\"path\":\"$PLUGIN_DATA/evidence-run\"}"
 assert_case "reviewer Read cannot open a full-suite evidence record" deny review-aspect Read "{\"file_path\":\"$PLUGIN_DATA/evidence-run/v1/records/scv1_x/er1_x.json\"}"
+assert_case "neutral Read cannot open an acceptance record" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN_DATA/acceptance-verify/v1/records/scv1_x/av1_x.json\"}"
+assert_case "reviewer Grep cannot search the acceptance store" deny review-aspect Grep "{\"pattern\":\"verdict\",\"path\":\"$PLUGIN_DATA/acceptance-verify\"}"
 PLUGIN_CASE_ALIAS="$(node -e '
   const value = process.argv[1];
   const slash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));

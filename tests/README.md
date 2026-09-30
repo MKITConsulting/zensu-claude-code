@@ -22,7 +22,7 @@ Exit 0 iff every selected suite passes. A timestamped report lands in `tests/res
 ## Windows contract profiles
 
 The versioned manifest at `tests/profiles/windows-ci.v1.json` divides the
-Windows-specific deterministic contracts into seven bounded profiles. Membership
+Windows-specific deterministic contracts into nine bounded profiles. Membership
 is balanced by measured runtime rather than by theme, so a profile name says
 which shard a suite runs in and nothing about what it covers:
 
@@ -35,6 +35,8 @@ node tests/run-profile.js windows-shard-4
 node tests/run-profile.js windows-shard-5
 node tests/run-profile.js windows-shard-6
 node tests/run-profile.js windows-shard-7
+node tests/run-profile.js windows-shard-8
+node tests/run-profile.js windows-shard-9
 ```
 
 Moving a suite between profiles is a rebalancing decision, not a semantic one.

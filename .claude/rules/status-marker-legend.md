@@ -16,7 +16,7 @@ Every status and verdict cell of the chain-end report and of the plugin-opened P
 carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker
 PREFIXES the value and never replaces it**, which is the whole safety property: a
 verbatim-carry literal (`EDIT NOT LANDED`, `UNVERIFIED (no claims logged)`, an unresolved
-`PENDING PREDICATE`, the terminus's `FULL SUITE — …` verdict, `FINDING VERIFICATION DEGRADED`,
+`PENDING PREDICATE`, the terminus's `FULL SUITE — …` and `ACCEPTANCE — …` verdicts, `FINDING VERIFICATION DEGRADED`,
 the bypass ledger's `UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
 dot deletes the disclosure while keeping the colour, which is worse than having no colour
 at all.
@@ -51,7 +51,10 @@ disabled gate must never render like a clean one — the rule this repo already 
 `reviewerSpawnPermissionCheck`), while `Gates bypassed` carries a NOT-READABLE arm, since
 its value is always read and the failure mode is an unreadable ledger rather than an absent
 one. Its 🟢 is bound to the literal `none` and everything else is 🔴, so a reworded ledger
-constant cannot render clean.
+constant cannot render clean. `Acceptance` follows the `Full suite` rule: it carries the terminus's `ACCEPTANCE — …`
+lines verbatim, 🟢 only for `pass`, 🟡 for the passing states that verified nothing on this tree
+and an advisory `incomplete` that lists only missing criteria, 🔴 for everything else including
+`escaped`; both renderers carry it right after `Full suite`.
 
 **EIGHT CARRIERS, and a census in prose goes stale the next time one is added — so this is
 a GREP, not a list: before rewording the legend or the vocabulary, run

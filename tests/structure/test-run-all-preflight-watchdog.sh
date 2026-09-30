@@ -121,6 +121,37 @@ check "D3 a blocked suite is counted and reported as BLOCK, never as PASS" "$(ve
 grep -q "npm ci" "$WORK/report.txt"
 check "D4 the BLOCK line carries the actionable command" "$(verdict $?)"
 
+echo "== Source pin: every npm-dependent CI suite is in the BLOCK arm =="
+DEPS_ARM="$(awk '/block_suite "structure\/\$base"/{print prev} {prev=$0}' "$RUN_ALL" | tr -d ' )')"
+[ -n "$DEPS_ARM" ]
+check "D5 the npm-dependency case arm is extracted from the shipped runner" "$(verdict $?)"
+NPM_DEPENDENT="$(node -e '
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[1];
+const dir = path.join(root, "tests", "structure");
+const packages = Object.keys(require(path.join(root, "package.json")).devDependencies || {})
+  .map((name) => name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
+const needs = new RegExp(`\\brequire\\(\\s*["\x27](?:${packages.join("|")})(?:/[^"\x27]*)?["\x27]\\s*\\)`);
+const code = (file, comment) => fs.readFileSync(file, "utf8").split("\n").filter((line) => !comment.test(line)).join("\n");
+for (const driver of require(path.join(root, "tests", "profiles", "promptfoo-local-only.v1.json")).ciStructureTests) {
+  const source = code(path.join(dir, driver), /^\s*#/);
+  const units = [...new Set(source.match(/[\w.-]+\.test\.js/g) || [])].filter((unit) => fs.existsSync(path.join(dir, unit)));
+  if ([source, ...units.map((unit) => code(path.join(dir, unit), /^\s*(\/\/|\/?\*)/))].some((text) => needs.test(text))) console.log(driver);
+}
+' "$PLUGIN_DIR")"
+printf '%s\n' "$NPM_DEPENDENT" | grep -qx 'test-workflow-dispatch-inputs.sh'
+check "D6 the dependency scan finds a suite whose unit requires the yaml devDependency" "$(verdict $?)"
+MISSING=""
+for SUITE in $NPM_DEPENDENT; do
+  case "|$DEPS_ARM|" in
+    (*"|$SUITE|"*) ;;
+    (*) MISSING="$MISSING $SUITE" ;;
+  esac
+done
+[ -z "$MISSING" ]
+check "D7 every CI suite whose code requires an npm devDependency reports BLOCK without node_modules${MISSING:+ (missing:$MISSING)}" "$(verdict $?)"
+
 echo "----"
 echo "test-run-all-preflight-watchdog: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]
