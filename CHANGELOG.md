@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-30
+
+### Added
+
+- **evidence**: Run full suites in the verified CI pipeline instead of locally (#350)
+- **session-control**: Adopt a compatible-schema record automatically across a lineage break (#343)
+- **tdd**: Verify every acceptance criterion live before a chain can close (#345)
+- **pr-fix-findings**: Follow the session's TDD mode instead of forcing strict (#342)
+- **verify-feature**: Make the origin the evidence boundary and retire the route gate (#340)
+- **verify-feature**: Admit localhost in the playwright-cli consent gate (#339)
+
+### Changed
+
+- **windows-ci**: Split the stop-enforcer routing suite across two shards (#341)
+
+### Fixed
+
+- **stop**: Exit early when nothing is armed and bound the hook with a deadline (#348)
+- **verify-feature**: Repair monorepo adapter boot, Vite binding and down (#349)
+- **session-control**: Stop a reused Windows PID from holding a deferred-review claim (#346)
+- **redact**: Skip artifacts git reports unchanged in the sweep (#351)
+- **release**: Pass dispatch inputs to run steps through env (#344)
+- **release**: Retry the publish read-back and stop failing without a message (#243)
+
 ### Upgrade notes
 
 - **verify-feature**: the browser consent gate no longer checks routes. An origin approved at the
