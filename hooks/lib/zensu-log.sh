@@ -14,6 +14,7 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh"
 
 case "${1:-}" in
   --evidence-run)
@@ -112,6 +113,10 @@ _zensu_evr_prepare() {
   printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
   printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
     "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
+  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix-scoped"
+  printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
+  printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
     ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
@@ -128,6 +133,7 @@ _zensu_evr_node() {
   ZENSU_EVR_SCOPE="${_evr_scope:-}" \
   ZENSU_EVR_SHOW="${_evr_show:-tail}" \
   ZENSU_EVR_IF_STALE="${_evr_if_stale:-0}" \
+  ZENSU_EVR_LOCAL="${_evr_local:-0}" \
   ZENSU_EVR_ESCAPE="${_evr_escape:-0}" \
   ZENSU_EVR_BASH="${_evr_bash:-bash}" \
   ZENSU_EVR_LABEL="$1" \
@@ -299,6 +305,7 @@ case "${1:-}" in
     _evr_scope=""
     _evr_show="tail"
     _evr_if_stale=0
+    _evr_local=0
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -306,6 +313,7 @@ case "${1:-}" in
         --cmd) evr_cmd="${2:-}"; evr_cmd_seen=true; shift 2 || break ;;
         --show) _evr_show="${2:-}"; shift 2 || break ;;
         --if-stale) _evr_if_stale=1; shift ;;
+        --local) _evr_local=1; shift ;;
         --log) evr_log="${2:-}"; shift 2 || break ;;
         --start) evr_start="${2:-}"; shift 2 || break ;;
         *) echo "zensu-log.sh --evidence-run: unknown argument: $1" >&2; exit 2 ;;
@@ -341,6 +349,18 @@ case "${1:-}" in
       fi
     fi
     exit "$evr_rc"
+    ;;
+  --full-suite-policy)
+    _fsp_refresh=0
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --refresh) _fsp_refresh=1; shift ;;
+        *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
+    exit $?
     ;;
   --acceptance-record|--acceptance-status)
     avr_verb="$1"
@@ -1298,6 +1318,9 @@ case "${1:-}" in
                 echo "zensu-log.sh --tdd-begin: RECEIPT RETIREMENT UNRESOLVED — the previous generation's edit-landing receipt could not be retired (${begin_receipt}). It records a verdict about ANOTHER generation's run log, and this chain's --tdd-complete may accept it as its own. Move or delete that file before completing." >&2
               fi
             fi
+          fi
+          if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
+            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"

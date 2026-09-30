@@ -41,6 +41,18 @@ check() {
   else echo "  FAIL  $1"; FAIL=$((FAIL + 1)); fi
 }
 
+wait_for_file() {
+  for ((attempt=0; attempt<200; attempt++)); do
+    [ -f "$1" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+json_field() {
+  node -e 'const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(value[process.argv[2]]));' "$1" "$2" 2>/dev/null
+}
+
 LOOPBACK_AVAILABLE=0
 if node -e '
   const net = require("node:net");
@@ -54,10 +66,10 @@ fi
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
   check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
 elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
-  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" 3; then
+  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" 7; then
   check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
 else
-  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= 3 registered)" FAIL
+  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= 7 registered)" FAIL
 fi
 
 mkdir -p "$STUBS" "$RUN_DIR" "$DOCKER_STATE" "$WORKTREE/backend/cmd/zensu" \
@@ -95,6 +107,14 @@ esac
 STUB
 cat >"$STUBS/go" <<'STUB'
 #!/bin/bash
+if [ -n "${ARGV_DIR:-}" ]; then
+  printf '%s\n' "$@" >"$ARGV_DIR/go.argv"
+  pwd -P >"$ARGV_DIR/go.cwd"
+  env | grep -E '^(DB_PASSWORD|JWT_SECRET)=' | cut -d= -f1 | LC_ALL=C sort >"$ARGV_DIR/go.secret-names"
+  env | grep -E '^(TRUSTED_PROXY_CIDRS|SERVER_HOST|SERVER_PORT|DB_HOST|DB_PORT|DB_USER|DB_NAME|DB_SSLMODE|REGISTRATION_ENABLED|EMAIL_ALLOW_NOOP|NOTIFICATION_ALLOW_NOOP|APP_BASE_URL|ZENSU_VERIFY_RUNTIME_LEASE)=' \
+    | LC_ALL=C sort >"$ARGV_DIR/go.env.tmp"
+  mv "$ARGV_DIR/go.env.tmp" "$ARGV_DIR/go.env"
+fi
 trap 'exit 0' TERM INT HUP
 while :; do sleep 1; done
 STUB
@@ -105,11 +125,31 @@ if printf '%s\n' "$*" | grep -q ' install '; then
   exit 0
 fi
 [ "${PNPM_FAIL_START:-0}" != 1 ] || exit 19
+if [ -n "${ARGV_DIR:-}" ]; then
+  printf '%s\n' "$@" >"$ARGV_DIR/pnpm.argv"
+  pwd -P >"$ARGV_DIR/pnpm.cwd"
+  env | grep -E '^(VITE_API_URL|ZENSU_VERIFY_RUNTIME_LEASE)=' | LC_ALL=C sort >"$ARGV_DIR/pnpm.env.tmp"
+  mv "$ARGV_DIR/pnpm.env.tmp" "$ARGV_DIR/pnpm.env"
+fi
 trap 'exit 0' TERM INT HUP
 while :; do sleep 1; done
 STUB
 cat >"$STUBS/curl" <<'STUB'
 #!/bin/bash
+case " $* " in
+  *' --connect-timeout '*)
+    for arg in "$@"; do
+      case "$arg" in
+        http://127.0.0.1:*/)
+          port="${arg#http://127.0.0.1:}"
+          port="${port%/}"
+          case ",${CURL_LISTENING_PORTS:-}," in *",$port,"*) exit 0 ;; esac
+          ;;
+      esac
+    done
+    exit 7
+    ;;
+esac
 exit 0
 STUB
 cat >"$STUBS/lsof" <<'STUB'
@@ -151,8 +191,12 @@ else
   check "a policy target whose legacy routes value is not a list is refused" FAIL
 fi
 if [ "$LOOPBACK_AVAILABLE" = 1 ]; then
-UP_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" up "$RUN_DIR" "$WORKTREE" 2>&1)"
+ARGV_DIR="$TMP/argv"
+mkdir -p "$ARGV_DIR"
+UP_OUT="$(env "${COMMON_ENV[@]}" ARGV_DIR="$ARGV_DIR" bash "$CONTROLLER" up "$RUN_DIR" "$WORKTREE" 2>&1)"
 UP_RC=$?
+wait_for_file "$ARGV_DIR/go.env"
+wait_for_file "$ARGV_DIR/pnpm.env"
 READY_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" ready "$RUN_DIR" "$WORKTREE" 2>&1)"
 READY_RC=$?
 ORIGIN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" origin "$RUN_DIR" "$WORKTREE" 2>&1)"
@@ -168,6 +212,36 @@ if [ "$PLANNED_ORIGIN" = 'http://127.0.0.1:45173' ] \
   check "controller behavior covers up, ready, origin, and repository-owned seed" PASS
 else
   check "controller behavior covers up, ready, origin, and repository-owned seed" FAIL
+fi
+
+STATE_PG_PORT="$(json_field "$RUN_DIR/zensu-runtime.json" pgPort)"
+STATE_BACKEND_PORT="$(json_field "$RUN_DIR/zensu-runtime.json" backendPort)"
+EXPECTED_PNPM_ARGV="$(printf '%s\n' dev --host 127.0.0.1 --port 45173 --strictPort)"
+PNPM_ARGV="$(cat "$ARGV_DIR/pnpm.argv" 2>/dev/null)"
+if [ "$PNPM_ARGV" = "$EXPECTED_PNPM_ARGV" ] \
+  && [ "$(cat "$ARGV_DIR/pnpm.cwd" 2>/dev/null)" = "$(cd "$WORKTREE/frontend" && pwd -P)" ]; then
+  check "the frontend runs pnpm dev --host 127.0.0.1 --port <planned port> --strictPort with no literal -- that would hide the flags from Vite" PASS
+else
+  check "the frontend runs pnpm dev --host 127.0.0.1 --port <planned port> --strictPort with no literal -- that would hide the flags from Vite (got '$(printf '%s' "$PNPM_ARGV" | tr '\n' ' ')')" FAIL
+fi
+if [ "$(cat "$ARGV_DIR/pnpm.env" 2>/dev/null)" = "VITE_API_URL=http://127.0.0.1:${STATE_BACKEND_PORT}" ]; then
+  check "the frontend proxies the API to the recorded literal-loopback backend port and never receives the runtime lease" PASS
+else
+  check "the frontend proxies the API to the recorded literal-loopback backend port and never receives the runtime lease (got '$(tr '\n' ' ' <"$ARGV_DIR/pnpm.env" 2>/dev/null)')" FAIL
+fi
+EXPECTED_GO_ENV="$(printf '%s\n' \
+  "APP_BASE_URL=http://127.0.0.1:45173" "DB_HOST=localhost" "DB_NAME=zensu" "DB_PORT=${STATE_PG_PORT}" \
+  "DB_SSLMODE=disable" "DB_USER=zensu" "EMAIL_ALLOW_NOOP=true" "NOTIFICATION_ALLOW_NOOP=true" \
+  "REGISTRATION_ENABLED=true" "SERVER_HOST=127.0.0.1" "SERVER_PORT=${STATE_BACKEND_PORT}" \
+  "TRUSTED_PROXY_CIDRS=none" | LC_ALL=C sort)"
+GO_ENV="$(cat "$ARGV_DIR/go.env" 2>/dev/null)"
+if [ "$(cat "$ARGV_DIR/go.argv" 2>/dev/null)" = "$(printf '%s\n' run ./cmd/zensu)" ] \
+  && [ "$(cat "$ARGV_DIR/go.cwd" 2>/dev/null)" = "$(cd "$WORKTREE/backend" && pwd -P)" ] \
+  && [ "$GO_ENV" = "$EXPECTED_GO_ENV" ] \
+  && [ "$(cat "$ARGV_DIR/go.secret-names" 2>/dev/null)" = "$(printf '%s\n' DB_PASSWORD JWT_SECRET)" ]; then
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease" PASS
+else
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease (got '$(printf '%s' "$GO_ENV" | tr '\n' ' ')')" FAIL
 fi
 
 DOWN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" 2>&1)"
@@ -263,6 +337,53 @@ if [ "$MISSING_UP_RC" = 0 ] && [ "$MISSING_DOWN_RC" = 0 ] \
   check "missing owned container does not prevent independent supervisor teardown" PASS
 else
   check "missing container still tears down both supervisors (up=$MISSING_UP_RC down=$MISSING_DOWN_RC)" FAIL
+fi
+
+STALE="$RUN_PARENT/run-stale-endpoints"
+mkdir -p "$STALE"
+STALE_DOCKER="$TMP/docker-stale"
+mkdir -p "$STALE_DOCKER"
+: >"$STALE_DOCKER/events"
+STALE_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$STALE_DOCKER" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
+env "${STALE_ENV[@]}" bash "$CONTROLLER" up "$STALE" "$WORKTREE" >/dev/null 2>&1
+STALE_UP_RC=$?
+STALE_LEASE="$(sed -n 's/^RUNTIME_LEASE=//p' "$STALE/zensu-runtime.secrets" 2>/dev/null)"
+ABANDONED=0
+for endpoint in "$STALE/frontend-supervisor.ready" "$STALE/backend-supervisor.ready"; do
+  child_pid="$(ZENSU_VERIFY_RUNTIME_LEASE="$STALE_LEASE" node "$ROOT/scripts/process-supervisor.js" status "$endpoint" 2>/dev/null \
+    | node -e 'let text = ""; process.stdin.on("data", (chunk) => { text += chunk; }).on("end", () => { process.stdout.write(String(JSON.parse(text).childPid)); });' 2>/dev/null)"
+  supervisor_pid="$(json_field "$endpoint" supervisorPid)"
+  [[ "$child_pid" =~ ^[0-9]+$ ]] && [[ "$supervisor_pid" =~ ^[0-9]+$ ]] || continue
+  kill -KILL -- "-$child_pid" 2>/dev/null
+  kill -KILL "$supervisor_pid" 2>/dev/null
+  for ((attempt=0; attempt<200; attempt++)); do
+    ZENSU_VERIFY_RUNTIME_LEASE="$STALE_LEASE" node "$ROOT/scripts/process-supervisor.js" status "$endpoint" >/dev/null 2>&1
+    if [ "$?" = 3 ]; then ABANDONED=$((ABANDONED + 1)); break; fi
+    sleep 0.05
+  done
+done
+LISTENING_OUT="$(env "${STALE_ENV[@]}" CURL_LISTENING_PORTS=45173 bash "$CONTROLLER" down "$STALE" "$WORKTREE" 2>&1)"
+LISTENING_RC=$?
+if [ "$STALE_UP_RC" = 0 ] && [ "$ABANDONED" = 2 ] && [ "$LISTENING_RC" != 0 ] \
+  && printf '%s' "$LISTENING_OUT" | grep -qF 'port 45173 still answers although no supervisor owns it' \
+  && [ -e "$STALE/zensu-runtime.json" ] && [ -e "$STALE/zensu-runtime.secrets" ] \
+  && [ -e "$STALE/frontend-supervisor.ready" ]; then
+  check "an endpoint no supervisor answers is not cleared while its service port still answers" PASS
+else
+  check "an endpoint no supervisor answers is not cleared while its service port still answers (up=$STALE_UP_RC abandoned=$ABANDONED down=$LISTENING_RC)" FAIL
+fi
+STALE_DOWN_OUT="$(env "${STALE_ENV[@]}" bash "$CONTROLLER" down "$STALE" "$WORKTREE" 2>&1)"
+STALE_DOWN_RC=$?
+env "${STALE_ENV[@]}" bash "$CONTROLLER" down "$STALE" "$WORKTREE" >/dev/null 2>&1
+STALE_AGAIN_RC=$?
+if [ "$STALE_DOWN_RC" = 0 ] && [ "$STALE_AGAIN_RC" = 0 ] \
+  && printf '%s' "$STALE_DOWN_OUT" | grep -qF 'stopped' \
+  && ! printf '%s' "$STALE_DOWN_OUT" | grep -qF 'no supervisor answers' \
+  && [ ! -e "$STALE/zensu-runtime.json" ] && [ ! -e "$STALE/zensu-runtime.secrets" ] \
+  && [ ! -e "$STALE/frontend-supervisor.ready" ] && [ ! -e "$STALE/backend-supervisor.ready" ]; then
+  check "down converges after both supervisors vanished and left their endpoints: nothing owned answers, so it succeeds, and succeeds again" PASS
+else
+  check "down converges after both supervisors vanished and left their endpoints (down=$STALE_DOWN_RC again=$STALE_AGAIN_RC: $STALE_DOWN_OUT)" FAIL
 fi
 else
   if [ "$PLANNED_ORIGIN" = 'http://127.0.0.1:45173' ]; then
