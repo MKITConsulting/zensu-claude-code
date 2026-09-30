@@ -2413,7 +2413,7 @@ test('deferred-review inspection distinguishes current, live-owned, and dead-own
   assert.equal(transferable.ownerRevision, deadState.revision);
 });
 
-test('handoff claims stay owned until both the process is dead and the claim is stale', () => {
+test('a handed-off claim is held by its lease alone, whatever its recorded PID shows', () => {
   const live = deferredFixture({ ownerSession: 'live-stale-handoff-owner' });
   const liveOwner = seedDeferredOwner(live);
   writeDeferredClaim(live, {
@@ -2421,12 +2421,33 @@ test('handoff claims stay owned until both the process is dead and the claim is 
     ownerProcessStartIdentity: currentProcessStartIdentity(),
     handoffEmitted: true,
   });
+  assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(live)).status, 'owned');
   const liveAndStale = core.inspectDeferredReviewOwner(inspectDeferredOptions(
     live,
     { claimStale: true },
   ));
-  assert.equal(liveAndStale.status, 'owned');
+  assert.equal(liveAndStale.status, 'transfer');
   assert.equal(liveAndStale.ownerRevision, liveOwner.revision);
+
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const reused = deferredFixture({ ownerSession: 'reused-pid-stale-handoff-owner' });
+    const reusedOwner = seedDeferredOwner(reused);
+    writeDeferredClaim(reused, {
+      ownerPid: unrelated.pid,
+      ownerProcessStartIdentity: null,
+      handoffEmitted: true,
+    });
+    assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(reused)).status, 'owned');
+    const reusedAndStale = core.inspectDeferredReviewOwner(inspectDeferredOptions(
+      reused,
+      { claimStale: true },
+    ));
+    assert.equal(reusedAndStale.status, 'transfer');
+    assert.equal(reusedAndStale.ownerRevision, reusedOwner.revision);
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
 
   const f = deferredFixture();
   const owner = seedDeferredOwner(f);
@@ -2469,6 +2490,13 @@ test('read-only foreign deferred ownership accepts only a live owner or fresh ha
   assert.equal(
     core.deferredReviewOwnedByOther(ownedOptions(assignmentWindow)),
     true,
+  );
+
+  const deadAssignment = deferredFixture({ ownerSession: 'read-only-dead-assignment' });
+  writeDeferredClaim(deadAssignment, { ownerPid: 2147483647 });
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(deadAssignment)),
+    false,
   );
 
   const freshHandoff = deferredFixture({ ownerSession: 'read-only-fresh-handoff' });
@@ -2559,6 +2587,170 @@ test('process start identity prevents a live PID reuse from retaining a deferred
     ownerProcessStartIdentity: 'linux:deliberately-mismatched:1',
   });
   assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(f)).status, 'transfer');
+});
+
+test('an unacknowledged claim that no owner state links is unseeded whatever its recorded PID shows', () => {
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const f = deferredFixture({ ownerSession: 'reused-pid-unseeded-owner' });
+    writeDeferredClaim(f, { ownerPid: unrelated.pid, ownerProcessStartIdentity: null });
+    const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+    assert.equal(inspected.status, 'unseeded');
+    assert.equal(inspected.ownerRevision, 1);
+    const recovered = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+    assert.equal(recovered.claimId, f.claimId);
+    assert.equal(recovered.ownerSessionId, f.currentSessionId);
+    assert.equal(recovered.ownerPid, process.pid);
+    assert.equal(recovered.handoffEmitted, false);
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
+});
+
+test('an unacknowledged linked claim is held by its live owner only while its lease is fresh', () => {
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const f = deferredFixture({ ownerSession: 'reused-pid-in-flight-owner' });
+    const owner = seedDeferredOwner(f);
+    writeDeferredClaim(f, { ownerPid: unrelated.pid, ownerProcessStartIdentity: null });
+    assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(f)).status, 'owned');
+    const stale = core.inspectDeferredReviewOwner(inspectDeferredOptions(f, { claimStale: true }));
+    assert.equal(stale.status, 'transfer');
+    assert.equal(stale.ownerRevision, owner.revision);
+
+    const retiring = deferredFixture({ ownerSession: 'reused-pid-retiring-owner' });
+    const retiringOwner = seedDeferredOwner(retiring);
+    writeDeferredClaim(retiring, {
+      ownerPid: unrelated.pid,
+      ownerProcessStartIdentity: null,
+      transfer: preparedTransfer(retiring, retiringOwner.revision),
+    });
+    const claimBefore = fs.readFileSync(retiring.claimFile);
+    assert.throws(
+      () => core.retireDeferredReviewOwner(retireDeferredOptions(retiring, retiringOwner.revision)),
+      /owner.*live|handoff lease is fresh/i,
+    );
+    assertClaimBytesUnchanged(retiring, claimBefore);
+    const retired = core.retireDeferredReviewOwner(retireDeferredOptions(
+      retiring,
+      retiringOwner.revision,
+      { claimStale: true },
+    ));
+    assert.equal(retired.revision, retiringOwner.revision + 1);
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
+});
+
+test('a live PID whose stored start identity does not match is an impostor, not an owner', (t) => {
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const actual = core.processStartIdentityForPid(unrelated.pid);
+    if (!actual) {
+      t.skip('this platform does not expose a process start identity');
+      return;
+    }
+    const mismatched = `${actual.slice(0, -1)}${actual.endsWith('0') ? '1' : '0'}`;
+    const impostor = deferredFixture({ ownerSession: 'identity-impostor-owner' });
+    const impostorOwner = seedDeferredOwner(impostor);
+    writeDeferredClaim(impostor, { ownerPid: unrelated.pid, ownerProcessStartIdentity: mismatched });
+    const rejected = core.inspectDeferredReviewOwner(inspectDeferredOptions(impostor));
+    assert.equal(rejected.status, 'transfer');
+    assert.equal(rejected.ownerRevision, impostorOwner.revision);
+
+    const genuine = deferredFixture({ ownerSession: 'identity-genuine-owner' });
+    seedDeferredOwner(genuine);
+    writeDeferredClaim(genuine, { ownerPid: unrelated.pid, ownerProcessStartIdentity: actual });
+    assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(genuine)).status, 'owned');
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
+});
+
+test('a live PID whose start identity cannot be read still holds its in-flight claim', async () => {
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const f = deferredFixture({ ownerSession: 'unreadable-identity-owner' });
+    const owner = seedDeferredOwner(f);
+    writeDeferredClaim(f, { ownerPid: unrelated.pid, ownerProcessStartIdentity: 'stored:owner-identity:1' });
+    const source = String.raw`
+      const fs = require('node:fs');
+      const childProcess = require('node:child_process');
+      const target = Number(process.argv[1]);
+      const readFileSync = fs.readFileSync;
+      fs.readFileSync = function unreadableStat(file, ...rest) {
+        if (String(file) === '/proc/' + target + '/stat') {
+          throw Object.assign(new Error('unreadable'), { code: 'EACCES' });
+        }
+        return readFileSync.call(this, file, ...rest);
+      };
+      const execFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = function timedOutPs(file, args, ...rest) {
+        if (Array.isArray(args) && args.includes(String(target))) throw new Error('ps timed out');
+        return execFileSync.call(this, file, args, ...rest);
+      };
+      const core = require(process.env.SESSION_CONTROL_CORE);
+      const inspected = core.inspectDeferredReviewOwner(JSON.parse(process.argv[2]));
+      process.stdout.write(JSON.stringify({
+        identity: core.processStartIdentityForPid(target),
+        status: inspected.status,
+        ownerRevision: inspected.ownerRevision,
+      }));
+    `;
+    const result = await runNode(source, [String(unrelated.pid), JSON.stringify(inspectDeferredOptions(f))]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      identity: null,
+      status: 'owned',
+      ownerRevision: owner.revision,
+    });
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
+});
+
+test('read-only foreign ownership never lets a live recorded PID outlast an expired lease', () => {
+  const ownedOptions = (fixtureValue) => {
+    const options = inspectDeferredOptions(fixtureValue);
+    delete options.claimStale;
+    return { ...options, ttlHours: 6 };
+  };
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    const inFlight = deferredFixture({ ownerSession: 'read-only-reused-in-flight' });
+    seedDeferredOwner(inFlight);
+    writeDeferredClaim(inFlight, { ownerPid: unrelated.pid, ownerProcessStartIdentity: null });
+    assert.equal(core.deferredReviewOwnedByOther(ownedOptions(inFlight)), true);
+
+    const staleInFlight = deferredFixture({ ownerSession: 'read-only-reused-stale-in-flight' });
+    seedDeferredOwner(staleInFlight);
+    writeDeferredClaim(staleInFlight, {
+      ownerPid: unrelated.pid,
+      ownerProcessStartIdentity: null,
+      ts: '2000-01-01T00:00:00Z',
+    });
+    assert.equal(core.deferredReviewOwnedByOther(ownedOptions(staleInFlight)), false);
+
+    const staleHandoff = deferredFixture({ ownerSession: 'read-only-reused-stale-handoff' });
+    seedDeferredOwner(staleHandoff);
+    writeDeferredClaim(staleHandoff, {
+      ownerPid: unrelated.pid,
+      ownerProcessStartIdentity: null,
+      handoffEmitted: true,
+      ts: '2000-01-01T00:00:00Z',
+    });
+    assert.equal(core.deferredReviewOwnedByOther(ownedOptions(staleHandoff)), false);
+
+    const staleAssignment = deferredFixture({ ownerSession: 'read-only-reused-stale-assignment' });
+    writeDeferredClaim(staleAssignment, {
+      ownerPid: unrelated.pid,
+      ownerProcessStartIdentity: null,
+      ts: '2000-01-01T00:00:00Z',
+    });
+    assert.equal(core.deferredReviewOwnedByOther(ownedOptions(staleAssignment)), false);
+  } finally {
+    unrelated.kill('SIGTERM');
+  }
 });
 
 test('deferred-review inspection reports done, cancelled, and never-seeded owners explicitly', () => {
@@ -4753,6 +4945,38 @@ test('the pruned-root admission relaxes nothing else about adoption', () => {
     core.adoptableRecord(adoptionOptions(unrooted, parked)).reason,
     'record-unreadable',
   );
+});
+
+// The refusal adoptContext throws under its lock is TYPED, because the automatic
+// adopter must tell a concurrent winner from every other refusal without
+// substring-matching prose. The message is unchanged; only the code and the
+// reason travel on the error.
+test('adoptContext refuses with a typed error a caller can branch on', () => {
+  const served = prunedReaderFixture();
+  const compatible = successorInstallation(served, '9.8.8');
+  assert.throws(
+    () => core.adoptContext(adoptionOptions(served, compatible)),
+    (error) => core.isAdoptionRefusal(error)
+      && error.reason === 'already-served'
+      && /record is not adoptable: already-served$/.test(error.message),
+  );
+  assert.equal(core.isAdoptionRefusal(new Error('record is not adoptable: already-served')), false);
+  assert.equal(core.isAdoptionRefusal(null), false);
+  assert.equal(core.isAdoptionRefusal(undefined), false);
+
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  const key = core.sessionKey(RAW_SESSION);
+  const planted = path.join(f.recordsDir, `${key}.superseded-9.8.7.json`);
+  fs.writeFileSync(planted, '{}');
+  assert.throws(
+    () => core.adoptContext(adoptionOptions(f, successor)),
+    (error) => core.isSupersededRecordConflict(error)
+      && path.basename(error.supersededFile) === path.basename(planted)
+      && /a superseded record already exists/.test(error.message),
+  );
+  assert.equal(core.isSupersededRecordConflict(new Error('EEXIST')), false);
+  assert.equal(core.readContext(f.readerOptions).plugin_root, fs.realpathSync.native(f.pluginRoot));
 });
 
 // Exported surface is a one-way door: adding an export later is free, removing one

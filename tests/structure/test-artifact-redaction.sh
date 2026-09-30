@@ -190,7 +190,7 @@ RAW_LOG="$PROJ/.zensu/logs/2026-01-01-0001_tdd-raw.log"
 printf 'RAW %s\n' "$LEAK_TEXT" > "$RAW_LOG"
 sweep_payload() {
   printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":%s},"tool_response":{"stdout":""},"session_id":%s}' \
-    "$(json_str "$1")" "$(json_str "$SESSION")"
+    "$(json_str "$1")" "$(json_str "${2:-$SESSION}")"
 }
 # Deliberately a command that does NOT mention `.zensu`: an earlier revision
 # pre-filtered on that substring, which the one spelling the sweep exists to
@@ -971,7 +971,7 @@ OUT48="$(node -e '
   };
   let out;
   try {
-    out = m.sweepTargets(root, { windowSeconds: 300 });
+    out = m.sweepTargets(root, { windowSeconds: 300 }).targets;
   } finally {
     fs.lstatSync = real;
   }
@@ -989,12 +989,12 @@ else
 fi
 
 # ── R49: the sweep processes a bounded number of artifacts ───────────
-# A `git checkout` refreshes every tracked artifact mtime at once, so the next
-# tool call would redact all of them synchronously inside a PostToolUse hook,
-# with no cap and no declared timeout. The cap is per invocation and ordered
-# newest first, so the artifacts most likely to hold a fresh unredacted append
-# are the ones processed; the rest are picked up by later passes while their
-# mtime is still in the window.
+# The git scope (R62-R81) drops what a checkout merely rewrote, but when git
+# cannot be asked — this fixture is no repository — every in-window artifact is
+# a candidate, and the next tool call would redact all of them synchronously
+# inside a PostToolUse hook with no cap and no declared timeout. The cap is per
+# invocation and ordered newest first, so the artifacts most likely to hold a
+# fresh unredacted append are the ones processed.
 #
 # The uncapped arm is the discrimination partner: it proves the enumeration
 # still sees all 30, so the cap is what bounds the result rather than a sweep
@@ -1016,8 +1016,8 @@ OUT49="$(node -e '
     names.push(name);
   }
   const m = require(process.argv[1]);
-  const capped = m.sweepTargets(root, { windowSeconds: 300 });
-  const all = m.sweepTargets(root, { windowSeconds: 300, maxTargets: 100 });
+  const capped = m.sweepTargets(root, { windowSeconds: 300 }).targets;
+  const all = m.sweepTargets(root, { windowSeconds: 300, maxTargets: 100 }).targets;
   const base = capped.map(function (p) { return p.slice(p.lastIndexOf("/") + 1); });
   const bad = [];
   if (capped.length !== 25) bad.push("capped=" + capped.length);
@@ -1077,6 +1077,304 @@ if [ "$R51_UNION" -eq 1 ] && [ "$R51_BOUND" -eq 1 ]; then
   check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root" PASS
 else
   check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root (union=$R51_UNION bound=$R51_BOUND)" FAIL
+fi
+
+# ── R62-R67: the sweep skips what git reports as unchanged ───────────
+sweep_git() {
+  git -c user.email=t@example.invalid -c user.name=zensu-test -c commit.gpgsign=false \
+    -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@" >/dev/null 2>&1
+}
+file_id() {
+  node -e 'const s=require("fs").statSync(process.argv[1]);process.stdout.write(s.ino+":"+s.mtimeMs)' "$1"
+}
+GIT_PROJ="$FAKE_HOME/IdeaProjects/gitdemo"
+mkdir -p "$GIT_PROJ/.zensu/plans" "$GIT_PROJ/.zensu/logs"
+GIT_PROJ="$(cd "$GIT_PROJ" && pwd -P)"
+GIT_LEAK="cd \"$GIT_PROJ/.claude/worktrees/wt\" && npm test | notes: $FAKE_HOME/notes.md, $FOREIGN_USER, $FOREIGN_HOME"
+GIT_CLEAN="$GIT_PROJ/.zensu/plans/2026-01-01-0062_tdd-clean.md"
+GIT_NFD="$GIT_PROJ/.zensu/plans/$(printf '2026-01-01-0062_tdd-u\314\210ber.md')"
+GIT_MODIFIED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-modified.log"
+GIT_UNTRACKED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-untracked.log"
+GIT_STAGED="$GIT_PROJ/.zensu/plans/2026-01-01-0062_tdd-staged.md"
+GIT_IGNORED="$GIT_PROJ/.zensu/logs/2026-01-01-0062_tdd-ignored.log"
+printf '# Clean plan\n\nWorktree: %s\n' "$GIT_LEAK" > "$GIT_CLEAN"
+printf 'NFD %s\n' "$GIT_LEAK" > "$GIT_NFD"
+printf 'MODIFIED base\n' > "$GIT_MODIFIED"
+printf '.zensu/logs/*_tdd-ignored.log\n' > "$GIT_PROJ/.gitignore"
+if git init -q --template= "$GIT_PROJ" >/dev/null 2>&1 \
+  && sweep_git -C "$GIT_PROJ" add -f -- .gitignore "$GIT_CLEAN" "$GIT_NFD" "$GIT_MODIFIED" \
+  && sweep_git -C "$GIT_PROJ" commit -qm base \
+  && printf 'MODIFIED %s\n' "$GIT_LEAK" >> "$GIT_MODIFIED" \
+  && printf 'UNTRACKED %s\n' "$GIT_LEAK" > "$GIT_UNTRACKED" \
+  && printf '# Staged plan\n\n%s\n' "$GIT_LEAK" > "$GIT_STAGED" \
+  && sweep_git -C "$GIT_PROJ" add -f -- "$GIT_STAGED" \
+  && printf 'IGNORED %s\n' "$GIT_LEAK" > "$GIT_IGNORED" \
+  && node -e '
+    const fs = require("fs");
+    const later = new Date(Date.now() + 2000);
+    for (const file of process.argv.slice(1)) fs.utimesSync(file, later, later);
+  ' "$GIT_CLEAN" "$GIT_NFD"; then
+  check "R62a the fixture repository holds a clean, modified, staged, untracked and ignored artifact" PASS
+else
+  check "R62a the fixture repository holds a clean, modified, staged, untracked and ignored artifact" FAIL
+fi
+OUT62="$(node -e '
+  const m = require(process.argv[1]);
+  const r = m.sweepTargets(process.argv[2], { windowSeconds: 300 });
+  const pick = (name, file) => name + "=" + (r.targets.includes(file) ? 1 : 0);
+  process.stdout.write(["fallback=" + r.fallback, pick("clean", process.argv[3]),
+    pick("nfd", process.argv[4]), pick("modified", process.argv[5]),
+    pick("untracked", process.argv[6]), pick("staged", process.argv[7]),
+    pick("ignored", process.argv[8])].join(" "));
+' "$REDACT" "$GIT_PROJ" "$GIT_CLEAN" "$GIT_NFD" "$GIT_MODIFIED" "$GIT_UNTRACKED" \
+  "$GIT_STAGED" "$GIT_IGNORED" 2>&1)"
+scoped62() {
+  printf ' %s ' "$OUT62" | grep -qF ' fallback=null ' && printf ' %s ' "$OUT62" | grep -qF " $1 "
+}
+if scoped62 clean=0; then
+  check "R62 a tracked artifact git reports unchanged is not swept despite its fresh mtime" PASS
+else
+  check "R62 a tracked artifact git reports unchanged is not swept despite its fresh mtime (got: $OUT62)" FAIL
+fi
+if scoped62 modified=1; then
+  check "R63 a tracked artifact modified in the working tree is swept" PASS
+else
+  check "R63 a tracked artifact modified in the working tree is swept (got: $OUT62)" FAIL
+fi
+if scoped62 untracked=1; then
+  check "R64 an untracked artifact is swept" PASS
+else
+  check "R64 an untracked artifact is swept (got: $OUT62)" FAIL
+fi
+if scoped62 staged=1; then
+  check "R65 an artifact added to the index is swept" PASS
+else
+  check "R65 an artifact added to the index is swept (got: $OUT62)" FAIL
+fi
+if scoped62 ignored=1; then
+  check "R66 an ignored artifact is swept, since git does not confirm it as tracked" PASS
+else
+  check "R66 an ignored artifact is swept, since git does not confirm it as tracked (got: $OUT62)" FAIL
+fi
+if scoped62 nfd=0; then
+  check "R67 a clean tracked artifact with a decomposed (NFD) name is not swept" PASS
+else
+  check "R67 a clean tracked artifact with a decomposed (NFD) name is not swept (got: $OUT62)" FAIL
+fi
+
+# ── R68-R72: through the hook, a clean tracked artifact stays byte-identical
+GIT_SESSION="sess-redact-git-$$"
+if ( activate "$GIT_PROJ" "$GIT_SESSION" ) >/dev/null 2>&1; then
+  check "R68 the git-backed Session Control session activated" PASS
+else
+  check "R68 the git-backed Session Control session activated" FAIL
+fi
+CLEAN_SUM="$(cksum < "$GIT_CLEAN")"
+CLEAN_ID="$(file_id "$GIT_CLEAN")"
+ERR69="$(sweep_payload 'git worktree add ../wt' "$GIT_SESSION" \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$GIT_PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+if [ "$(cksum < "$GIT_CLEAN")" = "$CLEAN_SUM" ] && [ "$(file_id "$GIT_CLEAN")" = "$CLEAN_ID" ] \
+  && grep -qF "$FOREIGN_USER" "$GIT_CLEAN" \
+  && [ -z "$(git -C "$GIT_PROJ" -c core.fsmonitor=false status --porcelain -- "$GIT_CLEAN" 2>/dev/null)" ]; then
+  check "R69 the hook leaves a clean tracked artifact byte-identical, unwritten and clean to git" PASS
+else
+  check "R69 the hook leaves a clean tracked artifact byte-identical, unwritten and clean to git" FAIL
+fi
+# shellcheck disable=SC2088
+git_redacted() {
+  [ -f "$1" ] && grep -qF "$2" "$1" && grep -qF '<project>' "$1" && grep -qF '~/notes.md' "$1" \
+    && ! grep -qF '/Users/' "$1" && ! grep -qF '/home/' "$1" && ! grep -qF "$GIT_PROJ" "$1"
+}
+if git_redacted "$GIT_MODIFIED" 'MODIFIED base'; then
+  check "R70 the same hook call redacts the modified tracked artifact and keeps its content" PASS
+else
+  check "R70 the same hook call redacts the modified tracked artifact and keeps its content" FAIL
+fi
+if git_redacted "$GIT_UNTRACKED" 'UNTRACKED '; then
+  check "R71 the same hook call redacts the untracked artifact and keeps its content" PASS
+else
+  check "R71 the same hook call redacts the untracked artifact and keeps its content" FAIL
+fi
+if ! printf '%s' "$ERR69" | grep -qF 'not scoped by git'; then
+  check "R72 a sweep git could scope reports no fallback" PASS
+else
+  check "R72 a sweep git could scope reports no fallback (err=$ERR69)" FAIL
+fi
+
+# ── R73-R77: when git cannot be asked, the sweep stays unscoped ──────
+NOGIT="$WORK/nogit"
+mkdir -p "$NOGIT/.zensu/logs"
+: > "$NOGIT/.zensu/logs/2026-01-01-0073_tdd-nogit.log"
+OUT73="$(node -e '
+  const r = require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });
+  process.stdout.write(r.fallback + " " + r.targets.length);
+' "$REDACT" "$NOGIT" 2>&1)"
+if [ "$OUT73" = "not-a-git-repository 1" ]; then
+  check "R73 outside a repository the sweep keeps every in-window artifact and names the fallback" PASS
+else
+  check "R73 outside a repository the sweep keeps every in-window artifact and names the fallback (got: $OUT73)" FAIL
+fi
+NOGIT_LOG="$PROJ/.zensu/logs/2026-01-01-0074_tdd-nogit.log"
+printf 'NOGIT %s\n' "$LEAK_TEXT" > "$NOGIT_LOG"
+ERR74="$(sweep_payload 'echo nogit' \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+if printf '%s' "$ERR74" | grep -qF 'zensu: artifact sweep not scoped by git (not-a-git-repository)' \
+  && ! grep -qF "$FOREIGN_USER" "$NOGIT_LOG" && grep -qF 'NOGIT' "$NOGIT_LOG"; then
+  check "R74 the hook reports the fallback on stderr and still redacts outside a repository" PASS
+else
+  check "R74 the hook reports the fallback on stderr and still redacts outside a repository (err=$ERR74)" FAIL
+fi
+NODE_BIN="$(command -v node)"
+NO_GIT_BIN="$WORK/bin-no-git"
+SLOW_GIT_BIN="$WORK/bin-slow-git"
+FAIL_GIT_BIN="$WORK/bin-fail-git"
+mkdir -p "$NO_GIT_BIN" "$SLOW_GIT_BIN" "$FAIL_GIT_BIN"
+printf '#!/bin/sh\nexec /bin/sleep 30\n' > "$SLOW_GIT_BIN/git"
+printf '#!/bin/sh\nexit 3\n' > "$FAIL_GIT_BIN/git"
+chmod +x "$SLOW_GIT_BIN/git" "$FAIL_GIT_BIN/git"
+unscoped_sweep() {
+  env PATH="$1" "$NODE_BIN" -e '
+    const m = require(process.argv[1]);
+    const started = Date.now();
+    const r = m.sweepTargets(process.argv[2], { windowSeconds: 300, gitTimeoutMs: 500 });
+    const clean = r.targets.includes(process.argv[3]) ? 1 : 0;
+    process.stdout.write(r.fallback + " clean=" + clean + " ms=" + (Date.now() - started));
+  ' "$REDACT" "$GIT_PROJ" "$GIT_CLEAN" 2>&1
+}
+OUT75="$(unscoped_sweep "$NO_GIT_BIN")"
+if [ "${OUT75%% ms=*}" = "git-unavailable clean=1" ]; then
+  check "R75 without git on PATH the sweep falls back to every in-window artifact" PASS
+else
+  check "R75 without git on PATH the sweep falls back to every in-window artifact (got: $OUT75)" FAIL
+fi
+OUT76="$(unscoped_sweep "$SLOW_GIT_BIN")"
+MS76="${OUT76##* ms=}"
+if [ "${OUT76%% ms=*}" = "git-timed-out clean=1" ] && [ "$MS76" -lt 10000 ] 2>/dev/null; then
+  check "R76 a git call that hangs is cut off at the timeout and the sweep falls back" PASS
+else
+  check "R76 a git call that hangs is cut off at the timeout and the sweep falls back (got: $OUT76)" FAIL
+fi
+OUT77="$(unscoped_sweep "$FAIL_GIT_BIN")"
+if [ "${OUT77%% ms=*}" = "git-status-failed clean=1" ]; then
+  check "R77 a failing git call makes the sweep fall back" PASS
+else
+  check "R77 a failing git call makes the sweep fall back (got: $OUT77)" FAIL
+fi
+
+# ── R78: the git scope runs before the cap ───────────────────────────
+CAP_PROJ="$WORK/capgit"
+mkdir -p "$CAP_PROJ/.zensu/plans" "$CAP_PROJ/.zensu/logs"
+CAP_INDEX=0
+while [ "$CAP_INDEX" -lt 30 ]; do
+  printf 'CHECKOUT %s\n' "$FOREIGN_USER" \
+    > "$CAP_PROJ/.zensu/plans/2026-01-01-01$(printf '%02d' "$CAP_INDEX")_tdd-checkout.md"
+  CAP_INDEX=$((CAP_INDEX + 1))
+done
+CAP_APPEND="$CAP_PROJ/.zensu/logs/2026-01-01-0078_tdd-append.log"
+if git init -q --template= "$CAP_PROJ" >/dev/null 2>&1 \
+  && sweep_git -C "$CAP_PROJ" add -f -- .zensu/plans \
+  && sweep_git -C "$CAP_PROJ" commit -qm checkout; then
+  printf 'APPEND %s\n' "$FOREIGN_USER" > "$CAP_APPEND"
+  OUT78="$(node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const [lib, root, append, noGit] = process.argv.slice(1);
+    const plans = path.join(root, ".zensu", "plans");
+    const now = Date.now();
+    const checkout = new Date(now + 3000);
+    for (const name of fs.readdirSync(plans)) fs.utimesSync(path.join(plans, name), checkout, checkout);
+    const older = new Date(now - 60000);
+    fs.utimesSync(append, older, older);
+    const m = require(lib);
+    const scoped = m.sweepTargets(root, { windowSeconds: 300 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = noGit;
+    const unscoped = m.sweepTargets(root, { windowSeconds: 300 });
+    process.env.PATH = savedPath;
+    const bad = [];
+    if (scoped.fallback !== null) bad.push("scoped-fallback=" + scoped.fallback);
+    if (scoped.targets.length !== 1 || scoped.targets[0] !== append) {
+      bad.push("scoped=" + JSON.stringify(scoped.targets));
+    }
+    if (unscoped.fallback !== "git-unavailable") bad.push("unscoped-fallback=" + unscoped.fallback);
+    if (unscoped.targets.length !== 25 || unscoped.targets.includes(append)) {
+      bad.push("unscoped=" + unscoped.targets.length + "/" + unscoped.targets.includes(append));
+    }
+    process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+  ' "$REDACT" "$CAP_PROJ" "$CAP_APPEND" "$NO_GIT_BIN" 2>&1)"
+else
+  OUT78="the fixture repository could not be committed"
+fi
+if [ "$OUT78" = "OK" ]; then
+  check "R78 a checkout's unchanged artifacts cannot crowd a real append out of the capped sweep" PASS
+else
+  check "R78 a checkout's unchanged artifacts cannot crowd a real append out of the capped sweep (bad: $OUT78)" FAIL
+fi
+
+# ── R79: the sweep's git calls never write the index ─────────────────
+IDX_BEFORE="$(cksum < "$CAP_PROJ/.git/index" 2>/dev/null)"
+node -e 'require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });' \
+  "$REDACT" "$CAP_PROJ" >/dev/null 2>&1
+IDX_AFTER="$(cksum < "$CAP_PROJ/.git/index" 2>/dev/null)"
+env -u GIT_OPTIONAL_LOCKS git -C "$CAP_PROJ" -c core.fsmonitor=false status --porcelain >/dev/null 2>&1
+IDX_CONTROL="$(cksum < "$CAP_PROJ/.git/index" 2>/dev/null)"
+if [ -n "$IDX_BEFORE" ] && [ "$IDX_BEFORE" = "$IDX_AFTER" ] && [ "$IDX_AFTER" != "$IDX_CONTROL" ]; then
+  check "R79 the sweep leaves a stat-dirty index unwritten, while a plain git status rewrites it" PASS
+else
+  check "R79 the sweep leaves a stat-dirty index unwritten, while a plain git status rewrites it" FAIL
+fi
+
+# ── R80: a project root below the repository root is scoped the same ─
+MONO="$WORK/mono"
+SUB_PROJ="$MONO/packages/app"
+mkdir -p "$SUB_PROJ/.zensu/plans" "$SUB_PROJ/.zensu/logs"
+SUB_CLEAN="$SUB_PROJ/.zensu/plans/2026-01-01-0080_tdd-clean.md"
+SUB_MODIFIED="$SUB_PROJ/.zensu/logs/2026-01-01-0080_tdd-modified.log"
+printf 'SUB %s\n' "$FOREIGN_USER" > "$SUB_CLEAN"
+printf 'SUB base\n' > "$SUB_MODIFIED"
+if git init -q --template= "$MONO" >/dev/null 2>&1 \
+  && sweep_git -C "$MONO" add -f -- packages \
+  && sweep_git -C "$MONO" commit -qm base; then
+  printf 'SUB %s\n' "$FOREIGN_USER" >> "$SUB_MODIFIED"
+  OUT80="$(node -e '
+    const fs = require("fs");
+    const [lib, root, clean, modified] = process.argv.slice(1);
+    const later = new Date(Date.now() + 2000);
+    fs.utimesSync(clean, later, later);
+    const r = require(lib).sweepTargets(root, { windowSeconds: 300 });
+    const names = r.targets.map((p) => (p === clean ? "clean" : (p === modified ? "modified" : p)));
+    process.stdout.write(r.fallback + " " + JSON.stringify(names));
+  ' "$REDACT" "$SUB_PROJ" "$SUB_CLEAN" "$SUB_MODIFIED" 2>&1)"
+else
+  OUT80="the fixture repository could not be committed"
+fi
+if [ "$OUT80" = 'null ["modified"]' ]; then
+  check "R80 below the repository root the sweep still drops the unchanged artifact and keeps the modified one" PASS
+else
+  check "R80 below the repository root the sweep still drops the unchanged artifact and keeps the modified one (got: $OUT80)" FAIL
+fi
+
+# ── R81: an artifact git status cannot see is kept, not skipped ──────
+NEST_PROJ="$WORK/nested"
+NEST_PLAN="$NEST_PROJ/.zensu/plans/2026-01-01-0081_tdd-nested.md"
+mkdir -p "$NEST_PROJ/.zensu/plans"
+printf 'NESTED %s\n' "$FOREIGN_USER" > "$NEST_PLAN"
+if git init -q --template= "$NEST_PROJ" >/dev/null 2>&1 \
+  && git init -q --template= "$NEST_PROJ/.zensu" >/dev/null 2>&1; then
+  OUT81="$(node -e '
+    const r = require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });
+    process.stdout.write(r.fallback + " " + (r.targets.includes(process.argv[3]) ? 1 : 0));
+  ' "$REDACT" "$NEST_PROJ" "$NEST_PLAN" 2>&1)"
+  NEST_STATUS="$(git -C "$NEST_PROJ" -c core.fsmonitor=false status --porcelain \
+    --untracked-files=all -- .zensu/plans .zensu/logs 2>&1)"
+else
+  OUT81="the fixture repositories could not be created"
+  NEST_STATUS="unknown"
+fi
+if [ "$OUT81" = "null 1" ] && [ -z "$NEST_STATUS" ]; then
+  check "R81 an artifact inside a nested repository, which git status does not list, is still swept" PASS
+else
+  check "R81 an artifact inside a nested repository, which git status does not list, is still swept (got: $OUT81 status=[$NEST_STATUS])" FAIL
 fi
 
 # ── R52: the scanner guard acts on its own predicate ─────────────────

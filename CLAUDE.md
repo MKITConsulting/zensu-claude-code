@@ -125,6 +125,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`
+- **Automatic Adoption (`hooks/lib/session-auto-adopt-v1.js`)** — the hook-side adoption of a compatible-schema record across a lineage break, its opt-out and the refusal tokens its denies name: `.claude/rules/automatic-adoption.md`
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
@@ -157,3 +158,4 @@ Each entry names the section title, what it covers, and its rule file.
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Worktree Keep (`hooks/lib/worktree-keep-v1.js` + three advisory hooks)** — keeping a live session's worktree out of the Claude Desktop pool, and the drift notice when it is taken anyway: `.claude/rules/worktree-keep.md`
 - **Restoring a Vanished Recorded Project Root (`restoreRootVerdict` / `restoreWorkflowProjectRoot`)** — re-creating a recorded project root a removed worktree took with it: `.claude/rules/restore-vanished-project-root.md`
+- **Deferred-Review Claim Ownership (`deferredReviewClaimHeld`)** — why the lease, not the recorded owner PID, decides who holds an adopted review, and the win32 lock-staleness gap: `.claude/rules/deferred-review-claim-ownership.md`

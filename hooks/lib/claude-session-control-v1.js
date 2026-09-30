@@ -6,6 +6,11 @@ const path = require('node:path');
 const core = require('./session-control-core-v1.js');
 const hostPaths = require('./claude-path-v1.js');
 const principals = require('./claude-principal-v1.js');
+// LAZY, like the binder and the `.*` gate: the module pulls in the lease sweep, and
+// a SessionStart or SubagentStart whose record serves never needs it — nor does a
+// plugin tree that ships this adapter without it, which must still bind.
+const autoAdoptModule = () => require('./session-auto-adopt-v1.js');
+const defaultCore = core;
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const MAX_SESSION_SOURCE_LENGTH = 64;
@@ -115,13 +120,21 @@ function authoritativePluginRoot() {
   return root;
 }
 
-function hookOutput(event, additionalContext) {
-  return {
+// `systemMessage` is the host's user-facing common field. Its DELIVERY by a
+// synchronous SessionStart or SubagentStart hook is documented but was not
+// measured in this work — CLAUDE.md records it as unverified — so it rides
+// beside `additionalContext` rather than instead of it, and only when a caller
+// has something the USER, not just the model, must hear: an adoption this hook
+// performed or observed.
+function hookOutput(event, additionalContext, systemMessage = '') {
+  const output = {
     hookSpecificOutput: {
       hookEventName: event,
       additionalContext,
     },
   };
+  if (typeof systemMessage === 'string' && systemMessage !== '') output.systemMessage = systemMessage;
+  return output;
 }
 
 function rejectSourceRevisionOverride() {
@@ -151,6 +164,101 @@ const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missi
   + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:tdd '
   + 'to re-arm if that work still needs a review. /zensu:doctor reports the same finding.';
 
+// The PUSH half of the adoption disclosure, on both channels the host offers a
+// SessionStart: `additionalContext` for the model and `systemMessage` for the
+// user. The text comes from session-auto-adopt-v1.js's renderAdoptionNotice — the
+// renderer the `.*` gate's allow-path announcement uses too — so this file holds
+// no version screen, no provenance screen and no lease clause of its own. (The
+// binder's stderr line is a third surface with its own lead-in; it shares the
+// SCREENS, not the renderer.)
+function adoptionNotice(adoption, label) {
+  return autoAdoptModule().renderAdoptionNotice(adoption, { where: `at this ${label}` });
+}
+
+// Serve the existing record, or ADOPT it when the executing installation cannot
+// serve it by version number but adoptableRecord admits it — the same ladder the
+// PreToolUse binder runs, so a compaction or a subagent spawn after a plugin
+// update binds instead of dying. A refusal keeps failing the hook, naming why.
+//
+// An `already-served` verdict reached AFTER the strict serve failed means a
+// sibling hook on the same event adopted the record in the window between the
+// two reads. Three siblings bind on these events: the Autopilot resume hook and the
+// worktree-keep SessionStart hook, both through the CLI binder with its output
+// discarded, and the review-evidence hook on SubagentStart, IN PROCESS through
+// resolveHookSession — none has a user channel of its own, so that adoption is
+// announced here. The bound is stated rather than implied: this
+// notice exists only when THIS process read the old record first. A sibling that
+// finished before the first serve below leaves a record that simply serves, the
+// first serve succeeds, and nothing here knows an adoption happened — so ordering
+// still decides whether the user hears about it from this hook, and /zensu:doctor's
+// adoption row is the surface that does not depend on it.
+//
+// `deps` is the unit seam: the substitution of the observed version is unreachable
+// from the upgrade suite, whose held lock makes every racer probe the old record.
+function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun, deps) {
+  const core = (deps && deps.core) || defaultCore;
+  const loadAutoAdopt = (deps && deps.loadAutoAdopt) || autoAdoptModule;
+  // The version this process READ before anyone adopted, kept for the sibling
+  // case below. It is the only honest source for "updated FROM": once a sibling
+  // has re-minted the record, its plugin_version is the executing version.
+  let observedRecorded = null;
+  const serve = () => {
+    const context = core.readContext(readerOptions);
+    if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
+      if (typeof context.plugin_version === 'string') observedRecorded = context.plugin_version;
+      fail(`${label} plugin root is neither the ${noun}'s plugin nor a compatible upgrade of it`);
+    }
+    if (context.plugin_data !== pluginData) fail(`${label} plugin data does not match the ${noun}`);
+    return context;
+  };
+  try {
+    return { context: serve(), adoption: null };
+  } catch (error) {
+    let autoAdopt;
+    try {
+      autoAdopt = (deps && deps.autoAdopt) || loadAutoAdopt();
+    } catch (loadError) {
+      const cause = String((loadError && loadError.message) || loadError).split('\n')[0];
+      fail(`${label}: automatic adoption unavailable (${cause}); ${error.message}`);
+    }
+    const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
+    // The observed version travels ON THE REQUEST: an `already-served` verdict has
+    // no `recorded` of its own, and the module is the one place that may put the
+    // caller's observation on the verdict. This process used to patch the returned
+    // verdict instead.
+    const verdict = autoAdopt.adoptForHook({
+      executingPluginRoot: pluginRoot,
+      pluginData,
+      recordsDir: readerOptions.recordsDir,
+      sessionId,
+      host: 'claude',
+      environment: process.env,
+      respectOptOut: true,
+      observedRecorded,
+    });
+    if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
+      // Strict re-read: the adopted record must serve itself. A vanished
+      // recorded project root re-throws here exactly as it always did — and
+      // when THIS process adopted, the failure names that adoption, so the
+      // re-mint is not lost behind the message of a bind it could not repair.
+      // The lease clause travels with it: this message is the ONLY report of that
+      // adoption's sweep, because the hook fails and no notice is ever rendered.
+      try {
+        return { context: serve(), adoption: verdict };
+      } catch (again) {
+        if (verdict.outcome === OUTCOMES.ADOPTED) {
+          fail(`${label}: ${autoAdopt.operatorLine(verdict)} — but the strict re-read still fails: ${again.message}`);
+        }
+        const sweepLine = typeof autoAdopt.servedSweepLine === 'function' ? autoAdopt.servedSweepLine(verdict) : null;
+        if (sweepLine) fail(`${label}: ${sweepLine} — but the strict re-read still fails: ${again.message}`);
+        throw again;
+      }
+    }
+    fail(`${label}: automatic adoption ${verdict.outcome} (${verdict.reason}); ${error.message}`);
+  }
+  return null;
+}
+
 function main() {
   const payload = readPayload();
   // SessionStart also carries agent_type for top-level `claude --agent`
@@ -169,6 +277,7 @@ function main() {
 
   let context;
   let baselineHealNotice = '';
+  let adoption = null;
   if (payload.hook_event_name === 'SessionStart') {
     const key = core.sessionKey(payload.session_id);
     const recordFile = path.join(recordsDir, `${key}.json`);
@@ -180,21 +289,22 @@ function main() {
       // cwd is host location metadata and must never become a rebind request.
       // Only a known-fresh source must still land in the recorded project: an
       // unknown one may well be a continuation the host added after this build.
-      context = core.readContext({
-        recordsDir,
-        sessionId: payload.session_id,
-        expectedHost: 'claude',
-      });
       // A resume or compact is where a mid-session plugin upgrade surfaces
       // again: the record still names the root it was minted against, while
-      // this hook now executes from the new one. Refusing here would kill the
-      // very session the compatible-lineage rule exists to keep alive, one
-      // compaction after it survived every tool call. The record is NOT
-      // rewritten — it stays the immutable anchor it always was.
-      if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
-        fail('SessionStart plugin root is neither the existing session\'s plugin nor a compatible upgrade of it');
-      }
-      if (context.plugin_data !== pluginData) fail('SessionStart plugin data does not match the existing session');
+      // this hook now executes from the new one. A compatible lineage serves the
+      // record as before; an incompatible one is ADOPTED here — re-minted under
+      // the executing installation with provenance — instead of failing the hook,
+      // which used to kill the very session one compaction after it had survived
+      // every tool call. A refused adoption still fails, naming why.
+      const served = serveOrAdopt(
+        { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' },
+        pluginRoot,
+        pluginData,
+        payload.session_id,
+        'SessionStart', 'existing session',
+      );
+      context = served.context;
+      adoption = served.adoption;
       if (isFresh && eventCwd !== context.project_root) {
         fail('fresh SessionStart cwd does not match the existing session project');
       }
@@ -324,21 +434,23 @@ function main() {
       });
     }
   } else {
-    context = core.readContext({
-      recordsDir,
-      sessionId: payload.session_id,
-      expectedHost: 'claude',
-    });
     // Same reasoning as the SessionStart branch above, and just as load-bearing:
     // the review chain fans out subagents, so a strict comparison here would let
     // an upgraded session keep working right up to the moment it tries to
-    // review itself.
-    if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
-      fail('SubagentStart plugin root is neither the parent session\'s plugin nor a compatible upgrade of it');
-    }
-    if (context.plugin_data !== pluginData) {
-      fail('SubagentStart plugin data does not match the parent session');
-    }
+    // review itself. The child adopts too: the payload carries the PARENT's
+    // session id, the record is per session, and the records lock serializes
+    // this hook against the evidence hook on the same matcher — the loser sees
+    // already-served and re-reads. Refusing instead would wedge the review
+    // chain at its first fan-out after a reload.
+    const served = serveOrAdopt(
+      { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' },
+      pluginRoot,
+      pluginData,
+      payload.session_id,
+      'SubagentStart', 'parent session',
+    );
+    context = served.context;
+    adoption = served.adoption;
     if (payload.cwd) {
       // CwdChanged may move an otherwise bound session into an external
       // detached worktree. The host payload is trusted location metadata, not
@@ -357,15 +469,32 @@ function main() {
       : core.renderHostContext(context);
   // Appended rather than substituted: the principal's own context is what binds the
   // session, and a notice that replaced it would trade a disclosure for the binding.
-  const emittedContext = baselineHealNotice === ''
+  // The adoption notice ALSO travels as the user-facing systemMessage: an adoption
+  // is a fact about the user's session, not only about the model's context. The
+  // MODEL-facing copy is appended for the main thread only — it names the
+  // superseded record, whose basename is the session selector every confined
+  // principal's rendered context deliberately withholds, and it names
+  // /zensu:doctor, a main-only command. A reviewer, an evidence worker or a
+  // neutral child gets its bound context unchanged; the user still gets the line.
+  const adoptionText = adoption ? adoptionNotice(adoption, payload.hook_event_name) : '';
+  const modelNotice = principal === principals.PRINCIPALS.MAIN ? adoptionText : '';
+  const notices = [baselineHealNotice, modelNotice].filter((text) => text !== '');
+  const emittedContext = notices.length === 0
     ? additionalContext
-    : `${additionalContext}\n\n${baselineHealNotice}`;
-  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, emittedContext))}\n`);
+    : `${additionalContext}\n\n${notices.join('\n\n')}`;
+  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, emittedContext, adoptionText))}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exit(1);
+// Exports ABOVE the entry guard, so a module that requires this file never sees an
+// empty export object. `serveOrAdopt` is exported for its unit seam alone; the hook
+// wrapper launches this file as the entry module, where the guard below runs main.
+module.exports = { serveOrAdopt };
+
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
+  }
 }

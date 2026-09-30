@@ -527,11 +527,29 @@ whether browser verification is enforced, not only when a row is red.
   above, and it has its own row naming BOTH declared versions (`record minted by
   X, executing Y`). Never report it as a missing record: the record is intact in
   plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
-  place — run `/zensu:adopt-session` to see whether the running installation may
-  take the record over, then `/zensu:adopt-session --confirm`. Both stay
-  reachable in this state; so does this diagnostic. A refusal names the exact
-  condition that failed, and `workflow-schema-mismatch` in particular means a
-  persisted shape really did change and a fresh session is the only way forward.
+  place — and Zensu attempts that repair itself: the first hook contact after
+  `/reload-plugins` adopts the record automatically when its persisted schemas
+  still match. A session that still shows this row is therefore one whose
+  adoption was refused, opted out or did not complete — the row itself says so, and
+  a gate's deny names the token. Run `/zensu:adopt-session`: it prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption.
+  An ADOPTABLE answer there has TWO causes, never one:
+  the automatic path was either opted out
+  through `hooks.sessionAutoAdopt: false` — the opt-out governs the automatic path only —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`.
+  Reading ADOPTABLE as the opt-out alone sends a user whose adoption merely timed out
+  looking for a config key nobody set. Then
+  `/zensu:adopt-session --confirm` retries by hand — it ignores the
+  opt-out, so on an opted-out record ask the user before running it: the operator
+  switched the automatic path off on purpose.
+  Both stay reachable in this state; so does this diagnostic. A refusal names the
+  exact condition that failed:
+  `workflow-schema-mismatch` means a persisted shape really did change and a
+  fresh session is the only way forward, and `executing-runtime-older` means the
+  running installation is a downgrade, so the newer version has to be
+  re-installed.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
@@ -544,9 +562,19 @@ whether browser verification is enforced, not only when a row is red.
   incompatible lineage** → both of the two rows above at once, and it is its own
   row because each of those two answers "not me" for it. It prints the dead path
   AND both declared versions. Never report it as a missing record. It IS
-  repairable in place and `/zensu:adopt-session` applies — that is the difference
-  from the plain orphaned row, which the running installation already serves and
-  which adoption refuses as `already-served`. State the limit whenever you offer
+  repairable in place — attempted automatically on the first hook contact, so a row
+  still rendered means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
+  (ask the user before `--confirm` then)
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and `/zensu:adopt-session --confirm`
+  retries by hand — that is the
+  difference from the plain orphaned row, which the running installation already
+  serves and which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
   diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
   stay denied until that exact directory is re-created by
@@ -596,8 +624,20 @@ whether browser verification is enforced, not only when a row is red.
   cache, so a session that outlives them lands here whatever its lineage: nothing
   can re-verify the record any more and no installation serves it. Never report
   it as a missing record. The remedy is the same in-place adoption as the lineage
-  row — `/zensu:adopt-session`, then `/zensu:adopt-session --confirm` — and the
-  adoption report marks the minting version `(installation no longer on disk)`.
+  row — attempted automatically on the first hook contact, so a row still rendered
+  means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
+  — ask the user before `--confirm` then, since the operator switched the automatic
+  path off on purpose —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and
+  `/zensu:adopt-session --confirm` retries by hand.
+  The adoption report marks the minting version
+  `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
@@ -889,10 +929,23 @@ whether browser verification is enforced, not only when a row is red.
   not read the restore phase token from the Session Control core, or the workflow
   document did not read back. That is a MISSING CHECK, never an all-clear: relay it as
   a check that did not run, and do not tell the user their project root is verified.
+- **✅ state: this session's Session Control record was ADOPTED across a plugin update** →
+  informational, and the one place an automatic adoption stays visible after the fact: a
+  plugin update landed while the session was running and a hook re-minted its record
+  under the new installation. The row names the entry count, the timestamp, the version
+  pair and the name the previous record was kept under. Relay it as a repair that
+  SUCCEEDED — no workflow state was lost and nothing is left to do — and do NOT tell the
+  user to restart. Two bounds travel with it. Review-evidence leases minted before the
+  update were set aside, so a review that was in flight then has to be re-gathered. And an
+  adoption made while no workflow document existed — a deleted worktree — wrote no entry,
+  so the ABSENCE of this row is never evidence that no adoption happened; the kept record
+  is then its only trace.
 - **⚠️ state: this session's workflow document was not checked for rebuild provenance**
-  → either the core exported no rebuild phase token or the document did not read back,
-  so the check did NOT run. A missing check, never an all-clear, and never a claim that
-  the document was not rebuilt.
+  (the row also reads `adoption provenance`; an unreadable document produces one such
+  row per check)
+  → either the core exported no phase token for that check or the document did not read
+  back, so the check did NOT run. A missing check, never an all-clear, and never a claim
+  that the document was not rebuilt or that the record was not adopted.
 - **⚠️ state: this session's own workflow document could not be classified** → the
   Session Control core did not load from the plugin directory the row names, so the check
   did NOT run. A missing check, never an all-clear.

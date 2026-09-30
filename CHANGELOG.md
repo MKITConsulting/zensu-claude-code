@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stage verifies every criterion unless the run was started with `--no-validate`, and the
   terminus line says which. A max-rounds close with `hooks.selfReview` off is not gated
   either, as for the full suite, and its summary shows acceptance as not checked.
+- **redact**: the artifact sweep no longer rewrites a committed `.zensu` plan or log that a
+  checkout merely refreshed, so a fresh worktree stays clean. A stray path-only diff that an
+  earlier release left in such a file can now be discarded with `git restore <file>` and stays
+  discarded; before this fix the next tool call redacted the restored file again. The sweep asks
+  git which artifacts changed, so outside a git repository, or when `git` fails or times out, it
+  sweeps every recent artifact as before and says so on stderr.
 
 ## [0.22.0] - 2026-09-28
 
