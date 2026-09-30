@@ -1,8 +1,6 @@
-name: Windows full safety suite
+name: win32 lock identity probe
 
 on:
-  schedule:
-    - cron: '17 3 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -13,43 +11,38 @@ defaults:
     shell: bash
 
 concurrency:
-  group: windows-full-safety-${{ github.ref }}
+  group: win32-lock-identity-probe-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  windows-full-safety-shards:
-    name: Windows full safety (${{ matrix.kind }} ${{ matrix.shard }}/${{ matrix.total }})
+  probe:
+    name: win32 start-time probe (${{ matrix.image }} run ${{ matrix.rep }})
     strategy:
       fail-fast: false
-      max-parallel: 15
       matrix:
-        include:
-          - { kind: canary, shard: 1, total: 4 }
-          - { kind: canary, shard: 2, total: 4 }
-          - { kind: canary, shard: 3, total: 4 }
-          - { kind: canary, shard: 4, total: 4 }
-          - { kind: structure, shard: 1, total: 8 }
-          - { kind: structure, shard: 2, total: 8 }
-          - { kind: structure, shard: 3, total: 8 }
-          - { kind: structure, shard: 4, total: 8 }
-          - { kind: structure, shard: 5, total: 8 }
-          - { kind: structure, shard: 6, total: 8 }
-          - { kind: structure, shard: 7, total: 8 }
-          - { kind: structure, shard: 8, total: 8 }
-          - { kind: offline, shard: 1, total: 3 }
-          - { kind: offline, shard: 2, total: 3 }
-          - { kind: offline, shard: 3, total: 3 }
-    runs-on: windows-latest
-    timeout-minutes: 240
+        image: [windows-2022, windows-2025]
+        rep: [1, 2]
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: Run bounded Windows safety shard
-        run: node tests/run-windows-safety-shard.js "${{ matrix.kind }}" "${{ matrix.shard }}" "${{ matrix.total }}"
+      - name: Shell facts
+        continue-on-error: true
+        timeout-minutes: 3
+        run: bash .github/probe/shell-facts.sh
+      - name: Probe helper cost and semantics
+        env:
+          PROBE_LABEL: ${{ matrix.image }}-${{ matrix.rep }}
+        run: node .github/probe/win32-start-time-probe.js "$RUNNER_TEMP/probe"
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: win32-probe-${{ matrix.image }}-${{ matrix.rep }}
+          path: ${{ runner.temp }}/probe
+          retention-days: 14
