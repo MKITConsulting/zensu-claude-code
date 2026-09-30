@@ -1061,6 +1061,14 @@ function releaseOwnedLock(lockDirectory, key, lockFile, acquired, expectedDirect
   }, expectedDirectory);
 }
 
+// A lock that could not be acquired carries a CODE, so the automatic adopter can
+// map it to `lock-timeout` without matching the message text.
+const LOCK_TIMEOUT_CODE = 'ZENSU_LOCK_TIMEOUT';
+
+function isLockTimeout(error) {
+  return Boolean(error) && error.code === LOCK_TIMEOUT_CODE;
+}
+
 function withFileLock(lockDirectory, key, callback) {
   const directory = canonicalDirectory(lockDirectory, 'lock directory');
   if (!/^[a-zA-Z0-9._-]{1,160}$/.test(key)) fail('lock key has an invalid format');
@@ -1087,7 +1095,9 @@ function withFileLock(lockDirectory, key, callback) {
     sleep(20);
   }
   if (!acquired) {
-    fail('timed out acquiring per-session lock');
+    const timedOut = new Error('session-control-v1: timed out acquiring per-session lock');
+    timedOut.code = LOCK_TIMEOUT_CODE;
+    throw timedOut;
   }
   try {
     return callback();
@@ -1648,8 +1658,22 @@ const ADOPTION_REFUSALS = {
 const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 
 
-function adoptionRefusal(reason) {
-  return { ok: false, reason };
+// A refusal carries the SAME four state fields the accepting verdict carries, and
+// every one of them is always present. The state is what a deny renders — both
+// versions, and which relaxed reader answered — and the automatic-adoption module
+// used to re-derive it with a second walk of condition 1's reader ladder, a hand
+// copy that could answer differently from the walk that produced the refusal.
+// `record-unreadable` is the one refusal reached BEFORE any record was read, so it
+// carries the empty state; every later refusal passes what condition 1 established.
+function adoptionRefusal(reason, state) {
+  return Object.assign({
+    ok: false,
+    reason,
+    recorded: null,
+    executing: null,
+    orphanedProjectRoot: false,
+    prunedPluginRoot: false,
+  }, state || {});
 }
 
 // The workflow document's path WITHOUT creating anything. workflowStateFile
@@ -1751,8 +1775,20 @@ function adoptableRecord(options) {
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
+  // Read once, here, because every refusal below reports it. executingPluginVersion
+  // never throws and answers null for a manifest it cannot read, which is also what
+  // the shape guard further down refuses on.
+  const executingVersion = executingPluginVersion(executingPluginRoot, context.host);
+  const state = {
+    recorded: context.plugin_version,
+    executing: typeof executingVersion === 'string' ? executingVersion : null,
+    orphanedProjectRoot,
+    prunedPluginRoot,
+  };
   // Condition 2 — the record store boundary is never relaxed.
-  if (context.plugin_data !== pluginData) return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA);
+  if (context.plugin_data !== pluginData) {
+    return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA, state);
+  }
   // There is deliberately NO condition on the CALLER's project root. It protected
   // nothing — the anchor is carried FROM the record, and the write bound is
   // readContext plus the sibling-root and plugin_data checks — and it contradicted
@@ -1771,20 +1807,19 @@ function adoptableRecord(options) {
   // check is skipped for it: a compatible-but-pruned record is adoptable, not
   // "already served", because no installation can bind it any more.
   if (!prunedPluginRoot && servesRecordedRuntime(context, executingPluginRoot, context.host)) {
-    return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
+    return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED, state);
   }
   // Condition 4 — the same structural bound servesRecordedRuntime applies: a
   // marketplace install lands beside the versions it replaces, a development
   // checkout never does, so a --plugin-dir tree cannot adopt an installed
   // session's record no matter what its manifest declares.
   if (path.dirname(context.plugin_root) !== path.dirname(executingPluginRoot)) {
-    return adoptionRefusal(ADOPTION_REFUSALS.NOT_SIBLING);
+    return adoptionRefusal(ADOPTION_REFUSALS.NOT_SIBLING, state);
   }
-  const executingVersion = executingPluginVersion(executingPluginRoot, context.host);
   if (typeof executingVersion !== 'string'
     || !ADOPTION_SAFE_VERSION_RE.test(executingVersion)
     || !ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) {
-    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED, state);
   }
   // Condition 5 — never backwards. Only a newer tree can be expected to
   // understand an older one's state; the reverse is the direction that loses
@@ -1792,12 +1827,12 @@ function adoptableRecord(options) {
   const recordedParts = parseRuntimeVersion(context.plugin_version);
   const executingParts = parseRuntimeVersion(executingVersion);
   if (recordedParts === null || executingParts === null) {
-    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED, state);
   }
   for (let index = 0; index < recordedParts.length; index += 1) {
     if (executingParts[index] !== recordedParts[index]) {
       if (executingParts[index] < recordedParts[index]) {
-        return adoptionRefusal(ADOPTION_REFUSALS.BACKWARDS);
+        return adoptionRefusal(ADOPTION_REFUSALS.BACKWARDS, state);
       }
       break;
     }
@@ -1818,7 +1853,7 @@ function adoptableRecord(options) {
     try {
       readWorkflowState({ projectRoot: context.project_root, sessionId: options.sessionId });
     } catch {
-      return adoptionRefusal(ADOPTION_REFUSALS.WORKFLOW_SCHEMA);
+      return adoptionRefusal(ADOPTION_REFUSALS.WORKFLOW_SCHEMA, state);
     }
   }
   return {
@@ -1839,6 +1874,86 @@ function adoptableRecord(options) {
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
+// What adoptContext reports about its own provenance write, as a closed token.
+// Two renderers decide on these: the adoption notice says what /zensu:doctor can
+// show, and that is an entry ONLY under RECORDED. The cause of UNAVAILABLE is an
+// error message, open text by construction, so it travels beside the token as
+// `provenanceCause` and nobody branches on it.
+const ADOPTION_PROVENANCE = Object.freeze({
+  RECORDED: 'recorded',
+  NO_DOCUMENT: 'no-workflow-document',
+  UNAVAILABLE: 'unavailable',
+});
+
+// The version pair an adoption records, in ONE grammar. The history entry's reason,
+// the binder's ZENSU_SESSION_ADOPTED export line and the doctor's adoption row all
+// spell or parse `<recorded> -> <executing>`; a reader that re-parsed the pair by
+// hand would drift from this writer silently, rendering every real adoption as an
+// unreadable pair. The parser holds both halves to the version shape, because the
+// reason is read back out of a document the session can write.
+const ADOPTION_PAIR_SEPARATOR = ' -> ';
+
+function formatAdoptionPair(recorded, executing) {
+  return `${recorded}${ADOPTION_PAIR_SEPARATOR}${executing}`;
+}
+
+function formatAdoptionReason(recorded, executing) {
+  return `${ADOPTION_HISTORY_REASON_PREFIX}${formatAdoptionPair(recorded, executing)}`;
+}
+
+function parseAdoptionReason(reason) {
+  if (typeof reason !== 'string' || reason.indexOf(ADOPTION_HISTORY_REASON_PREFIX) !== 0) return null;
+  const pair = reason.slice(ADOPTION_HISTORY_REASON_PREFIX.length).split(ADOPTION_PAIR_SEPARATOR);
+  if (pair.length !== 2) return null;
+  if (!ADOPTION_SAFE_VERSION_RE.test(pair[0]) || !ADOPTION_SAFE_VERSION_RE.test(pair[1])) return null;
+  return { recorded: pair[0], executing: pair[1] };
+}
+
+// The two ways adoptContext refuses under its own lock, as CODES a caller can
+// branch on rather than prose it has to substring-match — the same reason the
+// baseline repair carries BASELINE_ALREADY_PRESENT_CODE. A hook that adopts
+// automatically must tell `already-served` (a concurrent hook won the lock,
+// which is the outcome it wanted) from every other refusal, and the message
+// text alone cannot be that contract. The messages themselves are unchanged.
+const ADOPTION_REFUSED_CODE = 'ZENSU_ADOPTION_REFUSED';
+const SUPERSEDED_EXISTS_CODE = 'ZENSU_SUPERSEDED_EXISTS';
+
+// The PREDICATE is the consumer surface, for the reason isBaselineAlreadyPresent
+// states: comparing against an imported constant reads as a match whenever both
+// sides are undefined.
+function isAdoptionRefusal(error) {
+  return Boolean(error) && error.code === ADOPTION_REFUSED_CODE;
+}
+
+function isSupersededRecordConflict(error) {
+  return Boolean(error) && error.code === SUPERSEDED_EXISTS_CODE;
+}
+
+// Where adoptContext sets the previous record aside. ONE spelling, exported: the
+// shared adoption preview has to ask whether that file is already there — the
+// crash-resume shape, which a preview cannot otherwise see because it never
+// reaches the copy — and a second spelling of the name would let the two disagree
+// about which file blocks the adoption.
+//
+// The version reaches a FILENAME, so the shape is ENFORCED here and no longer left
+// as a caller precondition. adoptableRecord guarantees it for every verdict it
+// accepts, but since a refusal carries the recorded version as well — attached
+// before the shape guard runs — a later caller handing a refusal's `recorded` in
+// would have joined an unscreened string into a path. It throws; every caller
+// either holds an accepted verdict or treats the throw as "no such file".
+// The basename alone is its own export because a renderer that needs only the NAME
+// — the doctor's adoption row — has no records directory to hand in, and calling
+// the path form with an empty directory was a call off its contract.
+function supersededRecordName(key, recordedVersion) {
+  if (typeof recordedVersion !== 'string' || !ADOPTION_SAFE_VERSION_RE.test(recordedVersion)) {
+    fail('superseded record name needs a recorded version of the safe shape');
+  }
+  return `${key}.superseded-${recordedVersion}.json`;
+}
+
+function supersededRecordFile(recordsDir, key, recordedVersion) {
+  return path.join(recordsDir, supersededRecordName(key, recordedVersion));
+}
 
 // Performs the adoption re-checked UNDER the records lock. The precondition is
 // deliberately evaluated twice — once by the caller to report, once here to act
@@ -1852,7 +1967,12 @@ function adoptContext(options) {
 
   const adopted = withFileLock(locksDir, key, () => {
     const verdict = adoptableRecord({ ...options, pluginData, recordsDir });
-    if (!verdict.ok) fail(`record is not adoptable: ${verdict.reason}`);
+    if (!verdict.ok) {
+      const refused = new Error(`session-control-v1: record is not adoptable: ${verdict.reason}`);
+      refused.code = ADOPTION_REFUSED_CODE;
+      refused.reason = verdict.reason;
+      throw refused;
+    }
     const executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     // created_at is carried over on purpose: the session began when it began,
     // and rewriting that would erase the only provenance the record still holds
@@ -1883,10 +2003,7 @@ function adoptContext(options) {
     // Set aside, never overwrite. "The record is immutable" stays literally true:
     // no record is ever rewritten, a second one is minted beside it, and the
     // first stays readable under a name that says what happened to it.
-    const supersededFile = path.join(
-      recordsDir,
-      `${key}.superseded-${verdict.recorded}.json`,
-    );
+    const supersededFile = supersededRecordFile(recordsDir, key, verdict.recorded);
     // The existence check is the COPY's own O_EXCL, never a separate existsSync:
     // that call resolves through symlinks, so a dangling link at the superseded
     // name would answer false and copyFileSync would then write the record
@@ -1911,7 +2028,10 @@ function adoptContext(options) {
         // Names the file, because this is also the crash-resume shape — a death
         // between the copy and the swap leaves it behind — and the session has
         // no other write channel to find it with.
-        fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+        const conflict = new Error(`session-control-v1: a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+        conflict.code = SUPERSEDED_EXISTS_CODE;
+        conflict.supersededFile = supersededFile;
+        throw conflict;
       }
       throw error;
     }
@@ -1960,7 +2080,7 @@ function adoptContext(options) {
   // recorded after the swap because it is provenance, not a precondition: a
   // failure here is reported to the caller, never smoothed over, and never
   // reverts an adoption that already succeeded.
-  let provenance = 'recorded';
+  let provenance = ADOPTION_PROVENANCE.RECORDED;
   let adoptProvenanceCause = null;
   // A session with no workflow document is a state adoptableRecord explicitly
   // blesses ("a missing document is not a disagreement"), so it must not be
@@ -1968,7 +2088,7 @@ function adoptContext(options) {
   // a missing baseline, and the caller renders that as an anomaly worth
   // reporting. Say plainly that there was nothing to write to instead.
   if (!fs.existsSync(adoptionWorkflowStatePath(adopted.projectRoot, options.sessionId))) {
-    provenance = 'no-workflow-document';
+    provenance = ADOPTION_PROVENANCE.NO_DOCUMENT;
   } else {
     try {
       mutateWorkflowState({
@@ -1987,7 +2107,7 @@ function adoptContext(options) {
           step: '',
           phase: ADOPTION_HISTORY_PHASE,
           ts: nowIso(),
-          reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+          reason: formatAdoptionReason(adopted.recorded, adopted.executing),
         });
         state.history = history;
         return state;
@@ -1999,17 +2119,20 @@ function adoptContext(options) {
       // `error.message` on this path carries `session-control-v1: ` from fail(), so a
       // composed `unavailable: <message>` trips safeDisplayValue's PAIR_SEPARATOR
       // (`/ :|: /`) and folds the ROW, label included.
-      provenance = 'unavailable';
+      provenance = ADOPTION_PROVENANCE.UNAVAILABLE;
       adoptProvenanceCause = error && error.message ? error.message : 'unknown';
     }
   }
 
-  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and the
-  // adoption ENTRY SCRIPT calls it after this function returns — see that module's
-  // header for why the direction had to invert (requiring the lease owner from this
-  // file is a cycle). The consequence for a caller: an adoption is not complete
-  // until the sweep has also run, and a host that forgets it gets a re-minted record
-  // with the superseded leases still wedging every later lease operation.
+  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and
+  // session-auto-adopt-v1.js's adoptForHook calls it after this function returns,
+  // for every caller — the hooks, the SessionStart adapter and the manual entry
+  // point all adopt through that one ladder. See the sweep module's header for
+  // why the direction had to invert (requiring the lease owner from this file is a
+  // cycle). The consequence for a caller: an adoption is not complete until the
+  // sweep has also run, and a host that calls this function directly gets a
+  // re-minted record with the superseded leases still wedging every later lease
+  // operation.
   return {
     ...adopted,
     provenance,
@@ -5538,8 +5661,25 @@ module.exports = {
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
+  ADOPTION_PROVENANCE,
+  ADOPTION_PAIR_SEPARATOR,
+  formatAdoptionPair,
+  formatAdoptionReason,
+  parseAdoptionReason,
   adoptableRecord,
   adoptContext,
+  // PRODUCTION consumers: hooks/lib/session-auto-adopt-v1.js branches on the two
+  // predicates to tell a concurrent winner (`already-served`) and a crash-resume
+  // conflict from every other refusal. A port that drops them reports every
+  // refusal as unavailable. The constants travel with them for the unit layer.
+  ADOPTION_REFUSED_CODE,
+  SUPERSEDED_EXISTS_CODE,
+  isAdoptionRefusal,
+  isSupersededRecordConflict,
+  supersededRecordName,
+  supersededRecordFile,
+  LOCK_TIMEOUT_CODE,
+  isLockTimeout,
   // The read-only path helper. Exported because SessionStart needs to ASK where
   // the document is without creating it — workflowStateFile resolves through
   // ensureDescendantDirectory and mkdirs every missing component, which is right

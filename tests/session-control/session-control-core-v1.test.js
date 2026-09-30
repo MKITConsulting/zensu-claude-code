@@ -4947,6 +4947,38 @@ test('the pruned-root admission relaxes nothing else about adoption', () => {
   );
 });
 
+// The refusal adoptContext throws under its lock is TYPED, because the automatic
+// adopter must tell a concurrent winner from every other refusal without
+// substring-matching prose. The message is unchanged; only the code and the
+// reason travel on the error.
+test('adoptContext refuses with a typed error a caller can branch on', () => {
+  const served = prunedReaderFixture();
+  const compatible = successorInstallation(served, '9.8.8');
+  assert.throws(
+    () => core.adoptContext(adoptionOptions(served, compatible)),
+    (error) => core.isAdoptionRefusal(error)
+      && error.reason === 'already-served'
+      && /record is not adoptable: already-served$/.test(error.message),
+  );
+  assert.equal(core.isAdoptionRefusal(new Error('record is not adoptable: already-served')), false);
+  assert.equal(core.isAdoptionRefusal(null), false);
+  assert.equal(core.isAdoptionRefusal(undefined), false);
+
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  const key = core.sessionKey(RAW_SESSION);
+  const planted = path.join(f.recordsDir, `${key}.superseded-9.8.7.json`);
+  fs.writeFileSync(planted, '{}');
+  assert.throws(
+    () => core.adoptContext(adoptionOptions(f, successor)),
+    (error) => core.isSupersededRecordConflict(error)
+      && path.basename(error.supersededFile) === path.basename(planted)
+      && /a superseded record already exists/.test(error.message),
+  );
+  assert.equal(core.isSupersededRecordConflict(new Error('EEXIST')), false);
+  assert.equal(core.readContext(f.readerOptions).plugin_root, fs.realpathSync.native(f.pluginRoot));
+});
+
 // Exported surface is a one-way door: adding an export later is free, removing one
 // later is the break, and the port obligations invite a second host to implement
 // whatever this module exports. `prunedPluginRootSession` was added for symmetry
