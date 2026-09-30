@@ -20,8 +20,8 @@
 // Requires the sweep at top level. That is acyclic FROM HERE (sweep -> lease ->
 // binder -> core) and is exactly why the binder must require THIS module lazily
 // inside its failure path: a top-level require from the binder would close the
-// cycle. The SessionStart adapter and the report are leaves and may require it at
-// the top.
+// cycle. The report is a leaf and requires it at the top; the SessionStart adapter
+// could, but loads it lazily so a record that serves never pulls in the sweep.
 //
 // The opt-out `hooks.sessionAutoAdopt === false` is read HERE and only here, on
 // the adoption path — never on the hot bind. It reads the candidate files of
