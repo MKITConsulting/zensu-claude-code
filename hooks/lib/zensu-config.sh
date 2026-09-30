@@ -430,6 +430,36 @@ zensu_evidence_full_suite_gate() {
   printf '%s' "$val"
 }
 
+zensu_evidence_ci_config_json() {
+  command -v node >/dev/null 2>&1 || { printf '{}'; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var e=j.evidence;e=(e&&typeof e==="object"&&!Array.isArray(e))?e:{};var c=(e.ci&&typeof e.ci==="object"&&!Array.isArray(e.ci))?e.ci:{};function s(v){return typeof v==="string"&&v.trim()!==""&&v.length<=512&&v.indexOf(String.fromCharCode(0))===-1?v.trim():null}var r=e.fullSuiteRunner==="ci"||e.fullSuiteRunner==="local"?e.fullSuiteRunner:null;process.stdout.write(JSON.stringify({runner:r,workflow:s(c.workflow),job:s(c.job)}))' 2>/dev/null)
+  [ -n "$val" ] || val='{}'
+  printf '%s' "$val"
+}
+
+zensu_full_suite_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/full-suite-$session_key.json"
+}
+
+zensu_full_suite_marker_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
+  marker="$(zensu_full_suite_marker_path "$project_dir" "$session_key")" || { echo "none"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker" || [ ! -f "$marker" ]; then
+    echo "none"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" runner)" in
+    (ci)    echo "ci" ;;
+    (local) echo "local" ;;
+    (auto)  echo "released" ;;
+    (*)     echo "none" ;;
+  esac
+}
+
 # zen-mode's SESSION DEFAULT — what the mode resolves to before the session has
 # recorded an explicit choice. Defaults to TRUE (zen-mode on), so a fresh install
 # is low-noise out of the box; set hooks.zenModeDefault:false to restore the

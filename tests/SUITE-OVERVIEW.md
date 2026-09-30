@@ -81,8 +81,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **155** — 148 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **148 structure suites + 5 offline evals = 153 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 155 − 148 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **156** — 149 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **149 structure suites + 5 offline evals = 154 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 156 − 149 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -196,15 +196,17 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, evidence & secrets (10)
+### Bash gates, evidence & secrets (11)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`evidence-run` · `full-suite-gate` · `plugin-data-guard` · `secret-scan-gate` ·
+`evidence-run` · `full-suite-ci` · `full-suite-gate` · `plugin-data-guard` · `secret-scan-gate` ·
 `skill-workflow-markers` · `verify-consent`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
 the bypass ledger (gate escapes only — ~100 assertions), the evidence runner and the
-`--chain-done` full-suite gate, the build-time guard that a skill never runs a zensu
+`--chain-done` full-suite gate, the CI deferral of full-suite runs (the `/zensu:full-suite`
+helper verbs against a `gh` stub, the policy verb, a CI chain closing `deferred-ci`, and
+mid-chain switches that only ever tighten the terminus), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
 plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
 three chain states with an in-project allow control each and an armed-state premise, all four
@@ -348,6 +350,7 @@ that suite's failure.
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 50 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, retention |
+| `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |

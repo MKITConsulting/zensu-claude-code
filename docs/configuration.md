@@ -163,7 +163,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 ### Full-Suite Evidence
 
-`zensu-log.sh --evidence-run` runs a test command itself and records the real exit code. A `full` run is also bound to the exact working tree it ran on, so a later edit makes the record stale. Records live in the plugin's private data directory (`$CLAUDE_PLUGIN_DATA/evidence-run/v1/`): the reviewer and neutral subagents cannot read them, and Edit/Write cannot reach them.
+`zensu-log.sh --evidence-run` runs a test command itself and records the real exit code. A `full` or `scoped` run is also bound to the exact working tree it ran on, so a later edit makes the record stale. Records live in the plugin's private data directory (`$CLAUDE_PLUGIN_DATA/evidence-run/v1/`): the reviewer and neutral subagents cannot read them, and Edit/Write cannot reach them.
 
 ```bash
 CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --evidence-run --scope full
@@ -171,10 +171,11 @@ CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" -
 
 | Argument | Effect |
 |---|---|
-| `--scope full\|lint\|build\|coverage\|scoped` | Required. Only `full` fingerprints the working tree and counts toward the full-suite verdict. |
+| `--scope full\|lint\|build\|coverage\|scoped` | Required. `full` and `scoped` fingerprint the working tree. A local chain's full-suite verdict reads only `full` runs; a chain whose full suite runs in CI reads its `scoped` runs too ([Full Suite in CI](#full-suite-in-ci)). |
 | `--cmd '<shell>'` | The command to run. It runs from a private script file under `set -o pipefail` in `bash --noprofile --norc`, in the caller's working directory, with stdin connected to the null device. The plugin's own bindings (`ZENSU_SESSION_KEY`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_PLUGIN_ROOT` and the rest of the Session Control exports) are removed from its environment, and `CLAUDE_PROJECT_DIR` is the caller's own value. |
 | `--show tail\|all` | `tail` (default) prints the last 80 lines once the run ends; `all` prints the whole output. The full output always stays in a private log file whose path is printed first, so a background run can be inspected while it runs. |
-| `--if-stale` | Skips the run when the newest `full` record is green on the current tree. |
+| `--if-stale` | With `--scope full`, skips the run when the newest `full` record is green on the current tree. With `--scope scoped`, skips it when the newest run of the same command is green on the current tree. |
+| `--local` | Runs `--scope full` in a chain whose full suite runs in CI. Without it, such a run is refused with exit `2`, writes no record, and the refusal says it is not a suite failure. Pass it only when the user asked for a local full run. |
 | `--log <run log>` | Appends one machine-authored `EVIDENCE RUN — scope=… exit=… duration=… tree=… record=… \| cmd: …` line to a TDD run log through the normal `append` path (secret scan and path redaction included). `--start <epoch>` feeds the `relative` timestamp style. |
 
 The exit status is the command's own. A signal maps to `128 + n`, and a signal to the runner stops the whole process group and records the run as `interrupted`. A usage error, a refused command or an unavailable store exits `2`. The last output line is one summary: `zensu evidence-run: scope=… exit=… duration=…s tree=… record=… cmd=…`, with the command passed through the secret scan.
@@ -185,6 +186,9 @@ The tree fingerprint uses a temporary index, so the real index is never touched.
 |---|---|---|
 | `evidence.fullSuiteCommand` | unset | The command `--scope full` runs when no `--cmd` is given. While it is set, an explicit `--cmd` that differs from it is refused, so every `full` record names the configured suite. Unset, `--scope full` needs `--cmd`. |
 | `evidence.fullSuiteGate` | `required` | How `--chain-done` applies the full-suite verdict ([Full-Suite Gate](gates.md#full-suite-gate)): `required` refuses a missing, red, running, interrupted or stale record; `advisory` prints the same verdict marked `(advisory, not blocking)` and closes the chain. Any other value is treated as `required`, and the verdict says so. |
+| `evidence.fullSuiteRunner` | unset | `ci` or `local`: the team-wide choice of where a chain's full suite runs, the last rank of the [Full Suite in CI](#full-suite-in-ci) ladder. `local` always wins. `ci` takes effect only while the CI pull-request pipeline is verified. Any other value is ignored. |
+| `evidence.ci.workflow` | unset | The workflow file under `.github/workflows/` that runs the full suite on pull requests, for example `ci.yml`. Unset, the plugin picks the first workflow that triggers on `pull_request` and passes verification. |
+| `evidence.ci.job` | unset | The job name pattern that runs the suite. `*` matches any text, so `test (*)` binds every matrix shard. Unset, the plugin proposes the job that looks most like a test run. |
 
 ```json
 {
@@ -194,6 +198,28 @@ The tree fingerprint uses a temporary index, so the real index is never touched.
   }
 }
 ```
+
+#### Full Suite in CI
+
+A chain can leave its full suite to the repository's CI pull-request pipeline, so no full run happens on this machine. The tests affected by the change still run locally through `--scope scoped`, and the terminus closes as `FULL SUITE — deferred-ci` when every local test run on the current tree is green. The full suite then runs when a pull request is opened or updated. A red pull-request pipeline is possible, and the choice accepts it.
+
+```bash
+CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --full-suite-policy --refresh
+```
+
+The verb prints `full suite: ci`, `full suite: ask` or `full suite: local`, followed by the CI job, the command it runs, the local full-suite command, the age of the last pull-request run, whether the check blocks merges, the conditions found in the workflow, and who decided. `/zensu:tdd` runs it in Phase 0. On `ask`, an interactive chain asks the user once; a delegated or headless chain treats `ask` as `local`. `/zensu:full-suite` records the answer and reports the state with `--status`.
+
+**Verified** means all of this holds for a GitHub.com repository: a workflow under `.github/workflows/` triggers on `pull_request` (`pull_request_target` never counts), the repository is not a fork, and a job matching the bound pattern concluded `success` or `failure` in a completed pull-request run of the last 30 days. `skipped` and `cancelled` jobs do not count. Whether the check blocks merges is read from branch protection and rulesets and shown, never required. Path filters, branch filters and the `if:` conditions of the bound job are shown, not evaluated. The verification uses `gh api` and is cached in `$CLAUDE_PLUGIN_DATA/ci-contract/v1/`. `--refresh` reuses a proof younger than 24 hours and otherwise verifies again over the network. When that fails for a transient reason, such as no network or a missing or failing `gh`, the cached proof keeps counting for up to 7 days and the policy line names the failure. A refresh that finds the pipeline no longer qualifies removes the cached proof. Every other read uses the cache alone: a proof older than 24 hours is marked `(stale)`, and one older than 7 days no longer counts. An edit to the workflow file voids the proof at once. Other forges resolve to `local`.
+
+**Precedence.** `local` in any rank wins at once. CI runs need a `ci` choice in some rank and a verified pipeline:
+
+1. the session marker `.zensu/state/full-suite-<session>.json` (`/zensu:full-suite --ci|--local|--auto --session`);
+2. the record for this clone in the plugin data directory, shared by every worktree of the clone (`/zensu:full-suite --ci|--local|--auto --repo`);
+3. `evidence.fullSuiteRunner` in the config.
+
+With nothing recorded and a verified pipeline, the state is `ask`. A process inside CI (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `TF_BUILD` or `BUILDKITE`) never defers the suite to itself. `--tdd-begin` records the chain's runner in a snapshot, and the terminus honours CI only when the chain began with it: a switch to CI takes effect with the next chain, while a switch to local applies at once. Without a verified pipeline the chain runs the full suite locally, exactly as before, and the policy line names the reason. When a chain that chose CI closes locally, the terminus prints `FULL SUITE — local runner | <reason> | decided by: <rank>`.
+
+**Not covered.** A full-suite command the model runs by hand is not blocked; only the runner refusal and the skill text steer it. The chain does not wait for CI, and nothing makes the branch reach a pull request. Autopilot gates still run their own test gate locally. The per-clone record and the snapshot live in the plugin's private data directory, which a Bash redirect from the main thread can still write.
 
 ### Claude Environment and Native Placeholders
 

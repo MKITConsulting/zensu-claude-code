@@ -85,9 +85,9 @@ direct, autopilot or pilot answer decides only that plan or request), and
 
 ## What's included
 
-### Skills (29)
+### Skills (30)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (30 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (31 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -97,6 +97,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session |
+| `/zensu:full-suite` | Run full test suites in the verified CI pull-request pipeline instead of locally, for this repository or this session; affected tests stay local |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |

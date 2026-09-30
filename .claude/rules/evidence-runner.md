@@ -39,6 +39,13 @@ tree came out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`,
 its reason text reaches committed run-log lines. Over 20000 untracked files or 512 MiB,
 or on a git failure, the record carries no tree and names the reason.
 
+**`full` and `scoped` runs carry a tree** (`TREE_SCOPES`); `lint`, `build` and `coverage`
+stay untreed. `--if-stale` works for both: for `full` it reads the newest `full` record, for
+`scoped` the newest run of the same command. A local chain's verdict still reads only `full`
+records. A chain whose full suite runs in CI reads its `scoped` runs through `decideCi` and
+may close as `deferred-ci`, a passing state that is never persisted. That mode, its policy and
+its stores are described in `.claude/rules/full-suite-ci-deferral.md`.
+
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure
 is `unavailable` and blocks under `required`: a `safe.directory` refusal also exits 128,

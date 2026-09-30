@@ -858,13 +858,25 @@ reads the newest record, never a claim in the run log.
   plus `| run: <command>` when running the suite again is the remedy. Passing states: `pass`
   (the newest completed full run on the current tree exited 0; earlier red runs on the same tree
   add a `flaky` line), `pass-tree-unverified` (exit 0, but the tree could not be fingerprinted,
-  and the cause says why), `not-applicable` (the project is not a git repository or work tree,
-  or git is not installed) and `escaped`. Refusing states: `missing`, `running`, `failed`,
-  `interrupted`, `stale` (lists up to ten changed paths), `mutated-during-run` (the suite changed
-  files while it ran), `command-mismatch` (the run used another command than
-  `evidence.fullSuiteCommand`), `invalid` (the newest record does not validate) and
-  `unavailable` (the store or git could not be read). A refusal exits `1` and leaves the chain
-  open.
+  and the cause says why), `deferred-ci` (see CI mode below), `not-applicable` (the project is
+  not a git repository or work tree, or git is not installed) and `escaped`. Refusing states:
+  `missing`, `running`, `failed`, `interrupted`, `stale` (lists up to ten changed paths),
+  `mutated-during-run` (the suite changed files while it ran), `command-mismatch` (the run used
+  another command than `evidence.fullSuiteCommand`), `invalid` (the newest record does not
+  validate) and `unavailable` (the store or git could not be read). A refusal exits `1` and
+  leaves the chain open.
+- **CI mode.** In a chain whose full suite runs in the CI pull-request pipeline
+  ([Full Suite in CI](configuration.md#full-suite-in-ci)), the verdict reads the newest run of
+  each command on the current tree, `full` and `scoped` alike. A red, interrupted or mutating run
+  refuses. A green `full` run reads `pass`. Otherwise green `scoped` runs read `deferred-ci`, a
+  passing state whose cause says the full suite has not run anywhere for this change yet: CI runs
+  it when a pull request is opened or updated. A second line, `FULL SUITE — CI contract | …`,
+  names the workflow, the job, the last pull-request run and who decided. Runs only on an older
+  tree read `stale`, no test run reads `missing`, and every remedy renders `--scope scoped`.
+  `--evidence-run --scope full` is refused in such a chain unless `--local` is passed. A chain
+  keeps the runner it began with, so a switch to CI in the middle of a chain never relaxes its
+  terminus; a chain that chose CI but closes locally prints `FULL SUITE — local runner | …` with
+  the reason. The same `required` and `advisory` modes apply.
 - **Order.** A closed chain short-circuits first. A claimed ticket is then compared, read-only,
   with the session's consumed ticket; a wrong ticket is refused by the transition and never
   reaches the verdict. The verdict runs before the transition, and the pass line and the
