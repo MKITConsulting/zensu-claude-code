@@ -592,7 +592,7 @@ Two writers apply it:
 | Writer | What it covers |
 |--------|----------------|
 | `zensu-log.sh append` | the narrative log, at write time, including the runner's `EVIDENCE RUN — …` lines |
-| `hooks/post-artifact-redact.sh` | the plan (the named `file_path` on PostToolUse `Edit\|Write\|MultiEdit`), plus a bounded sweep on BOTH matchers that catches a hand-rolled `printf >>` and a subagent-written artifact |
+| `hooks/post-artifact-redact.sh` | the plan (the named `file_path` on PostToolUse `Edit\|Write\|MultiEdit`), plus a bounded sweep on BOTH matchers, limited to artifacts git does not confirm as tracked and unchanged, that catches a hand-rolled `printf >>` and a subagent-written artifact |
 
 `.zensu/state/` is ephemeral session state and never belongs in a commit, and
 nothing in the plugin reads, writes or checks a consuming repo's `.gitignore`, so
@@ -636,20 +636,25 @@ coverage of the surrounding shell command, which never carried the message.
 **This is writer-side only. No committed OBJECT is rewritten.** The ~436
 already-committed lines carrying absolute paths across four consuming repos stay
 in git history exactly as they are, and no repo becomes safe to open-source
-because of this change alone. One nuance worth stating rather than glossing: the
-sweep filters on mtime and knows nothing about git, so an already-committed
-artifact whose mtime is refreshed re-enters the window and IS redacted in the
-working tree — which shows up as an ordinary uncommitted diff, never as a rewrite
-of anything already recorded. What changes is that everything written from now on
-is publishable, so committing these artifacts stops adding to that pile.
+because of this change alone. The working tree is left alone too: a checkout
+refreshes the mtime of every committed artifact, so the sweep asks git first and
+skips every artifact git confirms as tracked and unchanged (`git status` does not
+list it and `git ls-files` does). An already-committed artifact is redacted only
+once it changes again, which shows up as an ordinary uncommitted diff, never as a
+rewrite of anything already recorded. When git cannot be asked, the sweep falls
+back to every artifact in its window and says so on stderr, because redacting too
+much is the safer failure. What changes is that everything written from now on is
+publishable, so committing these artifacts stops adding to that pile.
 
 **Bounds, stated rather than implied.** The rule is textual: a path spelled
 through a symlink or an alias that matches no known root is not caught (the one
 alias pair handled by hand is macOS's `/private/{tmp,var}`). A git repository
 root ABOVE the project root is covered only insofar as `$HOME` covers it. The
-PostToolUse sweep — on BOTH registered matchers — only revisits artifacts modified in the last 5 minutes, so plans
-from earlier runs are out of reach — this is a writer-side fix, not a history
-rewrite. And nothing here can recognize a customer name, an internal hostname,
+PostToolUse sweep — on BOTH registered matchers — only revisits artifacts modified in the last 5 minutes
+that git does not confirm as tracked and unchanged, so plans from earlier runs are
+out of reach — this is a writer-side fix, not a history rewrite. The same rule
+means an artifact committed before any main-thread pass reached it, such as one a
+subagent wrote and the next Bash call committed, is not swept once it is clean. And nothing here can recognize a customer name, an internal hostname,
 or a German sentence, which is why the plan template and `skills/tdd/SKILL.md`
 carry the authoring rules (English-only, repo-root-relative paths) as well.
 
