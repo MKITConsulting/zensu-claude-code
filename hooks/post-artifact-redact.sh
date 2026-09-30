@@ -23,7 +23,8 @@ set -u
 # the worst outcome this hook can produce.
 #
 # Scope. BOTH registered matchers sweep the artifacts modified in the last
-# `SWEEP_WINDOW_SECONDS`; the write matchers ADDITIONALLY redact the tool's own
+# `SWEEP_WINDOW_SECONDS` that git does not confirm as tracked and unchanged;
+# the write matchers ADDITIONALLY redact the tool's own
 # `tool_input.file_path`. Sweeping on the write matchers is not redundancy: this
 # hook is main-principal only, so a SUBAGENT-written artifact is reachable only
 # from a later main-thread pass, and more sampling points mean more chances to
@@ -43,15 +44,21 @@ set -u
 # can reject it. An earlier revision of this header claimed the window is what
 # keeps the sweep cheap in a repo holding hundreds of tracked plans, which was
 # not true. What bounds the sweep is `SWEEP_MAX_TARGETS` in the module.
-# Artifacts from earlier runs are out of reach on purpose, since this is a
-# writer-side fix and not a history rewrite.
+# A checkout rewrites every tracked artifact and refreshes its mtime, so before
+# that cap the module drops every candidate git confirms as tracked and
+# unchanged. That is what keeps artifacts from earlier runs out of reach on
+# purpose, since this is a writer-side fix and not a history rewrite. When git
+# cannot be asked, the sweep stays unscoped and the fallback is reported on
+# stderr: redacting too much is the safer failure.
 #
 # Bounds, stated rather than implied. This net is disabled entirely while the
 # session cannot bind its Session Control record — an unregistered session, or a
 # record whose project root is gone — and while the caller is not the main
 # principal. The first is reported on stderr; the second is not, for the reason
 # given at the guard. It is also bounded by `SWEEP_MAX_TARGETS` per invocation
-# and by the mtime window, so an artifact nothing touches again is not reached. There is
+# and by the mtime window, so an artifact nothing touches again is not reached,
+# and by git's view: an artifact committed before any main-thread pass reached
+# it is unchanged to git and is not reached either. There is
 # deliberately NO command-text pre-filter: `printf … >> "$LOG"` carries no
 # `.zensu` substring, and a net that the one spelling it exists to catch can
 # evade is not a net.
@@ -150,7 +157,12 @@ printf '%s' "$INPUT" | \
     // shape the subagent coverage exists for.
     const named = writeTool && job.tool_input && typeof job.tool_input.file_path === "string"
       ? job.tool_input.file_path : "";
-    const swept = mod.sweepTargets(project);
+    const sweep = mod.sweepTargets(project);
+    if (sweep.fallback) {
+      process.stderr.write("zensu: artifact sweep not scoped by git (" + sweep.fallback
+        + ") — artifacts git reports unchanged are swept too\n");
+    }
+    const swept = sweep.targets;
     // Deduplicated on the RESOLVED path: the named file is normally in the sweep
     // set too (it was just written), and without this a refusal would be
     // reported twice: once under the caller spelling, once under the sweep one.
