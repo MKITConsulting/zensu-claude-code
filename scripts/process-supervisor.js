@@ -8,10 +8,11 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const MAX_REQUEST_BYTES = 4096;
+const UNREACHABLE_EXIT_CODE = 3;
 
-function fail(message) {
+function fail(message, exitCode = 1) {
   process.stderr.write(`zensu process supervisor: ${message}\n`);
-  process.exit(1);
+  process.exit(exitCode);
 }
 
 function lease() {
@@ -28,25 +29,32 @@ function equalLease(left, right) {
 function signalGroup(pid, signal) {
   try { process.kill(-pid, signal); return true; }
   catch (error) {
-    if (error.code === 'ESRCH') return false;
+    if (error.code === 'ESRCH' || error.code === 'EPERM') return false;
     throw new Error(`failed to send ${signal} to owned process group: ${error.code || error.message}`);
   }
 }
 
-function groupAlive(pid) {
-  try { process.kill(-pid, 0); return true; }
+function probeGroup(pid) {
+  try { process.kill(-pid, 0); return 'alive'; }
   catch (error) {
-    if (error.code === 'ESRCH') return false;
+    if (error.code === 'ESRCH') return 'gone';
+    if (error.code === 'EPERM') return 'unsignalable';
     throw new Error(`failed to probe owned process group: ${error.code || error.message}`);
   }
 }
 
+function groupAlive(pid) {
+  return probeGroup(pid) === 'alive';
+}
+
 async function waitForGroupExit(pid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  while (groupAlive(pid) && Date.now() < deadline) {
+  let state = probeGroup(pid);
+  while (state !== 'gone' && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 50));
+    state = probeGroup(pid);
   }
-  return !groupAlive(pid);
+  return state;
 }
 
 async function start(readyPath, logPath, cwd, command, commandArgs) {
@@ -96,12 +104,12 @@ async function start(readyPath, logPath, cwd, command, commandArgs) {
     stopping = true;
     stopPromise = (async () => {
       signalGroup(child.pid, 'SIGTERM');
-      if (!await waitForGroupExit(child.pid, 5000)) {
+      let state = await waitForGroupExit(child.pid, 5000);
+      if (state === 'alive') {
         signalGroup(child.pid, 'SIGKILL');
-        if (!await waitForGroupExit(child.pid, 3000)) {
-          throw new Error('owned process group survived SIGKILL');
-        }
+        state = await waitForGroupExit(child.pid, 3000);
       }
+      if (state === 'alive') throw new Error('owned process group survived SIGKILL');
       cleanupPaths();
     })();
     return stopPromise;
@@ -206,6 +214,9 @@ async function request(readyPath, action) {
       catch (_error) { reject(new Error('invalid supervisor response')); }
     });
     socket.on('error', (error) => { clearTimeout(timer); reject(error); });
+  }).catch((error) => {
+    if (error.code === 'ECONNREFUSED') fail(`no supervisor answers at the recorded endpoint (${error.message})`, UNREACHABLE_EXIT_CODE);
+    throw error;
   });
   if (!response.ok) fail(response.error || 'supervisor rejected request');
   process.stdout.write(`${JSON.stringify(response)}\n`);
@@ -229,4 +240,4 @@ if (require.main === module) {
   main().catch((error) => fail(error.message));
 }
 
-module.exports = { equalLease, groupAlive, signalGroup, waitForGroupExit };
+module.exports = { UNREACHABLE_EXIT_CODE, equalLease, groupAlive, probeGroup, signalGroup, waitForGroupExit };

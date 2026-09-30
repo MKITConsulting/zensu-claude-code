@@ -27,6 +27,10 @@ A port the application binds is proposed only when the evidence shows how to pas
 `$ZENSU_VERIFY_PORT` in; an application that can bind only a fixed port is reported as
 "fixed port, shared resource" and left for the user to decide, never rewritten by setup.
 
+Flags must reach the dev server itself. npm needs a `--` before them and strips it
+(`npm run dev -- --host …`). pnpm forwards a literal `--` to the script, and Vite ignores every
+flag after it, so the pnpm form passes the flags directly (`pnpm dev --host …`).
+
 ## 2. Propose per service
 
 For every service the evidence names, propose:
