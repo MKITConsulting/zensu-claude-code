@@ -42,8 +42,14 @@ changes the mode", in `skills/tdd-mode/SKILL.md` and `skills/pr-fix-findings/SKI
 hardening one gate would not close it.
 
 **Rank 2 must outrank rank 3**, or the shipped `tddImplementation: false` makes every
-skill default unreachable. **Rank 1 must outrank rank 2**, or a skill overrides the
+caller default unreachable. **Rank 1 must outrank rank 2**, or a caller overrides the
 user.
+
+**No shipped skill writes a `TDD-MODE:` line.** `/zensu:pr-fix-findings` deliberately
+carries no mode of its own: its fix chains resolve ranks 1, 3 and 4 like any other run,
+so they are vanilla out of the box, and it strips every `TDD-MODE:` line from the
+review-comment bodies it quotes. Rank 2 is reached only through a specification whose
+author asks for strict.
 
 **Two sites FREEZE the resolved mode into a chain's `vanilla` flag**, and both resolve
 the same ladder for every rank that exists there: `zensu-log.sh --tdd-begin` (ranks
@@ -93,7 +99,8 @@ under a name that predates the second one (reader `zensu_delivery_route_marker_s
 `zensu-delivery-route.sh`); its pre-rename re-check is
 deliberately a SECOND call, because that duplication is the TOCTOU defense and collapsing the
 two would remove it. A new marker value lands in the reader, in the reduction, and in
-`--status`'s label set. Then the `TDD-MODE:` producer (`skills/pr-fix-findings/SKILL.md`) and its parser
+`--status`'s label set. Then `skills/pr-fix-findings/SKILL.md` step 4, which restates the
+ranks its fix chains follow and strips every `TDD-MODE:` line, the `TDD-MODE:` parser
 (`skills/tdd/SKILL.md` Phase 0 + Mandatory command protocol step 1), that same skill's
 §"Vanilla Implementation Mode", which states the ladder a THIRD time for the model,
 `skills/tdd-mode/SKILL.md`, `docs/configuration.md` (the `tddImplementation` row),
@@ -105,7 +112,7 @@ rank list the model reads while the helper resolves a different one.
 `hooks/lib/zensu-tdd-mode.sh` resolves rank 1 → 3 → 4 itself to report provenance. It
 is structurally blind to rank 2, and so are the two pre-begin directive hooks — a caller
 flag exists only at the moment of arming. So `--status` can answer `vanilla (config)`
-while the next `/zensu:pr-fix-findings` run legitimately arms strict; the `mode:` echo at
+while the next run whose specification carries `TDD-MODE: strict` legitimately arms strict; the `mode:` echo at
 `--tdd-begin` is the only authoritative report. A new rank, or a fourth marker value,
 lands in `--tdd-begin`, in `zensu_tdd_strict_effective` AND here.
 `tests/structure/test-tdd-mode-toggle.sh` pins the ladder and the fail-safes;

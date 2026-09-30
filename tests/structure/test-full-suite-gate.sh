@@ -51,8 +51,8 @@ WORK="$(cd -P "$WORK" && pwd -P)"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_TEST_PLUGIN_DATA="$WORK/plugin-data"
 export ZENSU_CONFIG="$WORK/config.json"
-printf '{}\n' > "$ZENSU_CONFIG"
-unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_FULL_SUITE_GATE ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE 2>/dev/null || true
+printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_FULL_SUITE_GATE ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE ZENSU_ACCEPTANCE_GATE 2>/dev/null || true
 source "$TDD_LIB"
 
 PROJ="$WORK/project"
@@ -228,7 +228,7 @@ else
   check "F9 arm a ticket-bound chain" FAIL
 fi
 
-printf '{"evidence":{"fullSuiteGate":"advisory"}}\n' > "$ZENSU_CONFIG"
+printf '{"evidence":{"fullSuiteGate":"advisory","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 if arm "fsg-advisory" "$PROJ"; then
   chain_done; RC=$?
   LEDGER="$(tdd_bypasses "$SF" 2>/dev/null)"
@@ -243,7 +243,7 @@ else
   check "F10 arm a ticket-bound chain" FAIL
 fi
 
-printf '{"evidence":{"fullSuiteGate":"sometimes"}}\n' > "$ZENSU_CONFIG"
+printf '{"evidence":{"fullSuiteGate":"sometimes","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 if arm "fsg-unknown-mode" "$PROJ"; then
   chain_done; RC=$?
   if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
@@ -258,12 +258,12 @@ else
   check "F11 arm a ticket-bound chain" FAIL
 fi
 
-printf '{"evidence":{"fullSuiteCommand":"echo configured"}}\n' > "$ZENSU_CONFIG"
+printf '{"evidence":{"fullSuiteCommand":"echo configured","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 if arm "fsg-mismatch" "$PROJ"; then
   run_full --cmd 'true'
-  printf '{}\n' > "$ZENSU_CONFIG"
+  printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
   run_full --cmd 'true'
-  printf '{"evidence":{"fullSuiteCommand":"echo configured"}}\n' > "$ZENSU_CONFIG"
+  printf '{"evidence":{"fullSuiteCommand":"echo configured","acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
   chain_done; RC=$?
   if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
     && grep -q '^FULL SUITE — command-mismatch | .* | cmd: echo configured | gate: required | run: CLAUDE_PLUGIN_DATA=.* --evidence-run --scope full$' "$WORK/err"; then
@@ -283,7 +283,7 @@ if arm "fsg-mismatch" "$PROJ"; then
 else
   check "F12 arm a ticket-bound chain" FAIL
 fi
-printf '{}\n' > "$ZENSU_CONFIG"
+printf '{"evidence":{"acceptanceGate":"advisory"}}\n' > "$ZENSU_CONFIG"
 
 if arm "fsg-plain" "$PLAIN"; then
   ZENSU_FULL_SUITE_GATE=off bash "$LOG" --chain-done --claimed-review-ticket "$TICKET" >"$WORK/out" 2>"$WORK/err"; RC=$?

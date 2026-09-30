@@ -94,13 +94,13 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:bootstrap` | Turn a vision document into tracked features, journeys, security profiles, and tiers |
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them |
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
-| `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
+| `/zensu:tdd` | The guided implementation workflow: build, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
