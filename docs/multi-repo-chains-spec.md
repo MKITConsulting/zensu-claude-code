@@ -47,10 +47,10 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites and they differ. `--tdd-complete`'s change count is NOT
 ambient: it resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1336`) and runs every `git` call with the discovery and
-config-injection variables unset (`:1380`, `:1393-1395`). The `--chain-done`
+(`hooks/lib/zensu-log.sh:1359`) and runs every `git` call with the discovery and
+config-injection variables unset (`:1403`, `:1416-1418`). The `--chain-done`
 zero-change terminus still reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` unscrubbed
-(`:2218-2220`) — ambient, with the same `.` fallback. An earlier revision of this
+(`:2241-2243`) — ambient, with the same `.` fallback. An earlier revision of this
 paragraph called the whole row ambient, which contradicted the superseded-fact
 paragraph below in the same section. Which root the ambient variable names in a
 multi-root topology, and what the fallback means when it is unset, is an open
@@ -61,7 +61,7 @@ question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:877`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1325`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1348`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -93,7 +93,7 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:369` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:370` refuses any
 reviewer path input outside the root with `file access must remain inside the
 immutable project root`, and `:341-343` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
@@ -421,8 +421,8 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:877` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1393-1395`, `:2218-2220` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:369`, `:347` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1416-1418`, `:2241-2243` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:370`, `:347` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -795,7 +795,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1303`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1326`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.
