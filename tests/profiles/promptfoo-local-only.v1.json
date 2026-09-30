@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "ciStructureTests": [
+    "test-acceptance-gate.sh",
     "test-agent-context.sh",
     "test-artifact-redaction.sh",
     "test-autopilot-adopt-cli.sh",

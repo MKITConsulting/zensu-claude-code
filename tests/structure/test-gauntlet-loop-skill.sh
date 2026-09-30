@@ -336,7 +336,7 @@ fi
 # derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and skills/,
 # and G12's own purpose — a prompt carrier must never TEACH one of these spellings —
 # applies to it exactly as it does to the nine gates.
-ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE FULL_SUITE_GATE'
+ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE FULL_SUITE_GATE ACCEPTANCE_GATE'
 # Quote tolerance: the gates decide the escape AFTER shell quote removal
 # (pre-edit-tdd-reminder.sh compares "${ZENSU_TDD_GATE:-}" = "off"), so prose
 # teaching ZENSU_CHAIN='off' disables the gate at runtime. A bare =off pattern
