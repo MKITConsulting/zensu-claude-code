@@ -1326,32 +1326,9 @@ tdd_chain_snapshot() {
         projectRoot:process.env.PROJECT_ROOT,
         sessionId:process.env.EXPECTED_SESSION,
       });
-      const natural=v=>Number.isSafeInteger(v)&&v>=0;
-      const linkId=v=>typeof v==="string"&&v.length>0&&v.length<=128&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v);
-      const root=s&&typeof s==="object"&&!Array.isArray(s)&&typeof s.phase==="string"
-        &&Array.isArray(s.history)&&Array.isArray(s.bypasses)
-        &&typeof s.active==="boolean"&&typeof s.vanilla==="boolean"
-        &&typeof s.implComplete==="boolean"&&typeof s.chainDone==="boolean"
-        &&typeof s.codeReviewDone==="boolean"&&typeof s.selfReviewFixed==="boolean"
-        &&typeof s.reviewTicket==="string"&&typeof s.reviewTicketConsumed==="boolean"
-        &&natural(s.reviewRound)&&natural(s.stopBlockCount);
-      if(!root)process.exit(3);
-      const values=[s.autopilotRunId,s.autopilotAttempt,s.autopilotReturnStage,s.chainId,s.chainOutcome];
-      const count=values.filter(v=>v!==undefined).length;
-      let autopilot=null;
-      if(count!==0){
-        const valid=count===values.length&&linkId(s.autopilotRunId)
-          &&Number.isInteger(s.autopilotAttempt)&&s.autopilotAttempt>=1&&s.autopilotAttempt<=999
-          &&["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
-          &&linkId(s.chainId)&&["","pass","no-changes","max-rounds"].includes(s.chainOutcome);
-        if(!valid)process.exit(3);
-        autopilot={runId:s.autopilotRunId,attempt:s.autopilotAttempt,
-          returnStage:s.autopilotReturnStage,chainId:s.chainId,outcome:s.chainOutcome};
-      }
-      process.stdout.write(JSON.stringify({sessionId:process.env.EXPECTED_SESSION,active:s.active,
-        implComplete:s.implComplete,chainDone:s.chainDone,codeReviewDone:s.codeReviewDone,
-        selfReviewFixed:s.selfReviewFixed,vanilla:s.vanilla,
-        stopBlockCount:s.stopBlockCount,autopilot}));
+      const snapshot=core.workflowChainSnapshot(s,process.env.EXPECTED_SESSION);
+      if(!snapshot)process.exit(3);
+      process.stdout.write(JSON.stringify(snapshot));
     } catch (_) { process.exit(3); }
   ' 2>/dev/null
 }

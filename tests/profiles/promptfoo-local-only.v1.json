@@ -112,6 +112,7 @@
     "test-smoke-main-thread-chain.sh",
     "test-state-verb-diagnostics.sh",
     "test-stop-enforcer-escapes.sh",
+    "test-stop-enforcer-latency.sh",
     "test-stop-enforcer-reviewer-denial-note.sh",
     "test-stop-enforcer-self-review-routing.sh",
     "test-stop-enforcer-subagent-noop.sh",

@@ -3931,6 +3931,58 @@ function readWorkflowState(options) {
   return validateWorkflowState(readJson(file), options.sessionId);
 }
 
+const CHAIN_SNAPSHOT_RETURN_STAGES = Object.freeze([
+  'GATES',
+  'CONVERGE',
+  'FIX_FINDINGS',
+  'VALIDATE',
+  'COVER',
+]);
+const CHAIN_SNAPSHOT_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds']);
+
+function workflowChainSnapshot(state, sessionId) {
+  const natural = (value) => Number.isSafeInteger(value) && value >= 0;
+  const linkId = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128
+    && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+  const s = state;
+  const root = s && typeof s === 'object' && !Array.isArray(s) && typeof s.phase === 'string'
+    && Array.isArray(s.history) && Array.isArray(s.bypasses)
+    && typeof s.active === 'boolean' && typeof s.vanilla === 'boolean'
+    && typeof s.implComplete === 'boolean' && typeof s.chainDone === 'boolean'
+    && typeof s.codeReviewDone === 'boolean' && typeof s.selfReviewFixed === 'boolean'
+    && typeof s.reviewTicket === 'string' && typeof s.reviewTicketConsumed === 'boolean'
+    && natural(s.reviewRound) && natural(s.stopBlockCount);
+  if (!root) return null;
+  const values = [s.autopilotRunId, s.autopilotAttempt, s.autopilotReturnStage, s.chainId, s.chainOutcome];
+  const count = values.filter((value) => value !== undefined).length;
+  let autopilot = null;
+  if (count !== 0) {
+    const valid = count === values.length && linkId(s.autopilotRunId)
+      && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+      && CHAIN_SNAPSHOT_RETURN_STAGES.includes(s.autopilotReturnStage)
+      && linkId(s.chainId) && CHAIN_SNAPSHOT_OUTCOMES.includes(s.chainOutcome);
+    if (!valid) return null;
+    autopilot = {
+      runId: s.autopilotRunId,
+      attempt: s.autopilotAttempt,
+      returnStage: s.autopilotReturnStage,
+      chainId: s.chainId,
+      outcome: s.chainOutcome,
+    };
+  }
+  return {
+    sessionId,
+    active: s.active,
+    implComplete: s.implComplete,
+    chainDone: s.chainDone,
+    codeReviewDone: s.codeReviewDone,
+    selfReviewFixed: s.selfReviewFixed,
+    vanilla: s.vanilla,
+    stopBlockCount: s.stopBlockCount,
+    autopilot,
+  };
+}
+
 function readWorkflowStateSnapshot(projectRoot, sessionId) {
   const file = workflowStateFile(projectRoot, sessionId);
   const snapshot = readRegularFileSnapshot(file);
@@ -5755,6 +5807,7 @@ module.exports = {
   transitionWorkflowState,
   resetReviewBudget,
   readWorkflowState,
+  workflowChainSnapshot,
   inspectDeferredReviewOwner,
   deferredReviewOwnedByOther,
   prepareDeferredReviewTransfer,

@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discarded; before this fix the next tool call redacted the restored file again. The sweep asks
   git which artifacts changed, so outside a git repository, or when `git` fails or times out, it
   sweeps every recent artifact as before and says so on stderr.
+- **chain-enforcer**: the `Stop` hook now has a whole-hook deadline of 45 s. Checks that have
+  not finished by then are stopped: a decision they already wrote stands, and otherwise the
+  Stop is released with a stderr notice that no completion was proven. The next Stop
+  evaluates again, and the release is not recorded in the bypass ledger. Set
+  `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment to move the bound between 10 s
+  and 75 s; the `Stop` registration carries a 90 s host `timeout` above that ceiling. A Stop
+  with no armed review chain, no Autopilot run and no queued review now returns right after
+  the session bind instead of running every check.
 
 ## [0.22.0] - 2026-09-28
 
