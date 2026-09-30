@@ -6,11 +6,10 @@ const path = require('node:path');
 const core = require('./session-control-core-v1.js');
 const hostPaths = require('./claude-path-v1.js');
 const principals = require('./claude-principal-v1.js');
-// Top-level here is fine: this adapter is a hook entry point nothing requires,
-// so adapter -> auto-adopt -> sweep -> lease -> binder -> core is acyclic. The
-// binder itself must require the same module lazily — see its header.
-const defaultAutoAdopt = require('./session-auto-adopt-v1.js');
-const autoAdopt = defaultAutoAdopt;
+// LAZY, like the binder and the `.*` gate: the module pulls in the lease sweep, and
+// a SessionStart or SubagentStart whose record serves never needs it — nor does a
+// plugin tree that ships this adapter without it, which must still bind.
+const autoAdoptModule = () => require('./session-auto-adopt-v1.js');
 const defaultCore = core;
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
@@ -173,7 +172,7 @@ const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missi
 // binder's stderr line is a third surface with its own lead-in; it shares the
 // SCREENS, not the renderer.)
 function adoptionNotice(adoption, label) {
-  return autoAdopt.renderAdoptionNotice(adoption, { where: `at this ${label}` });
+  return autoAdoptModule().renderAdoptionNotice(adoption, { where: `at this ${label}` });
 }
 
 // Serve the existing record, or ADOPT it when the executing installation cannot
@@ -198,8 +197,7 @@ function adoptionNotice(adoption, label) {
 // from the upgrade suite, whose held lock makes every racer probe the old record.
 function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun, deps) {
   const core = (deps && deps.core) || defaultCore;
-  const autoAdopt = (deps && deps.autoAdopt) || defaultAutoAdopt;
-  const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
+  const loadAutoAdopt = (deps && deps.loadAutoAdopt) || autoAdoptModule;
   // The version this process READ before anyone adopted, kept for the sibling
   // case below. It is the only honest source for "updated FROM": once a sibling
   // has re-minted the record, its plugin_version is the executing version.
@@ -216,6 +214,14 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
   try {
     return { context: serve(), adoption: null };
   } catch (error) {
+    let autoAdopt;
+    try {
+      autoAdopt = (deps && deps.autoAdopt) || loadAutoAdopt();
+    } catch (loadError) {
+      const cause = String((loadError && loadError.message) || loadError).split('\n')[0];
+      fail(`${label}: automatic adoption unavailable (${cause}); ${error.message}`);
+    }
+    const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
     // The observed version travels ON THE REQUEST: an `already-served` verdict has
     // no `recorded` of its own, and the module is the one place that may put the
     // caller's observation on the verdict. This process used to patch the returned

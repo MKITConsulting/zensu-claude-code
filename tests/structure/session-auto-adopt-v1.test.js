@@ -627,7 +627,11 @@ test('the candidate files equal those of _ZENSU_STRICT_JS in zensu-config.sh', (
     { ZENSU_CONFIG: '/explicit.json', HOME: '/h', CLAUDE_PROJECT_DIR: '/p' },
     {},
   ]) {
-    assert.deepEqual(moduleCands(env), shellCands(env), JSON.stringify(env));
+    assert.deepEqual(
+      moduleCands(env).map((file) => path.normalize(file)),
+      shellCands(env).map((file) => path.normalize(file)),
+      JSON.stringify(env),
+    );
   }
 });
 
@@ -924,6 +928,55 @@ test('the adapter names an adoption it performed when the strict re-read still f
       { core, autoAdopt: { ...mod, adoptForHook: refusing.adoptForHook } }),
     /resume context: automatic adoption refused \(executing-runtime-older\); /,
   );
+});
+
+test('the adapter loads the adoption module only after the strict serve fails', () => {
+  const adapter = require(path.join(LIB, 'claude-session-control-v1.js'));
+  let loads = 0;
+  const healthy = adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'label', 'session', {
+    core: { readContext: () => ({ plugin_version: '0.21.1', plugin_data: '/data' }), servesRecordedRuntime: () => true },
+    loadAutoAdopt: () => { loads += 1; throw new Error('must not be loaded'); },
+  });
+  assert.equal(healthy.adoption, null);
+  assert.equal(loads, 0);
+  const refusing = mod.createAutoAdopter({
+    core: stubCore({ adoptableRecord: () => ({ ok: false, reason: 'executing-runtime-older', recorded: '0.20.0', executing: '0.19.0' }) }).core,
+    sweep: stubSweep().sweep,
+    readConfig: () => ({}),
+  });
+  assert.throws(
+    () => adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session', {
+      core: { readContext: () => ({ plugin_version: '0.20.0', plugin_data: '/data' }), servesRecordedRuntime: () => false },
+      loadAutoAdopt: () => { loads += 1; return { ...mod, adoptForHook: refusing.adoptForHook }; },
+    }),
+    /resume context: automatic adoption refused \(executing-runtime-older\); /,
+  );
+  assert.equal(loads, 1);
+});
+
+test('an adapter tree without the adoption module still loads, and a failed serve names the missing module', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-adapter-lean-'));
+  try {
+    for (const file of ['claude-session-control-v1.js', 'session-control-core-v1.js', 'claude-path-v1.js', 'claude-principal-v1.js']) {
+      fs.copyFileSync(path.join(LIB, file), path.join(root, file));
+    }
+    const adapter = require(path.join(root, 'claude-session-control-v1.js'));
+    assert.equal(typeof adapter.serveOrAdopt, 'function');
+    let thrown = null;
+    try {
+      adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session', {
+        core: { readContext: () => ({ plugin_version: '0.20.0', plugin_data: '/data' }), servesRecordedRuntime: () => false },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown, 'a failed serve with no adoption module must still fail the hook');
+    assert.match(thrown.message, /resume context: automatic adoption unavailable \(Cannot find module '\.\/session-auto-adopt-v1\.js'\); /);
+    assert.match(thrown.message, /plugin root is neither the session's plugin nor a compatible upgrade of it/);
+    assert.doesNotMatch(thrown.message, /Require stack/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('the confined sentence names the version pair and never the kept record or a command', () => {
