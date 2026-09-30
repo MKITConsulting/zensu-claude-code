@@ -6,6 +6,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+STOP_WORKER_FLAG="$( ( source "$PLUGIN_DIR/hooks/lib/zensu-stop-deadline.sh"; printf '%s' "$ZENSU_STOP_WORKER_FLAG" ) )"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 if [ "$#" -gt 0 ]; then
@@ -252,10 +253,11 @@ canonical_session() {
 }
 stop() (
   local sid="$1"
+  shift
   activate_session "$sid" || exit 1
   printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     ZENSU_CONFIG="$CASE_CONFIG" \
-    bash "$STOP" 2>/dev/null
+    bash "$STOP" "$@" 2>/dev/null
 )
 state_flag() {
   local key
@@ -466,7 +468,7 @@ zlog --pending-review --files x.ts >/dev/null
 i=1
 while [ "$i" -le 20 ]; do
   (
-    if stop "parallel-$i" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
+    if stop "parallel-$i" "$STOP_WORKER_FLAG" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
     printf '%s\n' "$stop_rc" > "$CASE_ROOT/rc-$i"
   ) &
   i=$((i + 1))

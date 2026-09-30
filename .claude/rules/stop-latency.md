@@ -4,6 +4,7 @@ paths:
   - "hooks/lib/zensu-stop-deadline.sh"
   - "hooks/lib/stop-idle-probe-v1.js"
   - "tests/structure/test-stop-enforcer-latency.sh"
+  - "tests/structure/test-deferred-review-claim.sh"
 ---
 
 # Stop Hook Latency (`zensu-stop-deadline.sh` + `stop-idle-probe-v1.js`)
@@ -91,6 +92,11 @@ kills both groups at once.
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
   load ~740: the `hooks.chainEnforcer=false` branch needed more than 45 s.
+- A check that races many Stops at once runs the worker directly (`--zensu-stop-worker`),
+  because the deadline is per Stop and the race makes every Stop slow. C1 in
+  `test-deferred-review-claim.sh` starts 20 Stops together, and the check took 186 s on the
+  Windows runner on `main`; under the default deadline all 20 were released before any
+  adopted the queued review. Such a check tests the claim protocol, not the bound; the latency suite pins the bound.
 - On Git Bash the process-group kill is unverified; its fallback kills only the worker pid.
 
 **Version: `patch`.** No schema field, no strict key set, no hook added, removed or renamed, no
