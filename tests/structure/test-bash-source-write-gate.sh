@@ -441,7 +441,7 @@ OUT="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" C
   || check "W30 process-env escape (got '$OUT')" FAIL
 
 # The parser remains fail-open only after a trusted hook session is bound;
-# empty/non-JSON payloads cannot establish that binding and are denied.
+# empty/non-JSON payloads cannot establish that binding and are denied while the gate is opted in.
 OUT="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 OUT2="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 { [ "$OUT" = "DENY" ] && [ "$OUT2" = "DENY" ]; } \

@@ -83,7 +83,7 @@ unscrubbed — see the paragraph above.
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
 (`hooks/lib/bash-source-write-parse.js:829`) and rule (C) at the same predicate
 for git targets (`:875`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:724`). `hooks/pre-edit-tdd-reminder.sh:139-166` resolves a
+`CLAUDE_PROJECT_DIR` (`:724`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is

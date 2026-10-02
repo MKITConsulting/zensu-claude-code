@@ -230,7 +230,10 @@ the skills named above needs a `cd` into the new anchor, and what other skills r
 working directory — `/zensu:plan-review`'s plan and persona discovery, `/zensu:setup`'s
 project-local config target, the load-time overlays of `/zensu:tdd` and `/zensu:cover`, the
 templates of `/zensu:autopilot` and `/zensu:pilot`, and the checkout `/zensu:autopilot` opens its
-pull request from — still comes from the start directory's worktree of the same repository; a
+pull request from — still comes from the start directory's worktree of the same repository; the
+source-write gate reads its project-level `hooks.bashWriteGate` opt-in through the host's
+`CLAUDE_PROJECT_DIR`, ahead of its bind, so after a move the start worktree's
+`.zensu/config.json` still decides whether the gate runs; a
 project whose root holds a double quote, a dollar sign, a backtick or a backslash cannot run
 `/zensu:tdd`, because `--project-root` refuses it; open work under the old root must reach its end
 first;

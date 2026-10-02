@@ -142,7 +142,8 @@ scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`; the pruned branch
 the lineage branch, which lives ONCE — in `zensu_emit_named_bind_deny`, which all four
 binding gates
 (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
-`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) call rather than spelling the
+`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`; the source-write gate reaches it only
+while `hooks.bashWriteGate` is `true`) call rather than spelling the
 ladder themselves — and the self-worded FIFTH
 denier in `reviewer-capability-v1.js` — five deniers, the same set as the lineage
 state, which that file's own neighbouring comments already count as five; the FOURTH release arm in

@@ -163,7 +163,8 @@ source in **another repository** is refused as `status: blocked` with `reasonCod
 ref is measured there and would resolve against your history instead. The plan is rendered and never
 executed so a human sees and approves it before anything runs — not because these rules cover it. Be
 precise about that, since the block invites the reader to substitute their own target: of its four
-writing commands only `git apply` and the patch redirect are judged here. `git worktree add` is
+writing commands only `git apply` and the patch redirect are judged here, and only while the gate
+is on. `git worktree add` is
 **not** — `worktree` is gated for `remove`/`move` only, as the table above says — and the `tar`
 extraction carries none of the channels rule (A)/(B) recognize. The renderer's own guards (same
 repository, existing anchor, resolved branch) are what stand in for that. A worktree the script
@@ -732,8 +733,8 @@ nobody can run. `/zensu:adopt-session --restore-root` is the slash equivalent.
 `/zensu:adopt-session --restore-root` reports the verdict and writes nothing; adding
 `--confirm` performs both halves in one run. **The path comes only from the record.**
 No argument names a directory anywhere in this mode, and neither literal it accepts takes a
-value, so the anchor never moves and the source-write gate compares against exactly the root
-it compared against before. Creating a directory at a path the record already names restores the
+value, so the anchor never moves and the source-write gate, whenever it is opted in, compares
+against exactly the root it compared against before. Creating a directory at a path the record already names restores the
 authority the session already had and adds none.
 
 **Carried from the record is not the same as bounded, and only the first is true.** This is the

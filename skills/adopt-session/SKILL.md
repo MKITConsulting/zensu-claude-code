@@ -348,7 +348,9 @@ baseline, edit-landing audit, test runs and acceptance checks follow the move, a
 quote, a dollar sign, a backtick or a backslash, which `--project-root` refuses; the report
 then says so instead of promising a chain. `/zensu:plan-review`, `/zensu:setup`,
 `/zensu:cover`, `/zensu:autopilot` and `/zensu:pilot` still read plans, config, overlays and
-templates from the start directory.
+templates from the start directory, and so does the source-write gate's project-level
+`hooks.bashWriteGate` opt-in, which it reads through the host's project directory ahead of
+its bind.
 
 The target is verified, never trusted. It refuses unless every one of these holds:
 

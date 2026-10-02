@@ -157,7 +157,7 @@ case "$E1D" in
   (DENY:*) check "E1d a review-aspect reviewer cannot read the sibling worktree yet" PASS ;;
   (*) check "E1d reviewer read of the sibling worktree (got '$E1D')" FAIL ;;
 esac
-E1E="$(ZENSU_CONFIG="$GATE_ON_CONFIG" run_hook pre-bash-source-write-gate.sh"$(bash_payload "$B" "CLAUDE_PLUGIN_DATA=\"$DATA\" bash \"$REANCHOR\" --confirm")" | decision)"
+E1E="$(ZENSU_CONFIG="$GATE_ON_CONFIG" run_hook pre-bash-source-write-gate.sh "$(bash_payload "$B" "CLAUDE_PLUGIN_DATA=\"$DATA\" bash \"$REANCHOR\" --confirm")" | decision)"
 expect_eq "E1e the bound session's Bash gate admits the re-anchor command itself" "ALLOW" "$E1E"
 
 echo "=== E2: the read-only report ==="

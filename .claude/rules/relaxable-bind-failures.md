@@ -140,7 +140,8 @@ and `pruned-plugin-root` — take the two versions as their first positional arg
 adoption token as `$4` and the audience as `$5`; `adoption-incomplete` takes the token
 and the audience alone, because a lost race establishes no version pair (see
 `.claude/rules/automatic-adoption.md`). FIVE gates can deny
-in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
+in either state — the source-write gate only while `hooks.bashWriteGate` is `true`, because its
+config check sits ahead of its bind: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
 left on the generic text tells the user to start a fresh session while its sibling says the session can

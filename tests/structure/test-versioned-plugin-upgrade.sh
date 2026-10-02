@@ -509,8 +509,6 @@ TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
 TMP="$(cd -P -- "$TMP_RAW" && pwd -P)" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot canonicalize temp directory' >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
-printf '%s\n' '{"hooks":{"bashWriteGate":true}}' > "$TMP/gate-on-config.json"
-export ZENSU_CONFIG="$TMP/gate-on-config.json"
 ROOT_REVISION="$(git -C "$ROOT" rev-parse HEAD)"
 
 PROVENANCE_SOURCE="$TMP/provenance-source"
@@ -639,7 +637,7 @@ mkdir -p "$SHARED_DATA" "$PROJECT"
 # otherwise adopt the record and every later row would grade a served session. The
 # AUTO-* rows in Part E drive the default path, each on a session of its own.
 OPT_OUT_CONFIG="$TMP/session-auto-adopt-off.json"
-printf '%s\n' '{"hooks":{"sessionAutoAdopt":false}}' >"$OPT_OUT_CONFIG"
+printf '%s\n' '{"hooks":{"sessionAutoAdopt":false,"bashWriteGate":true}}' >"$OPT_OUT_CONFIG"
 # The opt-out is passed PER DRIVE, as a command-scoped `ZENSU_CONFIG=` prefix, never
 # exported: exporting it would switch the default path off for every AUTO-* row too.
 #
@@ -648,10 +646,11 @@ printf '%s\n' '{"hooks":{"sessionAutoAdopt":false}}' >"$OPT_OUT_CONFIG"
 # developer whose global config carries `sessionAutoAdopt: false` turned every
 # default-path row red for a reason unrelated to the tree under test, and one whose
 # config disables any other hook changed what those rows graded. `ZENSU_CONFIG` names
-# a file verbatim and outranks both sources, so an empty object here makes the default
-# path hermetic; a per-drive prefix still wins, being command-scoped.
+# a file verbatim and outranks both sources, so an object that only opts the source-write
+# gate in makes the default path hermetic; a per-drive prefix still wins, being
+# command-scoped, and carries the same opt-in.
 HERMETIC_CONFIG="$TMP/hermetic-config.json"
-printf '%s\n' '{}' >"$HERMETIC_CONFIG"
+printf '%s\n' '{"hooks":{"bashWriteGate":true}}' >"$HERMETIC_CONFIG"
 export ZENSU_CONFIG="$HERMETIC_CONFIG"
 
 tree_digest() {

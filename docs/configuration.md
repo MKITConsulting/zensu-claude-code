@@ -92,7 +92,7 @@ Zensu ships twenty-nine automatic hooks that fire across the development lifecyc
 - File missing -> all hooks active (default, backward compatible), except the opt-in keys below
 - Key missing -> hook active
 - Only an explicit boolean `false` disables a hook
-- Opt-in keys are the exception: `bashWriteGate` and `tddImplementation` take effect only as an explicit boolean `true`; absent, `false` or a quoted `"true"` leaves them off
+- Opt-in hook keys are the exception: `bashWriteGate` and `tddImplementation` take effect only as an explicit boolean `true`; absent, `false` or a quoted `"true"` leaves them off
 - Override the config path via the `ZENSU_CONFIG` environment variable
 
 > Flag names are **case-sensitive** and must be **JSON booleans**, not strings. A misspelled key or a quoted `"false"` is silently treated as enabled, and a quoted `"true"` on an opt-in key is silently treated as off.
