@@ -6,6 +6,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+STOP_WORKER_FLAG="$( ( source "$PLUGIN_DIR/hooks/lib/zensu-stop-deadline.sh"; printf '%s' "$ZENSU_STOP_WORKER_FLAG" ) )"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 if [ "$#" -gt 0 ]; then
@@ -252,10 +253,11 @@ canonical_session() {
 }
 stop() (
   local sid="$1"
+  shift
   activate_session "$sid" || exit 1
   printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     ZENSU_CONFIG="$CASE_CONFIG" \
-    bash "$STOP" 2>/dev/null
+    bash "$STOP" "$@" 2>/dev/null
 )
 state_flag() {
   local key
@@ -273,6 +275,115 @@ wait_for_file() {
 }
 claim_summary() {
   node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(typeof j.summary==="string"?j.summary:"invalid")}catch(_){process.stdout.write("invalid")}' "$1"
+}
+observed_stop() (
+  local log="$1" sid="$2"
+  export NODE_OPTIONS="--require=$PLUGIN_DIR/tests/structure/fixtures/deferred-owner-liveness-observer.js"
+  export ZENSU_TEST_OWNER_OBSERVER_LOG="$log"
+  stop "$sid"
+)
+owner_observations() {
+  OBSERVER_LOG="$1" node -e '
+    const fs = require("fs");
+    let lines = [];
+    try {
+      lines = fs.readFileSync(process.env.OBSERVER_LOG, "utf8").split(/\r?\n/).filter(Boolean);
+    } catch (_) {
+      process.stdout.write("no-decisions");
+      process.exit(0);
+    }
+    const records = lines.map((line) => {
+      try { return JSON.parse(line); } catch (_) { return { error: "unparseable" }; }
+    });
+    const alive = records.filter((record) => record.alive === true);
+    const errors = records.filter((record) => record.error).length;
+    const unobservable = errors ? `,${errors}-unobservable` : "";
+    if (alive.length === 0) {
+      process.stdout.write(`none-alive(${records.length}-decisions${unobservable})`);
+      process.exit(0);
+    }
+    process.stdout.write(alive.map((record) => [
+      `${record.method}:pid=${record.pid}`,
+      `image=${record.image}`,
+      `handoff=${record.handoff}`,
+      `stored=${record.stored || "null"}`,
+      `actual=${record.actual || "null"}`,
+    ].join(",")).join(";"));
+  '
+}
+alive_owner_note() {
+  case "$1" in
+    (*pid=*) printf ' [decision-time owner PID alive: %s]' "$1" ;;
+    (*) : ;;
+  esac
+}
+start_impostor() {
+  local pid_file="$1" waits=0
+  IMPOSTOR_STOP_FILE="$pid_file.stop"
+  PID_FILE="$pid_file" STOP_FILE="$IMPOSTOR_STOP_FILE" node -e '
+    const fs = require("fs");
+    fs.writeFileSync(`${process.env.PID_FILE}.tmp`, `${process.pid}\n`);
+    fs.renameSync(`${process.env.PID_FILE}.tmp`, process.env.PID_FILE);
+    setInterval(() => {
+      if (fs.existsSync(process.env.STOP_FILE)) process.exit(0);
+    }, 50);
+    setTimeout(() => process.exit(0), 600000);
+  ' & IMPOSTOR_JOB=$!
+  until wait_for_file "$pid_file" || [ "$waits" -ge 6 ]; do
+    waits=$((waits + 1))
+  done
+  IMPOSTOR_PID="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null)"
+}
+stop_impostor() {
+  if [ -n "${IMPOSTOR_STOP_FILE:-}" ]; then
+    : > "$IMPOSTOR_STOP_FILE"
+  fi
+  wait "${IMPOSTOR_JOB:-}" 2>/dev/null || true
+  IMPOSTOR_PID=""
+  IMPOSTOR_JOB=""
+  IMPOSTOR_STOP_FILE=""
+}
+plant_owner() {
+  local claim_file="$1" owner_pid="$2" identity_mode="$3" ts_mode="$4"
+  CONTROL_CORE="$CORE" CLAIM_FILE="$claim_file" OWNER_PID="$owner_pid" \
+    IDENTITY_MODE="$identity_mode" TS_MODE="$ts_mode" node -e '
+      const fs = require("fs");
+      const core = require(process.env.CONTROL_CORE);
+      const pid = Number.parseInt(process.env.OWNER_PID, 10);
+      const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+      let identity = null;
+      if (process.env.IDENTITY_MODE !== "none") {
+        const actual = core.processStartIdentityForPid(pid);
+        if (!actual) {
+          process.stdout.write("unsupported");
+          process.exit(0);
+        }
+        identity = process.env.IDENTITY_MODE === "genuine"
+          ? actual
+          : `${actual.slice(0, -1)}${actual.endsWith("0") ? "1" : "0"}`;
+      }
+      claim.ownerPid = pid;
+      claim.ownerProcessStartIdentity = identity;
+      if (process.env.TS_MODE === "expire") claim.ts = "2020-01-01T00:00:00Z";
+      core.atomicWriteJson(process.env.CLAIM_FILE, claim);
+      let alive = false;
+      try {
+        process.kill(pid, 0);
+        alive = true;
+      } catch (error) {
+        alive = error.code === "EPERM";
+      }
+      const shape = claim.handoffEmitted === true ? "handoff" : "unacknowledged";
+      const stored = identity === null ? "null" : process.env.IDENTITY_MODE;
+      process.stdout.write(`${alive ? "planted" : "dead"}:${shape}:${stored}`);
+    '
+}
+DEAD_OWNER_PID=2147483647
+observed_owner_alive() {
+  case "$1" in
+    (*"pid=$2,"*) return 0 ;;
+    (*) return 1 ;;
+  esac
 }
 
 PID_WIRING_OK="$(STOP_FILE="$STOP" TDD_FILE="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" \
@@ -459,6 +570,273 @@ else
   check "L2 writer/cleanup lock serialization (waited=$LOCK_CLEAR_WAITED clear=$(cat "$CASE_ROOT/clear.rc" 2>/dev/null) writer=$(cat "$CASE_ROOT/writer-clear.rc" 2>/dev/null) queue=$(claim_summary "$CASE_STATE/pending-review.json"))" FAIL
 fi
 
+setup_case lock_contract
+LOCK_CONTRACT_SCRIPT='
+  const fs = require("fs");
+  const path = require("path");
+  const root = process.env.PLUGIN_ROOT;
+  const files = [];
+  const scripts = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".sh")) files.push(full);
+      else if (entry.isFile() && entry.name.endsWith(".js")) scripts.push(full);
+    }
+  };
+  walk(path.join(root, "hooks"));
+  const relativeTo = (file) => path.relative(root, file).split(path.sep).join("/");
+  const sites = [];
+  for (const file of files.sort()) {
+    const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+    let current = null;
+    lines.forEach((line, index) => {
+      const definition = /^([A-Za-z_][A-Za-z0-9_]*)\(\) *[{(]$/.exec(line);
+      if (definition) {
+        current = definition[1];
+        return;
+      }
+      if (line === "}" || line === ")") {
+        current = null;
+        return;
+      }
+      if (/^\s*(#|export -f )/.test(line)) return;
+      let text = line;
+      for (let next = index + 1; /\\$/.test(text) && next < lines.length; next += 1) {
+        text = `${text.slice(0, -1)} ${lines[next]}`;
+      }
+      sites.push({ where: `${relativeTo(file)}:${index + 1}`, fn: current, line, text });
+    });
+  }
+  const words = (text) => {
+    const tokens = [];
+    let index = 0;
+    while (index < text.length) {
+      if (/\s/.test(text[index])) {
+        index += 1;
+        continue;
+      }
+      if (";|&<>".includes(text[index])) break;
+      let token = "";
+      while (index < text.length && !/\s/.test(text[index]) && !";|&<>".includes(text[index])) {
+        const quote = text[index];
+        if (quote === "\"" || quote === "\x27") {
+          const end = text.indexOf(quote, index + 1);
+          const stop = end < 0 ? text.length : end;
+          token += text.slice(index + 1, stop);
+          index = stop + 1;
+        } else {
+          token += quote;
+          index += 1;
+        }
+      }
+      tokens.push(token);
+    }
+    return tokens;
+  };
+  const beginCall = /(^|[^A-Za-z0-9_])tdd_begin_session([^A-Za-z0-9_(]|$)/;
+  const beginCritical = /(^|[^A-Za-z0-9_])_tdd_begin_session_critical([^A-Za-z0-9_]|$)/;
+  const inspectCall = /(^|[^A-Za-z0-9_$])inspectDeferredReviewOwner\s*\(/;
+  const assignCall = /(^|[^A-Za-z0-9_$])assignDeferredReviewClaim\s*\(/;
+  const problems = [];
+  for (const script of scripts.sort()) {
+    const relative = relativeTo(script);
+    if (relative === "hooks/lib/session-control-core-v1.js") continue;
+    if (/(inspectDeferredReviewOwner|assignDeferredReviewClaim)\s*\(/.test(fs.readFileSync(script, "utf8"))) {
+      problems.push(`js-caller:${relative}`);
+    }
+  }
+  const reached = new Set();
+  const assigning = new Set();
+  const seeding = new Set();
+  let inspections = 0;
+  let assignments = 0;
+  let seeds = 0;
+  for (const site of sites) {
+    if (beginCritical.test(site.line) && site.fn !== "tdd_begin_session") {
+      problems.push(`seed-bypass@${site.where}`);
+    }
+    const inspect = inspectCall.test(site.line);
+    const assign = assignCall.test(site.line);
+    const begin = beginCall.exec(site.text);
+    const args = begin
+      ? words(site.text.slice(begin.index + begin[1].length + "tdd_begin_session".length))
+      : [];
+    const forwarded = args.some((token) => /\$[@*]|\$\{[@*]|\[[@*]\]/.test(token));
+    const seed = (args[4] || "") !== "" || forwarded;
+    if (!inspect && !assign && !seed) continue;
+    if (inspect) inspections += 1;
+    if (assign) assignments += 1;
+    if (seed) seeds += 1;
+    if (site.fn === null) {
+      problems.push(`top-level@${site.where}`);
+      continue;
+    }
+    reached.add(site.fn);
+    if (assign) assigning.add(site.fn);
+    if (seed) seeding.add(site.fn);
+  }
+  const edges = [];
+  const terminals = new Set();
+  const referenced = new Set();
+  const queue = [...reached];
+  const visited = new Set();
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (visited.has(name)) continue;
+    visited.add(name);
+    const reference = new RegExp(`(^|[^A-Za-z0-9_])${name}([^A-Za-z0-9_]|$)`);
+    const lockRun = new RegExp(`_tdd_locked_run "\\$pf" ${name}([^A-Za-z0-9_]|$)`);
+    for (const site of sites) {
+      if (site.fn === name || !reference.test(site.line)) continue;
+      referenced.add(name);
+      if (lockRun.test(site.line)) {
+        terminals.add(name);
+        continue;
+      }
+      if (site.fn === null) {
+        problems.push(`unlocked:${name}@${site.where}`);
+        continue;
+      }
+      edges.push([site.fn, name]);
+      queue.push(site.fn);
+    }
+  }
+  for (const name of [...visited].sort()) {
+    if (!referenced.has(name)) problems.push(`uncalled:${name}`);
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [caller, callee] of edges) {
+      if (assigning.has(callee) && !assigning.has(caller)) {
+        assigning.add(caller);
+        changed = true;
+      }
+      if (seeding.has(callee) && !seeding.has(caller)) {
+        seeding.add(caller);
+        changed = true;
+      }
+    }
+  }
+  for (const name of [...terminals].sort()) {
+    if (seeding.has(name) && !assigning.has(name)) problems.push(`seed-without-assignment:${name}`);
+  }
+  if (inspections === 0 || assignments === 0 || seeds === 0 || terminals.size === 0) {
+    problems.push(`vacuous:${inspections}/${assignments}/${seeds}/${terminals.size}`);
+  }
+  process.stdout.write(problems.length === 0 ? `ok:${[...terminals].sort().join("+")}` : problems.join(","));
+'
+LOCK_CONTRACT="$(PLUGIN_ROOT="$PLUGIN_DIR" node -e "$LOCK_CONTRACT_SCRIPT")"
+LOCK_FIXTURE="$CASE_ROOT/lock-fixture"
+mkdir -p "$LOCK_FIXTURE/hooks/lib"
+cat > "$LOCK_FIXTURE/hooks/lib/x.sh" <<'LOCK_FIXTURE_SH'
+_x_orphan_inspect() {
+  node -e 'control.inspectDeferredReviewOwner(options)'
+}
+_w() {
+  x="$(tdd_begin_session "${@:1}")"
+}
+_x_seed_helper() {
+  tdd_begin_session "$s" false true true "$claim"
+}
+_x_assign_helper() {
+  node -e 'core.assignDeferredReviewClaim(options)'
+}
+_x_seed_critical() {
+  _x_seed_helper
+}
+_x_paired_critical() {
+  _x_assign_helper
+  _x_seed_helper
+}
+_x_seed() {
+  _tdd_locked_run "$pf" _x_seed_critical
+  _tdd_locked_run "$pf" _x_paired_critical
+}
+_x_bypass() {
+  _tdd_begin_session_critical "$f" "$s" false true "$claim"
+}
+_w2() {
+  tdd_begin_session "$@"
+}
+_w3() {
+  tdd_begin_session "${args[@]}"
+}
+_x_wrong_lock() {
+  node -e 'control.inspectDeferredReviewOwner(options)'
+}
+_x_state_locked() {
+  _tdd_locked_run "$state_file" _x_wrong_lock
+}
+_w a b c d e
+_w2 a b c d e
+_w3
+_x_state_locked
+node -e 'core.assignDeferredReviewClaim(options)'
+LOCK_FIXTURE_SH
+printf '%s\n' 'module.exports = (core, options) => core.inspectDeferredReviewOwner(options);' > "$LOCK_FIXTURE/hooks/lib/x.js"
+LOCK_FIXTURE_REPORT="$(PLUGIN_ROOT="$LOCK_FIXTURE" node -e "$LOCK_CONTRACT_SCRIPT")"
+LOCK_FIXTURE_CAUGHT=true
+for expected in uncalled:_x_orphan_inspect unlocked:_w@hooks/lib/x.sh: unlocked:_w2@hooks/lib/x.sh: unlocked:_w3@hooks/lib/x.sh: unlocked:_x_state_locked@hooks/lib/x.sh: seed-without-assignment:_x_seed_critical seed-bypass@hooks/lib/x.sh: top-level@hooks/lib/x.sh: js-caller:hooks/lib/x.js; do
+  case ",$LOCK_FIXTURE_REPORT," in
+    (*",$expected"*) : ;;
+    (*) LOCK_FIXTURE_CAUGHT=false ;;
+  esac
+done
+case ",$LOCK_FIXTURE_REPORT," in
+  (*",seed-without-assignment:_x_paired_critical,"*) LOCK_FIXTURE_CAUGHT=false ;;
+  (*) : ;;
+esac
+LOCK_EMPTY="$CASE_ROOT/lock-empty"
+mkdir -p "$LOCK_EMPTY/hooks"
+LOCK_EMPTY_REPORT="$(PLUGIN_ROOT="$LOCK_EMPTY" node -e "$LOCK_CONTRACT_SCRIPT")"
+LOCK_NO_INSPECT="$CASE_ROOT/lock-no-inspect"
+mkdir -p "$LOCK_NO_INSPECT/hooks/lib"
+cat > "$LOCK_NO_INSPECT/hooks/lib/y.sh" <<'LOCK_NO_INSPECT_SH'
+_y_assign() {
+  node -e 'core.assignDeferredReviewClaim(options)'
+}
+_y_seed() {
+  tdd_begin_session "$s" false true true "$claim"
+}
+_y_critical() {
+  _y_assign
+  _y_seed
+}
+_y_run() {
+  _tdd_locked_run "$pf" _y_critical
+}
+LOCK_NO_INSPECT_SH
+LOCK_NO_INSPECT_REPORT="$(PLUGIN_ROOT="$LOCK_NO_INSPECT" node -e "$LOCK_CONTRACT_SCRIPT")"
+LOCK_NO_SEED="$CASE_ROOT/lock-no-seed"
+mkdir -p "$LOCK_NO_SEED/hooks/lib"
+cat > "$LOCK_NO_SEED/hooks/lib/z.sh" <<'LOCK_NO_SEED_SH'
+_z_inspect() {
+  node -e 'control.inspectDeferredReviewOwner(options)'
+}
+_z_assign() {
+  node -e 'core.assignDeferredReviewClaim(options)'
+}
+_z_critical() {
+  _z_inspect
+  _z_assign
+}
+_z_run() {
+  _tdd_locked_run "$pf" _z_critical
+}
+LOCK_NO_SEED_SH
+LOCK_NO_SEED_REPORT="$(PLUGIN_ROOT="$LOCK_NO_SEED" node -e "$LOCK_CONTRACT_SCRIPT")"
+if [ "${LOCK_CONTRACT%%:*}" = ok ] \
+  && [ "$LOCK_FIXTURE_CAUGHT" = true ] \
+  && [ "$LOCK_EMPTY_REPORT" = "vacuous:0/0/0/0" ] \
+  && [ "$LOCK_NO_INSPECT_REPORT" = "vacuous:0/1/1/1" ] \
+  && [ "$LOCK_NO_SEED_REPORT" = "vacuous:1/1/0/1" ]; then
+  check "L3 owner inspection, assignment and seed run only under the pending-review lock and a seed only beside its assignment; every detector fires on a violating fixture" PASS
+else
+  check "L3 deferred-review lock contract (tree=$LOCK_CONTRACT fixture=$LOCK_FIXTURE_REPORT empty=$LOCK_EMPTY_REPORT no_inspect=$LOCK_NO_INSPECT_REPORT no_seed=$LOCK_NO_SEED_REPORT)" FAIL
+fi
+
 # Twenty simultaneous sessions race on one project marker. Only the winner
 # seeds/blocks; the others observe the live/emitted ownership record and no-op.
 setup_case parallel
@@ -466,7 +844,7 @@ zlog --pending-review --files x.ts >/dev/null
 i=1
 while [ "$i" -le 20 ]; do
   (
-    if stop "parallel-$i" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
+    if stop "parallel-$i" "$STOP_WORKER_FLAG" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
     printf '%s\n' "$stop_rc" > "$CASE_ROOT/rc-$i"
   ) &
   i=$((i + 1))
@@ -637,7 +1015,8 @@ if [ -f "$CASE_ROOT/post-assignment-before-cleanup.json" ] \
     && cmp -s "$CASE_ROOT/post-assignment-before-cleanup.json" "$POST_ASSIGN_CLAIM"; then
   POST_ASSIGN_CLEANUP_PRESERVED=true
 fi
-POST_ASSIGN_RECOVERED="$(stop seed-failure-recovery)"; POST_ASSIGN_RECOVERED_RC=$?
+POST_ASSIGN_RECOVERED="$(observed_stop "$CASE_ROOT/owner-observer.log" seed-failure-recovery)"; POST_ASSIGN_RECOVERED_RC=$?
+POST_ASSIGN_OBSERVED="$(owner_observations "$CASE_ROOT/owner-observer.log")"
 POST_ASSIGN_RECOVERY_OWNER="$(CLAIM_FILE="$POST_ASSIGN_CLAIM" node -e '
   try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write(j.ownerSessionId||"missing")}catch(_){process.stdout.write("missing")}
 ')"
@@ -653,9 +1032,40 @@ if [ "$POST_ASSIGN_RC" -eq 1 ] \
   && [ "$POST_ASSIGN_DECISION" = block ] \
   && [ "$POST_ASSIGN_RECOVERY_ACTIVE" = true ] \
   && [ "$POST_ASSIGN_RECOVERY_OWNER" = "$(canonical_session seed-failure-recovery)" ]; then
-  check "C2f post-assignment seed failure retains and recovers its durable claim" PASS
+  check "C2f post-assignment seed failure retains and recovers its durable claim$(alive_owner_note "$POST_ASSIGN_OBSERVED")" PASS
 else
-  check "C2f post-assignment recovery (first_rc=$POST_ASSIGN_RC assigned=$POST_ASSIGN_META owner_active=$POST_ASSIGN_OWNER_ACTIVE cleanup=$POST_ASSIGN_CLEANUP_PRESERVED retry_rc=$POST_ASSIGN_RECOVERED_RC decision=$POST_ASSIGN_DECISION recovery_active=$POST_ASSIGN_RECOVERY_ACTIVE owner=$POST_ASSIGN_RECOVERY_OWNER)" FAIL
+  check "C2f post-assignment recovery (first_rc=$POST_ASSIGN_RC assigned=$POST_ASSIGN_META owner_active=$POST_ASSIGN_OWNER_ACTIVE cleanup=$POST_ASSIGN_CLEANUP_PRESERVED retry_rc=$POST_ASSIGN_RECOVERED_RC decision=$POST_ASSIGN_DECISION recovery_active=$POST_ASSIGN_RECOVERY_ACTIVE owner=$POST_ASSIGN_RECOVERY_OWNER decision_time=$POST_ASSIGN_OBSERVED)" FAIL
+fi
+
+setup_case post_assignment_reused_pid
+zlog --pending-review --files reused-pid.ts --summary "reused pid recovery" >/dev/null
+if fail_seed_after_assignment reused-pid-owner >/dev/null 2>&1; then
+  REUSED_SEED_RC=0
+else
+  REUSED_SEED_RC=$?
+fi
+REUSED_SEED_CLAIM="$CASE_STATE/pending-review.json.claim"
+start_impostor "$CASE_ROOT/impostor.pid"
+REUSED_SEED_PID="$IMPOSTOR_PID"
+REUSED_SEED_PLANT="$(plant_owner "$REUSED_SEED_CLAIM" "$REUSED_SEED_PID" none keep)"
+REUSED_SEED_OUT="$(observed_stop "$CASE_ROOT/owner-observer.log" reused-pid-recovery)"; REUSED_SEED_STOP_RC=$?
+stop_impostor
+REUSED_SEED_DECISION="$(printf '%s' "$REUSED_SEED_OUT" | decision)"
+REUSED_SEED_OWNER="$(CLAIM_FILE="$REUSED_SEED_CLAIM" node -e '
+  try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write(j.ownerSessionId||"missing")}catch(_){process.stdout.write("missing")}
+')"
+REUSED_SEED_ACTIVE="$(state_flag reused-pid-recovery active)"
+REUSED_SEED_OBSERVED="$(owner_observations "$CASE_ROOT/owner-observer.log")"
+if [ "$REUSED_SEED_RC" -eq 1 ] \
+  && [ "$REUSED_SEED_PLANT" = "planted:unacknowledged:null" ] \
+  && [ "$REUSED_SEED_STOP_RC" -eq 0 ] \
+  && [ "$REUSED_SEED_DECISION" = block ] \
+  && [ "$REUSED_SEED_ACTIVE" = true ] \
+  && [ "$REUSED_SEED_OWNER" = "$(canonical_session reused-pid-recovery)" ] \
+  && observed_owner_alive "$REUSED_SEED_OBSERVED" "$REUSED_SEED_PID"; then
+  check "C2f-reuse unseeded claim is recovered while its recorded owner PID is a live unrelated process" PASS
+else
+  check "C2f-reuse unseeded claim recovery under a reused owner PID (seed_rc=$REUSED_SEED_RC plant=$REUSED_SEED_PLANT planted_pid=$REUSED_SEED_PID stop_rc=$REUSED_SEED_STOP_RC decision=$REUSED_SEED_DECISION recovery_active=$REUSED_SEED_ACTIVE owner=$REUSED_SEED_OWNER decision_time=$REUSED_SEED_OBSERVED)" FAIL
 fi
 
 # Crash after the foreign-owner CAS but before its receipt acknowledgement.
@@ -664,6 +1074,7 @@ fi
 setup_case retire_before_ack
 zlog --pending-review --files retire-before-ack.ts >/dev/null
 adopt retire-source >/dev/null
+RETIRE_OWNER_PLANT="$(plant_owner "$CASE_STATE/pending-review.json.claim" "$DEAD_OWNER_PID" none keep)"
 RETIRE_STAGE_OK=false
 retire_without_receipt_ack retire-target && RETIRE_STAGE_OK=true
 cp "$CASE_STATE/pending-review.json.claim" "$CASE_ROOT/claim-before-delayed-release.json"
@@ -681,7 +1092,8 @@ RETIRE_TRANSFER_LEFT="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" node 
   const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));
   process.stdout.write(Object.prototype.hasOwnProperty.call(j,"transfer")?"yes":"no");
 ')"
-if [ "$RETIRE_STAGE_OK" = true ] \
+if [ "$RETIRE_OWNER_PLANT" = "dead:unacknowledged:null" ] \
+  && [ "$RETIRE_STAGE_OK" = true ] \
   && [ "$DELAYED_RELEASE_REJECTED" = true ] \
   && [ "$RETIRE_RECEIPT_PRESERVED" = true ] \
   && [ "$(printf '%s' "$RETIRE_RECOVERED" | decision)" = block ] \
@@ -690,7 +1102,7 @@ if [ "$RETIRE_STAGE_OK" = true ] \
   && [ "$RETIRE_TRANSFER_LEFT" = no ]; then
   check "C2c delayed source release preserves receipt; target resumes transfer" PASS
 else
-  check "C2c delayed source release preserves receipt; target resumes transfer" FAIL
+  check "C2c delayed source release preserves receipt; target resumes transfer (plant=$RETIRE_OWNER_PLANT stage_ok=$RETIRE_STAGE_OK delayed_rejected=$DELAYED_RELEASE_REJECTED preserved=$RETIRE_RECEIPT_PRESERVED decision=$(printf '%s' "$RETIRE_RECOVERED" | decision) source=$(state_flag retire-source active) target=$(state_flag retire-target active) transfer_left=$RETIRE_TRANSFER_LEFT)" FAIL
 fi
 
 # Crash after the target state was seeded but before the cross-file receipt was
@@ -698,6 +1110,7 @@ fi
 setup_case seed_before_finalize
 zlog --pending-review --files seed-before-finalize.ts >/dev/null
 adopt finalize-source >/dev/null
+FINALIZE_OWNER_PLANT="$(plant_owner "$CASE_STATE/pending-review.json.claim" "$DEAD_OWNER_PID" none keep)"
 FINALIZE_STAGE_OK=false
 seed_without_transfer_finalize finalize-target && FINALIZE_STAGE_OK=true
 FINALIZE_BEFORE="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" node -e '
@@ -709,7 +1122,8 @@ FINALIZE_AFTER="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" node -e '
   const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));
   process.stdout.write(Object.prototype.hasOwnProperty.call(j,"transfer")?"yes":"no");
 ')"
-if [ "$FINALIZE_STAGE_OK" = true ] \
+if [ "$FINALIZE_OWNER_PLANT" = "dead:unacknowledged:null" ] \
+  && [ "$FINALIZE_STAGE_OK" = true ] \
   && [ "$FINALIZE_BEFORE" = pending ] \
   && [ "$(printf '%s' "$FINALIZE_RECOVERED" | decision)" = block ] \
   && [ "$(state_flag finalize-source active)" = false ] \
@@ -717,7 +1131,7 @@ if [ "$FINALIZE_STAGE_OK" = true ] \
   && [ "$FINALIZE_AFTER" = no ]; then
   check "C2d seeded-target crash finalizes receipt before same-session handoff" PASS
 else
-  check "C2d seeded-target crash finalizes receipt before same-session handoff" FAIL
+  check "C2d seeded-target crash finalizes receipt before same-session handoff (plant=$FINALIZE_OWNER_PLANT stage_ok=$FINALIZE_STAGE_OK before=$FINALIZE_BEFORE decision=$(printf '%s' "$FINALIZE_RECOVERED" | decision) source=$(state_flag finalize-source active) target=$(state_flag finalize-target active) after=$FINALIZE_AFTER)" FAIL
 fi
 
 # The actionable review prompt must never become visible before its durable
@@ -809,6 +1223,7 @@ fi
 setup_case reset_transfer_target
 zlog --pending-review --files reset-transfer-target.ts >/dev/null
 adopt reset-transfer-source >/dev/null
+RESET_TRANSFER_OWNER_PLANT="$(plant_owner "$CASE_STATE/pending-review.json.claim" "$DEAD_OWNER_PID" none keep)"
 seed_without_transfer_finalize reset-transfer-target >/dev/null
 RESET_TRANSFER_BEFORE="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" \
   TARGET="$(canonical_session reset-transfer-target)" node -e '
@@ -825,7 +1240,8 @@ fi
 RESET_TRANSFER_CLAIM_GONE=false
 [ ! -e "$CASE_STATE/pending-review.json.claim" ] && RESET_TRANSFER_CLAIM_GONE=true
 RESET_TRANSFER_AFTER="$(stop reset-transfer-target)"; RESET_TRANSFER_AFTER_RC=$?
-if [ "$RESET_TRANSFER_BEFORE" = pending ] \
+if [ "$RESET_TRANSFER_OWNER_PLANT" = "dead:unacknowledged:null" ] \
+  && [ "$RESET_TRANSFER_BEFORE" = pending ] \
   && [ "$RESET_TRANSFER_RC" -eq 0 ] \
   && [ "$RESET_TRANSFER_CLAIM_GONE" = true ] \
   && [ "$(state_flag reset-transfer-source active)" = false ] \
@@ -834,7 +1250,7 @@ if [ "$RESET_TRANSFER_BEFORE" = pending ] \
   && [ "$(printf '%s' "$RESET_TRANSFER_AFTER" | decision)" = allow ]; then
   check "C4t tdd-reset finalizes and cancels an owner-retired target receipt" PASS
 else
-  check "C4t transfer-target reset recovery (before=$RESET_TRANSFER_BEFORE rc=$RESET_TRANSFER_RC claim_gone=$RESET_TRANSFER_CLAIM_GONE source=$(state_flag reset-transfer-source active) target=$(state_flag reset-transfer-target active) after=$RESET_TRANSFER_AFTER_RC/$(printf '%s' "$RESET_TRANSFER_AFTER" | decision))" FAIL
+  check "C4t transfer-target reset recovery (plant=$RESET_TRANSFER_OWNER_PLANT before=$RESET_TRANSFER_BEFORE rc=$RESET_TRANSFER_RC claim_gone=$RESET_TRANSFER_CLAIM_GONE source=$(state_flag reset-transfer-source active) target=$(state_flag reset-transfer-target active) after=$RESET_TRANSFER_AFTER_RC/$(printf '%s' "$RESET_TRANSFER_AFTER" | decision))" FAIL
 fi
 
 # Explicit reset is allowed to cancel an exact current claim that reached done
@@ -953,6 +1369,7 @@ fi
 setup_case reset_transfer_assigned_unseeded
 zlog --pending-review --files reset-transfer-assigned-unseeded.ts >/dev/null
 adopt reset-transfer-unseeded-source >/dev/null
+RESET_TRANSFER_UNSEEDED_OWNER_PLANT="$(plant_owner "$CASE_STATE/pending-review.json.claim" "$DEAD_OWNER_PID" none keep)"
 ( activate_session reset-transfer-unseeded-target \
     && advance_transfer_core assigned-before-seed >/dev/null )
 RESET_TRANSFER_UNSEEDED_BEFORE="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" \
@@ -973,7 +1390,8 @@ RESET_TRANSFER_UNSEEDED_CLAIM_GONE=false
 [ ! -e "$CASE_STATE/pending-review.json.claim" ] && RESET_TRANSFER_UNSEEDED_CLAIM_GONE=true
 RESET_TRANSFER_UNSEEDED_AFTER="$(stop reset-transfer-unseeded-target)"
 RESET_TRANSFER_UNSEEDED_AFTER_RC=$?
-if [ "$RESET_TRANSFER_UNSEEDED_BEFORE" = unseeded-transfer ] \
+if [ "$RESET_TRANSFER_UNSEEDED_OWNER_PLANT" = "dead:unacknowledged:null" ] \
+  && [ "$RESET_TRANSFER_UNSEEDED_BEFORE" = unseeded-transfer ] \
   && [ "$RESET_TRANSFER_UNSEEDED_RC" -eq 0 ] \
   && [ "$RESET_TRANSFER_UNSEEDED_CLAIM_GONE" = true ] \
   && [ "$(state_flag reset-transfer-unseeded-source active)" = false ] \
@@ -982,7 +1400,7 @@ if [ "$RESET_TRANSFER_UNSEEDED_BEFORE" = unseeded-transfer ] \
   && [ "$(printf '%s' "$RESET_TRANSFER_UNSEEDED_AFTER" | decision)" = allow ]; then
   check "C4s-transfer tdd-reset cancels an assigned unseeded transfer target" PASS
 else
-  check "C4s-transfer reset recovery (before=$RESET_TRANSFER_UNSEEDED_BEFORE rc=$RESET_TRANSFER_UNSEEDED_RC claim_gone=$RESET_TRANSFER_UNSEEDED_CLAIM_GONE source=$(state_flag reset-transfer-unseeded-source active) target=$(state_flag reset-transfer-unseeded-target active) after=$RESET_TRANSFER_UNSEEDED_AFTER_RC/$(printf '%s' "$RESET_TRANSFER_UNSEEDED_AFTER" | decision))" FAIL
+  check "C4s-transfer reset recovery (plant=$RESET_TRANSFER_UNSEEDED_OWNER_PLANT before=$RESET_TRANSFER_UNSEEDED_BEFORE rc=$RESET_TRANSFER_UNSEEDED_RC claim_gone=$RESET_TRANSFER_UNSEEDED_CLAIM_GONE source=$(state_flag reset-transfer-unseeded-source active) target=$(state_flag reset-transfer-unseeded-target active) after=$RESET_TRANSFER_UNSEEDED_AFTER_RC/$(printf '%s' "$RESET_TRANSFER_UNSEEDED_AFTER" | decision))" FAIL
 fi
 
 # A foreign superseded unseeded receipt removes only that old claim. Explicit
@@ -1555,53 +1973,39 @@ CLAIM_FILE="$LEASE_CLAIM" node -e '
   j.ts = "2020-01-01T00:00:00Z";
   fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
 '
-LEASE_B="$(stop lease-b)"
+LEASE_B="$(observed_stop "$CASE_ROOT/owner-observer-b.log" lease-b)"
 LEASE_B_TS="$(CLAIM_FILE="$LEASE_CLAIM" node -e '
   const j = JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE, "utf8"));
   process.stdout.write(typeof j.ts === "string" ? j.ts : "");
 ')"
-LEASE_C_FRESH="$(stop lease-c)"; LEASE_C_FRESH_RC=$?
+LEASE_C_FRESH="$(observed_stop "$CASE_ROOT/owner-observer-c-fresh.log" lease-c)"; LEASE_C_FRESH_RC=$?
 CLAIM_FILE="$LEASE_CLAIM" node -e '
   const fs = require("fs");
   const j = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
   j.ts = "2020-01-01T00:00:00Z";
   fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
 '
-LEASE_C_EXPIRED="$(stop lease-c)"
+LEASE_C_EXPIRED="$(observed_stop "$CASE_ROOT/owner-observer-c-expired.log" lease-c)"
 # Every condition is hoisted into a variable BEFORE the test, so the FAIL branch can
 # name what actually happened. It used to print the PASS sentence verbatim with no
 # variable at all, which made a failure undiagnosable from a CI log — and this check
 # is Windows-intermittent, so its intermittency was learnable only by re-running it
 # rather than by reading it. The sibling C8 already carries this shape; C7 did not.
 #
-# The owner diagnostic mirrors C8's on purpose, because the two checks are the same
-# A/B/C scenario in two timestamp styles and share one gate: the transfer path tests
-# `deferredOwnerProcessIsAlive(claim)` as the FIRST disjunct, so a wrong "alive"
-# short-circuits the very lease this check is named for. `stored` is the claim's
-# recorded process start identity and `actual` the one derivable now; on win32
-# `processStartIdentity` has no branch and answers null, leaving ownership on bare
-# PID liveness. A `stored:null` beside `alive:true` on a supposedly dead owner is
-# what PID reuse looks like, and capturing that pair is why this message exists.
+# The owner diagnostic is taken at DECISION time: `observed_stop` preloads the owner
+# observer into the Stop hook's Node children, which record the claim's owner PID, its
+# liveness and its image name at the moment the core decides. A liveness sample taken
+# after the case's last Stop cannot refute PID reuse, because a short-lived process
+# holding the recycled PID when B or C decided has exited by then. The lease alone
+# decides a handed-off claim, so a reused PID cannot flip this check; a live owner at
+# decision time is still reported, on PASS too, so the CI log shows reuse when it happens.
 LEASE_A_DECISION="$(printf '%s' "$LEASE_A" | decision)"
 LEASE_B_DECISION="$(printf '%s' "$LEASE_B" | decision)"
 LEASE_C_FRESH_DECISION="$(printf '%s' "$LEASE_C_FRESH" | decision)"
 LEASE_C_EXPIRED_DECISION="$(printf '%s' "$LEASE_C_EXPIRED" | decision)"
 LEASE_B_ACTIVE="$(state_flag lease-b active)"
 LEASE_C_ACTIVE="$(state_flag lease-c active)"
-LEASE_OWNER_DIAG="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_CLAIM" node -e '
-  try {
-    const fs = require("fs");
-    const core = require(process.env.CONTROL_CORE);
-    const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
-    let alive = false;
-    try { process.kill(claim.ownerPid, 0); alive = true; }
-    catch (error) { alive = error.code === "EPERM"; }
-    const actual = core.processStartIdentityForPid(claim.ownerPid);
-    process.stdout.write(`pid:${claim.ownerPid},stored:${claim.ownerProcessStartIdentity || "null"},actual:${actual || "null"},alive:${alive}`);
-  } catch (error) {
-    process.stdout.write(`diagnostic-error:${error.message}`);
-  }
-')"
+LEASE_OWNER_DIAG="b:$(owner_observations "$CASE_ROOT/owner-observer-b.log") fresh:$(owner_observations "$CASE_ROOT/owner-observer-c-fresh.log") expired:$(owner_observations "$CASE_ROOT/owner-observer-c-expired.log")"
 if [ "$LEASE_A_DECISION" = block ] \
   && [ "$LEASE_B_DECISION" = block ] \
   && [ -n "$LEASE_B_TS" ] && [ "$LEASE_B_TS" != "2020-01-01T00:00:00Z" ] \
@@ -1610,9 +2014,51 @@ if [ "$LEASE_A_DECISION" = block ] \
   && [ "$LEASE_C_EXPIRED_DECISION" = block ] \
   && [ "$LEASE_B_ACTIVE" = false ] \
   && [ "$LEASE_C_ACTIVE" = true ]; then
-  check "C7 transferred claim renews timestamp lease before another session may adopt" PASS
+  check "C7 transferred claim renews timestamp lease before another session may adopt$(alive_owner_note "$LEASE_OWNER_DIAG")" PASS
 else
   check "C7 transferred claim lease renewal (a=$LEASE_A_DECISION b=$LEASE_B_DECISION b_ts=${LEASE_B_TS:-<empty>} fresh_rc=$LEASE_C_FRESH_RC fresh=$LEASE_C_FRESH_DECISION expired=$LEASE_C_EXPIRED_DECISION b_active=$LEASE_B_ACTIVE c_active=$LEASE_C_ACTIVE owner=$LEASE_OWNER_DIAG)" FAIL
+fi
+
+setup_case lease_owner_renewal '{"hooks":{"pendingReviewTtlHours":1}}'
+zlog --pending-review --files renewed.ts >/dev/null
+RENEW_FIRST="$(stop renew-owner)"; RENEW_FIRST_RC=$?
+RENEW_CLAIM="$CASE_STATE/pending-review.json.claim"
+CLAIM_FILE="$RENEW_CLAIM" node -e '
+  const fs = require("fs");
+  const j = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+  j.ts = "2020-01-01T00:00:00Z";
+  fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
+'; RENEW_AGE_RC=$?
+RENEW_AGED_TS="$(CLAIM_FILE="$RENEW_CLAIM" node -e '
+  try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write(typeof j.ts==="string"?j.ts:"none")}catch(_){process.stdout.write("missing")}
+')"
+RENEW_SECOND="$(stop renew-owner)"; RENEW_SECOND_RC=$?
+RENEW_META="$(CLAIM_FILE="$RENEW_CLAIM" node -e '
+  try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write([j.ownerSessionId,typeof j.ts==="string"?j.ts:"none",j.handoffEmitted===true].join("|"))}catch(_){process.stdout.write("missing|missing|missing")}
+')"
+IFS='|' read -r RENEW_OWNER RENEW_TS RENEW_HANDOFF <<< "$RENEW_META"
+RENEW_CONTENDER="$(stop renew-contender)"; RENEW_CONTENDER_RC=$?
+RENEW_FIRST_DECISION="$(printf '%s' "$RENEW_FIRST" | decision)"
+RENEW_SECOND_DECISION="$(printf '%s' "$RENEW_SECOND" | decision)"
+RENEW_CONTENDER_DECISION="$(printf '%s' "$RENEW_CONTENDER" | decision)"
+RENEW_OWNER_ACTIVE="$(state_flag renew-owner active)"
+RENEW_CONTENDER_ACTIVE="$(state_flag renew-contender active)"
+if [ "$RENEW_FIRST_RC" -eq 0 ] \
+  && [ "$RENEW_FIRST_DECISION" = block ] \
+  && [ "$RENEW_AGE_RC" -eq 0 ] \
+  && [ "$RENEW_AGED_TS" = "2020-01-01T00:00:00Z" ] \
+  && [ "$RENEW_SECOND_RC" -eq 0 ] \
+  && [ "$RENEW_SECOND_DECISION" = block ] \
+  && [ "$RENEW_OWNER" = "$(canonical_session renew-owner)" ] \
+  && [ "$RENEW_TS" != none ] && [ "$RENEW_TS" != "2020-01-01T00:00:00Z" ] \
+  && [ "$RENEW_HANDOFF" = true ] \
+  && [ "$RENEW_CONTENDER_RC" -eq 0 ] \
+  && [ "$RENEW_CONTENDER_DECISION" = allow ] \
+  && [ "$RENEW_OWNER_ACTIVE" = true ] \
+  && [ "$RENEW_CONTENDER_ACTIVE" = false ]; then
+  check "C7-renew a blocking review Stop of the owning session renews its lease, so another session cannot adopt the review" PASS
+else
+  check "C7-renew owner lease renewal (first_rc=$RENEW_FIRST_RC first=$RENEW_FIRST_DECISION age_rc=$RENEW_AGE_RC aged_ts=$RENEW_AGED_TS second_rc=$RENEW_SECOND_RC second=$RENEW_SECOND_DECISION meta=$RENEW_META contender_rc=$RENEW_CONTENDER_RC contender=$RENEW_CONTENDER_DECISION owner_active=$RENEW_OWNER_ACTIVE contender_active=$RENEW_CONTENDER_ACTIVE)" FAIL
 fi
 
 # timestampStyle:none deliberately persists no wall-clock timestamp. Assignment
@@ -1628,10 +2074,9 @@ CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
   j.ts = "2020-01-01T00:00:00Z";
   fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
 '
-LEASE_NONE_B="$(stop lease-none-b)"
-LEASE_NONE_PREPARED="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
+LEASE_NONE_B="$(observed_stop "$CASE_ROOT/owner-observer-b.log" lease-none-b)"
+LEASE_NONE_PREPARED="$(CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
   const fs = require("fs");
-  const core = require(process.env.CONTROL_CORE);
   const ttlMs = 60 * 60 * 1000;
   const file = process.env.CLAIM_FILE;
   const claim = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1642,48 +2087,12 @@ LEASE_NONE_PREPARED="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_NONE_CLAIM" node 
       || assignmentAgeMs < -5000 || assignmentAgeMs >= ttlMs) {
     throw new Error(`assignment did not establish a fresh mtime-only lease: hasTs=${hasTs} mtimeMs=${assignmentMtimeMs} ageMs=${assignmentAgeMs}`);
   }
-
-  // The contract intentionally requires both a dead owner and an expired
-  // handoff lease. Make owner death deterministic instead of depending on a
-  // short-lived Git Bash PID not being reused before the next assertion.
-  claim.ownerPid = 2147483647;
-  claim.ownerProcessStartIdentity = null;
-  core.atomicWriteJson(file, claim);
-  const restore = new Date(assignmentMtimeMs);
-  const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  let fixtureMtimeMs = Number.NaN;
-  let restoreError = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      fs.utimesSync(file, restore, restore);
-      fixtureMtimeMs = fs.statSync(file).mtimeMs;
-      if (Number.isFinite(fixtureMtimeMs)
-          && Math.abs(fixtureMtimeMs - assignmentMtimeMs) <= 2000) break;
-      restoreError = new Error(`restored mtime differs from assignment: ${fixtureMtimeMs}`);
-    } catch (error) {
-      if (!["EPERM", "EACCES"].includes(error.code)) throw error;
-      restoreError = error;
-    }
-    pause(50);
-  }
-  let ownerAlive = false;
-  try { process.kill(claim.ownerPid, 0); ownerAlive = true; }
-  catch (error) { ownerAlive = error.code === "EPERM"; }
-  if (!Number.isFinite(fixtureMtimeMs)
-      || Math.abs(fixtureMtimeMs - assignmentMtimeMs) > 2000) {
-    throw restoreError || new Error(`failed to restore assignment mtime: ${fixtureMtimeMs}`);
-  }
-  if (ownerAlive || Date.now() - fixtureMtimeMs >= ttlMs) {
-    throw new Error(`dead-owner fixture is invalid: alive=${ownerAlive} mtimeMs=${fixtureMtimeMs}`);
-  }
-  process.stdout.write(`no\t${assignmentMtimeMs}\t${fixtureMtimeMs}`);
+  process.stdout.write(`no\t${assignmentMtimeMs}`);
 ')"; LEASE_NONE_PREPARED_RC=$?
 LEASE_NONE_HAS_TS=""
 LEASE_NONE_ASSIGNMENT_MTIME=""
-LEASE_NONE_FIXTURE_MTIME=""
-IFS=$'\t' read -r LEASE_NONE_HAS_TS LEASE_NONE_ASSIGNMENT_MTIME \
-  LEASE_NONE_FIXTURE_MTIME <<<"$LEASE_NONE_PREPARED"
-LEASE_NONE_C_FRESH="$(stop lease-none-c)"; LEASE_NONE_C_FRESH_RC=$?
+IFS=$'\t' read -r LEASE_NONE_HAS_TS LEASE_NONE_ASSIGNMENT_MTIME <<<"$LEASE_NONE_PREPARED"
+LEASE_NONE_C_FRESH="$(observed_stop "$CASE_ROOT/owner-observer-c-fresh.log" lease-none-c)"; LEASE_NONE_C_FRESH_RC=$?
 # Use the same native Node filesystem boundary as the production mtime reader.
 # The old Git Bash `touch -t` result was unchecked, so a no-op could not be
 # distinguished from a lease bug. Set and verify the stale precondition here.
@@ -1712,7 +2121,7 @@ LEASE_NONE_STALE_MTIME="$(CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
   process.stdout.write(String(mtimeMs));
 ')"; LEASE_NONE_STALE_MTIME_RC=$?
 if [ "$LEASE_NONE_STALE_MTIME_RC" -eq 0 ]; then
-  LEASE_NONE_C_EXPIRED="$(stop lease-none-c)"; LEASE_NONE_C_EXPIRED_RC=$?
+  LEASE_NONE_C_EXPIRED="$(observed_stop "$CASE_ROOT/owner-observer-c-expired.log" lease-none-c)"; LEASE_NONE_C_EXPIRED_RC=$?
 else
   LEASE_NONE_C_EXPIRED=""; LEASE_NONE_C_EXPIRED_RC=2
 fi
@@ -1722,20 +2131,7 @@ LEASE_NONE_C_FRESH_DECISION="$(printf '%s' "$LEASE_NONE_C_FRESH" | decision)"
 LEASE_NONE_C_EXPIRED_DECISION="$(printf '%s' "$LEASE_NONE_C_EXPIRED" | decision)"
 LEASE_NONE_B_ACTIVE="$(state_flag lease-none-b active)"
 LEASE_NONE_C_ACTIVE="$(state_flag lease-none-c active)"
-LEASE_NONE_OWNER_DIAG="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
-  try {
-    const fs = require("fs");
-    const core = require(process.env.CONTROL_CORE);
-    const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
-    let alive = false;
-    try { process.kill(claim.ownerPid, 0); alive = true; }
-    catch (error) { alive = error.code === "EPERM"; }
-    const actual = core.processStartIdentityForPid(claim.ownerPid);
-    process.stdout.write(`pid:${claim.ownerPid},stored:${claim.ownerProcessStartIdentity || "null"},actual:${actual || "null"},alive:${alive}`);
-  } catch (error) {
-    process.stdout.write(`diagnostic-error:${error.message}`);
-  }
-')"
+LEASE_NONE_OWNER_DIAG="b:$(owner_observations "$CASE_ROOT/owner-observer-b.log") fresh:$(owner_observations "$CASE_ROOT/owner-observer-c-fresh.log") expired:$(owner_observations "$CASE_ROOT/owner-observer-c-expired.log")"
 if [ "$LEASE_NONE_A_DECISION" = block ] \
   && [ "$LEASE_NONE_B_DECISION" = block ] \
   && [ "$LEASE_NONE_PREPARED_RC" -eq 0 ] \
@@ -1747,9 +2143,90 @@ if [ "$LEASE_NONE_A_DECISION" = block ] \
   && [ "$LEASE_NONE_C_EXPIRED_DECISION" = block ] \
   && [ "$LEASE_NONE_B_ACTIVE" = false ] \
   && [ "$LEASE_NONE_C_ACTIVE" = true ]; then
-  check "C8 timestampStyle none renews claim lease through mtime" PASS
+  check "C8 timestampStyle none renews claim lease through mtime$(alive_owner_note "$LEASE_NONE_OWNER_DIAG")" PASS
 else
-  check "C8 timestampStyle none lease renewal (a=$LEASE_NONE_A_DECISION b=$LEASE_NONE_B_DECISION prepared_rc=$LEASE_NONE_PREPARED_RC has_ts=$LEASE_NONE_HAS_TS assignment_mtime=$LEASE_NONE_ASSIGNMENT_MTIME fixture_mtime=$LEASE_NONE_FIXTURE_MTIME fresh_rc=$LEASE_NONE_C_FRESH_RC fresh=$LEASE_NONE_C_FRESH_DECISION stale_rc=$LEASE_NONE_STALE_MTIME_RC stale_mtime=$LEASE_NONE_STALE_MTIME expired_rc=$LEASE_NONE_C_EXPIRED_RC expired=$LEASE_NONE_C_EXPIRED_DECISION b_active=$LEASE_NONE_B_ACTIVE c_active=$LEASE_NONE_C_ACTIVE owner=$LEASE_NONE_OWNER_DIAG)" FAIL
+  check "C8 timestampStyle none lease renewal (a=$LEASE_NONE_A_DECISION b=$LEASE_NONE_B_DECISION prepared_rc=$LEASE_NONE_PREPARED_RC has_ts=$LEASE_NONE_HAS_TS assignment_mtime=$LEASE_NONE_ASSIGNMENT_MTIME fresh_rc=$LEASE_NONE_C_FRESH_RC fresh=$LEASE_NONE_C_FRESH_DECISION stale_rc=$LEASE_NONE_STALE_MTIME_RC stale_mtime=$LEASE_NONE_STALE_MTIME expired_rc=$LEASE_NONE_C_EXPIRED_RC expired=$LEASE_NONE_C_EXPIRED_DECISION b_active=$LEASE_NONE_B_ACTIVE c_active=$LEASE_NONE_C_ACTIVE owner=$LEASE_NONE_OWNER_DIAG)" FAIL
+fi
+
+setup_case lease_reused_pid '{"hooks":{"pendingReviewTtlHours":1}}'
+zlog --pending-review --files reused-lease.ts >/dev/null
+REUSED_LEASE_A="$(stop reused-lease-a)"
+REUSED_LEASE_CLAIM="$CASE_STATE/pending-review.json.claim"
+start_impostor "$CASE_ROOT/impostor.pid"
+REUSED_LEASE_PID="$IMPOSTOR_PID"
+REUSED_LEASE_PLANT="$(plant_owner "$REUSED_LEASE_CLAIM" "$REUSED_LEASE_PID" none expire)"
+REUSED_LEASE_B="$(observed_stop "$CASE_ROOT/owner-observer.log" reused-lease-b)"; REUSED_LEASE_B_RC=$?
+stop_impostor
+REUSED_LEASE_A_DECISION="$(printf '%s' "$REUSED_LEASE_A" | decision)"
+REUSED_LEASE_B_DECISION="$(printf '%s' "$REUSED_LEASE_B" | decision)"
+REUSED_LEASE_A_ACTIVE="$(state_flag reused-lease-a active)"
+REUSED_LEASE_B_ACTIVE="$(state_flag reused-lease-b active)"
+REUSED_LEASE_OWNER="$(CLAIM_FILE="$REUSED_LEASE_CLAIM" node -e '
+  try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write(j.ownerSessionId||"missing")}catch(_){process.stdout.write("missing")}
+')"
+REUSED_LEASE_OBSERVED="$(owner_observations "$CASE_ROOT/owner-observer.log")"
+if [ "$REUSED_LEASE_A_DECISION" = block ] \
+  && [ "$REUSED_LEASE_PLANT" = "planted:handoff:null" ] \
+  && [ "$REUSED_LEASE_B_RC" -eq 0 ] \
+  && [ "$REUSED_LEASE_B_DECISION" = block ] \
+  && [ "$REUSED_LEASE_A_ACTIVE" = false ] \
+  && [ "$REUSED_LEASE_B_ACTIVE" = true ] \
+  && [ "$REUSED_LEASE_OWNER" = "$(canonical_session reused-lease-b)" ] \
+  && observed_owner_alive "$REUSED_LEASE_OBSERVED" "$REUSED_LEASE_PID"; then
+  check "C7-reuse expired handed-off claim is adopted while its recorded owner PID is a live unrelated process" PASS
+else
+  check "C7-reuse expired lease under a reused owner PID (a=$REUSED_LEASE_A_DECISION plant=$REUSED_LEASE_PLANT planted_pid=$REUSED_LEASE_PID b_rc=$REUSED_LEASE_B_RC b=$REUSED_LEASE_B_DECISION a_active=$REUSED_LEASE_A_ACTIVE b_active=$REUSED_LEASE_B_ACTIVE owner=$REUSED_LEASE_OWNER decision_time=$REUSED_LEASE_OBSERVED)" FAIL
+fi
+
+setup_case in_flight_identity
+IDENTITY_PLATFORM="$(node -p process.platform)"
+start_impostor "$CASE_ROOT/impostor.pid"
+IDENTITY_IMPOSTOR_PID="$IMPOSTOR_PID"
+identity_case() {
+  local label="$1" mode="$2" plant out rc
+  setup_case "in_flight_identity_$label" '{"hooks":{"pendingReviewTtlHours":1}}'
+  zlog --pending-review --files "identity-$label.ts" >/dev/null
+  adopt "identity-$label-a" >/dev/null
+  plant="$(plant_owner "$CASE_STATE/pending-review.json.claim" "$IDENTITY_IMPOSTOR_PID" "$mode" keep)"
+  if [ "$plant" = unsupported ]; then
+    printf 'unsupported'
+    return
+  fi
+  out="$(observed_stop "$CASE_ROOT/owner-observer.log" "identity-$label-b")"; rc=$?
+  printf '%s/%s/%s/%s/%s/%s' "$plant" "$rc" "$(printf '%s' "$out" | decision)" \
+    "$(state_flag "identity-$label-a" active)" "$(state_flag "identity-$label-b" active)" \
+    "$(owner_observations "$CASE_ROOT/owner-observer.log")"
+}
+IDENTITY_SUPPORTED="$(CONTROL_CORE="$CORE" OWNER_PID="$IDENTITY_IMPOSTOR_PID" node -e '
+  try {
+    const core = require(process.env.CONTROL_CORE);
+    const pid = Number.parseInt(process.env.OWNER_PID, 10);
+    process.stdout.write(core.processStartIdentityForPid(pid) ? "yes" : "no");
+  } catch (_error) {
+    process.stdout.write("error");
+  }
+')"
+if [ "$IDENTITY_SUPPORTED" = yes ]; then
+  IDENTITY_IMPOSTOR="$(identity_case impostor mismatch)"
+  IDENTITY_GENUINE="$(identity_case genuine genuine)"
+else
+  IDENTITY_IMPOSTOR=unsupported
+  IDENTITY_GENUINE=unsupported
+fi
+stop_impostor
+IDENTITY_IMPOSTOR_VERDICT="${IDENTITY_IMPOSTOR%/*}"
+IDENTITY_GENUINE_VERDICT="${IDENTITY_GENUINE%/*}"
+if [ "$IDENTITY_PLATFORM" = win32 ] \
+  && [ "$IDENTITY_SUPPORTED" = no ] \
+  && [ "$IDENTITY_IMPOSTOR" = unsupported ] \
+  && [ "$IDENTITY_GENUINE" = unsupported ]; then
+  check "C7-identity win32 exposes no process start identity for a live process, so the impostor arm is skipped" PASS
+elif [ "$IDENTITY_PLATFORM" != win32 ] \
+  && [ "$IDENTITY_IMPOSTOR_VERDICT" = "planted:unacknowledged:mismatch/0/block/false/true" ] \
+  && [ "$IDENTITY_GENUINE_VERDICT" = "planted:unacknowledged:genuine/0/allow/true/false" ]; then
+  check "C7-identity a live PID with a mismatching start identity is rejected as an impostor while a matching one still holds its in-flight claim" PASS
+else
+  check "C7-identity in-flight owner identity (platform=$IDENTITY_PLATFORM probe=$IDENTITY_SUPPORTED impostor=$IDENTITY_IMPOSTOR genuine=$IDENTITY_GENUINE)" FAIL
 fi
 
 setup_case seed_mode_ladder

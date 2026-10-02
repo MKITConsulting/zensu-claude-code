@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -28,6 +28,7 @@
     "./skills/delivery-route",
     "./skills/docs",
     "./skills/doctor",
+    "./skills/full-suite",
     "./skills/gauntlet-loop",
     "./skills/ghost-scan",
     "./skills/implement",

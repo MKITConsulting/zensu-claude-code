@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-30
+
+### Added
+
+- **evidence**: Run full suites in the verified CI pipeline instead of locally (#350)
+- **session-control**: Adopt a compatible-schema record automatically across a lineage break (#343)
+- **tdd**: Verify every acceptance criterion live before a chain can close (#345)
+- **pr-fix-findings**: Follow the session's TDD mode instead of forcing strict (#342)
+- **verify-feature**: Make the origin the evidence boundary and retire the route gate (#340)
+- **verify-feature**: Admit localhost in the playwright-cli consent gate (#339)
+
+### Changed
+
+- **windows-ci**: Split the stop-enforcer routing suite across two shards (#341)
+
+### Fixed
+
+- **stop**: Exit early when nothing is armed and bound the hook with a deadline (#348)
+- **verify-feature**: Repair monorepo adapter boot, Vite binding and down (#349)
+- **session-control**: Stop a reused Windows PID from holding a deferred-review claim (#346)
+- **redact**: Skip artifacts git reports unchanged in the sweep (#351)
+- **release**: Pass dispatch inputs to run steps through env (#344)
+- **release**: Retry the publish read-back and stop failing without a message (#243)
+
 ### Upgrade notes
 
 - **verify-feature**: the browser consent gate no longer checks routes. An origin approved at the
@@ -28,6 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stage verifies every criterion unless the run was started with `--no-validate`, and the
   terminus line says which. A max-rounds close with `hooks.selfReview` off is not gated
   either, as for the full suite, and its summary shows acceptance as not checked.
+- **redact**: the artifact sweep no longer rewrites a committed `.zensu` plan or log that a
+  checkout merely refreshed, so a fresh worktree stays clean. A stray path-only diff that an
+  earlier release left in such a file can now be discarded with `git restore <file>` and stays
+  discarded; before this fix the next tool call redacted the restored file again. The sweep asks
+  git which artifacts changed, so outside a git repository, or when `git` fails or times out, it
+  sweeps every recent artifact as before and says so on stderr.
+- **chain-enforcer**: the `Stop` hook now has a whole-hook deadline of 45 s. Checks that have
+  not finished by then are stopped: a decision they already wrote stands, and otherwise the
+  Stop is released with a stderr notice that no completion was proven. The next Stop
+  evaluates again, and the release is not recorded in the bypass ledger. Set
+  `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment to move the bound between 10 s
+  and 75 s; the `Stop` registration carries a 90 s host `timeout` above that ceiling. A Stop
+  with no armed review chain, no Autopilot run and no queued review now returns right after
+  the session bind instead of running every check.
 
 ## [0.22.0] - 2026-09-28
 

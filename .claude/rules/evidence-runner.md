@@ -31,6 +31,18 @@ block, because the bind overwrites that variable. A new binding the verb exports
 join `CHILD_SCRUBBED_ENV`, or the suite under test sees it; `test-evidence-run.sh` E7
 pins the current set.
 
+**The command runs where the fingerprint looks.** `runDirectory` keeps the caller's working
+directory when it lies in the git work tree of the bound project root, and otherwise runs the
+command in the project root and says so on stderr. Work-tree identity decides first: a nested
+worktree, an embedded clone or a submodule inside the root is another work tree, which the
+fingerprint does not measure. Path containment decides only for a root outside git. The tree
+fingerprint and the verdict are bound to the project root, so a run from another worktree — the
+Bash tool's start directory after `/zensu:adopt-session --reanchor` — would certify a tree it never
+tested. The same-work-tree arm keeps a session recorded in a subdirectory able to run its suite
+from the worktree top. `test-evidence-run.sh` E8, E8b and E8c pin the three directions, and the
+unit case `a working directory outside the work tree of the project root runs the command in the
+project root` pins both arms, the `<root>-x` prefix sibling and a caller outside git.
+
 **The tree fingerprint never touches the real index.** It copies the index, runs
 `git add -A -- .` and then `git rm -r --cached .zensu` on the copy, and writes the tree.
 Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is
@@ -50,6 +62,13 @@ The unit case `a same-size edit in the second of the last index write still chan
 id` pins it with `core.checkStat minimal`, so it reproduces on hosts whose git keeps sub-second
 stat data, and it backdates the file and its index entry five seconds, so the copy always lands
 in a later second than the recorded mtime whatever the host's timing.
+
+**`full` and `scoped` runs carry a tree** (`TREE_SCOPES`); `lint`, `build` and `coverage`
+stay untreed. `--if-stale` works for both: for `full` it reads the newest `full` record, for
+`scoped` the newest run of the same command. A local chain's verdict still reads only `full`
+records. A chain whose full suite runs in CI reads its `scoped` runs through `decideCi` and
+may close as `deferred-ci`, a passing state that is never persisted. That mode, its policy and
+its stores are described in `.claude/rules/full-suite-ci-deferral.md`.
 
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure

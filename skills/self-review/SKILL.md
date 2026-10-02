@@ -109,11 +109,14 @@ finalizing the current chain.
 
 List every file you changed or created in this session. You know these from your
 own context — no parsing needed. Cross-check by running the `/zensu:tdd`
-Phase 6 step 5b b) enumeration UNCHANGED — resolve
-`TOP="$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --show-toplevel)"` HERE and
-require `[ -n "$TOP" ] && [ -d "$TOP" ]` before ANY `git -C "$TOP"` (an empty
-`TOP` makes `git -C ""` enumerate whatever repo the cwd happens to be; an
-unresolvable root takes 5b's no-work-tree branch, never an unanchored run) —
+Phase 6 step 5b b) enumeration UNCHANGED — resolve the bound project root with
+`PROJECT_ROOT="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)"`
+and `TOP="$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel)"` HERE, never from
+the working directory, which after `/zensu:adopt-session --reanchor` is no longer
+the bound root, and require `[ -n "$PROJECT_ROOT" ] && [ -n "$TOP" ] && [ -d "$TOP" ]`
+before ANY `git -C "$TOP"` (an empty value makes `git -C ""` enumerate whatever
+repo the cwd happens to be; an unresolvable root takes 5b's no-work-tree branch,
+never an unanchored run) —
 then use `git -C "$TOP" -c core.quotePath=false diff --name-only HEAD` plus
 `git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard`
 (without `core.quotePath=false` git C-quotes non-ASCII paths and no fixed-string
@@ -176,7 +179,7 @@ Bash carries no `CLAUDE_PROJECT_DIR` and would otherwise skip the project config
 hook reads, with
 `CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off' _ "${CLAUDE_PLUGIN_ROOT}"`,
 and on `off` skip this paragraph and add no ledger rows to `## Open`. On `on`, run
-`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$(git rev-parse --show-toplevel)"`
+`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$TOP"`
 over the run log of the `/zensu:tdd` chain this stage closes: the log that chain has been
 writing to in this session, never a log resolved by recency. When that path is not known in
 this session, skip the ledger. On `status=ok` or `status=partial`, every entry in state
@@ -227,6 +230,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
+  Run every test, build or other project command of this round as
+  `cd "<project root>" && <command>`, where `<project root>` is the path `--project-root`
+  printed in Phase 1: the Bash tool returns to the session's start directory, which after
+  `/zensu:adopt-session --reanchor` is not the bound root. `--evidence-run` needs no prefix.
   Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
   the `/zensu:tdd` Phase 6 **step 1 full suite** over the amended tree through the
   evidence runner:
@@ -234,6 +241,11 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   — this is the chain's last edit, so this is
   the run whose verdict describes the tree that ships, and Phase 5 checkpoints are
   scoped and cannot stand in for it.
+  **In CI mode** — `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --full-suite-policy`
+  prints `full suite: ci` — run the Phase 6 affected-suite command instead:
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope scoped --cmd '<the tests affected by the change>' --log <run-log>`,
+  covering the suites of every file this chain changed, never `--scope full`: the
+  runner refuses it, and the repository's CI pull-request pipeline runs the full suite.
   This stage is often forced cold and never ran `/zensu:tdd` Phase 1, so resolve the
   suite command in THIS order. (1) `evidence.fullSuiteCommand` — when the project
   configures it, drop `--cmd` and the runner uses it. (2) The project's own
@@ -278,7 +290,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal follow the remedy the line names: a `run:` segment means run `/zensu:verify-feature --chain` with the log it names, then this step again; a `fix:` segment means a criterion fails on this tree and needs the one fix round; an `add:` or `restore:` segment, or a refusal with no remedy, goes into your report and to the user. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. The same holds for a criterion that is still `fail` or `partial` after the spent round: carry the `ACCEPTANCE — …` refusal into your report, stop, and leave `ZENSU_ACCEPTANCE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record — in CI mode on a missing, red, running, interrupted or stale local test run, and it passes as `deferred-ci` with a second `FULL SUITE — CI contract` line. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. It applies the acceptance gate as well: it prints `ACCEPTANCE — <state> | …` lines and refuses while any active criterion lacks a `pass` on the current tree; on that refusal follow the remedy the line names: a `run:` segment means run `/zensu:verify-feature --chain` with the log it names, then this step again; a `fix:` segment means a criterion fails on this tree and needs the one fix round; an `add:` or `restore:` segment, or a refusal with no remedy, goes into your report and to the user. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. The same holds for a criterion that is still `fail` or `partial` after the spent round: carry the `ACCEPTANCE — …` refusal into your report, stop, and leave `ZENSU_ACCEPTANCE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
   2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus
      printed — the verdict, plus the `flaky` line and the gate-mode disclosure when
      present — into the `Full suite` verdict cell verbatim. Copy every `ACCEPTANCE — …`
@@ -337,7 +349,7 @@ take 🔴, never 🟡) — a claimed edit
 that never produced a change must not vanish between the Phase 6 report and this
 summary; **Full suite** takes the `FULL SUITE — …` lines `--chain-done` printed
 (Phase 4 finalize step 2): 🟢 only for `pass`; 🟡 for `pass-tree-unverified`,
-`not-applicable`, `not checked` and an advisory `missing`; 🔴 for every other
+`deferred-ci`, `not-applicable`, `not checked` and an advisory `missing`; 🔴 for every other
 state, advisory or not, including `escaped`. Both verbatim cells follow the `## Open` escaping rule
 (`\` first, then `|`), for the same reason: an unescaped pipe splits the row and
 the renderer drops the cells past the last column. **Acceptance** carries text VERBATIM

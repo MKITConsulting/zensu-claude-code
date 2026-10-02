@@ -196,7 +196,8 @@ layout constants and ALL THREE reason sets (`CLEAN_REASONS`, `TRANSIENT_REASONS`
 `NON_ARTIFACT_REASONS` — an explicit partition, because an implicit residual class
 once made a routine race report as the worst outcome the hook can produce), all in the host-neutral module — together
 with its ONE sibling `require`, `claude-path-v1.js`'s `msysDrivePrefix`, without
-which the module does not load at all. A SIXTH host obligation goes with the log
+which the module does not load at all. `sweepTargets` also spawns `git`; a host
+without it gets the unscoped set and a `fallback` reason, never an error. A SIXTH host obligation goes with the log
 verb: the credential-value scan, which couples it to `secret-patterns.js`'s
 location, its `scan()` name and its `{matches:[{rule}]}` shape. A port that takes
 the writer without it ships the writer minus the control this section says `append`
@@ -213,10 +214,42 @@ returns on every call, module loaded and never redacting. A port that takes only
 the rules and no writer. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT
 included in this change.
 
+**The sweep asks git before it redacts.** A checkout, `git worktree add` included,
+writes every tracked artifact, so an mtime cannot tell a fresh append from a file git
+just restored; unscoped, the first main-thread call redacted the 25 newest committed
+artifacts and left a stray diff that a restore could not cure, because the restore
+refreshed the mtime again. `sweepTargets` therefore drops a candidate only when git
+POSITIVELY confirms it tracked and unchanged: `git status --porcelain=v1 -z
+--untracked-files=all --no-renames` does not list it AND `git ls-files -z --cached`
+does. Status alone cannot vouch for a file — it lists nothing inside a nested
+repository at `.zensu` and spells a macOS NFD name in NFC — so keys are NFC-normalized
+and anything git cannot confirm (ignored, nested, behind a symlinked bucket, a case or
+normalization mismatch, skip-worktree) is kept. `ls-files` runs only when some
+candidate is unlisted, so an ordinary run costs one git call. Porcelain paths are
+relative to the repository ROOT and `ls-files` paths to the project root: the status
+side matches the trailing `.zensu/<bucket>/<name>`, which can only over-keep, and the
+`ls-files` side requires exactly those three components, which can only
+under-confirm. The filter runs BEFORE `SWEEP_MAX_TARGETS`, or the checkout's files
+fill the cap and crowd a real append out (R78). Both calls run with
+`GIT_OPTIONAL_LOCKS=0`, so the hook never takes `index.lock` (R79), plus
+`-c core.fsmonitor=false`, `LC_ALL=C` for the `not a git repository` match, one shared
+`SWEEP_GIT_TIMEOUT_MS` budget and a scrubbed `GIT_*` environment. **Fallback is the
+contract:** git missing, no repository, a non-zero exit, a timeout or unparseable
+output keep every candidate and name the reason in `fallback`, which the hook prints as
+`zensu: artifact sweep not scoped by git (<reason>)` — redacting too much is the safer
+failure for this net. Bound: an artifact committed before any main-thread pass reached
+it (a subagent write committed by the next Bash call, or a hand-rolled append committed
+in the same call) is clean to git and never swept, and `assume-unchanged` hides a
+modification the same way. Coupled sites: `sweepTargets` returns `{ targets, fallback }`,
+read by the hook and by R48, R49 and R62-R81 (R81 is the check that fails, on any OS, if
+the scope decides from `git status` alone); `GIT_ENV_SCRUB` is a THIRD hand-copy of
+the list in `worktree-keep-v1.js` (`GIT_ENV_SCRUB`) and `evidence-run-v1.js`
+(`GIT_SCRUBBED_ENV`), and nothing pins the three against each other.
+
 **The PostToolUse net is MAIN-THREAD only.** `zensu_hook_is_main_principal` gates
 it, so a subagent's `Write` to a plan is caught only by a later main-thread pass —
 on EITHER matcher, since both sweep — and only while the artifact is still younger
-than `SWEEP_WINDOW_SECONDS`. Sweeping on the write matchers adds sampling points;
+than `SWEEP_WINDOW_SECONDS` and not yet committed clean. Sweeping on the write matchers adds sampling points;
 it extends no deadline, because the cutoff is the artifact's own mtime. The writer
 verb is unaffected; this is a bound on the net, not on the guarantee's primary
 path, and it is listed here rather than left to be discovered.
@@ -228,9 +261,10 @@ repository becomes safe to open-source because of it alone.
 **Known bounds, stated rather than implied:** the rule is textual, so a path spelled
 through a symlink or an alias matching no known root is not caught (macOS's
 `/private/{tmp,var}` is the one pair handled by hand); a git repository root ABOVE the
-project root is covered only insofar as `$HOME` covers it; the `Bash` sweep only
-revisits artifacts modified within `SWEEP_WINDOW_SECONDS`, so earlier runs are out of
-reach by design — this is a writer-side fix, not a history rewrite; email addresses and
+project root is covered only insofar as `$HOME` covers it; the sweep only
+revisits artifacts modified within `SWEEP_WINDOW_SECONDS` that git does not confirm as
+tracked and unchanged, so earlier runs are out of reach by design, even right after a
+checkout refreshed their mtimes — this is a writer-side fix, not a history rewrite; email addresses and
 internal URLs are NOT redacted; a DOUBLY encoded separator (`\\\\Users\\\\bob`, four
 backslashes — JSON encoding applied twice) still leaves the user segment, because
 the escaped-separator rules cap at two; neither writer produces that spelling, so
@@ -239,9 +273,12 @@ rather than outside it; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
 nothing, and deliberately NOT gated on that variable: an earlier revision made
-`--truncate` refuse without it and broke the shipped Phase 2 recipe outright,
-because the variable is absent from the model's Bash environment on this host,
-which is exactly why `{log_file}` is rendered from `${CLAUDE_PROJECT_DIR:-.}`.
+`--truncate` refuse without it and broke the Phase 2 recipe of that time outright,
+because the variable is absent from the model's Bash environment on this host.
+The current recipe renders `{log_file}` from the bound root that
+`zensu-log.sh --project-root` prints and passes `CLAUDE_PROJECT_DIR="{project_root}"`
+on its `--truncate` call, so the shipped destructive write IS bound; every other
+caller that omits the variable still is not.
 An env var the caller sets is not an authority; what constrains the destructive
 mode is the module; and nothing here recognizes a customer name or an internal hostname, which is why the English-only + repo-root-relative authoring rules
 ship in `templates/tdd-plan.md` and `skills/tdd/SKILL.md` Phase 2 alongside the code.

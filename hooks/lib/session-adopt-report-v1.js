@@ -25,6 +25,11 @@ const core = require("./session-control-core-v1.js");
 // caller. Required at the TOP on purpose: a broken or missing sweep module then
 // fails this command before adoptContext has mutated anything, rather than after.
 const sweepLeases = require("./review-evidence-sweep-v1.js");
+// The ONE adoption implementation, shared with every hook that adopts on a failed
+// bind. --confirm is the manual fallback for a REFUSED or opted-out automatic
+// adoption, so it passes respectOptOut:false: hooks.sessionAutoAdopt=false switches
+// the hooks off, never the command the user runs by hand.
+const autoAdopt = require("./session-auto-adopt-v1.js");
 
 // The three inputs are read INSIDE buildRequest, not at module scope. Freezing them
 // at require time made main() undrivable from a unit test: every case would share one
@@ -596,8 +601,9 @@ const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 // the restore arm it was about. That require-time benefit is the whole of it, and
 // the second half this comment used to claim was unearned: a skewed core does NOT
 // reach the no-remedy text through the shipped entry point, because
-// `main()` resolves `core.restoreRootVerdict` unguarded and CALLS it
-// above the table, so it throws before the table is consulted and the outer catch
+// `main()` resolves `restoreRootVerdict` on the core it runs against
+// (`adoptionCore`, the module's own unless a caller injects one) unguarded and
+// CALLS it above the table, so it throws before the table is consulted and the outer catch
 // around main() turns that into a refusal with exit 1. The EMPTY table is reached
 // only by a caller that hands `renderRestoreVerdict` a verdict of its own, which is
 // the unit suite. The table is built on first use and memoized.
@@ -1207,7 +1213,56 @@ function renderRestoreOutcome(outcome) {
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
-function main() {
+// ONE rendering of the crash-resume refusal, for the read-only report and for
+// --confirm. The two used to disagree about the same state: the read-only path
+// answered ADOPTABLE, because the probe finds the record adoptable, while --confirm
+// refused it and opened on "the read-only check above found the record adoptable"
+// — and every deny that names this token tells the reader that THIS command names
+// the file. Both now ask the shared preview, which owns the check, and both print
+// this.
+function renderSupersededConflict(file) {
+  process.stdout.write("The record itself is adoptable, but a superseded record from an interrupted adoption\n");
+  process.stdout.write("is already in place, and the adoption refuses to overwrite it:\n");
+  process.stdout.write("  " + safe(file) + "\n");
+  process.stdout.write("Nothing was changed. That file is the copy taken before the earlier adoption was\n");
+  process.stdout.write("interrupted. Move it aside, then re-run this command with --confirm.\n");
+}
+
+// The provenance vocabulary through its owner, guarded the way BASELINE_STATES is
+// read: a core that predates the constant falls back to the literal it wrote. The
+// literals alone would silently re-route a renamed token — a successful adoption
+// without a workflow document would then print that its provenance entry could not
+// be written, which is false with nothing failing.
+function provenanceToken(c, name, fallback) {
+  const vocabulary = c && c.ADOPTION_PROVENANCE;
+  return vocabulary && typeof vocabulary[name] === "string" ? vocabulary[name] : fallback;
+}
+
+// ONE rendering for a refusal, whichever check answered it: the probe at the top of
+// a run, or the preview below it when the state changed in between. The diagnosis of
+// the workflow document is appended ONLY for already-served, and only on the
+// read-only path: every other refusal means the record itself is the problem, so a
+// diagnosis of the document it anchors would point past the actual cause. Strictly
+// read-only — that is the premise the PreToolUse recognizer's admission of this
+// command rests on.
+function writeRefusal(reason, request, c) {
+  process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(reason) + ")\n\n");
+  process.stdout.write((REMEDY[reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+  if (reason === c.ADOPTION_REFUSALS.ALREADY_SERVED) {
+    process.stdout.write(renderBaselineDiagnosis(baselineVerdict(request), request.sessionId));
+  }
+  process.exitCode = 1;
+}
+
+// `deps` is the unit seam for the adoption half — the request builder, the core and
+// the shared adopter. Production passes nothing. The --confirm outcome split and the
+// preview's arms are otherwise reachable only through a real store and a racing
+// hook, so each arm was held by nothing and swapping two of their bodies stayed
+// green.
+function main(deps = {}) {
+  const adoptionCore = deps.core || core;
+  const adopter = deps.autoAdopt || autoAdopt;
+  const build = deps.buildRequest || buildRequest;
   let request;
   // TWO refusal classes, two headlines. `buildRequest` performs two independent
   // checks — the session identity and the private record store — and routing both
@@ -1229,7 +1284,7 @@ function main() {
     return;
   }
   try {
-    request = buildRequest();
+    request = build();
   } catch (error) {
     process.stdout.write("Zensu session adoption — NOT adoptable (private-record-store-unsafe)\n\n");
     process.stdout.write("The private Session Control record store could not be opened safely: "
@@ -1248,7 +1303,7 @@ function main() {
     // main() resolves the verdict, exactly as it already does for `adoptableRecord`
     // below. That is what lets the two renderers TAKE their inputs and return their
     // lines, and it keeps the one place where the process result is decided here.
-    const restoreVerdict = core.restoreRootVerdict(request);
+    const restoreVerdict = adoptionCore.restoreRootVerdict(request);
     const pre = renderRestoreVerdict(restoreVerdict,
       process.env.ZADOPT_CONFIRM === "1");
     process.stdout.write(pre.text);
@@ -1264,7 +1319,7 @@ function main() {
     process.exitCode = post.code;
     return;
   }
-  const verdict = core.adoptableRecord(request);
+  const verdict = adoptionCore.adoptableRecord(request);
   if (!verdict.ok) {
     if (shouldRepairInPlace(verdict, process.env.ZADOPT_CONFIRM === "1")) {
       // The record needs nothing; the LEASE STORE may still be wedged. adoptContext
@@ -1286,7 +1341,7 @@ function main() {
       const baseline = repairBaseline(request, baselineVerdict(request));
       const repaired = sweepLeases.discardSupersededLeases(
         request.pluginData,
-        core.sessionKey(request.sessionId),
+        adoptionCore.sessionKey(request.sessionId),
         repairSweepRoot(request),
       );
       // Headline AFTER both verdicts, never before them: printing "repaired"
@@ -1309,21 +1364,44 @@ function main() {
       process.exitCode = repairExitCode(repaired, baseline);
       return;
     }
-    process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
-    process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
-    // ONLY on already-served, and only without --confirm: this is the read-only
-    // half of the one refusal that has something left to do. Every other refusal
-    // means the record itself is the problem, so a diagnosis of the document it
-    // anchors would point past the actual cause. Strictly read-only — that is the
-    // premise the PreToolUse recognizer's admission of this command rests on.
-    if (verdict.reason === core.ADOPTION_REFUSALS.ALREADY_SERVED) {
-      process.stdout.write(renderBaselineDiagnosis(baselineVerdict(request), request.sessionId));
-    }
-    process.exitCode = 1;
+    writeRefusal(verdict.reason, request, adoptionCore);
     return;
   }
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
+    // The crash-resume shape, asked of the SAME preview every hook asks. The probe
+    // above finds this record adoptable — it is — while a superseded file an
+    // interrupted adoption left behind makes adoptContext's exclusive copy refuse
+    // every later attempt. Strictly read-only: the preview performs no write, which
+    // is the premise the PreToolUse recognizer's admission of this command rests on.
+    // respectOptOut:false for the reason --confirm passes it — the opt-out governs
+    // the hooks, never the command the user runs by hand, so an opted-out record
+    // still reads ADOPTABLE here.
+    const blocked = adopter.previewAdoption({ ...request, respectOptOut: false });
+    if (blocked.reason === adopter.AUTO_ADOPT_REASONS.SUPERSEDED_EXISTS) {
+      process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(blocked.reason) + ")\n\n");
+      renderSupersededConflict(blocked.supersededFile);
+      process.exitCode = 1;
+      return;
+    }
+    // The preview can also answer what the probe above did not: a hook of this
+    // session adopted the record in between (served), or a refusal first appeared.
+    // Printing ADOPTABLE over either sent the user to a --confirm that answers NOT
+    // adopted a second later. A served or refused answer renders exactly as the
+    // probe's own would, so one state has one rendering.
+    if (blocked.outcome === adopter.AUTO_ADOPT_OUTCOMES.ALREADY_SERVED
+        || blocked.outcome === adopter.AUTO_ADOPT_OUTCOMES.REFUSED) {
+      writeRefusal(blocked.reason, request, adoptionCore);
+      return;
+    }
+    if (blocked.outcome !== adopter.AUTO_ADOPT_OUTCOMES.ADOPTABLE) {
+      process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(blocked.reason) + ")\n\n");
+      process.stdout.write("The adoption check itself could not complete: " + safe(blocked.error || blocked.reason) + "\n");
+      process.stdout.write("Nothing was changed. Re-run this command; if it persists, run /zensu:doctor,\n");
+      process.stdout.write("which names the disagreement.\n");
+      process.exitCode = 1;
+      return;
+    }
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + safe(verdict.recorded) + prunedNote(verdict.prunedPluginRoot) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
@@ -1391,16 +1469,62 @@ function main() {
     return;
   }
 
-  const adopted = core.adoptContext(request);
-  // The record is swapped at this point. The sweep is the second half of the
-  // adoption and runs here rather than inside adoptContext; every one of its own
-  // filesystem paths is caught internally, so it reports a verdict rather than
-  // throwing after a mutation that already succeeded.
-  const leases = sweepLeases.discardSupersededLeases(
-    request.pluginData,
-    core.sessionKey(request.sessionId),
-    adopted.context.plugin_root,
-  );
+  // adoptContext plus the lease sweep, through the shared adopter: it re-checks
+  // adoptability under the records lock, so a sibling hook adopting in the window
+  // between the preview above and this call is answered as already-served rather
+  // than as a crash, and a refusal that first appears under the lock is named.
+  const adopted = adopter.adoptForHook({ ...request, respectOptOut: false });
+  if (adopted.outcome !== adopter.AUTO_ADOPT_OUTCOMES.ADOPTED) {
+    process.stdout.write("Zensu session adoption — NOT adopted (" + safe(adopted.reason) + ")\n\n");
+    if (adopted.outcome === adopter.AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
+      process.stdout.write("The record was adopted by a hook of this session while this command ran, so this\n");
+      // A served answer still ran the lease sweep — adoptForHook completes every
+      // served outcome with it — and what it did travels on the result. "Nothing was
+      // changed" is true only when it set nothing aside and nothing failed; an older
+      // adopter without the predicate is read as having something to report.
+      const served = adopted.leases && typeof adopted.leases === "object" ? adopted.leases : null;
+      const worth = typeof adopter.sweepWorthReporting === "function" ? adopter.sweepWorthReporting(served) : true;
+      if (served === null) {
+        process.stdout.write("installation already serves it. No lease sweep result was recorded for this run,\n");
+        process.stdout.write("so re-run this command with --confirm to sweep the lease store.\n");
+      } else if (!worth) {
+        process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
+        process.stdout.write("see the served state, or simply continue in the session.\n");
+      } else if (leasesScope(served) !== "") {
+        process.stdout.write("installation already serves it. This run ran that adoption's review-evidence lease\n");
+        process.stdout.write("sweep, and the sweep was REFUSED; what it found is below.\n");
+        reportLeaseWarnings(served);
+      } else {
+        process.stdout.write("installation already serves it. This run completed that adoption's review-evidence\n");
+        process.stdout.write("lease sweep, and what it did is below.\n");
+        reportLeaseWarnings(served);
+      }
+    } else if (adopted.supersededFile) {
+      // Named by the preview before the lock, or by adoptContext's own exclusive
+      // copy under it; the same state either way, so the same rendering.
+      renderSupersededConflict(adopted.supersededFile);
+    } else if (adopted.outcome === adopter.AUTO_ADOPT_OUTCOMES.REFUSED) {
+      // A refusal that first appears UNDER the records lock: the probe at the top of
+      // this run passed, so the record stopped being adoptable in between. Calling
+      // it adoptable here would contradict the headline one line up.
+      process.stdout.write("The adoption was refused under the records lock, although the probe a moment\n");
+      process.stdout.write("earlier found the record adoptable — the state changed in between. Nothing was\n");
+      process.stdout.write("changed. Re-run this command WITHOUT --confirm to read that refusal and its remedy.\n");
+    } else {
+      // No "the read-only check above" here: nothing above this line was printed in
+      // this invocation, so the sentence pointed at output the reader never saw.
+      process.stdout.write("The record is adoptable, but the adoption itself did not complete: "
+        + safe(adopted.error || adopted.reason) + "\n");
+      process.stdout.write("Nothing was changed. Re-run this command with --confirm; if it persists, run\n");
+      process.stdout.write("/zensu:doctor, which names the disagreement.\n");
+    }
+    process.exitCode = 1;
+    return;
+  }
+  // The record is swapped at this point and the lease store has been swept; the
+  // sweep is the second half of the adoption and its verdict is carried on the
+  // result, never absorbed.
+  const leases = adopted.leases;
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
   process.stdout.write("  record minted by : " + safe(adopted.recorded) + prunedNote(adopted.prunedPluginRoot) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
@@ -1448,7 +1572,7 @@ function main() {
       process.stdout.write(PRUNED_EXPLANATION);
     }
   }
-  if (adopted.provenance === "no-workflow-document") {
+  if (adopted.provenance === provenanceToken(adoptionCore, "NO_DOCUMENT", "no-workflow-document")) {
     // TWO shapes for one provenance value, because that value means two different
     // things and only ONE of them has a repair. The guard behind it is an existsSync
     // UNDER adopted.projectRoot, and in the ORPHANED case that directory is the
@@ -1478,8 +1602,8 @@ function main() {
       // carrier.
       let adoptedShape = null;
       try {
-        adoptedShape = core.classifyWorkflowBaselineShape(
-          core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+        adoptedShape = adoptionCore.classifyWorkflowBaselineShape(
+          adoptionCore.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
           adopted.projectRoot,
         );
       } catch (_error) { adoptedShape = null; }
@@ -1495,9 +1619,9 @@ function main() {
         // the warning is not, so a failure costs the name and keeps the sentence.
         let unsafeComponent = null;
         try {
-          unsafeComponent = core.baselineUnsafeComponent(
+          unsafeComponent = adoptionCore.baselineUnsafeComponent(
             adopted.projectRoot,
-            core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+            adoptionCore.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
           );
         } catch (_error) { unsafeComponent = null; }
         process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
@@ -1510,7 +1634,7 @@ function main() {
         process.stdout.write("review chain that was live when it vanished is gone.\n");
       }
     }
-  } else if (adopted.provenance !== "recorded") {
+  } else if (adopted.provenance !== provenanceToken(adoptionCore, "RECORDED", "recorded")) {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }

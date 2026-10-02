@@ -391,6 +391,35 @@ test('the child sees no plugin bindings, the caller project dir and the caller c
   assert.match(result.stdout, /\/sub\n/);
 });
 
+test('a working directory outside the work tree of the project root runs the command in the project root', async () => {
+  const root = gitRepo();
+  const sibling = gitRepo();
+  const data = pluginData();
+  const result = await runIn(root, data, { scope: 'scoped', cwd: sibling, command: 'pwd -P' });
+  assert.equal(result.code, 0);
+  assert.ok(result.stdout.split('\n').includes(root), result.stdout);
+  assert.ok(!result.stdout.split('\n').includes(sibling), result.stdout);
+  assert.match(result.stderr, /the working directory is not in the work tree of the bound project root, so the command runs in /);
+  const [record] = recordsOf(data);
+  assert.equal(record.cwd, root);
+  assert.deepEqual(evr.runDirectory(root, sibling), { cwd: root, moved: true });
+  assert.deepEqual(evr.runDirectory(root, path.join(root, 'sub')), { cwd: path.join(root, 'sub'), moved: false });
+  assert.deepEqual(evr.runDirectory(path.join(root, 'sub'), root), { cwd: root, moved: false });
+  assert.deepEqual(evr.runDirectory(root, ''), { cwd: root, moved: false });
+  const nested = path.join(root, 'nested');
+  fs.mkdirSync(nested);
+  sh(nested, 'git init -q');
+  assert.deepEqual(evr.runDirectory(root, nested), { cwd: root, moved: true });
+  assert.deepEqual(evr.runDirectory(root, tempDir('plain-caller')), { cwd: root, moved: true });
+  const plain = tempDir('plain-root');
+  fs.mkdirSync(path.join(plain, 'sub'));
+  fs.mkdirSync(`${plain}-x`);
+  assert.deepEqual(evr.runDirectory(plain, plain), { cwd: plain, moved: false });
+  assert.deepEqual(evr.runDirectory(plain, path.join(plain, 'sub')), { cwd: path.join(plain, 'sub'), moved: false });
+  assert.deepEqual(evr.runDirectory(plain, `${plain}-x`), { cwd: plain, moved: true });
+  assert.deepEqual(evr.runDirectory(plain, sibling), { cwd: plain, moved: true });
+});
+
 test('a scoped run carries no tree id', async () => {
   const data = pluginData();
   await runIn(gitRepo(), data, { scope: 'lint', command: 'true' });
