@@ -2643,7 +2643,7 @@ CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 # ── W* — the WRITES anchor, and the renderer bounds around it ───────────────
 # A takeover into another worktree can edit and test but cannot commit: the Bash
 # source-write gate compares every write against the session's IMMUTABLE project
-# root, and nothing re-anchors a session. `show` therefore reports whether the
+# root, and only /zensu:adopt-session --reanchor moves it. `show` therefore reports whether the
 # TARGET worktree is this session's own anchor, and the whole point of the line
 # is that it must never answer "allowed" off a measurement that failed.
 #

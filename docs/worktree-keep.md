@@ -62,21 +62,29 @@ drift disclosure at all, which is listed under Limits below. A payload that name
 - **`session-end-worktree-keep.sh`** (SessionEnd). Ages this session's anchor instead of
   deleting it: the anchor stops holding the marker at once but stays as the branch baseline
   until twice its idle window, so a takeover between the end and a later resume is still
-  disclosed. An anchor it cannot validate is removed when it is a regular file, a hard link
+  disclosed. The marker then goes unless another anchor or a nested repository keeps it. An anchor it cannot validate is removed when it is a regular file, a hard link
   included; a symlink, a non-file or a broken `.zensu/state` component is left in place.
+- **`/zensu:adopt-session --reanchor --confirm`** is not a hook, but it moves the record's
+  project root to another worktree of the same repository, and the anchor moves with it while
+  `hooks.worktreeKeep` is on: this session's anchor in the old worktree is aged exactly as
+  SessionEnd ages it, and one is written in the new worktree exactly as a fresh SessionStart
+  writes it. Another session's live anchor in the target, or one this build cannot validate,
+  makes the move refuse, because it marks a worktree that session may still be working in.
 
 With `hooks.worktreeKeep` off, the SessionStart and SessionEnd hooks run a release pass instead:
 they remove this session's anchor and every marker this plugin wrote that nothing holds any
 more, in this worktree and in its siblings, and never create one. The prompt hook stays off. A
 marker stays while a live anchor of another session holds it, while an anchor file this build
 cannot validate sits beside it (usually the live anchor of a session on another plugin version
-during an update; remove it by hand only after confirming no such session is live there), and
+during an update; remove it by hand only after confirming no such session is live there),
 while the anchor directory cannot be read — a directory past its bound drains as those passes
-reap the expired anchors they read; `/zensu:doctor` names which of these holds it.
+reap the expired anchors they read — and while a nested repository sits inside the worktree or
+the scan for one did not finish (see below); `/zensu:doctor` names which of these holds it.
 
 The marker's lifecycle is implemented once in `hooks/lib/worktree-keep-v1.js`: the marker is
-held in a worktree while at least one live anchor exists there, and also while an anchor this
-build cannot validate sits beside it. An anchor is live while its stamp is younger than the idle
+held in a worktree while at least one live anchor exists there, also while an anchor this
+build cannot validate sits beside it, and, once no anchor holds it, while a nested repository
+sits inside the worktree. An anchor is live while its stamp is younger than the idle
 window it recorded (`hooks.worktreeKeepIdleHours` of the session that wrote it, default 72; the
 reader's own window applies only to an anchor that recorded none), so a sweep under a shorter
 window cannot release another session's marker early. An aged anchor from SessionEnd is stale at
@@ -93,6 +101,35 @@ marker is a fixed signature — is never removed. Branch names outside a plain g
 never rendered: an anchor carrying one is rejected and rewritten, and a takeover onto a
 checked-out branch with such a name is disclosed with the name withheld. Every git child runs
 with the `GIT_DIR`-style discovery and config-injection variables removed from its environment.
+
+## Nested repositories keep the marker
+
+Once the marker is gone, Claude Desktop's archive cleanup judges the worktree by
+`git status --porcelain --untracked-files=all`, which does not list ignored files, and removes
+the directory whole; it spares only the worktrees the app created itself. Read in the
+2.19675.0 bundle and not run. A repository nested inside the worktree is usually ignored by the
+outer repository — the multi-repo `.worktrees/<repo>/<branch>` layout, a worktree of the same
+repository under `.claude/worktrees/` created by the continuation recipe below or by hand —
+so the outer tree reads as clean and the nested repository is deleted with it, together with
+its uncommitted work and, for a repository with its own `.git` directory, its unpushed commits.
+
+So the marker is not removed while a nested repository other than a submodule of the
+worktree's own repository sits inside the worktree. The rule lives in `reconcileKeep` and
+therefore covers every path that would otherwise remove the marker: SessionEnd ageing the
+anchor, the sibling sweep at a later SessionStart once the idle window passed, the release pass
+with `hooks.worktreeKeep` off, and `release` below. The scan runs only on that path, so a live
+session's prompt never pays for it: its own anchor holds the marker before the scan is reached.
+It walks the worktree in name order, never follows a symlink, and stops at the first nested
+repository it finds; it walks the whole tree only to show that none is there. In the hooks it
+ends 3 seconds after the hook's `node` process started (`NESTED_SCAN_DEADLINE_MS`), and a scan
+that does not finish — past that deadline, past its entry bound, or at a directory it cannot
+read — keeps the marker too, because it cannot rule a nested repository out.
+
+The consequence is that such a worktree stays on disk when its session is archived, until
+every nested repository in it is moved out or removed; the next SessionStart in the repository
+then releases the marker. The same rule protects the taking session after a takeover that
+moved the old worktree into its own with `git worktree move`: the moved tree is a nested
+worktree, so archiving the taking session no longer deletes it.
 
 ## How to continue when the directory was taken
 
@@ -164,11 +201,9 @@ them when it prints that the old session can be archived or removed, because an 
 them with the worktree.
 
 The nested-repository refusal exists because the app's cleanup does not spare what it did not
-create. Read in the 2.19675.0 code and not run: the cleanup judges a worktree by its
-`git status`, removes it whole, and protects only the worktrees the app created itself. A
-worktree of another repository nested inside, as in the multi-repo `.worktrees/<repo>/<branch>`
-layout, is usually ignored by the outer repository, so the outer tree reads as clean and the
-nested one is deleted with it. `nestedRepositories` in the module is the scan. It walks the
+create (see Nested repositories keep the marker above); `release` refuses where `reconcileKeep`
+would keep the marker anyway, so it never reports a worktree as releasable that the hold would
+keep. `nestedRepositories` in the module is the scan. It walks the
 worktree without following a symlink and recognizes a repository by its `.git` entry, or a bare
 one by its `HEAD`, `objects` and `refs`. It stops at every nested repository root and names its
 kind, except that it walks on into a real submodule: a gitfile whose target lies in the
@@ -181,13 +216,15 @@ directory.
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `hooks.worktreeKeep` | `true` | `false` turns the prompt hook off and stops every new marker, anchor and notice; SessionStart and SessionEnd then release this session's anchor and every marker this plugin wrote that nothing holds any more; a marker another live anchor, an anchor file this build cannot validate or an unreadable anchor directory still holds stays, and `/zensu:doctor` names the hold |
+| `hooks.worktreeKeep` | `true` | `false` turns the prompt hook off and stops every new marker, anchor and notice; SessionStart and SessionEnd then release this session's anchor and every marker this plugin wrote that nothing holds any more; a marker another live anchor, an anchor file this build cannot validate, an unreadable anchor directory, a nested repository or an unfinished scan for one still holds stays, and `/zensu:doctor` names the hold |
 | `hooks.worktreeKeepIdleHours` | `72` (range `1..8760`) | Idle window after which an anchor no longer holds the marker; each anchor records the window it was written under and is judged by it |
 
 ## Doctor
 
 `/zensu:doctor` renders a `worktree:` row family: not an app-managed worktree, marker present
-with the live anchor count, an anchor directory that could not be read (and whether it drains),
+with the live anchor count, a nested repository that keeps the marker once no session anchor
+holds it (naming the first one in name order), a scan for nested repositories that did not
+finish, an anchor directory that could not be read (and whether it drains),
 marker missing while this session's anchor is live (naming why the plugin does not create it —
 git does not ignore the marker, `info/exclude` refuses the entry, or git cannot answer — and
 promising no restore while the anchor directory cannot be read), this session's anchor missing,
@@ -215,9 +252,20 @@ plugin version is live there.
 - `release` attributes an anchor only to a session it finds in the config root it reads. An
   anchor of any other session counts as unattributed and keeps the old worktree protected until
   its idle window passes.
-- Nothing but `release` checks for nested repositories. When an anchor ages through SessionEnd,
-  the idle window or the flag-off release pass, the marker goes whether or not a nested
-  repository is still inside, and an archive after that can delete it with the worktree.
+- A nested repository keeps the worktree on disk at archive whatever it holds. The scan cannot
+  tell a worktree whose work is committed and pushed, or a dependency checkout a build can
+  recreate — SwiftPM's `SourcePackages` in a DerivedData directory inside the worktree, a test
+  fixture repository — from one holding unpushed or uncommitted work, so it keeps the marker
+  for all of them; such a directory stays until its nested repositories are removed by hand.
+- A session still running a plugin build without this rule removes the marker the old way, so
+  while any session in a repository runs such a build, its SessionEnd or its sibling sweep can
+  still release a worktree with a nested repository inside.
+- The sibling sweep visits siblings in name order under one deadline. A sibling whose scan
+  cannot finish in time keeps its marker, and the siblings after it keep theirs until a later
+  SessionStart has time left for them.
+- A nested repository created between the scan and the marker's removal is not seen; the
+  listing of anchors that follows the removal restores the marker only when a session's live
+  anchor appeared in that window, which is what a session working there writes.
 - The notice also fires when the session switched branches itself, once per context; the text
   says so and names the way to record a new baseline.
 - A paused rebase or bisect suspends the check while HEAD is detached, whoever started it, so a

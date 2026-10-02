@@ -19,7 +19,8 @@ description: >
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
   Autopilot run holding a working tree, whether this session's app-managed worktree
-  carries the desktop-pool keep marker and still sits on its recorded branch, any reviewer spawn
+  carries the desktop-pool keep marker, still sits on its recorded branch and holds a nested
+  repository that keeps the marker after the session ends, any reviewer spawn
   the host permission layer refused, any claim this session audited against a root
   that is not the anchor, this session's recorded delivery route, expired pending-review
   surfaced).
@@ -1010,6 +1011,23 @@ whether browser verification is enforced, not only when a row is red.
   how many session anchors are live could not be read** says the marker is in place while the
   anchor directory itself could not be listed, so the count is withheld rather than rendered
   as zero.
+- **✅ worktree: a nested repository in … keeps the keep marker once no session anchor holds
+  it — the first in name order is X (kind)** → a repository other than a submodule of the
+  worktree's own repository sits inside this worktree: a worktree of another repository in a
+  `.worktrees/<repo>/<branch>` layout, a worktree of this repository nested under
+  `.claude/worktrees/`, a tree a takeover moved in with `git worktree move`, or a dependency
+  checkout such as SwiftPM's `SourcePackages`. Claude Desktop's archive cleanup judges the
+  directory by a `git status` that does not see an ignored nested repository and then removes
+  it whole, so the plugin keeps the marker after the last session anchor here ends and the app
+  leaves the directory on disk when the session is archived. Nothing to do while work
+  continues; tell the user that once every nested repository is moved out or removed on
+  purpose, the next SessionStart in this repository releases the marker and the app can clean
+  the directory up.
+- **⚠️ worktree: the scan for nested repositories in … did not finish (reason)** → the scan
+  met a directory it could not read or ran past its entry bound, so it cannot rule out a
+  nested repository and the marker stays once no session anchor holds it. Relay the reason;
+  the remedy is to make that directory readable or to remove dependency or build directories
+  that are no longer needed, then run the doctor again.
 - **⚠️ worktree: anchors in … could not be read** → the session-anchor directory could not be
   listed, so this check did not run. It is a missing check, not an all-clear, and no
   live-anchor count and no rejected-anchor row can be trusted for that directory. When the
@@ -1035,7 +1053,12 @@ whether browser verification is enforced, not only when a row is red.
   expired anchors it read and releases the marker once the directory is back under the bound.
   When nothing holds it, the row says it stays
   until the next SessionStart or SessionEnd in it releases the marker; a SessionStart in any
-  sibling worktree releases it too. Name the file, the hold and the flag; offer no cleanup,
+  sibling worktree releases it too. When a nested repository sits inside it, the row says
+  the release pass keeps the marker until every nested repository there is moved out or removed,
+  and when the scan for one did not finish, that
+  the release pass keeps the marker until a scan finishes; the nested-repository row beside it
+  names which. Where live or unvalidated anchors hold it as well, their release promise ends
+  with once nothing else holds it. Name the file, the hold and the flag; offer no cleanup,
   since Phase 3 covers `pending-review.json` alone.
 - **✅ worktree: this session still sits on its recorded branch … in …** (or **… its recorded
   detached HEAD in …**) → the branch, or the detached HEAD, this session recorded when it

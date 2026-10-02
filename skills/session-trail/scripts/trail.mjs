@@ -368,11 +368,11 @@ function containment(callerRoot, targetRoot) {
 // IMMUTABLE Session Control project root — hooks/lib/claude-hook-session-v1.js
 // exports it as ZENSU_PROJECT_ROOT and hooks/pre-bash-source-write-gate.sh hands
 // that value to the parser as CLAUDE_PROJECT_DIR. It is minted at SessionStart
-// and never moves, so a takeover into ANOTHER worktree can edit and run tests
+// and does not follow the session, so a takeover into ANOTHER worktree can edit and run tests
 // but cannot commit: rules (B) and (C) refuse every source write and every
-// working-tree git verb whose target escapes that root. Nothing re-anchors a
-// session, so the constraint has to be reported BEFORE the first edit rather
-// than discovered as a deny afterwards.
+// working-tree git verb whose target escapes that root. Only a verified
+// `/zensu:adopt-session --reanchor` moves it, so the constraint has to be
+// reported BEFORE the first edit rather than discovered as a deny afterwards.
 //
 // The comparison is CONTAINMENT, never equality, because that is the test the
 // gate performs: `within(projectRoot, p)` in hooks/lib/bash-source-write-parse.js,

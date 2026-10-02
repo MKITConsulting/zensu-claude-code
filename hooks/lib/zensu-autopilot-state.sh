@@ -2365,6 +2365,38 @@ autopilot_read_active() {
   _autopilot_locked_run "$root" "" _autopilot_read_active_critical "$root" "$owner"
 }
 
+_ZENSU_AP_ACTIVE_RECORD=""
+_ZENSU_AP_ACTIVE_WORKER_RC=""
+_autopilot_active_probe() {
+  _ZENSU_AP_ACTIVE_RECORD="$(_autopilot_read_active_critical "$1" "$2")"
+  _ZENSU_AP_ACTIVE_WORKER_RC=$?
+  return 0
+}
+
+autopilot_read_active_strict() {
+  local root owner="${2:-}"
+  [ "$#" -eq 2 ] && [ -n "${1:-}" ] || return 3
+  _autopilot_session_id_ok "$owner" || return 3
+  root="$(_autopilot_project_root "$1")" || return 5
+  _autopilot_read_storage_ready "$root"
+  case "$?" in
+    0) ;;
+    1) return 1 ;;
+    *) return 5 ;;
+  esac
+  _ZENSU_AP_ACTIVE_RECORD=""
+  _ZENSU_AP_ACTIVE_WORKER_RC=""
+  _autopilot_locked_run "$root" "" _autopilot_active_probe "$root" "$owner" || return 5
+  case "$_ZENSU_AP_ACTIVE_WORKER_RC" in
+    0) ;;
+    1) return 1 ;;
+    2) return 2 ;;
+    *) return 5 ;;
+  esac
+  [ -n "$_ZENSU_AP_ACTIVE_RECORD" ] || return 5
+  printf '%s\n' "$_ZENSU_AP_ACTIVE_RECORD"
+}
+
 _autopilot_release_critical() {
   local root="$1" run_id="$2" event_id="$3" caller_session_id="$4"
   local caller_workspace="$5" ttl_hours="$6"

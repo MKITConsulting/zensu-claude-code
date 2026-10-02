@@ -256,7 +256,9 @@ an incompatible lineage instead: that would let an incompatible runtime SERVE a 
 with no schema check and no provenance, which is what the lineage rule exists to prevent.
 Re-anchoring the record to a live directory was also considered and refused — a session
 may delete its own root, so a caller-named anchor would become a cross-project write
-escape.
+escape. That refusal covers the UNBOUNDED form and THIS state: the bounded same-repository
+move that exists (`.claude/rules/session-reanchor.md`) requires the recorded root to EXIST,
+so it refuses exactly the combined state this paragraph is about.
 
 **Widening that predicate changed what the message surfaces enumerated below mean — FIVE entries, six if both doctor rows are counted separately, and that is the part
 to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for

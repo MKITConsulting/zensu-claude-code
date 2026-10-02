@@ -865,10 +865,21 @@ REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
           ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_GIT" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_GIT" | grep -qF 'git add' \
-  && printf '%s' "$REASON_GIT" | grep -qF "git -C '$NS_PROJ'" \
-  && printf '%s' "$REASON_GIT" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
-  && check "W121 rule-C deny names repo, subcommand, quoted -C fix and escape hatch" PASS \
-  || check "W121 rule-C deny reason (want repo '$NS_SIB' and -C '$NS_PROJ'; got '$REASON_GIT')" FAIL
+  && printf '%s' "$REASON_GIT" | grep -qF '/zensu:adopt-session --reanchor' \
+  && ! printf '%s' "$REASON_GIT" | grep -qF "$NS_PROJ" \
+  && ! printf '%s' "$REASON_GIT" | grep -qF 'git -C' \
+  && case "$REASON_GIT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
+  && check "W121 rule-C deny names repo, subcommand, the re-anchor route and the escape hatch last, and never another worktree" PASS \
+  || check "W121 rule-C deny reason (want repo '$NS_SIB', --reanchor, no '$NS_PROJ', no git -C; got '$REASON_GIT')" FAIL
+
+REASON_WRITE_OUT="$(payload "printf x > $SIB/src/new.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+{ printf '%s' "$REASON_WRITE_OUT" | grep -qF "$NS_SIB" \
+  && printf '%s' "$REASON_WRITE_OUT" | grep -qF '/zensu:adopt-session --reanchor' \
+  && ! printf '%s' "$REASON_WRITE_OUT" | grep -qF "$NS_PROJ" \
+  && case "$REASON_WRITE_OUT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
+  && check "W121c rule-B deny names the re-anchor route and the escape hatch last, and never another worktree" PASS \
+  || check "W121c rule-B deny reason (want '$NS_SIB', --reanchor, no '$NS_PROJ'; got '$REASON_WRITE_OUT')" FAIL
 
 # AC-003: the reason must quote ONE namespace. The pre-fix message named the
 # addressed repo as `D:\d\a\…` — path.resolve splicing the MSYS spelling under the
@@ -908,6 +919,13 @@ REASON_GIT_WT="$(payload "git --work-tree=$SIB add ." | env CLAUDE_PLUGIN_ROOT="
 printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
   && check "W163 designated-path deny does not advise a -C that cannot clear it" PASS \
   || check "W163 designated-path remedy (got '$REASON_GIT_WT')" FAIL
+{ printf '%s' "$REASON_GIT_WT" | grep -qF '/zensu:adopt-session --reanchor' \
+  && case "$REASON_GIT_WT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
+  && check "W163c designated-path deny names the re-anchor route and keeps the escape hatch last" PASS \
+  || check "W163c designated-path deny (want --reanchor and the escape last; got '$REASON_GIT_WT')" FAIL
+! printf '%s' "$REASON_GIT_WT" | grep -qF "$NS_PROJ" \
+  && check "W163b designated-path deny names no worktree other than the one it addressed" PASS \
+  || check "W163b designated-path remedy names '$NS_PROJ' (got '$REASON_GIT_WT')" FAIL
 
 # The third remedy arm. Without it a worktree deny would advise pointing
 # --work-tree/--git-dir inside the root for a command that has neither flag.
@@ -917,6 +935,9 @@ REASON_WT_PATH="$(payload "git worktree remove --force $SIB/wt" | env CLAUDE_PLU
   && printf '%s' "$REASON_WT_PATH" | grep -qF "$NS_SIB_WT"; } \
   && check "W204 worktree deny names the destroyed tree and its own remedy" PASS \
   || check "W204 worktree remedy (want '$NS_SIB_WT' got '$REASON_WT_PATH')" FAIL
+! printf '%s' "$REASON_WT_PATH" | grep -qF -- '--reanchor' \
+  && check "W204b a worktree-operand deny offers no re-anchor, which would not stop the destroy" PASS \
+  || check "W204b worktree-operand deny names --reanchor (got '$REASON_WT_PATH')" FAIL
 
 # Rule (C) resolves lexically and must never consult git about the foreign repo —
 # otherwise a hung or missing git on another checkout could wedge or invert it.
@@ -1076,6 +1097,9 @@ REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_K
   && printf '%s' "$REASON_UNBOUND_C" | grep -qF "OUTSIDE this session's"; } \
   && check "W224 unbound rule-C deny keeps its own cause" PASS \
   || check "W224 unbound rule-C reason (got '$REASON_UNBOUND_C')" FAIL
+! printf '%s' "$REASON_UNBOUND_C" | grep -qF -- '--reanchor' \
+  && check "W224b unbound rule-C deny offers no re-anchor a session without a record cannot run" PASS \
+  || check "W224b unbound rule-C reason names --reanchor (got '$REASON_UNBOUND_C')" FAIL
 
 # The unbound deny must keep the ORIGINAL write-rule cause and its escape hint —
 # not only the appended binding sentence, or dropping the cause would leave every
