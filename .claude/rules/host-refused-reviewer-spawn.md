@@ -379,9 +379,10 @@ every check before it green. It reached T36b at 877.8 s against 681.5 s on 36556
 a runner 29% slower than the green one was enough. Two changes landed together:
 
 - The note lifecycle — T23-T25, T27-T32 and T35 — moved to
-  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, alone on a new
-  `windows-shard-9`. The routing file keeps T1-T22, T26, T33-T34 and T36-T59, alone on
-  `windows-shard-7`, and lost a trailing `start_session` that no check read.
+  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, on a new `windows-shard-9`,
+  where `deferred-lease-refresh` now runs ahead of it. The routing file keeps T1-T22, T26,
+  T33-T34 and T36-T59, alone on `windows-shard-7`, and lost a trailing `start_session` that no
+  check read.
 - T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
   reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
   `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for

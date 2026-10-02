@@ -171,10 +171,10 @@ unreadable-state block, so the seed-write failure it names stays the path it mea
   silence is the residual.
 - On Windows a held-lease check costs about 35 s, not ten (run 37060398940). `W33` to `W36`
   pushed `test-autopilot-state-machine.sh` past its 900000 ms cap on `windows-shard-1`, and
-  `P7e` to `P7i` added 175 s to `test-autopilot-plan-delegate.sh` on `windows-shard-5`, so both
-  caps rose and `deferred-lease-refresh` moved to `windows-shard-9`.
-  `.claude/rules/windows-budget-best-solution-first.md` records the figures, which wait for the
-  next green Windows run to be re-measured.
+  `P7e` to `P7i` raised `test-autopilot-plan-delegate.sh` on `windows-shard-5` from at most 402 s
+  to as much as 549 s, so both caps rose and `deferred-lease-refresh` moved to `windows-shard-9`.
+  `.claude/rules/windows-budget-best-solution-first.md` records the figures measured on run
+  37064216294.
 
 **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md` entry by entry: no
 context-record or workflow-state field, no strict key set, no hook added, removed or renamed,

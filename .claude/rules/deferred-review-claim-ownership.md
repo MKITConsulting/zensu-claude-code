@@ -105,10 +105,10 @@ without a seed `vacuous:1/1/0/1`, so each missing entry point trips the guard on
 registered in `tests/structure/deferred-review-claim-cases.test.js`. `C2f-reuse`, `C7-reuse`,
 `C7-identity` and `L3` run in `deferred-claim-adoption` on `windows-shard-4`, `C4t` and
 `C4s-transfer` in `deferred-transfer-reset` on `windows-shard-6`, and `C7-renew` in
-`deferred-lease-refresh` on `windows-shard-1`, where it measured about 96 s on run 36625440255.
-Two suites moved off that shard to pay for it. Those measurements, the budget of
-`deferred-claim-adoption` and its position on its shard are recorded in
-`.claude/rules/windows-budget-best-solution-first.md`.
+`deferred-lease-refresh` on `windows-shard-9`. `C7-renew` measured about 96 s on run 36625440255,
+when that suite still ran on `windows-shard-1`, and two suites moved off that shard to pay for it.
+Those measurements, the budget of `deferred-claim-adoption` and its position on its shard are
+recorded in `.claude/rules/windows-budget-best-solution-first.md`.
 
 **Operator-facing accounts.** The "Who holds an adopted review" paragraphs in
 `docs/session-control.md` and question three of the `pendingReviewTtlHours` row in
