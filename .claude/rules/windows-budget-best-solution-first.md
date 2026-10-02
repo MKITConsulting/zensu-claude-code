@@ -62,6 +62,15 @@ whose shard 1 summed 1357 s. So the shard was already close to its envelope on a
 99509 ms) moved to `windows-shard-8`, which measured 882 and 1083 s, ahead of its pinned tail.
 `expectedShardHomes` pins both homes. Re-measure shard 1 on the next green Windows run.
 
+**`post-review-self-review-handoff` on `windows-shard-5` outgrew its 720000 ms cap**, which
+dates from #182 while the suite kept gaining checks. Six green runs measured it at 591568,
+636796, 636930, 663856, 686575 and 695461 ms (82–97% of the cap). Run 36730717361 then
+reported `TIMED_OUT` after P15, with every check before it passing, on a runner about 20%
+slower than the fastest of those runs. The cap is now 900000 ms, and the SHARD pays for it:
+shard 5's seven suites summed to at most 1183 s on those runs against its 1800000 ms
+envelope, and the suite runs third with about 80 s of suites behind it. Re-measure on the
+next green Windows run.
+
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
 outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is
