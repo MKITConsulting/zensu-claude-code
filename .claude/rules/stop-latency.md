@@ -80,14 +80,53 @@ kills both groups at once.
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
 
+**One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Measured
+on `dc9f0ff8` with a classifying `node` shim, an armed Stop spawned **96** `node` children: 28
+project-root verifications (`zensu_resolve_project_dir`, each a record read plus a runtime
+digest) and 18 `session-key` calls, 17 of them on a key that was already canonical. After this
+change the same Stop spawns **50**: one verification and no `session-key` call. Other paths:
+implementing 70 → 37, deferred-review adoption 170 → 87, `ZENSU_CHAIN=off` 88 → 37, idle 4 → 4.
+Wall time for the armed Stop fell from about 11 s to about 6 s at load 19–30.
+
+- **Session key.** `sessionKey` returns a value matching `^scv1_[a-f0-9]{64}$` unchanged, so
+  `_zensu_session_key_canonical` answers that one shape in shell and every other input still
+  goes to the core. It is a pure-function shortcut, not a cache, and applies to every caller of
+  `zensu_resolve_session_id`. The pattern lists the hex digits instead of using a range, so no
+  collation can widen it. The hook passes no raw id any more: the bind already derived the key
+  from the same payload, so `zensu_resolve_session_id ""` returns the bound key.
+- **Project root.** `zensu_memoize_project_dir` runs the unchanged full verification once and
+  records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT, ZENSU_SESSION_KEY, rendered root)` in the
+  shell ARRAY `_ZENSU_PROJECT_DIR_MEMO`. A later `zensu_resolve_project_dir` still runs every
+  shell-side check and skips only the `node` child, and only when all three inputs match and the
+  root still renders (`cd -P && pwd -P`) to the recorded physical path. Any mismatch falls
+  through to the full verification, so every refusal stays a refusal.
+- **Why an array.** An environment variable becomes a scalar, which fills index 0 only, and
+  bash never exports an array. The memo is accepted only when index 3 is set, so no environment
+  variable can stand in for it and no child process inherits it; `L33` and `L35` pin both. Both
+  bind functions unset it. A variable or a file that a model-side Bash command could set is
+  never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that reason.
+- **Opt-in, Stop hook only.** Only the Stop hook calls `zensu_memoize_project_dir`. Every other
+  entry point verifies on every call, as before. `zensu-log.sh` is a candidate, not a caller.
+- **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
+  once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
+  digest was never a defence there, because a changed tree includes the code that checks it.
+- **Rejected.** Priming the memo from the bind: `validateContext` canonicalizes the recorded
+  root without comparing it, so the bind accepts a root reached through a symlinked ancestor
+  that the resolver refuses. A cache file: poisonable. Memoizing `_tdd_paths_safe`: it is the
+  per-operation symlink check and must see every swap.
+
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
   that caused the deadline) and renders no ledger line. It is INDUCIBLE — by loading the machine,
   or by lowering `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment — the same class as
   the other inducible releases this hook records.
-- The armed path still spawns 100+ `node` children; the deadline bounds it and does not make it
-  fast. The durable fix is to resolve the project root and session key once per hook run and
-  pass them down, which changes shared libraries every gate sources.
+- The armed path still spawns 50 `node` children, so at a load in the high hundreds it can still
+  reach the deadline. The largest remaining groups are `_tdd_paths_safe` (22), the lock acquire
+  and release pairs (8 on bash 3.2) and the config reads (4).
+- When the first verification fails, the hook verifies a second time before it takes its
+  existing failure branch. That costs one extra digest on a path that blocks or releases anyway.
+- The memo and the shortcut were measured on macOS with bash 3.2 only. bash 5 and Git Bash are
+  unverified locally.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
