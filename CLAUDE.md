@@ -131,6 +131,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **Foreign-Chain Row (`zensu-doctor.sh` + `zensu-doctor-report.js`)** — the `/zensu:doctor` rows about chains and their record anchor: `.claude/rules/foreign-chain-row.md`
+- **Autopilot Lease Row (`leaseRow` in `hooks/lib/zensu-doctor-report.js`)** — the read-only `/zensu:doctor` rows for the Autopilot project lease and its recovery sentinel, rendered from the core's `inspectExternalProcessLock`: `.claude/rules/autopilot-lease-row.md`
 - **Implementing-Phase Turn Counter (`hooks/stop-chain-enforcer.sh` + `zensu-tdd-phase.sh`)** — the `implStopCount` nudge and the shared watchdog ladder: `.claude/rules/implementing-phase-turn-counter.md`
 - **Stop Hook Latency (`hooks/lib/zensu-stop-deadline.sh` + `hooks/lib/stop-idle-probe-v1.js`)** — the early exit for a Stop with nothing to enforce, the whole-hook deadline and why it releases: `.claude/rules/stop-latency.md`
 - **Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)** — the two bind failures that relax, and the vanished-cwd case that must not: `.claude/rules/relaxable-bind-failures.md`
