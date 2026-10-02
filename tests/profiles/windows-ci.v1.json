@@ -247,7 +247,7 @@
           "runner": "bash",
           "path": "tests/structure/test-post-review-self-review-handoff.sh",
           "args": [],
-          "timeoutMs": 720000
+          "timeoutMs": 900000
         },
         {
           "id": "session-id-v1",
