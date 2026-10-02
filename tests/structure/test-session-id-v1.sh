@@ -103,13 +103,53 @@ CONCURRENT_STATE="$PROJECT/.zensu/state/tdd-phase-$CONCURRENT_KEY.json"
 # Switch the immutable test context to the concurrent raw session before
 # launching its 24 writers.
 source "$ROOT/tests/session-control/initialize-baseline.sh" "$CONCURRENT"
-PIDS=""
-for lane in $(seq 1 24); do
-  CLAUDE_PROJECT_DIR="$PROJECT" bash -c "source '$SESSION'; source '$PHASE'; tdd_set_flag '$CONCURRENT' 'lane_$lane' true" &
-  PIDS="$PIDS $!"
+LANES="$TMP/lanes"
+mkdir -p "$LANES"
+LANE_IDS="$(seq 1 24)"
+LANE_PIDS=""
+for lane in $LANE_IDS; do
+  (
+    CLAUDE_PROJECT_DIR="$PROJECT" bash -c "source '$SESSION'; source '$PHASE'; tdd_set_flag '$CONCURRENT' 'lane_$lane' true" \
+      >"$LANES/$lane.out" 2>"$LANES/$lane.err"
+    printf '%s\n' "$?" >"$LANES/$lane.rc.tmp" && mv "$LANES/$lane.rc.tmp" "$LANES/$lane.rc"
+  ) &
+  LANE_PIDS="$LANE_PIDS $lane:$!"
+done
+LANE_DEADLINE="${SESSION_ID_LANE_DEADLINE_SECONDS:-180}"
+LANE_STARTED=$SECONDS
+while :; do
+  STUCK=""
+  for lane in $LANE_IDS; do [ -f "$LANES/$lane.rc" ] || STUCK="$STUCK $lane"; done
+  [ -z "$STUCK" ] && break
+  [ $((SECONDS - LANE_STARTED)) -ge "$LANE_DEADLINE" ] && break
+  sleep 1
 done
 CONCURRENT_FAIL=0
-for pid in $PIDS; do wait "$pid" || CONCURRENT_FAIL=1; done
+for entry in $LANE_PIDS; do
+  lane="${entry%%:*}"
+  case " $STUCK " in
+    *" $lane "*)
+      CONCURRENT_FAIL=1
+      printf '  lane %s (shell pid %s) still running after %ss, deadline %ss\n' \
+        "$lane" "${entry#*:}" "$((SECONDS - LANE_STARTED))" "$LANE_DEADLINE"
+      ;;
+    *)
+      LANE_RC="$(cat "$LANES/$lane.rc" 2>/dev/null)"
+      if [ "$LANE_RC" != 0 ]; then
+        CONCURRENT_FAIL=1
+        printf '  lane %s exited %s: %s\n' "$lane" "$LANE_RC" "$(head -c 400 "$LANES/$lane.err" 2>/dev/null | tr '\r\n' '  ')"
+      fi
+      ;;
+  esac
+done
+if [ "$CONCURRENT_FAIL" -ne 0 ]; then
+  printf '  lock artifacts in %s:\n' "$PROJECT/.zensu/state"
+  node "$ROOT/tests/structure/fixtures/lock-owner-report.js" "$PROJECT/.zensu/state" 2>&1 | sed 's/^/    /'
+fi
+for entry in $LANE_PIDS; do
+  case " $STUCK " in *" ${entry%%:*} "*) kill "${entry#*:}" 2>/dev/null || true ;; esac
+done
+for entry in $LANE_PIDS; do wait "${entry#*:}" 2>/dev/null || true; done
 CONCURRENT_RESULT="$(node -e '
   const s=require(process.argv[1]);
   const lanes=Object.keys(s).filter(k => /^lane_[0-9]+$/.test(k) && s[k]===true).length;
