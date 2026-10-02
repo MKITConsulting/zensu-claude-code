@@ -117,8 +117,14 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
   child alive cannot silently wedge the whole runner.
 - **`BLOCK` state** — suites needing npm devDependencies (`node_modules` absent) are
   reported as *blocked, not run*, and still fail the overall result. No silent skip.
-  Membership is pinned too: a CI suite whose driver, or a unit file it drives,
-  requires a devDependency fails the watchdog suite until it joins that arm.
+  The manifest declares which suites these are: `needsNodeDeps` on each `ciOfflineSuites`
+  entry, and the `nodeDepsStructureTests` list for structure suites. Every entry of that
+  list must also be in `ciStructureTests` or `localStructureTests`, without duplicates,
+  or the run refuses to start. Membership is pinned too: the watchdog suite fails while a
+  structure suite, CI or local, is missing from that list although its own source, a unit
+  file it drives, or a local module such a unit requires needs a `package.json` package —
+  through `require` or `import`, a `node_modules/.bin` binary, `npx` / `npm exec`, or
+  `npm run` of one of its scripts.
 - **Offline inventory count check** — executed suite count must equal the manifest count.
 
 ## 3. Deterministic structure suites — grouped by what they cover
@@ -524,10 +530,11 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
   `run-all.sh` — only in the Windows profiles and the legacy canary.
 - 4 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
-- 2 offline eval self-checks (`session-control`, `reset-review-limit`) plus
-  `test-windows-ci-contract.sh`, `test-workflow-checkout-credentials.sh` and
-  `test-workflow-dispatch-inputs.sh` need `npm ci`; without `node_modules` they
-  report `BLOCK` and the run is not green.
+- The 2 offline eval self-checks whose `ciOfflineSuites` entry sets `needsNodeDeps`
+  (`session-control`, `reset-review-limit`) and every structure suite listed in the
+  manifest's `nodeDepsStructureTests` need `npm ci`; without `node_modules` they report
+  `BLOCK` and the run is not green. The manifest owns that structure-suite list, so it is
+  not copied here.
 - The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pretool/`,
   and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
   that was removed when TDD moved to the main thread. Rewriting them to the main-thread
