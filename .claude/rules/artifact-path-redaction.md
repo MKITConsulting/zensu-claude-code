@@ -273,9 +273,12 @@ rather than outside it; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
 nothing, and deliberately NOT gated on that variable: an earlier revision made
-`--truncate` refuse without it and broke the shipped Phase 2 recipe outright,
-because the variable is absent from the model's Bash environment on this host,
-which is exactly why `{log_file}` is rendered from `${CLAUDE_PROJECT_DIR:-.}`.
+`--truncate` refuse without it and broke the Phase 2 recipe of that time outright,
+because the variable is absent from the model's Bash environment on this host.
+The current recipe renders `{log_file}` from the bound root that
+`zensu-log.sh --project-root` prints and passes `CLAUDE_PROJECT_DIR="{project_root}"`
+on its `--truncate` call, so the shipped destructive write IS bound; every other
+caller that omits the variable still is not.
 An env var the caller sets is not an authority; what constrains the destructive
 mode is the module; and nothing here recognizes a customer name or an internal hostname, which is why the English-only + repo-root-relative authoring rules
 ship in `templates/tdd-plan.md` and `skills/tdd/SKILL.md` Phase 2 alongside the code.

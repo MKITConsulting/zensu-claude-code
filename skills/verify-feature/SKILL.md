@@ -137,6 +137,15 @@ only these points:
 8. **Report** in the Phase 5 format and name the criterion id first in every Scenario cell
    (`AC-001 — …`). Run `--acceptance-status` once more after the last record and put its
    lines under the table. The verdict line follows the Phase 5 verdict rules.
+9. **Work in the chain's anchor.** Resolve the Phase 0 git root with
+   `ANCHOR="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root)" && [ -n "$ANCHOR" ] && GIT_ROOT="$(git -C "$ANCHOR" rev-parse --show-toplevel)"`,
+   never from the working directory, and stop when `GIT_ROOT` is empty. Run every command this run
+   starts — `git`, the runtime recipe, fixtures and teardown, but never a `playwright-cli` call,
+   which must stay one plain call — as `cd "<that root>" && …`, and read the recipe files
+   from that root; that `cd` is the one prefix a recorded `down` may carry (Phase 2 step 3).
+   After `/zensu:adopt-session --reanchor` the Bash
+   tool still starts in the session's previous worktree, while every record binds to the
+   anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
 
 ## Phase 0 — Resolve scope and target
 
@@ -353,7 +362,8 @@ Claude's native placeholder substitution.
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own
    standalone Bash invocation, byte-for-byte. Do not combine it with semicolons, `&&`, pipes,
-   subshells, logging, or any other cleanup; run additional run-owned cleanup separately.
+   subshells, logging, or any other cleanup; run additional run-owned cleanup separately. Under
+   `--chain`, the `cd "<that root>" &&` prefix of Chain mode point 9 is the one exception.
 4. Run readiness probes until they pass or their configured timeout expires. A sleep is not
    readiness evidence.
 5. Seed only data required by the matrix, through repository-owned fixtures, typed tools, or
@@ -480,7 +490,8 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
   or `kill-all`, which end sessions this run does not own;
 - delete the run directory without touching a sibling or out-of-scope path;
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
-  call; let its lease-bound controller stop only the process groups and resources it owns;
+  call, under `--chain` behind the `cd` prefix of Chain mode point 9 and nothing else; let its
+  lease-bound controller stop only the process groups and resources it owns;
 - remove only uniquely named containers/resources created by this run;
 - leave the git worktree and all user-owned services intact.
 

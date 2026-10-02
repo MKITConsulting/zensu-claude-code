@@ -246,6 +246,12 @@ CC_ERR="$(bash "$LOG" --tdd-complete --session gate-stem-bind \
 CC_RC=$?
 { [ "$CC_RC" -ne 0 ] && printf '%s' "$CC_ERR" | grep -qF 'describes the run log'; }
 check "Z7 a clean receipt describing ANOTHER run log does not satisfy this chain's gate" "$(verdict $?)"
+remedy_bound() {
+  printf '%s' "$1" | grep -qF -- '--project "<the path zensu-log.sh --project-root prints>"' \
+    && ! printf '%s' "$1" | grep -qF 'CLAUDE_PROJECT_DIR:-.'
+}
+remedy_bound "$CC_ERR"
+check "Z7b the run-log refusal's remedy names the bound root through --project-root" "$(verdict $?)"
 # The control: the same receipt naming THIS chain's log is accepted.
 printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/stem-bind.log","claims":1,"clean":true}\n' \
   > "$(receipt_for gate-stem-bind)"
@@ -412,6 +418,8 @@ printf '%s' "$ERR_R" | grep -qF 'zensu-edit-landing.sh'
 check "R3 the refusal names the command that produces it" "$(verdict $?)"
 printf '%s' "$ERR_R" | grep -qF 'never landed leaves no diff'
 check "R4 the refusal explains why the check exists, not just that it failed" "$(verdict $?)"
+remedy_bound "$ERR_R"
+check "R4b the missing-receipt remedy names the bound root through --project-root" "$(verdict $?)"
 # Refusing must not have advanced the chain.
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_R")" implComplete)" != "true" ]
 check "R5 a refused completion leaves implComplete unset" "$(verdict $?)"
@@ -449,6 +457,8 @@ VR_ERR="$(bash "$LOG" --tdd-complete --session "$SID_V" 2>&1 >/dev/null)"
 VR_RC=$?
 { [ "$VR_RC" -ne 0 ] && printf '%s' "$VR_ERR" | grep -qF 'records a FAILED audit'; }
 check "D1 a receipt recording clean:false is refused" "$(verdict $?)"
+remedy_bound "$VR_ERR"
+check "D1b the verdict refusal's remedy names the bound root through --project-root" "$(verdict $?)"
 plant_receipt '{"schema":"edit-landing-v2"}'
 VR_ERR="$(bash "$LOG" --tdd-complete --session "$SID_V" 2>&1 >/dev/null)"
 VR_RC=$?

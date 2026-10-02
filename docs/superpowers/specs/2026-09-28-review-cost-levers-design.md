@@ -149,7 +149,8 @@ Non-goals
   verdict reads `stale` while the directory of the newest finished run has no current record. Both max-rounds
   hand-offs run one close step: the full suite with `--if-stale` in a local chain, the affected suite in a CI
   chain. An `acceptance` run keeps the project-root fingerprint, because the acceptance gate compares it with
-  the project tree.
+  the project tree. Since #354 the runner keeps the cwd only inside the project root's own work tree and runs a
+  nested cwd in the project root, so a nested work tree is reached only through the leading `cd`.
 
 ## 4. Delivery
 

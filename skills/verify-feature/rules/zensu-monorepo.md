@@ -40,7 +40,8 @@ Register this exact standalone teardown command before `up`:
 bash "$ZENSU_RUNTIME_CONTROLLER" down "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 ```
 
-Do not combine it with logging, pipes, conditionals, or other cleanup.
+Do not combine it with logging, pipes, conditionals, or other cleanup. Under `--chain`, the
+`cd "<that root>" &&` prefix of the skill's Chain mode point 9 is the one exception.
 
 ## Navigation preflight, start, and readiness
 

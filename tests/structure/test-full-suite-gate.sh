@@ -318,22 +318,22 @@ git -C "$PROJ" -c commit.gpgsign=false commit -qm ignore-worktrees
 NESTED="$PROJ/.claude/worktrees/wt"
 git -C "$PROJ" worktree add -q "$NESTED" -b wt 2>/dev/null
 if [ -d "$NESTED" ] && arm "fsg-nested" "$PROJ"; then
-  (cd "$NESTED" && run_full --cmd 'true')
+  (cd "$NESTED" && bash "$LOG" --evidence-run --scope full --cmd 'true' >"$WORK/nested.out" 2>"$WORK/nested.err")
   printf 'edited in the worktree\n' > "$NESTED/tracked.txt"
-  chain_done; RC=$?
-  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
-    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree of the project and \.claude/worktrees/wt (record er1_[0-9_a-f]*); files changed since: \.claude/worktrees/wt/tracked\.txt | ' "$WORK/err"; then
-    check "F16 an edit in a nested ignored worktree after its green run refuses as stale" PASS
+  (cd "$NESTED" && bash "$LOG" --evidence-run --scope full --cmd 'true' --if-stale >"$WORK/nested-skip.out" 2>&1)
+  if grep -qF 'the working directory is not in the work tree of the bound project root, so the command runs in ' "$WORK/nested.err" \
+    && grep -qF 'skipped (--if-stale)' "$WORK/nested-skip.out"; then
+    check "F16 a run from inside a nested worktree runs in the project root, so an edit there leaves it current" PASS
   else
-    check "F16 an edit in a nested ignored worktree after its green run refuses as stale (rc=$RC)" FAIL
-    ERR
+    check "F16 a run from inside a nested worktree runs in the project root, so an edit there leaves it current" FAIL
+    cat "$WORK/nested.err" "$WORK/nested-skip.out"
   fi
-  (cd "$NESTED" && run_full --cmd 'true' --if-stale)
   chain_done; RC=$?
-  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
-    check "F17 --if-stale in the nested worktree re-runs the suite and the terminus then closes" PASS
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err" \
+    && ! grep -qF 'of the project and' "$WORK/err"; then
+    check "F17 the terminus closes on the project tree that run measured" PASS
   else
-    check "F17 --if-stale in the nested worktree re-runs the suite and the terminus then closes (rc=$RC)" FAIL
+    check "F17 the terminus closes on the project tree that run measured (rc=$RC)" FAIL
     ERR
   fi
 else

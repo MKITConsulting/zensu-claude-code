@@ -290,7 +290,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:877 · zensu-log.sh:1348</p>
+      <p class="src">zensu-edit-landing.sh:876 · zensu-log.sh:1370</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -298,7 +298,7 @@
       <p>Rule (B) of the write gate denies every Bash write outside the root. The edit gate only
       classifies a path as <code>state</code>, <code>zensu</code> or <code>other</code> and does not
       confine it. The topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:817 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
+      <p class="src">bash-source-write-parse.js:825 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -313,7 +313,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus is the half that stayed ambient and
       unscrubbed. A chain that claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1343 · zensu-log.sh:1326-1419 · zensu-log.sh:2241-2243</p>
+      <p class="src">zensu-log.sh:1365 · zensu-log.sh:1348-1441 · zensu-log.sh:2263-2265</p>
     </div>
   </div>
 </section>
@@ -435,7 +435,7 @@
           <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
           <td><code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B)
           and rule (C).</td>
-          <td class="where mono">bash-source-write-parse.js:817<br>bash-source-write-parse.js:863</td>
+          <td class="where mono">bash-source-write-parse.js:825<br>bash-source-write-parse.js:871</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -443,7 +443,7 @@
           counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
           narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
           the <code>--chain-done</code> zero-change terminus unchanged.</td>
-          <td class="where mono">zensu-log.sh:1416-1418<br>zensu-log.sh:2241-2243</td>
+          <td class="where mono">zensu-log.sh:1438-1440<br>zensu-log.sh:2263-2265</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -589,7 +589,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:2601</p>
+      <p class="src">trail.mjs:2602</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -598,14 +598,14 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">skills/session-trail/SKILL.md:305</p>
+      <p class="src">skills/session-trail/SKILL.md:315</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:4674</p>
+      <p class="src">trail.mjs:4687</p>
     </div>
   </div>
 

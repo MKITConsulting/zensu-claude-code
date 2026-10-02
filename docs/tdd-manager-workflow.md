@@ -27,11 +27,25 @@ The skill is also auto-invoked by the `ExitPlanMode` PostToolUse hook when the u
 
 | Artifact | Path | Purpose |
 |----------|------|---------|
-| Plan | `.zensu/plans/{ts}_tdd-{slug}.md` | Design decisions, Requirements table (stable AC-###/FR-### IDs), step table with per-step `Covers` traceability, preconditions, audit checklist |
-| Log | `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
+| Plan | `{project_root}/.zensu/plans/{ts}_tdd-{slug}.md` | Design decisions, Requirements table (stable AC-###/FR-### IDs), step table with per-step `Covers` traceability, preconditions, audit checklist |
+| Log | `{project_root}/.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
 | State | `.zensu/state/tdd-phase-<scv1-session-key>.json` | Runtime FSM/review state (per session, ephemeral) |
 | Source | test + implementation files | The actual code |
 | Audit | included in log + final report | Build, coverage, mtime discipline, edit landing, precondition drift |
+
+`{project_root}` is the absolute path `zensu-log.sh --project-root` prints: the project root the
+session's Session Control record is bound to, which every stateful verb anchors on. The skill reads
+it once in Phase 0 and derives the plan, the log, the baseline commit and the edit-landing audit's
+`--project` from it, never from the working directory or `CLAUDE_PROJECT_DIR`: that variable is
+unset in the model's Bash environment on this host, and after `/zensu:adopt-session --reanchor`
+the directory the Bash tool starts in is no longer the bound root. For the same reason every
+project command the skill prescribes — test runs, checkpoints, the build, coverage and the mtime
+`stat` — runs as `cd "{project_root}" && <command>`, while `--evidence-run` needs no prefix: it
+runs its command in the bound root whenever the working directory lies outside that work tree.
+The `cd` carries no `--`: the root is absolute, and the source-write gate takes the token after
+`cd` as the directory, so `cd --` would scope its checks to a directory named `--`.
+The verb refuses a root holding a double quote, a dollar sign, a backtick or a backslash, because
+the skill pastes the path into double-quoted shell commands, where the shell would re-parse it.
 
 The plan and log are per-run artifacts, and the plugin never auto-stages or
 commits them. Whether they END UP committed is the repository's call: they are
@@ -505,7 +519,7 @@ The agent appends to the log via:
 
 ```bash
 CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
-  append --log "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log" \
+  append --log "{project_root}/.zensu/logs/{ts}_tdd-{slug}.log" \
   --message "<message>" --start "$SESSION_EPOCH"
 ```
 
@@ -544,14 +558,17 @@ unrecognized destination used to leave the derived root empty, which SKIPPED the
 project-root rule and wrote a partially redacted line under exit 0.
 
 `--truncate` is deliberately NOT gated on `CLAUDE_PROJECT_DIR`. An earlier
-revision made it refuse without that variable and broke the shipped Phase 2
-recipe outright: the variable is absent from the model's Bash environment on this
-host, which is exactly why `{log_file}` is rendered from
-`${CLAUDE_PROJECT_DIR:-.}`. What constrains the destructive mode is the module —
+revision made it refuse without that variable and broke the Phase 2 recipe of
+that time outright: the variable is absent from the model's Bash environment on
+this host. What constrains the destructive mode is the module —
 the `logs` bucket only, a canonicalized artifact
 directory, and a descriptor judged for `isFile`/`nlink`/dev+ino — not an ambient
 variable the caller sets anyway. When it IS set it still travels as
-`expectedRoot`, so a bound session gets the stricter check for free.
+`expectedRoot`, so a bound session gets the stricter check for free, and the
+shipped Phase 2 recipe sets it on purpose: it passes
+`CLAUDE_PROJECT_DIR="{project_root}"` on its `--truncate` call, because without
+the variable the verb binds a destructive write to the working directory, which
+after `/zensu:adopt-session --reanchor` is not the bound root.
 
 It does require `node`, and refuses loudly without it rather than writing an
 unredacted line — a host without `node` cannot arm a chain in the first place, so

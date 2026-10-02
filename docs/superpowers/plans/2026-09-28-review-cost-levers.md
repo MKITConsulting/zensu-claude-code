@@ -65,7 +65,8 @@ git commit -m "docs(review): add the review cost levers design and plan"
 > max-rounds close: one `CLOSE_SUITE_STEP` runs the full suite with `--if-stale` in a local chain and the
 > affected suite in a CI chain. Task A1 also covers `scoped` runs, because a CI chain closes on them, and
 > `decideCi` compares each record with the tree of its own directory. An `acceptance` run keeps the
-> project-root fingerprint.
+> project-root fingerprint. Since #354 a nested cwd runs in the project root, so only a leading `cd`
+> reaches a nested work tree.
 
 ### Task A1: Fingerprint the work tree the suite ran in
 

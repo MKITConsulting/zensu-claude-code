@@ -32,6 +32,19 @@ block, because the bind overwrites that variable. A new binding the verb exports
 join `CHILD_SCRUBBED_ENV`, or the suite under test sees it; `test-evidence-run.sh` E7
 pins the current set.
 
+**The command runs where the fingerprint looks.** `runDirectory` keeps the caller's working
+directory when it lies in the git work tree of the bound project root, and otherwise runs the
+command in the project root and says so on stderr. Work-tree identity decides first: a nested
+worktree, an embedded clone or a submodule inside the root is another work tree, which a run from
+its cwd never reaches; only a leading literal `cd` in the command does, and the fingerprint then
+measures it beside the project (below). Path containment decides only for a root outside git. The tree
+fingerprint and the verdict are bound to the project root, so a run from another worktree — the
+Bash tool's start directory after `/zensu:adopt-session --reanchor` — would certify a tree it never
+tested. The same-work-tree arm keeps a session recorded in a subdirectory able to run its suite
+from the worktree top. `test-evidence-run.sh` E8, E8b and E8c pin the three directions, and the
+unit case `a working directory outside the work tree of the project root runs the command in the
+project root` pins both arms, the `<root>-x` prefix sibling and a caller outside git.
+
 **The tree fingerprint never touches the real index.** It copies the index, runs
 `git add -A -- .` and then `git rm -r --cached .zensu` on the copy, and writes the tree.
 Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is
@@ -60,8 +73,8 @@ may close as `deferred-ci`, a passing state that is never persisted. That mode, 
 its stores are described in `.claude/rules/full-suite-ci-deferral.md`.
 
 **The fingerprint of a test run covers the project AND the nested work tree the suite ran
-in.** For `full` and `scoped` runs (`TEST_SCOPES`) the run directory is the cwd, or the target
-of a leading literal `cd` in the command: `commandDirectory` reads one single-quoted,
+in.** For `full` and `scoped` runs (`TEST_SCOPES`) the run directory is the directory
+`runDirectory` keeps, or the target of a leading literal `cd` in the command: `commandDirectory` reads one single-quoted,
 expansion-free double-quoted or plain token followed by `&&`, `;` or a newline, optionally
 inside a subshell, and keeps the cwd for anything it cannot read literally (`~`, `$VAR`, a
 glob, `cd -`, an option). That is the shape of the benchmark run in
@@ -83,7 +96,9 @@ its halves to list changed paths, running the work-tree half in that repository'
 store and prefixing it with its location relative to the project root, and lists nothing when
 the two trees are not the same shape. The pass, stale and mutated verdicts name that location
 (`of the project and <location>`). No record field carries the root or the directory: every
-reader derives both from a record's `command` and `cwd`. A local chain measures one root, the
+reader derives both from a record's `command` and `cwd`, and `cwd` is the directory `runDirectory`
+kept, so a record written before it existed with a nested cwd still reads against the combined
+fingerprint of the tree its command ran in. A local chain measures one root, the
 newest `full` record's, so an older record from another directory never keeps the gate green;
 `--if-stale` passes its own run's directory as `runCwd`, because the verdict CLI's transport
 always fills `options.cwd` with the project root. `decideCi` compares every record with the

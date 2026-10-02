@@ -391,6 +391,35 @@ test('the child sees no plugin bindings, the caller project dir and the caller c
   assert.match(result.stdout, /\/sub\n/);
 });
 
+test('a working directory outside the work tree of the project root runs the command in the project root', async () => {
+  const root = gitRepo();
+  const sibling = gitRepo();
+  const data = pluginData();
+  const result = await runIn(root, data, { scope: 'scoped', cwd: sibling, command: 'pwd -P' });
+  assert.equal(result.code, 0);
+  assert.ok(result.stdout.split('\n').includes(root), result.stdout);
+  assert.ok(!result.stdout.split('\n').includes(sibling), result.stdout);
+  assert.match(result.stderr, /the working directory is not in the work tree of the bound project root, so the command runs in /);
+  const [record] = recordsOf(data);
+  assert.equal(record.cwd, root);
+  assert.deepEqual(evr.runDirectory(root, sibling), { cwd: root, moved: true });
+  assert.deepEqual(evr.runDirectory(root, path.join(root, 'sub')), { cwd: path.join(root, 'sub'), moved: false });
+  assert.deepEqual(evr.runDirectory(path.join(root, 'sub'), root), { cwd: root, moved: false });
+  assert.deepEqual(evr.runDirectory(root, ''), { cwd: root, moved: false });
+  const nested = path.join(root, 'nested');
+  fs.mkdirSync(nested);
+  sh(nested, 'git init -q');
+  assert.deepEqual(evr.runDirectory(root, nested), { cwd: root, moved: true });
+  assert.deepEqual(evr.runDirectory(root, tempDir('plain-caller')), { cwd: root, moved: true });
+  const plain = tempDir('plain-root');
+  fs.mkdirSync(path.join(plain, 'sub'));
+  fs.mkdirSync(`${plain}-x`);
+  assert.deepEqual(evr.runDirectory(plain, plain), { cwd: plain, moved: false });
+  assert.deepEqual(evr.runDirectory(plain, path.join(plain, 'sub')), { cwd: path.join(plain, 'sub'), moved: false });
+  assert.deepEqual(evr.runDirectory(plain, `${plain}-x`), { cwd: plain, moved: true });
+  assert.deepEqual(evr.runDirectory(plain, sibling), { cwd: plain, moved: true });
+});
+
 test('a scoped run carries no tree id', async () => {
   const data = pluginData();
   await runIn(gitRepo(), data, { scope: 'lint', command: 'true' });
@@ -722,9 +751,9 @@ test('a full run in a nested worktree fingerprints the project and that worktree
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   const [first, second] = recordsOf(data);
   const scratch = tempDir('scratch');
   assert.notEqual(first.tree_end, second.tree_end);
@@ -764,7 +793,7 @@ test('an edit in the project root after a run in a nested worktree reads stale',
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   assert.equal(verdictFor(root, data).state, 'pass');
   fs.writeFileSync(path.join(root, 'a.txt'), 'edited in the project\n');
   const result = verdictFor(root, data);
@@ -839,7 +868,7 @@ test('the terminus reads stale after an edit in the nested worktree', async () =
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   assert.equal(verdictFor(root, data).state, 'pass');
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
   const result = verdictFor(root, data);
@@ -847,16 +876,20 @@ test('the terminus reads stale after an edit in the nested worktree', async () =
   assert.match(result.lines[0], /files changed since: \.claude\/worktrees\/wt\/a\.txt/);
 });
 
-test('if-stale runs again after an edit in the nested worktree', async () => {
+test('a run whose cwd lies in a nested worktree runs in the project root and binds the project tree', async () => {
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
-  const skipped = await runIn(root, data, { cwd: tree, command: 'true', ifStale: true });
+  const result = await runIn(root, data, { cwd: tree, command: 'pwd -P' });
+  assert.ok(result.stdout.split('\n').includes(root), result.stdout);
+  const [record] = recordsOf(data);
+  assert.equal(record.cwd, root);
+  assert.equal(record.tree_end, evr.computeTree(root, tempDir('scratch')).tree);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  assert.equal(verdictFor(root, data).state, 'pass');
+  const skipped = await runIn(root, data, { cwd: tree, command: 'pwd -P', ifStale: true });
   assert.match(skipped.stdout, /skipped \(--if-stale\)/);
-  fs.writeFileSync(path.join(tree, 'a.txt'), 'edit\n');
-  await runIn(root, data, { cwd: tree, command: 'true', ifStale: true });
-  assert.equal(recordsOf(data).length, 2);
+  assert.equal(recordsOf(data).length, 1);
 });
 
 test('a record fingerprinted at the project root reads stale for an edited nested worktree', () => {
@@ -875,7 +908,7 @@ test('the verdict CLI follows the newest full record into a nested worktree', as
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
   const transport = tempDir('transport');
   const result = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], {
@@ -899,7 +932,7 @@ test('a run from a work tree outside the project root keeps the project-root fin
   const elsewhere = gitRepo();
   fs.writeFileSync(path.join(elsewhere, 'a.txt'), 'another repository\n');
   const data = pluginData();
-  await runIn(root, data, { cwd: elsewhere, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(elsewhere)} && true` });
   const [record] = recordsOf(data);
   const scratch = tempDir('scratch');
   assert.equal(record.tree_end, evr.computeTree(root, scratch).tree);
@@ -950,7 +983,7 @@ test('a work tree git cannot resolve leaves the fingerprint unverified instead o
   fs.writeFileSync(path.join(broken, '.git', 'config'), 'not a config [[[\n');
   assert.equal(evr.fingerprintRoot(broken, root), null);
   const data = pluginData();
-  await runIn(root, data, { cwd: broken, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(broken)} && true` });
   const [record] = recordsOf(data);
   assert.equal(record.tree_end, null);
   assert.match(record.tree_end_reason, /git could not resolve the work tree the run directory lies in/);
@@ -963,7 +996,7 @@ test('a pass over a nested worktree names the work tree it measured', async () =
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   const result = verdictFor(root, data);
   assert.equal(result.state, 'pass');
   assert.match(result.lines[0], /exit 0 on the current tree [0-9a-f]{12} of the project and \.claude\/worktrees\/wt \(record /);
@@ -975,11 +1008,11 @@ test('the verdict follows the directory of the newest full record', async () => 
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   await runIn(root, data, { command: 'true' });
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
   assert.equal(verdictFor(root, data).state, 'pass');
-  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true` });
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited again in the worktree\n');
   assert.equal(verdictFor(root, data).state, 'stale');
 });
@@ -990,7 +1023,7 @@ test('a nested repository with its own object store lists its changed paths', as
   fs.writeFileSync(path.join(root, '.gitignore'), '.claude/worktrees/\n');
   sh(root, 'git add .gitignore && git commit -q -m ignore-worktrees');
   const data = pluginData();
-  await runIn(root, data, { cwd: other, command: 'true' });
+  await runIn(root, data, { command: `cd ${evr.shellQuote(other)} && true` });
   assert.equal(verdictFor(root, data).state, 'pass');
   fs.writeFileSync(path.join(other, 'x.txt'), 'edited in the nested repository\n');
   const result = verdictFor(root, data);

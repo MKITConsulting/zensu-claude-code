@@ -257,7 +257,7 @@ stop() (
   activate_session "$sid" || exit 1
   printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     ZENSU_CONFIG="$CASE_CONFIG" \
-    bash "$STOP" "$@" 2>/dev/null
+    bash "$STOP" "$STOP_WORKER_FLAG" "$@" 2>/dev/null
 )
 state_flag() {
   local key
@@ -844,7 +844,7 @@ zlog --pending-review --files x.ts >/dev/null
 i=1
 while [ "$i" -le 20 ]; do
   (
-    if stop "parallel-$i" "$STOP_WORKER_FLAG" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
+    if stop "parallel-$i" > "$CASE_ROOT/out-$i"; then stop_rc=0; else stop_rc=$?; fi
     printf '%s\n' "$stop_rc" > "$CASE_ROOT/rc-$i"
   ) &
   i=$((i + 1))
