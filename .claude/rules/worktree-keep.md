@@ -39,7 +39,9 @@ drift detector is what survives that: it compares the worktree's current branch 
 this session recorded, and a mismatch discloses ONCE what happened and how to continue.
 
 **ONE lifecycle rule, in ONE function.** `reconcileKeep` holds the marker present while at least
-one LIVE anchor exists in `<worktree>/.zensu/state/` — an anchor is this session's
+one LIVE anchor exists in `<worktree>/.zensu/state/`, and, once none does, while `nestedHold`
+finds a nested repository other than a submodule inside the worktree or cannot finish looking
+(the nested-repository paragraphs below) — an anchor is this session's
 `worktree-anchor-<scv1 session key>.json` (schema 1: an ABSOLUTE worktree root without control
 bytes, branch, head, liveness stamp, drift, and two optional fields, `idleHours` and `endedAt`),
 `live` while its stamp is inside the window its WRITER recorded in `idleHours` (the caller's
@@ -188,7 +190,17 @@ still holds it — live session anchors; anchor files this build cannot validate
 to remove only after confirming no session on another plugin version is live there, because such a
 file is usually a live anchor another installation wrote during an update; or an unreadable anchor
 directory, which the row says drains when it is past its bound and holds expired anchors, since the
-release pass reaps what it read — because the release pass removes it only once nothing does. A drift row, a
+release pass reaps what it read; or a nested repository or an unfinished scan for one, a variant of
+its own in place of the release promise, while the live and unvalidated-anchor variants end their
+promise with `once nothing else holds it` when a nested hold applies — because the release pass
+removes it only once nothing does. Whenever the marker is the plugin's own, in either flag state,
+the renderer reads `nestedHold` once and renders an OK row naming the first nested repository in
+name order as a FORECAST (it keeps the marker once no session anchor holds it), or a WARN row
+when the scan did not finish. The forecast is OK on purpose: in the multi-repo layout it holds for
+a whole session, and a WARN there would withhold the green summary from every such session for a
+state the user has nothing to fix in yet. A module that predates the export renders no nested
+row. The doctor's scan carries no deadline, only the entry bound, so a report on a huge tree with
+no nested repository pays one full walk (up to about 2.4 s cold on the largest tree measured). A drift row, a
 MISSING-marker row and a stale own-anchor row are WARN and withhold the green summary for as long
 as they hold, deliberately: a taken or unprotected directory is real state the user must act on.
 The MISSING row promises a restore only for an `IGNORED` or `NOT_YET_EXCLUDED` verdict and only
@@ -271,11 +283,12 @@ lives in `cmdRelease`, not in the module: the registry-completeness, caller and 
 checks, the go/no-go for a BUSY or an unmeasured source, the owner attribution of each live
 anchor, the root-mismatch and nested-repository refusals, and the post-apply re-listing that
 reports `released` only when no live anchor and no marker are left. `nestedRepositories` is the
-module's scan for that refusal. It never follows a symlink, recognizes a bare repository by
-`HEAD`, `objects` and `refs`, stops at each nested root except a real submodule, which it walks
-into, exempts nothing itself (the caller exempts `NESTED_KINDS.SUBMODULE`), and answers `ok: false`
-past `MAX_NESTED_SCAN_ENTRIES` or on an unreadable directory, so a partial walk never reads as a
-clean tree. `SUBMODULE` means a gitfile whose target lies in the worktree's own `modules`
+module's scan for that refusal and for the hold below. It walks in name order, never follows a
+symlink, recognizes a bare repository by `HEAD`, `objects` and `refs`, stops at each nested root
+except a real submodule, which it walks into, exempts nothing itself (the caller exempts
+`NESTED_KINDS.SUBMODULE`), stops at the first blocking root when asked (`firstBlocking`), and
+answers `ok: false` past `MAX_NESTED_SCAN_ENTRIES`, past a `deadline` on the `performance.now()`
+clock, or on an unreadable directory, so a partial walk never reads as a clean tree. `SUBMODULE` means a gitfile whose target lies in the worktree's own `modules`
 directory and carries no `commondir` file; every linked worktree's admin directory carries one, so
 a worktree of a submodule's repository is a `WORKTREE` and blocks. The refusal exists because the app's archive cleanup, read in the
 2.19675.0 bundle and not run, protects only the worktrees the app created, so a gitignored nested
@@ -286,13 +299,79 @@ verb working. The `WR*` family in `tests/structure/test-session-trail-verdict.sh
 end to end against a real base repository, two linked worktrees and a nested worktree of a second
 repository; the module half has its own unit cases.
 
+**Nested repositories hold the marker — decided 2026-10-02: (a), with a doctor row as its
+disclosure.** Three options were weighed for
+the gap that only `release` refused over a nested repository while SessionEnd, the idle window
+and the flag-off release pass dropped the marker regardless: (a) `reconcileKeep` holds the
+marker while a nested repository other than a submodule remains; (b) a `/zensu:doctor` WARN row
+naming the nested repositories of a worktree whose marker would drop; (c) an
+`additionalContext` notice at SessionEnd or SessionStart. The reason for (a): the loss is
+IRREVERSIBLE and SILENT — an archive after the drop deletes the nested repository's uncommitted
+work and, for one with its own `.git` directory, its unpushed commits — while the cost of a hold
+is a directory left on disk, which is visible and recoverable. (b) alone reports a deletion the
+user must prevent by hand, and only to a user who runs the doctor in that worktree before
+archiving. (c) has no channel: SessionEnd ends the session and `hookEnvelope` emits
+`additionalContext` only for `prompt` and `session-start`, and a SessionStart notice would reach
+a new session's model about another worktree. The premise was re-read in the installed
+2.19675.0 bundle, not run: the cleanup's status call is
+`git status --porcelain --untracked-files=all` with `:(exclude).worktree-keep` and no
+`--ignored`.
+
+**The cost that kept (a) out was mis-located, and a measurement is what moved it.** The gap
+this replaces said the hold would put a tree walk "on the reconcile path, which runs on every
+prompt". The walk sits only in the branch that would UNLINK the marker, after the live-anchor
+return, and a prompt writes its own anchor before it reconciles, so the prompt path reaches the
+walk only when the session's own anchor cannot be written. The unit case `an unfinished nested
+scan keeps the marker, and a live anchor decides before any scan runs` holds that order.
+MEASURED 2026-10-02 on the development Mac (load 7 to 17 on 16 cores) with the module's own
+`nestedRepositories`: a stratified sample of 107 app-managed worktrees across 20 repositories
+walked whole in a median 4 ms, p90 135 ms, at most 278 ms warm and about 1 s on the first, cold
+run (115k entries at most); a census of all 823 worktrees found 58 carrying the plugin's marker,
+19 of them with no live anchor, and 8 with a nested repository inside, one of those with no
+live anchor, so its marker would have dropped at the next sweep; the largest walk was 323k
+entries, 2.2 to 2.4 s cold and 0.4 s warm. A held worktree is scanned again at every later
+sweep, so the scan walks in name order and stops at the first blocking repository: the
+dot-directory layouts (`.worktrees/<repo>/<branch>`, `.claude/worktrees/<slug>`) were found
+after 37 to 132 entries in under 1 ms, 60k-entry trees included, whose full walk takes 0.5 to
+0.7 s; SwiftPM checkouts under a DerivedData directory inside the worktree took 13k to 20k
+entries, about 40 to 50 ms. A worktree on its way to release pays one full walk, once.
+
+**`nestedHold` is the ONE verdict.** It returns `null`, `{ reason: NESTED_HOLDS.REPOSITORY,
+nested }` (the first blocking repository in name order) or `{ reason:
+NESTED_HOLDS.SCAN_INCOMPLETE, scan }`; `reconcileKeep` spreads it into its `kept` answer and the
+doctor renders from it, and `P1wk18-judge` requires the renderer to call it and forbids it
+`nestedRepositories`, so the submodule exemption has one owner on that path. `cmdRelease` keeps
+its own `n.kind !== NESTED_KINDS.SUBMODULE` filter over a FULL scan, because its refusal lists
+every nested repository; both read the same `NESTED_KINDS`, and `release` therefore refuses
+exactly where the hold would keep the marker anyway.
+
+**Bounds.** An unfinished scan HOLDS — past `MAX_NESTED_SCAN_ENTRIES`, at an unreadable
+directory, or past the hook deadline — the fail-safe direction, because a hold can be undone
+and a deletion cannot. `NESTED_SCAN_DEADLINE_MS` (3000) is read on the `performance.now()`
+clock of the hook's `node` process, which starts at process start, because `zensu_run_bounded`
+kills that process at 5 s; `inputFromEnv` sets it for every verb, and the sweep shares the one
+deadline across its siblings. Library callers — `retireAnchors`, `cmdRelease`, the doctor —
+pass none and are bounded by entries alone. `WK_SCAN_DEADLINE_MS` overrides it only in the
+JSON test mode, the `WK_NOW` rule, and a blank value falls back.
+
+**The taker's own worktree, and why no special case was needed.** The move route of
+`/zensu:session-trail` (§"Takeover Destination") runs `git worktree move` with `<path>` inside
+the taker's anchor, which nests the old worktree in the taker's. Before the hold, the taker's
+SessionEnd dropped its marker and the next archive of the TAKING session deleted the moved tree
+with it. The moved tree is a nested worktree of the same repository, so the hold covers it;
+the unit case `a whole-tree worktree move into the taker keeps the taker's marker at SessionEnd
+until the moved tree leaves` performs exactly that move.
+
 **Coupled sites that move together:** `KEEP_FILENAME` / `KEEP_SOURCE_BUILD` / `ANCHOR_PREFIX` /
 `ANCHOR_NAME_RE` / `DEFAULT_IDLE_HOURS` / `MAX_IDLE_HOURS` / `MAX_SWEEP_DIRS` /
 `REFRESH_INTERVAL_MS` / `MAX_ANCHOR_FILES` / `UNRENDERABLE_BRANCH` / `branchValueOk` /
 `MARKER_STATES` / `VERDICTS` / `IGNORE_STATES` / `ANCHOR_REMEDIES` / `BRANCH_STATES` / `ACTIONS` /
 `EXCLUDE_COMMENT` and the three verbs in the module; `MAX_NESTED_SCAN_ENTRIES` / `NESTED_KINDS`
-with `nestedRepositories` and `retireAnchors`, whose one consumer is `worktreeKeepModules` /
-`cmdRelease` in `skills/session-trail/scripts/trail.mjs`; `anchorTargetCheck` and `anchorRemedy` (the
+with `nestedRepositories` and `retireAnchors`, whose consumer outside the module is
+`worktreeKeepModules` / `cmdRelease` in `skills/session-trail/scripts/trail.mjs`;
+`NESTED_HOLDS` / `NESTED_SCAN_DEADLINE_MS` with `nestedHold`, the verdict `reconcileKeep` holds
+on and the doctor's `nestedHoldVerdict` / `nestedHoldRow` render, and the `WK_SCAN_DEADLINE_MS`
+test-mode override in `inputFromEnv`; `anchorTargetCheck` and `anchorRemedy` (the
 pre-check `writeAnchor` applies, and the remedy the doctor names from it);
 `PAUSED_MARKERS`, `pausedState` / `baselineFor` (git's paused-operation file
 formats, `head-name` holding `refs/heads/<branch>` and `BISECT_START` holding a short branch name
@@ -357,9 +436,11 @@ overrides `markerIgnoreState` (`P1wk45`), a remedy it does not name by one that 
 when the principal can write it anyway. The catch rows are driven by a missing module
 (`P1wk7`), a module that fails to parse (`P1wk38`) and stub modules (`P1wk24`, `P1wk25`,
 `P1wk37`). `P1wk18-judge` requires the renderer to call `branchState`, `anchorMatchesRoot`,
-`recordedMoveSentence`, `branchNoun` and `anchorRemedy`, forbids it `judgeBranch`,
-`unresolvedRecord`, `pausedState` and `detectDrift`, and holds it to handing `remedyLines` only
-the recorded branch.
+`recordedMoveSentence`, `branchNoun`, `anchorRemedy` and `nestedHold`, forbids it `judgeBranch`,
+`unresolvedRecord`, `pausedState`, `detectDrift` and `nestedRepositories`, and holds it to
+handing `remedyLines` only the recorded branch. The nested-hold rows are driven by a nested
+`git init` inside the fixture worktree with the flag on and off and beside a live anchor, and
+the unfinished-scan rows by a mode-000 directory, skipped when the principal reads it anyway.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
 workflow-state schema field — the anchor is a new session-keyed state file, the same class as the
@@ -369,6 +450,10 @@ model-facing output is `additionalContext`, and they return no `permissionDecisi
 keys read through the PERMISSIVE `zensu_hook_enabled` / `_zensu_config_bounded_int` readers; no
 attestation change. The `release` additions keep that verdict: two functions and two constants
 exported, no anchor field added (`endedAt` was already optional), and no hook added or re-matched.
+So does the nested-repository hold: one function and two constants exported, no anchor or marker
+field, no config key, no hook added or re-matched, and still no `permissionDecision`; it keeps a
+marker longer, which no runtime reads as a contract, and the older build that drops it is a named
+gap below rather than a lineage break.
 
 **Known gaps, accepted and named:**
 
@@ -381,11 +466,30 @@ exported, no anchor field added (`endedAt` was already optional), and no hook ad
   sessions archived after a takeover on 2026-09-29 kept live anchors for days, so an archive
   inside the window leaves the worktree on disk; `release` lifts it early, from the continuing
   session, and only when that session runs it.
-- **Only `release` refuses over a nested repository.** An anchor that ages through SessionEnd,
-  the idle window or the flag-off release pass drops the marker whether or not a nested
-  repository is still inside, and an archive after that can delete it with the worktree. Holding
-  the marker while a nested repository remains is the uncompromised fix and is NOT taken: it
-  puts a bounded tree walk on the reconcile path, which runs on every prompt.
+- **A held worktree stays on disk whatever its nested repository holds.** The scan cannot tell a
+  nested worktree whose work is committed and pushed, or a dependency checkout a build recreates
+  (SwiftPM's `SourcePackages` in a DerivedData directory inside the worktree, a test fixture
+  repository), from one holding uncommitted work or unpushed commits, so it keeps the marker for
+  all of them, and such a directory stays until its nested repositories are removed by hand.
+  Judging each nested repository's own `git status` and unpushed commits is the precise rule and
+  is NOT taken: it runs `git` inside arbitrary nested repositories from a sweep of SIBLING
+  worktrees, where `core.fsmonitor` and its kin execute that repository's configuration, and it
+  costs several `git` spawns per nested repository at every sweep that re-checks a held one.
+- **A build without the hold still drops the marker.** Under the lineage rule several builds can
+  serve sessions of one repository at once; while any of them predates this change, its
+  SessionEnd and its sibling sweep remove a marker over a nested repository the old way.
+- **The sweep shares one deadline in name order.** A sibling whose scan cannot finish inside
+  `NESTED_SCAN_DEADLINE_MS` keeps its marker, and so does every sibling after it until a later
+  SessionStart has time left; a sibling whose full walk alone exceeds the budget therefore holds
+  until an invocation reaches it early enough. Nothing rotates the order.
+- **The scan is a decision, not a lock.** A nested repository created between the scan and the
+  unlink is not seen. The listing of anchors that follows the unlink restores the marker only
+  when a live anchor appeared in that window, which is what a session working there writes.
+- **The prompt path can scan in one degenerate state.** When the session's own anchor cannot be
+  written (a symlinked `.zensu`/`state` component, a read-only volume) and no other live anchor
+  exists, the prompt reaches the unlink branch and scans; a held worktree then pays the early
+  stop on every such prompt, and one without a nested repository pays one full walk before its
+  marker drops.
 - **`release` attributes an anchor only to a session in the config root it reads.** An anchor of
   any other session reads as unattributed and blocks the release until its idle window passes.
 - **The marker and the anchor are files in a session-writable directory.** They separate a

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 
 const KEEP_FILENAME = '.worktree-keep';
 const KEEP_SOURCE_BUILD = '2.2553.1';
@@ -31,6 +32,7 @@ const MAX_ANCHOR_FILES = 256;
 const MAX_PAUSED_TARGET_BYTES = 4096;
 const MAX_GITFILE_BYTES = 4096;
 const MAX_NESTED_SCAN_ENTRIES = 500000;
+const NESTED_SCAN_DEADLINE_MS = 3000;
 const HEADS_PREFIX = 'refs/heads/';
 const LINK_UNSUPPORTED_CODES = Object.freeze(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV', 'EMLINK']);
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -82,6 +84,10 @@ const NESTED_KINDS = Object.freeze({
   WORKTREE: 'worktree',
   SUBMODULE: 'submodule',
   UNKNOWN: 'unknown',
+});
+const NESTED_HOLDS = Object.freeze({
+  REPOSITORY: 'nested-repository',
+  SCAN_INCOMPLETE: 'nested-scan-incomplete',
 });
 const VERBS = Object.freeze(['session-start', 'prompt', 'session-end', 'release']);
 const RESUME_SOURCES = Object.freeze(['resume', 'compact']);
@@ -516,6 +522,8 @@ function reconcileKeep(worktreeRoot, nowMs, idleMs, options) {
   }
   if (marker.state === MARKER_STATES.OURS) {
     if (counts.rejected > 0) return { action: ACTIONS.KEPT, reason: 'rejected-anchors', file: marker.file, ...counts };
+    const nested = nestedHold(worktreeRoot, opts.deadline);
+    if (nested !== null) return { action: ACTIONS.KEPT, ...nested, file: marker.file, ...counts };
     try {
       fs.unlinkSync(marker.file);
     } catch (error) {
@@ -702,7 +710,7 @@ function sweepSiblings(baseRepo, nowMs, idleMs, options) {
         continue;
       }
       summary.scanned += 1;
-      const result = reconcileKeep(root, nowMs, idleMs, { reap: false, create: opts.create });
+      const result = reconcileKeep(root, nowMs, idleMs, { reap: false, create: opts.create, deadline: opts.deadline });
       if (result.action === ACTIONS.CREATED) summary.created += 1;
       else if (result.action === ACTIONS.REMOVED) summary.removed += 1;
       else if (result.action === ACTIONS.KEPT) summary.kept += 1;
@@ -921,9 +929,9 @@ function sessionStart(input) {
   out.head = record.head;
   out.exclude = ensureExclude(managed.worktreeRoot);
   if (out.exclude.action === ACTIONS.REFUSED) out.faults.push('exclude:' + out.exclude.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
-  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot });
+  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, deadline: input.deadline });
   return out;
 }
 
@@ -977,7 +985,7 @@ function prompt(input) {
   } else {
     out.anchor = { ok: true, unchanged: true };
   }
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
   out.branch = current.ok ? current.branch : null;
   out.recordedBranch = record.branch;
@@ -1010,7 +1018,7 @@ function sessionEnd(input) {
     out.anchor = removeAnchor(managed.worktreeRoot, input.sessionKey);
   }
   if (out.anchor.action === ACTIONS.REFUSED) out.faults.push('anchor-remove:' + out.anchor.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
   return out;
 }
@@ -1027,9 +1035,9 @@ function release(input) {
   }
   out.anchor = removeAnchor(managed.worktreeRoot, input.sessionKey);
   if (out.anchor.action === ACTIONS.REFUSED) out.faults.push('anchor-remove:' + out.anchor.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { create: false });
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { create: false, deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
-  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, create: false });
+  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, create: false, deadline: input.deadline });
   return out;
 }
 
@@ -1103,6 +1111,8 @@ function nestedRepositories(worktreeRoot, options) {
   const limit = Number.isInteger(opts.maxEntries) && opts.maxEntries > 0
     ? Math.min(opts.maxEntries, MAX_NESTED_SCAN_ENTRIES)
     : MAX_NESTED_SCAN_ENTRIES;
+  const deadline = Number.isFinite(opts.deadline) ? opts.deadline : null;
+  const firstBlocking = opts.firstBlocking === true;
   const sorted = (list) => list.slice().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   if (typeof worktreeRoot !== 'string' || !path.isAbsolute(worktreeRoot)) {
     return { ok: false, reason: 'root-not-absolute', entries: 0, nested: [] };
@@ -1112,6 +1122,7 @@ function nestedRepositories(worktreeRoot, options) {
   const stack = [worktreeRoot];
   let entries = 0;
   while (stack.length > 0) {
+    if (deadline !== null && performance.now() > deadline) return { ok: false, reason: 'scan-deadline', entries, nested: sorted(nested) };
     const dir = stack.pop();
     let listing;
     try {
@@ -1128,14 +1139,23 @@ function nestedRepositories(worktreeRoot, options) {
       if (hasGit || bareRepositoryListing(listing)) {
         const kind = hasGit ? nestedKind(dir, ownGit) : NESTED_KINDS.REPOSITORY;
         nested.push({ path: path.relative(worktreeRoot, dir), kind });
-        if (kind !== NESTED_KINDS.SUBMODULE) continue;
+        if (kind !== NESTED_KINDS.SUBMODULE) {
+          if (firstBlocking) return { ok: true, entries, nested: sorted(nested) };
+          continue;
+        }
       }
     }
-    for (const entry of listing) {
-      if (entry.name !== '.git' && entry.isDirectory()) stack.push(path.join(dir, entry.name));
-    }
+    const children = listing.filter((entry) => entry.name !== '.git' && entry.isDirectory()).map((entry) => entry.name).sort();
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push(path.join(dir, children[i]));
   }
   return { ok: true, entries, nested: sorted(nested) };
+}
+
+function nestedHold(worktreeRoot, deadline) {
+  const scan = nestedRepositories(worktreeRoot, { firstBlocking: true, deadline });
+  if (!scan.ok) return { reason: NESTED_HOLDS.SCAN_INCOMPLETE, scan: scan.reason };
+  const blocking = scan.nested.find((entry) => entry.kind !== NESTED_KINDS.SUBMODULE);
+  return blocking ? { reason: NESTED_HOLDS.REPOSITORY, nested: blocking } : null;
 }
 
 function retireAnchors(worktreeRoot, targets, nowMs, idleMs) {
@@ -1195,6 +1215,8 @@ function retireAnchors(worktreeRoot, targets, nowMs, idleMs) {
 function inputFromEnv(env, testMode) {
   const now = testMode ? Number(env.WK_NOW) : NaN;
   const maxDirs = testMode ? Number(env.WK_MAX_DIRS) : NaN;
+  const rawDeadline = env.WK_SCAN_DEADLINE_MS;
+  const deadline = testMode && typeof rawDeadline === 'string' && rawDeadline.trim() !== '' ? Number(rawDeadline) : NaN;
   return {
     cwd: typeof env.WK_CWD === 'string' ? env.WK_CWD : '',
     sessionKey: typeof env.WK_SESSION_KEY === 'string' ? env.WK_SESSION_KEY : '',
@@ -1203,6 +1225,7 @@ function inputFromEnv(env, testMode) {
     idleMs: idleMsFromHours(env.WK_IDLE_HOURS),
     nowMs: Number.isFinite(now) && now > 0 ? now : Date.now(),
     maxDirs: Number.isInteger(maxDirs) && maxDirs > 0 ? maxDirs : undefined,
+    deadline: Number.isFinite(deadline) && deadline >= 0 ? deadline : NESTED_SCAN_DEADLINE_MS,
   };
 }
 
@@ -1272,7 +1295,9 @@ module.exports = {
   MAX_SWEEP_DIRS,
   MAX_ANCHOR_FILES,
   MAX_NESTED_SCAN_ENTRIES,
+  NESTED_SCAN_DEADLINE_MS,
   NESTED_KINDS,
+  NESTED_HOLDS,
   MARKER_STATES,
   IGNORE_STATES,
   ANCHOR_REMEDIES,
@@ -1306,6 +1331,7 @@ module.exports = {
   ensureExclude,
   sweepSiblings,
   nestedRepositories,
+  nestedHold,
   retireAnchors,
   currentBranch,
   unresolvedRecord,
