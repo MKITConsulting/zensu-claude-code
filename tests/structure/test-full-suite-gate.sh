@@ -367,5 +367,6 @@ fi
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 check "FS-A1 the gate doc names the combined fingerprint" "$(grep -qF 'combines the project tree and that work tree' "$GATES_DOC" && echo PASS || echo FAIL)"
 check "FS-A2 the gate doc names the leading cd" "$(grep -qF 'target of a leading literal `cd <dir>`' "$GATES_DOC" && echo PASS || echo FAIL)"
+check "FS-A3 both max-rounds hand-offs run the suite step once before they close" "$([ "$(grep -cF '${CLOSE_SUITE_STEP}' "$POSTREV")" -eq 2 ] && grep -qF 'CLOSE_SUITE_REASON="this run is the only full-suite measurement of the tree that ships"' "$POSTREV" && echo PASS || echo FAIL)"
 
 finish

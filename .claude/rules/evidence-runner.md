@@ -5,6 +5,7 @@ paths:
   - "tests/structure/evidence-run-v1.test.js"
   - "tests/structure/test-evidence-run.sh"
   - "tests/structure/test-full-suite-gate.sh"
+  - "hooks/post-review-tdd-delegate.sh"
 ---
 
 # Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)
@@ -146,7 +147,16 @@ documented residual of every plugin store, and no seal was added.
 `ZENSU_FULL_SUITE_GATE` row and the visible-opt-outs roster; `docs/gates.md`
 §"Full-suite gate"; the counts in `.claude/rules/gate-disable-prefixes.md`;
 `ESCAPE_STEMS` in `tests/structure/test-gauntlet-loop-skill.sh`; the escape case in
-`tests/structure/test-bypass-ledger.sh`.
+`tests/structure/test-bypass-ledger.sh`. The close step moves together across
+`FULL_SUITE_STEP`, `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP` and `CLOSE_SUITE_REASON` of
+`hooks/post-review-tdd-delegate.sh` (both `CLOSE_PASS` arms, `CLOSE_PASS_SUITE_CI` and both
+max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
+`skills/tdd/SKILL.md`, discipline patch 12 in `docs/tdd-manager-workflow.md`,
+the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
+`tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
+`evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
+`tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` count in
+`tests/SUITE-OVERVIEW.md`.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when

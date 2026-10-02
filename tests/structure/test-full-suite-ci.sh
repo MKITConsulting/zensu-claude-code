@@ -154,13 +154,8 @@ bind() {
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
 }
 
-arm() {
-  local sid="$1" ctx
-  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err" || return 1
-  bash "$LOG" --tdd-complete >/dev/null 2>&1 || return 1
-  TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
-  [ -n "$TICKET" ] || return 1
-  ctx="$(SID_VALUE="$sid" TICKET="$TICKET" node -e '
+completion() {
+  SID_VALUE="$1" TICKET="$TICKET" node -e '
     process.stdout.write(JSON.stringify({
       hook_event_name: "PostToolUse",
       tool_name: "Agent",
@@ -170,8 +165,16 @@ arm() {
       },
       session_id: process.env.SID_VALUE
     }));
-  ')"
-  printf '%s' "$ctx" | bash "$POSTREV" >"$WORK/postrev.json" 2>/dev/null
+  '
+}
+
+arm() {
+  local sid="$1"
+  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err" || return 1
+  bash "$LOG" --tdd-complete >/dev/null 2>&1 || return 1
+  TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+  [ -n "$TICKET" ] || return 1
+  completion "$sid" | bash "$POSTREV" >"$WORK/postrev.json" 2>/dev/null
   bash "$LOG" --code-review-done --claimed-review-ticket "$TICKET" >/dev/null 2>&1 || return 1
   SF="$(tdd_state_file "$sid")"
 }
@@ -423,6 +426,52 @@ if [ "$RC" -eq 2 ] && printf '%s\n' "$OUT" | grep -qF 'refusing to record CI ful
 else
   check "C21 --ci --repo refuses without a verified pipeline and records nothing (rc=$RC)" FAIL
   printf '%s\n' "$OUT"
+fi
+
+max_rounds() {
+  local sid="$1" round
+  bind "$sid" "$PROJ" || return 1
+  bash "$HELPER" --ci --session >/dev/null 2>&1 || return 1
+  bash "$LOG" --tdd-begin >"$WORK/begin.out" 2>"$WORK/begin.err" || return 1
+  bash "$LOG" --tdd-complete >/dev/null 2>&1 || return 1
+  for round in 1 2; do
+    TICKET="$(bash "$LOG" --review-ticket 2>/dev/null)"
+    [ -n "$TICKET" ] || return 1
+    completion "$sid" | bash "$POSTREV" >"$WORK/postrev.json" 2>/dev/null
+  done
+}
+
+ZENSU_CONFIG="$WORK/max-rounds.json"
+printf '{"evidence":{"fullSuiteCommand":"echo full-suite-ok"},"hooks":{"autoFix":true,"autoFixMaxRounds":1}}\n' > "$ZENSU_CONFIG"
+if max_rounds "fsci-max-rounds"; then
+  DIRECTIVE="$(directive)"
+  if printf '%s' "$DIRECTIVE" | grep -qF 'FIRST, re-run the affected-suite command of Phase 6 step 1 through the evidence runner' \
+    && printf '%s' "$DIRECTIVE" | grep -qF -- "--evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>'" \
+    && printf '%s' "$DIRECTIVE" | grep -qF "THEN your next action MUST be the Skill tool with skill='zensu:self-review'" \
+    && ! printf '%s' "$DIRECTIVE" | grep -qF -- '--evidence-run --scope full --if-stale'; then
+    check "C22 the max-rounds hand-off of a CI chain re-runs the affected suite before the self-review" PASS
+  else
+    check "C22 the max-rounds hand-off of a CI chain re-runs the affected suite before the self-review" FAIL
+    printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+  fi
+else
+  check "C22 drive a CI chain to the max-rounds hand-off" FAIL
+fi
+
+printf '{"evidence":{"fullSuiteCommand":"echo full-suite-ok"},"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}\n' > "$ZENSU_CONFIG"
+if max_rounds "fsci-max-rounds-off"; then
+  DIRECTIVE="$(directive)"
+  if printf '%s' "$DIRECTIVE" | grep -qF 'Before you reply, re-run the affected-suite command of Phase 6 step 1 through the evidence runner' \
+    && printf '%s' "$DIRECTIVE" | grep -qF -- "--evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>'" \
+    && printf '%s' "$DIRECTIVE" | grep -qF 'this run is the only local test measurement of the tree that ships, and CI runs the full suite' \
+    && ! printf '%s' "$DIRECTIVE" | grep -qF -- '--evidence-run --scope full --if-stale'; then
+    check "C23 the max-rounds close of a CI chain without self-review re-runs the affected suite before the reply" PASS
+  else
+    check "C23 the max-rounds close of a CI chain without self-review re-runs the affected suite before the reply" FAIL
+    printf '%s\n' "$DIRECTIVE" | head -c 4000; echo
+  fi
+else
+  check "C23 drive a CI chain without self-review to the max-rounds close" FAIL
 fi
 
 finish
