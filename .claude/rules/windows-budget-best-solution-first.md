@@ -62,6 +62,24 @@ whose shard 1 summed 1357 s. So the shard was already close to its envelope on a
 99509 ms) moved to `windows-shard-8`, which measured 882 and 1083 s, ahead of its pinned tail.
 `expectedShardHomes` pins both homes. Re-measure shard 1 on the next green Windows run.
 
+**`windows-shard-1` ran out of room again, so `deferred-lease-refresh` moved off it.** On runs
+36724193854, 36730717361 and 36735221114 (attempt 2) the shard's suites summed to 1630, 1621 and
+1739 s of the 1800000 ms envelope. `autopilot-state-machine` measured 812203 and 830672 ms on the
+first two and reported `TIMED_OUT` at its 900000 ms cap (900216 ms) on the third, with
+`deferred-lease-refresh` taking 735535-780910 ms behind it. That third run had at most about 61 s
+of the envelope left, so raising the cap in place would only have moved the timeout onto the suites
+behind it. `deferred-lease-refresh` therefore moved, with its command and its 900000 ms cap
+unchanged, to the FRONT of `windows-shard-9`. That shard's only suite,
+`stop-enforcer-reviewer-denial-note`, measured 626985-713658 ms on the same runs. The cap of
+`autopilot-state-machine` rose to 1280000 ms, about 42% over the figure at which it timed out. It
+runs first on shard 1, so that cap now binds before the envelope: a full run to it still leaves
+about 520 s for the five small suites behind it, which took 55-58 s on those runs. On the same runs
+shard 1 would have measured about 867-958 s, the last a lower bound because that suite was cut off,
+and shard 9 about 1363-1495 s. `stop-enforcer-reviewer-denial-note` stays LAST on shard 9 because
+its 1200000 ms cap is the larger one, so an overrun of either suite surfaces as that suite's own
+`TIMED_OUT` instead of starving the other. `expectedShardHomes` and `expectedShardTails` pin both
+positions. Re-measure both shards on the next green Windows run.
+
 **`post-review-self-review-handoff` on `windows-shard-5` outgrew its 720000 ms cap**, which
 dates from #182 while the suite kept gaining checks. Six green runs measured it at 591568,
 636796, 636930, 663856, 686575 and 695461 ms (82–97% of the cap). Run 36730717361 then
