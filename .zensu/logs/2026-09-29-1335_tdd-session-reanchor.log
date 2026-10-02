@@ -1,0 +1,397 @@
+TDD STARTED — verified Session Control re-anchor within one repository | steps: 8
+TASKS UNAVAILABLE — this harness exposes no TaskCreate/TaskUpdate tool (ToolSearch select:TaskCreate,TaskUpdate found nothing); the run log is the progress channel
+EXECUTION STARTED — vanilla mode
+S1 IMPL completed — files: hooks/lib/session-control-core-v1.js | supersedeContextRecord extracted from adoptContext unchanged, contextRecordLocation added, initializeWorkflowStateDetailed exported
+S1 CHECKPOINT — PASS 182/182 | cmd: bash tests/session-control/run.sh | scope: 1 suites over hooks/lib/session-control-core-v1.js
+S2 IMPL completed — files: hooks/lib/review-evidence-sweep-v1.js | optional fourth argument keeps a lease only when owned AND bound to that project root; three-argument callers unchanged
+S3 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js | verdict ladder, live-claim probe, locked perform, renderers; 95.71% lines
+S3 CHECKPOINT — PASS 72/72 | cmd: node --test tests/structure/session-reanchor-v1.test.js tests/structure/review-evidence-sweep-v1.test.js | scope: 2 unit files over hooks/lib/session-reanchor-v1.js, hooks/lib/review-evidence-sweep-v1.js
+S4 IMPL completed — files: hooks/lib/zensu-session-reanchor.sh, hooks/lib/session-reanchor-v1.js | separate entry script (--confirm only) and main(); a ZADOPT_MODE route was built and reverted so the recognized adopt script stays untouched
+S5 IMPL completed — files: hooks/lib/zensu-log.sh, hooks/lib/zensu-tdd-phase.sh, tests/structure/test-restore-project-root.sh | PROJECT_ROOT_REANCHORED and its reason prefix reserved in both guard bodies; R5d/R5e needles narrowed to the RESTORED arm
+S6 IMPL completed — files: hooks/lib/bash-source-write-parse.js, hooks/pre-bash-source-write-gate.sh, tests/structure/test-bash-source-write-gate.sh | rule B/C remedies name --reanchor in a bound session and no other worktree; P5b adjacency kept
+S6 CHECKPOINT — PASS 252/252 | cmd: bash tests/structure/test-bash-source-write-gate.sh | scope: 1 suites over hooks/lib/bash-source-write-parse.js, hooks/pre-bash-source-write-gate.sh
+S7 IMPL completed — files: tests/structure/test-session-reanchor.sh, tests/structure/session-reanchor-v1.test.js, tests/profiles/promptfoo-local-only.v1.json, tests/SUITE-OVERVIEW.md | end-to-end reproduction; synthetic runtime root in the unit file
+S7 CHECKPOINT — PASS 44/44 | cmd: bash tests/structure/test-session-reanchor.sh | scope: 1 suites over hooks/lib/session-reanchor-v1.js, hooks/lib/zensu-session-reanchor.sh (bash 3.2 macOS and bash 5.2 node:20-bookworm)
+S8 IMPL completed — files: skills/adopt-session/SKILL.md, docs/session-control.md, docs/gates.md, docs/worktree-keep.md, skills/session-trail/SKILL.md, skills/session-trail/scripts/trail.mjs, .claude/rules/session-reanchor.md, .claude/rules/session-adoption.md, .claude/rules/restore-vanished-project-root.md, .claude/rules/worktree-keep.md, CLAUDE.md | operator accounts and the false 'nothing re-anchors a session' claims corrected
+FULL SUITE NOT RUN LOCALLY — project rule: tests/run-all.sh is CI-only; .zensu/config.json sets evidence.fullSuiteGate=advisory; CI is the gate
+STATIC CHECKS — PASS 14/14 | node --check (js/mjs), /bin/bash -n and bash -n (sh), JSON.parse (json) over every changed file | no lint or build script exists in package.json; Build: – n/a
+COVERAGE — hooks/lib/session-reanchor-v1.js 94.69% lines PASS; hooks/lib/review-evidence-sweep-v1.js 91.88% PASS @ 90% (plan scope: the new module) | hooks/lib/bash-source-write-parse.js and hooks/lib/session-control-core-v1.js: changed lines run in shell-suite subprocesses c8 does not instrument (parser 0/9 instrumented, exercised by W121/W121c/W163b/W224b; core 42/68, the rest the moved rollback arm and adoptContext lines driven by tests/session-control/run.sh)
+S8 IMPL completed — files: docs/multi-repo-chains-overview.html, docs/multi-repo-chains-spec.md | 15 line citations of zensu-log.sh (+8) and bash-source-write-parse.js (+4) re-pointed and verified line-identical; pre-existing stale citation pre-bash-source-write-gate.sh:274-283 left as found
+EDIT LANDING AUDIT — claims=29 landed=29 not_landed=0 | PRECONDITIONS — git: used at runtime by hooks/lib/session-reanchor-v1.js (rev-parse, worktree list --porcelain -z) and by both new test files, though no IMPL line names it; node and c8: named in CHECKPOINT and COVERAGE lines; no drift
+TDD COMPLETE — 6/6 GREEN, 1 RF | Integration: 1 WIRED | Build: – n/a (no build step) | Coverage: 2/2 files >= 90% (plan scope)
+ASPECT PANEL — 5 spawned, 0 skipped, 0 personas | JUDGE — 5 deltas (JUDGE-1 IMPORTANT, JUDGE-2..5 SUGGESTION), no Panel-FP | FINDING VERIFICATION — 39 verified, 0 unsupported, 0 phantom, 4 off-changeset
+FINDING LEDGER — R1-F1 routed CRITICAL hooks/lib/session-reanchor-v1.js:302 | open-work check misses a durable Autopilot run owned by the session but not linked to a chain
+FINDING LEDGER — R1-F2 routed IMPORTANT docs/multi-repo-chains-spec.md:51 | bare zensu-log.sh continuation citations not re-pointed after the shift
+FINDING LEDGER — R1-F3 routed IMPORTANT docs/multi-repo-chains-spec.md:84 | parser citations land on comment lines
+FINDING LEDGER — R1-F4 routed IMPORTANT hooks/lib/session-reanchor-v1.js:239 | three fail-closed arms of the claim probe have no test
+FINDING LEDGER — R1-F5 routed IMPORTANT hooks/lib/session-reanchor-v1.js:526 | probe blind to where a live session edits; carriers overclaim the protection
+FINDING LEDGER — R1-F6 routed IMPORTANT hooks/lib/session-reanchor-v1.js:318 | pruned-installation branch of the record reader never tested
+FINDING LEDGER — R1-F7 routed IMPORTANT hooks/lib/session-reanchor-v1.js:445 | per-session preference markers left behind under the old root
+FINDING LEDGER — R1-F8 routed IMPORTANT hooks/lib/session-reanchor-v1.js:450 | concurrent moves into one worktree can both pass
+FINDING LEDGER — R1-F9 routed IMPORTANT hooks/lib/session-reanchor-v1.js:459 | written project root not compared with the verified target
+FINDING LEDGER — R1-F10 routed IMPORTANT hooks/lib/session-reanchor-v1.js:586 | session identity taken from an unprotected input
+FINDING LEDGER — R1-F11 routed IMPORTANT hooks/lib/zensu-session-reanchor.sh:86 | wrapper config translation for worktree keep untested
+FINDING LEDGER — R1-F12 routed IMPORTANT tests/structure/session-reanchor-v1.test.js:409 | intact target document and second move untested
+FINDING LEDGER — R1-F13 routed IMPORTANT tests/structure/session-reanchor-v1.test.js:432 | lock re-derivation, baseline order and post-swap failures untested
+FINDING LEDGER — R1-F14 routed IMPORTANT tests/structure/test-bash-source-write-gate.sh:917 | designation-arm hint and operand-arm absence not asserted
+FINDING LEDGER — R1-F15 routed IMPORTANT tests/structure/test-session-reanchor.sh:280 | mixed-case reserved reason prefix untested
+FINDING LEDGER — R1-F16 deferred SUGGESTION .claude/rules/session-reanchor.md:2 | rule file roster and paths incomplete
+FINDING LEDGER — R1-F17 routed SUGGESTION docs/gates.md:163 | docs say every rule C deny names the route; operand arm does not
+FINDING LEDGER — R1-F18 deferred SUGGESTION hooks/lib/session-adopt-report-v1.js:1287 | in-place repair sweep has no project-root filter
+FINDING LEDGER — R1-F19 deferred SUGGESTION hooks/lib/session-control-core-v1.js:1420 | registerContext duplicates the record-location derivation
+FINDING LEDGER — R1-F20 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:148 | liveness check does not detect pid reuse
+FINDING LEDGER — R1-F21 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:157 | two parsers of the host live-session registry
+FINDING LEDGER — R1-F22 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:158 | invoking environment selects registry and git
+FINDING LEDGER — R1-F23 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:172 | missing foreign record yields no claim and no refusal
+FINDING LEDGER — R1-F24 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:305 | chain-shape rule hand-copied
+FINDING LEDGER — R1-F25 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:344 | open-work read without the workflow state lock
+FINDING LEDGER — R1-F26 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:354 | git failures reported as directory facts
+FINDING LEDGER — R1-F27 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:509 | foreign values in detail lines lack a delimiter
+FINDING LEDGER — R1-F28 deferred SUGGESTION tests/run-windows-safety-shard.js:94 | weekly Windows run executes the suite unprepared
+FINDING LEDGER — R1-F29 deferred SUGGESTION tests/structure/session-reanchor-v1.test.js:453 | lease fixtures are stubs
+FINDING LEDGER — R1-F30 deferred SUGGESTION tests/structure/session-reanchor-v1.test.js:485 | keep-state assertion too loose
+FINDING LEDGER — R1-F31 deferred SUGGESTION tests/structure/test-session-reanchor.sh:151 | only one Bash hook driven for the command
+FINDING LEDGER — R1-F32 deferred SUGGESTION tests/structure/test-session-reanchor.sh:158 | report check would accept a subdirectory anchor
+FINDING LEDGER — R1-F33 routed SUGGESTION tests/structure/test-session-trail-skill.sh:1322 | test comments still say nothing re-anchors a session
+FINDING LEDGER — R1-F34 deferred SUGGESTION tests/structure/test-versioned-plugin-upgrade.sh:318 | suite missing from test evidence at spawn time
+FINDING LEDGER — R1-F35 routed CRITICAL hooks/lib/session-reanchor-v1.js:357 | a target containing the recorded root widens the anchor instead of moving it
+FINDING LEDGER — R1-F36 routed SUGGESTION skills/session-trail/SKILL.md:145 | skill still says a denied session has no way through
+FINDING LEDGER — R1-F37 routed SUGGESTION docs/gates.md:158 | confirm flag described as user confirmation
+FINDING LEDGER — R1-F38 routed SUGGESTION hooks/lib/zensu-session-reanchor.sh:12 | confirmed move not tied to the anchor the report showed
+FINDING LEDGER — R1-F39 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:430 | aging the old keep anchor can release a worktree still in use
+R1-F1 IMPL completed — files: hooks/lib/session-reanchor-v1.js, hooks/lib/zensu-session-reanchor.sh, tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh, skills/adopt-session/SKILL.md, docs/session-control.md, .claude/rules/session-reanchor.md | the verdict asks autopilot_read_active for this session's run under the recorded root; open run refuses workflow-in-progress, unreadable state refuses autopilot-state-unverifiable; wrapper passes its native bash
+R1-F35 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh, skills/adopt-session/SKILL.md, .claude/rules/session-reanchor.md | target-contains-recorded-root and target-contains-other-worktrees refusals after already-anchored; a unit case pins that the skill names every refusal
+R1-F2 IMPL completed — files: docs/multi-repo-chains-spec.md | bare zensu-log.sh continuation citations re-pointed (+8) at spec:51, spec:53, spec:424
+R1-F3 IMPL completed — files: docs/multi-repo-chains-spec.md, docs/multi-repo-chains-overview.html | parser citations re-pointed to the rule (B) predicate 825, the rule (C) escapes predicate 871 and the project-dir check 716
+R1-F4 IMPL completed — files: tests/structure/session-reanchor-v1.test.js | live entry without cwd, unlistable anchors and a registry over 1024 entries each fail closed under test
+R1-F5 IMPL completed — files: hooks/lib/session-reanchor-v1.js, hooks/lib/bash-source-write-parse.js, skills/adopt-session/SKILL.md, docs/session-control.md, docs/gates.md, skills/session-trail/SKILL.md, .claude/rules/session-reanchor.md, .claude/rules/worktree-keep.md | report lists the target's uncommitted paths; carriers say what the probe finds, not that it sees every edit
+R1-F6 IMPL completed — files: tests/structure/session-reanchor-v1.test.js | record minted by a pruned installation refuses as not served
+R1-F7 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh | tdd-mode, delivery-route and zen-mode markers renamed into the new root, faults reported
+R1-F8 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js | per-repository re-anchor lock outside the session records lock; the re-derived common dir must match it
+R1-F9 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js | target re-resolved before the baseline; written project_root must equal the verified worktree
+R1-F10 IMPL completed — files: hooks/lib/session-reanchor-v1.js, hooks/lib/zensu-session-reanchor.sh, tests/structure/session-reanchor-v1.test.js | identity read from CLAUDE_CODE_SESSION_ID only; ZREANCHOR_SESSION_ID removed
+R1-F11 IMPL completed — files: tests/structure/test-session-reanchor.sh | hooks.worktreeKeep false reaches the move as disabled; a configured one-hour idle window reaches the claim probe
+R1-F12 IMPL completed — files: tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh | intact target document reused and a second move back, in unit and end-to-end
+R1-F13 IMPL completed — files: tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh, tests/SUITE-OVERVIEW.md | claim registered inside the lock, document-before-record order, post-swap failures; unit floor and overview count 60
+R1-F14 IMPL completed — files: tests/structure/test-bash-source-write-gate.sh | W163c pins the hint and the escape last in the designation arm; W204b pins its absence from the operand arm
+R1-F15 IMPL completed — files: tests/structure/test-session-reanchor.sh | mixed-case reserved reason prefix refused by both guard bodies
+R1-F17 IMPL completed — files: docs/gates.md, docs/session-control.md, .claude/rules/session-reanchor.md | docs name rule (B) and the repository and designation arms of rule (C), not the operand arm
+R1-F33 IMPL completed — files: tests/structure/test-session-trail-skill.sh, tests/structure/test-session-trail-verdict.sh | two test comments no longer say nothing re-anchors a session
+R1-F36 IMPL completed — files: skills/session-trail/SKILL.md | step 3 and the Limits bullet name the one in-session way through
+R1-F37 IMPL completed — files: docs/gates.md, docs/session-control.md, skills/adopt-session/SKILL.md | the consent is the skill step, since --confirm is an argument the model can supply
+R1-F38 IMPL completed — files: skills/adopt-session/SKILL.md | the skill renders both steps with an explicit cd into the reported anchor
+R1-GIT-TIMEOUT IMPL completed — files: hooks/lib/session-reanchor-v1.js | git timeout raised from 5 s to 20 s after one refusal under load average ~780
+FINDING LEDGER — R1-F1 fixed CRITICAL hooks/lib/session-reanchor-v1.js:302 | open-work check misses a durable Autopilot run owned by the session but not linked to a chain
+FINDING LEDGER — R1-F2 fixed IMPORTANT docs/multi-repo-chains-spec.md:51 | bare zensu-log.sh continuation citations not re-pointed after the shift
+FINDING LEDGER — R1-F3 fixed IMPORTANT docs/multi-repo-chains-spec.md:84 | parser citations land on comment lines
+FINDING LEDGER — R1-F4 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:239 | three fail-closed arms of the claim probe have no test
+FINDING LEDGER — R1-F5 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:526 | probe blind to where a live session edits; carriers overclaim the protection
+FINDING LEDGER — R1-F6 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:318 | pruned-installation branch of the record reader never tested
+FINDING LEDGER — R1-F7 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:445 | per-session preference markers left behind under the old root
+FINDING LEDGER — R1-F8 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:450 | concurrent moves into one worktree can both pass
+FINDING LEDGER — R1-F9 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:459 | written project root not compared with the verified target
+FINDING LEDGER — R1-F10 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:586 | session identity taken from an unprotected input
+FINDING LEDGER — R1-F11 fixed IMPORTANT hooks/lib/zensu-session-reanchor.sh:86 | wrapper config translation for worktree keep untested
+FINDING LEDGER — R1-F12 fixed IMPORTANT tests/structure/session-reanchor-v1.test.js:409 | intact target document and second move untested
+FINDING LEDGER — R1-F13 fixed IMPORTANT tests/structure/session-reanchor-v1.test.js:432 | lock re-derivation, baseline order and post-swap failures untested
+FINDING LEDGER — R1-F14 fixed IMPORTANT tests/structure/test-bash-source-write-gate.sh:917 | designation-arm hint and operand-arm absence not asserted
+FINDING LEDGER — R1-F15 fixed IMPORTANT tests/structure/test-session-reanchor.sh:280 | mixed-case reserved reason prefix untested
+FINDING LEDGER — R1-F17 fixed SUGGESTION docs/gates.md:163 | docs say every rule C deny names the route; operand arm does not
+FINDING LEDGER — R1-F32 fixed SUGGESTION tests/structure/test-session-reanchor.sh:158 | report check would accept a subdirectory anchor
+FINDING LEDGER — R1-F33 fixed SUGGESTION tests/structure/test-session-trail-skill.sh:1322 | test comments still say nothing re-anchors a session
+FINDING LEDGER — R1-F35 fixed CRITICAL hooks/lib/session-reanchor-v1.js:357 | a target containing the recorded root widens the anchor instead of moving it
+FINDING LEDGER — R1-F36 fixed SUGGESTION skills/session-trail/SKILL.md:145 | skill still says a denied session has no way through
+FINDING LEDGER — R1-F37 fixed SUGGESTION docs/gates.md:158 | confirm flag described as user confirmation
+FINDING LEDGER — R1-F38 fixed SUGGESTION hooks/lib/zensu-session-reanchor.sh:12 | confirmed move not tied to the anchor the report showed
+PENDING PREDICATE — S1: hooks/lib/session-control-core-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: hooks/lib/review-evidence-sweep-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-tdd-phase.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: tests/structure/test-restore-project-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/lib/bash-source-write-parse.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/pre-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/profiles/promptfoo-local-only.v1.json was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/SUITE-OVERVIEW.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/session-trail/scripts/trail.mjs was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-adoption.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/restore-vanished-project-root.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: CLAUDE.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: hooks/lib/bash-source-write-parse.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F6: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F8: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F8: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F11: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F12: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F12: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/SUITE-OVERVIEW.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F14: tests/structure/test-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F36: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F38: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-GIT-TIMEOUT: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=83 landed=2 not_landed=0 unverified=0 pending=81 exempt_ignored=0 exempt_verified=0
+PREDICATE RE-READ — R1-F1: 7/7 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F35: 5/5 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F2: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F3: 2/2 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F4: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F5: 8/8 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F6: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F7: 3/3 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F8: 2/2 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F9: 2/2 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F10: 3/3 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F11: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F12: 2/2 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F13: 3/3 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F14: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F15: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F17: 3/3 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F36: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F37: 3/3 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-F38: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — R1-GIT-TIMEOUT: 1/1 claimed files carry this round's new text and none keeps the replaced text it was checked for
+PREDICATE RE-READ — S1-S8: pending only because those files were already dirty when this round began; their landing was certified by this chain's first audit (claims=29 landed=29 not_landed=0)
+EDIT LANDING R1 — 2 landed (R1-F33), 81 pending predicates re-read by hand: 21/21 R1 claims verified, S1-S8 carried from the first audit; no EDIT NOT LANDED line
+R1 CHECKPOINT — PASS 61/61 | cmd: bash tests/structure/test-session-reanchor.sh | final tree on macOS /bin/bash 3.2 (2433 s at load average 850-1000) and on Linux bash 5.2 in node:20-bookworm (rc=0, 0 FAIL); E0a runs the 60-case unit file
+R1 CHECKPOINT — PASS 92/92 | cmd: node_modules/.bin/c8 --include=hooks/lib/session-reanchor-v1.js --include=hooks/lib/review-evidence-sweep-v1.js node --test tests/structure/session-reanchor-v1.test.js tests/structure/review-evidence-sweep-v1.test.js | lines: session-reanchor-v1.js 96.97%, review-evidence-sweep-v1.js 91.88%
+R1 CHECKPOINT — PASS on Linux, INCOMPLETE on macOS | cmd: bash tests/structure/test-bash-source-write-gate.sh | Linux bash 5.2, final tree: rc=0, 0 FAIL in 296 s; macOS /bin/bash 3.2: 190 PASS / 0 FAIL, then terminated by SIGTERM (rc 143) at 2682 s under load average ~1000, so the tail of the suite did not run there
+R1 CHECKPOINT — PASS 9/9 | cmd: bash tests/structure/test-multi-repo-doc-consistency.sh | macOS /bin/bash 3.2 and Linux bash 5.2
+R1 CHECKPOINT — PASS 80/80 | cmd: bash tests/structure/test-session-trail-skill.sh | macOS /bin/bash 3.2; inside the Linux container only T12 fails, as in round 0 (plugin.json lookup in the container tree)
+R2 ASPECT PANEL — 5 spawned, 0 skipped, 0 personas | JUDGE — 1 new finding (JUDGE-1 IMPORTANT, merged as R2-F27), [NOT FIXED] R1-F5 covers R2-F12, [STILL OPEN] R1-F31 covers R2-F25, no Panel-FP | FINDING VERIFICATION — 27 verified, 0 unsupported, 0 phantom, 0 off-changeset | CONVERGENCE — round-scope round=1 status=ok, ledger status=ok entries=39 open=17; routable 1 CRITICAL (R2-F1) and 10 IMPORTANT (R2-F2, F3, F4, F5, F7, F8, F9, F10 on round-1 lines; R2-F12 NOT FIXED; R2-F27 judge); parked 2 IMPORTANT on round-0 lines (R2-F6, R2-F11); deferred 14 SUGGESTION (R2-F13 to R2-F26, R2-F25 kept under R1-F31)
+FINDING LEDGER — R2-F6 parked IMPORTANT hooks/lib/session-reanchor-v1.js:313 | claim probe ignores a foreign unfinished Autopilot run whose workspace is the target
+FINDING LEDGER — R2-F11 parked IMPORTANT hooks/lib/zensu-session-reanchor.sh:118 | launcher passes the absolute module path to node instead of a cwd-relative module
+FINDING LEDGER — R2-F13 deferred SUGGESTION .claude/rules/session-reanchor.md:90 | marker coupling omits one owner template and has no reverse pointer from the owners
+FINDING LEDGER — R2-F14 deferred SUGGESTION .claude/rules/session-reanchor.md:117 | rule records an earlier deny wording and carries overlong lines
+FINDING LEDGER — R2-F15 deferred SUGGESTION docs/multi-repo-chains-spec.md:40 | two older citations miss their code (spec lines 40 and 632)
+FINDING LEDGER — R2-F16 deferred SUGGESTION docs/multi-repo-chains-spec.md:84 | citation re-point evidence names a suite that checks no citation
+FINDING LEDGER — R2-F17 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:72 | claimed-worktree remedy still names a nested worktree the containment rung refuses first
+FINDING LEDGER — R2-F18 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:420 | no fixture covers a prunable nested worktree inside the target
+FINDING LEDGER — R2-F19 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:571 | a transient pre-lock git failure keys the unresolved lock and reports a failed move
+FINDING LEDGER — R2-F20 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:581 | target document created before the record checks, so a throw leaves a stray document
+FINDING LEDGER — R2-F21 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:604 | a lock release fault after the swap reports failure and skips the post-swap steps
+FINDING LEDGER — R2-F22 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:713 | report prints none to move above the fault rows when every marker failed
+FINDING LEDGER — R2-F23 deferred SUGGESTION tests/structure/session-reanchor-v1.test.js:618 | marker move tested only for a linked source marker
+FINDING LEDGER — R2-F24 deferred SUGGESTION tests/structure/session-reanchor-v1.test.js:637 | uncommitted listing tested with one untracked path only
+FINDING LEDGER — R2-F26 deferred SUGGESTION tests/structure/test-session-reanchor.sh:367 | only one of three session markers is read back through its owner end to end
+SELF-REVIEW FIX ROUND — ticket rt_e74a45485f032d8eef7b063b00845a5a, vanilla mode, one round: must-fix R2-F1 R2-F2 R2-F4 R2-F5 R2-F7 R2-F8 R2-F10 R2-F12 R2-F27 plus the parked ledger candidates R2-F6 and R2-F11; advisory and left open R2-F3 R2-F9
+R2-F1 IMPL completed — files: hooks/lib/zensu-autopilot-state.sh, hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, .claude/rules/session-reanchor.md, .claude/rules/autopilot-run-scope.md, docs/session-control.md, skills/adopt-session/SKILL.md | autopilot_read_active_strict answers 5 for a lease, storage or path fault and 1 only for the worker's own no-run; the rung maps 5 to autopilot-state-unverifiable
+R2-F7 IMPL completed — files: tests/structure/session-reanchor-v1.test.js | stub shells cover printed-no-run and exit 97, and a BASH_ENV file cannot hide an owned open run
+R2-F8 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, .claude/rules/session-reanchor.md, docs/session-control.md | the Autopilot rung runs after every git and containment check, just before the live claims
+R2-F4 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, skills/adopt-session/SKILL.md | the open-work remedy cancels an own run through the event path, since the release skill refuses the caller's own run
+R2-F5 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, .claude/rules/session-reanchor.md, docs/session-control.md | git status runs with --no-optional-locks, and reanchorReport lists the paths on the report path only
+R2-F10 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, .claude/rules/session-reanchor.md, docs/session-control.md | every listed file name is printed inside double quotes, and the row says so
+R2-F11 IMPL completed — files: hooks/lib/zensu-session-reanchor.sh, tests/structure/test-msys-special-plugin-module-boundaries.sh | the launcher runs a cwd-relative module after cd -P, and the special-root canary runs it
+R2-F12 IMPL completed — files: skills/adopt-session/SKILL.md | the restore-root section states the containment rule and the found form
+R2-F27 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, skills/adopt-session/SKILL.md, .claude/rules/session-reanchor.md, .claude/rules/worktree-keep.md, docs/session-control.md | report and outcome name the host start directory and send a new chain to a fresh session instead of claiming every workflow verb follows
+R2-F2 IMPL completed — files: docs/session-control.md | the repository-lock race gap joins the docs known-gap list
+R2-F6 IMPL completed — files: docs/session-control.md, .claude/rules/session-reanchor.md | named known gap: a foreign Autopilot run holding the target is visible neither to this probe nor to the library's own workspace fences
+FINDING LEDGER — R2-F1 fixed CRITICAL hooks/lib/session-reanchor-v1.js:352 | Autopilot probe read every exit 1 as no run, including lease and storage faults
+FINDING LEDGER — R2-F2 fixed IMPORTANT docs/session-control.md:257 | docs gap list lacked the repository-lock race gap
+FINDING LEDGER — R2-F3 deferred IMPORTANT hooks/lib/session-reanchor-v1.js:46 | marker names re-spell three owner path templates; advisory, no defect ships
+FINDING LEDGER — R2-F4 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:62 | open-work remedy pointed an own Autopilot run at a verb that refuses it
+FINDING LEDGER — R2-F5 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:127 | target git status could take the index lock and ran inside the shared verdict
+FINDING LEDGER — R2-F6 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:313 | claim probe ignores a foreign unfinished Autopilot run whose workspace is the target
+FINDING LEDGER — R2-F7 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:343 | two fail-closed arms of the Autopilot probe were untested
+FINDING LEDGER — R2-F8 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:404 | Autopilot rung ran before the cheap git and containment refusals
+FINDING LEDGER — R2-F9 deferred IMPORTANT hooks/lib/session-reanchor-v1.js:575 | the two in-lock re-checks have no test; advisory, no defect ships
+FINDING LEDGER — R2-F10 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:660 | uncommitted file names were printed without a delimiter at the consent step
+FINDING LEDGER — R2-F11 fixed IMPORTANT hooks/lib/zensu-session-reanchor.sh:118 | launcher passes the absolute module path to node instead of a cwd-relative module
+FINDING LEDGER — R2-F12 fixed IMPORTANT skills/adopt-session/SKILL.md:249 | restore-root section overclaimed that no other live session may work in the target
+FINDING LEDGER — R2-F27 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:674 | report claimed every workflow verb follows the move and no restart is needed
+SR-COUNT IMPL completed — files: tests/SUITE-OVERVIEW.md, tests/structure/test-session-reanchor.sh | declared unit count 60 to 67, found by test-restore-project-root.sh R13 on Linux, and the E0a floor raised to 67
+EDIT LANDING AUDIT STARTED — round self-review
+PENDING PREDICATE — S1: hooks/lib/session-control-core-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: hooks/lib/review-evidence-sweep-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-tdd-phase.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: tests/structure/test-restore-project-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/lib/bash-source-write-parse.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/pre-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/profiles/promptfoo-local-only.v1.json was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/SUITE-OVERVIEW.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/session-trail/scripts/trail.mjs was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-adoption.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/restore-vanished-project-root.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: CLAUDE.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F35: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: hooks/lib/bash-source-write-parse.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F6: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F8: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F8: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F10: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F11: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F12: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F12: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F13: tests/SUITE-OVERVIEW.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F14: tests/structure/test-bash-source-write-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F33: tests/structure/test-session-trail-skill.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F33: tests/structure/test-session-trail-verdict.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F36: skills/session-trail/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: docs/gates.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F37: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F38: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-GIT-TIMEOUT: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F7: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F8: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F8: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F8: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F8: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F4: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F4: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F4: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F5: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F5: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F5: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F5: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F10: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F10: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F10: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F10: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F11: hooks/lib/zensu-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F12: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F27: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F2: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F6: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F6: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-COUNT: tests/SUITE-OVERVIEW.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-COUNT: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=120 landed=3 not_landed=0 unverified=0 pending=117 exempt_ignored=0 exempt_verified=0
+PREDICATE RE-READ — R2-F1: 7/7 claimed files carry this round's new text, and 3 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F7: 1/1 claimed files carry this round's new text, and 0 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F8: 4/4 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F4: 3/3 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F5: 4/4 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F10: 4/4 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F11: 2/2 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F12: 1/1 claimed files carry this round's new text, and 1 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F27: 6/6 claimed files carry this round's new text, and 2 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F2: 1/1 claimed files carry this round's new text, and 0 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F6: 2/2 claimed files carry this round's new text, and 0 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — SR-COUNT: 2/2 claimed files carry this round's new text, and 2 of them were checked for the replaced text, which is gone
+PREDICATE RE-READ — R2-F8 order: the Autopilot rung sits after the target-document check and before the live claims in verdictUnguarded
+PREDICATE RE-READ — S1-S8 and R1 claims: pending only because those files were already dirty when this round began; their landing was certified by this chain's earlier audits (claims=29 landed=29, then 21/21 R1 claims re-read)
+EDIT LANDING SELF-REVIEW — 3 landed (R2-F1 x2, R2-F11), 117 pending predicates: 12/12 self-review claims and the rung order re-read by hand, S1-S8 and R1 carried from the earlier audits; no EDIT NOT LANDED line
+SR CHECKPOINT — PASS 67/67 | cmd: node --test tests/structure/session-reanchor-v1.test.js | macOS, 137 s at load average ~400; four mutants (strict reader reverted, BASH_ENV scrub removed, optional-locks flag removed, quoting removed) each turn their new test red
+SR CHECKPOINT — PASS 61/61 | cmd: bash tests/structure/test-session-reanchor.sh | macOS /bin/bash 3.2 (140 s, E0a pass=67) and Linux bash 5.2 in node:20-bookworm on the final tree (55 s)
+SR CHECKPOINT — PASS 16/16 | cmd: bash tests/structure/test-msys-special-plugin-module-boundaries.sh | macOS /bin/bash 3.2 and Linux bash 5.2, the new launcher check included
+SR CHECKPOINT — PASS rc=0 | cmd: bash tests/structure/test-restore-project-root.sh | Linux bash 5.2 on the final tree; its R13 caught the stale declared count first, fixed as SR-COUNT
+SR STATIC — 18/18 changed .js/.mjs/.sh/.json files clean (node --check; /bin/bash -n and bash -n; JSON.parse) over 32 changed paths
+FULL SUITE — not run locally: the project rule makes tests/run-all.sh CI-only, and .zensu/config.json sets evidence.fullSuiteGate=advisory

@@ -123,9 +123,9 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (16)
+### Session Control & workflow state (17)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
-`session-control-sandbox-hook-integration` · `session-id-v1` ·
+`session-control-sandbox-hook-integration` · `session-id-v1` · `session-reanchor` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
@@ -135,7 +135,8 @@ Covers the canonical CAS workflow document, immutable session binding, the share
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
 state verbs, the SessionStart banner, a vanished live working directory under an
-intact binding, and the worktree-keep marker, anchor and drift lifecycle that keeps an
+intact binding, the verified re-anchor of a session record to a sibling worktree of the same
+repository, and the worktree-keep marker, anchor and drift lifecycle that keeps an
 app-managed worktree out of the Claude Desktop pool while a session is bound to it. `session-control-claude` alone carries ~140
 assertions.
 
@@ -360,7 +361,7 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-run-v1.test.js` | 54 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention |
+| `evidence-run-v1.test.js` | 55 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
@@ -372,6 +373,7 @@ that suite's failure.
 | `reviewer-spawn-denial-v1.test.js` | 37 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 27 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
+| `session-reanchor-v1.test.js` | 67 | `test-session-reanchor.sh` (E0a) | verified re-anchor of a session record to a sibling worktree of the same repository: git identity and worktree registration, every refusal reason including the Autopilot-run rung (a lease it cannot take, a shell that prints no run, a BASH_ENV file, and its place after the cheap refusals) and the two containment refusals, the live-session claim probe (registry working directory, recorded project root, worktree-keep anchors) and its fail-closed arms, the re-mint under the repository and session locks with its set-aside record and two-sided provenance, the project-root lease filter, the keep-anchor and session-marker moves, and both renderers, including quoted uncommitted file names read without optional git locks |
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 59 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, that the display rule has exactly ONE owner, and the adoption half of `main()` through its `deps` seam — the three `--confirm` failure arms (served meanwhile, refused under the lock, did not complete), the read-only preview's served, refused and adoptable answers, the provenance branches read off the core vocabulary rather than literals, and the already-served `--confirm` arm whole for every lease-sweep result — none recorded, moved, clean, refused (named as refused, never as completed) and stuck |
 | `session-auto-adopt-v1.test.js` | 44 | `test-versioned-plugin-upgrade.sh` | the automatic adoption shared by every hook binder and the manual entry point: the ladder (probe, then the crash-resume check the preview owns — a dangling link at the superseded name included — then the opt-out, which stands only for an adoptable record, adopt under the lock, sweep), every refusal and unavailable arm through injected core and sweep stubs, the closed outcome and reason vocabularies, the opt-out precedence (explicit file as one layer, else the global file and the project overlay as two; `false` is STICKY across them while the merged view still lets the project win; malformed input degrades to enabled), that `previewAdoption` never writes — a served answer from it carries no sweep, while `adoptForHook` completes a sibling's adoption with one, on the probe-time, lock-time and timed-out-then-served arms alike — the candidate files equal to those of `_ZENSU_STRICT_JS` in `zensu-config.sh`, that the manual caller may ignore the opt-out, the named-state predicate, the typed lock-timeout code and that the core MINTS it, that a refusal names the state the PROBE carried (and that the real `adoptableRecord` attaches it to every refusal but `record-unreadable`), the single JavaScript owner of the token grammar, the shared notice renderer (a refused sweep is named as refused — partial or not — the orphan and concurrent variants, the unmeasured already-served span, every value screened, the doctor pointer conditional per provenance), `supersededRecordFile` refusing an unsafe version, the observed version travelling on the request, the operator line and the kept-record screen, the `.*` gate's token screens and verb/remedy/tail selectors through its export seam, the adapter's `serveOrAdopt` through its `deps` seam (including the lease sweep of a served answer it names when the strict re-read still fails), the served-sweep line naming the served record rather than a sibling's adoption, the notice's closing on a deny and on an orphaned adoption, and that the default instance is wired to the real core and sweep |
@@ -401,8 +403,8 @@ that suite's failure.
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (44
-files) against this table's 39 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (45
+files) against this table's 40 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR

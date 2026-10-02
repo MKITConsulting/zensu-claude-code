@@ -678,6 +678,10 @@ function main() {
   // mode denies it, the anchored path allows and ledgers it. Deliberate: this
   // caller has no project root, so fail-closed is the only safe direction.
   const targetsOnly = process.env.BSWG_MODE === "targets";
+  const reanchorHint = process.env.BSWG_REANCHOR === "1"
+    ? " If this session now works in that worktree for good, /zensu:adopt-session --reanchor, run from inside it, " +
+      "reports whether this session's anchor can move there; it refuses a worktree in which it finds another live session."
+    : "";
 
   const HOME = process.env.HOME || "";
   // The comparison namespace. The hook hands over a project root it already
@@ -826,7 +830,7 @@ function main() {
         channel +
         "). Writing source into a sibling or main checkout corrupts another session's working tree — " +
         "the cross-session contamination this gate prevents. Edit files through the Edit/Write tools inside " +
-        "your own worktree. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+        "your own worktree." + reanchorHint + " Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
       );
     }
     // The budget bounds the SYNCHRONOUS GIT CALLS, so it is spent here rather than
@@ -900,10 +904,11 @@ function main() {
     if (t.paths.indexOf(hit) !== -1) {
       remedy = "Name a worktree inside this session root (or under a temp root) instead — adding -C does not change which tree is destroyed.";
     } else if (hit === t.repo) {
-      remedy = "Address your own worktree explicitly instead: git -C '" + projectRoot + "' " + t.sub + " … .";
+      remedy = "Re-pointing the command at a different checkout does not help: it would " + t.sub +
+        " there, not in the tree this command addressed." + reanchorHint;
     } else {
-      remedy = "Point --work-tree/--git-dir inside this session root, or drop them and run " +
-        "git -C '" + projectRoot + "' " + t.sub + " … — re-running with -C alone keeps the same escaping designation and denies again.";
+      remedy = "Point --work-tree/--git-dir inside this session root, or drop them — re-running with -C alone " +
+        "keeps the same escaping designation and denies again." + reanchorHint;
     }
     return (
       "Blocked `git " + t.sub + "` against a repository OUTSIDE this session's worktree/project root (" +

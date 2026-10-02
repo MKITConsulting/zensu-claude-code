@@ -487,8 +487,7 @@ normalize_claim() {
   # `append` "forces the two authorities to agree through `expectedRoot`
   # whenever `CLAUDE_PROJECT_DIR` is set, which is the normal case", and
   # CLAUDE.md §"Artifact Path Redaction" records the opposite for this host —
-  # the variable is absent from the model's Bash environment here, which is why
-  # `{log_file}` is rendered from `${CLAUDE_PROJECT_DIR:-.}`. Whether `append`
+  # the variable is absent from the model's Bash environment here. Whether `append`
   # can reach the multi-member array without it was not traced, so the honest
   # word is unverified. This is the one transform in the file that can turn
   # `EDIT NOT LANDED` into `EDIT LANDED`, which is why the bound is stated

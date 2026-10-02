@@ -232,7 +232,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # never degrade into a blanket allow.
   if ! UNBOUND_REASON="$(
     cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-    BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
+    BSWG_MODE= PAYLOAD= BSWG_REANCHOR= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
       node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
   )"; then
     emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
@@ -271,7 +271,7 @@ fi
 # to discard it, so a crashed or killed parser allowed the command unchecked.
 if ! REASON="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-  BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
+  BSWG_MODE= PAYLOAD= BSWG_REANCHOR=1 CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
     node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
 )"; then
   emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. Two remedies are decided BEFORE the parser runs and therefore still work: set hooks.bashWriteGate:false in ~/.zensu/config.json, or export ZENSU_BASH_WRITE_GATE=off into the environment Claude Code was started from. An INLINE ZENSU_BASH_WRITE_GATE=off prefix does not help here — that one is decided inside the parser that is failing."
