@@ -4158,6 +4158,232 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   }
 }
 
+var LEASE_RESOURCE = 'autopilot';
+var LEASE_WORDS = {
+  lock: {
+    noun: 'the lock artifact',
+    path: 'the lease path',
+    blocks: 'every lease acquisition fails while it stays',
+    busy: 'a lease is being taken or released right now',
+    taker: 'the process that took the lease',
+    role: 'the lock keeper',
+    shapes: 'A live lock keeper is either the node lock keeper that a Zensu hook or zensu-log.sh starts under'
+      + ' bash 4 or later, whose command line names session-control-core-v1.js and this project\'s'
+      + ' .zensu/state, or, under bash 3.2, the bash process that runs that hook or zensu-log.sh itself.',
+  },
+  recovery: {
+    noun: 'the recovery sentinel',
+    path: 'the recovery sentinel path',
+    blocks: 'every lease acquisition and release fails while it stays',
+    busy: 'a lease is being recovered or released right now',
+    taker: 'the process that took the recovery sentinel',
+    role: 'the holder of the recovery sentinel',
+    shapes: 'A process that holds the recovery sentinel is a node process whose command line names'
+      + ' session-control-core-v1.js.',
+  },
+};
+
+function leaseDuration(ms) {
+  var seconds = Math.floor(ms / 1000);
+  if (seconds < 120) return seconds + ' s';
+  var minutes = Math.floor(seconds / 60);
+  if (minutes < 120) return minutes + ' min';
+  var hours = Math.floor(minutes / 60);
+  if (hours < 48) return hours + ' h';
+  return Math.floor(hours / 24) + ' d';
+}
+
+function leaseResolveCause(error) {
+  var message = String((error && error.message) || '');
+  if (message.indexOf('lock resource is unsafe') !== -1) {
+    return 'the resource path .zensu/state/' + LEASE_RESOURCE + ' is not a single-link regular file';
+  }
+  if (message.indexOf('lock directory is unsafe') !== -1) {
+    return 'the state directory is a symbolic link or not a directory';
+  }
+  if (error && error.code === 'ENOENT') return 'a path component vanished while it was resolved';
+  return 'the Session Control core refused the lease path';
+}
+
+function leaseFacts(artifact) {
+  return 'owner pid ' + artifact.pid + ' (' + (artifact.alive ? 'alive' : 'not alive') + '), process start identity '
+    + (artifact.identityRecorded ? 'recorded' : 'not recorded') + ', created_at '
+    + new Date(artifact.createdAtMs).toISOString();
+}
+
+function leaseCheck(pid) {
+  return 'Check with ps -ww -p ' + pid + ' -o args= that pid ' + pid + ' is such a process before acting on this'
+    + ' row: the owner record lives in the session-writable .zensu/state, so its pid and start identity are'
+    + ' evidence, not proof.';
+}
+
+function leaseRefusedRow(words, artifact, file) {
+  if (artifact.cause === 'unreadable') {
+    line(WARN, 'autopilot lease: the core cannot read ' + words.noun + ' ' + parenthesizedPath(file, ' — ')
+      + ' — ' + words.blocks + ', and the core never reclaims it. Check its permissions and content, and'
+      + ' remove it by hand; the doctor never deletes it.');
+    return;
+  }
+  var what = artifact.cause === 'symlink' ? 'a symbolic link'
+    : artifact.cause === 'irregular' ? 'an entry that is not a regular file'
+      : 'a file larger than an owner record may take';
+  line(WARN, 'autopilot lease: ' + words.path + ' holds ' + what + ' ' + parenthesizedPath(file, ' — ')
+    + ' — the core never writes one there, ' + words.blocks + ', and the core never reclaims it. Inspect it'
+    + ' and remove it by hand; the doctor never deletes it.');
+}
+
+function leaseOwnerlessRow(words, artifact, file, staleAfterMs, inspectedAtMs) {
+  var staleSeconds = staleAfterMs / 1000;
+  var age = inspectedAtMs - artifact.mtimeMs;
+  if (artifact.stale) {
+    line(WARN, 'autopilot lease: ' + words.noun + ' ' + parenthesizedPath(file, ' carries')
+      + ' carries no owner record the core can read and is ' + leaseDuration(age) + ' old — the core counts'
+      + ' such an artifact as stale after ' + staleSeconds + ' s, so no live process owns it and it'
+      + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
+    return;
+  }
+  if (age < 0) {
+    line(WARN, 'autopilot lease: ' + words.noun + ' ' + parenthesizedPath(file, ' carries')
+      + ' carries no owner record the core can read, and its modification time lies in the future — the core'
+      + ' treats it as held until ' + staleSeconds + ' s after that moment, and nothing reclaims it before then.'
+      + ' Inspect it and remove it by hand; the doctor never deletes it.');
+    return;
+  }
+  line(WARN, 'autopilot lease: ' + words.noun + ' ' + parenthesizedPath(file, ' carries')
+    + ' carries no owner record the core can read — the core treats it as held until it is ' + staleSeconds
+    + ' s old and then reclaims it at the next lease acquisition. Run /zensu:doctor again after that.');
+}
+
+function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs) {
+  var pid = artifact.pid;
+  var facts = leaseFacts(artifact);
+  var age = inspectedAtMs - artifact.createdAtMs;
+  var subject = kind === 'lock'
+    ? 'Its owner is not a live lock keeper, so the artifact '
+    : 'The sentinel ';
+  if (artifact.stale && !artifact.alive) {
+    line(WARN, (kind === 'lock'
+      ? 'autopilot lease: held by a process that is gone — '
+      : 'autopilot lease: the recovery sentinel was left by a process that is gone — ')
+      + facts + '. ' + subject + parenthesizedPath(file, ' is')
+      + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
+    return;
+  }
+  if (artifact.stale) {
+    line(WARN, 'autopilot lease: pid ' + pid + ' is alive but is not ' + words.taker + ' — ' + facts
+      + ', and its current start identity differs from the recorded one. ' + subject + parenthesizedPath(file, ' is')
+      + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
+    return;
+  }
+  if (age >= 0 && age <= staleAfterMs) {
+    line(OK, kind === 'lock'
+      ? 'autopilot lease: held right now — ' + facts + '. A lease covers one short critical section and clears'
+        + ' on its own; run /zensu:doctor again if an Autopilot state read keeps failing.'
+      : 'autopilot lease: ' + words.busy + ' — ' + facts + '. That takes a moment and clears on its own; run'
+        + ' /zensu:doctor again if an Autopilot state read keeps failing.');
+    return;
+  }
+  var since = age >= 0 ? 'for ' + leaseDuration(age) : 'since a created_at that lies in the future';
+  var unknown = age >= 0 ? ''
+    : ' The clock moved back or the record was edited, so how long it has been held is unknown.';
+  if (artifact.identityRecorded && artifact.identityCurrent !== null) {
+    if (kind === 'lock') {
+      line(WARN, 'autopilot lease: held ' + since + ' by a live lock keeper — ' + facts + ', and pid ' + pid
+        + ' still carries the recorded start identity, so the artifact ' + parenthesizedPath(file, ' is')
+        + ' is NOT removable.' + (age >= 0
+          ? ' While a lease is held this long every other lease acquisition gives up waiting and its Autopilot'
+            + ' state read fails.'
+          : unknown)
+        + ' ' + words.shapes + ' ' + leaseCheck(pid) + ' If it is one and the run that holds the lease is hung,'
+        + ' end the shell that runs _tdd_locked_run for that run together with every process under it: pid ' + pid
+        + ' itself under bash 3.2, and the parent of the parent of pid ' + pid + ' under bash 4 or later, because'
+        + ' the node lock keeper runs inside a coprocess shell. That ends the run, and the lease clears.'
+        + ' Never end the node lock keeper alone, which lets the next lease acquisition in while that shell still'
+        + ' runs its critical section, and never its coprocess shell alone, which releases nothing.');
+    } else {
+      line(WARN, 'autopilot lease: the recovery sentinel ' + parenthesizedPath(file, ' has') + ' has been held '
+        + since + ' by pid ' + pid + ', which still carries the recorded start identity — ' + facts + '. The'
+        + ' sentinel is NOT removable, and while it stays every lease acquisition waits on it and gives up, so'
+        + ' every Autopilot state read that needs the lease fails.' + unknown + ' ' + words.shapes + ' '
+        + leaseCheck(pid) + ' If it is one and hung, end it; the next lease acquisition then reclaims the'
+        + ' sentinel.');
+    }
+    return;
+  }
+  line(WARN, (kind === 'lock'
+    ? 'autopilot lease: held ' + since + ' by pid ' + pid
+    : 'autopilot lease: the recovery sentinel ' + parenthesizedPath(file, ' has') + ' has been held ' + since
+      + ' by pid ' + pid)
+    + ', which is alive — ' + facts + '.' + unknown + ' '
+    + (artifact.identityRecorded
+      ? 'Its current start identity could not be read, so the core keeps treating ' + words.noun + ' as live'
+        + ' and does not reclaim it while that holds.'
+      : 'Without a recorded start identity the core never reclaims ' + words.noun + ' while any process holds'
+        + ' pid ' + pid + '; it clears only when that process releases it or exits.')
+    + ' The doctor cannot establish whether pid ' + pid + ' is still ' + words.role + '. ' + words.shapes + ' '
+    + leaseCheck(pid) + ' If pid ' + pid + ' is not such a process, ' + words.taker + ' is gone and its pid was'
+    + ' reused: nothing reclaims ' + words.noun + (kind === 'lock' ? ' ' + parenthesizedPath(file, ' while') : '')
+    + ' while pid ' + pid + ' lives, and only a removal by hand clears it. The doctor never deletes it.');
+}
+
+function leaseArtifactRow(kind, artifact, file, staleAfterMs, inspectedAtMs) {
+  var words = LEASE_WORDS[kind];
+  if (artifact.state === 'refused') {
+    leaseRefusedRow(words, artifact, file);
+    return;
+  }
+  if (artifact.state === 'changing') {
+    line(WARN, 'autopilot lease: ' + words.noun + ' changed while it was read — ' + words.busy + '. Run'
+      + ' /zensu:doctor again for a stable reading; that is a missing check, not an all-clear.');
+    return;
+  }
+  if (artifact.state === 'ownerless') {
+    leaseOwnerlessRow(words, artifact, file, staleAfterMs, inspectedAtMs);
+    return;
+  }
+  leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs);
+}
+
+function leaseRow(dir) {
+  var core = null;
+  try {
+    core = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+  } catch (e) {
+    core = null;
+  }
+  if (!core || typeof core.externalProcessLockPath !== 'function'
+    || typeof core.inspectExternalProcessLock !== 'function') {
+    line(WARN, 'autopilot lease: not checked — the Session Control core did not load from '
+      + foldPath(pluginDir(), ' with') + ' with its read-only lease inspection. That is a missing check,'
+      + ' not an all-clear.');
+    return;
+  }
+  var options = { lockDirectory: dir, resourcePath: path.join(dir, LEASE_RESOURCE) };
+  var file;
+  var lease;
+  try {
+    file = core.externalProcessLockPath(options);
+    lease = core.inspectExternalProcessLock(options);
+  } catch (e) {
+    line(WARN, 'autopilot lease: the lease artifact could not be resolved — ' + leaseResolveCause(e)
+      + '. The lease cannot be taken while that holds, so every Autopilot state read that needs it'
+      + ' fails. That is a missing check, not an all-clear.');
+    return;
+  }
+  if (lease.lock.state === 'absent' && lease.recovery.state === 'absent') {
+    line(OK, 'autopilot lease: free — no lock artifact and no recovery sentinel, so no process holds the'
+      + ' Autopilot project lease');
+    return;
+  }
+  var inspectedAtMs = Number.isFinite(lease.inspectedAtMs) ? lease.inspectedAtMs : Date.now();
+  if (lease.lock.state !== 'absent') {
+    leaseArtifactRow('lock', lease.lock, file, lease.staleAfterMs, inspectedAtMs);
+  }
+  if (lease.recovery.state !== 'absent') {
+    leaseArtifactRow('recovery', lease.recovery, lease.recoveryFile, lease.staleAfterMs, inspectedAtMs);
+  }
+}
+
 // The recorded project root is a real directory name minted from the SessionStart
 // cwd, and both binding rows below render it verbatim into a terminal and into the
 // model's context. `readOrphanedProjectRootContext` rejects only control characters
@@ -5499,6 +5725,12 @@ function stateBlock(nowMs) {
   // project has a single CAS workflow document, and nesting it there would hide
   // the hold in exactly the fresh session most likely to walk into it.
   autopilotRows(entries, dir, nowMs, currentSessionKey(), projectRoot);
+  try {
+    leaseRow(dir);
+  } catch (e) {
+    line(WARN, 'autopilot lease: not checked — the lease row failed while it was rendered. That is a missing'
+      + ' check, not an all-clear.');
+  }
   claimTopologyRow(projectRoot, currentSessionKey());
   worktreeKeepRows(nowMs, currentSessionKey(), projectRoot);
   var pr = path.join(dir, 'pending-review.json');
