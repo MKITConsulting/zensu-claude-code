@@ -757,6 +757,46 @@ test('never reclaims an old lock whose owner process is still alive', async () =
   fs.unlinkSync(lockFile);
 });
 
+test('a waiter behind a live lock owner never takes the recovery sentinel', async () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-waiter-')));
+  const lockFile = path.join(root, '.waiter.lock');
+  const ready = path.join(root, 'holder.ready');
+  const source = [
+    'const fs = require("node:fs");',
+    'const c = require(process.env.SESSION_CONTROL_CORE);',
+    'c.withFileLock(process.argv[1], "waiter", () => {',
+    '  fs.writeFileSync(process.argv[2], "held");',
+    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);',
+    '});',
+  ].join('\n');
+  const holder = runNode(source, [root, ready]);
+  while (!fs.existsSync(ready)) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(lockFile), true);
+
+  const originalOpen = fs.openSync;
+  let sentinelCandidates = 0;
+  let takenWhileWaiting = null;
+  fs.openSync = function countingOpen(file, ...rest) {
+    if (/\.waiter\.recovery\.\d+\.[a-f0-9]{48}\.candidate$/.test(String(file))) sentinelCandidates += 1;
+    return originalOpen.call(fs, file, ...rest);
+  };
+  const started = Date.now();
+  try {
+    core.withFileLock(root, 'waiter', () => { takenWhileWaiting = sentinelCandidates; });
+  } finally {
+    fs.openSync = originalOpen;
+  }
+  const waited = Date.now() - started;
+  const result = await holder;
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(waited >= 250, `the waiter acquired after ${waited} ms, so it never waited on the holder`);
+  assert.ok(
+    takenWhileWaiting <= 1,
+    `the waiter took the recovery sentinel ${takenWhileWaiting} times while its owner was alive`,
+  );
+  assert.equal(fs.existsSync(lockFile), false);
+});
+
 test('recovers a lock left at a SIGKILL kill point', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-kill-'));
   const source = 'const c=require(process.env.SESSION_CONTROL_CORE);c.withFileLock(process.argv[1],"killpoint",()=>process.kill(process.pid,"SIGKILL"));';
