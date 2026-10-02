@@ -1008,6 +1008,73 @@ test('policy mode judges the run config against the policy and needs a resolver 
     { verdict: 'none', plan: [{ origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode' }] });
 });
 
+const REMOTE_APP_TARGET = Object.freeze({ origin: 'https://app.example.com', evidenceMode: 'declared-safe' });
+
+function networkOnlyPolicy(mode, targets, networkOnlyOrigins) {
+  return consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode, targets, networkOnlyOrigins }) });
+}
+
+test('policy mode admits a network-only origin in the run config, plans nothing for it, and refuses every navigation to it', (t) => {
+  const env = isolatedEnv(t);
+  const policy = networkOnlyPolicy('remote', [REMOTE_APP_TARGET], ['https://api.example.org', 'https://93.184.216.36']);
+  assert.deepEqual([...policy.networkOnly.keys()], ['https://api.example.org', 'https://93.184.216.36']);
+  const origins = ['https://app.example.com', 'https://api.example.org', 'https://93.184.216.36'];
+  const config = runConfig(t, origins, ['MAP app.example.com 93.184.216.34', 'MAP api.example.org 93.184.216.35']);
+  assert.deepEqual(decide(openCommand(config.file, 'https://app.example.com/'), { env, policy }),
+    { verdict: 'none', plan: [{ origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode' }] });
+  assert.deepEqual(decide(openCommand(config.file), { env, policy }),
+    { verdict: 'none', plan: [{ origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode' }] });
+  const refusals = [
+    [openCommand(config.file, 'https://api.example.org/'), 'https://api.example.org'],
+    [cli('goto https://api.example.org/v1/items'), 'https://api.example.org'],
+    [cli('tab-new https://api.example.org/'), 'https://api.example.org'],
+    [cli('goto https://93.184.216.36/'), 'https://93.184.216.36'],
+  ];
+  for (const [command, origin] of refusals) {
+    assert.equal(denied(command, { env, policy }), `${origin}: ${REASONS.NETWORK_ONLY_NAVIGATION}`, command);
+  }
+  const unpinned = runConfig(t, ['https://app.example.com', 'https://api.example.org'], ['MAP app.example.com 93.184.216.34']);
+  assert.equal(denied(openCommand(unpinned.file), { env, policy }),
+    'https://api.example.org: the run config carries no resolver pin for this remote host');
+  const stranger = runConfig(t, ['https://app.example.com', 'https://other.example.net'],
+    ['MAP app.example.com 93.184.216.34', 'MAP other.example.net 93.184.216.37']);
+  assert.equal(denied(openCommand(stranger.file), { env, policy }), `https://other.example.net: ${REASONS.NOT_POLICY_TARGET}`);
+});
+
+test('a local policy admits a loopback and a pinned public network-only origin and still refuses to navigate either', (t) => {
+  const env = isolatedEnv(t);
+  const policy = networkOnlyPolicy('local', [LOCAL_TARGET], ['http://127.0.0.1:9090', 'https://auth.example.com']);
+  const config = runConfig(t, ['http://127.0.0.1:4300', 'http://127.0.0.1:9090', 'https://auth.example.com'], ['MAP auth.example.com 93.184.216.34']);
+  assert.deepEqual(decide(openCommand(config.file, 'http://127.0.0.1:4300/'), { env, policy }),
+    { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/', decidedBy: 'policy-mode' }] });
+  assert.equal(denied(cli('goto http://127.0.0.1:9090/health'), { policy }), `http://127.0.0.1:9090: ${REASONS.NETWORK_ONLY_NAVIGATION}`);
+  assert.equal(denied(cli('goto https://auth.example.com/authorize'), { policy }), `https://auth.example.com: ${REASONS.NETWORK_ONLY_NAVIGATION}`);
+  const unpinned = runConfig(t, ['http://127.0.0.1:4300', 'https://auth.example.com']);
+  assert.equal(denied(openCommand(unpinned.file), { env, policy }),
+    'https://auth.example.com: the run config carries no resolver pin for this remote host');
+});
+
+test('judgeOrigin keeps the navigable and the network-only role apart and has no network-only role without a policy', () => {
+  const policy = networkOnlyPolicy('remote', [REMOTE_APP_TARGET], ['https://api.example.org']);
+  const judge = (url, options) => consent.judgeOrigin(url, { policy, ...options });
+  assert.equal(judge('https://api.example.org/', { navigation: false }).networkOnly, true);
+  assert.equal(judge('https://app.example.com/', { navigation: false }).networkOnly, false);
+  assert.equal(judge('https://api.example.org/', { navigation: false, role: 'network-only' }).networkOnly, true);
+  assert.equal(judge('https://app.example.com/', { navigation: false, role: 'navigable' }).decidedBy, 'policy-mode');
+  const navigation = { deny: `https://api.example.org: ${REASONS.NETWORK_ONLY_NAVIGATION}` };
+  assert.deepEqual(judge('https://api.example.org/', { navigation: false, role: 'navigable' }), navigation);
+  assert.deepEqual(judge('https://api.example.org/v1', { navigation: true }), navigation);
+  assert.deepEqual(judge('https://app.example.com/', { navigation: false, role: 'network-only' }),
+    { deny: `https://app.example.com: ${REASONS.NOT_POLICY_NETWORK_ONLY}` });
+  assert.deepEqual(judge('https://other.example.net/', { navigation: false, role: 'network-only' }),
+    { deny: `https://other.example.net: ${REASONS.NOT_POLICY_NETWORK_ONLY}` });
+  assert.deepEqual(judge('https://other.example.net/', { navigation: false }), { deny: `https://other.example.net: ${REASONS.NOT_POLICY_TARGET}` });
+  assert.deepEqual(consent.judgeOrigin('http://127.0.0.1:9090/', { navigation: false, policy: null, role: 'network-only' }),
+    { deny: REASONS.NETWORK_ONLY_NEEDS_POLICY });
+  assert.deepEqual(consent.judgeOrigin('http://127.0.0.1:9090/', { navigation: false, policy: null, role: 'navigable' }),
+    { origin: 'http://127.0.0.1:9090', route: '/', mode: 'local' });
+});
+
 test('a command beyond the size bound is refused only when it names a zensu-verify session', () => {
   const padding = 'x'.repeat(262145);
   assert.equal(denied(`${cli('snapshot')} # ${padding}`), REASONS.COMMAND_TOO_LARGE);
@@ -1411,6 +1478,20 @@ test('runPost records nothing for a denied, interrupted, non-Bash, target-free o
   assert.deepEqual(consent.runPost(post(cli('snapshot')), env, err), { ok: true, skipped: 'nothing-to-record' });
   assert.equal(err.text(), '');
   assert.equal(fs.existsSync(memory), false);
+  const networkOnlyEnv = {
+    ...env,
+    ...isolatedEnv(t),
+    ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode: 'local', targets: [LOCAL_TARGET], networkOnlyOrigins: ['http://127.0.0.1:9090'] }),
+  };
+  assert.deepEqual(consent.runPost(post(cli('goto http://127.0.0.1:9090/')), networkOnlyEnv, err),
+    { ok: true, skipped: `http://127.0.0.1:9090: ${REASONS.NETWORK_ONLY_NAVIGATION}` });
+  assert.equal(fs.existsSync(memory), false);
+  const config = runConfig(t, ['http://127.0.0.1:4300', 'http://127.0.0.1:9090']);
+  assert.equal(consent.runPost(post(openCommand(config.file, 'http://127.0.0.1:4300/')), networkOnlyEnv, err).ok, true);
+  assert.deepEqual(consent.readConsentMemory(memory, root).records.map(({ origin, decidedBy }) => ({ origin, decidedBy })),
+    [{ origin: 'http://127.0.0.1:4300', decidedBy: 'policy-mode' }]);
+  assert.equal(err.text(), '');
+  fs.rmSync(memory);
   const unbound = sink();
   assert.deepEqual(consent.runPost(post(cli('goto http://127.0.0.1:4200/')), {}, unbound), { ok: false, reason: 'no-bound-session' });
   assert.equal(unbound.text(), 'zensu: verify consent memory not written (no bound session)\n');
@@ -1641,6 +1722,8 @@ test('readPolicy is absent without the variable and names the fault of an invali
   assert.equal(valid.ok, true);
   assert.equal(valid.mode, 'local');
   assert.deepEqual([...valid.targets.keys()], ['http://127.0.0.1:4300']);
+  assert.deepEqual([...valid.networkOnly.keys()], []);
+  assert.deepEqual([...networkOnlyPolicy('local', [LOCAL_TARGET], ['http://127.0.0.1:9090']).networkOnly.keys()], ['http://127.0.0.1:9090']);
   assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' }),
     { ok: false, fault: 'policy contains unknown or missing keys' });
 });
