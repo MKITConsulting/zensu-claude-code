@@ -112,7 +112,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over, and trace where a session was continued across windows and accounts |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts |
 | `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default |
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
@@ -223,7 +223,7 @@ is unpinned).
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
-| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, and how to continue in a nested worktree when it happened anyway |
+| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing
