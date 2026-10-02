@@ -9431,7 +9431,7 @@ else
   check "P1wk14 every worktree row phrase the renderer emits has a doctor-skill bullet (derived=$WK_PHRASE_COUNT missing:$WK_PHRASE_MISSING)" FAIL
 fi
 WK_SHARED_MISSING=""
-for phrase in 'is stale — it no longer holds the keep marker' 'names another worktree' 'how many session anchors are live could not be read' 'the keep marker is left as it stands' 'the release pass leaves the marker as it stands' 'the next prompt restores the marker' 'recorded no branch' 'the branch read failed when the session started' 'and still fails, so a takeover could not be ruled out' 'the next prompt records the branch once git can answer' 'anchor recorded a move of' 'the plugin does not create the marker there' 'the next prompt replaces it with' 'this report cannot say whether the next prompt can replace it' 'the plugin never replaces a symlink, a hard link or a non-file there' 'so the plugin neither reads nor writes anchors there' 'such a file is usually the live anchor of a session on another plugin version' 'only after confirming no such session is live there' 'the next prompt records the branch it returns to' 'although info/exclude lists it' 'cannot add the marker to info/exclude' 'git could not say whether it ignores' 'restores it only once the anchor directory can be read' 'the next prompt reaps the' 'the anchor directory could not be read' 'live session anchor(s) hold it' 'this build cannot validate sit beside it' 'only after confirming no session on another plugin version is live there' 'the next SessionStart or SessionEnd in it reaps the' 'until the next SessionStart or SessionEnd in it releases the marker'; do
+for phrase in 'is stale — it no longer holds the keep marker' 'names another worktree' 'how many session anchors are live could not be read' 'the keep marker is left as it stands' 'the release pass leaves the marker as it stands' 'the next prompt restores the marker' 'recorded no branch' 'the branch read failed when the session started' 'and still fails, so a takeover could not be ruled out' 'the next prompt records the branch once git can answer' 'anchor recorded a move of' 'the plugin does not create the marker there' 'the next prompt replaces it with' 'this report cannot say whether the next prompt can replace it' 'the plugin never replaces a symlink, a hard link or a non-file there' 'so the plugin neither reads nor writes anchors there' 'such a file is usually the live anchor of a session on another plugin version' 'only after confirming no such session is live there' 'the next prompt records the branch it returns to' 'although info/exclude lists it' 'cannot add the marker to info/exclude' 'git could not say whether it ignores' 'restores it only once the anchor directory can be read' 'the next prompt reaps the' 'the anchor directory could not be read' 'live session anchor(s) hold it' 'this build cannot validate sit beside it' 'only after confirming no session on another plugin version is live there' 'the next SessionStart or SessionEnd in it reaps the' 'until the next SessionStart or SessionEnd in it releases the marker' 'the release pass keeps the marker until every nested repository there is moved out or removed' 'the release pass keeps the marker until a scan finishes' 'once nothing else holds it'; do
   grep -qF -- "$phrase" "$REPORT" || WK_SHARED_MISSING="$WK_SHARED_MISSING [renderer: $phrase]"
   grep -qF -- "$phrase" "$VF_SKILL" || WK_SHARED_MISSING="$WK_SHARED_MISSING [skill: $phrase]"
 done
@@ -9598,7 +9598,7 @@ if (start < 0 || end < 0) {
 }
 const body = src.slice(start, end).split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 const bare = [];
-for (const lit of ['absent', 'ours', 'foreign', 'refused', 'missing', 'rejected', 'live', 'stale', 'ignored', 'not-ignored', 'not-yet-excluded', 'exclude-refused', 'unknown', 'replaced', 'remove-by-hand', 'state-component', 'unresolved', 'unresolved-paused', 'unresolved-unreadable', 'drift-held', 'paused', 'drift', 'on-baseline', 'unreadable']) {
+for (const lit of ['absent', 'ours', 'foreign', 'refused', 'missing', 'rejected', 'live', 'stale', 'ignored', 'not-ignored', 'not-yet-excluded', 'exclude-refused', 'unknown', 'replaced', 'remove-by-hand', 'state-component', 'unresolved', 'unresolved-paused', 'unresolved-unreadable', 'drift-held', 'paused', 'drift', 'on-baseline', 'unreadable', 'nested-repository', 'nested-scan-incomplete']) {
   if (body.indexOf("'" + lit + "'") !== -1) bare.push(lit);
 }
 if (body.indexOf('.worktree-keep') !== -1) bare.push('.worktree-keep');
@@ -9624,21 +9624,21 @@ if (start < 0 || end < 0) {
 }
 const body = src.slice(start, end).split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 const faults = [];
-for (const shared of ['mod.branchState(', 'mod.anchorMatchesRoot(', 'mod.recordedMoveSentence(', 'mod.branchNoun(', 'mod.anchorRemedy(']) {
+for (const shared of ['mod.branchState(', 'mod.anchorMatchesRoot(', 'mod.recordedMoveSentence(', 'mod.branchNoun(', 'mod.anchorRemedy(', 'mod.nestedHold(']) {
   if (body.indexOf(shared) === -1) faults.push('not-called:' + shared);
 }
 for (const own of ['mod.judgeBranch(', 'mod.unresolvedRecord(']) {
   if (body.indexOf(own) !== -1) faults.push('decides-itself:' + own);
 }
-for (const call of ['mod.pausedState(', 'mod.detectDrift(', 'worktreeRoot:']) {
+for (const call of ['mod.pausedState(', 'mod.detectDrift(', 'mod.nestedRepositories(', 'worktreeRoot:']) {
   if (body.indexOf(call) !== -1) faults.push(call);
 }
 console.log(faults.length === 0 ? 'CLEAN' : 'FAULTS:' + faults.join(','));
 WKJS
 WK_JUDGE="$(node "$SBOX/wk-judge.js" "$REPORT")"
 case "$WK_JUDGE" in
-  CLEAN) check "P1wk18-judge the renderer branches on the module's branchState verdict and hands remedyLines only the recorded branch" PASS ;;
-  *) check "P1wk18-judge the renderer branches on the module's branchState verdict and hands remedyLines only the recorded branch ($WK_JUDGE)" FAIL ;;
+  CLEAN) check "P1wk18-judge the renderer branches on the module's branchState and nestedHold verdicts and hands remedyLines only the recorded branch" PASS ;;
+  *) check "P1wk18-judge the renderer branches on the module's branchState and nestedHold verdicts and hands remedyLines only the recorded branch ($WK_JUDGE)" FAIL ;;
 esac
 
 # The wrapper's on/off derivation was pinned only by presence greps, which the literal text
@@ -9831,6 +9831,58 @@ case "$OUT_WK30" in
     check "P1wk30 with the flag off and nothing holding the marker, the row promises the release" PASS ;;
   *) check "P1wk30 with the flag off and nothing holding the marker, the row promises the release (got: $(printf '%s' "$OUT_WK30" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
+WK_NESTED="$WK_WT/.worktrees/nested-clone"
+mkdir -p "$WK_NESTED" && git -C "$WK_NESTED" init -q >/dev/null 2>&1
+OUT_WK48="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK48" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'while a nested repository sits inside it; the release pass keeps the marker until every nested repository there is moved out or removed'*'✅  worktree: a nested repository in '*'keeps the keep marker once no session anchor holds it — the first in name order is .worktrees/nested-clone (repository)'*)
+    check "P1wk48 with the flag off a nested repository is named as what still holds the marker" PASS ;;
+  *) check "P1wk48 with the flag off a nested repository is named as what still holds the marker (got: $(printf '%s' "$OUT_WK48" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
+esac
+case "$OUT_WK48" in
+  *'until the next SessionStart or SessionEnd in it releases the marker'*) check "P1wk48-control a marker a nested repository holds is never promised to the next release pass" FAIL ;;
+  *) check "P1wk48-control a marker a nested repository holds is never promised to the next release pass" PASS ;;
+esac
+OUT_WK49="$(wk_report)"
+case "$OUT_WK49" in
+  *'✅  worktree: keep marker present in '*'✅  worktree: a nested repository in '*'the first in name order is .worktrees/nested-clone (repository); Claude Desktop then leaves the directory on disk'*)
+    check "P1wk49 with the flag on a nested repository renders the hold row beside the marker row" PASS ;;
+  *) check "P1wk49 with the flag on a nested repository renders the hold row beside the marker row (got: $(printf '%s' "$OUT_WK49" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
+esac
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+OUT_WK49L="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK49L" in
+  *'while 1 live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker once nothing else holds it'*)
+    check "P1wk49-live with the flag off a live anchor over a nested repository promises the release only once nothing else holds the marker" PASS ;;
+  *) check "P1wk49-live with the flag off a live anchor over a nested repository promises the release only once nothing else holds the marker (got: $(printf '%s' "$OUT_WK49L" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
+esac
+rm -f "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+rm -rf "$WK_WT/.worktrees"
+OUT_WK49C="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK49C" in
+  *'a nested repository in '*|*'scan for nested repositories'*) check "P1wk49-control with the nested repository gone no hold row renders" FAIL ;;
+  *'until the next SessionStart or SessionEnd in it releases the marker'*) check "P1wk49-control with the nested repository gone no hold row renders" PASS ;;
+  *) check "P1wk49-control with the nested repository gone no hold row renders (got: $(printf '%s' "$OUT_WK49C" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+WK_LOCKED="$WK_WT/locked"
+mkdir -p "$WK_LOCKED" && chmod 000 "$WK_LOCKED"
+if ls "$WK_LOCKED" >/dev/null 2>&1; then
+  check "P1wk50 SKIP this principal reads a mode-000 directory, so the unfinished-scan rows cannot be driven" PASS
+else
+  OUT_WK50="$(wk_report)"
+  case "$OUT_WK50" in
+    *'⚠️  worktree: the scan for nested repositories in '*'did not finish (unreadable:EACCES) — the keep marker stays once no session anchor holds it, until a scan finishes'*)
+      check "P1wk50 an unreadable directory renders the unfinished-scan WARN row" PASS ;;
+    *) check "P1wk50 an unreadable directory renders the unfinished-scan WARN row (got: $(printf '%s' "$OUT_WK50" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
+  esac
+  OUT_WK50F="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+  case "$OUT_WK50F" in
+    *'while the scan for nested repositories in it did not finish; the release pass keeps the marker until a scan finishes'*'⚠️  worktree: the scan for nested repositories in '*)
+      check "P1wk50-off with the flag off an unfinished scan is named as what still holds the marker" PASS ;;
+    *) check "P1wk50-off with the flag off an unfinished scan is named as what still holds the marker (got: $(printf '%s' "$OUT_WK50F" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
+  esac
+fi
+chmod 755 "$WK_LOCKED" && rmdir "$WK_LOCKED"
 node "$SBOX/wk-reapflood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" fill
 OUT_WK29D="$(ZDOC_WORKTREE_KEEP=off wk_report)"
 case "$OUT_WK29D" in

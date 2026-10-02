@@ -119,7 +119,7 @@ case "$WT_UNIT_SKIP" in ''|*[!0-9]*) WT_UNIT_SKIP=0 ;; esac
 # anywhere — and is admitted on the looser criterion alone: a case whose disappearance nothing
 # else would report. Both guards name their own case below. Apply this shape on that looser
 # criterion, never as a blanket rule, and state which of the two a third one matches.
-WT_UNIT_TOTAL_WANT=65
+WT_UNIT_TOTAL_WANT=66
 # The skip BOUND is DERIVED from the file rather than hand-written, and then the derivation
 # itself is registered. A bare ceiling would accept a case that quietly started skipping
 # itself, which is the failure the exact-count comment above exists to prevent; counting the
@@ -2643,7 +2643,7 @@ CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 # ── W* — the WRITES anchor, and the renderer bounds around it ───────────────
 # A takeover into another worktree can edit and test but cannot commit: the Bash
 # source-write gate compares every write against the session's IMMUTABLE project
-# root, and nothing re-anchors a session. `show` therefore reports whether the
+# root, and only /zensu:adopt-session --reanchor moves it. `show` therefore reports whether the
 # TARGET worktree is this session's own anchor, and the whole point of the line
 # is that it must never answer "allowed" off a measurement that failed.
 #
@@ -6979,6 +6979,269 @@ if [ -z "$SEL26_BAD" ]; then
   check "SEL26 a non-string timestamp on a user, assistant, queue, compaction or API-error record never takes show, takeover or handoff down, and each such stamp reads as null" PASS
 else
   check "SEL26 non-string record timestamps:$SEL26_BAD" FAIL
+fi
+
+WR_HOME="$(cd "$FAKE" && pwd -P)/release-home"
+WR_REPO="$WR_HOME/repo"
+WR_SRC_WT="$WR_REPO/.claude/worktrees/src-wt"
+WR_TAKER_WT="$WR_REPO/.claude/worktrees/taker-wt"
+WR_OTHER="$WR_HOME/other"
+WR_NESTED="$WR_SRC_WT/.worktrees/other/feat"
+WR_SRC=f1000000-0000-0000-0000-000000000001
+WR_TAKER=f2000000-0000-0000-0000-000000000002
+WR_ENDED=f3000000-0000-0000-0000-000000000003
+WR_INSIDE=f4000000-0000-0000-0000-000000000004
+WR_MAIN=f5000000-0000-0000-0000-000000000005
+WR_NEST=f7000000-0000-0000-0000-000000000007
+WR_ACCT=f6000000-1111-2222-3333-444444444444
+WR_ACCT2=f8000000-1111-2222-3333-444444444444
+WR_DEAD=2147483647
+mkdir -p "$WR_HOME"
+cat > "$WR_HOME/mkrel.mjs" <<'MKREL'
+import fs from 'node:fs';
+import path from 'node:path';
+const [home, sid, cwd, pid, ageSec, acct] = process.argv.slice(2);
+const cfg = path.join(home, '.claude');
+const now = Date.now();
+const last = now - Number(ageSec) * 1000;
+const iso = (ms) => new Date(ms).toISOString();
+const dir = path.join(cfg, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
+fs.mkdirSync(dir, { recursive: true });
+fs.mkdirSync(path.join(cfg, 'sessions'), { recursive: true });
+const records = [
+  { type: 'user', message: { role: 'user', content: 'work on the release fixture' }, cwd, gitBranch: 'claude/src-wt', isSidechain: false, timestamp: iso(last - 60000) },
+  ...Array.from({ length: 8 }, () => ({ type: 'padding', blob: 'x'.repeat(40) })),
+  { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(last) },
+];
+const file = path.join(dir, `${sid}.jsonl`);
+fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+fs.utimesSync(file, last / 1000, last / 1000);
+fs.writeFileSync(path.join(cfg, 'sessions', `${sid}.json`), JSON.stringify({ sessionId: sid, cwd, pid: Number(pid), startedAt: last - 3600000 }));
+if (acct !== 'none') {
+  const rec = path.join(home, 'store', acct, 'ws-0001');
+  fs.mkdirSync(rec, { recursive: true });
+  fs.writeFileSync(path.join(rec, `local_${sid}.json`), JSON.stringify({ cliSessionId: sid, isArchived: false, title: `release fixture ${sid.slice(0, 8)}` }));
+}
+MKREL
+cat > "$WR_HOME/mkanchor.cjs" <<'MKANCHOR'
+const path = require('node:path');
+const [lib, root, who, ageSec, recordedRoot] = process.argv.slice(2);
+const keep = require(path.join(lib, 'worktree-keep-v1.js'));
+const core = require(path.join(lib, 'session-control-core-v1.js'));
+const managed = keep.managedWorktree(root);
+const key = who.startsWith('scv1_') ? who : core.sessionKey(who);
+const now = Date.now();
+const seen = now - Number(ageSec) * 1000;
+const written = keep.writeAnchor(managed.worktreeRoot, key, {
+  schemaVersion: 1, sessionKey: key, worktreeRoot: recordedRoot || managed.worktreeRoot, branch: 'claude/src-wt', head: null,
+  recordedAt: seen, lastSeenAt: seen, drift: null, endedAt: null, idleHours: 72,
+});
+const kept = keep.reconcileKeep(managed.worktreeRoot, now, keep.idleMsFromHours(72));
+process.stdout.write(written.ok ? kept.action : 'write-failed');
+MKANCHOR
+wr_rel() { node "$WR_HOME/mkrel.mjs" "$WR_HOME" "$@"; }
+wr_anchor() { node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$WR_SRC_WT" "$@"; }
+wr_trail() {
+  local at="$1"; shift
+  ( cd "$at" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$WR_HOME" USERPROFILE="$WR_HOME" ZENSU_CCD_STORE="$WR_HOME/store" CLAUDE_CODE_SESSION_ID="$WR_TAKER" node "$TRAIL_MJS" release "$@" --all --config-dir "$WR_HOME/.claude" )
+}
+wr_json() {
+  node -e '
+let o;
+try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const v = Function("o", "return (" + process.argv[2] + ");")(o);
+process.stdout.write(typeof v === "object" ? JSON.stringify(v) : String(v));
+' "$1" "$2"
+}
+wr_anchor_ended() { node -e '
+const fs = require("node:fs");
+const dir = process.argv[1];
+let n = 0;
+for (const f of fs.readdirSync(dir)) if (f.startsWith("worktree-anchor-")) { const j = JSON.parse(fs.readFileSync(dir + "/" + f, "utf8")); if (typeof j.endedAt === "number") n += 1; }
+process.stdout.write(String(n));
+' "$WR_SRC_WT/.zensu/state"; }
+
+WR_OK=0
+if command -v git >/dev/null 2>&1 \
+  && git init -q "$WR_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n.worktrees/\n' > "$WR_REPO/.gitignore" \
+  && git -C "$WR_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$WR_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$WR_REPO/.claude/worktrees" \
+  && git -C "$WR_REPO" worktree add -q "$WR_SRC_WT" -b claude/src-wt >/dev/null 2>&1 \
+  && git -C "$WR_REPO" worktree add -q "$WR_TAKER_WT" -b claude/taker-wt >/dev/null 2>&1 \
+  && git init -q "$WR_OTHER" >/dev/null 2>&1 \
+  && git -C "$WR_OTHER" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m base >/dev/null 2>&1 \
+  && git -C "$WR_OTHER" worktree add -q "$WR_NESTED" -b feat >/dev/null 2>&1 \
+  && wr_rel "$WR_SRC" "$WR_SRC_WT" "$WR_DEAD" 7200 "$WR_ACCT" \
+  && wr_rel "$WR_TAKER" "$WR_TAKER_WT" "$WR_DEAD" 600 "$WR_ACCT" \
+  && [ "$(wr_anchor "$WR_SRC" 3600)" = "created" ] \
+  && [ -f "$WR_SRC_WT/.worktree-keep" ]; then
+  WR_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "WR* git is not on PATH — the release checks need real worktrees and are unverified in this run"
+elif [ "$WR_OK" != 1 ]; then
+  check "WR-fixture the release fixture (worktrees, nested worktree, sessions, keep anchor and marker) could not be built" FAIL
+else
+  check "WR0 the release fixture holds a source worktree with a live keep anchor, its marker and a nested worktree of another repository" PASS
+
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"; WR_RC=$?
+  WR_BAD=""
+  [ "$WR_RC" = "0" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+  [ "$(wr_json "$WR_OUT" 'o.verdict')" = "blocked" ] || WR_BAD="$WR_BAD verdict=$(wr_json "$WR_OUT" 'o.verdict')"
+  [ "$(wr_json "$WR_OUT" 'o.blockers.map((b) => b.code).join(",")')" = "nested-repositories" ] || WR_BAD="$WR_BAD codes=$(wr_json "$WR_OUT" 'o.blockers.map((b) => b.code).join(",")')"
+  [ "$(wr_json "$WR_OUT" 'o.nested.repositories.map((n) => n.path + ":" + n.kind).join(",")')" = ".worktrees/other/feat:worktree" ] || WR_BAD="$WR_BAD nested=$(wr_json "$WR_OUT" 'JSON.stringify(o.nested)')"
+  [ "$(wr_json "$WR_OUT" 'o.applied')" = "false" ] || WR_BAD="$WR_BAD applied"
+  [ "$(wr_json "$WR_OUT" 'typeof o.skipped')" = "number" ] || WR_BAD="$WR_BAD no-skipped-field"
+  [ -f "$WR_SRC_WT/.worktree-keep" ] || WR_BAD="$WR_BAD marker-gone"
+  [ -z "$WR_BAD" ] && check "WR1 a dry run refuses while a nested worktree of another repository is still inside, names it, and changes nothing" PASS || check "WR1 nested-worktree refusal:$WR_BAD" FAIL
+
+  WR_ERR="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --apply 2>&1 >/dev/null)"; WR_RC=$?
+  WR_BAD=""
+  [ "$WR_RC" = "1" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+  printf '%s' "$WR_ERR" | grep -qF 'nothing was released' || WR_BAD="$WR_BAD stderr=${WR_ERR:-<empty>}"
+  [ -f "$WR_SRC_WT/.worktree-keep" ] || WR_BAD="$WR_BAD marker-gone"
+  [ "$(wr_anchor_ended)" = "0" ] || WR_BAD="$WR_BAD anchor-ended"
+  [ -z "$WR_BAD" ] && check "WR2 --apply under the same refusal exits 1, says so on stderr, and leaves the anchor and the marker alone" PASS || check "WR2 refused apply:$WR_BAD" FAIL
+
+  git -C "$WR_OTHER" -c core.fsmonitor=false worktree move "$WR_NESTED" "$WR_HOME/feat-moved" >/dev/null 2>&1
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"; WR_RC=$?
+  WR_BAD=""
+  [ -e "$WR_NESTED" ] && WR_BAD="$WR_BAD nested-worktree-not-moved"
+  [ "$WR_RC" = "0" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+  [ "$(wr_json "$WR_OUT" 'o.verdict')" = "releasable" ] || WR_BAD="$WR_BAD verdict=$(wr_json "$WR_OUT" 'o.verdict') blockers=$(wr_json "$WR_OUT" 'JSON.stringify(o.blockers)')"
+  [ "$(wr_json "$WR_OUT" 'o.anchors.map((a) => a.owner + ":" + a.action).join(",")')" = "source:end" ] || WR_BAD="$WR_BAD anchors=$(wr_json "$WR_OUT" 'JSON.stringify(o.anchors)')"
+  [ "$(wr_json "$WR_OUT" 'o.message')" = "null" ] || WR_BAD="$WR_BAD message-before-release"
+  [ -f "$WR_SRC_WT/.worktree-keep" ] || WR_BAD="$WR_BAD marker-gone"
+  [ -z "$WR_BAD" ] && check "WR3 once the nested worktree moved out, a dry run reports the source's anchor as the one to end and still changes nothing" PASS || check "WR3 releasable dry run:$WR_BAD" FAIL
+
+  printf 'notes\n' > "$WR_SRC_WT/.worktrees/notes.txt"
+  WR_TXT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --apply 2>/dev/null)"; WR_RC=$?
+  WR_BAD=""
+  [ "$WR_RC" = "0" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+  printf '%s\n' "$WR_TXT" | grep -qE '^RELEASED +f1000000 ' || WR_BAD="$WR_BAD no-RELEASED-receipt"
+  printf '%s\n' "$WR_TXT" | grep -qE '^ARCHIVE +The old session f1000000 can now be archived or removed\.$' || WR_BAD="$WR_BAD no-ARCHIVE-line"
+  printf '%s\n' "$WR_TXT" | grep -qF 'same account as this session' || WR_BAD="$WR_BAD no-account-line"
+  printf '%s\n' "$WR_TXT" | grep -qF '1 ignored path that git status does not list and an archive deletes with it: .worktrees/.' || WR_BAD="$WR_BAD no-ignored-line"
+  printf '%s\n' "$WR_TXT" | grep -qF '.zensu' && WR_BAD="$WR_BAD reports-own-state"
+  [ -e "$WR_SRC_WT/.worktree-keep" ] && WR_BAD="$WR_BAD marker-still-there"
+  [ "$(wr_anchor_ended)" = "1" ] || WR_BAD="$WR_BAD anchor-not-ended"
+  [ -z "$WR_BAD" ] && check "WR4 --apply ends the source's keep anchor, the marker goes, and the ARCHIVE line says the old session can now be archived or removed and names the ignored files an archive would delete" PASS || check "WR4 release:$WR_BAD" FAIL
+
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  WR_BAD=""
+  [ "$(wr_json "$WR_OUT" 'o.verdict')" = "ready" ] || WR_BAD="$WR_BAD verdict=$(wr_json "$WR_OUT" 'o.verdict')"
+  [ "$(wr_json "$WR_OUT" 'o.marker.before')" = "absent" ] || WR_BAD="$WR_BAD marker=$(wr_json "$WR_OUT" 'o.marker.before')"
+  wr_json "$WR_OUT" 'o.message' | grep -qF 'can now be archived or removed' || WR_BAD="$WR_BAD message=$(wr_json "$WR_OUT" 'o.message')"
+  [ -z "$WR_BAD" ] && check "WR5 a second run finds nothing to release and still carries the archive message" PASS || check "WR5 repeat run:$WR_BAD" FAIL
+
+  printf 'not json' > "$WR_HOME/.claude/sessions/broken-record.json"
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  rm -f "$WR_HOME/.claude/sessions/broken-record.json"
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.blockers.map((b) => b.code).join(",")')" = "blocked:registry-incomplete" ] \
+    && check "WR5b an unreadable session-registry record blocks the release, because a running session could read as one that ended" PASS \
+    || check "WR5b incomplete registry: $(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')" FAIL
+
+  WR_OUT="$(wr_trail "$WR_SRC_WT" "$WR_SRC" --json 2>/dev/null)"
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.blockers.map((b) => b.code).join(",")')" = "blocked:caller-inside" ] \
+    && check "WR6 run from inside the source worktree, release refuses because archiving would delete the caller's directory" PASS \
+    || check "WR6 caller inside the source worktree: $(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')" FAIL
+
+  mkdir -p "$WR_SRC_WT/sub"
+  wr_rel "$WR_INSIDE" "$WR_SRC_WT/sub" "$$" 600 none
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  [ "$(wr_json "$WR_OUT" 'o.blockers.map((b) => b.code).join(",")')" = "session-inside" ] \
+    && check "WR7 another live session working inside the source worktree blocks the release" PASS \
+    || check "WR7 live session inside: $(wr_json "$WR_OUT" 'JSON.stringify(o.blockers)')" FAIL
+  rm -f "$WR_HOME/.claude/sessions/$WR_INSIDE.json"
+
+  wr_rel "$WR_SRC" "$WR_SRC_WT" "$$" 30 "$WR_ACCT"
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  WR_FORCED="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json --force 2>/dev/null)"
+  WR_BAD=""
+  [ "$(wr_json "$WR_OUT" 'o.blockers.map((b) => b.code).join(",")')" = "source-busy" ] || WR_BAD="$WR_BAD unforced=$(wr_json "$WR_OUT" 'JSON.stringify(o.blockers)')"
+  [ "$(wr_json "$WR_FORCED" 'o.verdict + ":" + o.source.level + ":" + o.source.measuredLevel')" = "ready:CONTESTED:BUSY" ] || WR_BAD="$WR_BAD forced=$(wr_json "$WR_FORCED" 'o.verdict + ":" + o.source.level')"
+  wr_json "$WR_FORCED" 'o.message' | grep -qF 'Its process is still registered — measured: pid' || WR_BAD="$WR_BAD no-process-line"
+  wr_json "$WR_FORCED" 'o.message' | grep -qF 'too recent to judge' || WR_BAD="$WR_BAD no-measured-reason"
+  wr_json "$WR_FORCED" 'o.message' | grep -qF 'in the middle of a turn' && WR_BAD="$WR_BAD unmeasured-cause"
+  [ -z "$WR_BAD" ] && check "WR8 a busy source blocks the release until --force records the go/no-go, and the archive line then names its process with the measured reason" PASS || check "WR8 busy source:$WR_BAD" FAIL
+  wr_rel "$WR_SRC" "$WR_SRC_WT" "$WR_DEAD" 7200 "$WR_ACCT"
+
+  wr_anchor "$WR_SRC" 60 >/dev/null
+  wr_rel "$WR_ENDED" "$WR_SRC_WT" "$WR_DEAD" 7200 none
+  wr_anchor "$WR_ENDED" 120 >/dev/null
+  WR_STRAY="scv1_$(printf 'c%.0s' $(seq 1 64))"
+  wr_anchor "$WR_STRAY" 120 >/dev/null
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  WR_BAD=""
+  [ "$(wr_json "$WR_OUT" 'o.blockers.map((b) => b.code).join(",")')" = "unattributed-anchor" ] || WR_BAD="$WR_BAD codes=$(wr_json "$WR_OUT" 'JSON.stringify(o.blockers)')"
+  rm -f "$WR_SRC_WT/.zensu/state/worktree-anchor-$WR_STRAY.json"
+  WR_TXT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" 2>/dev/null)"
+  printf '%s\n' "$WR_TXT" | grep -qF 'would also end the keep anchor of session f3000000, which is not running' || WR_BAD="$WR_BAD dry-run-names-no-other-session"
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json --apply 2>/dev/null)"
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.ended.length')" = "released:2" ] || WR_BAD="$WR_BAD apply=$(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')"
+  [ "$(wr_json "$WR_OUT" 'o.anchors.map((a) => a.owner).sort().join(",")')" = "ended-session,source" ] || WR_BAD="$WR_BAD owners=$(wr_json "$WR_OUT" 'JSON.stringify(o.anchors)')"
+  wr_json "$WR_OUT" 'o.message' | grep -qF 'Session f3000000 also worked in this worktree recently and is not running' || WR_BAD="$WR_BAD message-names-no-other-session"
+  [ -e "$WR_SRC_WT/.worktree-keep" ] && WR_BAD="$WR_BAD marker-still-there"
+  [ -z "$WR_BAD" ] && check "WR9 an anchor no known session owns blocks the release, while one left by a session that is no longer running is ended with the source's and named in both the dry run and the archive message" PASS || check "WR9 anchor ownership:$WR_BAD" FAIL
+
+  wr_anchor "$WR_SRC" 60 "$WR_HOME/elsewhere" >/dev/null
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  WR_ERR="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --apply 2>&1 >/dev/null)"; WR_RC=$?
+  WR_BAD=""
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.blockers.map((b) => b.code).join(",")')" = "blocked:anchor-root-mismatch" ] || WR_BAD="$WR_BAD dry=$(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')"
+  [ "$WR_RC" = "1" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+  [ -f "$WR_SRC_WT/.worktree-keep" ] || WR_BAD="$WR_BAD marker-gone"
+  wr_anchor "$WR_SRC" 60 >/dev/null
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json --apply 2>/dev/null)"
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.ended.length')" = "released:1" ] || WR_BAD="$WR_BAD reapply=$(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')"
+  [ -z "$WR_BAD" ] && check "WR9b an anchor recorded for another worktree path is refused by name instead of promised and then left in place" PASS || check "WR9b root mismatch:$WR_BAD" FAIL
+
+  WR_ERR="$(wr_trail "$WR_TAKER_WT" "$WR_TAKER" 2>&1 >/dev/null)"; WR_RC=$?
+  { [ "$WR_RC" = "1" ] && printf '%s' "$WR_ERR" | grep -qF 'refusing to release this session itself'; } \
+    && check "WR10 a session never releases itself" PASS \
+    || check "WR10 self release: rc=$WR_RC ${WR_ERR:-<empty>}" FAIL
+
+  wr_rel "$WR_MAIN" "$WR_REPO" "$WR_DEAD" 7200 "$WR_ACCT2"
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_MAIN" --json 2>/dev/null)"
+  { [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.source.layout')" = "ready:main-checkout" ] \
+    && wr_json "$WR_OUT" 'o.message' | grep -qF 'main checkout' \
+    && wr_json "$WR_OUT" 'o.message' | grep -qF "not under this session's account, so do it from a Claude window signed in to that account"; } \
+    && check "WR11 a session that ran in the main checkout under another account is ready at once and names the account window to archive it from" PASS \
+    || check "WR11 main checkout: $(wr_json "$WR_OUT" 'o.verdict + " " + o.source.layout + " " + o.message')" FAIL
+
+  wr_rel "$WR_NEST" "$WR_TAKER_WT/.claude/worktrees/nest-cont" "$WR_DEAD" 7200 "$WR_ACCT"
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_NEST" --json 2>/dev/null)"
+  [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.source.layout + ":" + o.blockers.length')" = "ready:gone:0" ] \
+    && check "WR11b a vanished worktree nested under another session's worktree reads as gone, never as the worktree around it" PASS \
+    || check "WR11b nested gone worktree: $(wr_json "$WR_OUT" 'o.verdict + " " + o.source.layout + " " + o.source.worktree + " " + JSON.stringify(o.blockers)')" FAIL
+
+  if [ "$(id -u 2>/dev/null)" = "0" ]; then
+    skip "WR11c running as root reads a mode-000 directory, so the incomplete-scan refusal is unverified in this run"
+  else
+    mkdir -p "$WR_SRC_WT/locked/inner"
+    chmod 000 "$WR_SRC_WT/locked"
+    wr_anchor "$WR_SRC" 60 >/dev/null
+    WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+    WR_ERR="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --apply 2>&1 >/dev/null)"; WR_RC=$?
+    WR_ENDED_NOW="$(wr_anchor_ended)"
+    chmod 755 "$WR_SRC_WT/locked"
+    rm -rf "$WR_SRC_WT/locked"
+    WR_BAD=""
+    [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.blockers.map((b) => b.code).join(",")')" = "blocked:scan-incomplete" ] || WR_BAD="$WR_BAD dry=$(wr_json "$WR_OUT" 'o.verdict + " " + JSON.stringify(o.blockers)')"
+    [ "$WR_RC" = "1" ] || WR_BAD="$WR_BAD rc=$WR_RC"
+    [ -f "$WR_SRC_WT/.worktree-keep" ] || WR_BAD="$WR_BAD marker-gone"
+    [ "$WR_ENDED_NOW" = "1" ] || WR_BAD="$WR_BAD ended-anchors=$WR_ENDED_NOW"
+    [ -z "$WR_BAD" ] && check "WR11c a nested-repository scan that cannot finish refuses the release and leaves the anchor and the marker alone" PASS || check "WR11c incomplete scan:$WR_BAD" FAIL
+  fi
+
+  git -C "$WR_REPO" -c core.fsmonitor=false worktree move "$WR_SRC_WT" "$WR_TAKER_WT/moved-src" >/dev/null 2>&1
+  WR_OUT="$(wr_trail "$WR_TAKER_WT" "$WR_SRC" --json 2>/dev/null)"
+  { [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.source.layout')" = "ready:gone" ] && wr_json "$WR_OUT" 'o.message' | grep -qF 'Nothing is left at its recorded worktree'; } \
+    && check "WR12 after a whole-tree move the old session is ready at once, because nothing is left at its recorded path" PASS \
+    || check "WR12 gone layout: $(wr_json "$WR_OUT" 'o.verdict + " " + o.source.layout')" FAIL
 fi
 
 report

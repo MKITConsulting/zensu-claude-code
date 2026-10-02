@@ -46,7 +46,13 @@ after explicit user confirmation via AskUserQuestion. In non-interactive runs
 ## Phase 0: Locate the plan
 
 1. Plan doc: use the path argument when given; otherwise the newest
-   `${CLAUDE_PROJECT_DIR:-.}/.zensu/plans/*_tdd-*.md` by mtime.
+   `"<project root>"/.zensu/plans/*_tdd-*.md` by mtime, where `<project root>` is
+   the path
+   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root`
+   prints: the root this session's Session Control record is bound to, which
+   after `/zensu:adopt-session --reanchor` is not the working directory. When
+   that command fails, relay its message and ask for the plan path rather than
+   guessing one from the working directory.
 2. **Legacy stop:** if the plan has no `## Requirements` table, report
    "nothing to converge against — the plan predates stable requirement IDs"
    and stop cleanly. No findings, no error.

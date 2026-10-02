@@ -1844,6 +1844,28 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
     return;
   }
   var root = managed.worktreeRoot;
+  function nestedHoldVerdict() {
+    if (typeof mod.nestedHold !== 'function' || !mod.NESTED_HOLDS) return null;
+    try {
+      return mod.nestedHold(root);
+    } catch (e) {
+      return { reason: mod.NESTED_HOLDS.SCAN_INCOMPLETE, scan: worktreeFaultText(e) };
+    }
+  }
+  function nestedHoldRow(held) {
+    if (held === null) return;
+    if (held.reason === mod.NESTED_HOLDS.REPOSITORY) {
+      line(OK, 'worktree: a nested repository in ' + foldPath(root, ' keeps the keep marker once no session anchor holds it — ')
+        + ' keeps the keep marker once no session anchor holds it — the first in name order is ' + foldPath(held.nested.path, ' (')
+        + ' (' + held.nested.kind + '); Claude Desktop then leaves the directory on disk when a session is archived, '
+        + 'until every nested repository in it is moved out or removed, because its cleanup would delete them with the directory');
+    } else {
+      line(WARN, 'worktree: the scan for nested repositories in ' + foldPath(root, ' did not finish (') + ' did not finish ('
+        + held.scan + ') — the keep marker stays once no session anchor holds it, until a scan finishes; '
+        + 'make every directory there readable, or remove dependency or build directories you no longer need, '
+        + 'because an unfinished scan cannot rule out a repository the archive cleanup would delete');
+    }
+  }
   if (env.ZDOC_WORKTREE_KEEP === 'off') {
     var offMarker = null;
     try {
@@ -1858,6 +1880,8 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
       } catch (e) {
         hold = { ok: false, reason: worktreeFaultText(e) };
       }
+      var offNested = nestedHoldVerdict();
+      var afterNested = offNested === null ? '' : ' once nothing else holds it';
       var stranded = 'worktree: keep marker still present although hooks.worktreeKeep=false — ' + foldPath(offMarker.file, ' keeps')
         + ' keeps this directory out of the desktop pool';
       if (!hold.ok) {
@@ -1868,15 +1892,20 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
               + ' expired anchor(s) it read and releases the marker once the directory is back under the bound and nothing else holds it'
             : 'the release pass leaves the marker as it stands'));
       } else if (hold.live.length) {
-        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker');
+        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker' + afterNested);
       } else if (hold.rejected.length) {
         line(WARN, stranded + ' while anchor file(s) this build cannot validate sit beside it ('
           + hold.rejected.map(function (r) { return r.name; }).join(', ')
           + '); remove one by hand only after confirming no session on another plugin version is live there, '
-          + 'then the next SessionStart or SessionEnd in it releases the marker');
+          + 'then the next SessionStart or SessionEnd in it releases the marker' + afterNested);
+      } else if (offNested !== null && offNested.reason === mod.NESTED_HOLDS.REPOSITORY) {
+        line(WARN, stranded + ' while a nested repository sits inside it; the release pass keeps the marker until every nested repository there is moved out or removed');
+      } else if (offNested !== null) {
+        line(WARN, stranded + ' while the scan for nested repositories in it did not finish; the release pass keeps the marker until a scan finishes');
       } else {
         line(WARN, stranded + ' until the next SessionStart or SessionEnd in it releases the marker');
       }
+      nestedHoldRow(offNested);
     } else if (offMarker && offMarker.state === mod.MARKER_STATES.FOREIGN) {
       line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
         + ' was not written by this plugin — left alone, the desktop pool still honours it');
@@ -1915,6 +1944,7 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
     } else if (marker.state === mod.MARKER_STATES.OURS) {
       line(OK, 'worktree: keep marker present in ' + foldPath(root, ' — ') + ' — how many session anchors are live could not be read');
     }
+    nestedHoldRow(marker.state === mod.MARKER_STATES.OURS ? nestedHoldVerdict() : null);
     if (ownKey !== '') {
       var own = mod.anchorVerdict(root, ownKey, nowMs, idleMs);
       if (own.verdict === mod.VERDICTS.MISSING) {

@@ -47,10 +47,10 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites and they differ. `--tdd-complete`'s change count is NOT
 ambient: it resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1359`) and runs every `git` call with the discovery and
-config-injection variables unset (`:1403`, `:1416-1418`). The `--chain-done`
+(`hooks/lib/zensu-log.sh:1381`) and runs every `git` call with the discovery and
+config-injection variables unset (`:1425`, `:1438-1440`). The `--chain-done`
 zero-change terminus still reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` unscrubbed
-(`:2241-2243`) — ambient, with the same `.` fallback. An earlier revision of this
+(`:2263-2265`) — ambient, with the same `.` fallback. An earlier revision of this
 paragraph called the whole row ambient, which contradicted the superseded-fact
 paragraph below in the same section. Which root the ambient variable names in a
 multi-root topology, and what the fallback means when it is unset, is an open
@@ -59,9 +59,9 @@ question (§11).
 **The edit-landing audit already takes a `--project` argument** — it defaults to
 `CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:89`) and
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:877`), while
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:876`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1348`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1370`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -81,9 +81,9 @@ unscrubbed — see the paragraph above.
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
 Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:817`) and rule (C) at the same predicate
-for git targets (`:863`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:712`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
+(`hooks/lib/bash-source-write-parse.js:825`) and rule (C) at the same predicate
+for git targets (`:871`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:716`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today and Bash writes do not. Neither of
@@ -418,10 +418,10 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:877` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:876` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
-| Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1416-1418`, `:2241-2243` |
+| Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:825`, `:871` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1438-1440`, `:2263-2265` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:573`, `:550` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -434,23 +434,24 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2601`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2602`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
 That is the same silent-green failure as §2, relocated into the handover path.
 
 The fix costs no schema, and it adds no write of its own. `trail.mjs`'s only write
-channel is the lineage ledger (`skills/session-trail/SKILL.md:75`) — it had none when
-this paragraph was first written, and the ledger has since given it one, so state what
-the FIX costs rather than what the script lacks. It may read the anchor's workflow document,
+channel of its own is the lineage ledger (`skills/session-trail/SKILL.md:77`), and its
+`release --apply` verb also ends keep anchors through the worktree-keep module — it had
+no write at all when this paragraph was first written, so state what the FIX costs
+rather than what the script lacks. It may read the anchor's workflow document,
 take `codeRoots`, and call `gitState` once per union member, rendering the results
 grouped by label.
 
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4674`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4687`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -464,7 +465,7 @@ Two properties stay as they are, deliberately:
   who trusts that list.
 - **Discovery stays anchor-scoped.** `list` keeps only transcript directories
   whose name starts with the slug of the repo's main checkout
-  (`skills/session-trail/SKILL.md:305`), so from a code root's repository the
+  (`skills/session-trail/SKILL.md:315`), so from a code root's repository the
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
@@ -795,7 +796,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1326`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1348`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.
