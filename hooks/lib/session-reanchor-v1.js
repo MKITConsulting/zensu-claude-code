@@ -56,6 +56,7 @@ const MAX_RECORD_BYTES = 1024 * 1024;
 const REGISTRY_NAME_RE = /^([1-9][0-9]{0,9})\.json$/;
 const LABEL_WIDTH = 17;
 const MAX_LISTED_PATHS = 10;
+const UNPASTABLE_ROOT_RE = /["$`\\]/;
 
 const REANCHOR_REMEDY = Object.freeze({
   [REANCHOR_REFUSALS.SESSION_ID_UNUSABLE]: 'The session identity this command was given is empty, malformed, or a derived Session Control identifier rather than the raw host session id. Nothing was read.',
@@ -693,12 +694,22 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += 'call the source-write gate, the reviewer confinement and the zensu-log.sh workflow verbs\n';
   text += 'anchor on the new worktree, and the recorded root is outside this session from then on.\n';
   text += 'The host does not move: it keeps this session\'s start directory, and the Bash tool\n';
-  text += 'returns there after a command that leaves it. Paths a Zensu skill builds from the working\n';
-  text += 'directory — the plan, run log and edit-landing audit of /zensu:tdd — then name the\n';
-  text += 'recorded root, so run each such command with a leading cd into the new worktree, and\n';
-  text += 'start a fresh session there for a new /zensu:tdd chain. The workflow document under the\n';
-  text += 'recorded root stays where it is; review-evidence leases bound to it are set aside, and\n';
-  text += 'this session\'s tdd-mode, delivery-route and zen-mode markers move with the anchor.\n';
+  text += 'returns there after a command that leaves it, so give your own commands a leading cd into\n';
+  if (UNPASTABLE_ROOT_RE.test(String(verdict.targetRoot))) {
+    text += 'the new worktree, with its path in single quotes. That path holds a double quote, a dollar\n';
+    text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:tdd,\n';
+    text += '/zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot run there:\n';
+    text += 'move the worktree to a path without these characters before you start a chain there.\n';
+  } else {
+    text += 'the new worktree. /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature\n';
+    text += '--chain read the anchor from zensu-log.sh --project-root and run their commands inside it,\n';
+    text += 'and --evidence-run runs there too, so a new /zensu:tdd chain can start in this session.\n';
+  }
+  text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
+  text += 'read plans, config, overlays and templates from the start directory. The workflow\n';
+  text += 'document under the recorded root stays where it is; review-evidence leases bound to it\n';
+  text += 'are set aside, and this session\'s tdd-mode, delivery-route and zen-mode markers move\n';
+  text += 'with the anchor.\n';
   text += '\nNothing has been changed. Run the same command with --confirm to move the anchor.\n';
   return { text, code: 0, proceed: false };
 }
@@ -736,9 +747,21 @@ function renderReanchorOutcome(outcome) {
   text += row('session markers', markers.moved.length > 0 ? `moved (${markers.moved.join(', ')})` : 'none to move');
   for (const fault of markers.faults) text += row('marker fault', safe(fault));
   text += '\nThis session is anchored at the project above from the next tool call onward. The host\n';
-  text += 'still returns the Bash tool to this session\'s start directory, so run Zensu skill commands\n';
-  text += 'with a leading cd into the project above, and start a fresh session there for a new\n';
-  text += '/zensu:tdd chain.\n';
+  text += 'still returns the Bash tool to this session\'s start directory, so give your own commands a\n';
+  if (UNPASTABLE_ROOT_RE.test(String(outcome.projectRoot))) {
+    text += 'leading cd into the project above, with its path in single quotes. That path holds a double\n';
+    text += 'quote, a dollar sign, a backtick or a backslash, which zensu-log.sh --project-root refuses,\n';
+    text += 'so /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
+    text += 'run there: move the worktree to a path without these characters before you start a chain\n';
+    text += 'there. /zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot\n';
+    text += 'still read plans, config, overlays and templates from the start directory.\n';
+  } else {
+    text += 'leading cd into the project above. /zensu:tdd, /zensu:self-review, /zensu:converge,\n';
+    text += '/zensu:verify-feature --chain and --evidence-run work in the project above, so a new\n';
+    text += '/zensu:tdd chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
+    text += '/zensu:cover, /zensu:autopilot and /zensu:pilot still read plans, config, overlays and\n';
+    text += 'templates from the start directory.\n';
+  }
   if (markers.faults.length > 0) {
     text += '\nA session marker that did not move stays under the previous root, where this session no\n';
     text += 'longer reads it. Set that preference again from here.\n';

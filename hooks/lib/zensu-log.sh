@@ -14,6 +14,7 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh"
 
 case "${1:-}" in
   --evidence-run)
@@ -112,6 +113,10 @@ _zensu_evr_prepare() {
   printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
   printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
     "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
+  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope scoped' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix-scoped"
+  printf '%s' "$(zensu_full_suite_marker_state "${CLAUDE_PROJECT_DIR:-}" "${ZENSU_SESSION_KEY:-}")" > "$_evr_dir/full-suite-marker"
+  printf '%s' "$(zensu_evidence_ci_config_json)" > "$_evr_dir/ci-config.json"
   _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
     ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
   return 0
@@ -128,6 +133,7 @@ _zensu_evr_node() {
   ZENSU_EVR_SCOPE="${_evr_scope:-}" \
   ZENSU_EVR_SHOW="${_evr_show:-tail}" \
   ZENSU_EVR_IF_STALE="${_evr_if_stale:-0}" \
+  ZENSU_EVR_LOCAL="${_evr_local:-0}" \
   ZENSU_EVR_ESCAPE="${_evr_escape:-0}" \
   ZENSU_EVR_BASH="${_evr_bash:-bash}" \
   ZENSU_EVR_LABEL="$1" \
@@ -299,6 +305,7 @@ case "${1:-}" in
     _evr_scope=""
     _evr_show="tail"
     _evr_if_stale=0
+    _evr_local=0
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -306,6 +313,7 @@ case "${1:-}" in
         --cmd) evr_cmd="${2:-}"; evr_cmd_seen=true; shift 2 || break ;;
         --show) _evr_show="${2:-}"; shift 2 || break ;;
         --if-stale) _evr_if_stale=1; shift ;;
+        --local) _evr_local=1; shift ;;
         --log) evr_log="${2:-}"; shift 2 || break ;;
         --start) evr_start="${2:-}"; shift 2 || break ;;
         *) echo "zensu-log.sh --evidence-run: unknown argument: $1" >&2; exit 2 ;;
@@ -341,6 +349,18 @@ case "${1:-}" in
       fi
     fi
     exit "$evr_rc"
+    ;;
+  --full-suite-policy)
+    _fsp_refresh=0
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --refresh) _fsp_refresh=1; shift ;;
+        *) echo "zensu-log.sh --full-suite-policy: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
+    exit $?
     ;;
   --acceptance-record|--acceptance-status)
     avr_verb="$1"
@@ -411,6 +431,20 @@ case "${1:-}" in
       exit 2
     }
     printf '%s\n' "$session_val"
+    exit 0
+    ;;
+  --project-root)
+    if [ "$#" -ne 1 ]; then
+      echo "zensu-log.sh --project-root: takes no arguments" >&2
+      exit 2
+    fi
+    case "$CLAUDE_PROJECT_DIR" in
+      (*'"'*|*'$'*|*'`'*|*'\'*)
+        echo "zensu-log.sh --project-root: the bound project root contains a double quote, a dollar sign, a backtick or a backslash, and Zensu skills paste this path into double-quoted shell commands; move the project to a path without these characters" >&2
+        exit 2
+        ;;
+    esac
+    printf '%s\n' "$CLAUDE_PROJECT_DIR"
     exit 0
     ;;
   --phase)
@@ -1288,6 +1322,9 @@ case "${1:-}" in
               fi
             fi
           fi
+          if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
+            echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
+          fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
@@ -1658,7 +1695,7 @@ case "${1:-}" in
           # is a file the session can write, so it bounds accidents, not intent.
           if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]; then
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session (a symlink at that path is refused rather than followed, so it does not count as one). A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
-            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
           fi
@@ -1710,7 +1747,7 @@ case "${1:-}" in
               # `.zensu/logs`, so rendering it raw inside a double-quoted
               # command the model is told to run was the one unscreened value
               # left in this refusal.
-              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"$(_tc_render_stem "${_tc_run_log:-}")\" --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"$(_tc_render_stem "${_tc_run_log:-}")\" --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
               exit 1
             fi
           fi
@@ -1777,7 +1814,7 @@ case "${1:-}" in
                 ;;
             esac
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. ${_tc_remedy_text} Re-run the Phase 6 step 5b audit:" >&2
-            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"<the path zensu-log.sh --project-root prints>\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
           fi
@@ -2472,9 +2509,8 @@ case "$cmd" in
     fi
     # NOT gated on CLAUDE_PROJECT_DIR, and the reason is worth writing down: an
     # earlier revision made `--truncate` refuse without it, which broke the
-    # shipped Phase 2 recipe outright — that variable is absent from the model's
-    # Bash environment on this host, and `{log_file}` is rendered from
-    # `${CLAUDE_PROJECT_DIR:-.}` precisely because it may be. The binding would
+    # Phase 2 recipe of that time outright — that variable is absent from the
+    # model's Bash environment on this host. The binding would
     # also have bought little: an env var the caller sets is not an authority.
     # What actually constrains the destructive mode is the module — the `logs`
     # bucket only, a canonicalized artifact directory,
@@ -2596,10 +2632,8 @@ case "$cmd" in
           const target = mod.resolveArtifactTarget(log, expected);
           if (!target.ok) { refuse(target.reason); return; }
           // CONTAINMENT for the DESTRUCTIVE mode when the caller supplied no
-          // authority, which is the DEFAULT path and not an edge case:
-          // CLAUDE_PROJECT_DIR is absent from the Bash environment the model runs
-          // on this host, which is exactly why the shipped recipe renders
-          // {log_file} from ${CLAUDE_PROJECT_DIR:-.}.
+          // authority: CLAUDE_PROJECT_DIR is absent from the Bash environment the
+          // model runs on this host, so every caller that does not pass it lands here.
           // (No apostrophes anywhere in this block: it lives inside a
           // single-quoted node -e program, where one terminates the shell string
           // and turns the next brace into a bash syntax error.)
@@ -2640,14 +2674,12 @@ case "$cmd" in
           // `cd <sibling> && … append --truncate --log <sibling>/.zensu/logs/x.log`
           // satisfies this check and is judged by no gate at any point.
           //
-          // AND IT IS VACUOUS FOR THE SHIPPED SPELLING, which an earlier revision
+          // AND IT IS VACUOUS FOR A RELATIVE `--log`, which an earlier revision
           // of this paragraph got backwards. `resolveArtifactTarget` is called
           // with no `base`, so a RELATIVE `--log` resolves against the cwd and the
           // project root is then derived from that same resolution — this check
-          // compares the cwd against itself and cannot fail. `skills/tdd/SKILL.md`
-          // renders `{log_file}` from `${CLAUDE_PROJECT_DIR:-.}`, and that
-          // variable is unset on some hosts, which is exactly the relative form
-          // (R28 pins it as succeeding). So the drifted-cwd shape is the one shape
+          // compares the cwd against itself and cannot fail (R28 pins the relative
+          // form as succeeding). So the drifted-cwd shape is the one shape
           // this cannot see: a drifted cwd REDEFINES the root it would be judged
           // against.
           //

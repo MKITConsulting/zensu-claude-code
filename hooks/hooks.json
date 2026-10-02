@@ -197,7 +197,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\"",
+            "timeout": 90
           }
         ]
       }

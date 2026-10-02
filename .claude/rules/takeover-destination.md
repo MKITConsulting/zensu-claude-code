@@ -57,6 +57,18 @@ review round, which is the drift this file records about itself everywhere else.
 the unvetted-tree stop, the `-c core.fsmonitor=false` non-carry, the same-repository bound, the
 destination-containment instruction for `<path>`, the COST, and the measured-pid line. One
 fenced command is one copy button, so anything printed after it is read after it has run.
+The release step is NOT a member of this route, and it lived here for one review round, which
+is the defect worth recording: it told only a reader who MOVED to run `release`, while the
+default create route — the one this file calls the default — left the old session's keep anchor
+live and its worktree on disk at the next archive with nothing saying so. `RELEASE_AFTER` now
+closes `worktreeAdvice` on BOTH legs, after the carry-over, and in `show`'s survey form too, so
+every carrier ends with it whichever route the reader takes. It is prose only — no two-space
+line, so `T35_EXPECT`, `recipePlaceholders` and the fence split are untouched — and its wording
+is bounded to what `release` checks: it names its refusals, and it REPORTS uncommitted, unpushed
+and ignored files rather than refusing over them. The unit case `every arm on both legs closes
+with the release step, whichever form renders it` holds both legs, both forms and the closing
+position; SKILL.md flow 3 step 4's closing paragraph carries the same instruction in its own
+words, kept in step by hand.
 
 **The history is worth keeping because the claim was FALSE TWICE, in opposite directions.**
 A first round moved one precondition up and left two below. A second round wrote "Three

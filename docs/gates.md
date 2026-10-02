@@ -32,7 +32,10 @@ and for the adoption at most the literals `--restore-root` and `--confirm`, each
 at most once. Neither literal takes a VALUE, which is what keeps a destination out
 of every invocation this gate admits. Every hook on the `Bash`
 matcher plus the all-tool capability gate must allow, because a deny from any one
-of them wins. The full account is in
+of them wins. The adoption itself no longer needs the command: every hook adopts a
+compatible-schema record automatically on its first failed bind
+(`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
+command is the report and the manual retry for a refusal. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
 
 ## CLI Write-Gate
@@ -667,9 +670,16 @@ escaped no gate, because the document a gate would have read was already gone. S
 
 **Neither writer path is user-consented, and this document said otherwise for one release.**
 The adopt path requires the literal `--confirm` in argv, which is a token the model supplies
-to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is; the
-"wait for the user to say yes" rule lives in `skills/adopt-session/SKILL.md`. The
-`SessionStart` self-heal above requires no token at all. Do not restate the writer as
+to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is — and
+since every hook adopts a compatible-schema record automatically on a failed bind, the
+ordinary adoption path carries no consent step at all: provenance (the `RUNTIME_ADOPTED`
+history entry and the superseded record) and schema equality are the controls. The
+`SessionStart` self-heal above requires no token at all. What IS prose-backed on the manual
+path: `skills/adopt-session/SKILL.md` tells the model to ask the user and wait before
+`--confirm` on the two uses that lose or override something — the workflow-baseline
+rebuild on an `already-served` record whose baseline is missing, and an `opted-out`
+refusal, where the operator switched the automatic path off — and to run it directly for
+every other refusal. That is an instruction, not a gate. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
 ## Vanished Recorded Project Root
@@ -881,13 +891,25 @@ reads the newest record, never a claim in the run log.
   plus `| run: <command>` when running the suite again is the remedy. Passing states: `pass`
   (the newest completed full run on the current tree exited 0; earlier red runs on the same tree
   add a `flaky` line), `pass-tree-unverified` (exit 0, but the tree could not be fingerprinted,
-  and the cause says why), `not-applicable` (the project is not a git repository or work tree,
-  or git is not installed) and `escaped`. Refusing states: `missing`, `running`, `failed`,
-  `interrupted`, `stale` (lists up to ten changed paths), `mutated-during-run` (the suite changed
-  files while it ran), `command-mismatch` (the run used another command than
-  `evidence.fullSuiteCommand`), `invalid` (the newest record does not validate) and
-  `unavailable` (the store or git could not be read). A refusal exits `1` and leaves the chain
-  open.
+  and the cause says why), `deferred-ci` (see CI mode below), `not-applicable` (the project is
+  not a git repository or work tree, or git is not installed) and `escaped`. Refusing states:
+  `missing`, `running`, `failed`, `interrupted`, `stale` (lists up to ten changed paths),
+  `mutated-during-run` (the suite changed files while it ran), `command-mismatch` (the run used
+  another command than `evidence.fullSuiteCommand`), `invalid` (the newest record does not
+  validate) and `unavailable` (the store or git could not be read). A refusal exits `1` and
+  leaves the chain open.
+- **CI mode.** In a chain whose full suite runs in the CI pull-request pipeline
+  ([Full Suite in CI](configuration.md#full-suite-in-ci)), the verdict reads the newest run of
+  each command on the current tree, `full` and `scoped` alike. A red, interrupted or mutating run
+  refuses. A green `full` run reads `pass`. Otherwise green `scoped` runs read `deferred-ci`, a
+  passing state whose cause says the full suite has not run anywhere for this change yet: CI runs
+  it when a pull request is opened or updated. A second line, `FULL SUITE — CI contract | …`,
+  names the workflow, the job, the last pull-request run and who decided. Runs only on an older
+  tree read `stale`, no test run reads `missing`, and every remedy renders `--scope scoped`.
+  `--evidence-run --scope full` is refused in such a chain unless `--local` is passed. A chain
+  keeps the runner it began with, so a switch to CI in the middle of a chain never relaxes its
+  terminus; a chain that chose CI but closes locally prints `FULL SUITE — local runner | …` with
+  the reason. The same `required` and `advisory` modes apply.
 - **Order.** A closed chain short-circuits first. A claimed ticket is then compared, read-only,
   with the session's consumed ticket; a wrong ticket is refused by the transition and never
   reaches the verdict. The verdict runs before the transition, and the pass line and the

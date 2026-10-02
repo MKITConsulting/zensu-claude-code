@@ -641,10 +641,12 @@ check "S10 a review-fix round passes the round's pre-existing dirty set" "$(verd
 printf '%s' "$BLOCK" | grep -qF 'ls-files --others --exclude-standard'
 [ $? -ne 0 ]
 check "S11 the enumeration recipe is gone from the prose (the library owns it)" "$(verdict $?)"
+printf '%s' "$BLOCK" | grep -qF -- '--project "{project_root}"'
+check "S12 the audit anchors --project on the bound project root, never the working directory" "$(verdict $?)"
 
 echo "== Skill: surrounding contract intact =="
-grep -qF 'BASELINE_SHA=$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD)' "$SKILL_TDD"
-check "P1 Phase 0 still captures the baseline SHA the library consumes" "$(verdict $?)"
+grep -qF 'BASELINE_SHA=$(git -C "{project_root}" rev-parse --verify --quiet HEAD)' "$SKILL_TDD"
+check "P1 Phase 0 still captures the baseline SHA the library consumes, from the bound project root" "$(verdict $?)"
 grep -F 'On Critical/Important findings' "$SKILL_TDD" | grep -qF 'Edit Landing Audit'
 check "P2 every review-fix round re-runs the audit over that round's claims" "$(verdict $?)"
 grep -qF 'Mechanical or bulk replacement — confirm by RE-READING the result, never by the test run.' "$SKILL_TDD"

@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.22.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.23.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -85,9 +85,9 @@ direct, autopilot or pilot answer decides only that plan or request), and
 
 ## What's included
 
-### Skills (29)
+### Skills (30)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (30 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (31 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -97,6 +97,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:tdd` | The guided implementation workflow: build, verify every acceptance criterion live, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
 | `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session |
+| `/zensu:full-suite` | Run full test suites in the verified CI pull-request pipeline instead of locally, for this repository or this session; affected tests stay local |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
@@ -111,12 +112,12 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over, and trace where a session was continued across windows and accounts |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over and then release the old one so it can be archived, and trace where a session was continued across windows and accounts |
 | `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default |
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
-| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run, or move its anchor to a sibling worktree of the same repository (`--reanchor`) |
+| `/zensu:adopt-session` | Report a refused automatic adoption after a plugin update landed mid-run and retry it by hand, re-create a vanished recorded project root, or move the session's anchor to a sibling worktree of the same repository (`--reanchor`) |
 | `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
@@ -222,7 +223,7 @@ is unpinned).
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
-| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, and how to continue in a nested worktree when it happened anyway |
+| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing

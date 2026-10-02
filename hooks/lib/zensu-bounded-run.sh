@@ -60,10 +60,10 @@
 # never returns is still unbounded on a host without `timeout`/`gtimeout`.
 #
 # WHAT THE UNBOUNDED ARM COSTS DIFFERS PER CALLER, and stating only the Stop-path answer
-# understated it. On the Stop path it costs a DIAGNOSTIC: the Stop hook's own registration
-# in `hooks.json` carries no `timeout` key, unlike several sibling entries, so nothing in
-# this repository bounds that hook either and whether the host applies a default is
-# unverified. On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
+# understated it. On the Stop path it costs a DIAGNOSTIC: the whole Stop hook runs under
+# the internal deadline in `hooks/lib/zensu-stop-deadline.sh`, backed by a host `timeout`
+# in `hooks.json`, so a hung child here ends with the hook rather than holding the session.
+# On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
 # so the host kills the whole hook instead, and that turn loses the entire injected
 # directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
 # only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is

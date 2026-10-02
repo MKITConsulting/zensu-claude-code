@@ -1844,6 +1844,28 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
     return;
   }
   var root = managed.worktreeRoot;
+  function nestedHoldVerdict() {
+    if (typeof mod.nestedHold !== 'function' || !mod.NESTED_HOLDS) return null;
+    try {
+      return mod.nestedHold(root);
+    } catch (e) {
+      return { reason: mod.NESTED_HOLDS.SCAN_INCOMPLETE, scan: worktreeFaultText(e) };
+    }
+  }
+  function nestedHoldRow(held) {
+    if (held === null) return;
+    if (held.reason === mod.NESTED_HOLDS.REPOSITORY) {
+      line(OK, 'worktree: a nested repository in ' + foldPath(root, ' keeps the keep marker once no session anchor holds it — ')
+        + ' keeps the keep marker once no session anchor holds it — the first in name order is ' + foldPath(held.nested.path, ' (')
+        + ' (' + held.nested.kind + '); Claude Desktop then leaves the directory on disk when a session is archived, '
+        + 'until every nested repository in it is moved out or removed, because its cleanup would delete them with the directory');
+    } else {
+      line(WARN, 'worktree: the scan for nested repositories in ' + foldPath(root, ' did not finish (') + ' did not finish ('
+        + held.scan + ') — the keep marker stays once no session anchor holds it, until a scan finishes; '
+        + 'make every directory there readable, or remove dependency or build directories you no longer need, '
+        + 'because an unfinished scan cannot rule out a repository the archive cleanup would delete');
+    }
+  }
   if (env.ZDOC_WORKTREE_KEEP === 'off') {
     var offMarker = null;
     try {
@@ -1858,6 +1880,8 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
       } catch (e) {
         hold = { ok: false, reason: worktreeFaultText(e) };
       }
+      var offNested = nestedHoldVerdict();
+      var afterNested = offNested === null ? '' : ' once nothing else holds it';
       var stranded = 'worktree: keep marker still present although hooks.worktreeKeep=false — ' + foldPath(offMarker.file, ' keeps')
         + ' keeps this directory out of the desktop pool';
       if (!hold.ok) {
@@ -1868,15 +1892,20 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
               + ' expired anchor(s) it read and releases the marker once the directory is back under the bound and nothing else holds it'
             : 'the release pass leaves the marker as it stands'));
       } else if (hold.live.length) {
-        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker');
+        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker' + afterNested);
       } else if (hold.rejected.length) {
         line(WARN, stranded + ' while anchor file(s) this build cannot validate sit beside it ('
           + hold.rejected.map(function (r) { return r.name; }).join(', ')
           + '); remove one by hand only after confirming no session on another plugin version is live there, '
-          + 'then the next SessionStart or SessionEnd in it releases the marker');
+          + 'then the next SessionStart or SessionEnd in it releases the marker' + afterNested);
+      } else if (offNested !== null && offNested.reason === mod.NESTED_HOLDS.REPOSITORY) {
+        line(WARN, stranded + ' while a nested repository sits inside it; the release pass keeps the marker until every nested repository there is moved out or removed');
+      } else if (offNested !== null) {
+        line(WARN, stranded + ' while the scan for nested repositories in it did not finish; the release pass keeps the marker until a scan finishes');
       } else {
         line(WARN, stranded + ' until the next SessionStart or SessionEnd in it releases the marker');
       }
+      nestedHoldRow(offNested);
     } else if (offMarker && offMarker.state === mod.MARKER_STATES.FOREIGN) {
       line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
         + ' was not written by this plugin — left alone, the desktop pool still honours it');
@@ -1915,6 +1944,7 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
     } else if (marker.state === mod.MARKER_STATES.OURS) {
       line(OK, 'worktree: keep marker present in ' + foldPath(root, ' — ') + ' — how many session anchors are live could not be read');
     }
+    nestedHoldRow(marker.state === mod.MARKER_STATES.OURS ? nestedHoldVerdict() : null);
     if (ownKey !== '') {
       var own = mod.anchorVerdict(root, ownKey, nowMs, idleMs);
       if (own.verdict === mod.VERDICTS.MISSING) {
@@ -4410,6 +4440,22 @@ function parentheticalWriter() {
   };
 }
 
+// ONE sentence for the three binding rows whose remedy is an adoption — the
+// lineage row, the pruned row and the combined one. They used to spell it
+// separately, and the combined row was left on the manual-first wording ("to see
+// whether the running installation may take the record over") a release after the
+// bind began adopting on its own. Four things it has to get right, each of which
+// one spelling of it got wrong: reaching the row means the automatic adoption
+// already ran and did not bind the session; the read-only report prints a refusal
+// — or names the superseded record file an interrupted adoption left behind —
+// only for a record the adoption REFUSES; an ADOPTABLE answer there has TWO causes
+// and not one, the opt-out (which governs the automatic path only) and an adoption
+// that did not complete (a lock timeout, or a fault inside the adoption itself),
+// so reading it as the opt-out alone sends a user whose adoption timed out looking
+// for a config key nobody set; and the opt-out case needs the user's yes before
+// --confirm, which the deny scopes say and a row that omitted it undid.
+var ADOPTION_ROW_REMEDY = 'Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused, opted out or did not complete; run /zensu:adopt-session — it prints the same refusal in full and names a superseded record file when one blocks the adoption; when it reports the record as adoptable instead, the automatic path was either opted out (hooks.sessionAutoAdopt is false; ask the user before going further) or did not complete (a lock timeout, or a fault inside the adoption itself) — then /zensu:adopt-session --confirm to retry by hand';
+
 // The Session Control binding rows, and the reason this function exists at all rather
 // than a plain string per verdict: several of those rows carry MORE THAN ONE folded
 // slot, and a fold failure is stated once per ROW. It is the family's first consumer of
@@ -4455,12 +4501,13 @@ function bindingLine() {
     // row existed the state fell through to `unbound` above, whose line asserts
     // "no valid Session Control record": false, and it sends the user hunting for
     // a record sitting intact in plugin data. Naming both versions is what makes
-    // the cause checkable rather than a claim the user has to take on faith, and
-    // this is the only binding row whose remedy repairs the session in place.
+    // the cause checkable rather than a claim the user has to take on faith. It is
+    // one of THREE binding rows whose remedy repairs the session in place: the
+    // pruned row and the combined one below share ADOPTION_ROW_REMEDY with it.
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
         + versions()
-        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
         // The limit belongs on THIS row too, not only on the combined one. The row
         // is reachable for a session whose recorded project root is also gone —
         // the doctor falls back to it whenever the third-fact probe cannot answer
@@ -4489,7 +4536,7 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY);
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
@@ -4504,10 +4551,12 @@ function bindingLine() {
         + one(env.ZDOC_BINDING_PROJECT_ROOT)
         + ' is gone and the running Zensu installation declares an incompatible lineage'
         + versions()
-        // OFFERED, never promised — the same hedge the row above carries and for
-        // the same reason: this state is reachable on a DOWNGRADE, which adoption
-        // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there. To write again, run /zensu:adopt-session --restore-root AFTERWARDS: it re-creates exactly that directory and rebuilds the workflow document in one step, where a bare mkdir leaves the second half missing and every tool denied. The ORDER matters — that repair requires the running installation to serve the record, which the adoption above is what establishes. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Starting a fresh Claude Code session remains the alternative. If the directory was moved rather than deleted, its state still exists there, and moving it back is better than re-creating it');
+        // The shared sentence says the adoption already RAN and did not bind the
+        // session — this state is reachable on a DOWNGRADE, which adoption refuses
+        // outright as executing-runtime-older — and the orphan limit follows it,
+        // because an adoption here still leaves the session without a write anchor.
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
+        + '. An adoption unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there. To write again, run /zensu:adopt-session --restore-root AFTERWARDS: it re-creates exactly that directory and rebuilds the workflow document in one step, where a bare mkdir leaves the second half missing and every tool denied. The ORDER matters — that repair requires the running installation to serve the record, which the adoption is what establishes. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Starting a fresh Claude Code session remains the alternative. If the directory was moved rather than deleted, its state still exists there, and moving it back is better than re-creating it');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     // The wrapper's OWN "could not resolve it" verdict, and the unset value the
@@ -5175,6 +5224,84 @@ function claimTopologyRow(projectRoot, ownKey) {
     + ' repository the claims name, or land the work in the anchor.');
 }
 
+// The RUNTIME_ADOPTED provenance row, and the surface other carriers had already
+// promised: the adoption notice points the user at /zensu:doctor, and until this
+// row nothing here rendered an adoption at all — so the one durable record of a
+// repair the user never confirmed had no reader. Same rules as the rebuild row:
+// PRESENT arm only, the phase token from the LOADED core, silence when no entry
+// exists.
+//
+// OK and not WARN, deliberately. An adoption is a repair that SUCCEEDED — the
+// session binds again and no workflow state was lost — so a row that withheld the
+// green summary for the rest of every updated session would be trained away, the
+// failure this file records for the implementing-turns row. The rebuild row is
+// WARN because a rebuild IS a loss.
+//
+// The reason is PARSED, never echoed. It comes out of a document the session can
+// write, this report is relayed by a model, and the only thing the row needs from
+// it is a version pair — so anything that is not the core's own prefix plus two
+// versions of the safe shape renders as unrecorded rather than verbatim.
+//
+// ONE bound travels with it and the row states it rather than implying coverage:
+// an adoption made while no workflow document existed wrote no entry, so it can
+// never appear here, and neither can one whose provenance write failed.
+function runtimeAdoptedRow(core, projectRoot, key, sharedRead) {
+  var phase = (core && typeof core.ADOPTION_HISTORY_PHASE === 'string' && core.ADOPTION_HISTORY_PHASE)
+    ? core.ADOPTION_HISTORY_PHASE
+    : '';
+  if (phase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for adoption '
+      + 'provenance — the Session Control core in ' + foldPath(pluginDir(), ' exports no adoption ')
+      + ' exports no adoption '
+      + 'phase token. That is a missing check, not an all-clear.');
+    return;
+  }
+  // Shares the sibling rows' read — see the note in `baselineRebuiltRow`, including
+  // the cost it names: an unreadable document produces one WARN per row.
+  var read = sharedWorkflowRead(core, projectRoot, key, sharedRead);
+  if (read.error) {
+    line(WARN, 'state: this session\'s workflow document was not checked for adoption '
+      + 'provenance — it did not read back (' + (read.code || 'unreadable')
+      + '). That is a missing check, not an all-clear.');
+    return;
+  }
+  var state = read.state;
+  var history = (state && Array.isArray(state.history)) ? state.history : [];
+  var adoptions = history.filter(function (entry) {
+    return entry && entry.phase === phase;
+  });
+  if (!adoptions.length) return;
+  var last = adoptions[adoptions.length - 1];
+  // The stamp takes the same slot and the same row decision as the two sibling rows:
+  // `ts` is a field of a document the session can write, and this report is relayed
+  // by a model. The reason is not a slot here because it is never displayed — only
+  // the version pair parsed out of it is, and that is held to the version shape.
+  var stamp = provenanceSlot((last && typeof last.ts === 'string') ? last.ts : '', '');
+  var rendered = provenanceRendering(stamp, { text: '', present: false, ok: true, bracket: false });
+  // The GRAMMAR comes from the core that writes the entry: `parseAdoptionReason` holds
+  // both halves to the version shape and answers null for anything else, so a reader
+  // here cannot drift from the writer, and the pair is rendered with the core's own
+  // separator. A core without the parser renders the pair as unrecorded.
+  var reason = (last && typeof last.reason === 'string') ? last.reason : '';
+  var parsed = typeof core.parseAdoptionReason === 'function' ? core.parseAdoptionReason(reason) : null;
+  var from = parsed ? parsed.recorded : '';
+  var span = parsed && typeof core.formatAdoptionPair === 'function'
+    ? ' (' + core.formatAdoptionPair(parsed.recorded, parsed.executing) + ')'
+    : ' (the version pair is not recorded in a readable form)';
+  // The NAME comes from the core that writes it, never from a suffix spelled here.
+  var kept = '';
+  if (from !== '' && typeof core.supersededRecordName === 'function') {
+    try { kept = core.supersededRecordName(key, from); } catch (e) { kept = ''; }
+  }
+  line(OK, 'state: this session\'s Session Control record was ADOPTED across a plugin update — '
+    + adoptions.length + (adoptions.length === 1 ? ' entry' : ' entries')
+    + ', most recently at ' + rendered.when + span + '. The session binds again and no workflow state was lost'
+    + (kept !== '' ? '; the previous record was kept beside the new one as ' + kept : '')
+    + '; any review-evidence lease minted before the update was set aside, so a review that was '
+    + 'in flight then has to be re-gathered. An adoption made while no workflow document existed '
+    + 'wrote no entry and cannot appear here — the kept record is then its only evidence.' + rendered.note);
+}
+
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
@@ -5262,6 +5389,9 @@ function stateBlock(nowMs) {
       // is the half a user is standing in. Both rows render: they are different
       // findings and neither substitutes for the other.
       projectRootRestoredRow(ownCore, projectRoot, ownKey, ownRead);
+      // An ADOPTED record is the third provenance of the same document, read from
+      // the same shared read.
+      runtimeAdoptedRow(ownCore, projectRoot, ownKey, ownRead);
       return;
     }
     if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {
