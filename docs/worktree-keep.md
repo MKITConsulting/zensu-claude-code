@@ -126,6 +126,57 @@ If a Zensu review chain is armed in the session, close it in the shared director
 chain's completion gate, its edit-landing audit and its run log are anchored on the session
 record's root, which is the directory that was taken, not the nested worktree.
 
+## Releasing a session whose work moved away
+
+A session whose work another session took over, for example with `/zensu:session-trail` after an
+account switch, often ends without a SessionEnd hook ageing its anchor. The anchor then stays
+live for the rest of its idle window, and the marker stays with it. Measured on 2026-09-29: two
+sessions archived after a session-trail takeover still had live anchors days later, and Claude
+Desktop logged `[WorktreePool] <name> has .worktree-keep; leaving on disk` when it archived them.
+Read in the code of Claude Desktop 2.19675.0 and not run: the agent tool `delete_session`
+refuses a worktree that carries the marker.
+
+`/zensu:session-trail release <selector>`, run from the session that continues the work, lifts
+that protection on the old session's behalf. `retireAnchors` in `hooks/lib/worktree-keep-v1.js`
+ends the old session's live anchor the way SessionEnd would have: it sets `endedAt` and keeps the
+record as the branch baseline. `reconcileKeep`, the one owner of the marker's lifecycle, then
+removes the marker when nothing else holds it. `retireAnchors` acts only inside an app-managed
+worktree, ends only the live anchors it is given whose recorded root is that worktree and whose
+last-seen stamp is still the one the caller measured, never creates a marker and never reaps an
+anchor. An anchor of a known session that is no longer running is ended together with the old
+session's own, and the output names that session. A dry run reports what would change; `--apply`
+makes the change, checks that no live anchor and no marker are left, and then prints that the old
+session can now be archived or removed. The verb refuses, and changes nothing, while:
+
+- the continuing session or another live session works inside the old worktree;
+- the old session is busy, or still registered with a queue it could not measure, until the user
+  gives one go/no-go and the verb runs again with `--force`;
+- the session registry cannot be read completely, so a running session could read as one that
+  ended;
+- an anchor that no session it can find owns, one this build cannot validate, or one recorded for
+  another worktree path still holds the marker;
+- the marker was not written by this plugin, or is not a plain file;
+- a nested repository other than a submodule of the worktree's own repository sits inside the
+  old worktree, or the scan for one did not finish.
+
+It does not refuse over uncommitted, unpushed or ignored files in the old worktree. It reports
+them when it prints that the old session can be archived or removed, because an archive deletes
+them with the worktree.
+
+The nested-repository refusal exists because the app's cleanup does not spare what it did not
+create. Read in the 2.19675.0 code and not run: the cleanup judges a worktree by its
+`git status`, removes it whole, and protects only the worktrees the app created itself. A
+worktree of another repository nested inside, as in the multi-repo `.worktrees/<repo>/<branch>`
+layout, is usually ignored by the outer repository, so the outer tree reads as clean and the
+nested one is deleted with it. `nestedRepositories` in the module is the scan. It walks the
+worktree without following a symlink and recognizes a repository by its `.git` entry, or a bare
+one by its `HEAD`, `objects` and `refs`. It stops at every nested repository root and names its
+kind, except that it walks on into a real submodule: a gitfile whose target lies in the
+worktree's own `modules` directory and has no `commondir` file. A linked worktree of a
+submodule's repository has that file and counts as a nested worktree. The scan answers
+`ok: false` instead of a clean result when it runs past its entry bound or cannot read a
+directory.
+
 ## Configuration
 
 | Key | Default | Effect |
@@ -158,7 +209,15 @@ plugin version is live there.
   the marker protects nothing; the drift notice and the doctor row still report a takeover.
 - Whether the desktop app delivers `SessionEnd` when it stops a session's process is unverified.
   A session that ends without it keeps its worktree out of the pool until the idle window
-  elapses; the sibling sweep at every later SessionStart in the same repository clears it.
+  elapses; the sibling sweep at every later SessionStart in the same repository clears it. Two
+  sessions archived after a takeover on 2026-09-29 kept live anchors for days, so an archive
+  inside the window leaves the worktree on disk; `release` above is the way to lift it early.
+- `release` attributes an anchor only to a session it finds in the config root it reads. An
+  anchor of any other session counts as unattributed and keeps the old worktree protected until
+  its idle window passes.
+- Nothing but `release` checks for nested repositories. When an anchor ages through SessionEnd,
+  the idle window or the flag-off release pass, the marker goes whether or not a nested
+  repository is still inside, and an archive after that can delete it with the worktree.
 - The notice also fires when the session switched branches itself, once per context; the text
   says so and names the way to record a new baseline.
 - A paused rebase or bisect suspends the check while HEAD is detached, whoever started it, so a
