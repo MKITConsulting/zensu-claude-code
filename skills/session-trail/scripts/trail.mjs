@@ -1598,14 +1598,15 @@ function instanceId(value, width) {
 // identical machine state. Two carriers of one command disagreeing about a number
 // the skill documents is worse than the number being large.
 let LIVE_CACHE = null;
+const LIVE_GAPS = { directory: null, records: 0 };
 
 function liveRegistry() {
   if (LIVE_CACHE) return LIVE_CACHE;
   const map = new Map();
   LIVE_CACHE = map;
-  if (!dirExists(SESSIONS)) return map;
+  if (!dirExists(SESSIONS)) { LIVE_GAPS.directory = 'missing'; return map; }
   let regFiles;
-  try { regFiles = fs.readdirSync(SESSIONS); } catch { SKIPPED += 1; return map; }
+  try { regFiles = fs.readdirSync(SESSIONS); } catch { SKIPPED += 1; LIVE_GAPS.directory = 'unreadable'; return map; }
   for (const f of regFiles) {
     if (!f.endsWith('.json')) continue;
     let o;
@@ -1613,7 +1614,7 @@ function liveRegistry() {
     // naming how many records were skipped — so a corrupt registry file that
     // silently drops a LIVE session is exactly the state that promise exists to
     // make visible, and it is indistinguishable from an idle machine without it.
-    try { o = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8')); } catch { SKIPPED += 1; continue; }
+    try { o = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8')); } catch { SKIPPED += 1; LIVE_GAPS.records += 1; continue; }
     // Identity first, pid SECOND and under ONE rule. Testing `!o.pid` here and a
     // bad pid further down split the accounting: `pid: 0`, `pid: ""` and
     // `pid: false` were dropped in silence while `pid: "abc"` and `pid: -1` were
@@ -1633,7 +1634,7 @@ function liveRegistry() {
     // session that does not exist. Only a number or a string can be a pid spelling.
     const raw = o.pid;
     const pid = (typeof raw === 'number' || typeof raw === 'string') ? Number(raw) : NaN;
-    if (!Number.isInteger(pid) || pid <= 0) { SKIPPED += 1; continue; }
+    if (!Number.isInteger(pid) || pid <= 0) { SKIPPED += 1; LIVE_GAPS.records += 1; continue; }
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
     if (!alive) continue;
@@ -2310,9 +2311,9 @@ function surveyVerdict(r) {
 // test-session-trail-skill.sh T18 asserts against the emitted set. One key is not
 // a level: `PROBABLY_FREE_UNMEASURED` replaces `PROBABLY_FREE`'s entry while
 // `isUnmeasuredProbablyFree` holds and no --force answered it, because the flow-3
-// table routes that case to the go/no-go `BUSY` costs. That predicate is the one
-// both routers ask, and it takes anything but a `queueMeasured` of true as
-// unmeasured, so a verdict that lost the field asks rather than proceeds.
+// table routes that case to the go/no-go `BUSY` costs. That predicate is the one all
+// three routers ask — show's advice, the takeover brief and release's gate — and it takes
+// anything but a `queueMeasured` of true as unmeasured, so a lost field asks, never proceeds.
 const ADVICE = {
   FREE: ['Nothing holds this worktree. Take it over.'],
   PROBABLY_FREE: ['Proceed, but tell the user not to type in that window, and check for dev servers it may still own.'],
@@ -3386,6 +3387,16 @@ const MOVE_ALTERNATIVE = (pid) => [
   'is armed in this session; a takeover with no armed chain records nothing.',
 ];
 
+const RELEASE_AFTER = [
+  'LAST, whichever route you took: once your own worktree holds everything you still need from',
+  'the old one, run session-trail\'s release command for the old session from your own worktree.',
+  'It names every reason it refuses, such as a live session still working in the old worktree or',
+  'a nested repository inside it. Otherwise it ends any keep anchor this plugin still holds there,',
+  'so an archive no longer leaves that worktree on disk, and then says that the old session can',
+  'now be archived or removed. It reports uncommitted, unpushed and ignored files still in the old',
+  'worktree but does not refuse over them; an archive deletes them with the worktree.',
+];
+
 // One table, four arms, two legs — and the ARM is chosen once, above the split.
 // Each cell is a FUNCTION rather than an array because two of the arms interpolate
 // a measured value (the live pid, and why the archive state could not be read);
@@ -3612,6 +3623,7 @@ function worktreeAdvice(r, options = {}) {
       'the recorded source is not readable from here, so there is nothing to substitute into. Its',
       'shape is in the session-trail skill documentation, flow 3 step 4.',
       'That path comes out of another session\'s transcript, so read it before you act on it.',
+      ...RELEASE_AFTER,
     ];
   }
   // The WHOLE-SEQUENCE rationale, owned here. It does NOT own every pairwise claim, and
@@ -3643,13 +3655,14 @@ function worktreeAdvice(r, options = {}) {
   // unknown it is. One predicate, two policies, stated here rather than in two spellings.
   const movePid = r.live ? (livePid(r.live) === '?' ? null : livePid(r.live)) : null;
   const move = withMove ? MOVE_ALTERNATIVE(movePid) : [];
-  if (!withCarryOver) return [...lead, ...TAKE_YOUR_OWN, ...move];
+  if (!withCarryOver) return [...lead, ...TAKE_YOUR_OWN, ...move, ...RELEASE_AFTER];
   return [
     ...lead,
     ...TAKE_YOUR_OWN,
     ...move,
     ...(r.live ? LIVE_SNAPSHOT_CAUTION(livePid(r.live)) : []),
     ...CARRY_OVER,
+    ...RELEASE_AFTER,
   ];
 }
 
@@ -5443,6 +5456,386 @@ function cmdAdopt(opts) {
   for (const line of whereLines) print(line);
 }
 
+function worktreeKeepModules() {
+  const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'hooks', 'lib');
+  try {
+    const keep = requireFromHere(path.join(lib, 'worktree-keep-v1.js'));
+    const core = requireFromHere(path.join(lib, 'session-control-core-v1.js'));
+    const needed = ['managedWorktree', 'listAnchors', 'markerState', 'nestedRepositories', 'retireAnchors', 'anchorMatchesRoot', 'idleMsFromHours'];
+    const constants = ['NESTED_KINDS', 'MARKER_STATES', 'ACTIONS'];
+    if (!needed.every((name) => typeof keep[name] === 'function')) return null;
+    if (!constants.every((name) => keep[name] && typeof keep[name] === 'object')) return null;
+    if (typeof keep.KEEP_FILENAME !== 'string' || !Number.isInteger(keep.DEFAULT_IDLE_HOURS) || !Number.isInteger(keep.MAX_NESTED_SCAN_ENTRIES)) return null;
+    if (typeof core.sessionKey !== 'function') return null;
+    return { keep, core };
+  } catch {
+    return null;
+  }
+}
+
+function keepKeyOf(core, sessionId) {
+  try { return core.sessionKey(sessionId); } catch { return null; }
+}
+
+function pathSpellings(p) {
+  const abs = trimDir(path.resolve(String(p)));
+  let real = abs;
+  try { real = trimDir(fs.realpathSync.native(abs)); } catch { real = abs; }
+  return real === abs ? [abs] : [abs, real];
+}
+
+function insideOrSame(root, p) {
+  if (typeof p !== 'string' || p.trim() === '' || !path.isAbsolute(p)) return false;
+  for (const outer of pathSpellings(root)) {
+    for (const inner of pathSpellings(p)) {
+      const rel = path.relative(outer, inner);
+      if (rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))) return true;
+    }
+  }
+  return false;
+}
+
+function firstExistingDir(p) {
+  let dir = path.resolve(String(p));
+  for (let i = 0; i < 64; i += 1) {
+    if (dirExists(dir)) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+  return null;
+}
+
+function innermostManagedRoot(p) {
+  let dir = path.resolve(String(p));
+  for (let i = 0; i < 64; i += 1) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    if (path.basename(parent) === CONTINUATION_DIR[1] && path.basename(path.dirname(parent)) === CONTINUATION_DIR[0]) return dir;
+    dir = parent;
+  }
+  return null;
+}
+
+function releaseSubject(recordedWorktree, recordedCwd, keep) {
+  const recorded = recordedWorktree || recordedCwd || null;
+  const own = recordedCwd ? innermostManagedRoot(recordedCwd) : null;
+  const near = own ? (dirExists(own) ? own : null) : recordedCwd ? firstExistingDir(recordedCwd) : null;
+  const managed = near ? keep.managedWorktree(near) : null;
+  if (managed) return { layout: 'linked', root: managed.worktreeRoot, managed: true, recorded };
+  if (recorded && dirExists(recorded)) {
+    let entry = null;
+    try { entry = fs.lstatSync(path.join(recorded, '.git')); } catch { entry = null; }
+    if (entry && entry.isFile()) return { layout: 'linked', root: recorded, managed: false, recorded };
+    if (entry && entry.isDirectory()) return { layout: 'main-checkout', root: recorded, managed: false, recorded };
+    return { layout: 'not-a-worktree', root: recorded, managed: false, recorded };
+  }
+  return { layout: 'gone', root: null, managed: false, recorded };
+}
+
+function keepOwners(core, opts) {
+  const owners = new Map();
+  const live = liveRegistry();
+  for (const row of buildIndex({ ...opts, live: false }).rows) {
+    const key = keepKeyOf(core, row.sessionId);
+    if (key) owners.set(key, { sessionId: row.sessionId, live: live.has(row.sessionId) });
+  }
+  for (const sid of live.keys()) {
+    const key = keepKeyOf(core, sid);
+    if (key) owners.set(key, { sessionId: sid, live: true });
+  }
+  return owners;
+}
+
+function selfAccount() {
+  const id = selfSessionId();
+  const app = id ? ccdIndex().get(id) : null;
+  if (app && app.accountUuid) return app.accountUuid;
+  const host = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim();
+  return host ? accountForHostSession(host) : null;
+}
+
+function releaseArchiveLines(r, subject, v, state, others) {
+  const tag = sessionTag(r.sessionId);
+  const archived = r.app ? r.app.archived === true : null;
+  const plural = (n, one, many) => (n === 1 ? one : many);
+  const lines = [];
+  const linked = subject.layout === 'linked';
+  const ignored = linked && Array.isArray(state.ignored) ? state.ignored : [];
+  if (linked && state.dirty > 0) {
+    lines.push(`${archived ? `The old session ${tag} is already archived.` : `The old session ${tag} can now be archived.`} Removing it would also delete the ${state.dirty} uncommitted ${plural(state.dirty, 'change', 'changes')} left in its worktree, so carry over what you still need first.`);
+  } else if (linked && state.dirty === null) {
+    lines.push(`${archived ? `The old session ${tag} is already archived.` : `The old session ${tag} can now be archived.`} Its worktree status could not be read, so run git status there before you remove the session.`);
+  } else {
+    lines.push(archived ? `The old session ${tag} is already archived and can now be removed.` : `The old session ${tag} can now be archived or removed.`);
+  }
+  if (subject.layout === 'gone') lines.push(`Nothing is left at its recorded worktree ${flatPath(subject.recorded)}, so an archive has no worktree there to remove.`);
+  if (subject.layout === 'main-checkout') lines.push(`It ran in the main checkout ${flatPath(subject.root)} rather than in a worktree of its own, so an archive has no worktree to remove.`);
+  if (subject.layout === 'not-a-worktree') lines.push(`Its recorded directory ${flatPath(subject.root)} is not a git worktree, so an archive has no worktree to remove.`);
+  if (linked && archived) lines.push('Claude Desktop kept its worktree on disk when it was archived; removing the session lets the app clean that worktree up now.');
+  if (linked && state.unpushed > 0) lines.push(`Its branch has ${state.unpushed} ${plural(state.unpushed, 'commit', 'commits')} on no remote yet; push ${plural(state.unpushed, 'it', 'them')} first if you still need ${plural(state.unpushed, 'it', 'them')}.`);
+  if (ignored.length > 0) {
+    const shown = ignored.slice(0, 8).map((p) => flatPath(p)).join(', ');
+    const more = ignored.length > 8 ? ` and ${ignored.length - 8} more` : '';
+    lines.push(`Its worktree also holds ${ignored.length} ignored ${plural(ignored.length, 'path', 'paths')} that git status does not list and an archive deletes with it: ${shown}${more}. Copy what you still need first.`);
+  }
+  for (const other of others) {
+    lines.push(`Session ${sessionTag(other)} also worked in this worktree recently and is not running; once the old session is archived, resuming ${sessionTag(other)} finds its directory gone.`);
+  }
+  if (r.live && !archived) lines.push(`Its process is still registered — measured: ${flatPath(v.measuredReason)} Archiving stops it, so do not type in that window before you archive it.`);
+  const theirs = r.app && r.app.accountUuid ? r.app.accountUuid : null;
+  const mine = selfAccount();
+  if (theirs && mine && theirs !== mine) {
+    lines.push(`It runs under ${accountLabel(theirs)}, not under this session's account, so do it from a Claude window signed in to that account; the session tools here cannot see it.`);
+  } else if (theirs && mine) {
+    lines.push('It runs under the same account as this session, so its entry is in this window\'s session list.');
+  } else if (theirs) {
+    lines.push(`It runs under ${accountLabel(theirs)}. This session's own account could not be read, so do it from a Claude window signed in to that account.`);
+  } else if (r.app) {
+    lines.push('Its desktop record names no account, so do it in the window it ran in.');
+  } else {
+    lines.push('Its desktop record could not be read, so do it in the window it ran in.');
+  }
+  return lines;
+}
+
+function cmdRelease(opts) {
+  const r = hydrate(resolve(opts, opts._[1], 'a session never releases itself'));
+  const selfId = selfSessionId();
+  if (selfId !== null && r.sessionId === selfId) fail('refusing to release this session itself — run release from the session that continues its work');
+  const mods = worktreeKeepModules();
+  if (!mods) fail('hooks/lib/worktree-keep-v1.js or hooks/lib/session-control-core-v1.js could not be loaded, so the keep protection cannot be measured — the plugin tree is incomplete');
+  const { keep, core } = mods;
+  const now = Date.now();
+  const idleMs = keep.idleMsFromHours();
+  const subject = releaseSubject(r.wt, r.cwd, keep);
+  const v = activityVerdict(r, opts.force);
+  const blockers = [];
+  const anchors = [];
+  const toEnd = [];
+  let nested = null;
+  let markerBefore = null;
+  let state = { dirty: null, unpushed: null, ignored: null };
+  const live = liveRegistry();
+  if (LIVE_GAPS.directory !== null || LIVE_GAPS.records > 0) {
+    const why = LIVE_GAPS.directory !== null
+      ? `the directory is ${LIVE_GAPS.directory}`
+      : `${LIVE_GAPS.records} ${LIVE_GAPS.records === 1 ? 'record' : 'records'} could not be read`;
+    blockers.push({ code: 'registry-incomplete', text: `The session registry in ${flatPath(SESSIONS)} could not be read completely (${why}), so a session that is still running could be taken for one that ended. Nothing is released until it reads cleanly.` });
+  }
+  if (v.level === 'BUSY') {
+    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Take one go/no-go from the user, and on yes run release again with --force.` });
+  } else if (isUnmeasuredProbablyFree(v) && !v.authorized) {
+    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Take one go/no-go from the user, and on yes run release again with --force.` });
+  }
+  const hoursLeft = (record) => {
+    const hours = Number.isInteger(record.idleHours) ? record.idleHours : keep.DEFAULT_IDLE_HOURS;
+    return Math.max(1, Math.ceil((record.lastSeenAt + hours * 3600000 - now) / 3600000));
+  };
+  if (subject.layout === 'linked') {
+    const root = subject.root;
+    const callers = [process.cwd(), process.env.ZENSU_PROJECT_ROOT, process.env.CLAUDE_PROJECT_DIR];
+    if (selfId !== null && live.has(selfId)) callers.push(live.get(selfId).cwd);
+    if (callers.some((p) => insideOrSame(root, p))) {
+      blockers.push({ code: 'caller-inside', text: `This session works inside ${flatPath(root)}. Archiving the old session would delete the directory you are working in, so continue in a worktree of your own first.` });
+    }
+    for (const [sid, rec] of live) {
+      if (sid === r.sessionId || sid === selfId || !insideOrSame(root, rec.cwd)) continue;
+      blockers.push({ code: 'session-inside', text: `Session ${sessionTag(sid)} (pid ${livePid(rec)}) is still working inside ${flatPath(root)}.` });
+    }
+    nested = keep.nestedRepositories(root);
+    const blocking = nested.nested.filter((n) => n.kind !== keep.NESTED_KINDS.SUBMODULE);
+    if (!nested.ok) {
+      const why = nested.reason === 'scan-budget'
+        ? `it stopped after ${nested.entries} directory entries, past its bound of ${keep.MAX_NESTED_SCAN_ENTRIES}. Removing dependency or build directories you no longer need there shrinks the tree`
+        : `${flatPath(nested.reason)}. Make that directory readable`;
+      blockers.push({ code: 'scan-incomplete', text: `The scan for nested repositories in ${flatPath(root)} did not finish: ${why}, then run release again. Until it finishes, release cannot rule out a repository an archive would delete.` });
+    }
+    if (blocking.length) {
+      const one = blocking.length === 1;
+      const shown = blocking.slice(0, 12).map((n) => flatPath(n.path)).join(', ');
+      const more = blocking.length > 12 ? ` and ${blocking.length - 12} more` : '';
+      blockers.push({ code: 'nested-repositories', text: `${blocking.length} nested ${one ? 'repository is' : 'repositories are'} still inside ${flatPath(root)}: ${shown}${more}. Claude Desktop's cleanup does not spare a nested repository it did not create, so archiving the old session could delete ${one ? 'it' : 'them'} with its worktree. Move ${one ? 'it' : 'them'} out or remove ${one ? 'it' : 'them'} on purpose, then run release again.` });
+    }
+    markerBefore = keep.markerState(root).state;
+    if (markerBefore === keep.MARKER_STATES.FOREIGN) {
+      blockers.push({ code: 'foreign-marker', text: `The ${keep.KEEP_FILENAME} in ${flatPath(root)} was not written by this plugin, so release leaves it alone; remove it by hand if you placed it there.` });
+    } else if (markerBefore === keep.MARKER_STATES.REFUSED) {
+      blockers.push({ code: 'marker-refused', text: `The ${keep.KEEP_FILENAME} in ${flatPath(root)} is not a plain file, so release leaves it alone.` });
+    } else if (markerBefore === keep.MARKER_STATES.OURS && !subject.managed) {
+      blockers.push({ code: 'marker-unmanaged', text: `A ${keep.KEEP_FILENAME} of this plugin sits in ${flatPath(root)}, which is not under a .claude/worktrees directory, so release cannot reconcile it; remove it by hand once nothing works there.` });
+    }
+    if (subject.managed) {
+      const listing = keep.listAnchors(root, now, idleMs);
+      if (!listing.ok) blockers.push({ code: 'anchors-unreadable', text: `The keep anchors in ${flatPath(root)} could not be listed (${flatPath(listing.reason)}).` });
+      const owners = keepOwners(core, opts);
+      const sourceKey = keepKeyOf(core, r.sessionId);
+      const selfKey = selfId !== null ? keepKeyOf(core, selfId) : null;
+      for (const entry of listing.live) {
+        const known = owners.get(entry.key);
+        const owner = entry.key === sourceKey ? 'source'
+          : entry.key === selfKey ? 'self'
+            : known ? (known.live ? 'live-session' : 'ended-session') : 'unattributed';
+        const ownerId = owner === 'source' ? r.sessionId : owner === 'self' ? selfId : known ? known.sessionId : null;
+        const endable = owner === 'source' || owner === 'ended-session';
+        const rootMatches = keep.anchorMatchesRoot(entry.record, root);
+        const ends = endable && rootMatches;
+        anchors.push({ key: entry.key, owner, sessionId: ownerId, state: 'live', lastSeenAt: new Date(entry.record.lastSeenAt).toISOString(), action: ends ? 'end' : 'keep' });
+        if (ends) {
+          toEnd.push({ key: entry.key, lastSeenAt: entry.record.lastSeenAt });
+        } else if (endable) {
+          blockers.push({ code: 'anchor-root-mismatch', text: `A keep anchor of session ${sessionTag(ownerId)} in ${flatPath(root)} was recorded for another worktree path, so release cannot end it; it stops holding the marker in about ${hoursLeft(entry.record)} h.` });
+        } else if (owner === 'self') {
+          blockers.push({ code: 'caller-inside', text: `This session holds a live keep anchor in ${flatPath(root)}, so it works there.` });
+        } else if (owner === 'live-session') {
+          blockers.push({ code: 'session-inside', text: `Session ${sessionTag(ownerId)} is still running and holds a live keep anchor in ${flatPath(root)}.` });
+        } else {
+          blockers.push({ code: 'unattributed-anchor', text: `A keep anchor in ${flatPath(root)} belongs to no session this tool can find. It was last refreshed ${ago(entry.record.lastSeenAt)} ago and stops holding the marker in about ${hoursLeft(entry.record)} h.` });
+        }
+      }
+      for (const entry of listing.rejected) {
+        anchors.push({ key: entry.key, owner: null, sessionId: null, state: 'rejected', reason: entry.reason, action: 'keep' });
+        blockers.push({ code: 'rejected-anchor', text: `A keep anchor in ${flatPath(root)} could not be validated (${flatPath(entry.reason)}) and holds the marker; /zensu:doctor names it under "worktree:".` });
+      }
+    }
+    if (opts.git) {
+      const status = git(root, ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain', '--ignored']);
+      const count = git(root, ['--no-optional-locks', 'rev-list', '--count', 'HEAD', '--not', '--remotes']);
+      const rows = status === null ? null : status.split('\n').filter(Boolean);
+      const zensuHoldsOnlyState = () => {
+        try { return fs.readdirSync(path.join(root, '.zensu')).every((name) => name === 'state'); } catch { return false; }
+      };
+      const ownPath = (p) => p === keep.KEEP_FILENAME || p === '.zensu/state/' || (p === '.zensu/' && zensuHoldsOnlyState());
+      state = {
+        dirty: rows === null ? null : rows.filter((row) => !row.startsWith('!! ')).length,
+        unpushed: count !== null && /^\d+$/.test(count) ? Number(count) : null,
+        ignored: rows === null ? null : rows.filter((row) => row.startsWith('!! ')).map((row) => row.slice(3)).filter((p) => !ownPath(p)),
+      };
+    }
+  }
+  const seen = new Set();
+  const blocked = blockers.filter((b) => {
+    const k = `${b.code}\n${b.text}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const title = oneLine(flatPath(r.title || r.lastPrompt), 70);
+  const head = (label) => `${label.padEnd(11)}${sessionTag(r.sessionId)} "${title}"`;
+  const pad = ' '.repeat(11);
+  const where = flatPath(subject.root || subject.recorded || '(unknown)');
+  const endedOthers = anchors.filter((a) => a.action === 'end' && a.owner === 'ended-session' && a.sessionId);
+  const unarchivedOthers = endedOthers.map((a) => a.sessionId).filter((sid) => {
+    const app = ccdIndex().get(sid);
+    return !(app && app.archived === true);
+  });
+  const archiveLines = releaseArchiveLines(r, subject, v, state, unarchivedOthers);
+  const archiveText = archiveLines.map((line, i) => `${i === 0 ? 'ARCHIVE'.padEnd(11) : pad}${line}`);
+  const endedNoun = (n) => `${n} keep ${n === 1 ? 'anchor' : 'anchors'}`;
+  const blockedText = (endedCount) => [
+    `${head('BLOCKED')}   ${where}`,
+    ...blocked.map((b) => `${pad}- ${b.text}`),
+    endedCount > 0
+      ? `${pad}${endedNoun(endedCount)} ended, but the old worktree stays protected until these are resolved.`
+      : `${pad}Nothing was released. The old session keeps its protection until these are resolved.`,
+  ];
+  const otherNotes = (verb, keys) => endedOthers
+    .filter((a) => keys === null || keys.includes(a.key))
+    .map((a) => `${pad}${verb} the keep anchor of session ${sessionTag(a.sessionId)}, which is not running`);
+  const needsWrite = subject.layout === 'linked' && subject.managed && (toEnd.length > 0 || markerBefore === keep.MARKER_STATES.OURS);
+  let verdict;
+  let lines;
+  let applied = false;
+  let ended = [];
+  let markerAfter = markerBefore;
+  let failed = false;
+  if (blocked.length) {
+    verdict = 'blocked';
+    lines = blockedText(0);
+    failed = opts.apply === true;
+  } else if (!needsWrite) {
+    verdict = 'ready';
+    const why = subject.layout === 'linked' ? `no keep marker of this plugin holds ${where}` : 'there is no keep protection to lift';
+    lines = [head('READY'), `${pad}${why}`, ...archiveText];
+  } else if (!opts.apply) {
+    verdict = 'releasable';
+    lines = [
+      `${head('RELEASABLE')}   ${where}`,
+      `${pad}would end ${endedNoun(toEnd.length)} and remove the ${keep.KEEP_FILENAME} marker; nothing was changed`,
+      ...otherNotes('would also end', null),
+      `${pad}Run release again with --apply. It then tells you that the old session can be archived or removed.`,
+    ];
+  } else {
+    const result = keep.retireAnchors(subject.root, toEnd, now, idleMs);
+    applied = true;
+    ended = result.ended;
+    markerAfter = keep.markerState(subject.root).state;
+    const after = keep.listAnchors(subject.root, now, idleMs);
+    const allEnded = toEnd.every((t) => ended.includes(t.key));
+    const lifted = result.managed && allEnded && markerAfter === keep.MARKER_STATES.ABSENT && after.ok && after.live.length === 0;
+    if (lifted) {
+      verdict = 'released';
+      lines = [
+        `${head('RELEASED')}   ${where}`,
+        `${pad}ended ${endedNoun(ended.length)}; the ${keep.KEEP_FILENAME} marker is gone`,
+        ...otherNotes('also ended', ended),
+        ...archiveText,
+      ];
+    } else {
+      verdict = 'blocked';
+      failed = true;
+      const ownerOf = (key) => {
+        const a = anchors.find((x) => x.key === key);
+        return a && a.sessionId ? `session ${sessionTag(a.sessionId)}` : 'an anchor';
+      };
+      const reasons = [
+        ...(result.managed ? [] : ['the worktree is no longer app-managed']),
+        ...result.skipped.map((s) => `${ownerOf(s.key)}: ${s.reason}`),
+        ...result.faults.filter((f) => f.startsWith('keep:')),
+        ...(!after.ok ? [`anchors unreadable: ${after.reason}`] : after.live.length > 0 ? [`${after.live.length} live ${after.live.length === 1 ? 'anchor remains' : 'anchors remain'}`] : []),
+        ...(markerAfter !== keep.MARKER_STATES.ABSENT ? [`marker ${markerAfter}`] : []),
+      ];
+      blocked.push({ code: 'marker-kept', text: `The keep protection of ${where} stayed in place after ${endedNoun(ended.length)} ended (${flatPath(reasons.join('; ') || 'unknown')}).` });
+      lines = blockedText(ended.length);
+    }
+  }
+  const payload = {
+    verdict,
+    applied,
+    blockers: blocked,
+    message: verdict === 'released' || verdict === 'ready' ? archiveLines.join(' ') : null,
+    source: {
+      sessionId: r.sessionId,
+      title: r.title ? oneLine(flatPath(r.title), 200) : null,
+      recordedWorktree: subject.recorded,
+      worktree: subject.root,
+      layout: subject.layout,
+      managed: subject.managed,
+      archived: r.app ? r.app.archived === true : null,
+      accountUuid: r.app && r.app.accountUuid ? r.app.accountUuid : null,
+      pid: r.live ? r.live.pid : null,
+      level: v.level,
+      measuredLevel: v.measuredLevel,
+      reason: v.reason,
+    },
+    nested: nested ? { ok: nested.ok, reason: nested.reason || null, entries: nested.entries, repositories: nested.nested } : null,
+    anchors,
+    ended,
+    marker: { before: markerBefore, after: markerAfter },
+    worktreeState: state,
+    selfSkipped: SELF_SKIPPED_ID,
+  };
+  if (opts.json) print(JSON.stringify({ ...payload, skipped: SKIPPED }, null, 2));
+  else for (const line of lines) print(line);
+  if (failed) {
+    const what = ended.length > 0
+      ? `the keep protection stayed for ${sessionTag(r.sessionId)} after ${endedNoun(ended.length)} ended`
+      : `nothing was released for ${sessionTag(r.sessionId)}`;
+    process.stderr.write(`session-trail: ${what}: ${blocked.map((b) => b.code).join(', ')}\n`);
+    exitAfterOwnDiagnostic();
+  }
+}
+
 function lineageDiagnose(opts) {
   const probes = ccdStoreCandidates().map((c) => ({ ...c, exists: dirExists(c.dir) }));
   const resolved = probes.find((p) => p.exists) || null;
@@ -6039,8 +6432,8 @@ function scriptPath() { return fileURLToPath(import.meta.url); }
 
 // The two tables are adjacent because the invariant between them is the whole
 // point: every dispatched command needs a flag row, or it accepts every flag in
-// the namespace again. Keys drive the usage string too, so an eleventh command cannot
-// be added to one and forgotten in the other. (TEN is the count today; the two numerals
+// the namespace again. Keys drive the usage string too, so a twelfth command cannot
+// be added to one and forgotten in the other. (ELEVEN is the count today; the two numerals
 // nearby were written when it was nine and are corrected here rather than left to be
 // re-derived by the next reader.)
 const COMMANDS = {
@@ -6052,12 +6445,13 @@ const COMMANDS = {
   takeover: cmdTakeover,
   lineage: cmdLineage,
   adopt: cmdAdopt,
+  release: cmdRelease,
   label: cmdLabel,
   'window-probe': (opts) => print(JSON.stringify({ ...windowProbe(fs.readFileSync(0, 'utf8')), skipped: SKIPPED }, null, 2)),
 };
 
 // The flag namespace is global — parseArgs accepts every flag for every command —
-// while the rules about them lived inside two handlers. The dispatcher routes TEN,
+// while the rules about them lived inside two handlers. The dispatcher routes ELEVEN,
 // so `takeover x --forget y --apply` parsed both, recorded an edge, and named
 // neither: exactly the silence the mode-exclusivity guard refuses INSIDE `lineage`,
 // surviving one layer up. The rule belongs where the command name is decided.
@@ -6075,7 +6469,7 @@ const COMMANDS = {
 // the gap was a promise the code did not keep.
 //
 // `--config-dir` is consumed by `resolveRoots` before dispatch and `--json` selects the
-// output shape, so both are read by every verb; listing them ten times would be ten
+// output shape, so both are read by every verb; listing them eleven times would be eleven
 // copies of one row.
 const GLOBAL_FLAGS = ['--json', '--config-dir'];
 
@@ -6119,6 +6513,7 @@ const COMMAND_FLAGS = {
   // `ZENSU_SESSION_LINEAGE=off`. It changes a documented flag contract with its own pins
   // (`L56c`/`L56d`), so it belongs in its own change rather than inside this one.
   adopt: ['--reason', ...SCAN_FLAGS],
+  release: ['--apply', '--force', ...SCAN_FLAGS],
   // No selector scan at all: a label is keyed by account or window, so `resolve()` is
   // never reached and none of the scan flags decides anything here.
   label: ['--remove', '--self'],

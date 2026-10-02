@@ -254,11 +254,45 @@ is consulted before any count is rendered, because `listAnchors` answers its fai
 lists and a green row claiming zero live anchors over a directory it never read is the inversion
 the sibling doctor rows exist to prevent.
 
+**A fourth caller ends anchors, and it is not a hook: `release` in
+`skills/session-trail/scripts/trail.mjs`.** It calls `retireAnchors` on behalf of a session whose
+work moved away and which never aged its own anchor. Measured on 2026-09-29, that is the case
+behind two archived worktrees Claude Desktop left on disk with `[WorktreePool] <name> has
+.worktree-keep; leaving on disk`; the anchors still read `endedAt: null` days later.
+`retireAnchors` is the only export whose PURPOSE is to end another session's live anchor —
+`writeAnchor` and `removeAnchor` accept any session key, and `reconcileKeep` reaps other sessions'
+expired anchors in its own worktree, so do not read "only" as "only writer". Its bounds are its
+whole contract: an app-managed worktree only, the named targets only, each an anchor that is live,
+whose recorded root is this worktree and whose `lastSeenAt` is still the stamp the caller
+measured (a target without one is refused as `expected-stamp-missing`, a refreshed one as
+`changed-since-listing`), `endedAt` set and the record kept as the baseline, and the marker
+reconciled with `create: false` and `reap: false`. Everything that decides WHETHER to call it
+lives in `cmdRelease`, not in the module: the registry-completeness, caller and live-session
+checks, the go/no-go for a BUSY or an unmeasured source, the owner attribution of each live
+anchor, the root-mismatch and nested-repository refusals, and the post-apply re-listing that
+reports `released` only when no live anchor and no marker are left. `nestedRepositories` is the
+module's scan for that refusal. It never follows a symlink, recognizes a bare repository by
+`HEAD`, `objects` and `refs`, stops at each nested root except a real submodule, which it walks
+into, exempts nothing itself (the caller exempts `NESTED_KINDS.SUBMODULE`), and answers `ok: false`
+past `MAX_NESTED_SCAN_ENTRIES` or on an unreadable directory, so a partial walk never reads as a
+clean tree. `SUBMODULE` means a gitfile whose target lies in the worktree's own `modules`
+directory and carries no `commondir` file; every linked worktree's admin directory carries one, so
+a worktree of a submodule's repository is a `WORKTREE` and blocks. The refusal exists because the app's archive cleanup, read in the
+2.19675.0 bundle and not run, protects only the worktrees the app created, so a gitignored nested
+worktree of another repository goes with the outer one. `trail.mjs` requires the module LAZILY
+through `worktreeKeepModules`, which checks every export it uses by name and type: a rename here
+makes `release` fail with its "could not be loaded" message and leaves every other session-trail
+verb working. The `WR*` family in `tests/structure/test-session-trail-verdict.sh` drives the verb
+end to end against a real base repository, two linked worktrees and a nested worktree of a second
+repository; the module half has its own unit cases.
+
 **Coupled sites that move together:** `KEEP_FILENAME` / `KEEP_SOURCE_BUILD` / `ANCHOR_PREFIX` /
 `ANCHOR_NAME_RE` / `DEFAULT_IDLE_HOURS` / `MAX_IDLE_HOURS` / `MAX_SWEEP_DIRS` /
 `REFRESH_INTERVAL_MS` / `MAX_ANCHOR_FILES` / `UNRENDERABLE_BRANCH` / `branchValueOk` /
 `MARKER_STATES` / `VERDICTS` / `IGNORE_STATES` / `ANCHOR_REMEDIES` / `BRANCH_STATES` / `ACTIONS` /
-`EXCLUDE_COMMENT` and the three verbs in the module; `anchorTargetCheck` and `anchorRemedy` (the
+`EXCLUDE_COMMENT` and the three verbs in the module; `MAX_NESTED_SCAN_ENTRIES` / `NESTED_KINDS`
+with `nestedRepositories` and `retireAnchors`, whose one consumer is `worktreeKeepModules` /
+`cmdRelease` in `skills/session-trail/scripts/trail.mjs`; `anchorTargetCheck` and `anchorRemedy` (the
 pre-check `writeAnchor` applies, and the remedy the doctor names from it);
 `PAUSED_MARKERS`, `pausedState` / `baselineFor` (git's paused-operation file
 formats, `head-name` holding `refs/heads/<branch>` and `BISECT_START` holding a short branch name
@@ -333,7 +367,8 @@ reviewer denial note; no strict key set; three hooks ADDED and none removed, ren
 re-matched, every one of them the ADVISORY shape the hook-inventory exemption names (their only
 model-facing output is `additionalContext`, and they return no `permissionDecision`); two config
 keys read through the PERMISSIVE `zensu_hook_enabled` / `_zensu_config_bounded_int` readers; no
-attestation change.
+attestation change. The `release` additions keep that verdict: two functions and two constants
+exported, no anchor field added (`endedAt` was already optional), and no hook added or re-matched.
 
 **Known gaps, accepted and named:**
 
@@ -342,7 +377,17 @@ attestation change.
   `KEEP_SOURCE_BUILD` is the thing to re-verify against the bundle after every desktop update.
 - **`SessionEnd` delivery by the desktop app is UNVERIFIED.** A session that dies without it keeps
   its worktree out of the pool until its anchor ages past the idle window, and only a later
-  SessionStart in the SAME base repository sweeps it. Say "unverified", never "handled".
+  SessionStart in the SAME base repository sweeps it. Say "unverified", never "handled". Two
+  sessions archived after a takeover on 2026-09-29 kept live anchors for days, so an archive
+  inside the window leaves the worktree on disk; `release` lifts it early, from the continuing
+  session, and only when that session runs it.
+- **Only `release` refuses over a nested repository.** An anchor that ages through SessionEnd,
+  the idle window or the flag-off release pass drops the marker whether or not a nested
+  repository is still inside, and an archive after that can delete it with the worktree. Holding
+  the marker while a nested repository remains is the uncompromised fix and is NOT taken: it
+  puts a bounded tree walk on the reconcile path, which runs on every prompt.
+- **`release` attributes an anchor only to a session in the config root it reads.** An anchor of
+  any other session reads as unattributed and blocks the release until its idle window passes.
 - **The marker and the anchor are files in a session-writable directory.** They separate a
   worktree a live session holds from one nobody holds; they authenticate nothing, and a session
   can hold any worktree in its repository by writing a marker there by hand. The anchor's branch
