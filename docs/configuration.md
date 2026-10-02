@@ -164,7 +164,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 ### Full-Suite Evidence
 
-`zensu-log.sh --evidence-run` runs a test command itself and records the real exit code. A `full` or `scoped` run is also bound to the exact working tree it ran on, so a later edit makes the record stale. Records live in the plugin's private data directory (`$CLAUDE_PLUGIN_DATA/evidence-run/v1/`): the reviewer and neutral subagents cannot read them, and Edit/Write cannot reach them.
+`zensu-log.sh --evidence-run` runs a test command itself and records the real exit code. A `full` or `scoped` run is also bound to a fingerprint of the project's working tree, taken together with the nested work tree it ran in when there is one, so a later edit makes the record stale. Records live in the plugin's private data directory (`$CLAUDE_PLUGIN_DATA/evidence-run/v1/`): the reviewer and neutral subagents cannot read them, and Edit/Write cannot reach them.
 
 ```bash
 CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" --evidence-run --scope full
@@ -181,7 +181,7 @@ CLAUDE_PLUGIN_DATA="<plugin data>" bash "<plugin root>/hooks/lib/zensu-log.sh" -
 
 The exit status is the command's own. A signal maps to `128 + n`, and a signal to the runner stops the whole process group and records the run as `interrupted`. A usage error, a refused command or an unavailable store exits `2`. The last output line is one summary: `zensu evidence-run: scope=… exit=… duration=…s tree=… record=… cmd=…`, with the command passed through the secret scan.
 
-The tree fingerprint uses a temporary index, so the real index is never touched. `.zensu/` is excluded, so the run's own artifacts never make it stale. Over 20000 untracked files or 512 MiB of untracked content, or when `git` fails, the record carries no tree and names the reason. Retention keeps the newest 40 records per session and scope, so acceptance runs never evict a full-suite record, sweeps sessions idle for 14 days, and caps each output log at 5 MiB by cutting its middle.
+The tree fingerprint uses a temporary index, so the real index is never touched. `.zensu/` is excluded, so the run's own artifacts never make it stale. A `full` or `scoped` run whose cwd, or the target of a leading literal `cd <dir>` in its command, lies in a git work tree nested inside the project's own work tree, such as a worktree under `.claude/worktrees/`, is fingerprinted over the project and that work tree together (see [Full-Suite Gate](gates.md#full-suite-gate)); an `acceptance` run keeps the project's fingerprint. Over 20000 untracked files or 512 MiB of untracked content, or when `git` fails, the record carries no tree and names the reason. Retention keeps the newest 40 records per session and scope, so acceptance runs never evict a full-suite record, sweeps sessions idle for 14 days, and caps each output log at 5 MiB by cutting its middle.
 
 | Key | Default | Effect |
 |---|---|---|

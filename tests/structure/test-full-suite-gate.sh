@@ -312,4 +312,60 @@ else
   ERR
 fi
 
+printf '.zensu/\n.session-control-test/\n.claude/worktrees/\n' > "$PROJ/.gitignore"
+git -C "$PROJ" add .gitignore
+git -C "$PROJ" -c commit.gpgsign=false commit -qm ignore-worktrees
+NESTED="$PROJ/.claude/worktrees/wt"
+git -C "$PROJ" worktree add -q "$NESTED" -b wt 2>/dev/null
+if [ -d "$NESTED" ] && arm "fsg-nested" "$PROJ"; then
+  (cd "$NESTED" && run_full --cmd 'true')
+  printf 'edited in the worktree\n' > "$NESTED/tracked.txt"
+  chain_done; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree of the project and \.claude/worktrees/wt (record er1_[0-9_a-f]*); files changed since: \.claude/worktrees/wt/tracked\.txt | ' "$WORK/err"; then
+    check "F16 an edit in a nested ignored worktree after its green run refuses as stale" PASS
+  else
+    check "F16 an edit in a nested ignored worktree after its green run refuses as stale (rc=$RC)" FAIL
+    ERR
+  fi
+  (cd "$NESTED" && run_full --cmd 'true' --if-stale)
+  chain_done; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
+    check "F17 --if-stale in the nested worktree re-runs the suite and the terminus then closes" PASS
+  else
+    check "F17 --if-stale in the nested worktree re-runs the suite and the terminus then closes (rc=$RC)" FAIL
+    ERR
+  fi
+else
+  check "F16 arm a ticket-bound chain beside a nested worktree" FAIL
+fi
+
+NESTED_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$NESTED" 2>/dev/null)"
+if [ -n "$NESTED_HOST" ] && arm "fsg-cd" "$PROJ"; then
+  run_full --cmd "cd '$NESTED_HOST' && true"
+  printf 'edited again in the worktree\n' > "$NESTED/tracked.txt"
+  chain_done; RC=$?
+  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+    && grep -q '^FULL SUITE — stale | the newest green full-suite run measured an older tree of the project and \.claude/worktrees/wt (record er1_[0-9_a-f]*); files changed since: \.claude/worktrees/wt/tracked\.txt | ' "$WORK/err"; then
+    check "F18 a run from the project root that cds into a nested worktree sees an edit there as stale" PASS
+  else
+    check "F18 a run from the project root that cds into a nested worktree sees an edit there as stale (rc=$RC)" FAIL
+    ERR
+  fi
+  run_full --cmd "cd '$NESTED_HOST' && true" --if-stale
+  chain_done; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(done_flag)" = "true" ] && grep -q '^FULL SUITE — pass | ' "$WORK/err"; then
+    check "F19 --if-stale with the same cd re-runs the suite and the terminus then closes" PASS
+  else
+    check "F19 --if-stale with the same cd re-runs the suite and the terminus then closes (rc=$RC)" FAIL
+    ERR
+  fi
+else
+  check "F18 arm a ticket-bound chain for a cd into a nested worktree" FAIL
+fi
+
+GATES_DOC="$PLUGIN_DIR/docs/gates.md"
+check "FS-A1 the gate doc names the combined fingerprint" "$(grep -qF 'combines the project tree and that work tree' "$GATES_DOC" && echo PASS || echo FAIL)"
+check "FS-A2 the gate doc names the leading cd" "$(grep -qF 'target of a leading literal `cd <dir>`' "$GATES_DOC" && echo PASS || echo FAIL)"
+
 finish

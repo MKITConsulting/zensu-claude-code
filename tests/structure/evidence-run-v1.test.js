@@ -706,3 +706,353 @@ test('the verdict CLI exits 1 on a block and 0 on a pass', async () => {
   const unavailable = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], { env: { ...env, ZENSU_EVR_PROJECT_ROOT: path.join(root, 'missing') }, encoding: 'utf8' });
   assert.equal(unavailable.status, 2);
 });
+
+function sameDirectory(actual, expected) {
+  assert.equal(fs.realpathSync.native(actual), fs.realpathSync.native(expected));
+}
+
+function nestedWorktree(root) {
+  fs.writeFileSync(path.join(root, '.gitignore'), '.claude/worktrees/\n');
+  sh(root, 'git add .gitignore && git commit -q -m ignore-worktrees');
+  sh(root, 'git worktree add -q .claude/worktrees/wt -b wt');
+  return fs.realpathSync(path.join(root, '.claude', 'worktrees', 'wt'));
+}
+
+test('a full run in a nested worktree fingerprints the project and that worktree together', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  const [first, second] = recordsOf(data);
+  const scratch = tempDir('scratch');
+  assert.notEqual(first.tree_end, second.tree_end);
+  assert.equal(second.tree_end, evr.computeFingerprint(root, tree, scratch).tree);
+  assert.notEqual(second.tree_end, evr.computeTree(root, scratch).tree);
+  assert.notEqual(second.tree_end, evr.computeTree(tree, scratch).tree);
+});
+
+test('the combined fingerprint holds the project tree and the work tree', () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const scratch = tempDir('scratch');
+  const own = evr.computeTree(root, scratch).tree;
+  assert.equal(evr.computeFingerprint(root, root, scratch).tree, own);
+  const combined = evr.computeFingerprint(root, tree, scratch).tree;
+  const listing = sh(root, `git ls-tree ${combined}`);
+  assert.match(listing, new RegExp(`^040000 tree ${own}\tproject$`, 'm'));
+  assert.match(listing, new RegExp(`^040000 tree ${evr.computeTree(tree, scratch).tree}\twork$`, 'm'));
+  assert.equal(listing.trim().split('\n').length, 2);
+});
+
+test('changed paths are listed per half, and not at all across a combined and a plain tree', () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const scratch = tempDir('scratch');
+  const plain = evr.computeTree(root, scratch).tree;
+  const combined = evr.computeFingerprint(root, tree, scratch).tree;
+  assert.equal(evr.fingerprintChanges(root, root, combined, plain), null);
+  assert.equal(evr.fingerprintChanges(root, tree, plain, combined), null);
+  fs.writeFileSync(path.join(root, 'a.txt'), 'edited in the project\n');
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  const after = evr.computeFingerprint(root, tree, scratch).tree;
+  assert.deepEqual(evr.fingerprintChanges(root, tree, combined, after), ['a.txt', '.claude/worktrees/wt/a.txt']);
+});
+
+test('an edit in the project root after a run in a nested worktree reads stale', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'edited in the project\n');
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'stale');
+  assert.match(result.lines[0], /files changed since: a\.txt \|/);
+});
+
+test('a command that cds into a nested worktree fingerprints that worktree too', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { command: `cd ${evr.shellQuote(path.join(tree, 'sub'))} && true` });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  fs.writeFileSync(path.join(tree, 'sub', 'b.txt'), 'edited after the run\n');
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'stale');
+  assert.match(result.lines[0], /files changed since: \.claude\/worktrees\/wt\/sub\/b\.txt/);
+});
+
+test('if-stale follows a cd in the command into the nested worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  const command = `cd ${evr.shellQuote(tree)} && true`;
+  await runIn(root, data, { command });
+  const skipped = await runIn(root, data, { command, ifStale: true });
+  assert.match(skipped.stdout, /skipped \(--if-stale\)/);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edit\n');
+  await runIn(root, data, { command, ifStale: true });
+  assert.equal(recordsOf(data).length, 2);
+});
+
+test('the if-stale verdict measures the directory of the run it may skip', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { command: 'true' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  assert.equal(verdictFor(root, data, { runCwd: tree }).state, 'stale');
+  const rerun = await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && true`, ifStale: true });
+  assert.doesNotMatch(rerun.stdout, /skipped/);
+  assert.equal(recordsOf(data).length, 2);
+});
+
+test('a suite that edits the nested worktree it cds into is reported as mutated during the run', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { command: `cd ${evr.shellQuote(tree)} && echo more >> a.txt` });
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'mutated-during-run');
+  assert.match(result.lines[0], /\.claude\/worktrees\/wt\/a\.txt/);
+});
+
+test('the command directory follows only a leading, literal cd', () => {
+  const base = tempDir('base');
+  assert.equal(evr.commandDirectory('cd sub && npm test', base), path.join(base, 'sub'));
+  assert.equal(evr.commandDirectory('(cd sub && npm test)', base), path.join(base, 'sub'));
+  assert.equal(evr.commandDirectory('  cd sub; npm test', base), path.join(base, 'sub'));
+  assert.equal(evr.commandDirectory('cd sub\nnpm test', base), path.join(base, 'sub'));
+  assert.equal(evr.commandDirectory('cd sub&&npm test', base), path.join(base, 'sub'));
+  assert.equal(evr.commandDirectory("cd 'a b' && x", base), path.join(base, 'a b'));
+  assert.equal(evr.commandDirectory('cd "a b" && x', base), path.join(base, 'a b'));
+  assert.equal(evr.commandDirectory('cd a~b && x', base), path.join(base, 'a~b'));
+  assert.equal(evr.commandDirectory('cd /abs/dir && x', base), path.resolve(base, '/abs/dir'));
+  for (const command of ['npm test', 'cd $HOME/x && y', 'cd ~/x && y', 'cd "$DIR" && y', 'cd - && y', 'cd -P sub && y', 'cd && y', 'cd sub', 'cd sub || exit 1', 'cd a*b && y', "cd 'a'b && y", 'echo x && cd sub && y', null, '']) {
+    assert.equal(evr.commandDirectory(command, base), base, JSON.stringify(command));
+  }
+});
+
+test('the terminus reads stale after an edit in the nested worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'stale');
+  assert.match(result.lines[0], /files changed since: \.claude\/worktrees\/wt\/a\.txt/);
+});
+
+test('if-stale runs again after an edit in the nested worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  const skipped = await runIn(root, data, { cwd: tree, command: 'true', ifStale: true });
+  assert.match(skipped.stdout, /skipped \(--if-stale\)/);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edit\n');
+  await runIn(root, data, { cwd: tree, command: 'true', ifStale: true });
+  assert.equal(recordsOf(data).length, 2);
+});
+
+test('a record fingerprinted at the project root reads stale for an edited nested worktree', () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  const scratch = tempDir('scratch');
+  const projectTree = evr.computeTree(root, scratch).tree;
+  const locations = evr.storeLocations(data, SESSION);
+  evr.writeRecordAtomic(locations.records, baseRecord({ project_root: root, cwd: tree, tree_start: projectTree, tree_end: projectTree }));
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  assert.equal(verdictFor(root, data).state, 'stale');
+});
+
+test('the verdict CLI follows the newest full record into a nested worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
+  const transport = tempDir('transport');
+  const result = childProcess.spawnSync(process.execPath, [LIB, 'verdict'], {
+    env: {
+      ...process.env,
+      ZENSU_EVR_PLUGIN_DATA: data,
+      ZENSU_EVR_SESSION_KEY: SESSION,
+      ZENSU_EVR_PROJECT_ROOT: root,
+      ZENSU_EVR_CWD: '',
+      ZENSU_EVR_DIR: transport,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 1);
+  assert.equal(fs.readFileSync(path.join(transport, 'verdict-state'), 'utf8'), 'stale');
+  assert.match(result.stderr, /files changed since: \.claude\/worktrees\/wt\/a\.txt/);
+});
+
+test('a run from a work tree outside the project root keeps the project-root fingerprint', async () => {
+  const root = gitRepo();
+  const elsewhere = gitRepo();
+  fs.writeFileSync(path.join(elsewhere, 'a.txt'), 'another repository\n');
+  const data = pluginData();
+  await runIn(root, data, { cwd: elsewhere, command: 'true' });
+  const [record] = recordsOf(data);
+  const scratch = tempDir('scratch');
+  assert.equal(record.tree_end, evr.computeTree(root, scratch).tree);
+  assert.notEqual(record.tree_end, evr.computeTree(elsewhere, scratch).tree);
+  fs.writeFileSync(path.join(root, 'a.txt'), 'edited in the project\n');
+  assert.equal(verdictFor(root, data).state, 'stale');
+});
+
+test('the fingerprint root leaves the project root only for a work tree nested inside it', () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  sameDirectory(evr.fingerprintRoot(path.join(tree, 'sub'), root), tree);
+  assert.equal(evr.fingerprintRoot(path.join(root, 'sub'), root), root);
+  assert.equal(evr.fingerprintRoot(root, path.join(root, 'sub')), path.join(root, 'sub'));
+  assert.equal(evr.fingerprintRoot(gitRepo(), root), root);
+  assert.equal(evr.fingerprintRoot(tempDir('plain'), root), root);
+  assert.equal(evr.fingerprintRoot(null, root), root);
+  assert.equal(evr.fingerprintRoot(path.join(root, 'missing'), root), root);
+  assert.equal(evr.fingerprintRoot(path.join(root, '.git'), root), root);
+  const ignoredRepo = path.join(root, '.claude', 'worktrees', 'other');
+  fs.mkdirSync(ignoredRepo, { recursive: true });
+  sh(ignoredRepo, 'git init -q');
+  sameDirectory(evr.fingerprintRoot(ignoredRepo, root), ignoredRepo);
+});
+
+test('a nested repository the project does not ignore is fingerprinted beside the project', () => {
+  const root = gitRepo();
+  const nested = path.join(root, 'nested-repo', 'lib');
+  fs.mkdirSync(nested, { recursive: true });
+  sh(nested, 'git init -q && git config user.email t@example.invalid && git config user.name tester && git config commit.gpgsign false');
+  fs.writeFileSync(path.join(nested, 'x.txt'), 'x\n');
+  sh(nested, 'git add -A && git commit -q -m nested');
+  sameDirectory(evr.fingerprintRoot(nested, root), nested);
+});
+
+function nestedRepository(root, relative) {
+  const nested = path.join(root, ...relative.split('/'));
+  fs.mkdirSync(nested, { recursive: true });
+  sh(nested, 'git init -q && git config user.email t@example.invalid && git config user.name tester && git config commit.gpgsign false');
+  fs.writeFileSync(path.join(nested, 'x.txt'), 'x\n');
+  sh(nested, 'git add -A && git commit -q -m nested');
+  return nested;
+}
+
+test('a work tree git cannot resolve leaves the fingerprint unverified instead of falling back to the project', async () => {
+  const root = gitRepo();
+  const broken = nestedRepository(root, 'broken/repo');
+  fs.writeFileSync(path.join(broken, '.git', 'config'), 'not a config [[[\n');
+  assert.equal(evr.fingerprintRoot(broken, root), null);
+  const data = pluginData();
+  await runIn(root, data, { cwd: broken, command: 'true' });
+  const [record] = recordsOf(data);
+  assert.equal(record.tree_end, null);
+  assert.match(record.tree_end_reason, /git could not resolve the work tree the run directory lies in/);
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'pass-tree-unverified');
+  assert.match(result.lines[0], /git could not resolve the work tree the run directory lies in/);
+});
+
+test('a pass over a nested worktree names the work tree it measured', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'pass');
+  assert.match(result.lines[0], /exit 0 on the current tree [0-9a-f]{12} of the project and \.claude\/worktrees\/wt \(record /);
+  await runIn(root, data, { command: 'true' });
+  assert.doesNotMatch(verdictFor(root, data).lines[0], /of the project and/);
+});
+
+test('the verdict follows the directory of the newest full record', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  await runIn(root, data, { command: 'true' });
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
+  assert.equal(verdictFor(root, data).state, 'pass');
+  await runIn(root, data, { cwd: tree, command: 'true' });
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited again in the worktree\n');
+  assert.equal(verdictFor(root, data).state, 'stale');
+});
+
+test('a nested repository with its own object store lists its changed paths', async () => {
+  const root = gitRepo();
+  const other = nestedRepository(root, '.claude/worktrees/other');
+  fs.writeFileSync(path.join(root, '.gitignore'), '.claude/worktrees/\n');
+  sh(root, 'git add .gitignore && git commit -q -m ignore-worktrees');
+  const data = pluginData();
+  await runIn(root, data, { cwd: other, command: 'true' });
+  assert.equal(verdictFor(root, data).state, 'pass');
+  fs.writeFileSync(path.join(other, 'x.txt'), 'edited in the nested repository\n');
+  const result = verdictFor(root, data);
+  assert.equal(result.state, 'stale');
+  assert.match(result.lines[0], /files changed since: \.claude\/worktrees\/other\/x\.txt \|/);
+});
+
+const NESTED_CI_POLICY = { runner: 'ci', decidedBy: 'this clone', summary: 'CI: .github/workflows/ci.yml, job "test"', base: 'main' };
+
+test('in CI mode a scoped run that cds into a nested worktree reads stale after an edit there', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'scoped', command: `cd ${evr.shellQuote(tree)} && true` });
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY }).state, 'deferred-ci');
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
+  const result = verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY });
+  assert.equal(result.state, 'stale');
+  assert.match(result.lines.join('\n'), /files changed since: \.claude\/worktrees\/wt\/a\.txt/);
+});
+
+test('in CI mode a current run at the project root does not hide a stale run in the active worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'scoped', command: 'true' });
+  await runIn(root, data, { scope: 'scoped', command: `cd ${evr.shellQuote(tree)} && true` });
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY }).state, 'deferred-ci');
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edited after the run\n');
+  assert.equal(verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY }).state, 'stale');
+});
+
+test('in CI mode a red command at the project root still blocks next to a green one in the worktree', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'scoped', command: 'exit 3' });
+  await runIn(root, data, { scope: 'scoped', command: `cd ${evr.shellQuote(tree)} && true` });
+  const result = verdictFor(root, data, { ciPolicy: NESTED_CI_POLICY });
+  assert.equal(result.state, 'failed');
+  assert.match(result.lines[0], /exit 3/);
+});
+
+test('a scoped if-stale run in a nested worktree runs again after an edit there', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  const command = `cd ${evr.shellQuote(tree)} && true`;
+  await runIn(root, data, { scope: 'scoped', command });
+  const skipped = await runIn(root, data, { scope: 'scoped', command, ifStale: true });
+  assert.match(skipped.stdout, /skipped \(--if-stale\)/);
+  fs.writeFileSync(path.join(tree, 'a.txt'), 'edit\n');
+  await runIn(root, data, { scope: 'scoped', command, ifStale: true });
+  assert.equal(recordsOf(data).length, 2);
+});
+
+test('an acceptance run keeps the project-root fingerprint the acceptance gate binds to', async () => {
+  const root = gitRepo();
+  const tree = nestedWorktree(root);
+  const data = pluginData();
+  await runIn(root, data, { scope: 'acceptance', command: `cd ${evr.shellQuote(tree)} && true` });
+  const [record] = recordsOf(data);
+  assert.equal(record.tree_end, evr.computeTree(root, tempDir('scratch')).tree);
+});
+
