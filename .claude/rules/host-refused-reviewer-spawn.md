@@ -379,10 +379,10 @@ every check before it green. It reached T36b at 877.8 s against 681.5 s on 36556
 a runner 29% slower than the green one was enough. Two changes landed together:
 
 - The note lifecycle — T23-T25, T27-T32 and T35 — moved to
-  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, on a new `windows-shard-9`,
-  where `deferred-lease-refresh` now runs ahead of it. The routing file keeps T1-T22, T26,
-  T33-T34 and T36-T59, alone on `windows-shard-7`, and lost a trailing `start_session` that no
-  check read.
+  `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, on a new `windows-shard-9`
+  that it held alone until `deferred-lease-refresh` joined it (see below). The routing file
+  keeps T1-T22, T26, T33-T34 and T36-T59, alone on `windows-shard-7`, and lost a trailing
+  `start_session` that no check read.
 - T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
   reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
   `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for
@@ -401,6 +401,15 @@ the figure to budget against from then on. These figures live here with their ru
 because the contract-test note beside `windows-shard-7` records only the earlier 1700000
 raise. Growth in either file is paid for the way this split was — a shard of its own or a
 cheaper check — never by a raise past its measured range.
+
+**The note part no longer has `windows-shard-9` to itself.** `deferred-lease-refresh` (cap
+900000 ms) moved in AHEAD of it when `windows-shard-1` ran out of room, so the 600 s of unspent
+envelope above now holds only for the routing part. That suite took 735535-780910 ms on the runs
+that forced the move, which left the note part a grant just under 1019-1064 s against its own
+626985-713658 ms on the same runs. On shard 9 the envelope, not the 1200000 ms cap, therefore
+bounds the note part. It runs LAST because its cap is the larger one: an overrun of either suite
+surfaces as that suite's own `TIMED_OUT` instead of starving the other. The run ids and the shard
+sums are in `.claude/rules/windows-budget-best-solution-first.md`.
 
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose

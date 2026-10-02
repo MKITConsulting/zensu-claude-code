@@ -384,7 +384,7 @@
             "--cases",
             "C6a,C6b,C7,C7-renew,C8"
           ],
-          "timeoutMs": 970000
+          "timeoutMs": 900000
         },
         {
           "id": "stop-enforcer-reviewer-denial-note",
