@@ -1140,10 +1140,12 @@ zensu_resolve_project_dir() {
 }
 
 zensu_memoize_project_dir() {
-  local rendered
+  local before rendered
   unset _ZENSU_PROJECT_DIR_MEMO
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] || return 1
+  before="$(cd -P -- "$ZENSU_PROJECT_ROOT" 2>/dev/null && pwd -P)" || return 1
   rendered="$(zensu_resolve_project_dir)" || return 1
-  [ -n "$rendered" ] || return 1
+  [ -n "$rendered" ] && [ "$rendered" = "$before" ] || return 1
   _ZENSU_PROJECT_DIR_MEMO=("${ZENSU_PROJECT_ROOT:-}" "${ZENSU_SESSION_CONTEXT:-}" \
     "${ZENSU_SESSION_KEY:-}" "$rendered")
 }

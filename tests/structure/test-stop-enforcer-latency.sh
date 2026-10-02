@@ -50,6 +50,12 @@ case "\$*" in
   (*'session-control-core-v1.js session-key '*) kind=key ;;
 esac
 printf '%s\n' "\$kind" >>"\${ZENSU_TEST_NODE_COUNT:-/dev/null}"
+if [ "\$kind" = root ] && [ -n "\${ZENSU_TEST_AFTER_ROOT:-}" ]; then
+  "$REAL_NODE" "\$@"
+  rc=\$?
+  bash "\$ZENSU_TEST_AFTER_ROOT"
+  exit "\$rc"
+fi
 exec "$REAL_NODE" "\$@"
 EOF
 cat >"$WORK/hang-shim/node" <<'EOF'
@@ -163,6 +169,11 @@ if [ "$STOP_RC" -eq 0 ] && [ "$STOP_DECISION" = "allow" ] && [ "$NODE_COUNT" -gt
 else
   check "L5 ZENSU_CHAIN=off path (rc=$STOP_RC spawns=$NODE_COUNT)$STOP_NOTE" FAIL
 fi
+if [ "$ROOT_COUNT" -eq 1 ] && [ "$KEY_COUNT" -eq 0 ] && [ -z "$STOP_NOTE" ]; then
+  check "L5b the ZENSU_CHAIN=off path verifies the project root once and spawns nothing to resolve its session key" PASS
+else
+  check "L5b ZENSU_CHAIN=off resolver spawns (root verifications=$ROOT_COUNT session-key spawns=$KEY_COUNT)$STOP_NOTE" FAIL
+fi
 
 echo "== every state with something to enforce still reaches the full path"
 
@@ -175,6 +186,11 @@ if [ -f "$STATE_DIR/pending-review.json" ]; then
     check "L6 a queued deferred review is adopted and blocks, as before (spawned $NODE_COUNT)" PASS
   else
     check "L6 pending review adoption (decision=$STOP_DECISION spawns=$NODE_COUNT marker=$([ -f "$STATE_DIR/pending-review.json" ] && echo kept || echo gone))$STOP_NOTE" FAIL
+  fi
+  if [ "$ROOT_COUNT" -eq 1 ] && [ "$KEY_COUNT" -eq 0 ] && [ -z "$STOP_NOTE" ]; then
+    check "L6b the deferred-review adoption path verifies the project root once and spawns nothing to resolve its session key" PASS
+  else
+    check "L6b adoption path resolver spawns (root verifications=$ROOT_COUNT session-key spawns=$KEY_COUNT)$STOP_NOTE" FAIL
   fi
 else
   check "L6 fixture: pending-review marker was written" FAIL
@@ -206,6 +222,11 @@ if [ "$STOP_RC" -eq 0 ] && [ "$STOP_DECISION" = "allow" ] && [ "$NODE_COUNT" -gt
   check "L9 a chain still implementing is released by the full path, not the early exit (spawned $NODE_COUNT)" PASS
 else
   check "L9 implementing chain (rc=$STOP_RC decision=$STOP_DECISION spawns=$NODE_COUNT)$STOP_NOTE" FAIL
+fi
+if [ "$ROOT_COUNT" -eq 1 ] && [ "$KEY_COUNT" -eq 0 ] && [ -z "$STOP_NOTE" ]; then
+  check "L9b the implementing path verifies the project root once and spawns nothing to resolve its session key" PASS
+else
+  check "L9b implementing path resolver spawns (root verifications=$ROOT_COUNT session-key spawns=$KEY_COUNT)$STOP_NOTE" FAIL
 fi
 
 new_session lat-missing || check "L10 fixture: missing-baseline session" FAIL
@@ -480,7 +501,7 @@ if [ "$STOP_DECISION" = "block" ] && [ "$ROOT_COUNT" -eq 1 ] && [ "$KEY_COUNT" -
 else
   check "L29 armed Stop resolver spawns (decision=$STOP_DECISION root verifications=$ROOT_COUNT session-key spawns=$KEY_COUNT)$STOP_NOTE" FAIL
 fi
-if [ "$STOP_DECISION" = "block" ] && [ "$NODE_COUNT" -le "$ARMED_SPAWN_BUDGET" ]; then
+if [ "$STOP_DECISION" = "block" ] && [ "$NODE_COUNT" -le "$ARMED_SPAWN_BUDGET" ] && [ -z "$STOP_NOTE" ]; then
   check "L30 an armed Stop stays within $ARMED_SPAWN_BUDGET node spawns (spawned $NODE_COUNT)" PASS
 else
   check "L30 armed Stop spawn budget (decision=$STOP_DECISION spawns=$NODE_COUNT budget=$ARMED_SPAWN_BUDGET)$STOP_NOTE" FAIL
@@ -527,6 +548,32 @@ case "${1:-}" in
     mv "$ZENSU_PROJECT_ROOT" "$ZENSU_PROJECT_ROOT.moved" || exit 6
     zensu_resolve_project_dir
     ;;
+  (set-input)
+    zensu_memoize_project_dir || exit 9
+    printf -v "$MEMO_SET_NAME" '%s' "$MEMO_SET_VALUE"
+    zensu_resolve_project_dir
+    ;;
+  (record-gone)
+    zensu_memoize_project_dir || exit 9
+    mv "$ZENSU_SESSION_CONTEXT" "$ZENSU_SESSION_CONTEXT.moved" || exit 6
+    zensu_resolve_project_dir
+    ;;
+  (record-link)
+    zensu_memoize_project_dir || exit 9
+    mv "$ZENSU_SESSION_CONTEXT" "$ZENSU_SESSION_CONTEXT.moved" || exit 6
+    ln -s "$ZENSU_SESSION_CONTEXT.moved" "$ZENSU_SESSION_CONTEXT" 2>/dev/null || exit 5
+    [ -L "$ZENSU_SESSION_CONTEXT" ] || exit 5
+    zensu_resolve_project_dir
+    ;;
+  (hook-rebind)
+    zensu_memoize_project_dir || exit 9
+    zensu_bind_hook_session "$MEMO_HOOK_PAYLOAD" || exit 7
+    zensu_resolve_project_dir
+    ;;
+  (gap-swap)
+    if zensu_memoize_project_dir; then echo kept; else echo refused; fi
+    zensu_resolve_project_dir
+    ;;
   (key)
     zensu_resolve_session_id "$MEMO_KEY_ARG"
     ;;
@@ -548,6 +595,7 @@ memo_run() {
 new_session lat-memo || check "L31 fixture: memo session baseline" FAIL
 MEMO_ROOT="$(cd -P -- "$CLAUDE_PROJECT_DIR" && pwd -P)"
 MEMO_KEY="$ZENSU_SESSION_KEY"
+MEMO_CONTEXT="$ZENSU_SESSION_CONTEXT"
 MEMO_OTHER="$WORK/memo-other-root"
 mkdir -p "$MEMO_OTHER"
 
@@ -612,17 +660,17 @@ else
 fi
 
 memo_run key MEMO_KEY_ARG="scv1_$(printf '%064d' 0)"
-if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ]; then
+if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$KEY_COUNT" -eq 0 ]; then
   check "L39 the canonical key of another session is still refused under a bound key" PASS
 else
-  check "L39 foreign canonical key (rc=$MEMO_RC out=$MEMO_OUT)" FAIL
+  check "L39 foreign canonical key (rc=$MEMO_RC out=$MEMO_OUT session-key spawns=$KEY_COUNT)" FAIL
 fi
 
 memo_run key MEMO_KEY_ARG="$MEMO_KEY" ZENSU_SESSION_KEY="scv1_short"
-if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ]; then
+if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$KEY_COUNT" -eq 1 ]; then
   check "L40 a bound key that is not canonical still refuses every id" PASS
 else
-  check "L40 non-canonical bound key (rc=$MEMO_RC out=$MEMO_OUT)" FAIL
+  check "L40 non-canonical bound key (rc=$MEMO_RC out=$MEMO_OUT session-key spawns=$KEY_COUNT)" FAIL
 fi
 
 memo_run key MEMO_KEY_ARG="lat-memo"
@@ -645,6 +693,70 @@ for near in "scv1_${HEX63}A" "scv1_${HEX63}" "scv1_${HEX63}00" "scv1_${HEX63}g" 
 done
 check "L42 an id that only resembles a canonical key is hashed by the core module, never returned as it is" "$NEAR_OK"
 
+memo_run set-input MEMO_SET_NAME=ZENSU_SESSION_KEY MEMO_SET_VALUE="scv1_$(printf '%064d' 0)"
+if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+  check "L44 the memo answers only for the session key it verified: another key is verified again and refused" PASS
+else
+  check "L44 memo under a changed session key (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+printf '{}\n' >"$WORK/memo-other-context.json"
+memo_run set-input MEMO_SET_NAME=ZENSU_SESSION_CONTEXT MEMO_SET_VALUE="$WORK/memo-other-context.json"
+if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+  check "L45 the memo answers only for the session record it verified: another record file is verified again and refused" PASS
+else
+  check "L45 memo under a changed record path (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+memo_run set-input MEMO_SET_NAME=ZENSU_PROJECT_ROOT MEMO_SET_VALUE="$WORK/./proj-lat-memo"
+if [ "$MEMO_RC" -eq 0 ] && [ "$MEMO_OUT" = "$MEMO_ROOT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+  check "L46 the memo compares the root as it is spelled: another spelling of the same directory is verified again" PASS
+else
+  check "L46 memo under another root spelling (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+memo_run record-gone
+mv "$MEMO_CONTEXT.moved" "$MEMO_CONTEXT" 2>/dev/null
+if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 1 ]; then
+  check "L47 a session record that vanishes after the memo was taken is refused before the memo is consulted" PASS
+else
+  check "L47 memo with a vanished record (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+memo_run record-link
+RECORD_LINK_RC="$MEMO_RC"
+if [ -L "$MEMO_CONTEXT" ]; then
+  rm -f "$MEMO_CONTEXT"
+fi
+mv "$MEMO_CONTEXT.moved" "$MEMO_CONTEXT" 2>/dev/null
+if [ "$RECORD_LINK_RC" -eq 5 ]; then
+  check "L48 this host creates no symbolic link, so there is no linked record to refuse" PASS
+elif [ "$RECORD_LINK_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 1 ]; then
+  check "L48 a session record replaced by a symbolic link after the memo was taken is refused before the memo is consulted" PASS
+else
+  check "L48 memo with a linked record (rc=$RECORD_LINK_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+memo_run hook-rebind \
+  MEMO_HOOK_PAYLOAD="$(printf '{"hook_event_name":"Stop","session_id":"lat-memo","cwd":"%s"}' "$CLAUDE_PROJECT_DIR")"
+if [ "$MEMO_RC" -eq 0 ] && [ "$ROOT_COUNT" -eq 2 ] && [ "$MEMO_OUT" = "$MEMO_ROOT" ]; then
+  check "L49 binding the session again from a hook payload discards the memo" PASS
+else
+  check "L49 memo after a hook bind (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+new_session lat-alias "$WORK/alias-target/proj" || check "L50 fixture: alias session baseline" FAIL
+if ln -s "$WORK/alias-target" "$WORK/alias-link" 2>/dev/null && [ -L "$WORK/alias-link" ]; then
+  memo_run set-input MEMO_SET_NAME=ZENSU_PROJECT_ROOT MEMO_SET_VALUE="$WORK/alias-link/proj"
+  if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+    check "L50 the same root spelled through a symlinked ancestor is not answered by the memo: it is verified again and refused" PASS
+  else
+    check "L50 memo under an aliased root spelling (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+  fi
+else
+  check "L50 this host creates no symbolic link, so there is no aliased root spelling to refuse" PASS
+fi
+
 new_session lat-swap "$WORK/swap-parent/proj" || check "L43 fixture: swap session baseline" FAIL
 memo_run swap-ancestor MEMO_SWAP_PARENT="$WORK/swap-parent"
 if [ -L "$WORK/swap-parent" ]; then
@@ -657,6 +769,39 @@ elif [ -d "$WORK/swap-parent.real" ]; then
   check "L43 this host creates no symbolic link, so there is no ancestor swap to detect" PASS
 else
   check "L43 ancestor swap fixture (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+fi
+
+if [ -L "$WORK/swap-parent" ]; then
+  stop_run lat-swap "$FULL_PATH_DEADLINE"
+  if [ "$STOP_DECISION" = "block" ] && [ "$ROOT_COUNT" -eq 1 ] && [ -z "$STOP_NOTE" ] \
+      && printf '%s' "$STOP_ERR" | grep -q 'exists but does not match'; then
+    check "L51 a Stop whose root no longer matches the record takes the failure branch after one verification" PASS
+  else
+    check "L51 Stop with a mismatched root (decision=$STOP_DECISION verifications=$ROOT_COUNT err=$STOP_ERR)$STOP_NOTE" FAIL
+  fi
+else
+  check "L51 this host creates no symbolic link, so there is no mismatched root to stop on" PASS
+fi
+
+new_session lat-gap "$WORK/gap-parent/proj" || check "L52 fixture: gap session baseline" FAIL
+cat >"$WORK/swap-after-root.sh" <<'EOF'
+#!/bin/bash
+[ -L "$MEMO_SWAP_PARENT" ] && exit 0
+[ -d "$MEMO_SWAP_PARENT" ] || exit 0
+mv "$MEMO_SWAP_PARENT" "$MEMO_SWAP_PARENT.real" || exit 0
+ln -s "$MEMO_SWAP_PARENT.real" "$MEMO_SWAP_PARENT" 2>/dev/null || exit 0
+EOF
+memo_run gap-swap MEMO_SWAP_PARENT="$WORK/gap-parent" ZENSU_TEST_AFTER_ROOT="$WORK/swap-after-root.sh"
+if [ -L "$WORK/gap-parent" ]; then
+  if [ "$MEMO_RC" -ne 0 ] && [ "$MEMO_OUT" = "refused" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+    check "L52 an ancestor swapped between the verification and the render is not memoized, and the root is refused" PASS
+  else
+    check "L52 swap inside the memoizing call (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+  fi
+elif [ -d "$WORK/gap-parent.real" ]; then
+  check "L52 this host creates no symbolic link, so there is no swap inside the memoizing call" PASS
+else
+  check "L52 gap swap fixture (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
 fi
 
 echo "----"
