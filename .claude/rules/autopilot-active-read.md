@@ -169,12 +169,12 @@ unreadable-state block, so the seed-write failure it names stays the path it mea
   run, or whose storage is unsafe, keeps its ticket and gets no directive, and the next Stop's
   resume directive orders the review again. The refusal is the point for an owned run; the
   silence is the residual.
-- Windows is unmeasured for the added checks. `P7e`, `P7f`, `P7h` and `P7i` sit in the suite
-  that `tests/profiles/windows-ci.v1.json` places on the blocking `windows-shard-5`, and `W33`,
-  `W34` and `W36` in the one on `windows-shard-1`; each adds at least one ten-second
-  acquisition wait, `W34` two (the verb and its hold report), and
-  `.claude/rules/windows-budget-best-solution-first.md` records how little headroom such a
-  shard can have.
+- On Windows a held-lease check costs about 35 s, not ten (run 37060398940). `W33` to `W36`
+  pushed `test-autopilot-state-machine.sh` past its 900000 ms cap on `windows-shard-1`, and
+  `P7e` to `P7i` added 175 s to `test-autopilot-plan-delegate.sh` on `windows-shard-5`, so both
+  caps rose and `deferred-lease-refresh` moved to `windows-shard-9`.
+  `.claude/rules/windows-budget-best-solution-first.md` records the figures, which wait for the
+  next green Windows run to be re-measured.
 
 **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md` entry by entry: no
 context-record or workflow-state field, no strict key set, no hook added, removed or renamed,

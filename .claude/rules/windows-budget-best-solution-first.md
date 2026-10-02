@@ -66,3 +66,20 @@ The suite-level wall clock on Windows is still **unmeasured**; only the shard is
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
 outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is
 a CI-wide outage rather than documentation.
+
+**`windows-shard-1` and `windows-shard-5` paid for the held-lease Autopilot checks.** A check
+that holds the real project lease waits out the core's bounded acquisition, and on Windows one
+such check measured about 35 s. Run 37060398940 put four of them into `autopilot-state-machine`
+(`W33` to `W36`, three of them waiting): they took 110.4 s from `W32d` to `W36`, and the suite
+reported `TIMED_OUT` at 900328 ms with every check before it passing. On main's run 37056715866
+the suite measured 787951 ms and reached `W32d` 48.3 s before its end, so with the new checks it
+completes at about 906 s; its cap is now 1280000 ms, about 41% over that figure, the margin
+`plan-payload-path-transport` got. Its neighbour `deferred-lease-refresh` (718779 ms on run
+37056715866, 739185 ms on run 36625440255) moved to `windows-shard-9`, whose only suite measured
+642057 and 669455 ms. Shard 1 now holds about 906 s of `autopilot-state-machine` plus 57 s of
+small suites, and shard 9 at most about 1409 s. `stop-enforcer-reviewer-denial-note` stays last
+there because its 1200000 ms cap is the larger one; `expectedShardHomes` and `expectedShardTails`
+pin both. `autopilot-plan-delegate` on `windows-shard-5` measured 336373 ms on main's run and
+511828 ms on run 37060398940 with `P7e` to `P7i`, so its cap rose from 600000 to 720000 ms, about
+41% over the new figure; shard 5 summed 1204 s on that run. Re-measure all three suites on the
+next green Windows run and replace these figures.

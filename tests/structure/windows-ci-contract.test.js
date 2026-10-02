@@ -130,10 +130,12 @@ const expectedShardHomes = {
   'session-trail-lineage': 'windows-shard-8',
   'autopilot-bound-payload-windows': 'windows-shard-6',
   'deferred-review-fallback': 'windows-shard-8',
+  'deferred-lease-refresh': 'windows-shard-9',
 };
 const expectedShardTails = {
   'windows-shard-4': 'deferred-claim-adoption',
   'windows-shard-8': 'plan-payload-path-transport',
+  'windows-shard-9': 'stop-enforcer-reviewer-denial-note',
 };
 
 test('measured shard rebalances stay where they were moved', () => {
