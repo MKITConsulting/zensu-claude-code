@@ -27,12 +27,20 @@ fi
 # Windows profiles invoke this script directly, so a floor in the driver alone
 # would leave exactly those runs unfloored.
 SESSION_CONTROL_FLOOR="${SESSION_CONTROL_FLOOR:-138}"
+SESSION_CONTROL_TIMEOUT_MS="${SESSION_CONTROL_TIMEOUT_MS:-180000}"
+
+LOG="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-log-XXXXXX")"
+PROGRESS="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-progress-XXXXXX")"
+trap 'rm -f "$LOG" "$PROGRESS"' EXIT
 
 set +e
-OUT="$(SESSION_CONTROL_CORE="$CORE" node --test "$ROOT/tests/session-control/session-control-core-v1.test.js" 2>&1)"
-STATUS=$?
+SESSION_CONTROL_CORE="$CORE" SESSION_CONTROL_PROGRESS="$PROGRESS" \
+  node --test --test-timeout="$SESSION_CONTROL_TIMEOUT_MS" \
+  "$ROOT/tests/session-control/session-control-core-v1.test.js" 2>&1 | tee "$LOG"
+STATUS=${PIPESTATUS[0]}
 set -e
-printf '%s\n' "$OUT"
+OUT="$(cat "$LOG")"
+IN_FLIGHT="$(tr -d '\r' < "$PROGRESS" | sed -n '$s/^start //p')"
 
 # The reporter prefixes its summary with a non-ASCII marker, so the leading run
 # is matched loosely rather than spelled - the digits are what is being read.
@@ -42,6 +50,9 @@ PASSED="$(printf '%s\n' "$OUT" | tr -d '\r' | sed -n 's/^[^0-9]*pass \([0-9][0-9
 FAILED="$(printf '%s\n' "$OUT" | tr -d '\r' | sed -n 's/^[^0-9]*fail \([0-9][0-9]*\)$/\1/p' | tail -1)"
 
 if [ "$STATUS" -ne 0 ]; then
+  if [ -n "$IN_FLIGHT" ]; then
+    printf '%s\n' "session-control: the last test started never finished: $IN_FLIGHT" >&2
+  fi
   printf '%s\n' "session-control: node --test exited $STATUS" >&2
   exit "$STATUS"
 fi

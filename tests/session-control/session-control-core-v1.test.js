@@ -20,6 +20,11 @@ const WINDOWS = process.platform === 'win32';
 const WINDOWS_SYMLINK_SKIP = WINDOWS
   ? 'Windows runners do not guarantee unprivileged symbolic-link creation'
   : false;
+const PROGRESS_FILE = process.env.SESSION_CONTROL_PROGRESS;
+if (PROGRESS_FILE) {
+  test.beforeEach((t) => { fs.appendFileSync(PROGRESS_FILE, `start ${t.name}\n`); });
+  test.afterEach((t) => { fs.appendFileSync(PROGRESS_FILE, `end ${t.name}\n`); });
+}
 
 function fixture(host = 'codex') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-session-control-'));
