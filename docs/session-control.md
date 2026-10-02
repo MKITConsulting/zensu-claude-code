@@ -232,11 +232,16 @@ live-looking id counts as the owner, as it always does on Windows. Either way, a
 dies between adoption and handoff can keep its claim from another session for at most the
 lease, while its own session recovers it on its next `Stop`.
 
-On Windows the locks that serialize these steps still decide whether their holder is gone by
-its process id alone. A lock whose holder was killed without releasing it stays held while an unrelated
-process reuses that id, and every acquisition then fails with `timed out acquiring external
-process lock` or `timed out acquiring per-session lock` until that process exits. This gap is
-known and not yet closed.
+The locks that serialize these steps do not trust a live-looking id either. A lock is written
+by its holder, so the holder existed before the lock's recorded creation time. When the process
+now using the recorded id provably started more than one second after that time, it cannot be
+the holder: the holder is gone, the id was reused, and the next acquisition recovers the lock.
+Linux and macOS first compare the start identity the lock stored. Windows stores none, so a
+waiting process reads the start time through `powershell.exe`, and only for a lock older than
+one second, at most once every two seconds per lock. A start time that cannot be read keeps the
+lock held. So does a reused id whose new process started within that second; acquisitions then
+still fail with `timed out acquiring external process lock` or `timed out acquiring per-session
+lock` until that process exits.
 
 ## Unbindable sessions
 

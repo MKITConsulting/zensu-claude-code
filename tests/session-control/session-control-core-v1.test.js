@@ -730,7 +730,7 @@ test('does not classify unrelated errors whose paths mention a transient phrase'
 test('never reclaims an old lock whose owner process is still alive', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-live-lock-'));
   const lockFile = path.join(root, '.liveowner.lock');
-  const owner = { pid: process.pid, token: 'b'.repeat(48), created_at: CREATED_AT };
+  const owner = { pid: process.pid, token: 'b'.repeat(48), created_at: new Date().toISOString() };
   fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
   const stale = new Date(Date.now() - 60000);
   fs.utimesSync(lockFile, stale, stale);
@@ -4590,7 +4590,7 @@ test('external process lease stays contended when a live owner identity is unava
     pid: process.pid,
     token: 'a'.repeat(48),
     kind: 'external-process-lock',
-    created_at: CREATED_AT,
+    created_at: new Date().toISOString(),
     process_start_identity: null,
   };
   fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
@@ -4670,6 +4670,240 @@ test('external process lease reclaims a live PID with a mismatched start identit
     ownerPid: process.pid,
     token: acquired.token,
   });
+});
+
+const START_READER_PLATFORMS = new Set(['linux', 'darwin', 'win32']);
+
+function spawnUnrelatedProcess() {
+  const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready\\n"); setInterval(() => {}, 1e6);'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const ready = new Promise((resolve, reject) => {
+    let seen = '';
+    child.stdout.on('data', (chunk) => {
+      seen += chunk;
+      if (seen.includes('ready')) resolve();
+    });
+    child.on('error', reject);
+    child.on('exit', (code, signal) => reject(new Error(`unrelated process exited early (${code}, ${signal})`)));
+  });
+  return { child, ready };
+}
+
+function startReaderUnavailable(t, pid) {
+  if (core.processStartLowerBoundForPid(pid) !== null) return false;
+  assert.ok(
+    !START_READER_PLATFORMS.has(process.platform),
+    `no process start time was readable on ${process.platform}`,
+  );
+  t.skip('this platform exposes no process start time');
+  return true;
+}
+
+test('reads a lower bound for the start time of a live process on this platform', async (t) => {
+  if (!START_READER_PLATFORMS.has(process.platform)) {
+    t.skip('no process start reader exists for this platform');
+    return;
+  }
+  const spawnedAt = Date.now();
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    const lowerBound = core.processStartLowerBoundForPid(child.pid);
+    assert.equal(typeof lowerBound, 'number');
+    assert.ok(lowerBound >= spawnedAt - 2500, `${lowerBound} lies far before the spawn at ${spawnedAt}`);
+    assert.ok(lowerBound <= Date.now(), `${lowerBound} lies in the future`);
+    assert.equal(core.processStartLowerBoundForPid(2147483647), null);
+  } finally {
+    child.kill();
+  }
+});
+
+test('recovers a per-session lock whose live owner PID started after the record and stored no identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-reused-absent-'));
+  const lockFile = path.join(root, '.reusedabsent.lock');
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '1'.repeat(48),
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    assert.equal(core.withFileLock(root, 'reusedabsent', () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('recovers a per-session lock whose live owner PID started after the record under a mismatched identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-reused-mismatch-'));
+  const lockFile = path.join(root, '.reusedmismatch.lock');
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '7'.repeat(48),
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: 'mismatched-process-start',
+    }), { mode: 0o600 });
+    assert.equal(core.withFileLock(root, 'reusedmismatch', () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('external process lease reclaims a live owner PID that started after the record and stored no identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-reused-absent-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '2'.repeat(48),
+      kind: 'external-process-lock',
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    const acquired = core.acquireExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      attemptLimit: 40,
+    });
+    assert.notEqual(JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')).token, '2'.repeat(48));
+    core.releaseExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      token: acquired.token,
+    });
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('external process lease keeps a live owner without identity that started before the record', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-genuine-absent-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const owner = {
+      pid: child.pid,
+      token: '3'.repeat(48),
+      kind: 'external-process-lock',
+      created_at: new Date().toISOString(),
+      process_start_identity: null,
+    };
+    fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
+    assert.ok(core.processStartLowerBoundForPid(child.pid) <= Date.parse(owner.created_at));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.throws(() => core.acquireExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      attemptLimit: 1,
+    }), /timed out acquiring external process lock/i);
+    assert.deepEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')), owner);
+  } finally {
+    child.kill();
+    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+  }
+});
+
+test('the win32 start reader runs a pinned PowerShell only for a record older than the skew', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-win32-start-reader-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    const invocations = [];
+    let output = '';
+    childProcess.execFileSync = (file, args, options) => {
+      invocations.push({ file, args, options });
+      return output;
+    };
+    const filetime = (ms) => String(BigInt(ms) * 10000n + 116444736000000000n);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const [lockDirectory, resourcePath] = process.argv.slice(1);
+    const lockFile = core.externalProcessLockPath({ lockDirectory, resourcePath });
+    const plant = (token, createdAt) => fs.writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid,
+      token,
+      kind: 'external-process-lock',
+      created_at: new Date(createdAt).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    const attempt = () => {
+      try {
+        const lease = core.acquireExternalProcessLock({ lockDirectory, resourcePath, ownerPid: process.pid, attemptLimit: 3 });
+        core.releaseExternalProcessLock({ lockDirectory, resourcePath, ownerPid: process.pid, token: lease.token });
+        return 'acquired';
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const report = { pid: process.pid };
+    plant('4'.repeat(48), Date.now());
+    report.young = { outcome: attempt(), calls: invocations.length };
+    output = 'noise\r\n' + filetime(Date.now() - 600000) + '\r\n';
+    plant('5'.repeat(48), Date.now() - 5000);
+    report.genuine = { outcome: attempt(), calls: invocations.length };
+    output = filetime(Date.now()) + '\r\n';
+    plant('6'.repeat(48), Date.now() - 3600000);
+    report.replaced = { outcome: attempt(), calls: invocations.length, lockLeft: fs.existsSync(lockFile) };
+    output = 'not a filetime\r\n';
+    report.malformed = core.processStartLowerBoundForPid(process.pid);
+    report.parsed = (() => { output = filetime(1790772128308) + '\r\n'; return core.processStartLowerBoundForPid(process.pid); })();
+    report.invocation = invocations[0];
+    report.program = Buffer.from(invocations[0].args[3], 'base64').toString('utf16le');
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const result = await runNode(source, [root, resourcePath]);
+  assert.equal(result.code, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.match(report.young.outcome, /timed out acquiring external process lock/i);
+  assert.equal(report.young.calls, 0);
+  assert.match(report.genuine.outcome, /timed out acquiring external process lock/i);
+  assert.equal(report.genuine.calls, 1);
+  assert.equal(report.replaced.outcome, 'acquired');
+  assert.equal(report.replaced.calls, 2);
+  assert.equal(report.replaced.lockLeft, false);
+  assert.equal(report.malformed, null);
+  assert.equal(report.parsed, 1790772128308);
+  const configuredRoot = process.env.SystemRoot;
+  const systemRoot = configuredRoot && path.win32.isAbsolute(configuredRoot) ? configuredRoot : 'C:\\Windows';
+  const powershellDirectory = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
+  assert.equal(report.invocation.file, path.win32.join(powershellDirectory, 'powershell.exe'));
+  assert.deepEqual(report.invocation.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
+  assert.equal(report.invocation.args.length, 4);
+  assert.equal(report.invocation.options.timeout, 5000);
+  assert.equal(report.invocation.options.windowsHide, true);
+  assert.deepEqual(report.invocation.options.stdio, ['ignore', 'pipe', 'ignore']);
+  assert.equal(report.invocation.options.env.SystemRoot, systemRoot);
+  assert.equal(report.invocation.options.env.PSModulePath, path.win32.join(powershellDirectory, 'Modules'));
+  assert.ok(report.program.includes(`GetProcessById(${report.pid})`), report.program);
+  assert.ok(report.program.includes(`WHERE ProcessId = ${report.pid}'`), report.program);
+  assert.ok(!report.program.includes('"'), report.program);
 });
 
 // requireAbsentDirectoryPath was exported "for the unit layer alone" and had no unit
