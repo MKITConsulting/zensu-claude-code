@@ -37,7 +37,7 @@ Six sites, all single-root.
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
 `zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
-`pre-bash-source-write-gate.sh:274-283` refuses an empty recorded root outright
+`pre-bash-source-write-gate.sh:265-274` refuses an empty recorded root outright
 rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
@@ -83,7 +83,7 @@ unscrubbed — see the paragraph above.
 Rule (B) denies at `!within(projectRoot, p)`
 (`hooks/lib/bash-source-write-parse.js:825`) and rule (C) at the same predicate
 for git targets (`:871`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:716`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
+`CLAUDE_PROJECT_DIR` (`:720`). `hooks/pre-edit-tdd-reminder.sh:132-159` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today and Bash writes do not. Neither of
@@ -357,7 +357,7 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/pre-edit-tdd-reminder.sh:209`). Reading that deny as a boundary is the
+(`hooks/pre-edit-tdd-reminder.sh:206, :219`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
@@ -556,12 +556,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/SKILL.md:406`) and runs in vanilla
+Drift Audit does the same (`skills/tdd/SKILL.md:409`) and runs in vanilla
 (`skills/tdd/SKILL.md:202`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/SKILL.md:412`), which is a test vanilla cannot be made to produce.
+(`skills/tdd/SKILL.md:415`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/SKILL.md:415`), AND reword the finding
+level as step 6c already is (`skills/tdd/SKILL.md:417`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
