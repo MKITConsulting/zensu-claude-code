@@ -165,6 +165,12 @@
     "test-promptfoo-verify-feature.sh",
     "test-promptfoo-zen-mode.sh"
   ],
+  "nodeDepsStructureTests": [
+    "test-promptfoo-session-upgrade.sh",
+    "test-windows-ci-contract.sh",
+    "test-workflow-checkout-credentials.sh",
+    "test-workflow-dispatch-inputs.sh"
+  ],
   "ciOfflineSuites": [
     {
       "label": "evals/config-gate (--self-check)",
