@@ -6648,6 +6648,642 @@ else
 fi
 rm -f "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 rm -f "$AP_STATE"/autopilot-run-*.json
+
+LE_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+LE_BLOCK="$(node -e '
+  var src = require("fs").readFileSync(process.argv[1], "utf8");
+  var start = src.indexOf("var LEASE_RESOURCE = ");
+  var row = start < 0 ? -1 : src.indexOf("\nfunction leaseRow(", start);
+  var close = row < 0 ? -1 : src.indexOf("\n}\n", row);
+  process.stdout.write(close < 0 ? "" : src.slice(start, close + 3));
+' "$REPORT" 2>/dev/null)"
+LE_READERS='(^|[^A-Za-z_])fs\.|process\.kill|processStartIdentityForPid|JSON\.parse'
+if [ -n "$LE_BLOCK" ] \
+  && printf '%s' "$LE_BLOCK" | grep -qF 'lease = core.inspectExternalProcessLock(options);' \
+  && ! printf '%s' "$LE_BLOCK" | grep -qE "$LE_READERS" \
+  && grep -qE "$LE_READERS" "$REPORT"; then
+  check "P1le1 the lease row reads nothing on its own: every fact comes from the core's inspectExternalProcessLock" PASS
+else
+  check "P1le1 the lease row reads the lock artifact or the process table on its own, or its source slice is empty" FAIL
+fi
+if grep -qF "var LEASE_RESOURCE = 'autopilot';" "$REPORT" \
+  && grep -qF 'var options = { lockDirectory: dir, resourcePath: path.join(dir, LEASE_RESOURCE) };' "$REPORT" \
+  && grep -qF 'file = core.externalProcessLockPath(options);' "$REPORT" \
+  && grep -qF 'lease = core.inspectExternalProcessLock(options);' "$REPORT" \
+  && grep -qF "'external process lock resource is unsafe'" "$LE_CORE" \
+  && grep -qF "'external process lock directory is unsafe'" "$LE_CORE" \
+  && grep -qF "'lock resource is unsafe'" "$REPORT" \
+  && grep -qF "'lock directory is unsafe'" "$REPORT"; then
+  check "P1le2 the row resolves the artifact through externalProcessLockPath, judges it through inspectExternalProcessLock with the same options, and maps the core's own refusals" PASS
+else
+  check "P1le2 lease resolution, inspection or refusal mapping no longer matches the core" FAIL
+fi
+LE_OWNER_MODEL="$(node -e '
+  var src = require("fs").readFileSync(process.argv[1], "utf8");
+  var keeperAt = src.indexOf("\n_tdd_core_lock_keeper() {");
+  var runAt = src.indexOf("\n_tdd_locked_run() {");
+  var runEnd = runAt < 0 ? -1 : src.indexOf("\n}\n", runAt);
+  var keeper = keeperAt < 0 || runAt < keeperAt ? "" : src.slice(keeperAt, runAt);
+  var run = runEnd < 0 ? "" : src.slice(runAt, runEnd);
+  var modern = run.indexOf("-ge 4 ]");
+  var legacy = run.indexOf("ownerPid: process.ppid,");
+  var found = [
+    keeper.indexOf("ownerPid: process.pid,") !== -1,
+    run.indexOf("coproc $coproc_name { _tdd_core_lock_keeper ") !== -1,
+    run.indexOf(">&\"$keeper_write_fd\"") !== -1,
+    modern !== -1 && legacy > modern,
+  ];
+  process.stdout.write(found.every(Boolean) ? "ok" : "drift:" + found.join(","));
+' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null)"
+if [ "$LE_OWNER_MODEL" = ok ]; then
+  check "P1le26 the keeper shapes and the hung remedy match the lease owner model in zensu-tdd-phase.sh: a coprocess node keeper owns the lease under bash 4 or later while the shell that runs _tdd_locked_run holds its pipe, and the bash 3.2 branch records that shell" PASS
+else
+  check "P1le26 the lease owner model in zensu-tdd-phase.sh changed; re-derive the lease rows' keeper shapes and hung remedy (${LE_OWNER_MODEL:-no output})" FAIL
+fi
+
+LE_TOKEN="$(printf 'a%.0s' $(seq 48))"
+LE_PATHS="$(LE_DIR="$AP_STATE" node -e '
+  var inspection = require(process.argv[1]).inspectExternalProcessLock({
+    lockDirectory: process.env.LE_DIR,
+    resourcePath: require("path").join(process.env.LE_DIR, "autopilot"),
+  });
+  process.stdout.write(inspection.lockFile + "\n" + inspection.recoveryFile + "\n");
+' "$LE_CORE" 2>/dev/null)"
+LE_LOCK="$(printf '%s' "$LE_PATHS" | sed -n 1p)"
+LE_RECOVERY="$(printf '%s' "$LE_PATHS" | sed -n 2p)"
+LE_KEEPER_FILE="$SBOX/le-keeper.pid"
+rm -f "$LE_KEEPER_FILE"
+node -e '
+  require("fs").writeFileSync(process.argv[1], String(process.pid));
+  setTimeout(function () { process.exit(0); }, 600000);
+' "$LE_KEEPER_FILE" &
+LE_KEEPER_BG=$!
+LE_WAIT=0
+while [ ! -s "$LE_KEEPER_FILE" ] && [ "$LE_WAIT" -lt 100 ]; do sleep 0.1; LE_WAIT=$((LE_WAIT + 1)); done
+LE_LIVE_PID="$(cat "$LE_KEEPER_FILE" 2>/dev/null)"
+LE_LIVE_IDENTITY="$(node -e '
+  var id = null;
+  try {
+    id = require(process.argv[1]).processStartIdentityForPid(Number(process.argv[2]));
+  } catch (e) {
+    id = null;
+  }
+  process.stdout.write(typeof id === "string" ? id : "");
+' "$LE_CORE" "${LE_LIVE_PID:-0}" 2>/dev/null)"
+LE_LIVE_START="$(node -e '
+  var start = null;
+  try {
+    start = require(process.argv[1]).processStartLowerBoundForPid(Number(process.argv[2]));
+  } catch (e) {
+    start = null;
+  }
+  process.stdout.write(typeof start === "number" ? String(start) : "");
+' "$LE_CORE" "${LE_LIVE_PID:-0}" 2>/dev/null)"
+LE_ALL=""
+le_row() { printf '%s\n' "$1" | grep -F 'autopilot lease:'; }
+le_keep() { LE_ALL="$LE_ALL
+$1"; }
+le_owner() {
+  LE_PID="$1" LE_CREATED="$2" LE_IDENTITY="$3" LE_TOKEN_VALUE="${4:-$LE_TOKEN}" node -e '
+    require("fs").writeFileSync(process.argv[1], JSON.stringify({
+      pid: Number(process.env.LE_PID),
+      token: process.env.LE_TOKEN_VALUE,
+      kind: "external-process-lock",
+      created_at: process.env.LE_CREATED,
+      process_start_identity: process.env.LE_IDENTITY === "null" ? null : process.env.LE_IDENTITY,
+    }));
+  ' "${5:-$LE_LOCK}"
+}
+le_clear() {
+  if [ -n "$LE_LOCK" ]; then rm -rf "$LE_LOCK"; fi
+  if [ -n "$LE_RECOVERY" ]; then rm -rf "$LE_RECOVERY"; fi
+}
+le_report() {
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$AP_OWN" \
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$1" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$2" \
+    node "$REPORT" 2>/dev/null
+}
+le_shim() {
+  LE_SHIM="$1/hooks/lib/session-control-core-v1.js" node -e '
+    require("fs").writeFileSync(process.env.LE_SHIM, "var real = require(" + JSON.stringify(process.argv[1])
+      + ");\nmodule.exports = Object.assign({}, real, { inspectExternalProcessLock: " + process.argv[2] + " });\n");
+  ' "$LE_CORE" "$2"
+}
+le_fingerprint() {
+  node -e '
+    var crypto = require("crypto"), fs = require("fs");
+    var st = fs.lstatSync(process.argv[1]);
+    process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex")
+      + ":" + st.mtimeMs + ":" + st.ino + ":" + st.size);
+  ' "$1" 2>/dev/null
+}
+
+if [ -z "$LE_LOCK" ] || [ -z "$LE_RECOVERY" ] || ! [[ "$LE_LIVE_PID" =~ ^[0-9]+$ ]]; then
+  check "P1le0 lease fixture unavailable (lock path '$LE_LOCK', recovery path '$LE_RECOVERY', live pid '$LE_LIVE_PID')" FAIL
+else
+  le_clear
+  LE_FREE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_FREE_ROW"
+  LE_AFTER_FREE="$(ls -A "$AP_STATE" | grep -E '^\.external-.*\.(lock|recovery)$')"
+  if printf '%s' "$LE_FREE_ROW" | grep -qF '✅  autopilot lease: free — no lock artifact and no recovery sentinel' \
+    && [ -z "$LE_AFTER_FREE" ]; then
+    check "P1le3 no lock artifact and no recovery sentinel render the lease free, and the report leaves no artifact behind" PASS
+  else
+    check "P1le3 free lease row (row: $LE_FREE_ROW; artifacts after: $LE_AFTER_FREE)" FAIL
+  fi
+
+  LE_HELD_OUT="$(
+    set +u
+    . "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null
+    . "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null || exit 1
+    le_held_probe() { ap_report bound "$AP_OWN"; }
+    _autopilot_locked_run "$AP_P" "" le_held_probe
+  )"
+  LE_HELD_ROW="$(le_row "$LE_HELD_OUT")"
+  le_keep "$LE_HELD_ROW"
+  LE_RELEASED_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  if printf '%s' "$LE_HELD_ROW" | grep -qF '✅  autopilot lease: held right now — owner pid ' \
+    && printf '%s' "$LE_HELD_ROW" | grep -qF ' (alive), process start identity ' \
+    && { [ -z "$LE_LIVE_IDENTITY" ] || printf '%s' "$LE_HELD_ROW" | grep -qF 'process start identity recorded'; } \
+    && printf '%s' "$LE_RELEASED_ROW" | grep -qF '✅  autopilot lease: free'; then
+    check "P1le4 a lease held through _autopilot_locked_run is the artifact the row reads, and it reads free once released" PASS
+  else
+    check "P1le4 real lease (held: $LE_HELD_ROW; released: $LE_RELEASED_ROW)" FAIL
+  fi
+
+  le_owner 2147483647 2020-01-01T01:00:00+01:00 null
+  LE_DEAD_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_DEAD_ROW"
+  if printf '%s' "$LE_DEAD_ROW" | grep -qF '⚠️  autopilot lease: held by a process that is gone' \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF 'owner pid 2147483647 (not alive)' \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF 'process start identity not recorded' \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF 'created_at 2020-01-01T00:00:00.000Z' \
+    && ! printf '%s' "$LE_DEAD_ROW" | grep -qF '+01:00' \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF "$LE_LOCK" \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own' \
+    && printf '%s' "$LE_DEAD_ROW" | grep -qF 'the doctor never deletes it'; then
+    check "P1le5 a dead owner is reported with pid, liveness, identity and a created_at normalized to ISO form, and the artifact is called removable" PASS
+  else
+    check "P1le5 dead owner row (got: $LE_DEAD_ROW)" FAIL
+  fi
+
+  touch -t 202001010000 "$LE_LOCK" 2>/dev/null || true
+  LE_PRINT_BEFORE="$(le_fingerprint "$LE_LOCK")"
+  LE_LIST_BEFORE="$(ls -A "$AP_STATE")"
+  ap_report bound "$AP_OWN" >/dev/null
+  LE_PRINT_AFTER="$(le_fingerprint "$LE_LOCK")"
+  LE_LIST_AFTER="$(ls -A "$AP_STATE")"
+  if [ -n "$LE_PRINT_BEFORE" ] && [ "$LE_PRINT_BEFORE" = "$LE_PRINT_AFTER" ] \
+    && [ "$LE_LIST_BEFORE" = "$LE_LIST_AFTER" ]; then
+    check "P1le6 the report leaves a removable artifact byte-identical and the state directory unchanged" PASS
+  else
+    check "P1le6 report touched the lease artifact (before: $LE_PRINT_BEFORE; after: $LE_PRINT_AFTER)" FAIL
+  fi
+
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z reused:0
+  LE_REUSED_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_REUSED_ROW"
+  if [ -n "$LE_LIVE_IDENTITY" ]; then
+    if printf '%s' "$LE_REUSED_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the lease" \
+      && printf '%s' "$LE_REUSED_ROW" | grep -qF "owner pid $LE_LIVE_PID (alive), process start identity recorded" \
+      && printf '%s' "$LE_REUSED_ROW" | grep -qF 'differs from the recorded one' \
+      && printf '%s' "$LE_REUSED_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own'; then
+      check "P1le7 a live pid whose start identity no longer matches is not a live lock keeper, so the artifact is removable" PASS
+    else
+      check "P1le7 reused-pid row (got: $LE_REUSED_ROW)" FAIL
+    fi
+  elif [ -n "$LE_LIVE_START" ]; then
+    if printf '%s' "$LE_REUSED_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the lease" \
+      && printf '%s' "$LE_REUSED_ROW" | grep -qF "the process that holds pid $LE_LIVE_PID started after the record was written, so its pid was reused" \
+      && printf '%s' "$LE_REUSED_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own'; then
+      check "P1le7 without a readable start identity a live pid that started after the record is still not the lock keeper, so the artifact is removable" PASS
+    else
+      check "P1le7 start-time reused-pid row (got: $LE_REUSED_ROW)" FAIL
+    fi
+  elif printf '%s' "$LE_REUSED_ROW" | grep -qF 'Its current start identity could not be read' \
+    && ! printf '%s' "$LE_REUSED_ROW" | grep -qF 'removable'; then
+    check "P1le7 without a readable start identity a recorded one cannot be refuted, so the artifact is not called removable" PASS
+  else
+    check "P1le7 identity-unreadable reused-pid row (got: $LE_REUSED_ROW)" FAIL
+  fi
+
+  if [ -z "$LE_LIVE_IDENTITY" ]; then
+    check "P1le8 SKIPPED — no process start identity is readable on this host" PASS
+  else
+    le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z "$LE_LIVE_IDENTITY"
+    LE_KEEPER_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+    le_keep "$LE_KEEPER_ROW"
+    if printf '%s' "$LE_KEEPER_ROW" | grep -qF '⚠️  autopilot lease: held for ' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'by a live lock keeper' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'still carries the recorded start identity' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'is NOT removable' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'whose command line names session-control-core-v1.js' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF "Check with ps -ww -p $LE_LIVE_PID -o args= that pid $LE_LIVE_PID is such a process" \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'evidence, not proof' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF "end the shell that runs _tdd_locked_run for that run together with every process under it: pid $LE_LIVE_PID itself under bash 3.2, and the parent of the parent of pid $LE_LIVE_PID under bash 4 or later" \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'Never end the node lock keeper alone' \
+      && printf '%s' "$LE_KEEPER_ROW" | grep -qF 'never its coprocess shell alone, which releases nothing' \
+      && ! printf '%s' "$LE_KEEPER_ROW" | grep -qF "the parent of pid $LE_LIVE_PID when" \
+      && ! printf '%s' "$LE_KEEPER_ROW" | grep -qF 'is removable;'; then
+      check "P1le8 an old lease whose owner still carries its start identity is a live lock keeper, not removable; the row names a full command-line check and ends the shell that runs _tdd_locked_run, never the node lock keeper or its coprocess shell alone" PASS
+    else
+      check "P1le8 live keeper row (got: $LE_KEEPER_ROW)" FAIL
+    fi
+  fi
+
+  LE_NOW="$(node -e 'process.stdout.write(new Date().toISOString())')"
+  le_owner "$LE_LIVE_PID" "$LE_NOW" null
+  LE_YOUNG_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_YOUNG_ROW"
+  if printf '%s' "$LE_YOUNG_ROW" | grep -qF "✅  autopilot lease: held right now — owner pid $LE_LIVE_PID (alive), process start identity not recorded, created_at $LE_NOW"; then
+    check "P1le9 a live owner inside the 30 s bound renders green as a lease held right now" PASS
+  else
+    check "P1le9 young lease row (got: $LE_YOUNG_ROW)" FAIL
+  fi
+
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null
+  LE_BARE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_BARE_ROW"
+  if [ -z "$LE_LIVE_START" ]; then
+    check "P1le10 SKIPPED — no process start time is readable on this host" PASS
+  elif printf '%s' "$LE_BARE_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the lease" \
+    && printf '%s' "$LE_BARE_ROW" | grep -qF 'process start identity not recorded' \
+    && printf '%s' "$LE_BARE_ROW" | grep -qF "the process that holds pid $LE_LIVE_PID started after the record was written, so its pid was reused" \
+    && printf '%s' "$LE_BARE_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own'; then
+    check "P1le10 a live pid that started after an identity-less lease record is not the lock keeper, so the artifact is removable" PASS
+  else
+    check "P1le10 identity-less reused-pid row (got: $LE_BARE_ROW)" FAIL
+  fi
+
+  LE_NOPROOF="$SBOX/le-noproof"
+  rm -rf "$LE_NOPROOF"
+  cp -R "$SBOX/plug" "$LE_NOPROOF"
+  le_shim "$LE_NOPROOF" 'function (options) {
+    var inspection = real.inspectExternalProcessLock(options);
+    if (inspection.lock.state === "owned" && inspection.lock.alive && !inspection.lock.identityRecorded) {
+      inspection.lock.stale = false;
+      inspection.lock.startedAfterRecord = false;
+    }
+    return inspection;
+  }'
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null
+  LE_NOPROOF_ROW="$(le_row "$(le_report "$LE_NOPROOF" "$AP_P")")"
+  le_keep "$LE_NOPROOF_ROW"
+  if printf '%s' "$LE_NOPROOF_ROW" | grep -qF "⚠️  autopilot lease: held for " \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "by pid $LE_LIVE_PID, which is alive" \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "the core reclaims the lock artifact only once the process holding pid $LE_LIVE_PID provably started after the record was written" \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'it clears only when that process releases it or exits' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the lock keeper" \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'whose command line names session-control-core-v1.js' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'under bash 3.2, the bash process that runs that hook or zensu-log.sh itself' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'only a removal by hand clears it' \
+    && ! printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'removable'; then
+    check "P1le10b a live owner without a start identity that nothing shows to be younger than its record is never called removable; the row names how to tell a live lock keeper apart" PASS
+  else
+    check "P1le10b identity-less live owner row (got: $LE_NOPROOF_ROW)" FAIL
+  fi
+
+  le_owner "$LE_LIVE_PID" 2099-01-01T00:00:00.000Z null
+  LE_FUTURE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_FUTURE_ROW"
+  if printf '%s' "$LE_FUTURE_ROW" | grep -qF '⚠️  autopilot lease: held since a created_at that lies in the future' \
+    && printf '%s' "$LE_FUTURE_ROW" | grep -qF 'created_at 2099-01-01T00:00:00.000Z' \
+    && printf '%s' "$LE_FUTURE_ROW" | grep -qF 'how long it has been held is unknown'; then
+    check "P1le11 a future created_at is never read as a lease held right now, and the row claims no hold duration" PASS
+  else
+    check "P1le11 future created_at row (got: $LE_FUTURE_ROW)" FAIL
+  fi
+
+  if [ -z "$LE_LIVE_IDENTITY" ]; then
+    check "P1le11b SKIPPED — no process start identity is readable on this host" PASS
+  else
+    le_owner "$LE_LIVE_PID" 2099-01-01T00:00:00.000Z "$LE_LIVE_IDENTITY"
+    LE_FUTURE_KEEPER_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+    le_keep "$LE_FUTURE_KEEPER_ROW"
+    if printf '%s' "$LE_FUTURE_KEEPER_ROW" | grep -qF '⚠️  autopilot lease: held since a created_at that lies in the future by a live lock keeper' \
+      && printf '%s' "$LE_FUTURE_KEEPER_ROW" | grep -qF 'how long it has been held is unknown' \
+      && printf '%s' "$LE_FUTURE_KEEPER_ROW" | grep -qF 'is NOT removable' \
+      && ! printf '%s' "$LE_FUTURE_KEEPER_ROW" | grep -qF 'held this long' \
+      && ! printf '%s' "$LE_FUTURE_KEEPER_ROW" | grep -qF 'is removable;'; then
+      check "P1le11b a live lock keeper with a future created_at stays not removable and claims no hold time" PASS
+    else
+      check "P1le11b future created_at live keeper row (got: $LE_FUTURE_KEEPER_ROW)" FAIL
+    fi
+  fi
+
+  LE_NOIDENT="$SBOX/le-noident"
+  rm -rf "$LE_NOIDENT"
+  cp -R "$SBOX/plug" "$LE_NOIDENT"
+  le_shim "$LE_NOIDENT" 'function (options) {
+    var inspection = real.inspectExternalProcessLock(options);
+    if (inspection.lock.state === "owned" && inspection.lock.alive && inspection.lock.identityRecorded) {
+      inspection.lock.identityCurrent = null;
+      inspection.lock.stale = false;
+    }
+    return inspection;
+  }'
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z unread:1
+  LE_UNREAD_ROW="$(le_row "$(le_report "$LE_NOIDENT" "$AP_P")")"
+  le_keep "$LE_UNREAD_ROW"
+  if printf '%s' "$LE_UNREAD_ROW" | grep -qF "owner pid $LE_LIVE_PID (alive), process start identity recorded" \
+    && printf '%s' "$LE_UNREAD_ROW" | grep -qF 'Its current start identity could not be read' \
+    && printf '%s' "$LE_UNREAD_ROW" | grep -qF 'does not reclaim it while that holds' \
+    && printf '%s' "$LE_UNREAD_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the lock keeper" \
+    && printf '%s' "$LE_UNREAD_ROW" | grep -qF 'only a removal by hand clears it' \
+    && ! printf '%s' "$LE_UNREAD_ROW" | grep -qF 'removable'; then
+    check "P1le12 a recorded start identity the core cannot re-read keeps the artifact out of every removable verdict" PASS
+  else
+    check "P1le12 unreadable identity row (got: $LE_UNREAD_ROW)" FAIL
+  fi
+
+  le_clear
+  printf 'garbage' > "$LE_LOCK"
+  touch -t 202001010000 "$LE_LOCK" 2>/dev/null || true
+  LE_OLD_GARBAGE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_OLD_GARBAGE_ROW"
+  printf 'garbage' > "$LE_LOCK"
+  LE_FRESH_GARBAGE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_FRESH_GARBAGE_ROW"
+  touch -t 209901010000 "$LE_LOCK" 2>/dev/null || true
+  LE_FUTURE_GARBAGE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_FUTURE_GARBAGE_ROW"
+  if printf '%s' "$LE_OLD_GARBAGE_ROW" | grep -qF 'carries no owner record the core can read and is ' \
+    && printf '%s' "$LE_OLD_GARBAGE_ROW" | grep -qF 'stale after 30 s' \
+    && printf '%s' "$LE_OLD_GARBAGE_ROW" | grep -qF 'it is removable; the next lease acquisition reclaims it on its own' \
+    && printf '%s' "$LE_FRESH_GARBAGE_ROW" | grep -qF 'held until it is 30 s old' \
+    && ! printf '%s' "$LE_FRESH_GARBAGE_ROW" | grep -qF 'removable' \
+    && printf '%s' "$LE_FUTURE_GARBAGE_ROW" | grep -qF 'its modification time lies in the future' \
+    && printf '%s' "$LE_FUTURE_GARBAGE_ROW" | grep -qF 'remove it by hand'; then
+    check "P1le13 an artifact with no readable owner record is removable only past the core's 30 s bound" PASS
+  else
+    check "P1le13 owner-less rows (old: $LE_OLD_GARBAGE_ROW; fresh: $LE_FRESH_GARBAGE_ROW; future: $LE_FUTURE_GARBAGE_ROW)" FAIL
+  fi
+
+  le_owner 2147483647 2020-01-01T00:00:00.000Z null "$(printf 'a%.0s' $(seq 47))"
+  touch -t 202001010000 "$LE_LOCK" 2>/dev/null || true
+  LE_BADTOKEN_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_owner 2147483647 2020-01-01T00:00:00.000Z UPPER
+  touch -t 202001010000 "$LE_LOCK" 2>/dev/null || true
+  LE_BADIDENT_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  if printf '%s' "$LE_BADTOKEN_ROW" | grep -qF 'carries no owner record the core can read' \
+    && ! printf '%s' "$LE_BADTOKEN_ROW" | grep -qF 'owner pid' \
+    && printf '%s' "$LE_BADIDENT_ROW" | grep -qF 'carries no owner record the core can read' \
+    && ! printf '%s' "$LE_BADIDENT_ROW" | grep -qF 'owner pid'; then
+    check "P1le14 an owner record lockOwner refuses (short token, identity outside its class) is read as no owner record" PASS
+  else
+    check "P1le14 refused owner records (token: $LE_BADTOKEN_ROW; identity: $LE_BADIDENT_ROW)" FAIL
+  fi
+
+  le_owner 2147483647 2020-01-01T00:00:00.000Z null
+  LE_HARDLINK="$SBOX/le-hardlink"
+  rm -f "$LE_HARDLINK"
+  ln "$LE_LOCK" "$LE_HARDLINK" 2>/dev/null || true
+  LE_NLINK="$(node -e 'try { process.stdout.write(String(require("fs").lstatSync(process.argv[1]).nlink)); } catch (e) { process.stdout.write("0"); }' "$LE_LOCK")"
+  if [ "$LE_NLINK" -lt 2 ]; then
+    check "P1le15 SKIPPED — the filesystem refused a hard link" PASS
+  elif le_row "$(ap_report bound "$AP_OWN")" | grep -qF 'held by a process that is gone — owner pid 2147483647'; then
+    check "P1le15 a multiply linked artifact is still read, as lockOwner reads it" PASS
+  else
+    check "P1le15 multiply linked artifact was not read" FAIL
+  fi
+  rm -f "$LE_HARDLINK"
+
+  le_clear
+  ln -s "$AP_STATE/le-nowhere" "$LE_LOCK" 2>/dev/null || true
+  if [ ! -L "$LE_LOCK" ]; then
+    check "P1le16 SKIPPED — the filesystem refused a symbolic link" PASS
+  else
+    LE_LINK_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+    le_keep "$LE_LINK_ROW"
+    if printf '%s' "$LE_LINK_ROW" | grep -qF '⚠️  autopilot lease: the lease path holds a symbolic link' \
+      && printf '%s' "$LE_LINK_ROW" | grep -qF 'the core never reclaims it' \
+      && printf '%s' "$LE_LINK_ROW" | grep -qF 'Inspect it and remove it by hand; the doctor never deletes it.'; then
+      check "P1le16 a symbolic link at the lease path is reported as never reclaimed" PASS
+    else
+      check "P1le16 symlinked lease path row (got: $LE_LINK_ROW)" FAIL
+    fi
+  fi
+  le_clear
+  mkdir "$LE_LOCK"
+  LE_DIR_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_DIR_ROW"
+  le_clear
+  head -c 5000 /dev/zero | tr '\0' 'x' > "$LE_LOCK"
+  LE_BIG_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_BIG_ROW"
+  le_clear
+  if printf '%s' "$LE_DIR_ROW" | grep -qF 'the lease path holds an entry that is not a regular file' \
+    && printf '%s' "$LE_BIG_ROW" | grep -qF 'the lease path holds a file larger than an owner record may take'; then
+    check "P1le17 a directory or an oversized file at the lease path is reported as an artifact the core never writes" PASS
+  else
+    check "P1le17 unsafe artifact rows (directory: $LE_DIR_ROW; oversized: $LE_BIG_ROW)" FAIL
+  fi
+
+  mkdir "$AP_STATE/autopilot"
+  LE_RESOURCE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_RESOURCE_ROW"
+  rmdir "$AP_STATE/autopilot"
+  if printf '%s' "$LE_RESOURCE_ROW" | grep -qF '⚠️  autopilot lease: the lease artifact could not be resolved — the resource path .zensu/state/autopilot is not a single-link regular file' \
+    && printf '%s' "$LE_RESOURCE_ROW" | grep -qF 'That is a missing check, not an all-clear.'; then
+    check "P1le18 an unsafe resource path is reported with the core's cause as a missing check" PASS
+  else
+    check "P1le18 unresolvable resource row (got: $LE_RESOURCE_ROW)" FAIL
+  fi
+
+  LE_LINK_P="$SBOX/le-link-project"
+  mkdir -p "$LE_LINK_P/.zensu" "$SBOX/le-link-target"
+  ln -s "$SBOX/le-link-target" "$LE_LINK_P/.zensu/state" 2>/dev/null || true
+  if [ ! -L "$LE_LINK_P/.zensu/state" ]; then
+    check "P1le19 SKIPPED — the filesystem refused a symbolic link" PASS
+  elif le_row "$(le_report "$SBOX/plug" "$LE_LINK_P")" | grep -qF 'could not be resolved — the state directory is a symbolic link or not a directory'; then
+    check "P1le19 a symlinked state directory is reported with the core's cause" PASS
+  else
+    check "P1le19 symlinked state directory row (got: $(le_row "$(le_report "$SBOX/plug" "$LE_LINK_P")"))" FAIL
+  fi
+
+  LE_NOCORE="$SBOX/le-nocore"
+  rm -rf "$LE_NOCORE"
+  cp -R "$SBOX/plug" "$LE_NOCORE"
+  rm -f "$LE_NOCORE/hooks/lib/session-control-core-v1.js"
+  LE_NOCORE_ROW="$(le_row "$(le_report "$LE_NOCORE" "$AP_P")")"
+  le_keep "$LE_NOCORE_ROW"
+  if printf '%s' "$LE_NOCORE_ROW" | grep -qF '⚠️  autopilot lease: not checked — the Session Control core did not load from ' \
+    && printf '%s' "$LE_NOCORE_ROW" | grep -qF 'That is a missing check, not an all-clear.'; then
+    check "P1le20 a core that does not load is a missing check, never an all-clear" PASS
+  else
+    check "P1le20 missing-core row (got: $LE_NOCORE_ROW)" FAIL
+  fi
+
+  LE_NOINSPECT="$SBOX/le-noinspect"
+  rm -rf "$LE_NOINSPECT"
+  cp -R "$SBOX/plug" "$LE_NOINSPECT"
+  le_shim "$LE_NOINSPECT" 'undefined'
+  LE_NOINSPECT_ROW="$(le_row "$(le_report "$LE_NOINSPECT" "$AP_P")")"
+  le_keep "$LE_NOINSPECT_ROW"
+  if printf '%s' "$LE_NOINSPECT_ROW" | grep -qF '⚠️  autopilot lease: not checked — the Session Control core did not load from ' \
+    && printf '%s' "$LE_NOINSPECT_ROW" | grep -qF 'with its read-only lease inspection' \
+    && printf '%s' "$LE_NOINSPECT_ROW" | grep -qF 'That is a missing check, not an all-clear.' \
+    && ! printf '%s' "$LE_NOINSPECT_ROW" | grep -qF 'could not be resolved'; then
+    check "P1le20b a core that loads without inspectExternalProcessLock is a missing check, never a resolution failure" PASS
+  else
+    check "P1le20b core without the inspector (got: $LE_NOINSPECT_ROW)" FAIL
+  fi
+
+  le_clear
+  printf '{"pid":1,"token":"%s","created_at":{"toString":1}}' "$LE_TOKEN" > "$LE_LOCK"
+  LE_HOSTILE_OUT="$(ap_report bound "$AP_OWN")"
+  LE_HOSTILE_ROW="$(le_row "$LE_HOSTILE_OUT")"
+  le_keep "$LE_HOSTILE_ROW"
+  le_clear
+  if printf '%s' "$LE_HOSTILE_ROW" | grep -qF '⚠️  autopilot lease: the core cannot read the lock artifact' \
+    && printf '%s' "$LE_HOSTILE_ROW" | grep -qF 'every lease acquisition fails while it stays, and the core never reclaims it' \
+    && printf '%s' "$LE_HOSTILE_OUT" | grep -qF 'Summary: ' \
+    && ! printf '%s' "$LE_HOSTILE_OUT" | grep -qF 'diagnostics renderer failed'; then
+    check "P1le21 an owner record the core cannot parse is a never-reclaimed artifact, and the rest of the report still renders" PASS
+  else
+    check "P1le21 unparseable owner record (row: $LE_HOSTILE_ROW)" FAIL
+  fi
+
+  le_owner 2147483647 2020-01-01T00:00:00.000Z null "" "$LE_RECOVERY"
+  LE_REC_DEAD_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_REC_DEAD_ROW"
+  LE_NOW="$(node -e 'process.stdout.write(new Date().toISOString())')"
+  le_owner "$LE_LIVE_PID" "$LE_NOW" null "" "$LE_RECOVERY"
+  LE_REC_BUSY_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_REC_BUSY_ROW"
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null "" "$LE_RECOVERY"
+  LE_REC_BARE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_REC_BARE_ROW"
+  le_clear
+  mkdir "$LE_RECOVERY"
+  LE_REC_DIR_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+  le_keep "$LE_REC_DIR_ROW"
+  le_clear
+  if ! printf '%s' "$LE_REC_DEAD_ROW" | grep -qF 'autopilot lease: free' \
+    && printf '%s' "$LE_REC_DEAD_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel was left by a process that is gone' \
+    && printf '%s' "$LE_REC_DEAD_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own' \
+    && printf '%s' "$LE_REC_BUSY_ROW" | grep -qF '✅  autopilot lease: a lease is being recovered or released right now' \
+    && printf '%s' "$LE_REC_BARE_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel' \
+    && printf '%s' "$LE_REC_BARE_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the holder of the recovery sentinel" \
+    && ! printf '%s' "$LE_REC_BARE_ROW" | grep -qF 'removable' \
+    && printf '%s' "$LE_REC_DIR_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel path holds an entry that is not a regular file' \
+    && printf '%s' "$LE_REC_DIR_ROW" | grep -qF 'every lease acquisition and release fails while it stays'; then
+    check "P1le22 a recovery sentinel is judged with the lock's verdicts, and the lease never reads free while one exists" PASS
+  else
+    check "P1le22 recovery sentinel rows (dead: $LE_REC_DEAD_ROW; busy: $LE_REC_BUSY_ROW; bare: $LE_REC_BARE_ROW; directory: $LE_REC_DIR_ROW)" FAIL
+  fi
+
+  if [ -z "$LE_LIVE_IDENTITY" ]; then
+    check "P1le22b SKIPPED — no process start identity is readable on this host" PASS
+  else
+    le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z "$LE_LIVE_IDENTITY" "" "$LE_RECOVERY"
+    LE_REC_HELD_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+    le_keep "$LE_REC_HELD_ROW"
+    le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z reused:0 "" "$LE_RECOVERY"
+    LE_REC_REUSED_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
+    le_keep "$LE_REC_REUSED_ROW"
+    le_clear
+    if printf '%s' "$LE_REC_HELD_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel' \
+      && printf '%s' "$LE_REC_HELD_ROW" | grep -qF "by pid $LE_LIVE_PID, which still carries the recorded start identity" \
+      && printf '%s' "$LE_REC_HELD_ROW" | grep -qF 'The sentinel is NOT removable' \
+      && printf '%s' "$LE_REC_HELD_ROW" | grep -qF 'A process that holds the recovery sentinel is a node process whose command line names session-control-core-v1.js' \
+      && printf '%s' "$LE_REC_HELD_ROW" | grep -qF "Check with ps -ww -p $LE_LIVE_PID -o args= that pid $LE_LIVE_PID is such a process" \
+      && printf '%s' "$LE_REC_HELD_ROW" | grep -qF 'If it is one and hung, end it' \
+      && ! printf '%s' "$LE_REC_HELD_ROW" | grep -qF 'bash 3.2' \
+      && ! printf '%s' "$LE_REC_HELD_ROW" | grep -qF 'is removable;' \
+      && printf '%s' "$LE_REC_REUSED_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the recovery sentinel" \
+      && printf '%s' "$LE_REC_REUSED_ROW" | grep -qF 'differs from the recorded one' \
+      && printf '%s' "$LE_REC_REUSED_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own'; then
+      check "P1le22b a recovery sentinel whose holder still carries its identity is not removable and names the holder's own shape and a full command-line check; a reused pid makes it removable" PASS
+    else
+      check "P1le22b recovery identity rows (held: $LE_REC_HELD_ROW; reused: $LE_REC_REUSED_ROW)" FAIL
+    fi
+  fi
+
+  LE_NOW="$(node -e 'process.stdout.write(new Date().toISOString())')"
+  LE_EARLIER_MS="$(node -e 'process.stdout.write(String(Date.now() - 60000))')"
+  le_owner "$LE_LIVE_PID" "$LE_NOW" null
+  LE_RACE_HELD_ROW="$(le_row "$(ZDOC_NOW_MS="$LE_EARLIER_MS" ap_report bound "$AP_OWN")")"
+  le_keep "$LE_RACE_HELD_ROW"
+  le_clear
+  printf 'garbage' > "$LE_LOCK"
+  LE_RACE_BARE_ROW="$(le_row "$(ZDOC_NOW_MS="$LE_EARLIER_MS" ap_report bound "$AP_OWN")")"
+  le_keep "$LE_RACE_BARE_ROW"
+  le_clear
+  if printf '%s' "$LE_RACE_HELD_ROW" | grep -qF "✅  autopilot lease: held right now — owner pid $LE_LIVE_PID (alive)" \
+    && ! printf '%s' "$LE_RACE_HELD_ROW" | grep -qF 'lies in the future' \
+    && printf '%s' "$LE_RACE_BARE_ROW" | grep -qF 'held until it is 30 s old' \
+    && ! printf '%s' "$LE_RACE_BARE_ROW" | grep -qF 'lies in the future'; then
+    check "P1le25 a lease taken after the report started ages on the inspection's own clock, never on the report-start clock" PASS
+  else
+    check "P1le25 lease taken while the report ran (held: $LE_RACE_HELD_ROW; owner-less: $LE_RACE_BARE_ROW)" FAIL
+  fi
+
+  LE_THROWS="$SBOX/le-throws"
+  rm -rf "$LE_THROWS"
+  cp -R "$SBOX/plug" "$LE_THROWS"
+  le_shim "$LE_THROWS" 'function () {
+    return { get lock() { throw new Error("inspection fault"); } };
+  }'
+  LE_THROWS_OUT="$(le_report "$LE_THROWS" "$AP_P")"
+  LE_THROWS_ROW="$(le_row "$LE_THROWS_OUT")"
+  if printf '%s' "$LE_THROWS_ROW" | grep -qF '⚠️  autopilot lease: not checked — the lease row failed while it was rendered' \
+    && ! printf '%s' "$LE_THROWS_ROW" | grep -qF 'inspection fault' \
+    && printf '%s' "$LE_THROWS_OUT" | grep -qF 'Summary: '; then
+    check "P1le23 a lease row that throws costs one missing-check row, never the rest of the report" PASS
+  else
+    check "P1le23 throwing lease row (row: $LE_THROWS_ROW)" FAIL
+  fi
+
+  LE_SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
+  LE_FRONTMATTER="$(awk 'NR == 1 && $0 == "---" { inside = 1; next } inside && $0 == "---" { exit } inside { print }' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
+  LE_ROSTER_MISSING=""
+  for _phrase in \
+    'autopilot lease: free' \
+    'held right now' \
+    'is removable; the next lease acquisition reclaims it on its own' \
+    'by a live lock keeper' \
+    'which is alive' \
+    'since a created_at that lies in the future' \
+    'cannot establish whether pid' \
+    'carries no owner record the core can read' \
+    'the lease path holds' \
+    'the core cannot read' \
+    'the recovery sentinel' \
+    'is being recovered or released right now' \
+    'autopilot lease: not checked' \
+    'the lease artifact could not be resolved' \
+    'changed while it was read' \
+    'which still carries the recorded start identity' \
+    'started after the record was written' \
+    'ps -ww -p' \
+    'evidence, not proof' \
+    'the parent of the parent of' \
+    'Never end the node lock keeper alone' \
+    'never its coprocess shell alone, which releases nothing'; do
+    if ! printf '%s' "$LE_ALL" | grep -qF "$_phrase" && ! grep -qF "$_phrase" "$REPORT"; then
+      LE_ROSTER_MISSING="$LE_ROSTER_MISSING [renderer: $_phrase]"
+    fi
+    printf '%s' "$LE_SKILL_FLAT" | grep -qF "$_phrase" || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [skill: $_phrase]"
+  done
+  printf '%s' "$LE_FRONTMATTER" | grep -qF 'who holds the Autopilot project lease' \
+    || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [frontmatter]"
+  printf '%s' "$LE_SKILL_FLAT" | grep -qF 'Never delete the artifact and never offer to' \
+    || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [no-deletion rule]"
+  if [ -z "$LE_ROSTER_MISSING" ]; then
+    check "P1le24 every lease row phrase is both emitted and documented in skills/doctor/SKILL.md, with the frontmatter clause and the no-deletion rule" PASS
+  else
+    check "P1le24 lease row wording drifted from the skill:$LE_ROSTER_MISSING" FAIL
+  fi
+  rm -rf "$LE_NOIDENT" "$LE_NOPROOF" "$LE_NOCORE" "$LE_NOINSPECT" "$LE_THROWS" "$LE_LINK_P" "$SBOX/le-link-target"
+fi
+le_clear
+kill "$LE_KEEPER_BG" 2>/dev/null || true
+wait "$LE_KEEPER_BG" 2>/dev/null || true
+rm -f "$LE_KEEPER_FILE"
+
 # ── P6 the bound session's OWN workflow document ────────────────────────────
 #
 # Every other state row judges the documents that EXIST; not one asked whether

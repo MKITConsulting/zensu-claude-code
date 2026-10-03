@@ -163,8 +163,13 @@ start reader on the running host, per-session lock recovery for an absent and fo
 identity, external-lease recovery, a control that keeps a holder older than its record, and a
 faked-win32 case that pins the PowerShell invocation, the age gate and the per-generation cache
 on every host. The unit file runs as `session-control-core` on `windows-shard-2`, which is
-where the real PowerShell path executes. Two older fixtures planted a live PID under a
-`created_at` older than that process, which is the reused-PID shape itself, and now plant
+where the real PowerShell path executes. The verdict reaches `/zensu:doctor` through
+`inspectExternalProcessLock`, whose `startedAfterRecord` field names this cause: the inspection
+case table `external process lock inspection calls an artifact stale exactly when acquisition
+reclaims it` holds it against a real acquisition, and `P1le7`, `P1le10` and `P1le10b` in
+`tests/structure/test-doctor.sh` hold the `autopilot lease:` row
+(`.claude/rules/autopilot-lease-row.md`). Older fixtures that planted a live PID under a
+`created_at` older than that process, which is the reused-PID shape itself, now plant
 `created_at` at write time.
 
 **Operator-facing accounts.** The "Who holds an adopted review" paragraphs in
