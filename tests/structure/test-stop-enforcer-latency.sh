@@ -716,6 +716,22 @@ for near in "scv1_${HEX63}A" "scv1_${HEX63}" "scv1_${HEX63}00" "scv1_${HEX63}g" 
 done
 check "L42 an id that only resembles a canonical key is hashed by the core module, never returned as it is" "$NEAR_OK"
 
+COLLATED_KEYS="$(LC_ALL=en_US.UTF-8 bash -c '
+  source "$1" >/dev/null 2>&1 || exit 9
+  for key in "$2" "$3" "$4"; do
+    if zensu_session_key_canonical "$key"; then printf a; else printf r; fi
+  done
+  case B in ([a-f]) printf :collating ;; (*) printf :ascii ;; esac
+' _ "$SESSION_LIB" "scv1_${HEX63}f" "scv1_${HEX63}B" "$(printf 'scv1_%s\303\251' "$HEX63")" 2>/dev/null)"
+case "$COLLATED_KEYS" in
+  (arr:collating)
+    check "L42b a locale whose bracket ranges collate does not widen the canonical-key test" PASS ;;
+  (arr:ascii)
+    check "L42b bracket ranges did not collate under en_US.UTF-8 in this shell, so the locale probe could not discriminate" PASS ;;
+  (*)
+    check "L42b canonical-key test under a collating locale (got '$COLLATED_KEYS', want arr)" FAIL ;;
+esac
+
 memo_run set-input MEMO_SET_NAME=ZENSU_SESSION_KEY MEMO_SET_VALUE="scv1_$(printf '%064d' 0)"
 if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
   check "L44 the memo answers only for the session key it verified: another key is verified again and refused" PASS
