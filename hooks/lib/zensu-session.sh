@@ -1036,7 +1036,7 @@ zensu_emit_hook_session_deny() {
     "$appended"
 }
 
-_zensu_session_key_canonical() {
+zensu_session_key_canonical() {
   local value="${1:-}"
   [ "${#value}" -eq 69 ] || return 1
   case "$value" in
@@ -1061,7 +1061,7 @@ zensu_resolve_session_id() {
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
   core="$lib_dir/session-control-core-v1.js"
   [ -f "$core" ] || return 1
-  if _zensu_session_key_canonical "$raw"; then
+  if zensu_session_key_canonical "$raw"; then
     resolved="$raw"
   else
     resolved="$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$raw")" \
@@ -1072,7 +1072,7 @@ zensu_resolve_session_id() {
     # binding: explicit raw ids and explicit keys are accepted only when their
     # normalized key is exactly this session's key. This prevents model-side
     # helpers from reading or mutating another session's CAS state.
-    if ! _zensu_session_key_canonical "$injected_key"; then
+    if ! zensu_session_key_canonical "$injected_key"; then
       [ "$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$injected_key")" \
         = "$injected_key" ] || return 1
     fi
@@ -1179,7 +1179,7 @@ case "${OSTYPE:-}" in
       zensu_session_adoption_attempt _zensu_adoption_attempt \
       zensu_session_adoption_tail _zensu_adoption_tail \
       _zensu_deny_audience _zensu_load_agent_context \
-      zensu_session_key _zensu_session_key_canonical zensu_resolve_session_id \
+      zensu_session_key zensu_session_key_canonical zensu_resolve_session_id \
       zensu_resolve_project_dir zensu_memoize_project_dir 2>/dev/null || true
     ;;
 esac
