@@ -1320,8 +1320,8 @@ fi
 
 # ── T26-T29 — the write-anchor routing rule and its carriers ────────────────
 # The skill tells a takeover to work in the target worktree, and the Bash
-# source-write gate refuses to commit there: the session's project root is minted
-# at SessionStart and only /zensu:adopt-session --reanchor moves it. Editing and testing still succeed,
+# source-write gate, while it is opted in, refuses to commit there: the session's
+# project root is minted at SessionStart and only /zensu:adopt-session --reanchor moves it. Editing and testing still succeed,
 # because no Edit-matcher hook compares a path against that root — so the failure
 # surfaces only at `git commit`, after the work is done. These pins hold the
 # disclosure and the route in the file, since prose is the entire fix.
@@ -1353,9 +1353,11 @@ printf '%s\n' "$FLOW3" | grep -qF 'containment, not equality' || ANCHOR_MISS="$A
 printf '%s\n' "$FLOW3" | grep -qF '.claude/worktrees/' || ANCHOR_MISS="$ANCHOR_MISS [nested-layout-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'rule (C)' || ANCHOR_MISS="$ANCHOR_MISS [rule-c-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'rule (B)' || ANCHOR_MISS="$ANCHOR_MISS [rule-b-not-named]"
-# The escape hatch the deny advertises is refused by the host, so a reader told
-# only "there is a prefix" is sent down a route that does not exist.
+# The escape hatch is refused by the host, and the deny no longer names it, so a
+# reader told only "there is a prefix" is sent down a route that does not exist.
 printf '%s\n' "$FLOW3" | grep -qF 'Auto-Mode classifier' || ANCHOR_MISS="$ANCHOR_MISS [classifier-caveat-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'hooks.bashWriteGate' || ANCHOR_MISS="$ANCHOR_MISS [opt-in-key-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'With the gate off — the default — the commit lands too' || ANCHOR_MISS="$ANCHOR_MISS [default-off-not-stated]"
 # Derived from THIS step's own sentence, not from the bare command names: both
 # `claude --resume` and `handoff brief` already occur in step 2, so needling them
 # alone cannot detect deletion of the routing sentence this change added.
@@ -1528,6 +1530,7 @@ fi
 LIMITS_SECTION="$(section_of '## Limits of what this can know')"
 LIMITS_MISS=""
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'but not commit it' || LIMITS_MISS="$LIMITS_MISS [asymmetry-bullet-missing]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'With the opt-in source-write gate on' || LIMITS_MISS="$LIMITS_MISS [asymmetry-not-bounded-to-the-opt-in]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-edit-tdd-reminder.sh' || LIMITS_MISS="$LIMITS_MISS [edit-hook-not-named]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-write-secret-scan.sh' || LIMITS_MISS="$LIMITS_MISS [secret-scan-hook-not-named]"
 # The roster is only complete WITH the principal. A third hook on the `.*` matcher
@@ -2203,6 +2206,9 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'containment, not construction' || T35B_MISS="$T35B_MISS [move-gate-containment]"
   printf '%s' "$STEP4" | grep -qF 'while a Zensu chain is armed' || T35B_MISS="$T35B_MISS [move-ledger-bound]"
   printf '%s' "$STEP4" | grep -qF 'never spelled, and never prescribed' || T35B_MISS="$T35B_MISS [move-escape-not-prescribed]"
+  printf '%s' "$STEP4" | grep -qF 'and only when that session has the opt-in gate on' || T35B_MISS="$T35B_MISS [move-gate-opt-in-bound]"
+  printf '%s' "$STEP4" | grep -qF 'the refusal no longer names it either' || T35B_MISS="$T35B_MISS [move-refusal-names-no-escape]"
+  printf '%s' "$STEP4" | grep -qF 'The refusal itself carries' && T35B_MISS="$T35B_MISS [move-refusal-still-carries-the-prefix]"
   # The CONSEQUENCE of taking the escape anyway, which the two needles above do not reach:
   # they pin that the gate judges both operands and that the escape is not prescribed, and
   # neither sees that the DESTINATION is then unchecked and must be placed inside the anchor by

@@ -60,16 +60,9 @@ The team-review identity check is a THIRD shape: it resolves the owner from the 
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
 
-**`autopilot_read_active_strict` asks the owner-scoped question with the lease kept apart from
-the verdict.** `autopilot_read_active` ends in `_autopilot_locked_run`, so its exit 1 also covers a
-storage-safety failure, a failed acquisition and a failed release. The strict verb runs the worker
-through `_autopilot_active_probe`, which always returns 0 and carries the worker's status in
-`_ZENSU_AP_ACTIVE_WORKER_RC` beside the record in `_ZENSU_AP_ACTIVE_RECORD` — the same intra-file
-channel shape as `_autopilot_hold_probe` — and answers 0 with the run printed, 1 for the worker's own
-"no run" or an absent state directory, 2 for an orphaned, hidden or inconsistent run, 3 for a
-refused call and 5 for every lease, storage or path fault. Its one caller is
-`hooks/lib/session-reanchor-v1.js`, which names it across the file boundary; the hook call sites
-keep `autopilot_read_active` and read its 1 as "no run".
+**The owner-scoped read has a strict form, `autopilot_read_active_strict`.** Which callers use
+it, the read-only look it takes when the lease cannot be taken, and the checks that hold the real
+lease are in `.claude/rules/autopilot-active-read.md`.
 
 **The two deferred-review fences ask the owner-independent question and then WEIGH the
 answer; that is not a fourth shape and it is not owner-scoping.** They still call
@@ -931,7 +924,7 @@ still covers only the LEGACY pointer by name.
   through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
   gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
   present in the true-claim one — and P1nz13 pins the second row plus its control.
-- **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
+- **The Windows wall clock of `test-doctor.sh` is UNMEASURED.** `test-autopilot-state-machine.sh`
   runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
   and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
@@ -948,8 +941,11 @@ still covers only the LEGACY pointer by name.
   bullet read `P1na`-`P1ny` while `P1nz` already existed, with no rename involved. Re-grep the
   family before trusting either form.
   This repository's rule is that a ceiling comes from a green shard measurement
-  and never from an estimate, so no ceiling was raised: take both figures from the next green
-  Windows run and record them before adding further fixtures to either file.
+  and never from an estimate, so no ceiling was raised: take the `test-doctor.sh` figure from
+  the next green Windows run that runs it and record it before adding further fixtures to that
+  file. `test-autopilot-state-machine.sh` has been measured since, at 969005 and 878950 ms on run
+  37064216294, after run 37060398940 timed it out at its old 900000 ms cap;
+  `.claude/rules/windows-budget-best-solution-first.md` records the figures and its new cap.
 - **A foreign nonterminal run permanently withholds the green summary.** The row is `WARN` and
   `line()` counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so while
   any other session in this project holds a nonterminal run, `/zensu:doctor` cannot print a clean

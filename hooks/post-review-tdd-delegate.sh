@@ -179,7 +179,7 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   # unbound. A corrupt read is authoritative and must fail closed before ticket
   # mutation.
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+  if PREFLIGHT_OUTER="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     PREFLIGHT_OUTER_RC=0
   else
     PREFLIGHT_OUTER_RC=$?

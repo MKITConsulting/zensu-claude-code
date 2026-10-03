@@ -261,7 +261,7 @@
             <text class="t-ink3" x="736" y="246" font-size="12.5">frontend/ — worktree</text>
             <text class="t-ink3" x="736" y="264" font-size="11">the code lives here</text>
             <text class="t-acc"  x="736" y="308" font-size="11.5">invisible to audit and review</text>
-            <text class="t-acc"  x="736" y="326" font-size="11.5">denied for Bash writes</text>
+            <text class="t-acc"  x="736" y="326" font-size="11.5">Bash writes denied while gated</text>
           </g>
         </g>
       </svg>
@@ -272,7 +272,7 @@
       <ol>
         <li>Four consumers — Edit landing (phase 6, step 5b), Review packet (changed_files), Write gate (rules B and C), Terminus (tdd-complete) — all point at one anchor.</li>
         <li>The anchor is the single project root resolved by zensu_resolve_project_dir(). It holds state, logs, the workflow document and doctor. Below it sits the orchestrator repository, where no code is written.</li>
-        <li>Right of the visibility boundary are the backend/ and frontend/ worktrees where the code actually lives. Both are invisible to audit and review, and denied for Bash writes.</li>
+        <li>Right of the visibility boundary are the backend/ and frontend/ worktrees where the code actually lives. Both are invisible to audit and review, and denied for Bash writes while the opt-in write gate is on.</li>
       </ol>
     </details>
   </figure>
@@ -290,15 +290,15 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:876 · zensu-log.sh:1370</p>
+      <p class="src">zensu-edit-landing.sh:876 · zensu-log.sh:1373</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
-      <h3>Edit writes across, Bash does not</h3>
-      <p>Rule (B) of the write gate denies every Bash write outside the root. The edit gate only
-      classifies a path as <code>state</code>, <code>zensu</code> or <code>other</code> and does not
-      confine it. The topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:825 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
+      <h3>Edit writes across, Bash only when the gate is off</h3>
+      <p>While the opt-in write gate is on, its rule (B) denies a Bash source write outside the root.
+      The edit gate only classifies a path as <code>state</code>, <code>zensu</code> or
+      <code>other</code> and does not confine it. With the gate on, the topology is half blocked.</p>
+      <p class="src">bash-source-write-parse.js:829 · hooks/pre-edit-tdd-reminder.sh:132-160</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass — superseded by stage 1</span>
@@ -313,7 +313,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus is the half that stayed ambient and
       unscrubbed. A chain that claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1365 · zensu-log.sh:1348-1441 · zensu-log.sh:2263-2265</p>
+      <p class="src">zensu-log.sh:1368 · zensu-log.sh:1351-1444 · zensu-log.sh:2266-2268</p>
     </div>
   </div>
 </section>
@@ -423,7 +423,7 @@
           <td>Enumerate the union. Claims carry a root label instead of being merely repo-relative,
           otherwise <code>src/foo.ts</code> is ambiguous. Exactly <strong>one</strong> merged
           receipt, written beside the anchor's workflow document.</td>
-          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:181</td>
+          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:182</td>
         </tr>
         <tr>
           <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
@@ -435,7 +435,7 @@
           <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
           <td><code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B)
           and rule (C).</td>
-          <td class="where mono">bash-source-write-parse.js:825<br>bash-source-write-parse.js:871</td>
+          <td class="where mono">bash-source-write-parse.js:829<br>bash-source-write-parse.js:875</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -443,7 +443,7 @@
           counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
           narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
           the <code>--chain-done</code> zero-change terminus unchanged.</td>
-          <td class="where mono">zensu-log.sh:1438-1440<br>zensu-log.sh:2263-2265</td>
+          <td class="where mono">zensu-log.sh:1441-1443<br>zensu-log.sh:2266-2268</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -569,7 +569,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/tdd/SKILL.md:412 · skills/tdd/SKILL.md:415</p>
+    <p class="src">skills/tdd/SKILL.md:415 · skills/tdd/SKILL.md:417</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
@@ -605,7 +605,7 @@
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:4687</p>
+      <p class="src">trail.mjs:4689</p>
     </div>
   </div>
 

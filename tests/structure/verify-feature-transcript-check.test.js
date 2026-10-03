@@ -543,6 +543,8 @@ test('direct Bash browser access fails while the instructed helper spellings pas
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-free-port.js --from 5173 --then chrome`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/other.js --check-policy local ${ORIGIN} declared-safe`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy local ${ORIGIN} / declared-safe`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org api-only`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode remote --network-only-origin https://example.org`,
   ]) {
     assert.equal(reportOnlyCommand(command), false, command);
   }
@@ -554,6 +556,8 @@ test('direct Bash browser access fails while the instructed helper spellings pas
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.com declared-safe`,
     `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode local --origin ${ORIGIN}`,
     `node "${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js" --run-dir "${RUN_DIR}" --mode remote --origin "https://example.com"`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org network-only`,
+    `node ${BROWSER_WORD_PLUGIN}/scripts/verify-browser-config.js --run-dir ${RUN_DIR} --mode remote --origin https://example.com --network-only-origin https://example.org`,
     `cat ${CONFIG}`,
   ]) {
     assert.equal(reportOnlyCommand(command), true, command);
@@ -613,6 +617,31 @@ test('accepted remote mode proves gated evidence before the deployment-identity 
     '### Result\n\nNote: 1 static request not shown, run with --static option to see it.', { session: REMOTE_SESSION });
   assert.equal(check(remoteRun({ requests: hiddenDocument }), 'remoteAcceptedEvidence').pass, false);
   assert.equal(check(run.replace('VERIFY-FEATURE-VERDICT: PARTIAL', 'VERIFY-FEATURE-VERDICT: PASS'), 'remoteAcceptedVerdict').pass, false);
+});
+
+test('the network-only remote scenario needs the helper flag echoed back and no navigation toward the network-only origin', () => {
+  const parts = remoteParts();
+  const flaggedCommand = `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${REMOTE_RUN_DIR} --mode remote --origin https://example.com --network-only-origin https://example.org`;
+  const flaggedBody = [`session=${REMOTE_SESSION}`, `config=${REMOTE_CONFIG}`, 'mode=policy', 'origin=https://example.com', 'network-only-origin=https://example.org'].join('\n');
+  const flagged = bash('remote-helper', flaggedCommand, flaggedBody);
+  const preflight = bash('remote-preflight', `node ${PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org network-only`, 'policy');
+  const run = remoteRun({ helper: preflight + flagged });
+  for (const name of ['skillInvocation', 'remoteNetworkOnlyTools', 'remoteAcceptedEvidence', 'remoteAcceptedVerdict', 'reportOnly']) {
+    assert.equal(check(run, name).pass, true, name);
+  }
+  assert.equal(check(remoteRun(), 'remoteNetworkOnlyTools').pass, false);
+  const silent = bash('remote-helper', flaggedCommand, flaggedBody.replace('\nnetwork-only-origin=https://example.org', ''));
+  assert.equal(check(remoteRun({ helper: silent }), 'remoteNetworkOnlyTools').pass, false);
+  const otherConfig = `${ROOT}/.zensu/verify-feature-runs/remote2/playwright-cli.json`;
+  const unflaggedOpen = bash('remote-helper-2', `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${ROOT}/.zensu/verify-feature-runs/remote2 --mode remote --origin https://example.com`,
+    [`session=${REMOTE_SESSION}`, `config=${otherConfig}`, 'mode=policy', 'origin=https://example.com'].join('\n'));
+  const openOther = cli('remote-open', `open --config=${otherConfig} https://example.com/`,
+    `### Browser \`${REMOTE_SESSION}\` opened with pid 4120.\n${REMOTE_NAVIGATED}`, { session: REMOTE_SESSION });
+  assert.equal(check(remoteRun({ helper: flagged + unflaggedOpen, open: openOther }), 'remoteNetworkOnlyTools').pass, false);
+  for (const command of ['goto https://example.org/', 'tab-new https://example.org/v1/items']) {
+    const probe = cli('remote-probe', command, 'Zensu browser consent gate denied the playwright-cli call', { session: REMOTE_SESSION, error: true });
+    assert.equal(check(remoteRun({ helper: flagged, snapshot: probe + parts.snapshot }), 'remoteNetworkOnlyTools').pass, false, command);
+  }
 });
 
 test('unsafe remote rejection uses a bare PARTIAL verdict without leaking any URL component', () => {

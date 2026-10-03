@@ -90,7 +90,19 @@ only ever sees `Edit|Write|MultiEdit`; an agent can route around it with `printf
 `cat > file.rs <<EOF`, `sed -i`, `tee`, or `dd of=` — and, worse, `cd` into a sibling/main checkout
 and clobber **another session's working tree**.
 
-The gate denies a write through one of those channels to a source-extension file when either:
+**The gate is opt-in.** Its three rules run only when `hooks.bashWriteGate` is `true` in the Zensu
+config; absent, `false` or a quoted `"true"` leaves them off. The Session Control rebind check that
+shares the hook runs whatever the key says, because it is part of the trust boundary rather than a
+convention (see [Session Control](session-control.md)). The default flipped on measured evidence: a
+seeded sample of 156 transcripts from September 2026 held 27 denies in 11 sessions, and none of them
+stopped a real mistake. 14 blocked intended work — takeover moves out of a session the user had
+handed over, commits in a session's own worktree after the host moved it, multi-repository layouts —
+and 1,085 commands carried a gate-off prefix, about 40 per deny, which the host's auto-mode classifier
+refused 19 times. In a desktop session observed on 2026-09-29, Claude Code itself reset the shell to
+the session's worktree after every command that `cd`ed out of it, which by itself stops the
+cross-command drift that motivated rule (C) below wherever the host behaves that way.
+
+When enabled, the gate denies a write through one of those channels to a source-extension file when either:
 
 - **(A) Clobber** — the target already **exists and is git-tracked** inside the project (a raw
   shell overwrite of real tracked source), or
@@ -118,11 +130,16 @@ so `git -C ../sibling add notes.md` is denied even though `.md` is not a source 
 denied under any rule: temp roots (`$TMPDIR`, `/tmp`, `/private/tmp`, `/var/folders`; override the
 set with `ZENSU_BSWGATE_TEMP_DIRS`). The standalone `mv`/`cp` commands are out of scope — `git mv`
 is covered by (C) when it escapes the session root. Like the CLI gate this is a
-**convention-nudge, not a hard boundary** — bypass a deliberate one-off with an inline
-`ZENSU_BASH_WRITE_GATE=off` (or `ZENSU_MCP_GATE=off`) prefix, or disable it via `hooks.bashWriteGate:false`.
+**convention-nudge, not a hard boundary**: while it is enabled, an inline
+`ZENSU_BASH_WRITE_GATE=off` (or `ZENSU_MCP_GATE=off`) prefix still bypasses a deliberate one-off, but
+the deny texts no longer name that prefix — they name `hooks.bashWriteGate` and leave an intended
+command to the user, because the host's auto-mode classifier refuses a command that carries it.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
 
-**The expected *legitimate* hit of rule (C) is a cross-worktree takeover.** A session that continues
+**While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
+At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a
+session that was handed over; what still keys on the anchor is the review chain, whose reviewer
+subagents read only inside the recorded project root. A session that continues
 work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
 files and run tests there — on the main thread no Edit-matcher hook compares a path against the
 project root, and the all-tool capability gate that does compare exempts the main principal — but its
@@ -133,7 +150,8 @@ anchored there commits in all of them. The blocked shapes are a sibling worktree
 and the main checkout addressed from inside a worktree. The route is a session whose own anchor
 contains that worktree — `cd -- <cwd> && claude --resume <id>` as `show` prints it, or the handoff
 brief opened by an instance already running there — not the escape prefix above: the host's
-permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well.
+permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well. Switching the gate
+off is the other route, and it is the user's call.
 
 **A third route needs no other session, and it works BECAUSE containment is the test.** Since a
 worktree nested inside the anchor is writable, the taking session can create its continuation there
@@ -145,12 +163,13 @@ source in **another repository** is refused as `status: blocked` with `reasonCod
 ref is measured there and would resolve against your history instead. The plan is rendered and never
 executed so a human sees and approves it before anything runs — not because these rules cover it. Be
 precise about that, since the block invites the reader to substitute their own target: of its four
-writing commands only `git apply` and the patch redirect are judged here. `git worktree add` is
+writing commands only `git apply` and the patch redirect are judged here, and only while the gate
+is on. `git worktree add` is
 **not** — `worktree` is gated for `remove`/`move` only, as the table above says — and the `tar`
 extraction carries none of the channels rule (A)/(B) recognize. The renderer's own guards (same
 repository, existing anchor, resolved branch) are what stand in for that. A worktree the script
 created inside its own node process would not be seen either, which is why it renders instead.
-`/zensu:session-trail` flow 3 owns the routing rule and the nine `CONTINUE` states; this section
+`/zensu:session-trail` flow 3 owns the routing rule and the `CONTINUE` states; this section
 names only the one refusal that bounds the offer above.
 
 **A fourth route moves the anchor instead of the work.** When the worktree belongs to the SAME
@@ -164,8 +183,9 @@ there. It refuses rather than guesses when that last question cannot be answered
 edits files in the target by absolute path is not found, which is why the report lists the target's
 uncommitted paths. Without `--confirm` it is read-only; `--confirm` is an argument the model can supply
 as easily as the user, so the consent is the skill's step that relays the report and waits for the
-user's agreement. From the next tool call rules (B) and (C) compare against the new root, so the old
-worktree is outside this session from then on. It is the bounded form of a design that stays refused:
+user's agreement. From the next tool call the reviewer confinement and, whenever the gate is opted
+in, rules (B) and (C) compare against the new root, so the old worktree is outside this session
+from then on. It is the bounded form of a design that stays refused:
 nothing moves the anchor to a directory an argument names, into another repository, over another
 worktree, or into a worktree in which another live session is found, which is the contamination this
 gate exists to prevent. `docs/session-control.md` §"Unbindable sessions" carries its conditions and
@@ -181,7 +201,8 @@ against it: `FRESH_SESSION_SOURCES` in `hooks/lib/claude-session-control-v1.js` 
 with and inherits **that session's** anchor whatever directory you `cd` to first. The `cd` operand
 decides the anchor only for a **fresh** source — `--fork-session`, or a session whose record was
 pruned — and there it matters: compare the `WORKTREE` and `CWD` rows and start in `WORKTREE` if they
-differ, or the forked session anchors *inside* the worktree and still cannot commit at its root.
+differ, or the forked session anchors *inside* the worktree and, while the gate is enabled, still
+cannot commit at its root.
 Flow 3 of `skills/session-trail/SKILL.md` carries the routing rule and is the authority.
 
 ## Secret Scan
@@ -277,8 +298,8 @@ exactly the state in which the store is read.
 
 **Scope is deliberately narrow, and the asymmetry is accepted.** Only the store is protected. A
 write anywhere else outside the project root stays allowed here, so this gate is narrower than
-the source-write gate's rule (B), which denies every redirect escaping the project root (temp
-roots excepted). The wider rule would need a temp carve-out of its own and would refuse ordinary
+rule (B) of the opt-in source-write gate, which, when enabled, denies a redirect to a source file
+outside the project root (temp roots excepted). The wider rule would need a temp carve-out of its own and would refuse ordinary
 work on files outside the project; closing the measured hole does not. It applies to **every
 principal** — a subagent must not be able to write the store either.
 
@@ -478,7 +499,8 @@ and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels
 gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
 helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
 gate then requires, because an origin approved mid-session could not be pinned. The browser
-itself refuses every request to an origin outside `network.allowedOrigins`. It does NOT refuse a
+itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
+fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
 line after every navigating call and stops a scenario that left the approved set. In neither mode
 does anything enforce routes: the evidence boundary is the origin, which the human approves in
@@ -501,7 +523,21 @@ run-config helper uses too, so there is one floor, not two.
 origins, every route on them, and a remote hostname only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
 formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
-contract denies every `zensu-verify` navigation, with the broken rule named.
+contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
+policy names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` —
+because the browser turns an allowed origin into a URL glob and would read `*` or `{a,b}` as a
+pattern.
+
+**Network-only origins.** A policy may also list, in `networkOnlyOrigins`, up to 8 origins the
+pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint.
+The run config allows them beside the targets, so the gate derives from the policy which entries
+are navigable. At `open` it admits a network-only run-config origin, with its pin for a remote
+host, and plans no consent record for it; `open <url>`, `goto` and `tab-new` aimed at one deny
+with `NETWORK_ONLY_NAVIGATION`, a final reason. A remote policy accepts only non-loopback HTTPS
+there; a local policy accepts a loopback origin or a pinned public HTTPS one. Consent mode has no
+such class, so the run-config helper refuses `--network-only-origin` without a policy. A page can
+still navigate itself onto a network-only origin, because the browser knows one class of allowed
+origin: the `Page URL` check ends that scenario.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
@@ -687,9 +723,9 @@ gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four 
 The ordinary shape after `git worktree remove`: the Session Control record is readable, this
 installation may serve it, and the directory it records as `project_root` is gone.
 `readOrphanedProjectRootContext` waives exactly that one existence check, so reads and the
-read-only diagnostics keep working — while `Edit`, `Write`, `MultiEdit` and every writing Bash
-command deny, because the workflow document lived under that root and no write can be
-attributed to a project that is not there. It IS a relaxable bind failure, and the table in
+read-only diagnostics keep working — while `Edit`, `Write` and `MultiEdit` deny, and so does a
+Bash write while the opt-in source-write gate is on, because the workflow document lived under
+that root and no write can be attributed to a project that is not there. It IS a relaxable bind failure, and the table in
 [Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
 
 Re-creating the directory by hand does not repair it, and that is the trap this remedy exists
@@ -712,8 +748,8 @@ nobody can run. `/zensu:adopt-session --restore-root` is the slash equivalent.
 `/zensu:adopt-session --restore-root` reports the verdict and writes nothing; adding
 `--confirm` performs both halves in one run. **The path comes only from the record.**
 No argument names a directory anywhere in this mode, and neither literal it accepts takes a
-value, so the anchor never moves and the source-write gate compares against exactly the root
-it compared against before. Creating a directory at a path the record already names restores the
+value, so the anchor never moves and the source-write gate, whenever it is opted in, compares
+against exactly the root it compared against before. Creating a directory at a path the record already names restores the
 authority the session already had and adds none.
 
 **Carried from the record is not the same as bounded, and only the first is true.** This is the

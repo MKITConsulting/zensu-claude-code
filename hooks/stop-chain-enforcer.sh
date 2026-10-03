@@ -288,7 +288,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # ZENSU_SAFE_DISPLAY_PATH_RE — but this release is the COMBINED state, where
       # the remedy is an adoption before any restore, so the path is not the fact
       # the reader needs. Naming /zensu:doctor keeps this message about the order.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, READ-ONLY Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
+      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and running /zensu:adopt-session --restore-root AFTER the adoption reports whether it can be re-created — it writes nothing — with /zensu:adopt-session --restore-root --confirm as the remedy (that repair requires the running installation to SERVE the record, which the adoption is what establishes), and it re-creates the directory AND rebuilds the workflow document in one step where a bare mkdir leaves the second half missing. With no readable workflow document the schema-equality check that normally authorises a takeover is NOT performed, and a document rebuilt by the restore is checked only when it is first read, not here. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once adopted, Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
       exit 0
     fi
     if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
@@ -390,7 +390,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
   [ "$STOP_REBOUND" = true ] || exit 0
 fi
 
-if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
+if ! zensu_memoize_project_dir || ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
   # Kept deliberately, though it is now only the residual race window: binding
   # validates that the recorded root exists, so the steady-state deleted-root
   # session is released above and never reaches here. What survives is the
@@ -514,11 +514,10 @@ read_field() {
   ' 2>/dev/null
 }
 
-SESSION_ID="$(read_field session_id)"
 TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "$SESSION_LIB"
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
+SESSION_ID="$(zensu_resolve_session_id "")" || exit 0
 source "$CONFIG_LIB"
 source "$TDD_PHASE_LIB"
 source "$BOUNDED_RUN_LIB"
@@ -959,7 +958,7 @@ OUTER_JSON=""
 if [ -r "$AUTOPILOT_STATE_LIB" ]; then
   # shellcheck disable=SC1090
   source "$AUTOPILOT_STATE_LIB"
-  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+  if OUTER_JSON="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     OUTER_STATUS=0
   else
     OUTER_STATUS=$?
@@ -980,6 +979,11 @@ emit_block() {
   '
   echo
 }
+
+if [ "$OUTER_STATUS" -eq 5 ]; then
+  emit_block "Zensu Autopilot Stop denied: the project-local Autopilot state could not be read, because its lock could not be taken or its storage or path failed a safety check, so whether this session owns an active run is unknown. That is not a no-run answer. Retry the Stop once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease. Do not infer completion."
+  exit 0
+fi
 
 # A corrupt/orphaned outer inventory is authoritative and must fail closed
 # before deferred-review adoption, inner counters, or any other mutation.
@@ -1132,7 +1136,7 @@ outer_finish() {
       # Stage/event generation changed after reconciliation but before the
       # capped mutation. Re-route exactly once from fresh state so the response
       # names the new action and the stale generation remains byte-stable.
-      if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+      if OUTER_JSON="$(autopilot_read_active_strict "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
         OUTER_STATUS=0
         outer_finish true
       else

@@ -9,6 +9,8 @@ const FLOOR_REASONS = Object.freeze({
   REMOTE_HTTPS: 'remote navigation policy requires non-loopback HTTPS origins',
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
+  NETWORK_ONLY_HTTPS: 'a network-only origin outside loopback requires HTTPS',
+  HOSTNAME_PATTERN: 'policy origin must name its host exactly: an IP literal, or a hostname of a-z, 0-9, ".", "-" and "_" only, never a wildcard or pattern',
 });
 
 const CONSENT_REMOTE_REASON = 'consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost); a remote target needs the parent-environment navigation policy';
@@ -158,7 +160,14 @@ function classifyOrigin(rawUrl, navigation = true) {
   return { ...target, mode: 'remote', hostname };
 }
 
-// The three TOP-LEVEL guards of a navigation policy. It answers '' for a policy whose contract
+const POLICY_KEYS = Object.freeze(['mode', 'targets', 'version']);
+const NETWORK_ONLY_POLICY_KEYS = Object.freeze(['mode', 'networkOnlyOrigins', 'targets', 'version']);
+const MAX_NETWORK_ONLY_ORIGINS = 8;
+const NETWORK_ONLY_LIST_FAULT = `policy networkOnlyOrigins must be a list of 1 to ${MAX_NETWORK_ONLY_ORIGINS} origins`;
+const NETWORK_ONLY_OVERLAP_FAULT = 'policy origin must not be both a target and network-only';
+const HOSTNAME_RE = /^[a-z0-9._-]+$/;
+
+// The TOP-LEVEL guards of a navigation policy. It answers '' for a policy whose contract
 // holds and a short reason otherwise, so a caller renders the reason it was given rather than
 // inventing one.
 //
@@ -169,14 +178,44 @@ function policyContractFault(raw) {
   let value;
   try { value = JSON.parse(raw); }
   catch (_error) { return 'policy is not valid JSON'; }
-  const keys = Object.keys(value || {}).sort();
-  if (JSON.stringify(keys) !== JSON.stringify(['mode', 'targets', 'version'])) {
+  const keys = JSON.stringify(Object.keys(value || {}).sort());
+  if (keys !== JSON.stringify(POLICY_KEYS) && keys !== JSON.stringify(NETWORK_ONLY_POLICY_KEYS)) {
     return 'policy contains unknown or missing keys';
   }
   if (value.version !== 1 || !['local', 'remote'].includes(value.mode)
       || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 8) {
     return 'policy contract is invalid';
   }
+  if (Object.prototype.hasOwnProperty.call(value, 'networkOnlyOrigins')
+      && (!Array.isArray(value.networkOnlyOrigins) || value.networkOnlyOrigins.length < 1
+        || value.networkOnlyOrigins.length > MAX_NETWORK_ONLY_ORIGINS)) {
+    return NETWORK_ONLY_LIST_FAULT;
+  }
+  return '';
+}
+
+function policyOriginEntry(rawOrigin, label) {
+  if (typeof rawOrigin !== 'string') return { fault: `${label} must be a string` };
+  let parsed;
+  try { parsed = new URL(rawOrigin); }
+  catch (_error) { return { fault: `${label} is invalid` }; }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/'
+      || rawOrigin.includes('?') || rawOrigin.includes('#')) {
+    return { fault: `${label} must not contain credentials, path, query, or fragment` };
+  }
+  return { origin: parsed.origin, protocol: parsed.protocol, hostname: normalizeHostname(parsed.hostname) };
+}
+
+function policyFloorFault(entry, mode, networkOnly) {
+  const { protocol, hostname } = entry;
+  if (mode === 'local' && (!networkOnly || isLocalHost(hostname))) {
+    if (!['http:', 'https:'].includes(protocol) || !isLocalHost(hostname)) return FLOOR_REASONS.LOCAL_LOOPBACK_ONLY;
+  } else if (protocol !== 'https:' || isLocalHost(hostname)) {
+    return mode === 'local' ? FLOOR_REASONS.NETWORK_ONLY_HTTPS : FLOOR_REASONS.REMOTE_HTTPS;
+  } else if (net.isIP(hostname) && !isPublicAddress(hostname)) {
+    return FLOOR_REASONS.REMOTE_NOT_PUBLIC;
+  }
+  if (!net.isIP(hostname) && !HOSTNAME_RE.test(hostname)) return FLOOR_REASONS.HOSTNAME_PATTERN;
   return '';
 }
 
@@ -210,28 +249,24 @@ function parsePolicyTargets(raw) {
     }
     const routesFault = legacy ? legacyRoutesFault(rawTarget.routes) : '';
     if (routesFault) return { ok: false, fault: routesFault };
-    if (typeof rawTarget.origin !== 'string') return { ok: false, fault: 'policy origin must be a string' };
-    let parsed;
-    try { parsed = new URL(rawTarget.origin); }
-    catch (_error) { return { ok: false, fault: 'policy origin is invalid' }; }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/'
-        || rawTarget.origin.includes('?') || rawTarget.origin.includes('#')) {
-      return { ok: false, fault: 'policy origin must not contain credentials, path, query, or fragment' };
-    }
-    if (targets.has(parsed.origin)) return { ok: false, fault: 'policy origins must be unique' };
-    const hostname = normalizeHostname(parsed.hostname);
-    if (value.mode === 'local') {
-      if (!['http:', 'https:'].includes(parsed.protocol) || !isLocalHost(hostname)) {
-        return { ok: false, fault: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY };
-      }
-    } else if (parsed.protocol !== 'https:' || isLocalHost(hostname)) {
-      return { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS };
-    } else if (net.isIP(hostname) && !isPublicAddress(hostname)) {
-      return { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC };
-    }
-    targets.set(parsed.origin, { origin: parsed.origin, hostname });
+    const entry = policyOriginEntry(rawTarget.origin, 'policy origin');
+    if (entry.fault) return { ok: false, fault: entry.fault };
+    if (targets.has(entry.origin)) return { ok: false, fault: 'policy origins must be unique' };
+    const floorFault = policyFloorFault(entry, value.mode, false);
+    if (floorFault) return { ok: false, fault: floorFault };
+    targets.set(entry.origin, { origin: entry.origin, hostname: entry.hostname });
   }
-  return { ok: true, mode: value.mode, targets };
+  const networkOnly = new Map();
+  for (const rawOrigin of value.networkOnlyOrigins || []) {
+    const entry = policyOriginEntry(rawOrigin, 'policy network-only origin');
+    if (entry.fault) return { ok: false, fault: entry.fault };
+    if (networkOnly.has(entry.origin)) return { ok: false, fault: 'policy network-only origins must be unique' };
+    if (targets.has(entry.origin)) return { ok: false, fault: NETWORK_ONLY_OVERLAP_FAULT };
+    const floorFault = policyFloorFault(entry, value.mode, true);
+    if (floorFault) return { ok: false, fault: floorFault };
+    networkOnly.set(entry.origin, { origin: entry.origin, hostname: entry.hostname });
+  }
+  return { ok: true, mode: value.mode, targets, networkOnly };
 }
 
 module.exports = {
@@ -239,7 +274,10 @@ module.exports = {
   FLOOR_REASONS,
   LEGACY_POLICY_TARGET_KEYS,
   LOCALHOST_NAME,
+  MAX_NETWORK_ONLY_ORIGINS,
   MAX_POLICY_ROUTES,
+  NETWORK_ONLY_POLICY_KEYS,
+  POLICY_KEYS,
   POLICY_TARGET_KEYS,
   checkNavigationTarget,
   parsePolicyTargets,

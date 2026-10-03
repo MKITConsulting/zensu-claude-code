@@ -60,6 +60,9 @@ validate:
   navigationBroker:        # policy mode of /zensu:verify-feature; optional in consent mode
     contractVersion: 1
     policyEnv: ZENSU_VERIFY_NAVIGATION_POLICY_V1
+  networkOnly:
+    appOrigin: "<exact browser application origin these origins belong to; required in remote mode>"
+    origins: ["<exact origin the pages request but never navigate, e.g. a REST API or OIDC issuer>"]
   evidenceSafety:           # optional; declares the application's data classification, gates nothing
     contractVersion: 1      # required literal integer
     mode: declared-safe     # the only mode supported by contract v1
@@ -83,7 +86,8 @@ to `api`, every other AC's live proof is skipped and named in the report, and it
 The key keeps its name so existing recipes stay valid; it declares POLICY mode.
 `/zensu:verify-feature` accepts only contract version `1` with the literal parent-environment
 key `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. The environment value is JSON with exactly
-`{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe"}]}`
+`{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe"}]}`,
+optionally beside `"networkOnlyOrigins":["<exact-origin>", …]` (see `validate.networkOnly` below),
 and is read from the environment Claude Code started with, by the browser consent gate (the
 Bash-matcher hook pair that judges each `playwright-cli` call whose command text names the CLI
 and a `zensu-verify` session, or names the CLI while the hook environment's
@@ -107,14 +111,61 @@ must spell the same one. In `remote`
 mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
 is not globally routable and pins each hostname to an approved address for the browser process,
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser
-refuses every request to an origin outside the run config, and the gate reapplies the
+refuses every HTTP(S) request to an origin outside the run config — a WebSocket connection is
+not fenced by it, which is an open gap — and the gate reapplies the
 credential/query/fragment rule to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. Missing/invalid declarations, mode mismatches, wildcard origins,
-unsupported evidence modes, or unsupported policy versions fail closed. Each target approves
-its own origin only, so an approval never carries over to another origin.
+every navigation. Missing/invalid declarations, mode mismatches, unsupported evidence modes, or
+unsupported policy versions fail closed, and so does a hostname that is not exact: every origin
+in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only,
+because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as
+a pattern. Each target approves its own origin only, so an approval never carries over to
+another origin.
 Contract v1 supports only `declared-safe`; content on an origin that is not approved remains
 PARTIAL before navigation.
+
+### `validate.networkOnly` — origins the pages request but never navigate
+
+An application whose pages call a REST API, an OIDC discovery document or a token endpoint on
+another origin needs the browser to reach that origin for subresource, fetch and XHR requests
+only. Declaring it as a navigation target would make it navigable and evidence-eligible, so the
+contract has a second, separate class: **network-only origins**.
+
+- **Policy.** The parent-environment JSON names them in the optional top-level
+  `networkOnlyOrigins` list of contract version `1`, 1 to 8 exact origins. Every policy written
+  before the key existed stays valid byte for byte; an installation that predates the key refuses
+  a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than
+  admitting the origins as targets. An entry carries no credentials, path, query or fragment, is
+  unique after canonicalization, and is never also a target; a non-string entry, a duplicate, an
+  empty list or an overlap invalidates the whole policy.
+- **Floor.** In a `remote` policy every network-only origin is non-loopback HTTPS with a globally
+  routable address and a resolver pin per hostname, exactly as a target. In a `local` policy it is
+  either a loopback origin, as a local target, or a non-loopback HTTPS origin under that same
+  remote floor with a pin, so a local application can reach a hosted API or identity provider.
+- **Consent mode has no network-only class.** Without a policy the run-config helper refuses
+  `--network-only-origin`, and a non-loopback origin stays refused. A loopback API origin is then
+  passed as an ordinary `--origin` and consented to like any other loopback origin. Trade-off: a
+  local application that calls a non-loopback API needs the launch-time policy and a restart;
+  there is no prompt path for it.
+- **Recipe.** `validate.networkOnly` associates the origins with the selected deployment, as
+  `auth.baseUrl` is associated today. `origins` lists them exactly as the policy does. In remote
+  mode `appOrigin` must equal the origin derived from the validated base URL, exactly as
+  `auth.appOrigin` must, or the run stops PARTIAL before `open`. In local mode it may be omitted,
+  because the application origin is the run's own loopback origin; when present it must equal
+  that origin too.
+- **What the gate does.** The run config stays one plain `network.allowedOrigins` list holding the
+  targets and the network-only origins. At `open` the gate admits a run-config origin the policy
+  declares network-only (with its pin for a remote host) and records no consent memory for it.
+  `open <url>`, `goto` and `tab-new` aimed at a network-only origin are denied with their own
+  reason. The redirect rule is unchanged: a `Page URL` on a network-only origin ends the scenario,
+  and nothing on that page is read as evidence.
+
+What the class adds is an exfiltration surface: page code on a navigable origin can send data —
+including text the verifier types into a form — to every declared network-only origin. That is
+accepted because the list is declared by a human in the parent environment, which the model
+cannot write, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
+public HTTPS pinned to an approved address, so no entry reaches a private, metadata or loopback
+address. `docs/verify-feature-consent-spec.md` holds the full analysis.
 
 ### `validate.evidenceSafety` — optional data-classification declaration
 

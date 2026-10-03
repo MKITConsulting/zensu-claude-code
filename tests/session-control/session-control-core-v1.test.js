@@ -20,6 +20,11 @@ const WINDOWS = process.platform === 'win32';
 const WINDOWS_SYMLINK_SKIP = WINDOWS
   ? 'Windows runners do not guarantee unprivileged symbolic-link creation'
   : false;
+const PROGRESS_FILE = process.env.SESSION_CONTROL_PROGRESS;
+if (PROGRESS_FILE) {
+  test.beforeEach((t) => { fs.appendFileSync(PROGRESS_FILE, `start ${t.name}\n`); });
+  test.afterEach((t) => { fs.appendFileSync(PROGRESS_FILE, `end ${t.name}\n`); });
+}
 
 function fixture(host = 'codex') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-session-control-'));
@@ -730,7 +735,7 @@ test('does not classify unrelated errors whose paths mention a transient phrase'
 test('never reclaims an old lock whose owner process is still alive', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-live-lock-'));
   const lockFile = path.join(root, '.liveowner.lock');
-  const owner = { pid: process.pid, token: 'b'.repeat(48), created_at: CREATED_AT };
+  const owner = { pid: process.pid, token: 'b'.repeat(48), created_at: new Date().toISOString() };
   fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
   const stale = new Date(Date.now() - 60000);
   fs.utimesSync(lockFile, stale, stale);
@@ -750,6 +755,46 @@ test('never reclaims an old lock whose owner process is still alive', async () =
   child.kill('SIGTERM');
   await closed;
   fs.unlinkSync(lockFile);
+});
+
+test('a waiter behind a live lock owner never takes the recovery sentinel', async () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-waiter-')));
+  const lockFile = path.join(root, '.waiter.lock');
+  const ready = path.join(root, 'holder.ready');
+  const source = [
+    'const fs = require("node:fs");',
+    'const c = require(process.env.SESSION_CONTROL_CORE);',
+    'c.withFileLock(process.argv[1], "waiter", () => {',
+    '  fs.writeFileSync(process.argv[2], "held");',
+    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);',
+    '});',
+  ].join('\n');
+  const holder = runNode(source, [root, ready]);
+  while (!fs.existsSync(ready)) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(lockFile), true);
+
+  const originalOpen = fs.openSync;
+  let sentinelCandidates = 0;
+  let takenWhileWaiting = null;
+  fs.openSync = function countingOpen(file, ...rest) {
+    if (/\.waiter\.recovery\.\d+\.[a-f0-9]{48}\.candidate$/.test(String(file))) sentinelCandidates += 1;
+    return originalOpen.call(fs, file, ...rest);
+  };
+  const started = Date.now();
+  try {
+    core.withFileLock(root, 'waiter', () => { takenWhileWaiting = sentinelCandidates; });
+  } finally {
+    fs.openSync = originalOpen;
+  }
+  const waited = Date.now() - started;
+  const result = await holder;
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(waited >= 250, `the waiter acquired after ${waited} ms, so it never waited on the holder`);
+  assert.ok(
+    takenWhileWaiting <= 1,
+    `the waiter took the recovery sentinel ${takenWhileWaiting} times while its owner was alive`,
+  );
+  assert.equal(fs.existsSync(lockFile), false);
 });
 
 test('recovers a lock left at a SIGKILL kill point', async () => {
@@ -4590,7 +4635,7 @@ test('external process lease stays contended when a live owner identity is unava
     pid: process.pid,
     token: 'a'.repeat(48),
     kind: 'external-process-lock',
-    created_at: CREATED_AT,
+    created_at: new Date().toISOString(),
     process_start_identity: null,
   };
   fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
@@ -4670,6 +4715,534 @@ test('external process lease reclaims a live PID with a mismatched start identit
     ownerPid: process.pid,
     token: acquired.token,
   });
+});
+
+const START_READER_PLATFORMS = new Set(['linux', 'darwin', 'win32']);
+
+function spawnUnrelatedProcess() {
+  const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready\\n"); setInterval(() => {}, 1e6);'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const ready = new Promise((resolve, reject) => {
+    let seen = '';
+    child.stdout.on('data', (chunk) => {
+      seen += chunk;
+      if (seen.includes('ready')) resolve();
+    });
+    child.on('error', reject);
+    child.on('exit', (code, signal) => reject(new Error(`unrelated process exited early (${code}, ${signal})`)));
+  });
+  return { child, ready };
+}
+
+function startReaderUnavailable(t, pid) {
+  if (core.processStartLowerBoundForPid(pid) !== null) return false;
+  assert.ok(
+    !START_READER_PLATFORMS.has(process.platform),
+    `no process start time was readable on ${process.platform}`,
+  );
+  t.skip('this platform exposes no process start time');
+  return true;
+}
+
+test('reads a lower bound for the start time of a live process on this platform', async (t) => {
+  if (!START_READER_PLATFORMS.has(process.platform)) {
+    t.skip('no process start reader exists for this platform');
+    return;
+  }
+  const spawnedAt = Date.now();
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    const lowerBound = core.processStartLowerBoundForPid(child.pid);
+    assert.equal(typeof lowerBound, 'number');
+    assert.ok(lowerBound >= spawnedAt - 2500, `${lowerBound} lies far before the spawn at ${spawnedAt}`);
+    assert.ok(lowerBound <= Date.now(), `${lowerBound} lies in the future`);
+    assert.equal(core.processStartLowerBoundForPid(2147483647), null);
+  } finally {
+    child.kill();
+  }
+});
+
+test('recovers a per-session lock whose live owner PID started after the record and stored no identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-reused-absent-'));
+  const lockFile = path.join(root, '.reusedabsent.lock');
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '1'.repeat(48),
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    assert.equal(core.withFileLock(root, 'reusedabsent', () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('recovers a per-session lock whose live owner PID started after the record under a mismatched identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-reused-mismatch-'));
+  const lockFile = path.join(root, '.reusedmismatch.lock');
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '7'.repeat(48),
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: 'mismatched-process-start',
+    }), { mode: 0o600 });
+    assert.equal(core.withFileLock(root, 'reusedmismatch', () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('external process lease reclaims a live owner PID that started after the record and stored no identity', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-reused-absent-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: child.pid,
+      token: '2'.repeat(48),
+      kind: 'external-process-lock',
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    const acquired = core.acquireExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      attemptLimit: 40,
+    });
+    assert.notEqual(JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')).token, '2'.repeat(48));
+    core.releaseExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      token: acquired.token,
+    });
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    child.kill();
+  }
+});
+
+test('external process lease keeps a live owner without identity that started before the record', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-genuine-absent-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const owner = {
+      pid: child.pid,
+      token: '3'.repeat(48),
+      kind: 'external-process-lock',
+      created_at: new Date().toISOString(),
+      process_start_identity: null,
+    };
+    fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
+    assert.ok(core.processStartLowerBoundForPid(child.pid) <= Date.parse(owner.created_at));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.throws(() => core.acquireExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      attemptLimit: 1,
+    }), /timed out acquiring external process lock/i);
+    assert.deepEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')), owner);
+  } finally {
+    child.kill();
+    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+  }
+});
+
+test('the win32 start reader runs a pinned PowerShell only for a record older than the skew', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-win32-start-reader-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    const invocations = [];
+    let output = '';
+    childProcess.execFileSync = (file, args, options) => {
+      invocations.push({ file, args, options });
+      return output;
+    };
+    const filetime = (ms) => String(BigInt(ms) * 10000n + 116444736000000000n);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const [lockDirectory, resourcePath] = process.argv.slice(1);
+    const lockFile = core.externalProcessLockPath({ lockDirectory, resourcePath });
+    const plant = (token, createdAt) => fs.writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid,
+      token,
+      kind: 'external-process-lock',
+      created_at: new Date(createdAt).toISOString(),
+      process_start_identity: null,
+    }), { mode: 0o600 });
+    const attempt = () => {
+      try {
+        const lease = core.acquireExternalProcessLock({ lockDirectory, resourcePath, ownerPid: process.pid, attemptLimit: 3 });
+        core.releaseExternalProcessLock({ lockDirectory, resourcePath, ownerPid: process.pid, token: lease.token });
+        return 'acquired';
+      } catch (error) {
+        return error.message;
+      }
+    };
+    const report = { pid: process.pid };
+    plant('4'.repeat(48), Date.now());
+    report.young = { outcome: attempt(), calls: invocations.length };
+    output = 'noise\r\n' + filetime(Date.now() - 600000) + '\r\n';
+    plant('5'.repeat(48), Date.now() - 5000);
+    report.genuine = { outcome: attempt(), calls: invocations.length };
+    output = filetime(Date.now()) + '\r\n';
+    plant('6'.repeat(48), Date.now() - 3600000);
+    report.replaced = { outcome: attempt(), calls: invocations.length, lockLeft: fs.existsSync(lockFile) };
+    output = 'not a filetime\r\n';
+    report.malformed = core.processStartLowerBoundForPid(process.pid);
+    report.parsed = (() => { output = filetime(1790772128308) + '\r\n'; return core.processStartLowerBoundForPid(process.pid); })();
+    report.invocation = invocations[0];
+    report.program = Buffer.from(invocations[0].args[3], 'base64').toString('utf16le');
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const result = await runNode(source, [root, resourcePath]);
+  assert.equal(result.code, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.match(report.young.outcome, /timed out acquiring external process lock/i);
+  assert.equal(report.young.calls, 0);
+  assert.match(report.genuine.outcome, /timed out acquiring external process lock/i);
+  assert.equal(report.genuine.calls, 1);
+  assert.equal(report.replaced.outcome, 'acquired');
+  assert.equal(report.replaced.calls, 2);
+  assert.equal(report.replaced.lockLeft, false);
+  assert.equal(report.malformed, null);
+  assert.equal(report.parsed, 1790772128308);
+  const configuredRoot = process.env.SystemRoot;
+  const systemRoot = configuredRoot && path.win32.isAbsolute(configuredRoot) ? configuredRoot : 'C:\\Windows';
+  const powershellDirectory = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
+  assert.equal(report.invocation.file, path.win32.join(powershellDirectory, 'powershell.exe'));
+  assert.deepEqual(report.invocation.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-EncodedCommand']);
+  assert.equal(report.invocation.args.length, 4);
+  assert.equal(report.invocation.options.timeout, 5000);
+  assert.equal(report.invocation.options.windowsHide, true);
+  assert.deepEqual(report.invocation.options.stdio, ['ignore', 'pipe', 'ignore']);
+  assert.equal(report.invocation.options.env.SystemRoot, systemRoot);
+  assert.equal(report.invocation.options.env.PSModulePath, path.win32.join(powershellDirectory, 'Modules'));
+  assert.ok(report.program.includes(`GetProcessById(${report.pid})`), report.program);
+  assert.ok(report.program.includes(`WHERE ProcessId = ${report.pid}'`), report.program);
+  assert.ok(!report.program.includes('"'), report.program);
+});
+
+function lockInspectionFixture(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const options = { lockDirectory: root, resourcePath: path.join(root, 'autopilot') };
+  const inspection = core.inspectExternalProcessLock(options);
+  return { root, options, lockFile: inspection.lockFile, recoveryFile: inspection.recoveryFile };
+}
+
+function plantLockArtifact(file, owner, ageMs = 0) {
+  fs.writeFileSync(file, typeof owner === 'string' ? owner : JSON.stringify(owner), { mode: 0o600 });
+  const at = new Date(Date.now() - ageMs);
+  fs.utimesSync(file, at, at);
+}
+
+function lockDirectoryFingerprint(root) {
+  return fs.readdirSync(root).sort().map((name) => {
+    const stat = fs.lstatSync(path.join(root, name));
+    const bytes = stat.isFile() ? fs.readFileSync(path.join(root, name)).toString('hex') : '';
+    return `${name}:${stat.size}:${stat.mtimeMs}:${bytes}`;
+  });
+}
+
+function inspectWithoutChange(fixture) {
+  const before = lockDirectoryFingerprint(fixture.root);
+  const inspection = core.inspectExternalProcessLock(fixture.options);
+  assert.deepEqual(lockDirectoryFingerprint(fixture.root), before);
+  return inspection;
+}
+
+function acquisitionReclaims(fixture) {
+  let acquired;
+  try {
+    acquired = core.acquireExternalProcessLock({
+      ...fixture.options,
+      ownerPid: process.pid,
+      attemptLimit: 2,
+    });
+  } catch (error) {
+    if (/timed out acquiring external process lock/i.test(error.message)) return false;
+    throw error;
+  }
+  core.releaseExternalProcessLock({ ...fixture.options, ownerPid: process.pid, token: acquired.token });
+  return true;
+}
+
+test('external process lock inspection names the artifact externalProcessLockPath names', () => {
+  const fixture = lockInspectionFixture('zensu-external-inspect-absent-');
+  const inspection = inspectWithoutChange(fixture);
+  assert.equal(inspection.lockFile, core.externalProcessLockPath(fixture.options));
+  assert.equal(path.dirname(inspection.recoveryFile), path.dirname(inspection.lockFile));
+  assert.equal(
+    path.basename(inspection.recoveryFile),
+    path.basename(inspection.lockFile).replace(/\.lock$/, '.recovery'),
+  );
+  assert.equal(inspection.staleAfterMs, 30000);
+  assert.deepEqual(inspection.lock, { state: 'absent' });
+  assert.deepEqual(inspection.recovery, { state: 'absent' });
+});
+
+test('external process lock inspection reports a live holder without taking the lease', () => {
+  const fixture = lockInspectionFixture('zensu-external-inspect-held-');
+  const acquired = core.acquireExternalProcessLock({ ...fixture.options, ownerPid: process.pid });
+  try {
+    const recorded = JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')).process_start_identity;
+    const inspection = inspectWithoutChange(fixture);
+    const afterInspection = Date.now();
+    assert.ok(Number.isFinite(inspection.inspectedAtMs));
+    assert.ok(inspection.inspectedAtMs >= inspection.lock.createdAtMs);
+    assert.ok(inspection.inspectedAtMs <= afterInspection);
+    assert.equal(inspection.lock.state, 'owned');
+    assert.equal(inspection.lock.pid, process.pid);
+    assert.equal(inspection.lock.alive, true);
+    assert.equal(inspection.lock.stale, false);
+    assert.equal(inspection.lock.identityRecorded, Boolean(recorded));
+    assert.equal(inspection.lock.identityCurrent, recorded ? recorded : null);
+    assert.ok(Number.isFinite(inspection.lock.createdAtMs));
+    assert.ok(inspection.lock.createdAtMs <= Date.now());
+    assert.deepEqual(inspection.recovery, { state: 'absent' });
+  } finally {
+    core.releaseExternalProcessLock({ ...fixture.options, ownerPid: process.pid, token: acquired.token });
+  }
+});
+
+test('external process lock inspection calls an artifact stale exactly when acquisition reclaims it', () => {
+  const token = 'c'.repeat(48);
+  const identity = core.processStartIdentityForPid(process.pid);
+  const cases = [
+    {
+      name: 'dead owner',
+      owner: { pid: 2147483647, token, kind: 'external-process-lock', created_at: CREATED_AT, process_start_identity: null },
+      ageMs: 60000,
+      expect: { state: 'owned', stale: true, alive: false },
+    },
+    {
+      name: 'live owner without a recorded identity',
+      owner: { pid: process.pid, token, kind: 'external-process-lock', created_at: new Date().toISOString(), process_start_identity: null },
+      ageMs: 60000,
+      expect: {
+        state: 'owned',
+        stale: false,
+        alive: true,
+        identityRecorded: false,
+        identityCurrent: null,
+        startedAfterRecord: false,
+      },
+    },
+    {
+      name: 'owner-less and old',
+      owner: 'garbage',
+      ageMs: 60000,
+      expect: { state: 'ownerless', stale: true },
+    },
+    {
+      name: 'owner-less and fresh',
+      owner: 'garbage',
+      ageMs: 0,
+      expect: { state: 'ownerless', stale: false },
+    },
+    {
+      name: 'no created_at',
+      owner: { pid: 2147483647, token, kind: 'external-process-lock' },
+      ageMs: 60000,
+      expect: { state: 'ownerless', stale: true },
+    },
+    {
+      name: 'malformed release token digest',
+      owner: { pid: process.pid, token, kind: 'external-process-lock', created_at: CREATED_AT, release_token_digest: 'sha256:xyz' },
+      ageMs: 0,
+      expect: { state: 'ownerless', stale: false },
+    },
+    {
+      name: 'non-positive pid',
+      owner: { pid: 0, token, kind: 'external-process-lock', created_at: CREATED_AT },
+      ageMs: 60000,
+      expect: { state: 'ownerless', stale: true },
+    },
+  ];
+  if (core.processStartLowerBoundForPid(process.pid) !== null) {
+    cases.push({
+      name: 'live pid that started after an identity-less record',
+      owner: {
+        pid: process.pid,
+        token: '8'.repeat(48),
+        kind: 'external-process-lock',
+        created_at: CREATED_AT,
+        process_start_identity: null,
+      },
+      ageMs: 0,
+      expect: {
+        state: 'owned',
+        stale: true,
+        alive: true,
+        identityRecorded: false,
+        identityCurrent: null,
+        startedAfterRecord: true,
+      },
+    });
+  }
+  if (identity) {
+    cases.push({
+      name: 'live pid whose start identity no longer matches',
+      owner: { pid: process.pid, token, kind: 'external-process-lock', created_at: CREATED_AT, process_start_identity: 'reused:0' },
+      ageMs: 0,
+      expect: {
+        state: 'owned',
+        stale: true,
+        alive: true,
+        identityRecorded: true,
+        identityCurrent: identity,
+        startedAfterRecord: false,
+      },
+    });
+    cases.push({
+      name: 'live owner that still carries its start identity',
+      owner: { pid: process.pid, token, kind: 'external-process-lock', created_at: CREATED_AT, process_start_identity: identity },
+      ageMs: 60000,
+      expect: {
+        state: 'owned',
+        stale: false,
+        alive: true,
+        identityRecorded: true,
+        identityCurrent: identity,
+        startedAfterRecord: false,
+      },
+    });
+  }
+  for (const entry of cases) {
+    const fixture = lockInspectionFixture('zensu-external-inspect-reclaim-');
+    plantLockArtifact(fixture.lockFile, entry.owner, entry.ageMs);
+    const inspection = inspectWithoutChange(fixture);
+    for (const [key, value] of Object.entries(entry.expect)) {
+      assert.deepEqual(inspection.lock[key], value, `${entry.name}: ${key}`);
+    }
+    assert.equal(acquisitionReclaims(fixture), inspection.lock.stale, `${entry.name}: reclaim`);
+    if (fs.existsSync(fixture.lockFile)) fs.unlinkSync(fixture.lockFile);
+  }
+});
+
+test('external process lock inspection keeps a live holder whose start identity cannot be read', async () => {
+  const fixture = lockInspectionFixture('zensu-external-inspect-unread-');
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    childProcess.execFileSync = () => { throw new Error('ps unavailable'); };
+    const readFileSync = fs.readFileSync;
+    fs.readFileSync = function patchedRead(file, ...rest) {
+      if (String(file).startsWith('/proc/')) throw new Error('proc unavailable');
+      return readFileSync.call(fs, file, ...rest);
+    };
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const options = JSON.parse(process.argv[1]);
+    fs.writeFileSync(core.inspectExternalProcessLock(options).lockFile, JSON.stringify({
+      pid: process.pid,
+      token: 'f'.repeat(48),
+      kind: 'external-process-lock',
+      created_at: new Date().toISOString(),
+      process_start_identity: 'recorded:1',
+    }), { mode: 0o600 });
+    process.stdout.write(JSON.stringify(core.inspectExternalProcessLock(options).lock));
+  `;
+  const result = await runNode(source, [JSON.stringify(fixture.options)]);
+  assert.equal(result.code, 0, result.stderr);
+  const lock = JSON.parse(result.stdout);
+  assert.equal(lock.state, 'owned');
+  assert.equal(lock.alive, true);
+  assert.equal(lock.identityRecorded, true);
+  assert.equal(lock.identityCurrent, null);
+  assert.equal(lock.stale, false);
+});
+
+test('external process lock inspection refuses what lockOwner cannot read, and so does every acquisition', () => {
+  const token = 'd'.repeat(48);
+  const cases = [
+    {
+      name: 'owner record whose created_at cannot be converted',
+      plant: (file) => plantLockArtifact(file, `{"pid":1,"token":"${token}","created_at":{"toString":1}}`),
+      cause: 'unreadable',
+    },
+    { name: 'directory', plant: (file) => fs.mkdirSync(file), cause: 'irregular' },
+    { name: 'oversized file', plant: (file) => plantLockArtifact(file, 'x'.repeat(5000)), cause: 'oversized' },
+  ];
+  if (!WINDOWS) {
+    cases.push({
+      name: 'symbolic link',
+      plant: (file) => fs.symlinkSync(path.join(path.dirname(file), 'nowhere'), file),
+      cause: 'symlink',
+    });
+  }
+  for (const entry of cases) {
+    const fixture = lockInspectionFixture('zensu-external-inspect-refused-');
+    entry.plant(fixture.lockFile);
+    const inspection = inspectWithoutChange(fixture);
+    assert.deepEqual(inspection.lock, { state: 'refused', cause: entry.cause }, entry.name);
+    assert.throws(() => core.acquireExternalProcessLock({
+      ...fixture.options,
+      ownerPid: process.pid,
+      attemptLimit: 2,
+    }), Error, entry.name);
+    fs.rmSync(fixture.lockFile, { recursive: true, force: true });
+  }
+});
+
+test('external process lock inspection reads the recovery sentinel with the same verdicts', () => {
+  const token = 'e'.repeat(48);
+  const dead = lockInspectionFixture('zensu-external-inspect-recovery-dead-');
+  plantLockArtifact(dead.recoveryFile, {
+    pid: 2147483647,
+    token,
+    kind: 'recovery',
+    created_at: CREATED_AT,
+    process_start_identity: null,
+  }, 60000);
+  const deadInspection = inspectWithoutChange(dead);
+  assert.deepEqual(deadInspection.lock, { state: 'absent' });
+  assert.equal(deadInspection.recovery.state, 'owned');
+  assert.equal(deadInspection.recovery.stale, true);
+  assert.equal(acquisitionReclaims(dead), true);
+  assert.equal(fs.existsSync(dead.recoveryFile), false);
+
+  const held = lockInspectionFixture('zensu-external-inspect-recovery-held-');
+  plantLockArtifact(held.recoveryFile, {
+    pid: process.pid,
+    token,
+    kind: 'recovery',
+    created_at: new Date().toISOString(),
+    process_start_identity: null,
+  }, 60000);
+  const heldInspection = inspectWithoutChange(held);
+  assert.equal(heldInspection.recovery.state, 'owned');
+  assert.equal(heldInspection.recovery.stale, false);
+  assert.equal(heldInspection.recovery.alive, true);
+  assert.equal(acquisitionReclaims(held), false);
+  fs.unlinkSync(held.recoveryFile);
 });
 
 // requireAbsentDirectoryPath was exported "for the unit layer alone" and had no unit

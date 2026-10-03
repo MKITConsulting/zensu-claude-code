@@ -2641,9 +2641,9 @@ fi
 CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 
 # ── W* — the WRITES anchor, and the renderer bounds around it ───────────────
-# A takeover into another worktree can edit and test but cannot commit: the Bash
-# source-write gate compares every write against the session's IMMUTABLE project
-# root, and only /zensu:adopt-session --reanchor moves it. `show` therefore reports whether the
+# While the opt-in source-write gate is on, a takeover into another worktree can
+# edit and test but cannot commit: that gate compares every write against the
+# session's IMMUTABLE project root, and only /zensu:adopt-session --reanchor moves it. `show` therefore reports whether the
 # TARGET worktree is this session's own anchor, and the whole point of the line
 # is that it must never answer "allowed" off a measurement that failed.
 #
@@ -2841,6 +2841,8 @@ case "$W_DENIED" in *"$FAKE/work/somewhere-else"*) ;; *) W2_BAD="$W2_BAD caller-
 case "$W_DENIED" in *"$WT_A"*) ;; *) W2_BAD="$W2_BAD target-root-not-named" ;; esac
 case "$W_DENIED" in *"source-write gate (rules B/C)"*) ;; *) W2_BAD="$W2_BAD gate-not-named" ;; esac
 case "$W_DENIED" in *"COMMIT needs a session whose own anchor contains that worktree"*) ;; *) W2_BAD="$W2_BAD route-not-named" ;; esac
+case "$W_DENIED" in *"is opt-in (hooks.bashWriteGate: true) and off by default"*) ;; *) W2_BAD="$W2_BAD opt-in-bound-not-named" ;; esac
+case "$W_DENIED" in *"review-chain reviewers read only inside the anchor"*) ;; *) W2_BAD="$W2_BAD review-chain-reason-not-named" ;; esac
 case "$W_DENIED" in *"WRITES   allowed"*) W2_BAD="$W2_BAD claims-allowed" ;; esac
 if [ -z "$W2_BAD" ]; then
   check "W2 a worktree outside the anchor renders denied, names both roots, the rules and the route" PASS
@@ -3000,6 +3002,8 @@ for verb in takeover handoff; do
   BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" "$verb" "$SID_A" --all 2>/dev/null)"
   case "$BRIEF" in *"can edit files there but cannot commit"*) ;; *) W7_BAD="$W7_BAD $verb-missing-caution" ;; esac
   case "$BRIEF" in *"does not CONTAIN"*) ;; *) W7_BAD="$W7_BAD $verb-not-containment-wording" ;; esac
+  case "$BRIEF" in *"while the opt-in Zensu source-write gate is on"*) ;; *) W7_BAD="$W7_BAD $verb-opt-in-bound-missing" ;; esac
+  case "$BRIEF" in *"will go through the Zensu review chain"*) ;; *) W7_BAD="$W7_BAD $verb-review-chain-reason-missing" ;; esac
 done
 if [ -z "$W7_BAD" ]; then
   check "W7 both rendered briefs carry the write-anchor caution in containment wording" PASS
@@ -4800,6 +4804,10 @@ wt_case "WT8v7b the move route does not PRESCRIBE taking the escape" \
 # sees the consequence of a reader taking it anyway — that the DESTINATION then has no
 # containment check and must be placed inside the anchor by hand. Unpinned on both carriers
 # until now; a grep for `containment check on` across tests/ returned nothing.
+wt_case "WT8v12 the move route states the gate is opt-in before any claim about it" \
+  "$WT8_ADOPT" 'It is OPT-IN: it runs only when the Zensu config sets hooks.bashWriteGate to true, and it' 'the refusal names it'
+wt_case "WT8v12b the move route says the refusal names the config key and no escape prefix" \
+  "$WT8_ADOPT" 'Its refusal names that config key and no escape prefix' 'An operator-facing one-off escape exists and the refusal'
 wt_case "WT8v7c taking the escape is stated to drop the DESTINATION containment check" \
   "$WT8_ADOPT" 'check on the DESTINATION, so put `<path>` inside your own anchor' 'cannot run against it as printed'
 # The SAME-BRANCH claim is the route's headline benefit and it is false across two
@@ -4818,7 +4826,7 @@ wt_case "WT8v9 the same-repository bound is enforced by git, not by the reader's
 # so: its attestation paragraph had no needle at all until this round. This is the sentence
 # guarding the one rendered command in this flow that writes to the SOURCE worktree with no
 # refusal standing in front of it — "refusal standing", never "gate refusal": the renderer
-# refusals are what is absent here, while the write gate DOES judge this command, so naming
+# refusals are what is absent here, while the write gate, when opted in, DOES judge this command, so naming
 # the gate flips the claim onto the thing that applies. Leaving it unpinned left the most
 # consequential paragraph of the route the least protected.
 #
@@ -4873,10 +4881,10 @@ wt_case "WT8w1 the move route names the measured live pid when one is registered
 wt_case "WT8w2 an arm with no registered pid renders no measured-pid line" \
   "$WT8_ADOPT" 'only you can authorize it' 'was registered and alive for that worktree'
 
-# WT8v8 — the escape is NAMED and never SPELLED, over EVERY arm rather than one. Shipping
-# the prefix inside a skill teaches the hatch, which the repo convention forbids outright;
-# the gate's own deny message carries it, and carries it at the moment the reader needs it,
-# so pointing at the refusal costs nothing. The roster is the derived one `WT8k` uses, for
+# WT8v8 — the escape is never SPELLED, over EVERY arm rather than one. Shipping the
+# prefix inside a skill teaches the hatch, which the repo convention forbids outright; the
+# gate's deny names hooks.bashWriteGate and no prefix, so the prefix is operator
+# documentation in docs/ and never skill text. The roster is the derived one `WT8k` uses, for
 # the same reason it gives: a hand list cannot detect its own omission. `WT8_SPELLED` is
 # accumulated in `WT8k`'s loop rather than in one of its own — see the note there — and it
 # is safe to declare at top level because the roster grep matches a UUID-shaped value, which

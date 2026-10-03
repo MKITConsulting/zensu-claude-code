@@ -2373,6 +2373,23 @@ _autopilot_active_probe() {
   return 0
 }
 
+_autopilot_active_read_without_lease() {
+  local root="$1" owner="$2" rc=0 record=""
+  _ZENSU_AP_ACTIVE_RECORD=""
+  _autopilot_storage_safe "$root" "" || return 5
+  record="$(_autopilot_read_active_critical "$root" "$owner" 2>/dev/null)" || rc=$?
+  _autopilot_storage_safe "$root" "" || return 5
+  [ "$rc" -eq 1 ] && return 1
+  [ "$rc" -eq 0 ] || return 5
+  printf '%s' "$record" | node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
+      process.exit(["DONE","CANCELLED"].includes(s.stage)?0:1);
+    } catch (_) { process.exit(1); }
+  ' 2>/dev/null || return 5
+  _ZENSU_AP_ACTIVE_RECORD="$record"
+}
+
 autopilot_read_active_strict() {
   local root owner="${2:-}"
   [ "$#" -eq 2 ] && [ -n "${1:-}" ] || return 3
@@ -2386,7 +2403,12 @@ autopilot_read_active_strict() {
   esac
   _ZENSU_AP_ACTIVE_RECORD=""
   _ZENSU_AP_ACTIVE_WORKER_RC=""
-  _autopilot_locked_run "$root" "" _autopilot_active_probe "$root" "$owner" || return 5
+  _autopilot_locked_run "$root" "" _autopilot_active_probe "$root" "$owner" || {
+    [ -z "$_ZENSU_AP_ACTIVE_WORKER_RC" ] || return 5
+    _autopilot_active_read_without_lease "$root" "$owner" || return $?
+    printf '%s\n' "$_ZENSU_AP_ACTIVE_RECORD"
+    return 0
+  }
   case "$_ZENSU_AP_ACTIVE_WORKER_RC" in
     0) ;;
     1) return 1 ;;

@@ -225,11 +225,12 @@ else
   check "P4e rendering sites still consuming tdd_bypasses directly:${ROSTER_BAD:- (none, but the helper is missing)}" FAIL
 fi
 
-# P5 — functional (sandboxed state dir; ZENSU_CONFIG pinned to defaults;
-# ambient gate escapes neutralized per invocation)
+# P5 — functional (sandboxed state dir; ZENSU_CONFIG pinned to defaults plus the
+# opt-in source-write gate; ambient gate escapes neutralized per invocation)
 SBOX="$(mktemp -d 2>/dev/null)" || SBOX=""
 if [ -n "$SBOX" ]; then
-  printf '{"hooks":{}}\n' > "$SBOX/config.json"
+  printf '{"hooks":{"bashWriteGate":true}}\n' > "$SBOX/config.json"
+  printf '{"hooks":{}}\n' > "$SBOX/config-default.json"
   export CLAUDE_PROJECT_DIR="$SBOX"
   export ZENSU_TEST_PLUGIN_DATA="$SBOX/plugin-data"
   start_session() {
@@ -578,6 +579,42 @@ if [ -n "$SBOX" ]; then
       check "P5c3c --tdd-begin discloses the outgoing ledger it is about to clear (got: $BEGIN_ECHO)" FAIL ;;
   esac
 
+  start_session hd
+  run_log --tdd-begin --session hd >/dev/null 2>&1
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hd","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf x >> src/r.js"}}' \
+    | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-default.json" \
+      ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= \
+      bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
+  LHD="$(run_log --bypass-list --session hd 2>/dev/null)"
+  case "$OUT" in *'"deny"'*) DEFAULT_ALLOWED=no ;; *) DEFAULT_ALLOWED=yes ;; esac
+  if [ "$DEFAULT_ALLOWED" = "yes" ] && [ "$LHD" = "none" ]; then
+    check "P5h2 the source-write gate at its default (off) ledgers no inline escape" PASS
+  else
+    check "P5h2 the source-write gate at its default (off) ledgers no inline escape (got: $LHD, allowed: $DEFAULT_ALLOWED)" FAIL
+  fi
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hd","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf x >> src/r.js"}}' | run_hook pre-bash-source-write-gate.sh)"
+  LHD2="$(run_log --bypass-list --session hd 2>/dev/null)"
+  if [ "$LHD2" = "ZENSU_BASH_WRITE_GATE" ]; then
+    check "P5h2-control the same command under the opted-in gate is ledgered" PASS
+  else
+    check "P5h2-control the same command under the opted-in gate is ledgered (got: $LHD2)" FAIL
+  fi
+  start_session hp
+  run_log --tdd-begin --session hp >/dev/null 2>&1
+  printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hp","tool_name":"Bash","tool_input":{"command":"printf x >> src/r.js"}}' \
+    | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-default.json" \
+      ZENSU_TDD_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= \
+      env ZENSU_BASH_WRITE_GATE=off bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" >/dev/null 2>&1
+  LHP="$(run_log --bypass-list --session hp 2>/dev/null)"
+  printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hp","tool_name":"Bash","tool_input":{"command":"printf x >> src/r.js"}}' \
+    | run_hook_env ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh >/dev/null
+  LHP2="$(run_log --bypass-list --session hp 2>/dev/null)"
+  if [ "$LHP" = "none" ] && [ "$LHP2" = "ZENSU_BASH_WRITE_GATE" ]; then
+    check "P5h4 a process-env escape is ledgered only while the gate is opted in" PASS
+  else
+    check "P5h4 a process-env escape is ledgered only while the gate is opted in (default: $LHP, opted in: $LHP2)" FAIL
+  fi
+
   start_session sz
   run_log --tdd-begin --session sz >/dev/null 2>&1
   run_log --bypass-note ZENSU_TDD_GATE --session sz >/dev/null 2>&1
@@ -614,6 +651,18 @@ if [ -n "$SBOX" ]; then
       fi
       ;;
     *) check "P5z deny wins over markers (no deny emitted for tracked overwrite)" FAIL ;;
+  esac
+  OUT="$(printf '%s' "$DW_PAYLOAD" | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$DWSBOX" ZENSU_CONFIG="$SBOX/config-default.json" ZENSU_BSWGATE_TEMP_DIRS=/nonexistent-temp-root ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
+  L14D="$(run_log --bypass-list --session dwx 2>/dev/null)"
+  case "$OUT" in
+    *'"deny"'*) check "P5z2 at the default config the tracked overwrite P5z denies is allowed (got a deny)" FAIL ;;
+    *)
+      if [ "$L14D" = "none" ]; then
+        check "P5z2 at the default config the tracked overwrite P5z denies is allowed and ledgers nothing" PASS
+      else
+        check "P5z2 at the default config the tracked overwrite P5z denies is allowed and ledgers nothing (got: $L14D)" FAIL
+      fi
+      ;;
   esac
 
   SEED_SBOX_SID="sdx"

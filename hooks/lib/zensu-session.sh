@@ -31,7 +31,7 @@ zensu_bind_hook_session() {
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED _ZENSU_PROJECT_DIR_MEMO
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
@@ -70,7 +70,7 @@ zensu_bind_model_session() {
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED _ZENSU_PROJECT_DIR_MEMO
   [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
@@ -966,7 +966,7 @@ zensu_emit_hook_session_deny() {
     fi
     remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
     tail="$(_zensu_adoption_tail "$refusal")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis; a plugin update that lands mid-session is normally adopted automatically on the first hook contact, but Zensu tried to adopt this record and %s: %s. %s. The record is NOT damaged and NOT missing; %s — both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case."}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis; a plugin update that lands mid-session is normally adopted automatically on the first hook contact, but Zensu tried to adopt this record and %s: %s. %s. The record is NOT damaged and NOT missing; %s — both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case."}}\n' \
       "$recorded" "$executing" "$attempt" "$refusal" "$remedy" "$tail"
     return
   fi
@@ -980,7 +980,7 @@ zensu_emit_hook_session_deny() {
     # the three constant faults it closes and why it echoes rather than returns a
     # status are all stated at `zensu_safe_display_path`.
     dead="$(zensu_safe_display_path "$dead")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable and this installation serves it — the disagreement is that the project root it records no longer exists, which a deleted or recycled worktree causes. The workflow document lived under that directory, so no write can be attributed to a project that is not there and every writing tool fails closed. Ordinary read-only shell commands and the read-only diagnostics still work; a `zensu` CLI call does not, because that gate needs a binding before it can classify the verb as a read. Run /zensu:adopt-session --restore-root to see whether that directory can be re-created in place. That report is read-only; the repair itself is a separate step the user has to agree to, and a bare mkdir is not it — the workflow document lived under that root, so re-creating the directory alone leaves every tool denied. It restores the ANCHOR, not the work: the directory comes back empty, it is not a git worktree, and the chain that lived there is gone rather than restored. If it was moved rather than deleted, moving it back is better. Starting a fresh Claude Code session remains the alternative. The path this session records is: \\"%s\\""}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable and this installation serves it — the disagreement is that the project root it records no longer exists, which a deleted or recycled worktree causes. The workflow document lived under that directory, so no write can be attributed to a project that is not there: Edit, Write and MultiEdit fail closed, and so does a Bash write while the opt-in source-write gate is on (hooks.bashWriteGate: true). Other shell commands and the read-only diagnostics still work; a `zensu` CLI call does not, because that gate needs a binding before it can classify the verb as a read. Run /zensu:adopt-session --restore-root to see whether that directory can be re-created in place. That report is read-only; the repair itself is a separate step the user has to agree to, and a bare mkdir is not it — the workflow document lived under that root, so re-creating the directory alone leaves every tool denied. It restores the ANCHOR, not the work: the directory comes back empty, it is not a git worktree, and the chain that lived there is gone rather than restored. If it was moved rather than deleted, moving it back is better. Starting a fresh Claude Code session remains the alternative. The path this session records is: \\"%s\\""}}\n' \
       "$dead"
     return
   fi
@@ -1036,6 +1036,19 @@ zensu_emit_hook_session_deny() {
     "$appended"
 }
 
+_zensu_session_key_canonical() {
+  local value="${1:-}"
+  [ "${#value}" -eq 69 ] || return 1
+  case "$value" in
+    (scv1_*) ;;
+    (*) return 1 ;;
+  esac
+  case "${value#scv1_}" in
+    (*[!0123456789abcdef]*) return 1 ;;
+  esac
+  return 0
+}
+
 zensu_resolve_session_id() {
   local raw="${1:-}"
   local lib_dir core resolved injected_key
@@ -1048,15 +1061,21 @@ zensu_resolve_session_id() {
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
   core="$lib_dir/session-control-core-v1.js"
   [ -f "$core" ] || return 1
-  resolved="$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$raw")" \
-    || return 1
+  if _zensu_session_key_canonical "$raw"; then
+    resolved="$raw"
+  else
+    resolved="$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$raw")" \
+      || return 1
+  fi
   if [ -n "$injected_key" ]; then
     # SessionStart injects a canonical key. Once present, it is an immutable
     # binding: explicit raw ids and explicit keys are accepted only when their
     # normalized key is exactly this session's key. This prevents model-side
     # helpers from reading or mutating another session's CAS state.
-    [ "$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$injected_key")" \
-      = "$injected_key" ] || return 1
+    if ! _zensu_session_key_canonical "$injected_key"; then
+      [ "$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$injected_key")" \
+        = "$injected_key" ] || return 1
+    fi
     [ "$resolved" = "$injected_key" ] || return 1
   fi
   printf '%s\n' "$resolved"
@@ -1070,7 +1089,7 @@ zensu_resolve_project_dir() {
   local candidate="${ZENSU_PROJECT_ROOT:-}"
   local context_file="${ZENSU_SESSION_CONTEXT:-}"
   local session_key="${ZENSU_SESSION_KEY:-}"
-  local lib_dir core msys_env_exclusions
+  local lib_dir core msys_env_exclusions rendered
   [ -n "$candidate" ] && [ -n "$context_file" ] && [ -n "$session_key" ] || return 1
   [ ! -L "$candidate" ] && [ -d "$candidate" ] || return 1
   [ ! -L "$context_file" ] && [ -f "$context_file" ] || return 1
@@ -1080,6 +1099,16 @@ zensu_resolve_project_dir() {
   [ -f "$core" ] || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE)" \
     || return 1
+  if [ -n "${_ZENSU_PROJECT_DIR_MEMO[3]+set}" ] \
+      && [ "${_ZENSU_PROJECT_DIR_MEMO[0]:-}" = "$candidate" ] \
+      && [ "${_ZENSU_PROJECT_DIR_MEMO[1]:-}" = "$context_file" ] \
+      && [ "${_ZENSU_PROJECT_DIR_MEMO[2]:-}" = "$session_key" ]; then
+    rendered="$(cd -P -- "$candidate" 2>/dev/null && pwd -P)" || return 1
+    if [ -n "$rendered" ] && [ "$rendered" = "${_ZENSU_PROJECT_DIR_MEMO[3]:-}" ]; then
+      printf '%s\n' "$rendered"
+      return 0
+    fi
+  fi
   (
     cd -P -- "$lib_dir" || exit 1
     MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
@@ -1108,6 +1137,17 @@ zensu_resolve_project_dir() {
   # Bash builtins. Validate the immutable native value above, then render the
   # same directory in the executing shell's canonical namespace.
   (cd -P -- "$candidate" && pwd -P)
+}
+
+zensu_memoize_project_dir() {
+  local before rendered
+  unset _ZENSU_PROJECT_DIR_MEMO
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] || return 1
+  before="$(cd -P -- "$ZENSU_PROJECT_ROOT" 2>/dev/null && pwd -P)" || return 1
+  rendered="$(zensu_resolve_project_dir)" || return 1
+  [ -n "$rendered" ] && [ "$rendered" = "$before" ] || return 1
+  _ZENSU_PROJECT_DIR_MEMO=("${ZENSU_PROJECT_ROOT:-}" "${ZENSU_SESSION_CONTEXT:-}" \
+    "${ZENSU_SESSION_KEY:-}" "$rendered")
 }
 
 # The shape constants travel WITH the function that reads them, and this is an
@@ -1139,7 +1179,8 @@ case "${OSTYPE:-}" in
       zensu_session_adoption_attempt _zensu_adoption_attempt \
       zensu_session_adoption_tail _zensu_adoption_tail \
       _zensu_deny_audience _zensu_load_agent_context \
-      zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+      zensu_session_key _zensu_session_key_canonical zensu_resolve_session_id \
+      zensu_resolve_project_dir zensu_memoize_project_dir 2>/dev/null || true
     ;;
 esac
 # The underscore-private helpers in that list are there for CLOSURE, not as API: an

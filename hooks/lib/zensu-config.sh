@@ -12,8 +12,8 @@
 #
 # A missing or malformed file degrades to {} (so a broken project file can no
 # longer blank a valid global). When a key is absent from the merged object the
-# getters apply the same hardcoded defaults they always have, so a no-config
-# install behaves exactly as before.
+# getters apply their hardcoded defaults: enabled for an ordinary hook flag, off
+# for an opt-in key read through `zensu_hook_opted_in`.
 #
 # ONE exception to "this file only reads config": the session-marker helpers that
 # follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
@@ -130,11 +130,17 @@ zensu_hook_enabled_strict() {
 # tddImplementation defaults to FALSE (vanilla mode): strict runs ONLY on an
 # explicit boolean `true`; absent / false / non-boolean all resolve to vanilla,
 # and node-missing degrades to vanilla (the new default). Do NOT fold this into
-# zensu_hook_enabled — that helper defaults every other flag to enabled.
+# zensu_hook_enabled — that helper defaults a flag to enabled; the opt-in rule is
+# `zensu_hook_opted_in`, which this delegates to.
 zensu_tdd_strict_enabled() {
-  command -v node >/dev/null 2>&1 || return 1   # node missing → vanilla (default off)
+  zensu_hook_opted_in tddImplementation
+}
+
+zensu_hook_opted_in() {
+  local key="$1"
+  command -v node >/dev/null 2>&1 || return 1
   local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.tddImplementation===true?"1":"0")' 2>/dev/null)
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks[process.argv[1]]===true?"1":"0")' "$key" 2>/dev/null)
   [ "$val" = "1" ]
 }
 

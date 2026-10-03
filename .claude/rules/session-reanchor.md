@@ -14,8 +14,9 @@ paths:
 A session's record pins `project_root` to its SessionStart working directory. A session that
 goes on to work in ANOTHER worktree of the same repository — typically one it created with
 `git worktree add`, as this repository's own conventions ask — keeps its anchor in the worktree it
-started in. Rule (C) then denies `git add`/`git commit` where the session really works, rule (B)
-denies a new source file there, and `zensu:review-aspect` reviewers stay confined to the old root.
+started in. While the opt-in source-write gate is on (`hooks.bashWriteGate: true`), rule (C) then
+denies `git add`/`git commit` where the session really works and rule (B) denies a new source file
+there; at every setting `zensu:review-aspect` reviewers stay confined to the old root.
 `/zensu:adopt-session --reanchor` is the one sanctioned move, and it is BOUNDED, never
 caller-named.
 
@@ -43,8 +44,12 @@ and `_tdd_locked_run` returns 1 for a storage-safety failure, a failed lock acqu
 release as well, so its exit 1 cannot tell "no run" from "could not look". The strict verb runs the
 worker under the lease through a probe that always returns 0, as `autopilot_workspace_hold_report`
 does, and answers 1 only for the worker's own "no run" or an absent state directory, 2 for an
-orphaned, hidden or inconsistent run, 3 for a refused call and 5 for every lease, storage or path
-fault. Exit 0 is open unless the stage is `DONE` or `CANCELLED`; every other outcome, a library
+orphaned, hidden or inconsistent run, 3 for a refused call and 5 for a lease, storage or path
+fault. When the lease cannot be taken it looks once more without it, and gives the locked read's
+answer only when that read-only look proves no run or finds a `DONE` or `CANCELLED` own run
+(`.claude/rules/autopilot-active-read.md`), so a session without an active run re-anchors under a
+held lease while one whose look finds a nonterminal run refuses. Exit 0 is open unless the stage
+is `DONE` or `CANCELLED`; every other outcome, a library
 that fails to load (exit 97), a timeout and a missing shell included, refuses as
 `autopilot-state-unverifiable`. Do not re-implement the run inventory here: the library's owner
 scoping and orphan rules are the point. The verb is called by name across the file boundary, so
@@ -123,9 +128,12 @@ usable record cannot run the move. The worktree-operand arm does not name it (W2
 anchor does not change which tree `git worktree remove` destroys. The hint says the move refuses a
 worktree in which it FINDS another live session — never that it refuses wherever another session
 works, because the probe does not see where a session edits. No remedy names the recorded root any more — rule (C) used to
-recommend `git -C '<recorded root>' <verb> …`, which stages into the wrong worktree. The escape
-sentence stays LAST (`skills/session-trail` asserts the refusal names it), `denies again` stays in
-the designation arm (W163), and the operand arm is unchanged (W204). `P5b` in
+recommend `git -C '<recorded root>' <verb> …`, which stages into the wrong worktree. The parser's
+`OPT_IN_NOTE` stays LAST and names `hooks.bashWriteGate`, never the escape prefix
+(`skills/session-trail` asserts that shape; W121, W121c and W163c pin it), `denies again` stays in
+the designation arm (W163), and the operand arm is unchanged (W204). `test-session-reanchor.sh`
+drives its `git add` and admission checks with the gate opted in through `gate-on-config.json`,
+because at the default the gate allows every one of them. `P5b` in
 `test-secret-scan-gate.sh` pins the literal `BSWG_MODE= PAYLOAD=`, so a new assignment goes AFTER
 `PAYLOAD=`, never between the two.
 
@@ -226,7 +234,10 @@ the skills named above needs a `cd` into the new anchor, and what other skills r
 working directory — `/zensu:plan-review`'s plan and persona discovery, `/zensu:setup`'s
 project-local config target, the load-time overlays of `/zensu:tdd` and `/zensu:cover`, the
 templates of `/zensu:autopilot` and `/zensu:pilot`, and the checkout `/zensu:autopilot` opens its
-pull request from — still comes from the start directory's worktree of the same repository; a
+pull request from — still comes from the start directory's worktree of the same repository; the
+source-write gate reads its project-level `hooks.bashWriteGate` opt-in through the host's
+`CLAUDE_PROJECT_DIR`, ahead of its bind, so after a move the start worktree's
+`.zensu/config.json` still decides whether the gate runs; a
 project whose root holds a double quote, a dollar sign, a backtick or a backslash cannot run
 `/zensu:tdd`, because `--project-root` refuses it; open work under the old root must reach its end
 first;

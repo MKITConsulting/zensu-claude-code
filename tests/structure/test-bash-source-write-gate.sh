@@ -231,9 +231,18 @@ node -e '
 ' "$HOOKS_JSON" 2>/dev/null \
   && check "W4 registered as PreToolUse Bash matcher with timeout 60" PASS || check "W4 registered as PreToolUse Bash matcher with timeout 60" FAIL
 
-grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK" \
-  && check "W5 config-gated via zensu_hook_enabled bashWriteGate (default-on)" PASS \
-  || check "W5 config-gated via zensu_hook_enabled bashWriteGate (default-on)" FAIL
+{ grep -qF 'zensu_hook_opted_in bashWriteGate || exit 0' "$HOOK" \
+  && ! grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK"; } \
+  && check "W5 config-gated via zensu_hook_opted_in bashWriteGate (opt-in, default off)" PASS \
+  || check "W5 config-gated via zensu_hook_opted_in bashWriteGate (opt-in, default off)" FAIL
+
+HOOK_OPT_IN_NOTE="$(sed -n 's/^OPT_IN_NOTE="\(.*\)"$/\1/p' "$HOOK")"
+PARSER_OPT_IN_NOTE="$(node -e 'process.stdout.write(String(require(process.argv[1]).OPT_IN_NOTE).trim())' \
+  "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+{ [ -n "$HOOK_OPT_IN_NOTE" ] && [ "$HOOK_OPT_IN_NOTE" = "$PARSER_OPT_IN_NOTE" ] \
+  && [ "$(grep -cF '${OPT_IN_NOTE}' "$HOOK")" -eq 4 ]; } \
+  && check "W5b the hook's OPT_IN_NOTE equals the parser's exported note and reaches the four hook-side denies that interpolate it" PASS \
+  || check "W5b hook note '$HOOK_OPT_IN_NOTE' vs parser note '$PARSER_OPT_IN_NOTE'" FAIL
 
 # ── Behavioral harness ───────────────────────────────────────────────
 # A real (nested) git project + a sibling checkout. A controlled fake-temp dir
@@ -311,8 +320,10 @@ mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
     && printf 'pub fn x(){}\n' > src/lib.rs && git add src/lib.rs && git commit -qm init
 ) >/dev/null 2>&1
 
-CFG_DEF="$(mktemp -t bswgate-def-XXXXXX)";  printf '%s' '{"hooks":{}}'                    > "$CFG_DEF"
-CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}' > "$CFG_OFF"
+CFG_ON="$(mktemp -t bswgate-on-XXXXXX)";     printf '%s' '{"hooks":{"bashWriteGate":true}}'   > "$CFG_ON"
+CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}'  > "$CFG_OFF"
+CFG_UNSET="$(mktemp -t bswgate-unset-XXXXXX)"; printf '%s' '{"hooks":{}}'                     > "$CFG_UNSET"
+CFG_QUOTED="$(mktemp -t bswgate-quoted-XXXXXX)"; printf '%s' '{"hooks":{"bashWriteGate":"true"}}' > "$CFG_QUOTED"
 export CLAUDE_PROJECT_DIR="$PROJ"
 export ZENSU_TEST_PLUGIN_DATA="$WORKROOT/plugin-data"
 # shellcheck disable=SC1091
@@ -338,7 +349,7 @@ classify() {
 }
 # run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
-  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}" env_file="${6:-$PROJ/.claude-env}" home="${7:-${HOME:-}}"
+  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_ON}" env_file="${6:-$PROJ/.claude-env}" home="${7:-${HOME:-}}"
   local out
   out="$(payload "$cmd" "$cwd" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
         -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
@@ -407,32 +418,52 @@ run "W27 inline ZENSU_BASH_WRITE_GATE=off" "ZENSU_BASH_WRITE_GATE=off printf x >
 run "W28 inline ZENSU_MCP_GATE=off"        "ZENSU_MCP_GATE=off printf x >> src/app.rs"        ALLOW
 run "W29 config bashWriteGate:false"       "printf x >> src/app.rs" ALLOW "$PROJ" "$CFG_OFF"
 
+run "W29b default config leaves rule A off"   "printf x >> src/app.rs"             ALLOW "$PROJ" "$CFG_UNSET"
+run "W29c default config leaves rule B off"   "printf x >> ../sibling/src/lib.rs"  ALLOW "$PROJ" "$CFG_UNSET"
+run "W29d default config leaves rule C off"   "git -C $SIB add ."                  ALLOW "$PROJ" "$CFG_UNSET"
+run "W29e default config admits a takeover worktree move" \
+  "git -C $SIB worktree move $SIB/wt-old $PROJ/wt-new"                             ALLOW "$PROJ" "$CFG_UNSET"
+run "W29e-control opted in, the same takeover move is refused" \
+  "git -C $SIB worktree move $SIB/wt-old $PROJ/wt-new"                             DENY  "$PROJ" "$CFG_ON"
+run "W29f quoted \"true\" does not opt in"    "printf x >> src/app.rs"             ALLOW "$PROJ" "$CFG_QUOTED"
+run "W29g absent config file leaves the gate off" \
+  "printf x >> src/app.rs"                                                         ALLOW "$PROJ" "$WORKROOT/no-such-config.json"
+run "W29h control rebind still denies under the default config" \
+  "ZENSU_CLAUDE_PLUGIN_ROOT=/tmp/other env"                                        DENY  "$PROJ" "$CFG_UNSET"
+run "W29i host session-id rebind still denies under the default config" \
+  "CLAUDE_CODE_SESSION_ID=other env"                                               DENY  "$PROJ" "$CFG_UNSET"
+run "W29j opted in, rule A denies"            "printf x >> src/app.rs"             DENY  "$PROJ" "$CFG_ON"
+
 # Process-env escape (set on the hook process itself)
 OUT="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+      ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "W30 process-env ZENSU_BASH_WRITE_GATE=off -> ALLOW" PASS \
   || check "W30 process-env escape (got '$OUT')" FAIL
 
 # The parser remains fail-open only after a trusted hook session is bound;
-# empty/non-JSON payloads cannot establish that binding and are denied.
-OUT="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
-OUT2="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
+# empty/non-JSON payloads cannot establish that binding and are denied while the gate is opted in.
+OUT="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+OUT2="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 { [ "$OUT" = "DENY" ] && [ "$OUT2" = "DENY" ]; } \
   && check "W31 empty + non-JSON cannot bind a hook session -> DENY" PASS \
   || check "W31 binding failure (empty='$OUT' nonjson='$OUT2')" FAIL
 
 # Deny-reason content
 REASON_A="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
-{ printf '%s' "$REASON_A" | grep -qF 'tracked' && printf '%s' "$REASON_A" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
-  && check "W32 clobber deny-reason: 'tracked' + escape-hatch hint" PASS \
-  || check "W32 clobber deny-reason content" FAIL
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+{ printf '%s' "$REASON_A" | grep -qF 'tracked' \
+  && printf '%s' "$REASON_A" | grep -qF 'opt-in and runs because hooks.bashWriteGate is true' \
+  && ! printf '%s' "$REASON_A" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
+  && check "W32 clobber deny-reason: 'tracked' + the opt-in key, never the escape prefix" PASS \
+  || check "W32 clobber deny-reason content (got '$REASON_A')" FAIL
 
 REASON_B="$(payload 'printf x >> ../sibling/src/lib.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
-{ printf '%s' "$REASON_B" | grep -qiF 'worktree' && printf '%s' "$REASON_B" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
-  && check "W33 escape deny-reason: 'worktree' + escape-hatch hint" PASS \
-  || check "W33 escape deny-reason content" FAIL
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+{ printf '%s' "$REASON_B" | grep -qiF 'worktree' \
+  && printf '%s' "$REASON_B" | grep -qF 'opt-in and runs because hooks.bashWriteGate is true' \
+  && ! printf '%s' "$REASON_B" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
+  && check "W33 escape deny-reason: 'worktree' + the opt-in key, never the escape prefix" PASS \
+  || check "W33 escape deny-reason content (got '$REASON_B')" FAIL
 
 # ── Regression pins from review round 1 ──────────────────────────────
 # fd / quoting / redirect-variant correctness
@@ -487,21 +518,21 @@ run "W65 unset Session Control export" "unset ZENSU_SESSION_KEY" DENY
 run "W66 printf -v Session Control rebind" "printf -v ZENSU_RUNTIME_DIGEST bad" DENY
 run "W67 append through CLAUDE_ENV_FILE variable" 'printf '\''export ZENSU_PROJECT_ROOT=/tmp/other\n'\'' >> "$CLAUDE_ENV_FILE"' DENY
 run "W68 native CLAUDE_ENV_FILE vs Git-Bash command path" \
-  "printf x >> /d/a/zensu-claude-code/session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env" DENY "$PROJ" "$CFG_ON" \
   'D:\a\zensu-claude-code\session\.claude-env'
 run "W69 control rebind ignores bashWriteGate:false" "ZENSU_CLAUDE_PLUGIN_ROOT=/tmp/other env" DENY "$PROJ" "$CFG_OFF"
 run "W70 control rebind ignores inline escape" "ZENSU_BASH_WRITE_GATE=off ZENSU_PROJECT_ROOT=/tmp/other env" DENY
 run "W71 protected path prefix is not an exact CLAUDE_ENV_FILE match" \
-  "printf x >> /d/a/zensu-claude-code/session/.claude-env.backup" ALLOW "$PROJ" "$CFG_DEF" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env.backup" ALLOW "$PROJ" "$CFG_ON" \
   'D:\a\zensu-claude-code\session\.claude-env'
 run "W72 symbolic CLAUDE_ENV_FILE reference is independent of native path parsing" \
-  'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_DEF" \
+  'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_ON" \
   'D:\a\zensu-claude-code\session\.claude-env'
 run "W73 POSIX CLAUDE_ENV_FILE comparison remains case-sensitive and exact" \
-  "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_ON" \
   '/Users/Runner/Session/.claude-env'
 run "W74 POSIX CLAUDE_ENV_FILE does not fold case" \
-  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_DEF" \
+  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_ON" \
   '/Users/Runner/Session/.claude-env'
 run "W75 direct host session-id assignment" "CLAUDE_CODE_SESSION_ID=other env" DENY
 run "W76 exported host session-id rebind" "export CLAUDE_CODE_SESSION_ID=other" DENY
@@ -533,7 +564,7 @@ OUT_CONTROL_FAIL="$(payload 'git status' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZE
 
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-            ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+            ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_ESC" | grep -qiF 'worktree' \
   && check "W54 escaped+tracked target reports rule-B (worktree) reason" PASS \
   || check "W54 escaped+tracked rule precedence" FAIL
@@ -636,13 +667,13 @@ fi
 # W234 is the control, so an unconditional-deny regression cannot satisfy W233.
 if ln -s "$WORKROOT" "$WORKROOT/tmplink" 2>/dev/null; then
   OUT_TEMPLINK="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
-    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEF" \
+    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_ON" \
     ZENSU_BSWGATE_TEMP_DIRS="$WORKROOT/tmplink" bash "$HOOK" 2>/dev/null | classify)"
   [ "$OUT_TEMPLINK" = "DENY" ] \
     && check "W233 a temp entry whose realpath contains the project does not exempt everything" PASS \
     || check "W233 temp realpath ancestor exempted the tree (got '$OUT_TEMPLINK' want 'DENY')" FAIL
   OUT_TEMPLINK_OK="$(payload "printf x >> $FAKETMP/scratch.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
-    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEF" \
+    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_ON" \
     ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$OUT_TEMPLINK_OK" = "ALLOW" ] \
     && check "W234 control: an ordinary temp root still carves out" PASS \
@@ -709,8 +740,8 @@ run "W226 unexpanded -C does not hide an ABSOLUTE worktree operand" \
   'git -C $REPO worktree remove --force '"$SIB"'/wt'                                         DENY
 # expand(): only production's tilde handling makes these two differ. Without it
 # both resolve to $PROJ/~ and both allow.
-run "W215 tilde -C resolving outside HOME=sibling" "git -C ~ add ."                          DENY  "$PROJ" "$CFG_DEF" "$PROJ/.claude-env" "$SIB"
-run "W216 tilde -C resolving inside HOME=project (control)"  "git -C ~ add ."                          ALLOW "$PROJ" "$CFG_DEF" "$PROJ/.claude-env" "$PROJ"
+run "W215 tilde -C resolving outside HOME=sibling" "git -C ~ add ."                          DENY  "$PROJ" "$CFG_ON" "$PROJ/.claude-env" "$SIB"
+run "W216 tilde -C resolving inside HOME=project (control)"  "git -C ~ add ."                          ALLOW "$PROJ" "$CFG_ON" "$PROJ/.claude-env" "$PROJ"
 run "W207 apply --check --apply is a mutation"  "git -C $SIB apply --check --apply p.patch"  DENY
 # A binding made inside a subshell dies with it; a plain `declare` never exports.
 run "W208 subshell export does not leak"        "(export GIT_WORK_TREE=$SIB) && git add -A"  ALLOW
@@ -775,7 +806,7 @@ default_temp_run() {
         -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
         -u ZENSU_BSWGATE_TEMP_DIRS \
         CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-        CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
+        CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 default_temp_run "W185 real mktemp worktree removal under the DEFAULT temp list" \
@@ -815,7 +846,7 @@ run "W182 rule A survives 210 non-source targets" "$MANY
 printf x >> src/app.rs"                                                                      DENY
 REASON_BUDGET="$(payload "$MANY
 git -C $SIB add -A" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_BUDGET" | grep -qF "$NS_SIB" \
   && check "W183 the post-budget deny is the rule-(C) verdict, not an unrelated one" PASS \
   || check "W183 post-budget deny reason (want '$NS_SIB' got '$REASON_BUDGET')" FAIL
@@ -843,7 +874,7 @@ run "W129 in-project --work-tree stays ungated" "git --work-tree=$PROJ add ."   
 run "W130 read-only with --git-dir on sibling" "git --git-dir=$SIB/.git log --oneline"      ALLOW
 
 OUT_GIT_ENV="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+      ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT_GIT_ENV" = "ALLOW" ] \
   && check "W120 process-env ZENSU_BASH_WRITE_GATE=off releases rule C -> ALLOW" PASS \
   || check "W120 process-env escape rule C (got '$OUT_GIT_ENV')" FAIL
@@ -851,9 +882,9 @@ OUT_GIT_ENV="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR
 # The process-env arm of ZENSU_MCP_GATE was pinned nowhere, for any rule, on
 # either hook path — only its inline spelling was.
 OUT_MCP_ENV="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+      ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 OUT_MCP_ENV_A="$(payload "printf x >> src/app.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+      ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 { [ "$OUT_MCP_ENV" = "ALLOW" ] && [ "$OUT_MCP_ENV_A" = "ALLOW" ]; } \
   && check "W166 process-env ZENSU_MCP_GATE=off releases rules A and C -> ALLOW" PASS \
   || check "W166 process-env ZENSU_MCP_GATE (ruleC='$OUT_MCP_ENV' ruleA='$OUT_MCP_ENV_A')" FAIL
@@ -862,24 +893,26 @@ OUT_MCP_ENV_A="$(payload "printf x >> src/app.rs" | env CLAUDE_PLUGIN_ROOT="$PLU
 # form, and the opt-out. A reason naming only "a repository" leaves the agent
 # guessing which checkout it just hit.
 REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_GIT" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_GIT" | grep -qF 'git add' \
   && printf '%s' "$REASON_GIT" | grep -qF '/zensu:adopt-session --reanchor' \
   && ! printf '%s' "$REASON_GIT" | grep -qF "$NS_PROJ" \
   && ! printf '%s' "$REASON_GIT" | grep -qF 'git -C' \
-  && case "$REASON_GIT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
-  && check "W121 rule-C deny names repo, subcommand, the re-anchor route and the escape hatch last, and never another worktree" PASS \
-  || check "W121 rule-C deny reason (want repo '$NS_SIB', --reanchor, no '$NS_PROJ', no git -C; got '$REASON_GIT')" FAIL
+  && ! printf '%s' "$REASON_GIT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
+  && case "$REASON_GIT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && check "W121 rule-C deny names repo, subcommand, the re-anchor route and the opt-in note last, never the escape prefix or another worktree" PASS \
+  || check "W121 rule-C deny reason (want repo '$NS_SIB', --reanchor, opt-in note last, no '$NS_PROJ', no git -C, no escape prefix; got '$REASON_GIT')" FAIL
 
 REASON_WRITE_OUT="$(payload "printf x > $SIB/src/new.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_WRITE_OUT" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_WRITE_OUT" | grep -qF '/zensu:adopt-session --reanchor' \
   && ! printf '%s' "$REASON_WRITE_OUT" | grep -qF "$NS_PROJ" \
-  && case "$REASON_WRITE_OUT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
-  && check "W121c rule-B deny names the re-anchor route and the escape hatch last, and never another worktree" PASS \
-  || check "W121c rule-B deny reason (want '$NS_SIB', --reanchor, no '$NS_PROJ'; got '$REASON_WRITE_OUT')" FAIL
+  && ! printf '%s' "$REASON_WRITE_OUT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
+  && case "$REASON_WRITE_OUT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && check "W121c rule-B deny names the re-anchor route and the opt-in note last, never the escape prefix or another worktree" PASS \
+  || check "W121c rule-B deny reason (want '$NS_SIB', --reanchor, opt-in note last, no '$NS_PROJ', no escape prefix; got '$REASON_WRITE_OUT')" FAIL
 
 # AC-003: the reason must quote ONE namespace. The pre-fix message named the
 # addressed repo as `D:\d\a\…` — path.resolve splicing the MSYS spelling under the
@@ -915,14 +948,15 @@ fi
 # A designated --work-tree/--git-dir hit is NOT fixed by adding -C: re-running with
 # -C re-resolves the same escaping designation. The remedy sentence must say so.
 REASON_GIT_WT="$(payload "git --work-tree=$SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
   && check "W163 designated-path deny does not advise a -C that cannot clear it" PASS \
   || check "W163 designated-path remedy (got '$REASON_GIT_WT')" FAIL
 { printf '%s' "$REASON_GIT_WT" | grep -qF '/zensu:adopt-session --reanchor' \
-  && case "$REASON_GIT_WT" in (*'Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off.') true ;; (*) false ;; esac; } \
-  && check "W163c designated-path deny names the re-anchor route and keeps the escape hatch last" PASS \
-  || check "W163c designated-path deny (want --reanchor and the escape last; got '$REASON_GIT_WT')" FAIL
+  && ! printf '%s' "$REASON_GIT_WT" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
+  && case "$REASON_GIT_WT" in (*'ask the user to run it or to switch the gate off.') true ;; (*) false ;; esac; } \
+  && check "W163c designated-path deny names the re-anchor route and keeps the opt-in note last, never the escape prefix" PASS \
+  || check "W163c designated-path deny (want --reanchor, the opt-in note last and no escape prefix; got '$REASON_GIT_WT')" FAIL
 ! printf '%s' "$REASON_GIT_WT" | grep -qF "$NS_PROJ" \
   && check "W163b designated-path deny names no worktree other than the one it addressed" PASS \
   || check "W163b designated-path remedy names '$NS_PROJ' (got '$REASON_GIT_WT')" FAIL
@@ -930,7 +964,7 @@ printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
 # The third remedy arm. Without it a worktree deny would advise pointing
 # --work-tree/--git-dir inside the root for a command that has neither flag.
 REASON_WT_PATH="$(payload "git worktree remove --force $SIB/wt" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+          ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_WT_PATH" | grep -qF 'does not change which tree is destroyed' \
   && printf '%s' "$REASON_WT_PATH" | grep -qF "$NS_SIB_WT"; } \
   && check "W204 worktree deny names the destroyed tree and its own remedy" PASS \
@@ -966,7 +1000,7 @@ spy_run() {
   : > "$GIT_SPY_LOG"
   payload "$1" | env PATH="$GIT_SPY_BIN:$PATH" ZENSU_TEST_GIT_SPY="$GIT_SPY_LOG" \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-    ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
+    ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
 }
 # Positive control FIRST — an empty spy log proves nothing unless the shim is
 # demonstrably reachable. A rule-(A) probe DOES consult git (tracked()).
@@ -1004,7 +1038,7 @@ for v in $GIT_VERBS; do
     *)        probe="git -C $SIB $v" ;;
   esac
   out="$(payload "$probe" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-        ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+        ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "DENY" ] || VERB_FAIL="$VERB_FAIL $v($out)"
 done
 # The loop is driven BY the set, so it cannot notice a verb removed from it — the
@@ -1013,7 +1047,7 @@ done
 # An unconditional-deny regression would satisfy all 21+ DENY probes, so the same
 # env shape must also produce an ALLOW.
 VERB_CTRL="$(payload "git -C $SIB status" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+      ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
 { [ -z "$VERB_FAIL" ] && [ "$GIT_VERB_COUNT" -eq 24 ] && [ "$VERB_CTRL" = "ALLOW" ]; } \
   && check "W164 all $GIT_VERB_COUNT GIT_MUTATIONS verbs deny on a foreign repo, and the set still holds 24" PASS \
   || check "W164 ungated verbs:$VERB_FAIL count=$GIT_VERB_COUNT (want 24) control=$VERB_CTRL" FAIL
@@ -1072,13 +1106,13 @@ UNBOUND_DATA="$WORKROOT/unbound-plugin-data"
 mkdir -p "$UNBOUND_DATA"
 chmod 700 "$UNBOUND_DATA"
 run_unbound() {
-  local label="$1" cmd="$2" exp="$3"
+  local label="$1" cmd="$2" exp="$3" cfg="${4:-$CFG_ON}"
   local out
   out="$(payload "$cmd" "$PROJ" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
         -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
         CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
         CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-        ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+        ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 run_unbound "W81 unbound + read-only command"        "git status"                         ALLOW
@@ -1090,9 +1124,13 @@ run_unbound "W86 unbound + new untracked source"     "printf x > src/brandnew.rs
 run_unbound "W123 unbound + git mutation escaping project" "git -C $SIB add ."             DENY
 run_unbound "W124 unbound + read-only git on sibling"      "git -C $SIB status"            ALLOW
 run_unbound "W217 unbound + in-project git mutation (control)" "git add -A"                    ALLOW
+run_unbound "W83d unbound at the default config + write to tracked source" "printf x >> src/app.rs" ALLOW "$CFG_UNSET"
+run_unbound "W84d unbound at the default config + write escaping project"  "printf x >> $SIB/src/lib.rs" ALLOW "$CFG_UNSET"
+run_unbound "W123d unbound at the default config + git mutation escaping project" "git -C $SIB add ." ALLOW "$CFG_UNSET"
+run_unbound "W85d unbound at the default config + Session Control rebind still denies" "export ZENSU_SESSION_KEY=scv1_dead" DENY "$CFG_UNSET"
 REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_UNBOUND_C" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_UNBOUND_C" | grep -qF "OUTSIDE this session's"; } \
   && check "W224 unbound rule-C deny keeps its own cause" PASS \
@@ -1101,27 +1139,28 @@ REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_K
   && check "W224b unbound rule-C deny offers no re-anchor a session without a record cannot run" PASS \
   || check "W224b unbound rule-C reason names --reanchor (got '$REASON_UNBOUND_C')" FAIL
 
-# The unbound deny must keep the ORIGINAL write-rule cause and its escape hint —
+# The unbound deny must keep the ORIGINAL write-rule cause and its opt-in note —
 # not only the appended binding sentence, or dropping the cause would leave every
 # assertion green while the user loses the reason the write was refused.
 REASON_UNBOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 # Two distinct states reach this branch — no record at all, and a record whose
 # recorded project root is gone — so the binding sentence must name both rather
 # than assert the first, which would send a user with a deleted worktree hunting
 # for a record that is right there.
 { printf '%s' "$REASON_UNBOUND" | grep -qF 'tracked' \
-  && printf '%s' "$REASON_UNBOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE=off' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'hooks.bashWriteGate is true' \
+  && ! printf '%s' "$REASON_UNBOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'no usable Session Control project root' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'no record at all' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'no longer exists' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF '/zensu:doctor'; } \
-  && check "W87 unbound rule-A deny keeps its cause, escape hint, both binding gaps and /zensu:doctor" PASS \
+  && check "W87 unbound rule-A deny keeps its cause, the opt-in key, both binding gaps and /zensu:doctor" PASS \
   || check "W87 unbound deny reason (got '$REASON_UNBOUND')" FAIL
 REASON_UNBOUND_B="$(payload "printf x >> $SIB/src/lib.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_UNBOUND_B" | grep -qF 'worktree' \
   && check "W87a unbound rule-B deny still reports the worktree-escape cause" PASS \
   || check "W87a unbound rule-B reason (got '$REASON_UNBOUND_B')" FAIL
@@ -1138,7 +1177,7 @@ OUT_UNBOUND_CWD="$(CMD="printf x > $SIB/src/never-created.rs" CWD="/" node -e '
   process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",tool_name:"Bash",
     tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"}));
 ' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT_UNBOUND_CWD" = "DENY" ] \
   && check "W87d unbound ignores a payload cwd that would collapse the worktree rule" PASS \
   || check "W87d unbound payload-cwd authority (got '$OUT_UNBOUND_CWD')" FAIL
@@ -1150,12 +1189,19 @@ OUT_UNBOUND_CWD="$(CMD="printf x > $SIB/src/never-created.rs" CWD="/" node -e '
 # not the guard exists.
 OUT_UNBOUND_NOPROJ="$(payload "printf x > src/never-created-here.rs" "$PROJ" | env -u CLAUDE_PROJECT_DIR \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
 { printf '%s' "$OUT_UNBOUND_NOPROJ" | grep -qF 'permissionDecision":"deny' \
-  && printf '%s' "$OUT_UNBOUND_NOPROJ" | grep -qF 'no usable CLAUDE_PROJECT_DIR'; } \
-  && check "W87e unbound without CLAUDE_PROJECT_DIR denies with that exact cause" PASS \
+  && printf '%s' "$OUT_UNBOUND_NOPROJ" | grep -qF 'no usable CLAUDE_PROJECT_DIR' \
+  && printf '%s' "$OUT_UNBOUND_NOPROJ" | grep -qF 'hooks.bashWriteGate is true' \
+  && ! printf '%s' "$OUT_UNBOUND_NOPROJ" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
+  && check "W87e unbound without CLAUDE_PROJECT_DIR denies with that exact cause and names the opt-in key" PASS \
   || check "W87e unbound missing project root (got '$OUT_UNBOUND_NOPROJ')" FAIL
-
+OUT_UNBOUND_NOPROJ_DEF="$(payload "printf x > src/never-created-here.rs" "$PROJ" | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_UNSET" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT_UNBOUND_NOPROJ_DEF" = "ALLOW" ] \
+  && check "W87e2 at the default config the no-anchor write deny does not run" PASS \
+  || check "W87e2 no-anchor write at the default config (got '$OUT_UNBOUND_NOPROJ_DEF')" FAIL
 
 # A parser that cannot RUN must not degrade into a blanket allow.
 PARSER_FAIL_BIN="$WORKROOT/parser-fail-bin"
@@ -1167,25 +1213,33 @@ chmod +x "$PARSER_FAIL_BIN/node"
 OUT_PARSER_FAIL="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT_PARSER_FAIL" = "DENY" ] \
-  && check "W87f unbound parser runtime failure denies, never allows unchecked" PASS \
-  || check "W87f unbound parser failure (got '$OUT_PARSER_FAIL')" FAIL
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+REASON_PARSER_FAIL="$(payload "printf x >> src/app.rs" "$PROJ" | env \
+  PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+{ [ "$OUT_PARSER_FAIL" = "DENY" ] \
+  && printf '%s' "$REASON_PARSER_FAIL" | grep -qF 'hooks.bashWriteGate is true' \
+  && ! printf '%s' "$REASON_PARSER_FAIL" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
+  && check "W87f unbound parser runtime failure denies, never allows unchecked, and names the opt-in key" PASS \
+  || check "W87f unbound parser failure (got '$OUT_PARSER_FAIL' / '$REASON_PARSER_FAIL')" FAIL
 
 # The BOUND path used to discard the parser's exit status while its two siblings
 # honored theirs. Same shim, no CLAUDE_PLUGIN_DATA override, so the bind succeeds.
 OUT_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
 REASON_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 # A bare DENY cannot show WHICH branch answered — the unbound arm and a narrowed
 # bind failure both deny too. Only the bound arm emits this sentence.
 { [ "$OUT_PARSER_FAIL_BOUND" = "DENY" ] \
-  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'could not be evaluated for this session'; } \
+  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'could not be evaluated for this session' \
+  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'hooks.bashWriteGate to false in the Zensu config layer that enables it' \
+  && ! printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
   && check "W218 bound parser runtime failure denies with the bound-arm reason" PASS \
   || check "W218 bound parser failure (got '$OUT_PARSER_FAIL_BOUND' / '$REASON_PARSER_FAIL_BOUND')" FAIL
 
@@ -1209,10 +1263,16 @@ if node -e '
 ' "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$FOREIGN_DATA" "$FOREIGN_PLUG" "$PROJ" "bswgate-test" 2>/dev/null; then
   OUT_FOREIGN="$(payload "git status" "$PROJ" | env \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$FOREIGN_DATA" \
-    ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+    ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$OUT_FOREIGN" = "DENY" ] \
     && check "W87g a record from another installation stays fail-closed, relaxation is not reused" PASS \
     || check "W87g foreign record (got '$OUT_FOREIGN')" FAIL
+  OUT_FOREIGN_DEF="$(payload "git status" "$PROJ" | env \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$FOREIGN_DATA" \
+    ZENSU_CONFIG="$CFG_UNSET" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$OUT_FOREIGN_DEF" = "ALLOW" ] \
+    && check "W87g2 at the default config the gate exits before its bind, leaving a foreign record to the capability gate" PASS \
+    || check "W87g2 foreign record at the default config (got '$OUT_FOREIGN_DEF')" FAIL
 else
   check "W87g foreign-record fixture could not be minted" FAIL
 fi
@@ -1302,9 +1362,9 @@ fi
 # An unparseable envelope is NOT the unbindable-session case: with no readable
 # command there is nothing to judge, so it keeps the original deny (see W31).
 OUT_UNBOUND_EMPTY="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
+  CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 OUT_UNBOUND_JUNK="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
+  CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 { [ "$OUT_UNBOUND_EMPTY" = "DENY" ] && [ "$OUT_UNBOUND_JUNK" = "DENY" ]; } \
   && check "W88 unbound + unparseable payload still denies" PASS \
   || check "W88 unbound unparseable (empty='$OUT_UNBOUND_EMPTY' junk='$OUT_UNBOUND_JUNK')" FAIL
@@ -1312,13 +1372,13 @@ OUT_UNBOUND_JUNK="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR
 # The explicit escapes stay reachable while unbound — a user who knowingly opts
 # out must not need a bindable session to do it.
 OUT_UNBOUND_ESCAPE="$(payload "printf x >> src/app.rs" "$PROJ" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
-  CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_DEF" \
+  CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" ZENSU_CONFIG="$CFG_ON" \
   ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT_UNBOUND_ESCAPE" = "ALLOW" ] \
   && check "W89 unbound + process-env escape -> ALLOW" PASS \
   || check "W89 unbound process-env escape (got '$OUT_UNBOUND_ESCAPE')" FAIL
 
-rm -f "$CFG_DEF" "$CFG_OFF"
+rm -f "$CFG_ON" "$CFG_OFF" "$CFG_UNSET" "$CFG_QUOTED"
 
 echo "----"
 echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"

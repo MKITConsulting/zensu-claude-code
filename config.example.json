@@ -17,7 +17,7 @@
     "zenMode": true,
     "zenModeDefault": true,
     "mcpGate": true,
-    "bashWriteGate": true,
+    "bashWriteGate": false,
     "bestSolutionFirst": true,
     "secretScan": true,
     "reviewJudge": true,

@@ -35,6 +35,8 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 STATE_DIR="$(mktemp -d)"; export STATE_DIR
 export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"
+GATE_ON_CFG="$STATE_DIR/gate-on-config.json"
+printf '{"hooks":{"bashWriteGate":true}}\n' > "$GATE_ON_CFG"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE 2>/dev/null || true
 PROJECTS="$STATE_DIR/projects"
 mkdir -p "$PROJECTS"
@@ -82,7 +84,7 @@ decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on
 # contract is that a Bash-matcher hook added later is covered without editing
 # this test: a future hook that blocks via exit 2 must not read as allowing.
 run_gate() {
-  local hook_path="$1" payload="$2" data="$3" config="${4:-$STATE_DIR/no-such-config.json}"
+  local hook_path="$1" payload="$2" data="$3" config="${4:-$GATE_ON_CFG}"
   local project="${5:-$GATE_PROJECT}"
   local out status
   # The fixtures live under mktemp, which the parser exempts as a temp root by
@@ -594,7 +596,7 @@ for anchor_label in deleted-root unset-anchor; do
   esac
   if [ "$(run_gate "$BASH_GATE" \
     "$(bash_payload "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh")" "$GONE_DATA" \
-    "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ]; then
+    "$GATE_ON_CFG" "$anchor")" = "allow" ]; then
     check "O29 ($anchor_label) the diagnostic runs even with no usable project anchor" PASS
   else
     check "O29 ($anchor_label) diagnostic denied with no usable project anchor" FAIL
@@ -603,10 +605,17 @@ for anchor_label in deleted-root unset-anchor; do
   # a write to, a write must still be refused.
   if [ "$(run_gate "$BASH_GATE" \
     "$(bash_payload "printf x > $STATE_DIR/somewhere.ts")" "$GONE_DATA" \
-    "$STATE_DIR/no-such-config.json" "$anchor")" = "deny" ]; then
+    "$GATE_ON_CFG" "$anchor")" = "deny" ]; then
     check "O29a ($anchor_label) a write is still denied when no project anchor exists" PASS
   else
     check "O29a ($anchor_label) write allowed with no project anchor" FAIL
+  fi
+  if [ "$(run_gate "$BASH_GATE" \
+    "$(bash_payload "printf x > $STATE_DIR/somewhere.ts")" "$GONE_DATA" \
+    "$ZENSU_CONFIG" "$anchor")" = "allow" ]; then
+    check "O29a2 ($anchor_label) at the default config the opt-in source-write gate lets the same write run" PASS
+  else
+    check "O29a2 ($anchor_label) default config denied a write the opt-in gate should not judge" FAIL
   fi
   # The branch must decide on a resolved write OPERAND, not on a channel token
   # in the command text. A metacharacter-free ALLOW case cannot measure that:
@@ -616,7 +625,7 @@ for anchor_label in deleted-root unset-anchor; do
   while IFS= read -r readonly_cmd; do
     [ -n "$readonly_cmd" ] || continue
     [ "$(run_gate "$BASH_GATE" "$(bash_payload "$readonly_cmd")" "$GONE_DATA" \
-      "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ] \
+      "$GATE_ON_CFG" "$anchor")" = "allow" ] \
       || OVERDENIED="$OVERDENIED [$readonly_cmd]"
   done <<'EOF'
 git commit -m "fix: A -> B"
@@ -635,7 +644,7 @@ EOF
   for escape_var in ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE; do
     [ "$(run_gate "$BASH_GATE" \
       "$(bash_payload "$escape_var=off printf x > $STATE_DIR/somewhere.ts")" \
-      "$GONE_DATA" "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ] \
+      "$GONE_DATA" "$GATE_ON_CFG" "$anchor")" = "allow" ] \
       || ESCAPE_LOST="$ESCAPE_LOST $escape_var"
   done
   if [ -z "$ESCAPE_LOST" ]; then
@@ -651,7 +660,7 @@ EOF
   while [ "$i" -lt 210 ]; do BUDGET_CMD="$BUDGET_CMD > pad$i.txt"; i=$((i+1)); done
   BUDGET_CMD="$BUDGET_CMD > $STATE_DIR/late-source.ts"
   if [ "$(run_gate "$BASH_GATE" "$(bash_payload "$BUDGET_CMD")" "$GONE_DATA" \
-    "$STATE_DIR/no-such-config.json" "$anchor")" = "deny" ]; then
+    "$GATE_ON_CFG" "$anchor")" = "deny" ]; then
     check "O29e ($anchor_label) exhausting the target budget denies rather than waving a write through" PASS
   else
     check "O29e ($anchor_label) target-budget exhaustion allowed a write" FAIL
@@ -663,11 +672,34 @@ mkdir -p "$STUB_LIB/hooks/lib"
 cp -R "$PLUGIN_DIR/hooks/." "$STUB_LIB/hooks/" 2>/dev/null || true
 printf '#!/bin/sh\nexit 3\n' > "$STUB_LIB/hooks/lib/bash-source-write-parse.js"
 if [ "$(run_gate "$STUB_LIB/hooks/pre-bash-source-write-gate.sh" \
-  "$(bash_payload "git status")" "$GONE_DATA" "$STATE_DIR/no-such-config.json" \
+  "$(bash_payload "git status")" "$GONE_DATA" "$GATE_ON_CFG" \
   "$STATE_DIR/never-created-anchor")" = "deny" ]; then
   check "O29d a write-target parser that fails to run denies instead of allowing unchecked" PASS
 else
   check "O29d parser failure degraded into an allow" FAIL
+fi
+OVERLAY_ARMED="$( { arm orphan-overlay >/dev/null 2>&1 && printf '%s\n%s\n' "$ARMED_ROOT" "$ARMED_DATA"; } )" \
+  || { echo "O29f fixture failed" >&2; exit 1; }
+OVERLAY_ROOT="$(printf '%s\n' "$OVERLAY_ARMED" | sed -n 1p)"
+OVERLAY_DATA="$(printf '%s\n' "$OVERLAY_ARMED" | sed -n 2p)"
+OVERLAY_HOME="$STATE_DIR/overlay-home"
+mkdir -p "$OVERLAY_ROOT/.zensu" "$OVERLAY_HOME"
+printf '{"hooks":{"bashWriteGate":true}}\n' > "$OVERLAY_ROOT/.zensu/config.json"
+OVERLAY_PAYLOAD="$(bash_payload "printf x > $STATE_DIR/overlay-outside.ts" "orphan-overlay")"
+overlay_gate() {
+  printf '%s' "$OVERLAY_PAYLOAD" \
+    | env HOME="$OVERLAY_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$OVERLAY_DATA" \
+      CLAUDE_PROJECT_DIR="$OVERLAY_ROOT" ZENSU_CONFIG= \
+      ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
+      bash "$BASH_GATE" 2>/dev/null | decision
+}
+OVERLAY_LIVE="$(overlay_gate)"
+rm -rf "$OVERLAY_ROOT"
+OVERLAY_GONE="$(overlay_gate)"
+if [ "$OVERLAY_LIVE" = "deny" ] && [ "$OVERLAY_GONE" = "allow" ]; then
+  check "O29f a project-level opt-in lives under the project root, so it lapses with that root" PASS
+else
+  check "O29f project-overlay opt-in (root present: $OVERLAY_LIVE, want deny; root gone: $OVERLAY_GONE, want allow)" FAIL
 fi
 
 # --- O3 mutating tools stay denied ------------------------------------------

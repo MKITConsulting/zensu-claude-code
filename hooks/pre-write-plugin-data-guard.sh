@@ -20,11 +20,11 @@
 # Extending it would leave the hole open exactly where it matters.
 #
 # SCOPE — narrow on purpose. Only the store. A write anywhere else outside the
-# project root stays allowed here, so this gate is deliberately NARROWER than the
-# Bash source-write gate's rule (B), which denies every redirect escaping the
-# project root (temp roots excepted). The asymmetry between the Edit path and
-# the Bash path therefore survives this change; closing it needs a temp carve-out
-# and would refuse ordinary work on files outside the project.
+# project root stays allowed here, so this gate is deliberately NARROWER than
+# rule (B) of the opt-in Bash source-write gate, which, when enabled, denies a
+# redirect to a source file outside the project root (temp roots excepted). With
+# that gate on, the asymmetry between the Edit path and the Bash path survives
+# this change; closing it needs a temp carve-out and would refuse ordinary work.
 #
 # THE BASH CHANNEL IS NOT COVERED AT ALL, and that bounds what this gate can be
 # claimed to do: bash-source-write-parse.js filters targets through SRC, which

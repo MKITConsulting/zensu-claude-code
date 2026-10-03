@@ -20,11 +20,12 @@ const OUTPUT_DIR_NAME = consent.RUN_OUTPUT_DIR_NAME;
 const SESSION_PREFIX = consent.SESSION_PREFIX;
 const MAX_ORIGINS = consent.MAX_RUN_ORIGINS;
 const MODES = Object.freeze(['local', 'remote']);
-const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...]';
-const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> declared-safe';
+const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...]';
+const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>';
+const CHECK_ROLES = Object.freeze({ 'declared-safe': 'navigable', 'network-only': 'network-only' });
 
 function parseArgs(argv) {
-  const options = { runDir: null, mode: null, origins: [] };
+  const options = { runDir: null, mode: null, origins: [], networkOnlyOrigins: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
@@ -32,13 +33,16 @@ function parseArgs(argv) {
     if (arg === '--run-dir' && options.runDir === null) options.runDir = value;
     else if (arg === '--mode' && options.mode === null) options.mode = value;
     else if (arg === '--origin') options.origins.push(value);
+    else if (arg === '--network-only-origin') options.networkOnlyOrigins.push(value);
     else throw new Error(USAGE);
     index += 1;
   }
   if (!options.runDir || !MODES.includes(options.mode) || options.origins.length === 0) {
     throw new Error(USAGE);
   }
-  if (options.origins.length > MAX_ORIGINS) throw new Error(`at most ${MAX_ORIGINS} origins are accepted`);
+  if (options.origins.length + options.networkOnlyOrigins.length > MAX_ORIGINS) {
+    throw new Error(`at most ${MAX_ORIGINS} origins are accepted`);
+  }
   return options;
 }
 
@@ -51,7 +55,7 @@ function checkRunDir(runDir) {
   return fs.realpathSync.native(runDir);
 }
 
-function checkOrigin(rawOrigin, mode) {
+function checkOrigin(rawOrigin, mode, networkOnly = false) {
   let parsed;
   try { parsed = new URL(rawOrigin); }
   catch (_error) { throw new Error(FLOOR_REASONS.INVALID); }
@@ -62,11 +66,12 @@ function checkOrigin(rawOrigin, mode) {
   }
   if (parsed.pathname !== '/') throw new Error('an origin must not carry a path');
   const classified = classifyOrigin(parsed.origin);
-  if (mode === 'local') {
-    if (!classified.ok || classified.mode !== 'local') throw new Error(FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+  const loopback = classified.ok && classified.mode === 'local';
+  if (mode === 'local' && (!networkOnly || loopback)) {
+    if (!loopback) throw new Error(FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
     return classified;
   }
-  if (parsed.protocol !== 'https:') throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
+  if (parsed.protocol !== 'https:') throw new Error(mode === 'local' ? FLOOR_REASONS.NETWORK_ONLY_HTTPS : FLOOR_REASONS.REMOTE_HTTPS);
   if (!classified.ok) throw new Error(classified.reason);
   if (classified.mode !== 'remote') throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
   return classified;
@@ -79,21 +84,24 @@ async function resolverRule(classified, resolver) {
   return `MAP ${classified.hostname} ${net.isIP(address) === 6 ? `[${address}]` : address}`;
 }
 
-function policyVerdict(url, policy, navigation) {
-  const verdict = consent.judgeOrigin(url, { navigation, policy });
+function policyVerdict(url, policy, navigation, role) {
+  const verdict = consent.judgeOrigin(url, { navigation, policy, role });
   if (verdict.deny) throw new Error(verdict.deny);
   return verdict;
 }
 
 async function checkPolicy(argv, env = process.env, resolver = dns.promises.lookup, readiness = defaultReadiness()) {
-  if (argv.length !== 3 || !MODES.includes(argv[0]) || argv[2] !== 'declared-safe') throw new Error(CHECK_USAGE);
+  if (argv.length !== 3 || !MODES.includes(argv[0]) || !Object.prototype.hasOwnProperty.call(CHECK_ROLES, argv[2])) {
+    throw new Error(CHECK_USAGE);
+  }
   checkReadiness(readiness, env);
-  const [mode, rawOrigin] = argv;
-  const classified = checkOrigin(rawOrigin, mode);
+  const [mode, rawOrigin, operand] = argv;
+  const networkOnly = CHECK_ROLES[operand] === 'network-only';
+  const classified = checkOrigin(rawOrigin, mode, networkOnly);
   const policy = consent.readPolicy(env);
   if (policy && policy.ok && policy.mode !== mode) throw new Error('navigation policy mode does not match');
-  policyVerdict(`${classified.origin}/`, policy, true);
-  if (mode === 'remote') await resolveRemoteHost(classified.hostname, resolver);
+  policyVerdict(`${classified.origin}/`, policy, !networkOnly, CHECK_ROLES[operand]);
+  if (classified.mode === 'remote') await resolveRemoteHost(classified.hostname, resolver);
   return policy ? 'policy' : 'consent';
 }
 
@@ -176,25 +184,30 @@ async function run(argv, resolver = dns.promises.lookup, env = process.env, read
   const runDir = checkRunDir(options.runDir);
   const policy = consent.readPolicy(env);
   const origins = [];
+  const networkOnlyOrigins = [];
   const rules = [];
   const pinned = new Set();
-  for (const rawOrigin of options.origins) {
-    const classified = checkOrigin(rawOrigin, options.mode);
-    if (origins.includes(classified.origin)) throw new Error('origins must be unique');
-    policyVerdict(`${classified.origin}/`, policy, false);
-    if (options.mode === 'remote' && !pinned.has(classified.hostname)) {
+  const admit = async (rawOrigin, networkOnly) => {
+    const classified = checkOrigin(rawOrigin, options.mode, networkOnly);
+    if (origins.includes(classified.origin) || networkOnlyOrigins.includes(classified.origin)) {
+      throw new Error('origins must be unique');
+    }
+    policyVerdict(`${classified.origin}/`, policy, false, networkOnly ? 'network-only' : 'navigable');
+    if (classified.mode === 'remote' && !pinned.has(classified.hostname)) {
       const rule = await resolverRule(classified, resolver);
       if (rule) rules.push(rule);
       pinned.add(classified.hostname);
     }
-    origins.push(classified.origin);
-  }
+    (networkOnly ? networkOnlyOrigins : origins).push(classified.origin);
+  };
+  for (const rawOrigin of options.origins) await admit(rawOrigin, false);
+  for (const rawOrigin of options.networkOnlyOrigins) await admit(rawOrigin, true);
   const session = sessionName(runDir);
-  const config = buildConfig(runDir, origins, rules);
+  const config = buildConfig(runDir, [...origins, ...networkOnlyOrigins], rules);
   const shape = consent.runConfigShape(config, path.join(runDir, CONFIG_NAME));
   if (!shape.ok) throw new Error(shape.fault);
   const configPath = writeConfig(runDir, config);
-  return { session, configPath, origins, config, mode: policy ? 'policy' : 'consent' };
+  return { session, configPath, origins, networkOnlyOrigins, config, mode: policy ? 'policy' : 'consent' };
 }
 
 module.exports = {
@@ -218,6 +231,7 @@ if (require.main === module) {
     : run(argv).then((result) => {
       const lines = [`session=${result.session}`, `config=${result.configPath}`, `mode=${result.mode}`];
       for (const origin of result.origins) lines.push(`origin=${origin}`);
+      for (const origin of result.networkOnlyOrigins) lines.push(`network-only-origin=${origin}`);
       return `${lines.join('\n')}\n`;
     });
   work.then((text) => {

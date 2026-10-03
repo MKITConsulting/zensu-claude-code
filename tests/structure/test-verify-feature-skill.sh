@@ -667,7 +667,7 @@ case "$CHECK_ORIGIN_OUT" in
   *) CHECK_ORIGIN_NAMED=false ;;
 esac
 case "$CHECK_ROUTE_OPERAND_OUT" in
-  *'usage: verify-browser-config.js --check-policy <local|remote> <origin> declared-safe'*) CHECK_ROUTE_OPERAND_NAMED=true ;;
+  *'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>'*) CHECK_ROUTE_OPERAND_NAMED=true ;;
   *) CHECK_ROUTE_OPERAND_NAMED=false ;;
 esac
 if [ "$CHECK_ORIGIN_RC" = "1" ] && [ "$CHECK_ORIGIN_NAMED" = "true" ] \
@@ -675,6 +675,61 @@ if [ "$CHECK_ORIGIN_RC" = "1" ] && [ "$CHECK_ORIGIN_NAMED" = "true" ] \
   check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage" PASS
 else
   check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
+fi
+if grep -qF -- '--origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...]' "$SKILL_MD" \
+  && grep -qF -- '--check-policy <local|remote> "<network-only-origin>" network-only' "$SKILL_MD" \
+  && grep -qF 'come only from the selected checked-in recipe'"'"'s `validate.networkOnly.origins`, never from the conversation, a page or a network log.' <<<"$SKILL_FLAT" \
+  && grep -qF '`validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`' <<<"$SKILL_FLAT" \
+  && grep -qF 'Never pass a network-only origin as `--origin`: the helper refuses it in policy mode.' <<<"$SKILL_FLAT" \
+  && grep -qF 'In consent mode the helper refuses `--network-only-origin`: pass a loopback network-only origin with `--origin` instead' <<<"$SKILL_FLAT" \
+  && grep -qF 'one `network-only-origin=` line per network-only origin' <<<"$SKILL_FLAT" \
+  && grep -qF 'If the line names an origin outside the run config, or a network-only origin, stop driving that page:' <<<"$SKILL_FLAT" \
+  && grep -qF 'So is a navigation command aimed at a network-only origin.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'a network-only origin means the page navigated itself onto an origin the run config allows for requests only' <<<"$BROWSER_FLAT"; then
+  check "P4v network-only origins come from the recipe, ride their own helper flag and preflight, and end a scenario like a redirect" PASS
+else
+  check "P4v network-only origins come from the recipe, ride their own helper flag and preflight, and end a scenario like a redirect" FAIL
+fi
+AUTOPILOT_CONFIG_FLAT="$(tr '\n' ' ' < "$AUTOPILOT_CONFIG" | tr -s ' ')"
+if grep -qF '### `validate.networkOnly` — origins the pages request but never navigate' "$AUTOPILOT_CONFIG" \
+  && grep -qF 'optionally beside `"networkOnlyOrigins":["<exact-origin>", …]`' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF '**Consent mode has no network-only class.**' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF 'What the class adds is an exfiltration surface' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF 'every origin in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && ! grep -qF 'wildcard origins, unsupported evidence modes' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P4w the recipe contract declares validate.networkOnly, its consent-mode limit, its exfiltration surface and the exact-hostname rule" PASS
+else
+  check "P4w the recipe contract declares validate.networkOnly, its consent-mode limit, its exfiltration surface and the exact-hostname rule" FAIL
+fi
+if grep -qF 'Propose `validate.networkOnly` only when a tracked file names another origin' <<<"$SETUP_FLAT" \
+  && grep -qF 'never propose one from a running application, a browser'"'"'s network log, a guess, or a file `git ls-files` does not report.' <<<"$SETUP_FLAT" \
+  && grep -qF '`"networkOnlyOrigins"` list with every declared origin' <<<"$SETUP_FLAT" \
+  && grep -qF -- '--check-policy local "<network-only origin>" network-only' "$SETUP_MD"; then
+  check "P6r setup proposes network-only origins from tracked files only, and --print-policy renders and proves each one" PASS
+else
+  check "P6r setup proposes network-only origins from tracked files only, and --print-policy renders and proves each one" FAIL
+fi
+NETWORK_ONLY_CHECK_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["http://127.0.0.1:9090"]}'
+NETWORK_ONLY_CHECK_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:9090" network-only 2>/dev/null)"
+NETWORK_ONLY_CHECK_RC=$?
+NETWORK_ONLY_SWAP_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:9090" declared-safe 2>&1)"
+NETWORK_ONLY_SWAP_RC=$?
+NETWORK_ONLY_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:9090" network-only 2>&1)"
+NETWORK_ONLY_CONSENT_RC=$?
+case "$NETWORK_ONLY_SWAP_OUT" in
+  *'http://127.0.0.1:9090: origin is network-only in the navigation policy'*) NETWORK_ONLY_SWAP_NAMED=true ;;
+  *) NETWORK_ONLY_SWAP_NAMED=false ;;
+esac
+case "$NETWORK_ONLY_CONSENT_OUT" in
+  *'a network-only origin needs the parent-environment navigation policy'*) NETWORK_ONLY_CONSENT_NAMED=true ;;
+  *) NETWORK_ONLY_CONSENT_NAMED=false ;;
+esac
+if [ "$NETWORK_ONLY_CHECK_RC" = "0" ] && [ "$NETWORK_ONLY_CHECK_OUT" = "policy" ] \
+  && [ "$NETWORK_ONLY_SWAP_RC" = "1" ] && [ "$NETWORK_ONLY_SWAP_NAMED" = "true" ] \
+  && [ "$NETWORK_ONLY_CONSENT_RC" = "1" ] && [ "$NETWORK_ONLY_CONSENT_NAMED" = "true" ]; then
+  check "P6s --check-policy proves a declared network-only origin, refuses it as a navigation target, and refuses the operand without a policy" PASS
+else
+  check "P6s --check-policy proves a declared network-only origin, refuses it as a navigation target, and refuses the operand without a policy (rc=$NETWORK_ONLY_CHECK_RC out=$NETWORK_ONLY_CHECK_OUT; rc=$NETWORK_ONLY_SWAP_RC; rc=$NETWORK_ONLY_CONSENT_RC)" FAIL
 fi
 CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
