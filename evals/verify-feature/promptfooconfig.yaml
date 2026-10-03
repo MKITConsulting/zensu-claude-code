@@ -1,4 +1,4 @@
-description: "/zensu:verify-feature live E2E suite (local proof + rejected and accepted remote boundaries)"
+description: "/zensu:verify-feature live E2E suite (local proof + rejected and accepted remote boundaries + a network-only API origin)"
 
 providers:
   - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
@@ -22,6 +22,7 @@ tests:
   - file://scenarios/local-happy-path.yaml
   - file://scenarios/remote-unsafe-url.yaml
   - file://scenarios/remote-accepted-public.yaml
+  - file://scenarios/remote-separate-api-origin.yaml
 
 evaluateOptions:
   maxConcurrency: 1

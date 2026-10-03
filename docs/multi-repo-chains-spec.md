@@ -634,7 +634,7 @@ with it: `adoptContext` re-mints through `buildContext`
 (`hooks/lib/session-control-core-v1.js:607`), so a new field
 must be threaded there or it is silently dropped at every adoption; and a
 `SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
-one release boundary as `record-unreadable` (`:1850`).
+one release boundary as `record-unreadable` (`:1986`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger

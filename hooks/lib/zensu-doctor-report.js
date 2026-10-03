@@ -457,7 +457,7 @@ function toolBlock() {
 
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
-  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits only its target origins, and every route on them');
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate navigates only its target origins, and every route on them, and lets pages request its network-only origins, if any, without ever navigating them');
   else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per new loopback origin of a zensu-verify playwright-cli session and then admits every route on it, and a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
@@ -4301,7 +4301,10 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
   }
   if (artifact.stale) {
     line(WARN, 'autopilot lease: pid ' + pid + ' is alive but is not ' + words.taker + ' — ' + facts
-      + ', and its current start identity differs from the recorded one. ' + subject + parenthesizedPath(file, ' is')
+      + (artifact.startedAfterRecord
+        ? ', and the process that holds pid ' + pid + ' started after the record was written, so its pid was reused. '
+        : ', and its current start identity differs from the recorded one. ')
+      + subject + parenthesizedPath(file, ' is')
       + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
     return;
   }
@@ -4346,10 +4349,12 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
       + ' by pid ' + pid)
     + ', which is alive — ' + facts + '.' + unknown + ' '
     + (artifact.identityRecorded
-      ? 'Its current start identity could not be read, so the core keeps treating ' + words.noun + ' as live'
+      ? 'Its current start identity could not be read, and nothing shows that the process holding pid ' + pid
+        + ' started after the record was written, so the core keeps treating ' + words.noun + ' as live'
         + ' and does not reclaim it while that holds.'
-      : 'Without a recorded start identity the core never reclaims ' + words.noun + ' while any process holds'
-        + ' pid ' + pid + '; it clears only when that process releases it or exits.')
+      : 'Without a recorded start identity the core reclaims ' + words.noun + ' only once the process holding'
+        + ' pid ' + pid + ' provably started after the record was written, and nothing shows that; it clears'
+        + ' only when that process releases it or exits.')
     + ' The doctor cannot establish whether pid ' + pid + ' is still ' + words.role + '. ' + words.shapes + ' '
     + leaseCheck(pid) + ' If pid ' + pid + ' is not such a process, ' + words.taker + ' is gone and its pid was'
     + ' reused: nothing reclaims ' + words.noun + (kind === 'lock' ? ' ' + parenthesizedPath(file, ' while') : '')

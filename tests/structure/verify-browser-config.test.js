@@ -55,6 +55,10 @@ function policyEnv(mode, targets) {
   return { ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode, targets }) };
 }
 
+function networkOnlyEnv(mode, targets, networkOnlyOrigins) {
+  return { ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode, targets, networkOnlyOrigins }) };
+}
+
 function target(origin, routes) {
   return routes === undefined ? { origin, evidenceMode: 'declared-safe' } : { origin, evidenceMode: 'declared-safe', routes };
 }
@@ -68,7 +72,7 @@ function publicResolver(map) {
 
 test('argument parsing refuses a missing, repeated or unknown argument', () => {
   const good = ['--run-dir', '/tmp/x', '--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
-  assert.deepEqual(helper.parseArgs(good), { runDir: '/tmp/x', mode: 'local', origins: ['http://127.0.0.1:5173'] });
+  assert.deepEqual(helper.parseArgs(good), { runDir: '/tmp/x', mode: 'local', origins: ['http://127.0.0.1:5173'], networkOnlyOrigins: [] });
   const bad = [
     [],
     ['--run-dir', '/tmp/x', '--mode', 'local'],
@@ -82,6 +86,18 @@ test('argument parsing refuses a missing, repeated or unknown argument', () => {
   const many = ['--run-dir', '/tmp/x', '--mode', 'local'];
   for (let port = 1; port <= helper.MAX_ORIGINS + 1; port += 1) many.push('--origin', `http://127.0.0.1:${port}`);
   assert.throws(() => helper.parseArgs(many), /at most/);
+});
+
+test('argument parsing keeps network-only origins apart and counts them toward the same origin bound', () => {
+  const base = ['--run-dir', '/tmp/x', '--mode', 'remote', '--origin', 'https://app.example.com'];
+  assert.deepEqual(helper.parseArgs([...base, '--network-only-origin', 'https://api.example.org', '--network-only-origin', 'https://id.example.org']),
+    { runDir: '/tmp/x', mode: 'remote', origins: ['https://app.example.com'], networkOnlyOrigins: ['https://api.example.org', 'https://id.example.org'] });
+  assert.throws(() => helper.parseArgs(['--run-dir', '/tmp/x', '--mode', 'remote', '--network-only-origin', 'https://api.example.org']), /usage/);
+  assert.throws(() => helper.parseArgs([...base, '--network-only-origin']), /usage/);
+  const full = [...base];
+  for (let index = 1; index < helper.MAX_ORIGINS; index += 1) full.push('--network-only-origin', `https://api${index}.example.org`);
+  assert.equal(helper.parseArgs(full).networkOnlyOrigins.length, helper.MAX_ORIGINS - 1);
+  assert.throws(() => helper.parseArgs([...full, '--network-only-origin', 'https://one-more.example.org']), /at most/);
 });
 
 test('a local run writes an isolated, origin-restricted config inside the run directory', async (t) => {
@@ -197,6 +213,94 @@ test('the run config follows the navigation policy: remote needs one, and a poli
     new RegExp(consent.REASONS.NOT_POLICY_TARGET));
   await assert.rejects(helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'], undefined,
     { ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' }, READY), new RegExp(consent.REASONS.POLICY_INVALID));
+});
+
+test('a remote run allows its network-only origins after its targets and pins every hostname', async (t) => {
+  const dir = runDir(t);
+  const resolver = publicResolver({
+    'app.example.com': ['93.184.216.34'],
+    'api.example.org': ['93.184.216.35'],
+    'id.example.org': ['2606:2800:220:1:248:1893:25c8:1946'],
+  });
+  const env = networkOnlyEnv('remote', [target('https://app.example.com')], ['https://api.example.org', 'https://id.example.org', 'https://93.184.216.36']);
+  const result = await helper.run(['--run-dir', dir, '--mode', 'remote', '--origin', 'https://app.example.com',
+    '--network-only-origin', 'https://api.example.org', '--network-only-origin', 'https://id.example.org',
+    '--network-only-origin', 'https://93.184.216.36'], resolver, env, READY);
+  assert.equal(result.mode, 'policy');
+  assert.deepEqual(result.origins, ['https://app.example.com']);
+  assert.deepEqual(result.networkOnlyOrigins, ['https://api.example.org', 'https://id.example.org', 'https://93.184.216.36']);
+  assert.deepEqual(result.config.network.allowedOrigins,
+    ['https://app.example.com', 'https://api.example.org', 'https://id.example.org', 'https://93.184.216.36']);
+  assert.deepEqual(result.config.browser.launchOptions.args, [
+    '--no-proxy-server',
+    '--host-resolver-rules=MAP app.example.com 93.184.216.34,MAP api.example.org 93.184.216.35,MAP id.example.org [2606:2800:220:1:248:1893:25c8:1946]',
+  ]);
+  assert.equal(consent.readRunConfig(result.configPath).ok, true);
+});
+
+test('a local policy may allow a loopback API without a pin and a public HTTPS identity provider with one', async (t) => {
+  const dir = runDir(t);
+  const resolver = publicResolver({ 'auth.example.com': ['93.184.216.34'] });
+  const env = networkOnlyEnv('local', [target('http://127.0.0.1:4200')], ['http://127.0.0.1:9090', 'https://auth.example.com']);
+  const result = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:4200',
+    '--network-only-origin', 'http://127.0.0.1:9090', '--network-only-origin', 'https://auth.example.com'], resolver, env, READY);
+  assert.equal(result.mode, 'policy');
+  assert.deepEqual(result.config.network.allowedOrigins, ['http://127.0.0.1:4200', 'http://127.0.0.1:9090', 'https://auth.example.com']);
+  assert.deepEqual(result.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP auth.example.com 93.184.216.34']);
+  assert.equal(consent.readRunConfig(result.configPath).ok, true);
+});
+
+test('the helper refuses a network-only origin without a policy, one the policy does not declare, a swapped role and a failed floor', async (t) => {
+  const dir = runDir(t);
+  const resolver = publicResolver({
+    'app.example.com': ['93.184.216.34'],
+    'app2.example.com': ['93.184.216.34'],
+    'api.example.org': ['93.184.216.35'],
+    'internal.example.org': ['10.0.0.5'],
+  });
+  const remote = networkOnlyEnv('remote', [target('https://app.example.com'), target('https://app2.example.com')],
+    ['https://api.example.org', 'https://internal.example.org']);
+  const local = networkOnlyEnv('local', [target('http://127.0.0.1:4200')], ['http://127.0.0.1:9090']);
+  const app = ['--run-dir', dir, '--mode', 'remote', '--origin', 'https://app.example.com'];
+  const loopbackApp = ['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:4200'];
+  const refused = [
+    [[...loopbackApp, '--network-only-origin', 'http://127.0.0.1:9090'], NO_POLICY, consent.REASONS.NETWORK_ONLY_NEEDS_POLICY],
+    [[...loopbackApp, '--network-only-origin', 'https://api.example.org'], NO_POLICY, consent.REASONS.NETWORK_ONLY_NEEDS_POLICY],
+    [[...app, '--network-only-origin', 'https://other.example.org'], remote, `https://other.example.org: ${consent.REASONS.NOT_POLICY_NETWORK_ONLY}`],
+    [[...app, '--network-only-origin', 'https://app2.example.com'], remote, `https://app2.example.com: ${consent.REASONS.NOT_POLICY_NETWORK_ONLY}`],
+    [[...app, '--origin', 'https://api.example.org'], remote, `https://api.example.org: ${consent.REASONS.NETWORK_ONLY_NAVIGATION}`],
+    [[...app, '--network-only-origin', 'https://app.example.com'], remote, 'origins must be unique'],
+    [[...app, '--network-only-origin', 'https://internal.example.org'], remote, /non-public/],
+    [[...app, '--network-only-origin', 'https://10.0.0.5'], remote, FLOOR_REASONS.REMOTE_NOT_PUBLIC],
+    [[...app, '--network-only-origin', 'http://api.example.org'], remote, FLOOR_REASONS.REMOTE_HTTPS],
+    [[...loopbackApp, '--network-only-origin', 'http://api.example.org'], local, FLOOR_REASONS.NETWORK_ONLY_HTTPS],
+    [[...loopbackApp, '--network-only-origin', 'http://127.0.0.1:9091'], local, `http://127.0.0.1:9091: ${consent.REASONS.NOT_POLICY_NETWORK_ONLY}`],
+    [[...loopbackApp, '--origin', 'http://127.0.0.1:9090'], local, `http://127.0.0.1:9090: ${consent.REASONS.NETWORK_ONLY_NAVIGATION}`],
+  ];
+  for (const [argv, env, reason] of refused) {
+    await assert.rejects(helper.run(argv, resolver, env, READY),
+      (error) => (reason instanceof RegExp ? reason.test(error.message) : error.message === reason), JSON.stringify(argv.slice(4)));
+  }
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('the policy check judges a network-only origin by its own operand', async () => {
+  const resolver = publicResolver({ 'api.example.org': ['93.184.216.35'], 'internal.example.org': ['10.0.0.5'] });
+  const remote = networkOnlyEnv('remote', [target('https://app.example.com')], ['https://api.example.org', 'https://internal.example.org']);
+  assert.equal(await helper.checkPolicy(['remote', 'https://api.example.org', 'network-only'], remote, resolver, READY), 'policy');
+  await assert.rejects(helper.checkPolicy(['remote', 'https://internal.example.org', 'network-only'], remote, resolver, READY), /non-public/);
+  await assert.rejects(helper.checkPolicy(['remote', 'https://app.example.com', 'network-only'], remote, resolver, READY),
+    (error) => error.message === `https://app.example.com: ${consent.REASONS.NOT_POLICY_NETWORK_ONLY}`);
+  await assert.rejects(helper.checkPolicy(['remote', 'https://api.example.org', 'declared-safe'], remote, resolver, READY),
+    (error) => error.message === `https://api.example.org: ${consent.REASONS.NETWORK_ONLY_NAVIGATION}`);
+  await assert.rejects(helper.checkPolicy(['local', 'http://127.0.0.1:9090', 'network-only'], NO_POLICY, resolver, READY),
+    (error) => error.message === consent.REASONS.NETWORK_ONLY_NEEDS_POLICY);
+  const local = networkOnlyEnv('local', [target('http://127.0.0.1:4200')], ['http://127.0.0.1:9090', 'https://api.example.org']);
+  assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:9090', 'network-only'], local, resolver, READY), 'policy');
+  assert.equal(await helper.checkPolicy(['local', 'https://api.example.org', 'network-only'], local, resolver, READY), 'policy');
+  await assert.rejects(helper.checkPolicy(['local', 'https://api.example.org', 'declared-safe'], local, resolver, READY),
+    (error) => error.message === FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+  await assert.rejects(helper.checkPolicy(['remote', 'https://api.example.org', 'network-only'], local, resolver, READY), /mode does not match/);
 });
 
 test('the policy check answers consent or policy per origin and refuses what the gate would refuse', async () => {
@@ -366,4 +470,25 @@ test('the CLI prints the session, the config path and each origin, and exits 1 w
   assert.ok(stale.stderr.startsWith('zensu verify browser config: playwright-cli 0.1.20 is installed, but the browser consent gate was measured against '), stale.stderr);
   assert.ok(stale.stderr.includes(PINNED), stale.stderr);
   assert.deepEqual(fs.readdirSync(other), []);
+});
+
+test('the CLI prints one network-only-origin line per network-only origin and checks one through its operand', (t) => {
+  const dir = runDir(t);
+  const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
+  const env = {
+    ...process.env,
+    ...networkOnlyEnv('local', [target('http://127.0.0.1:4200')], ['http://127.0.0.1:9090']),
+    [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}`,
+  };
+  const ok = spawnSync(process.execPath, [HELPER, '--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:4200',
+    '--network-only-origin', 'http://127.0.0.1:9090'], { encoding: 'utf8', env });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout, `session=zensu-verify-run-abc123\nconfig=${path.join(dir, helper.CONFIG_NAME)}\nmode=policy\n`
+    + 'origin=http://127.0.0.1:4200\nnetwork-only-origin=http://127.0.0.1:9090\n');
+  const check = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:9090', 'network-only'], { encoding: 'utf8', env });
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(check.stdout, 'policy\n');
+  const usage = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:9090', 'api'], { encoding: 'utf8', env });
+  assert.equal(usage.status, 1);
+  assert.equal(usage.stderr, 'zensu verify browser config: usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>\n');
 });
