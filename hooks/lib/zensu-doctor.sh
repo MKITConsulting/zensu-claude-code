@@ -320,7 +320,7 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     # no apostrophes in comments, no bare case pattern: bash 3.2, see above
     source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
     zensu_bind_model_session >/dev/null 2>&1 || exit 1
-    [[ "${ZENSU_SESSION_KEY:-}" =~ ^scv1_[a-f0-9]{64}$ ]] || exit 0
+    zensu_session_key_canonical "${ZENSU_SESSION_KEY:-}" || exit 0
     [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ ! -L "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ -d "${ZENSU_PROJECT_ROOT:-}" ] || exit 0

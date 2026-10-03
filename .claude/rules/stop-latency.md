@@ -112,12 +112,13 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   control to pass and an upper-case and an accented last character to fail. It discriminates
   only in a shell whose bracket ranges collate under that locale: macOS `/bin/bash` 3.2.57 does,
   the local `bash:5` image (musl) does not, and the check's label says which case ran.
-- **Other shell copies of the shape remain.** `grep -rn 'scv1_' hooks/` finds them
-  (`.claude/rules/foreign-chain-row.md`). `zensu-edit-landing.sh` tests the `--session` operand
-  with `[[ "$SESSION_ID" =~ ^scv1_[0-9a-f]{64}$ ]]`, and on the same bash that exact test
-  accepts `scv1_` plus 63 hex digits plus `B` under `en_US.ISO8859-1` and `de_DE.ISO8859-1`,
-  though not under C or the UTF-8 locales. That file does not source `zensu-session.sh`, so
-  routing it through the predicate is a change of its own and is NOT taken here.
+- **Every shell test of the shape calls it.** `grep -rn 'scv1_' hooks/` is the census
+  (`.claude/rules/foreign-chain-row.md`). The receipt fallback in `zensu-edit-landing.sh` calls
+  the predicate in a subshell (`.claude/rules/multi-repo-stage1.md` records why, together with
+  the locale measurement of the range it replaced), and the session-pair guard in
+  `zensu-doctor.sh` calls it in the subshell that already sources this file. The other hits in
+  shell files are file-name prefix globs such as `tdd-phase-scv1_*.json` and JavaScript regexes
+  inside `node` programs, and neither collates.
 - **Project root.** `zensu_memoize_project_dir` renders the root (`cd -P && pwd -P`), runs the
   unchanged full verification once, and records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT,
   ZENSU_SESSION_KEY, rendered root)` in the shell ARRAY `_ZENSU_PROJECT_DIR_MEMO` only when the

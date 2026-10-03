@@ -270,6 +270,38 @@ durable answer is unchanged — have the verdict reader return the resolved,
 containment-checked log and have the requirements gate take it as input. Neither was taken
 inside a change set already several review rounds deep.
 
+**The receipt's session-key fallback asks the ONE shell predicate, in a subshell.** When the
+core's `session-key` verb cannot answer (no `node`, or no `session-control-core-v1.js` beside
+the script), the receipt name is built from the RAW `--session` operand, so the operand must
+have the canonical key shape before it reaches a path. The test is
+`zensu_session_key_canonical` from `hooks/lib/zensu-session.sh`, which lists the hex digits
+instead of using a range. The range it replaced collated. Measured on macOS `/bin/bash`
+3.2.57, `[[ "$SESSION_ID" =~ ^scv1_[0-9a-f]{64}$ ]]` accepted `scv1_` plus 63 hex digits plus
+`A`, `B` or a Latin-1 letter such as `à` under `en_US.ISO8859-1`, `de_DE.ISO8859-1`,
+`fr_FR.ISO8859-1` and `en_US.ISO8859-15`, and rejected `A` and `B` under C, `en_US.UTF-8` and
+`de_DE.UTF-8`. None of those locales admitted `/` or `.`, and the predicate rejects both as
+non-hex characters, so the traversal property held before and holds now; what the range let
+through was a key whose receipt name `--tdd-complete` never reads. **The library is sourced in
+a subshell and only on this fallback.** Measured on `5d62161b`, sourcing it adds 32 functions,
+10 constants and about 31 KB of exported definitions to the process and to every child it
+spawns, and sourcing it at the top of the script would put that load on every run, the
+`--inventory` run the doctor bounds at 5 s included. The subshell runs `set +u` and
+`unset -f zensu_session_key_canonical` before the source, so neither the library's hygiene
+under `set -u` nor a definition inherited through the environment decides the answer. Its exit
+status means one of three things: 0 canonical, 1 not canonical, anything else not checked.
+**A library that is missing, a symlink, unreadable or without the predicate refuses every raw
+operand, a canonical one included**, and the refusal names that cause
+(`the session-key shape check in zensu-session.sh could not be loaded`) instead of
+`the session key resolved empty`. `RW1`–`RW2e` in
+`tests/structure/test-requirements-table-gate.sh` drive the fallback through a copy of the
+script without the core module. `RW2c` discriminates only where bracket ranges collate under
+`en_US.ISO8859-1`: macOS `/bin/bash` 3.2.57 does, a runner without that locale does not, and
+the check's label says which case ran. The session-pair guard in `zensu-doctor.sh` calls the
+same predicate inside the subshell that already sources the library, and `P1mp` in
+`tests/structure/test-doctor.sh` pins that spelling. **Version: `patch`**: no schema field,
+strict key set, hook, matcher, config key or attestation moves; the audit refuses strictly more
+operands, and only where the core cannot answer.
+
 
 **Known gaps, accepted and named:**
 

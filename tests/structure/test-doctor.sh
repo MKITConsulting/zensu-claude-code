@@ -1468,10 +1468,10 @@ unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
 # The greps below are still worth their lines, and one property is theirs alone: the
 # shape-failure DIRECTION. Flipping `|| exit 0` to `|| exit 1` makes the elif fail, so
 # a genuinely bound session is reported `unbound`, and a pattern that stopped at the
-# regex would still match. P1mp2 covers the composite exit status, the TAB split and
+# key check would still match. P1mp2 covers the composite exit status, the TAB split and
 # the pair reaching the renderer, which no grep can see.
 if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
-  && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
+  && grep -qF 'zensu_session_key_canonical "${ZENSU_SESSION_KEY:-}" || exit 0' "$HELPER" \
   && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
   && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0' "$HELPER" \
   && grep -qE '^export ZDOC_ZENSU' "$HELPER" \
