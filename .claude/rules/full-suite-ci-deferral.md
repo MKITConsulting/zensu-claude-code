@@ -71,9 +71,11 @@ through the helper's repo and session verbs.
 **Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and its section
 "Full Suite in CI (mode-gated deltas)" (the file is capped at 433 lines); the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
-`FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend entry in `hooks/post-review-tdd-delegate.sh`,
-where `test-post-review-tdd-scope.sh` counts `--evidence-run --scope full --if-stale` exactly
-twice, so the CI variant must not add a third; `docs/configuration.md` §"Full Suite in CI" and
+`AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
+entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts
+`--evidence-run --scope full --if-stale` exactly once, in `FULL_SUITE_STEP`, and
+`test-full-suite-ci.sh` C10, C22 and C23 refuse it in a CI chain's directives, so the CI variant
+must not add one; `docs/configuration.md` §"Full Suite in CI" and
 its three keys; `docs/gates.md` CI mode; discipline patch 12 in
 `docs/tdd-manager-workflow.md`; `config.example.json`; the README skills table and count; the
 skills list in `.claude-plugin/plugin.json`.

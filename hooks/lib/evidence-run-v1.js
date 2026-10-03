@@ -38,6 +38,8 @@ const RECORD_FILE_RE = /^er1_[0-9]{13}_[0-9a-f]{12}\.json$/;
 const LOG_FILE_RE = /^er1_[0-9]{13}_[0-9a-f]{12}\.log$/;
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const TREE_RE = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const NO_WORK_TREE_RE = /not a git repository|cannot change to|must be run in a work tree/i;
+const LEADING_CD_RE = /^\s*\(?\s*cd\s+(?:'([^']*)'|"([^"$`\\]*)"|([^\s'"$`\\;&|()<>*?[\]{}!#~-][^\s'"$`\\;&|()<>*?[\]{}!#]*))\s*(?:&&|;|\n)/;
 const RECORD_KEYS = Object.freeze([
   'command',
   'cwd',
@@ -301,7 +303,8 @@ function git(root, args, options = {}) {
     maxBuffer: 64 * 1024 * 1024,
     timeout: options.timeoutMs || LIMITS.gitTimeoutMs,
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    input: options.input,
+    stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
   if (result.error) return { ok: false, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
   if (result.status !== 0) {
@@ -398,11 +401,108 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
   }
 }
 
+function commandDirectory(command, cwd) {
+  if (typeof command !== 'string' || typeof cwd !== 'string' || cwd === '') return cwd;
+  const match = LEADING_CD_RE.exec(command);
+  if (!match) return cwd;
+  const target = [match[1], match[2], match[3]].find((value) => value !== undefined);
+  return target ? path.resolve(cwd, target) : cwd;
+}
+
+function fingerprintRoot(directory, projectRoot, limits = LIMITS) {
+  if (typeof directory !== 'string' || directory === '' || directory === projectRoot) return projectRoot;
+  const own = git(projectRoot, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+  if (!own.ok) return projectRoot;
+  const other = git(directory, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+  if (!other.ok) return NO_WORK_TREE_RE.test(other.reason) ? projectRoot : null;
+  const ownTop = own.stdout.trim();
+  const otherTop = other.stdout.trim();
+  if (ownTop === '' || otherTop === '') return projectRoot;
+  const relative = path.relative(ownTop, otherTop);
+  if (relative === '' || relative.split(/[\\/]/)[0] === '..' || path.isAbsolute(relative)) return projectRoot;
+  return otherTop;
+}
+
+function computeFingerprint(projectRoot, treeRoot, scratchDirectory, limits = LIMITS) {
+  if (treeRoot === null) return { tree: null, reason: 'git could not resolve the work tree the run directory lies in' };
+  const own = computeTree(projectRoot, scratchDirectory, limits);
+  if (treeRoot === projectRoot || own.tree === null) return own;
+  const other = computeTree(treeRoot, scratchDirectory, limits);
+  if (other.tree === null) return { tree: null, reason: `work tree: ${other.reason}` };
+  const combined = git(projectRoot, ['mktree', '--missing'], { input: `040000 tree ${own.tree}\tproject\n040000 tree ${other.tree}\twork\n` });
+  if (!combined.ok) return { tree: null, reason: combined.reason };
+  const tree = combined.stdout.trim();
+  if (!TREE_RE.test(tree)) return { tree: null, reason: 'git mktree returned no tree id' };
+  return { tree, reason: null };
+}
+
+function recordRoot(record, projectRoot, limits = LIMITS) {
+  if (!record || !TEST_SCOPES.includes(record.scope)) return projectRoot;
+  return fingerprintRoot(commandDirectory(record.command, record.cwd), projectRoot, limits);
+}
+
+function currentTrees(projectRoot, scratchDirectory, limits = LIMITS) {
+  const roots = new Map();
+  const trees = new Map();
+  const rootOf = (record) => {
+    if (!record || !TEST_SCOPES.includes(record.scope)) return projectRoot;
+    const key = `${record.cwd}\u0000${record.command}`;
+    if (!roots.has(key)) roots.set(key, recordRoot(record, projectRoot, limits));
+    return roots.get(key);
+  };
+  const treeAt = (root) => {
+    const key = root === null ? '\u0000' : root;
+    if (!trees.has(key)) trees.set(key, computeFingerprint(projectRoot, root, scratchDirectory, limits));
+    return trees.get(key);
+  };
+  return { rootOf, treeAt, of: (entry) => treeAt(entry && entry.record ? rootOf(entry.record) : projectRoot) };
+}
+
 function changedPaths(projectRoot, fromTree, toTree, limits = LIMITS) {
   if (!fromTree || !toTree) return null;
   const diff = git(projectRoot, ['diff-tree', '-r', '--name-only', '-z', fromTree, toTree], { encoding: 'buffer' });
   if (!diff.ok) return null;
   return diff.stdout.toString('utf8').split('\0').filter(Boolean).slice(0, limits.listedPaths + 1);
+}
+
+function treeParts(projectRoot, tree, limits = LIMITS) {
+  const listed = git(projectRoot, ['ls-tree', '-z', tree], { encoding: 'buffer', timeoutMs: limits.gitTimeoutMs });
+  if (!listed.ok) return null;
+  const parts = {};
+  for (const entry of listed.stdout.toString('utf8').split('\0').filter(Boolean)) {
+    const match = /^040000 tree ([0-9a-f]{40}(?:[0-9a-f]{24})?)\t(project|work)$/.exec(entry);
+    if (!match || parts[match[2]]) return null;
+    parts[match[2]] = match[1];
+  }
+  return parts.project && parts.work ? parts : null;
+}
+
+function workPrefix(projectRoot, treeRoot) {
+  let base = projectRoot;
+  let target = treeRoot;
+  try { base = fs.realpathSync.native(projectRoot); } catch { }
+  try { target = fs.realpathSync.native(treeRoot); } catch { }
+  const relative = path.relative(base, target).split(path.sep).join('/');
+  return relative === '' ? '' : `${relative}/`;
+}
+
+function measuredLabel(projectRoot, treeRoot, limits = LIMITS) {
+  if (typeof treeRoot !== 'string' || treeRoot === projectRoot) return '';
+  const location = workPrefix(projectRoot, treeRoot).replace(/\/$/, '');
+  return location === '' ? '' : ` of the project and ${screen(location, projectRoot, limits)}`;
+}
+
+function fingerprintChanges(projectRoot, treeRoot, fromTree, toTree, limits = LIMITS) {
+  if (!fromTree || !toTree || treeRoot === null) return null;
+  const from = treeParts(projectRoot, fromTree, limits);
+  const to = treeParts(projectRoot, toTree, limits);
+  if (treeRoot === projectRoot) return from || to ? null : changedPaths(projectRoot, fromTree, toTree, limits);
+  if (!from || !to) return null;
+  const own = changedPaths(projectRoot, from.project, to.project, limits);
+  const other = changedPaths(treeRoot, from.work, to.work, limits);
+  if (own === null || other === null) return null;
+  const prefix = workPrefix(projectRoot, treeRoot);
+  return [...own, ...other.map((entry) => `${prefix}${entry}`)].slice(0, limits.listedPaths + 1);
 }
 
 function pidAlive(pid) {
@@ -526,6 +626,7 @@ function decide(entries, currentTree, configuredCommand, limits = LIMITS, now = 
 }
 
 function decideCi(entries, currentTree, limits = LIMITS, now = Date.now()) {
+  const treeOf = typeof currentTree === 'function' ? currentTree : () => currentTree;
   const stateOf = (entry) => effectiveState(entry.record, now, limits);
   const tests = entries.filter((entry) => entry.invalid || TEST_SCOPES.includes(entry.record.scope));
   const newest = tests[tests.length - 1];
@@ -535,8 +636,15 @@ function decideCi(entries, currentTree, limits = LIMITS, now = Date.now()) {
   if (running.length > 0) return { state: 'running', entry: running[running.length - 1] };
   const finished = valid.filter((entry) => stateOf(entry) !== 'running');
   if (finished.length === 0) return { state: 'missing', entry: null };
-  const unbound = currentTree.tree === null;
-  const pool = unbound ? finished : finished.filter((entry) => entry.record.tree_end === currentTree.tree);
+  const pool = finished.filter((entry) => {
+    const tree = treeOf(entry).tree;
+    return tree === null || entry.record.tree_end === tree;
+  });
+  const unbound = pool.some((entry) => treeOf(entry).tree === null);
+  const active = treeOf(finished[finished.length - 1]).tree;
+  if (active !== null && !pool.some((entry) => entry.record.tree_end === active)) {
+    return { state: 'stale', entry: finished[finished.length - 1] };
+  }
   if (pool.length === 0) return { state: 'stale', entry: finished[finished.length - 1] };
   const newestByCommand = new Map();
   for (const entry of pool) newestByCommand.set(`${entry.record.scope}\u0000${entry.record.command}`, entry);
@@ -554,7 +662,8 @@ function decideCi(entries, currentTree, limits = LIMITS, now = Date.now()) {
 }
 
 function ciVerdict(context) {
-  const { decision, currentTree, projectRoot, gate, gateLabel, lines, options, limits } = context;
+  const { decision, currentTree, treeRoot, projectRoot, gate, gateLabel, lines, options, limits } = context;
+  const measured = measuredLabel(projectRoot, treeRoot, limits);
   const policy = options.ciPolicy;
   const record = decision.entry && decision.entry.record;
   const scopedPrefix = options.scopedRemedyPrefix || 'zensu-log.sh --evidence-run --scope scoped';
@@ -562,7 +671,7 @@ function ciVerdict(context) {
   const scopeWord = record ? record.scope : 'test';
   const commandText = record ? screen(record.command, projectRoot, limits) : 'none recorded';
   const listedFor = (fromTree, toTree) => {
-    const paths = changedPaths(projectRoot, fromTree, toTree, limits);
+    const paths = fingerprintChanges(projectRoot, treeRoot, fromTree, toTree, limits);
     return paths && paths.length > 0
       ? `: ${paths.slice(0, limits.listedPaths).map((entry) => screen(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
       : '';
@@ -577,12 +686,12 @@ function ciVerdict(context) {
   let cause;
   switch (decision.state) {
     case 'pass':
-      cause = `a local full-suite run exited 0 on the current tree ${shortTree(currentTree.tree)} (${recordText}, ${formatDuration(record.duration_ms)})`;
+      cause = `a local full-suite run exited 0 on the current tree ${shortTree(currentTree.tree)}${measured} (${recordText}, ${formatDuration(record.duration_ms)})`;
       break;
     case 'deferred-ci':
       cause = decision.unbound
         ? `the newest run of each local test command exited 0 (newest ${recordText}); the tree could not be fingerprinted (${currentTree.reason}), so these runs are not bound to it; the full suite has not run for this change yet — CI runs it when a pull request against ${policy.base} is opened or updated`
-        : `the newest run of each local test command on the current tree ${shortTree(currentTree.tree)} exited 0 (${decision.greenCommands} command(s), newest ${recordText}); the full suite has not run for this change yet — CI runs it when a pull request against ${policy.base} is opened or updated`;
+        : `the newest run of each local test command on the current tree ${shortTree(currentTree.tree)}${measured} exited 0 (${decision.greenCommands} command(s), newest ${recordText}); the full suite has not run for this change yet — CI runs it when a pull request against ${policy.base} is opened or updated`;
       break;
     case 'running':
       cause = `a ${scopeWord} run is still in progress (${recordText}, pid ${record.pid}); wait for it to finish, then close the chain again`;
@@ -594,10 +703,10 @@ function ciVerdict(context) {
       cause = `the newest ${scopeWord} run never finished (${recordText}); run it again`;
       break;
     case 'mutated-during-run':
-      cause = `the tree changed while the ${scopeWord} run ran (${recordText})${listedFor(record.tree_start, record.tree_end)}; make the tests leave tracked files untouched, then run them again`;
+      cause = `the tree${measured} changed while the ${scopeWord} run ran (${recordText})${listedFor(record.tree_start, record.tree_end)}; make the tests leave tracked files untouched, then run them again`;
       break;
     case 'stale':
-      cause = `the newest local test run measured an older tree (${recordText}); files changed since${listedFor(record.tree_end, currentTree.tree)}; run the affected tests again`;
+      cause = `the newest local test run measured an older tree${measured} (${recordText}); files changed since${listedFor(record.tree_end, currentTree.tree)}; run the affected tests again`;
       break;
     case 'missing':
       cause = 'no local test run is recorded for this chain; the full suite runs in CI, but the tests affected by this change still run here';
@@ -654,28 +763,39 @@ function verdict(options) {
   }
   let decision;
   let currentTree = { tree: null, reason: 'not computed' };
+  let treeRoot = projectRoot;
   if (scope.applicable === null) {
     decision = { state: 'unavailable', entry: null, reason: scope.reason };
   } else {
     try {
       const locations = storeLocations(options.pluginData, options.sessionKey);
       const entries = listRecords(locations, { sessionKey: options.sessionKey, projectRoot }, limits);
-      currentTree = computeTree(projectRoot, locations.scratch, limits);
-      decision = ciMode ? decideCi(entries, currentTree, limits) : decide(entries, currentTree, configuredCommand, limits);
+      const trees = currentTrees(projectRoot, locations.scratch, limits);
+      if (ciMode) {
+        decision = decideCi(entries, trees.of, limits);
+        treeRoot = decision.entry && decision.entry.record ? trees.rootOf(decision.entry.record) : projectRoot;
+      } else {
+        const full = entries.filter((entry) => entry.record && entry.record.scope === 'full');
+        if (typeof options.runCwd === 'string' && options.runCwd !== '') treeRoot = fingerprintRoot(options.runCwd, projectRoot, limits);
+        else if (full.length > 0) treeRoot = trees.rootOf(full[full.length - 1].record);
+      }
+      currentTree = trees.treeAt(treeRoot);
+      if (!ciMode) decision = decide(entries, currentTree, configuredCommand, limits);
     } catch (error) {
       decision = { state: 'unavailable', entry: null, reason: error.message };
     }
   }
-  if (ciMode) return ciVerdict({ decision, currentTree, projectRoot, gate, gateLabel, lines, options, limits });
+  if (ciMode) return ciVerdict({ decision, currentTree, treeRoot, projectRoot, gate, gateLabel, lines, options, limits });
   const record = decision.entry && decision.entry.record;
   const knownCommand = configuredCommand || (record && record.command) || null;
   const remedy = remedyCommand(options.remedyPrefix, configuredCommand, record ? record.command : null, projectRoot);
   const commandText = knownCommand ? screen(knownCommand, projectRoot, limits) : 'none recorded';
   const recordText = record ? `record ${record.id}` : 'no record';
+  const measured = measuredLabel(projectRoot, treeRoot, limits);
   let cause;
   switch (decision.state) {
     case 'pass':
-      cause = `exit 0 on the current tree ${shortTree(currentTree.tree)} (${recordText}, ${formatDuration(record.duration_ms)})`;
+      cause = `exit 0 on the current tree ${shortTree(currentTree.tree)}${measured} (${recordText}, ${formatDuration(record.duration_ms)})`;
       break;
     case 'pass-tree-unverified':
       cause = `exit 0 (${recordText}, ${formatDuration(record.duration_ms)}); the tree could not be fingerprinted (${currentTree.reason}), so freshness is unverified`;
@@ -690,19 +810,19 @@ function verdict(options) {
       cause = `the newest full-suite run never finished (${recordText}); run the suite again`;
       break;
     case 'stale': {
-      const paths = changedPaths(projectRoot, record.tree_end, currentTree.tree, limits);
+      const paths = fingerprintChanges(projectRoot, treeRoot, record.tree_end, currentTree.tree, limits);
       const listed = paths && paths.length > 0
         ? `: ${paths.slice(0, limits.listedPaths).map((entry) => screen(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
         : '';
-      cause = `the newest green full-suite run measured an older tree (${recordText}); files changed since${listed}`;
+      cause = `the newest green full-suite run measured an older tree${measured} (${recordText}); files changed since${listed}`;
       break;
     }
     case 'mutated-during-run': {
-      const paths = changedPaths(projectRoot, record.tree_start, record.tree_end, limits);
+      const paths = fingerprintChanges(projectRoot, treeRoot, record.tree_start, record.tree_end, limits);
       const listed = paths && paths.length > 0
         ? `: ${paths.slice(0, limits.listedPaths).map((entry) => screen(entry, projectRoot, limits)).join(', ')}${paths.length > limits.listedPaths ? ', …' : ''}`
         : '';
-      cause = `the tree changed while the suite ran (${recordText})${listed}; make the suite leave tracked files untouched or ignore what it writes, then run it again`;
+      cause = `the tree${measured} changed while the suite ran (${recordText})${listed}; make the suite leave tracked files untouched or ignore what it writes, then run it again`;
       break;
     }
     case 'missing':
@@ -902,14 +1022,14 @@ function resolveCommand(scope, explicitCommand, configuredCommand) {
   return { command: chosen };
 }
 
-function freshScopedRecord(locations, sessionKey, projectRoot, command, limits) {
+function freshScopedRecord(locations, sessionKey, projectRoot, command, treeRoot, limits) {
   let entries;
   try {
     entries = listRecords(locations, { sessionKey, projectRoot }, limits);
   } catch {
     return null;
   }
-  const current = computeTree(projectRoot, locations.scratch, limits);
+  const current = computeFingerprint(projectRoot, treeRoot, locations.scratch, limits);
   if (current.tree === null) return null;
   const same = entries.filter((entry) => !entry.invalid
     && entry.record.scope === 'scoped'
@@ -953,8 +1073,11 @@ function run(options) {
       resolve(2);
       return;
     }
+    const where = runDirectory(projectRoot, options.cwd, limits);
+    const suiteDirectory = commandDirectory(resolved.command, where.cwd);
+    const treeRoot = TEST_SCOPES.includes(options.scope) ? fingerprintRoot(suiteDirectory, projectRoot, limits) : projectRoot;
     if (options.ifStale && options.scope === 'scoped') {
-      const fresh = freshScopedRecord(locations, options.sessionKey, projectRoot, resolved.command, limits);
+      const fresh = freshScopedRecord(locations, options.sessionKey, projectRoot, resolved.command, treeRoot, limits);
       if (fresh) {
         say(stdout, `zensu evidence-run: skipped (--if-stale) — the newest run of this command is green on the current tree ${shortTree(fresh.record.tree_end)} (record ${fresh.record.id})`);
         resolve(0);
@@ -966,6 +1089,7 @@ function run(options) {
         pluginData: options.pluginData,
         sessionKey: options.sessionKey,
         projectRoot,
+        runCwd: suiteDirectory,
         configuredCommand: options.configuredCommand,
         gateMode: 'required',
         remedyPrefix: options.remedyPrefix,
@@ -981,8 +1105,7 @@ function run(options) {
     const logPath = path.join(locations.logs, `${id}.log`);
     const scriptPath = path.join(locations.scratch, `run-${id}.sh`);
     const startedAt = new Date();
-    const treeStart = TREE_SCOPES.includes(options.scope) ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
-    const where = runDirectory(projectRoot, options.cwd, limits);
+    const treeStart = TREE_SCOPES.includes(options.scope) ? computeFingerprint(projectRoot, treeRoot, locations.scratch, limits) : { tree: null, reason: null };
     if (where.moved) {
       say(stderr, `zensu evidence-run: the working directory is not in the work tree of the bound project root, so the command runs in ${projectRoot}`);
     }
@@ -1073,7 +1196,7 @@ function run(options) {
       else if (interruptedBy) exitCode = 128 + signalNumber(interruptedBy);
       else if (code === null || code === undefined) exitCode = 128 + signalNumber(signal);
       else exitCode = code;
-      const treeEnd = TREE_SCOPES.includes(options.scope) ? computeTree(projectRoot, locations.scratch, limits) : { tree: null, reason: null };
+      const treeEnd = TREE_SCOPES.includes(options.scope) ? computeFingerprint(projectRoot, treeRoot, locations.scratch, limits) : { tree: null, reason: null };
       let logInfo = { bytes: null, truncated: false };
       try { logInfo = truncateLogMiddle(logPath, limits); } catch { }
       const final = {
@@ -1223,6 +1346,10 @@ module.exports = {
   workTree,
   runDirectory,
   computeTree,
+  commandDirectory,
+  fingerprintRoot,
+  computeFingerprint,
+  fingerprintChanges,
   changedPaths,
   pidAlive,
   effectiveState,

@@ -917,6 +917,18 @@ suite itself (`zensu-log.sh --evidence-run --scope full`, see
 actually returned, and binds the record to a fingerprint of the working tree. `--chain-done`
 reads the newest record, never a claim in the run log.
 
+- **Which tree.** A `full` or `scoped` run measures the directory the suite runs in: the run's
+  cwd, which the runner keeps only inside the project root's own work tree and otherwise replaces
+  with the project root, or the target of a leading literal `cd <dir>` followed by `&&`, `;` or a
+  newline in the command. When that directory lies in a git work tree nested inside the project
+  root's own work tree (a worktree under `.claude/worktrees/`, a submodule, a nested clone), the
+  fingerprint combines the project tree and that work tree, so an edit on either side makes the
+  record stale, and a changed path in the nested tree is listed with its location, for example
+  `.claude/worktrees/wt/a.txt`. Any other directory keeps the project root's fingerprint, and so
+  does an `acceptance` run. The terminus derives the directory from the newest full-suite
+  record's command and cwd, and `--if-stale` from its own run. In CI mode every run is compared
+  with the current tree of its own directory, and the verdict reads `stale` while the directory
+  of the newest finished run has no run on its current tree.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
   unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
@@ -960,7 +972,12 @@ reads the newest record, never a claim in the run log.
   reviewer and neutral subagents cannot read and Edit/Write cannot reach. A Bash redirect from
   the main thread can still write one, which is the documented residual of every plugin store.
   The gate stops a chain from closing on a missing, red or stale run by accident; it does not
-  stop a model that forges a record on purpose.
+  stop a model that forges a record on purpose. It measures only the tree the suite ran in: a
+  suite reached through anything but the cwd or a leading literal `cd` (a manifest path,
+  `git -C`, a script that changes directory) keeps the project root's fingerprint, and so does
+  a work tree outside the project root's own work tree. When git cannot resolve the work tree
+  of the run directory, the verdict reads `pass-tree-unverified` rather than falling back to the
+  project root.
 
 ## Acceptance Verification Gate
 

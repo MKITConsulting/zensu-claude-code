@@ -319,7 +319,7 @@ if source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-full-suite-transport.sh" 2>/dev
   && [ "$(zensu_full_suite_policy_node "post-review-tdd-delegate.sh" effective 2>/dev/null)" = "ci" ]; then
   FULL_SUITE_RUNNER="ci"
 fi
-FULL_SUITE_ROUND_NOTE="the full suite returns only in the convergence branch"
+FULL_SUITE_ROUND_NOTE="the full suite returns only when the review loop closes"
 [ "$FULL_SUITE_RUNNER" = "ci" ] && FULL_SUITE_ROUND_NOTE="this chain never runs the full suite locally, because CI runs it"
 
 if [ "$(tdd_vanilla_mode "$TDD_STATE_FILE")" = "true" ]; then
@@ -367,6 +367,8 @@ BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE_TRAILING"
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+FULL_SUITE_STEP="run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope full --if-stale --cmd '<full test command>' --log <run log> (drop --cmd when evidence.fullSuiteCommand is configured)"
+AFFECTED_SUITE_STEP="re-run the affected-suite command of Phase 6 step 1 through the evidence runner, skipping it only when the newest run of that command is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>' --log <run log>"
 CONVERGENCE_CLAUSE=""
 if [ "$CONVERGENCE_ON" = "1" ]; then
   NEXT_REVIEW=$((NEXT + 1))
@@ -382,16 +384,22 @@ if [ -z "${AUTOPILOT_BOUND_ARGS:-}" ]; then
   ACCEPTANCE_REFUSAL=" An ACCEPTANCE refusal follows the same remedy rule as the acceptance status above."
 fi
 
-CLOSE_PASS_SUITE_CI="FIRST, re-run the affected-suite command of Phase 6 step 1 through the evidence runner, skipping it only when the newest run of that command is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>' --log <run log>. This chain runs the full suite in CI, never locally, so do NOT run --scope full; the local run proves the tests this change touches on the tree that ships, and the terminus refuses a red, stale or missing local test run."
+CLOSE_PASS_SUITE_CI="FIRST, ${AFFECTED_SUITE_STEP}. This chain runs the full suite in CI, never locally, so do NOT run --scope full; the local run proves the tests this change touches on the tree that ships, and the terminus refuses a red, stale or missing local test run."
 if [ "$SELF_REVIEW_ON" = "1" ]; then
-  CLOSE_PASS="FIRST, run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope full --if-stale --cmd '<full test command>' --log <run log> (drop --cmd when evidence.fullSuiteCommand is configured). Phase 5 checkpoints are SCOPED, so this convergence branch is where the verdict for the tree that ships is measured, and a verdict taken before the fix rounds describes a tree that no longer exists. THEN run this ticket-bound command: ${LOG_COMMAND} --code-review-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Only if it exits 0, your VERY NEXT action must be the Skill tool with skill='zensu:self-review'. Carry this exact generation line into that skill: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} The terminal self-review owns the chain terminus and renders the final CHAIN-END SUMMARY. If the command fails, this completion is stale: do NOT invoke self-review, do NOT mutate chain state, and resume the current chain instead. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the matching generation."
+  CLOSE_PASS="FIRST, ${FULL_SUITE_STEP}. Phase 5 checkpoints are SCOPED, so this convergence branch is where the verdict for the tree that ships is measured, and a verdict taken before the fix rounds describes a tree that no longer exists. THEN run this ticket-bound command: ${LOG_COMMAND} --code-review-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Only if it exits 0, your VERY NEXT action must be the Skill tool with skill='zensu:self-review'. Carry this exact generation line into that skill: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} The terminal self-review owns the chain terminus and renders the final CHAIN-END SUMMARY. If the command fails, this completion is stale: do NOT invoke self-review, do NOT mutate chain state, and resume the current chain instead. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the matching generation."
   TAIL_DIRECTIVE=""
 else
-  CLOSE_PASS="FIRST, run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope full --if-stale --cmd '<full test command>' --log <run log> (drop --cmd when evidence.fullSuiteCommand is configured). Phase 5 checkpoints are SCOPED and NO self-review stage follows in this configuration, so this is the last chance to measure the tree that ships.${ACCEPTANCE_REVERIFY} THEN close only this review generation by running: ${LOG_COMMAND} --chain-done${AUTOPILOT_BOUND_ARGS} --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0. A FULL SUITE refusal names its remedy: run it, then close again.${ACCEPTANCE_REFUSAL} On any other failure this completion is stale, so leave the current chain untouched and resume it."
+  CLOSE_PASS="FIRST, ${FULL_SUITE_STEP}. Phase 5 checkpoints are SCOPED and NO self-review stage follows in this configuration, so this is the last chance to measure the tree that ships.${ACCEPTANCE_REVERIFY} THEN close only this review generation by running: ${LOG_COMMAND} --chain-done${AUTOPILOT_BOUND_ARGS} --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0. A FULL SUITE refusal names its remedy: run it, then close again.${ACCEPTANCE_REFUSAL} On any other failure this completion is stale, so leave the current chain untouched and resume it."
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
 fi
 if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
   CLOSE_PASS="${CLOSE_PASS_SUITE_CI} THEN${CLOSE_PASS#*THEN}"
+fi
+CLOSE_SUITE_STEP="$FULL_SUITE_STEP"
+CLOSE_SUITE_REASON="this run is the only full-suite measurement of the tree that ships"
+if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
+  CLOSE_SUITE_STEP="$AFFECTED_SUITE_STEP"
+  CLOSE_SUITE_REASON="this run is the only local test measurement of the tree that ships, and CI runs the full suite"
 fi
 
 emit_post_context() {
@@ -427,7 +435,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     else
       tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || exit 0
     fi
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. FIRST, ${CLOSE_SUITE_STEP}, because fix rounds re-run only their own scoped suites. THEN your next action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
   else
     if [ "$AUTOPILOT_BOUND" = "true" ]; then
       bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" \
@@ -439,7 +447,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     fi
     MAX_ROUNDS_VERDICTS=""
     [ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && MAX_ROUNDS_VERDICTS=" No FULL SUITE or ACCEPTANCE line reaches you for this max-rounds close, so in the summary below write 🟡 not checked (max-rounds) as the Full suite verdict and 🟡 not-checked (max-rounds) as the Acceptance verdict."
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${MAX_ROUNDS_VERDICTS}${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${MAX_ROUNDS_VERDICTS}${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
   printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0

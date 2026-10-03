@@ -67,6 +67,8 @@ render_rounds off-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true
 render_rounds off-default '{"hooks":{"autoFix":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":5}}'
 render_rounds summary-off '{"hooks":{"autoFix":true,"selfReview":false,"reviewConvergence":false,"autoFixMaxRounds":5}}'
+render_rounds max-rounds '{"hooks":{"autoFix":true,"autoFixMaxRounds":1}}'
+render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}'
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL
@@ -173,6 +175,21 @@ check "S4 combined summary discloses a partial or unreadable ledger" "$(has "$SU
 check "S5 convergence off drops the ledger rows from the combined summary" "$(lacks "$SUMOFF1" 'FINDINGS LEDGER')"
 check "S6 convergence off never runs the ledger reader at chain end" "$(lacks "$SUMOFF1" 'review-ledger-v1.js')"
 check "S7 convergence off keeps the pre-convergence ## Open sentence" "$(has "$SUMOFF1" 'One row per deferred suggestion (the buffered ### Suggestions block) or max-rounds finding requiring a manual fix, and one row per advisory FULL SUITE — line that did not pass, carrying that line verbatim. Every cell follows')"
+
+MAX2="$(context_of "$TMP_DIR/max-rounds/round-2.json")" && check "V8 max-rounds hand-off render is valid PostToolUse context" PASS \
+  || check "V8 max-rounds hand-off render is valid PostToolUse context" FAIL
+MAXOFF2="$(context_of "$TMP_DIR/max-rounds-off/round-2.json")" && check "V9 max-rounds close render without self-review is valid PostToolUse context" PASS \
+  || check "V9 max-rounds close render without self-review is valid PostToolUse context" FAIL
+case "$MAX2" in
+  *"FIRST, run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: "*"--evidence-run --scope full --if-stale"*"THEN your next action MUST be the Skill tool with skill='zensu:self-review'"*)
+    check "MR1 the max-rounds hand-off runs the full suite before the self-review" PASS ;;
+  *) check "MR1 the max-rounds hand-off runs the full suite before the self-review" FAIL ;;
+esac
+case "$MAXOFF2" in
+  *"Before you reply, run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: "*"--evidence-run --scope full --if-stale"*"this run is the only full-suite measurement of the tree that ships"*)
+    check "MR2 the max-rounds close without self-review runs the full suite before the reply" PASS ;;
+  *) check "MR2 the max-rounds close without self-review runs the full suite before the reply" FAIL ;;
+esac
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"

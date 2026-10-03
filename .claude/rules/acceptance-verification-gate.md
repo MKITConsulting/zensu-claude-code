@@ -120,6 +120,11 @@ and `--tdd-complete` loads a new module. No workflow-state field and no strict k
   chain whose review rounds change code verifies twice, three times when self-review's fix round
   edits too. Scoping records to the paths a criterion touches is not possible without a
   per-criterion path map nobody maintains.
+- **The fingerprint is the project root's alone.** An `--evidence-run --scope acceptance` run
+  whose command starts with `cd` into a nested worktree is still bound to the project tree,
+  because `acceptance-verify-v1.js` compares records with `computeTree(projectRoot)`. An edit in
+  that worktree after the run leaves the record current. The full-suite gate follows the nested
+  work tree for `full` and `scoped` runs (`.claude/rules/evidence-runner.md`).
 - **Consent prompts in auto or headless mode are unverified host behaviour**, as in
   §"Browser Consent Gate"; unattended browser verification belongs in policy mode.
 - **Windows is unverified**: neither suite is in `tests/profiles/windows-ci.v1.json`.
