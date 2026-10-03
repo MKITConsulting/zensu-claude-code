@@ -345,20 +345,23 @@ test('times out a nested process tree and records deterministic failure evidence
         stdio: 'ignore',
       });
       nested.unref();
-      fs.writeFileSync(${JSON.stringify(pidFile)}, String(nested.pid));
+      fs.writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, String(nested.pid));
+      fs.renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});
       setInterval(() => {}, 1000);
     `);
     const result = await runProfile({
-      manifest: manifestFor(process.platform, [
-        suite('timeout', child, {
-          timeoutMs: process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 250,
-        }),
-      ]),
+      manifest: manifestFor(process.platform, [suite('timeout', child)]),
       profileId: 'test-profile',
       root,
       reportDirectory: path.join(root, 'reports'),
       output: { write() {} },
+      suiteTimeoutTrigger: () => waitFor(() => fs.existsSync(pidFile), TEST_SUITE_TIMEOUT_MS),
     });
+    assert.equal(
+      fs.existsSync(pidFile),
+      true,
+      `the suite timed out before it published the grandchild pid within ${TEST_SUITE_TIMEOUT_MS}ms`,
+    );
     assert.equal(result.exitCode, EXIT_SUITE);
     const report = JSON.parse(fs.readFileSync(result.reportPath, 'utf8'));
     assert.equal(report.status, 'failed');
