@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **verify-feature**: a navigation policy may now list, beside its targets, up to 8
+  `networkOnlyOrigins` — a REST API, an OIDC issuer, a token endpoint — that the application's
+  pages may request but no navigation command may open, and nothing on them counts as evidence.
+  Declare them in the recipe under `validate.networkOnly` too. A policy without the key is
+  unchanged. An installation older than this one refuses a policy that carries the key, so
+  launch every session that reads it on this version. Consent mode has no network-only class: a
+  loopback API origin is still passed as an ordinary origin, and a non-loopback one needs the
+  launch-time policy.
+- **verify-feature**: every origin in a navigation policy must now name its host exactly, as an
+  IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_`. A target such as
+  `https://*.example.com` was accepted before and acted as a browser-side wildcard; a policy
+  carrying one is now invalid and denies every navigation until the hostname is spelled out.
+- **verify-feature**: the run-config helper takes `--network-only-origin <origin>`, counted with
+  `--origin` toward the bound of 8, and the preflight takes the operand `network-only`:
+  `verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>`.
+
 ## [0.23.0] - 2026-09-30
 
 ### Added

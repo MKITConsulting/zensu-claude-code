@@ -38,7 +38,8 @@ test('the consent gate and the run-config helper require the floor module instea
   assert.equal(consent.REASONS.REMOTE_NEEDS_POLICY.endsWith(floor.CONSENT_REMOTE_REASON), true);
   const raw = JSON.stringify({ version: 1, mode: 'local', targets: [{ origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' }] });
   const parsed = parsePolicyTargets(raw);
-  assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: raw }), { ok: true, mode: parsed.mode, targets: parsed.targets });
+  assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: raw }),
+    { ok: true, mode: parsed.mode, targets: parsed.targets, networkOnly: parsed.networkOnly });
   assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{}' }), { ok: false, fault: policyContractFault('{}') });
 });
 
@@ -293,5 +294,103 @@ test('parsePolicyTargets admits only loopback origins in local mode and only non
   }
   for (const origin of ['https://10.0.0.5', 'https://169.254.169.254', 'https://[fc00::1]']) {
     assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC }, origin);
+  }
+});
+
+const REMOTE_TARGET = Object.freeze({ origin: 'https://app.example.com', evidenceMode: 'declared-safe' });
+
+function networkOnlyPolicyOf(mode, targets, networkOnlyOrigins) {
+  return JSON.stringify({ version: 1, mode, targets, networkOnlyOrigins });
+}
+
+function targetFor(mode) {
+  return mode === 'local' ? POLICY_TARGET : REMOTE_TARGET;
+}
+
+test('the contract check admits an optional networkOnlyOrigins list of 1 to MAX_NETWORK_ONLY_ORIGINS and names its own cause', () => {
+  assert.equal(floor.MAX_NETWORK_ONLY_ORIGINS, 8);
+  assert.deepEqual(floor.POLICY_KEYS, ['mode', 'targets', 'version']);
+  assert.deepEqual(floor.NETWORK_ONLY_POLICY_KEYS, ['mode', 'networkOnlyOrigins', 'targets', 'version']);
+  const list = 'policy networkOnlyOrigins must be a list of 1 to 8 origins';
+  const origins = (count) => Array.from({ length: count }, (_unused, index) => `https://api${index}.example.org`);
+  for (const value of [[], null, 'https://api.example.org', {}, origins(9)]) {
+    const raw = networkOnlyPolicyOf('remote', [REMOTE_TARGET], value);
+    assert.equal(policyContractFault(raw), list, JSON.stringify(value));
+    assert.deepEqual(parsePolicyTargets(raw), { ok: false, fault: list }, JSON.stringify(value));
+  }
+  assert.equal(policyContractFault(networkOnlyPolicyOf('remote', [REMOTE_TARGET], origins(1))), '');
+  assert.equal(parsePolicyTargets(networkOnlyPolicyOf('remote', [REMOTE_TARGET], origins(8))).networkOnly.size, 8);
+  assert.equal(policyContractFault(JSON.stringify({ version: 1, mode: 'remote', targets: [REMOTE_TARGET], networkOnly: origins(1) })),
+    'policy contains unknown or missing keys');
+  assert.equal(policyContractFault(JSON.stringify({ version: 1, mode: 'remote', networkOnlyOrigins: origins(1) })),
+    'policy contains unknown or missing keys');
+});
+
+test('parsePolicyTargets maps each network-only origin to its canonical origin and hostname, and an absent list to an empty map', () => {
+  const absent = parsePolicyTargets(policyOf('remote', [REMOTE_TARGET]));
+  assert.equal(absent.ok, true);
+  assert.deepEqual([...absent.networkOnly.keys()], []);
+  const ipv6 = 'https://[2606:2800:220:1:248:1893:25c8:1946]';
+  const remote = parsePolicyTargets(networkOnlyPolicyOf('remote', [REMOTE_TARGET], ['https://API.Example.org', 'https://93.184.216.34:8443', ipv6]));
+  assert.equal(remote.ok, true);
+  assert.deepEqual([...remote.targets.keys()], ['https://app.example.com']);
+  assert.deepEqual([...remote.networkOnly.keys()], ['https://api.example.org', 'https://93.184.216.34:8443', ipv6]);
+  assert.deepEqual(remote.networkOnly.get('https://api.example.org'), { origin: 'https://api.example.org', hostname: 'api.example.org' });
+  assert.equal(remote.networkOnly.get(ipv6).hostname, '2606:2800:220:1:248:1893:25c8:1946');
+});
+
+test('parsePolicyTargets refuses a malformed, repeated or doubly declared network-only origin', () => {
+  const shape = 'policy network-only origin must not contain credentials, path, query, or fragment';
+  const cases = [
+    [42, 'policy network-only origin must be a string'],
+    [null, 'policy network-only origin must be a string'],
+    ['not a url', 'policy network-only origin is invalid'],
+    ['https://user:pw@api.example.org', shape],
+    ['https://api.example.org/v1', shape],
+    ['https://api.example.org/?x=1', shape],
+    ['https://api.example.org/#top', shape],
+    ['https://api.example.org/?', shape],
+  ];
+  for (const [origin, fault] of cases) {
+    assert.deepEqual(parsePolicyTargets(networkOnlyPolicyOf('remote', [REMOTE_TARGET], [origin])), { ok: false, fault }, JSON.stringify(origin));
+  }
+  assert.deepEqual(parsePolicyTargets(networkOnlyPolicyOf('remote', [REMOTE_TARGET], ['https://api.example.org', 'https://API.example.org:443/'])),
+    { ok: false, fault: 'policy network-only origins must be unique' });
+  assert.deepEqual(parsePolicyTargets(networkOnlyPolicyOf('remote', [REMOTE_TARGET], ['https://app.example.com:443'])),
+    { ok: false, fault: 'policy origin must not be both a target and network-only' });
+});
+
+test('a network-only origin obeys the remote floor in a remote policy, and loopback or that floor in a local one', () => {
+  const single = (mode, origin) => parsePolicyTargets(networkOnlyPolicyOf(mode, [targetFor(mode)], [origin]));
+  for (const origin of ['https://api.example.org', 'https://93.184.216.34', 'https://[2606:2800:220:1:248:1893:25c8:1946]']) {
+    assert.equal(single('remote', origin).ok, true, origin);
+    assert.equal(single('local', origin).ok, true, origin);
+  }
+  for (const origin of ['http://127.0.0.1:9090', 'https://127.0.0.2:8443', 'http://[::1]:9090', 'http://localhost:9090']) {
+    assert.equal(single('local', origin).ok, true, origin);
+    assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS }, origin);
+  }
+  for (const origin of ['http://api.example.org', 'http://93.184.216.34', 'ws://api.example.org']) {
+    assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS }, origin);
+    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.NETWORK_ONLY_HTTPS }, origin);
+  }
+  for (const origin of ['https://10.0.0.5', 'https://169.254.169.254', 'https://[fc00::1]']) {
+    assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC }, origin);
+    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC }, origin);
+  }
+  assert.deepEqual(single('local', 'ws://127.0.0.1:9090'), { ok: false, fault: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY });
+});
+
+test('one hostname rule refuses a wildcard or pattern host in a target and in a network-only origin alike', () => {
+  for (const origin of ['https://*.example.com', 'https://*', 'https://{a,b}.example.com', 'https://api.*.example.com', 'https://%2A.example.com']) {
+    assert.deepEqual(parsePolicyTargets(policyOf('remote', [{ ...POLICY_TARGET, origin }])), { ok: false, fault: FLOOR_REASONS.HOSTNAME_PATTERN }, origin);
+    for (const mode of ['remote', 'local']) {
+      assert.deepEqual(parsePolicyTargets(networkOnlyPolicyOf(mode, [targetFor(mode)], [origin])),
+        { ok: false, fault: FLOOR_REASONS.HOSTNAME_PATTERN }, `${mode} ${origin}`);
+    }
+  }
+  for (const origin of ['https://xn--caf-dma.example', 'https://café.example', 'https://my_host.example.com', 'https://a-b.example.com:8443']) {
+    assert.equal(parsePolicyTargets(policyOf('remote', [{ ...POLICY_TARGET, origin }])).ok, true, origin);
+    assert.equal(parsePolicyTargets(networkOnlyPolicyOf('local', [POLICY_TARGET], [origin])).ok, true, origin);
   }
 });

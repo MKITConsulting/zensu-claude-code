@@ -478,7 +478,8 @@ and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels
 gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
 helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
 gate then requires, because an origin approved mid-session could not be pinned. The browser
-itself refuses every request to an origin outside `network.allowedOrigins`. It does NOT refuse a
+itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
+fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
 line after every navigating call and stops a scenario that left the approved set. In neither mode
 does anything enforce routes: the evidence boundary is the origin, which the human approves in
@@ -501,7 +502,21 @@ run-config helper uses too, so there is one floor, not two.
 origins, every route on them, and a remote hostname only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
 formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
-contract denies every `zensu-verify` navigation, with the broken rule named.
+contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
+policy names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` —
+because the browser turns an allowed origin into a URL glob and would read `*` or `{a,b}` as a
+pattern.
+
+**Network-only origins.** A policy may also list, in `networkOnlyOrigins`, up to 8 origins the
+pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint.
+The run config allows them beside the targets, so the gate derives from the policy which entries
+are navigable. At `open` it admits a network-only run-config origin, with its pin for a remote
+host, and plans no consent record for it; `open <url>`, `goto` and `tab-new` aimed at one deny
+with `NETWORK_ONLY_NAVIGATION`, a final reason. A remote policy accepts only non-loopback HTTPS
+there; a local policy accepts a loopback origin or a pinned public HTTPS one. Consent mode has no
+such class, so the run-config helper refuses `--network-only-origin` without a policy. A page can
+still navigate itself onto a network-only origin, because the browser knows one class of allowed
+origin: the `Page URL` check ends that scenario.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
