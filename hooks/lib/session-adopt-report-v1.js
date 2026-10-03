@@ -706,13 +706,13 @@ const RESTORE_SHARED_BULLETS =
   + "    baseline is rebuilt fresh, so it reads as never active — that is all a fresh\n"
   + "    baseline can say.\n"
   + "  * The anchor does not MOVE. Only the path the record already names is created, so\n"
-  + "    the source-write gate keeps comparing against exactly the root it compared\n"
-  + "    against before. No ARGUMENT names a directory: the destination comes from the\n"
-  + "    record inside the plugin-data store this invocation names, and that store\n"
-  + "    decides WHICH record is read rather than where the directory lands. The path\n"
-  + "    itself is not bounded by location — only by depth, at most a few components\n"
-  + "    below a directory that is still there — so what stands behind it is who can\n"
-  + "    write a record into that store.\n";
+  + "    the source-write gate, while it is opted in, keeps comparing against exactly\n"
+  + "    the root it compared against before. No ARGUMENT names a directory: the\n"
+  + "    destination comes from the record inside the plugin-data store this invocation\n"
+  + "    names, and that store decides WHICH record is read rather than where the\n"
+  + "    directory lands. The path itself is not bounded by location — only by depth, at\n"
+  + "    most a few components below a directory that is still there — so what stands\n"
+  + "    behind it is who can write a record into that store.\n";
 const RESTORE_DISCLOSURE_HEAD = "What this repairs, and what it does NOT:\n";
 // ONE composer, so a bullet added later cannot reach one arm and miss the other.
 const restoreDisclosure = (raced) => RESTORE_DISCLOSURE_HEAD
@@ -911,7 +911,8 @@ function renderRestoreVerdict(verdict, confirmed) {
     w("  nearest existing : " + safe(verdict.nearestExisting) + "\n");
     w("  to be created    : " + verdict.missing.length + "\n\n");
     w("The record is readable and this installation serves it. Only the recorded project\n");
-    w("root is not reachable, which is why every write is denied while reads still work.\n");
+    w("root is not reachable, which is why Edit, Write and MultiEdit are denied while reads\n");
+    w("still work.\n");
     // The whole evidence base here is one ENOENT, which a deleted directory, a MOVED
     // or renamed one and an unmounted volume all produce identically. Both Stop-hook
     // arms carry this caveat; this block is the surface where the user DECIDES, and
@@ -1424,26 +1425,27 @@ function main(deps = {}) {
       process.stdout.write(PRUNED_EXPLANATION);
     }
     // Stated BEFORE the user confirms, not only after: an adoption that leaves
-    // Edit, Write and every WRITING Bash command denied is not the rescue an
+    // Edit, Write and MultiEdit denied is not the rescue an
     // unqualified "adoptable" implies,
     // and finding that out afterwards reads as a failed repair.
     if (verdict.orphanedProjectRoot) {
       process.stdout.write("The record itself is readable and this installation can take it over in place.\n");
       process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
       process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
-      process.stdout.write("worth doing: it clears the lineage break, so READ-ONLY Bash and the read-only\n");
-      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and MultiEdit\n");
-      process.stdout.write("stay denied, and so does any Bash command the source-write gate can attribute\n");
-      process.stdout.write("as a write, because a write cannot be attributed to a project that is not\n");
-      process.stdout.write("there. NotebookEdit is the one mutation that still passes, in a healthy\n");
-      process.stdout.write("session too. To write again, run this command with --restore-root --confirm\n");
-      process.stdout.write("AFTER the adoption: it re-creates exactly that directory and rebuilds the\n");
-      process.stdout.write("workflow document in one step, where a bare mkdir leaves the second half\n");
-      process.stdout.write("missing and every tool denied. The order matters — the restore requires this\n");
-      process.stdout.write("installation to SERVE the record, which is what the adoption establishes. It\n");
-      process.stdout.write("restores the anchor, not the work: the directory comes back empty and the\n");
-      process.stdout.write("chain that lived there is gone. If it was moved rather than deleted, its state\n");
-      process.stdout.write("still exists there, and moving it back is better than re-creating it.\n");
+      process.stdout.write("worth doing: it clears the lineage break, so Bash and the read-only diagnostics\n");
+      process.stdout.write("work again. It does NOT restore the file tools — Edit, Write and MultiEdit stay\n");
+      process.stdout.write("denied, and so does any Bash command the source-write gate can attribute as a\n");
+      process.stdout.write("write while that opt-in gate is on (hooks.bashWriteGate: true), because a write\n");
+      process.stdout.write("cannot be attributed to a project that is not there. NotebookEdit still passes,\n");
+      process.stdout.write("as it does in a healthy session. To restore Edit and Write, run this command\n");
+      process.stdout.write("with --restore-root --confirm AFTER the adoption: it re-creates exactly that\n");
+      process.stdout.write("directory and rebuilds the workflow document in one step, where a bare mkdir\n");
+      process.stdout.write("leaves the second half missing and every tool denied. The order matters — the\n");
+      process.stdout.write("restore requires this installation to SERVE the record, which is what the\n");
+      process.stdout.write("adoption establishes. It restores the anchor, not the work: the directory comes\n");
+      process.stdout.write("back empty and the chain that lived there is gone. If it was moved rather than\n");
+      process.stdout.write("deleted, its state still exists there, and moving it back is better than\n");
+      process.stdout.write("re-creating it.\n");
       // The schema-equality check that authorises an ordinary takeover did NOT
       // run here, and a report that stays silent about it lets the user read a
       // weaker check as the stronger one. Condition 6 is guarded by an
@@ -1552,20 +1554,21 @@ function main(deps = {}) {
   if (adopted.orphanedProjectRoot) {
     // Never the unqualified "bound again" line for this shape. The lineage break
     // is gone, but the anchor is still a directory that does not exist, which is
-    // the ordinary orphaned-project-root state: reads and diagnostics run, writes
-    // do not. Saying otherwise would send the user straight into a deny.
+    // the ordinary orphaned-project-root state: Bash and diagnostics run, Edit and
+    // Write do not. Saying otherwise would send the user straight into a deny.
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
-    process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
+    process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work,\n");
     process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
-    process.stdout.write("the source-write gate can attribute as a write — a write cannot be attributed\n");
-    process.stdout.write("to a project that is not there. NotebookEdit is the one mutation that still\n");
-    process.stdout.write("passes, in a healthy session too. To write again, run this command once more\n");
-    process.stdout.write("with --restore-root --confirm — now that the lineage break is cleared, this\n");
-    process.stdout.write("installation serves the record, which is what that repair requires. It\n");
-    process.stdout.write("re-creates exactly that directory and rebuilds the workflow document in one\n");
-    process.stdout.write("step, restoring the anchor and not the work: the directory comes back empty\n");
-    process.stdout.write("and the chain that lived there is gone. Or start a fresh Claude Code session.\n");
+    process.stdout.write("the source-write gate can attribute as a write while that opt-in gate is on\n");
+    process.stdout.write("(hooks.bashWriteGate: true) — a write cannot be attributed to a project that is\n");
+    process.stdout.write("not there. NotebookEdit still passes, as it does in a healthy session. To restore\n");
+    process.stdout.write("Edit and Write, run this command once more with --restore-root --confirm — now\n");
+    process.stdout.write("that the lineage break is cleared, this installation serves the record, which is\n");
+    process.stdout.write("what that repair requires. It re-creates exactly that directory and rebuilds the\n");
+    process.stdout.write("workflow document in one step, restoring the anchor and not the work: the\n");
+    process.stdout.write("directory comes back empty and the chain that lived there is gone. Or start a\n");
+    process.stdout.write("fresh Claude Code session.\n");
   } else {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
     if (adopted.prunedPluginRoot) {

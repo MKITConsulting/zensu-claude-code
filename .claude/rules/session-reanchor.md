@@ -14,8 +14,9 @@ paths:
 A session's record pins `project_root` to its SessionStart working directory. A session that
 goes on to work in ANOTHER worktree of the same repository — typically one it created with
 `git worktree add`, as this repository's own conventions ask — keeps its anchor in the worktree it
-started in. Rule (C) then denies `git add`/`git commit` where the session really works, rule (B)
-denies a new source file there, and `zensu:review-aspect` reviewers stay confined to the old root.
+started in. While the opt-in source-write gate is on (`hooks.bashWriteGate: true`), rule (C) then
+denies `git add`/`git commit` where the session really works and rule (B) denies a new source file
+there; at every setting `zensu:review-aspect` reviewers stay confined to the old root.
 `/zensu:adopt-session --reanchor` is the one sanctioned move, and it is BOUNDED, never
 caller-named.
 
@@ -127,9 +128,12 @@ usable record cannot run the move. The worktree-operand arm does not name it (W2
 anchor does not change which tree `git worktree remove` destroys. The hint says the move refuses a
 worktree in which it FINDS another live session — never that it refuses wherever another session
 works, because the probe does not see where a session edits. No remedy names the recorded root any more — rule (C) used to
-recommend `git -C '<recorded root>' <verb> …`, which stages into the wrong worktree. The escape
-sentence stays LAST (`skills/session-trail` asserts the refusal names it), `denies again` stays in
-the designation arm (W163), and the operand arm is unchanged (W204). `P5b` in
+recommend `git -C '<recorded root>' <verb> …`, which stages into the wrong worktree. The parser's
+`OPT_IN_NOTE` stays LAST and names `hooks.bashWriteGate`, never the escape prefix
+(`skills/session-trail` asserts that shape; W121, W121c and W163c pin it), `denies again` stays in
+the designation arm (W163), and the operand arm is unchanged (W204). `test-session-reanchor.sh`
+drives its `git add` and admission checks with the gate opted in through `gate-on-config.json`,
+because at the default the gate allows every one of them. `P5b` in
 `test-secret-scan-gate.sh` pins the literal `BSWG_MODE= PAYLOAD=`, so a new assignment goes AFTER
 `PAYLOAD=`, never between the two.
 
@@ -230,7 +234,10 @@ the skills named above needs a `cd` into the new anchor, and what other skills r
 working directory — `/zensu:plan-review`'s plan and persona discovery, `/zensu:setup`'s
 project-local config target, the load-time overlays of `/zensu:tdd` and `/zensu:cover`, the
 templates of `/zensu:autopilot` and `/zensu:pilot`, and the checkout `/zensu:autopilot` opens its
-pull request from — still comes from the start directory's worktree of the same repository; a
+pull request from — still comes from the start directory's worktree of the same repository; the
+source-write gate reads its project-level `hooks.bashWriteGate` opt-in through the host's
+`CLAUDE_PROJECT_DIR`, ahead of its bind, so after a move the start worktree's
+`.zensu/config.json` still decides whether the gate runs; a
 project whose root holds a double quote, a dollar sign, a backtick or a backslash cannot run
 `/zensu:tdd`, because `--project-root` refuses it; open work under the old root must reach its end
 first;

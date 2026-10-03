@@ -158,6 +158,10 @@ const GIT_OPTS_WITH_OPERAND = new Set(
   "-C -c --git-dir --work-tree --namespace --super-prefix --exec-path --config-env --attr-source".split(" ")
 );
 
+const OPT_IN_NOTE =
+  " This gate is opt-in and runs because hooks.bashWriteGate is true in the Zensu config; " +
+  "if the command is intended, ask the user to run it or to switch the gate off.";
+
 function stripSlash(p) {
   return p && p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") : p;
 }
@@ -830,7 +834,7 @@ function main() {
         channel +
         "). Writing source into a sibling or main checkout corrupts another session's working tree — " +
         "the cross-session contamination this gate prevents. Edit files through the Edit/Write tools inside " +
-        "your own worktree." + reanchorHint + " Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+        "your own worktree." + reanchorHint + OPT_IN_NOTE
       );
     }
     // The budget bounds the SYNCHRONOUS GIT CALLS, so it is spent here rather than
@@ -847,7 +851,7 @@ function main() {
         channel +
         "). A raw shell write to tracked source bypasses the Edit/Write tools and the review/TDD discipline " +
         "that watch them — route the change through Edit/Write instead. New files, gitignored/untracked files, " +
-        "and non-source files are unaffected. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+        "and non-source files are unaffected." + OPT_IN_NOTE
       );
     }
     return "";
@@ -914,8 +918,7 @@ function main() {
       "Blocked `git " + t.sub + "` against a repository OUTSIDE this session's worktree/project root (" +
       hit +
       "). Staging, committing or restoring in a sibling or main checkout rewrites another session's " +
-      "index and working tree — the cross-session contamination this gate prevents. " + remedy +
-      " Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+      "index and working tree — the cross-session contamination this gate prevents. " + remedy + OPT_IN_NOTE
     );
   }
 
@@ -1111,6 +1114,7 @@ if (require.main === module) {
   // entries live in an internal slot, so a frozen Set still accepts .delete()
   // and an in-process consumer could neuter rule (C) for that process.
   module.exports = {
+    OPT_IN_NOTE,
     detectChannels,
     detectControlMutation,
     stripHeredocs,

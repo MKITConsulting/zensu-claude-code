@@ -23,14 +23,15 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 This one answers "it serves it fine and the DIRECTORY the record anchors is gone" — the
 ordinary shape after `git worktree remove`, which `skills/session-trail/SKILL.md` measures at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
-`readOrphanedProjectRootContext` succeeds, reads still work and every write denies.
+`readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
+deny — a Bash write too, but only while the opt-in source-write gate is on.
 
 **The destination is carried FROM the record and never from an argument, and that is the whole
 safety argument.** `CLAUDE.md` records that re-anchoring a record to a CALLER-NAMED directory
 was considered and REFUSED — a session may delete its own root, so a caller-named anchor would
 be a cross-project write escape. Nothing here accepts one: the path is `context.project_root`,
-so the anchor never MOVES and the source-write gate keeps comparing against exactly the root it
-compared against before. Do NOT "generalize" this into a mode that takes a destination; that is
+so the anchor never MOVES and the source-write gate, whenever it is opted in, keeps comparing
+against exactly the root it compared against before. Do NOT "generalize" this into a mode that takes a destination; that is
 the refused design, not an extension of this one. The one anchor move that exists is the bounded
 same-repository re-anchor in `.claude/rules/session-reanchor.md`: a separate script that no
 bind-failure recognizer admits, and it refuses when the recorded root is gone, so it never

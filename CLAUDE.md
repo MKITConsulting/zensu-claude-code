@@ -137,7 +137,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Stop Hook Latency (`hooks/lib/zensu-stop-deadline.sh` + `hooks/lib/stop-idle-probe-v1.js`)** — the early exit for a Stop with nothing to enforce, the whole-hook deadline and why it releases, and the once-per-run project-root memo and canonical-key shortcut in `hooks/lib/zensu-session.sh`: `.claude/rules/stop-latency.md`
 - **Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)** — the two bind failures that relax, and the vanished-cwd case that must not: `.claude/rules/relaxable-bind-failures.md`
 - **Reviewer Capability Gate: Host Report Tool (`hooks/lib/reviewer-capability-v1.js`)** — why reviewers and the PLM may call `SubagentHandback`, and why the evidence workers may not: `.claude/rules/reviewer-capability-gate.md`
-- **Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)** — rule (C) of the Bash source-write gate and its Windows namespace: `.claude/rules/git-mutation-tables.md`
+- **Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)** — why the Bash source-write gate is opt-in, rule (C) and its Windows namespace: `.claude/rules/git-mutation-tables.md`
 - **Plugin-Data Guard (`hooks/pre-write-plugin-data-guard.sh` + `plugin-data-guard-v1.js`)** — the Edit/Write deny into `CLAUDE_PLUGIN_DATA` and its residuals: `.claude/rules/plugin-data-guard.md`
 - **Bypass Ledger Read Contract (`tdd_bypasses`)** — how the "Gates bypassed" line reads the ledger: `.claude/rules/bypass-ledger-read-contract.md`
 - **Status-Marker Legend (CHAIN-END SUMMARY + PR bodies)** — the four status markers in the chain-end summary and PR bodies: `.claude/rules/status-marker-legend.md`

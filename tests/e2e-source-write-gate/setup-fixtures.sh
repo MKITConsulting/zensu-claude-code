@@ -8,6 +8,8 @@ FIXTURE="$FIXTURES_DIR/project"
 mkdir -p "$FIXTURE/src"
 printf '# source-write-gate fixture\n\nGit project with a tracked source file. A live `claude --print` run here\nexercises the PreToolUse(Bash) source-write gate end to end. Generated, git-ignored.\n' > "$FIXTURE/README.md"
 printf 'export const greeting = "hello";\n' > "$FIXTURE/src/sample.ts"
+mkdir -p "$FIXTURE/.zensu"
+printf '%s\n' '{"hooks":{"bashWriteGate":true}}' > "$FIXTURE/.zensu/config.json"
 
 if [ ! -d "$FIXTURE/.git" ]; then
   ( cd "$FIXTURE" \

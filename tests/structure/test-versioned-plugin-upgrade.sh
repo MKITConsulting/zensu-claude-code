@@ -637,7 +637,7 @@ mkdir -p "$SHARED_DATA" "$PROJECT"
 # otherwise adopt the record and every later row would grade a served session. The
 # AUTO-* rows in Part E drive the default path, each on a session of its own.
 OPT_OUT_CONFIG="$TMP/session-auto-adopt-off.json"
-printf '%s\n' '{"hooks":{"sessionAutoAdopt":false}}' >"$OPT_OUT_CONFIG"
+printf '%s\n' '{"hooks":{"sessionAutoAdopt":false,"bashWriteGate":true}}' >"$OPT_OUT_CONFIG"
 # The opt-out is passed PER DRIVE, as a command-scoped `ZENSU_CONFIG=` prefix, never
 # exported: exporting it would switch the default path off for every AUTO-* row too.
 #
@@ -646,10 +646,11 @@ printf '%s\n' '{"hooks":{"sessionAutoAdopt":false}}' >"$OPT_OUT_CONFIG"
 # developer whose global config carries `sessionAutoAdopt: false` turned every
 # default-path row red for a reason unrelated to the tree under test, and one whose
 # config disables any other hook changed what those rows graded. `ZENSU_CONFIG` names
-# a file verbatim and outranks both sources, so an empty object here makes the default
-# path hermetic; a per-drive prefix still wins, being command-scoped.
+# a file verbatim and outranks both sources, so an object that only opts the source-write
+# gate in makes the default path hermetic; a per-drive prefix still wins, being
+# command-scoped, and carries the same opt-in.
 HERMETIC_CONFIG="$TMP/hermetic-config.json"
-printf '%s\n' '{}' >"$HERMETIC_CONFIG"
+printf '%s\n' '{"hooks":{"bashWriteGate":true}}' >"$HERMETIC_CONFIG"
 export ZENSU_CONFIG="$HERMETIC_CONFIG"
 
 tree_digest() {
@@ -1926,7 +1927,7 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
   # Both halves of the conditional are matched for the same reason AC-C20 matches
   # both: the consequent alone survives deleting the guard.
   case "$reason_text" in
-    *"record was minted by 0.17.0 and 0.18.0 is executing"*"it was REFUSED: opted-out"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created"*) ;;
+    *"record was minted by 0.17.0 and 0.18.0 is executing"*"it was REFUSED: opted-out"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created"*) ;;
     *) LINEAGE_REASON_FAILURES="$LINEAGE_REASON_FAILURES $reason_hook" ;;
   esac
 done
@@ -2079,7 +2080,7 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     `# would leave AC-C15a's positive green while this report told the user their` \
     `# project root was gone. The --confirm half already carries its own negative.` \
     && ! grep -qF '(GONE)' "$ADOPT_REPORT_OUT" \
-    && ! grep -qF 'It does NOT restore writes' "$ADOPT_REPORT_OUT" \
+    && ! grep -qF 'It does NOT restore the file tools' "$ADOPT_REPORT_OUT" \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
   check "AC-C07 the bare entry point reports adoptable and changes nothing" PASS
 else
@@ -3704,7 +3705,7 @@ if printf '%s' "$GONE_START" \
       && grep -qF 'ADOPTABLE' "$GONE_REPORT_OUT" \
       && grep -qF '(GONE)' "$GONE_REPORT_OUT" \
       && grep -qF 'Nothing has been changed' "$GONE_REPORT_OUT" \
-      && grep -qF 'It does NOT restore writes' "$GONE_REPORT_OUT" \
+      && grep -qF 'It does NOT restore the file tools' "$GONE_REPORT_OUT" \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.17.0 ]; then
     check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing" PASS
   else
@@ -3957,7 +3958,7 @@ if printf '%s' "$GONE_START" \
       && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
       && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
       && grep -qF 'while Edit, Write and MultiEdit stay denied, and so does any Bash command' "$GONE_CONFIRM_OUT" \
-      && grep -qF 'the source-write gate can attribute as a write — a write cannot be attributed' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'the source-write gate can attribute as a write while that opt-in gate is on' "$GONE_CONFIRM_OUT" \
       && [ ! -e "$GONE_PROJECT" ] \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ] \
@@ -4229,7 +4230,7 @@ env ZDOC_BINDING=incompatible-runtime \
   CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_OFF" 2>/dev/null
 if grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ON" \
-    && grep -qF 'Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
+    && grep -qF 'Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
     && ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_OFF" \
     && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_OFF"; then
   check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" PASS
@@ -4376,7 +4377,7 @@ if [ "$CAPABILITY_DECISION" = deny ] \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'it was REFUSED: opted-out' \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'If the recorded project root is ALSO gone' \
-    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'; then
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write while that opt-in gate is on (hooks.bashWriteGate: true), until that exact directory is re-created'; then
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair" PASS
 else
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL

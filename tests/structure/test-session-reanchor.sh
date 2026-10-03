@@ -51,6 +51,8 @@ SLEEPER_JOB=$!
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$STATE_DIR/live.pid" ] && break; sleep 0.25; done
 LIVE_PID="$(cat "$STATE_DIR/live.pid" 2>/dev/null)"
 export ZENSU_CONFIG="$STATE_DIR/no-config.json"
+GATE_ON_CONFIG="$STATE_DIR/gate-on-config.json"
+printf '%s' '{"hooks":{"bashWriteGate":true}}' > "$GATE_ON_CONFIG"
 
 REPO="$STATE_DIR/repo"
 OTHER="$STATE_DIR/other"
@@ -113,7 +115,7 @@ bash_payload() {
 read_payload() {
   node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.argv[1],cwd:process.argv[2],agent_id:"e2e-aspect",agent_type:"zensu:review-aspect",tool_name:"Read",tool_input:{file_path:process.argv[3]}}))' "$SID" "$1" "$2"
 }
-git_add_in() { run_hook pre-bash-source-write-gate.sh "$(bash_payload "$1" "git add $2")" | decision; }
+git_add_in() { ZENSU_CONFIG="$GATE_ON_CONFIG" run_hook pre-bash-source-write-gate.sh "$(bash_payload "$1" "git add $2")" | decision; }
 reviewer_read() { run_hook pre-reviewer-capability-gate.sh "$(read_payload "$1" "$2")" | decision; }
 RA_OUT=""; RA_RC=0; RA_ZENSU_CONFIG=""
 reanchor_from() {
@@ -155,7 +157,7 @@ case "$E1D" in
   (DENY:*) check "E1d a review-aspect reviewer cannot read the sibling worktree yet" PASS ;;
   (*) check "E1d reviewer read of the sibling worktree (got '$E1D')" FAIL ;;
 esac
-E1E="$(run_hook pre-bash-source-write-gate.sh "$(bash_payload "$B" "CLAUDE_PLUGIN_DATA=\"$DATA\" bash \"$REANCHOR\" --confirm")" | decision)"
+E1E="$(ZENSU_CONFIG="$GATE_ON_CONFIG" run_hook pre-bash-source-write-gate.sh "$(bash_payload "$B" "CLAUDE_PLUGIN_DATA=\"$DATA\" bash \"$REANCHOR\" --confirm")" | decision)"
 expect_eq "E1e the bound session's Bash gate admits the re-anchor command itself" "ALLOW" "$E1E"
 
 echo "=== E2: the read-only report ==="

@@ -149,18 +149,22 @@ session-trail takeover — which normally arms no chain — records NOTHING. An 
 "taking it is RECORDED" told a reader that a destructive escape leaves a trail it will not
 leave, which is worse than saying nothing.
 
-**The ESCAPE is named, never SPELLED, and never PRESCRIBED — and the fourth of those was
-missing for a round.** Rendering the prefix would be the shipped hatch §"Git Mutation Tables"
+**The ESCAPE is never SPELLED and never PRESCRIBED, and since the gate became opt-in the deny
+no longer names it either.** Rendering the prefix would be the shipped hatch §"Git Mutation Tables"
 forbids outright, and that much was right from the start. What was wrong was "take it from
 there rather than from here", which INSTRUCTS the reader to take it and contradicts
-`skills/session-trail/SKILL.md` §5's own "Do not plan around the escape prefix the deny
-names … do not go looking for the spelling in order to use it" — a rule that also records
+`skills/session-trail/SKILL.md` flow 3 step 3's own "Do not plan around an escape prefix …
+do not go looking for the spelling in order to use it" — a rule that also records
 that the host classifier commonly refuses the prefix, so the old wording pointed at a remedy
-which usually cannot be taken. **That sentence in the parser is a cross-module dependency registered in PROSE and pinned
-by nothing**: the advice asserts the deny message names an escape, the only thing making
-that true is an inline string literal in `bash-source-write-parse.js`, and nothing in
-`tests/` greps it. It IS registered on §"Git Mutation Tables"'s coupled-sites roster and is pinned by nothing
-there; `WT8v8` asserts only the negative direction, that no arm spells the prefix.
+which usually cannot be taken. **The deny no longer names the escape at all.** The gate is
+opt-in now, and every reason rules (A)/(B)/(C) produce ends with `OPT_IN_NOTE` in
+`bash-source-write-parse.js`, which names `hooks.bashWriteGate` and leaves an intended command
+to the user; four of the hook's own denies carry the same sentence through its `OPT_IN_NOTE`
+variable, and the bound parser-failure deny names the key in a remedy of its own. The advice
+asserts exactly that shape; the gate suite pins the note and the prefix's absence
+(W32/W33/W87/W121), and `T35b` and `WT8v12`/`WT8v12b` pin each skill carrier's own wording,
+while nothing compares either carrier against the parser, as §"Git Mutation Tables" records. `WT8v8` asserts the negative direction, that no arm
+spells the prefix.
 
 **The SAME-BRANCH benefit is bounded to one repository.** Across two, the create line fails
 harmlessly on a branch it cannot resolve while the move SUCCEEDS and relocates a foreign
@@ -238,8 +242,8 @@ needles on the doc carrier — the attestation paragraph had none until
 described the emitted carrier and not this one; the emitted side really did have one per
 sibling. (3) The bar guards the one rendered command in this flow that writes to the source
 worktree with no REFUSAL STANDING in front of it — "refusal standing", never "gate refusal":
-what is absent there are the renderer's own refusals, while the write gate DOES judge this
-command, so naming the gate flips the claim onto the thing that applies. A fourth subject was
+what is absent there are the renderer's own refusals, while the write gate, when it is opted in,
+DOES judge this command, so naming the gate flips the claim onto the thing that applies. A fourth subject was
 unpinned on both carriers until the same round and is NOT part of that sentence: the
 consequence of taking the escape anyway, pinned by `WT8v7c` and
 `[move-destination-containment]`. The fence SEPARATION of the create and move commands is a
@@ -575,9 +579,10 @@ durable, so it has no ordering to hold.
 **Known gaps, accepted and named:**
 
 - **The rule is prose, not a gate.** Nothing stops a session working in another session's
-  worktree; the source-write gate only refuses a COMMIT outside the anchor, which is the
-  other axis. This change makes every rendered recommendation point at the taker's own
-  worktree — it does not enforce one.
+  worktree; the opt-in source-write gate, when it is on, only refuses a COMMIT outside the
+  anchor, which is the other axis, and at its default (off) nothing refuses even that. This
+  change makes every rendered recommendation point at the taker's own worktree — it does
+  not enforce one.
 - **The carry-over's untracked half carries a hazard no git flag touches**, and it is now
   a RUNNABLE loop rather than a sentence. `ls-files --others --exclude-standard` reports a
   SYMLINK by name like any other path, so a copy follows it out of the worktree — in a
