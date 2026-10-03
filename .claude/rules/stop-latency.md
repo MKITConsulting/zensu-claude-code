@@ -177,18 +177,26 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on bash
   3.2) and the config reads (4).
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
-  container). Git Bash is unverified. The symlink checks `L43`, `L48`, `L50`, `L51` and `L52`
-  make their links through Node, never with `ln -s`, which Git Bash satisfies with a copy.
-  `L43`, `L50`, `L51` and `L52` link a directory with `make_directory_symlink`: a junction on
-  win32, a directory symlink elsewhere. `L48` links the session record, a file, which a junction
-  cannot do. It uses `make_file_symlink`, a native file symlink, which Windows creates only for
-  an elevated token or in Developer Mode, so `L48` keeps its skip arm. Each of the five checks
-  skips only when its helper fails, never on what `[ -L ]` reports: `L43` and `L51` read exit
-  code 5 of the memo driver, and `L52` reads the `.unlinked` marker of `swap-after-root.sh`. The
-  suite is excluded from the blocking Windows shards in
-  `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
-  workflow through `ciStructureTests`. `L13` and `L17d` still link with `ln -s`; their
-  behavior on Git Bash is unverified.
+  container). Git Bash is unverified. The symlink checks `L13`, `L17d`, `L43`, `L48`, `L50`, `L51`
+  and `L52` make their links through Node, never with `ln -s`, which Git Bash satisfies with a
+  copy; the suite generates both helpers before `L13`. `L13`, `L17d`, `L43`, `L50`, `L51` and
+  `L52` link a directory with `make_directory_symlink`: a junction on win32, a directory symlink
+  elsewhere. `L13` uses it for the Autopilot sentinel too, a file leaf, because a junction needs
+  no privilege, and the probe's `leafSafe` and `_tdd_paths_safe` both refuse any link before they
+  look at its type. Its target does not exist: libuv's `fs__create_junction` never reads a
+  junction's target, and `lstat` classifies the junction from its reparse data alone. `L48` links
+  the session record, a file, which a junction cannot do. It uses `make_file_symlink`, a native
+  file symlink, which Windows creates only for an elevated token or in Developer Mode, so `L48`
+  keeps its skip arm. Each of the seven checks skips only when its helper fails, never on what
+  `[ -L ]` reports: `L13`, `L17d` and `L50` read the helper's exit status, `L43`, `L48` and `L51`
+  read exit code 5 of the memo driver, and `L52` reads the `.unlinked` marker of
+  `swap-after-root.sh`. `L17d` depends on that: its state directory is moved aside before the
+  link is made, and a missing state directory answers `busy` too. It removes the link with
+  `rm -f`, which relies on Git Bash counting a junction as a symbolic link, as the msys2
+  runtime's `check_reparse_point_target` does; if it does not, the state directory stays
+  unrestored and the control `L17e` fails. The suite is excluded from the blocking Windows shards
+  in `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
+  workflow through `ciStructureTests`.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
