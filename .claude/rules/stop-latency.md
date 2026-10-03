@@ -158,9 +158,18 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on bash
   3.2) and the config reads (4).
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
-  container). Git Bash is unverified, and the symlink checks `L43`, `L48`, `L50`, `L51` and
-  `L52` assert nothing on a host that creates no symbolic link, which includes Git Bash in the
-  weekly Windows Safety shard.
+  container). Git Bash is unverified. The symlink checks `L43`, `L48`, `L50`, `L51` and `L52`
+  make their links through Node, never with `ln -s`, which Git Bash satisfies with a copy.
+  `L43`, `L50`, `L51` and `L52` link a directory with `make_directory_symlink`: a junction on
+  win32, a directory symlink elsewhere. `L48` links the session record, a file, which a junction
+  cannot do. It uses `make_file_symlink`, a native file symlink, which Windows creates only for
+  an elevated token or in Developer Mode, so `L48` keeps its skip arm. Each of the five checks
+  skips only when its helper fails, never on what `[ -L ]` reports: `L43` and `L51` read exit
+  code 5 of the memo driver, and `L52` reads the `.unlinked` marker of `swap-after-root.sh`. The
+  suite is excluded from the blocking Windows shards in
+  `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
+  workflow through `ciStructureTests`. `L13` and `L17d` still link with `ln -s`; their
+  behavior on Git Bash is unverified.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
