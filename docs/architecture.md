@@ -168,9 +168,10 @@ injects roughly 4.2 KB on the same prompt channel. The DIRECTIVE behind that fig
 since the chain-progress anchor landed — `Z30` in `tests/structure/test-zen-mode.sh` holds it
 under a declared ceiling — but `Z30` reads the hook and never opens this document, so the number
 written here is hand-derived like every other one below, and ages the same way. `C6` above stays
-the only figure a check reads out of this paragraph. A `/zensu:tdd` review round spawns five
-`review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
-**at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
+the only figure a check reads out of this paragraph. A full-panel `/zensu:tdd` review round
+(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
+the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
+spawns three aspects and runs the judge on the first review only — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
 to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds a chain needs at
@@ -245,7 +246,7 @@ Finally, the rule yields where another contract already fixes an order. A skill 
 2. /zensu:implement ZEN-1    → Load context, plan implementation
 3. /zensu:tdd                → Guided main-thread implementation (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-hook guaranteed)
-5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off)
+5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 

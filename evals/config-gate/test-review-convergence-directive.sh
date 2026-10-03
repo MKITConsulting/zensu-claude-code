@@ -69,6 +69,10 @@ render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRo
 render_rounds summary-off '{"hooks":{"autoFix":true,"selfReview":false,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds max-rounds '{"hooks":{"autoFix":true,"autoFixMaxRounds":1}}'
 render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}'
+render_rounds repro-off '{"hooks":{"autoFix":true,"criticalReproduction":false}}'
+render_rounds repro-fv-off '{"hooks":{"autoFix":true,"findingVerification":false}}'
+render_rounds one-round '{"hooks":{"autoFix":true}}'
+render_rounds full-panel '{"hooks":{"autoFix":true,"reviewPanel":"full"}}'
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL
@@ -190,6 +194,23 @@ case "$MAXOFF2" in
     check "MR2 the max-rounds close without self-review runs the full suite before the reply" PASS ;;
   *) check "MR2 the max-rounds close without self-review runs the full suite before the reply" FAIL ;;
 esac
+ONE1="$(context_of "$TMP_DIR/one-round/round-1.json")"
+ONE2="$(context_of "$TMP_DIR/one-round/round-2.json")"
+RPOFF2="$(context_of "$TMP_DIR/repro-off/round-2.json")"
+RPOFF1="$(context_of "$TMP_DIR/repro-off/round-1.json")"
+RPFV1="$(context_of "$TMP_DIR/repro-fv-off/round-1.json")"
+check "RP0 the default budget routes one fix round after the first review" "$(has "$ONE1" 'Review convergence (hooks.reviewConvergence is on)')"
+check "RP0b the default budget hands the verification review over at max rounds" "$(has "$ONE2" 'max 1 rounds reached')"
+check "RP1 the default clause gates a re-review CRITICAL on a reproduction" "$(has "$ONE1" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
+check "RP2 the default hand-off names the reproduction rule for self-review" "$(has "$ONE2" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "RP3 criticalReproduction off drops the rule from the clause" "$(lacks "$RPOFF1" 'FINDING REPRODUCTION')"
+check "RP4 criticalReproduction off drops the rule from the hand-off" "$(lacks "$RPOFF2" 'FINDING REPRODUCTION')"
+check "RP5 findingVerification off drops the rule, since stage 3 lives in that gate" "$(lacks "$RPFV1" 'FINDING REPRODUCTION')"
+FULL1="$(context_of "$TMP_DIR/full-panel/round-1.json")"
+check "LP1 the default fix round re-reviews with the lean panel" "$(has "$ONE1" 'aspect-activation-v1.js --panel lean --round re answers spawn')"
+check "LP2 the default fix round keeps the judge for the full panel only" "$(has "$ONE1" 'only when hooks.reviewJudge is enabled and hooks.reviewPanel is full')"
+check "LP3 reviewPanel full re-reviews with the full panel" "$(has "$FULL1" 'aspect-activation-v1.js --panel full --round re answers spawn')"
+check "LP4 no unexpanded panel variable reaches the model" "$(lacks "$ONE1" '${PANEL}')"
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"

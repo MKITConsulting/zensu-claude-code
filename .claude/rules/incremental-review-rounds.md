@@ -29,6 +29,22 @@ drift into a file THIS round did not touch is precisely what a delta hides — i
 finding class a narrowed panel structurally cannot raise. Never "simplify" the judge onto the
 delta; that deletes the compensating control rather than a redundancy.
 
+**The lean panel (`hooks.reviewPanel`, default `lean`) re-reviews without the judge, by
+decision.** The first review spawns `correctness`, `design` and `security` plus the judge; a fix
+round's re-review spawns `correctness` alone on the round delta and no judge (`--panel <panel>
+--round <round>` of `aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of
+both delegate arms). That drops the compensating control above knowingly: with one fix round by
+default, the re-review is the last review before `/zensu:self-review`, which re-reads the whole
+change, and the consume-mode code-reviewer still reads the merge. `reviewPanel: full` restores
+five perspectives and a judge on every review. Without a judge, a lean re-review routes an
+IMPORTANT finding only when it cites code the fix pass edited, and the convergence clause runs
+its helpers before classifying instead of before a judge pass. Coupled sites: `zensu_review_panel`
+in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, the `correctness`
+and `design` checklist lines of `agents/review-aspect.md`, the `reviewPanel` row of
+`docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`, `config.example.json`,
+LC3 to LC3j in `tests/structure/test-review-convergence.sh`, and LP1 to LP4 in
+`evals/config-gate/test-review-convergence-directive.sh`.
+
 **FAIL-OPEN IS THE WHOLE CONTRACT, and it has three degraded causes rather than two.**
 `roundScope` answers `ok` only when it resolved a real delta; `empty` (no claims logged for the
 round) and `degraded` keep the WHOLE diff. TRUNCATION at EITHER cap is a degraded cause and was
@@ -42,8 +58,9 @@ the shape `persona-activation.js` already established for repo-local personas. `
 `bugs` ALWAYS spawn; `tests`/`security` are skipped only on a documentation-only change set;
 `architecture` only when the change set carries no production code at all. **`security`
 deliberately still runs on a tests-only change set** — fixtures carry credentials, and that is
-exactly the case a "just tests" heuristic would miss. Empty or unclassifiable input spawns all
-five, so a narrowed panel is always a proven reduction rather than a guess, and the predicates
+exactly the case a "just tests" heuristic would miss. Those are the full panel's rules; the lean
+panel skips only `security`, on a documentation-only change set. Empty or unclassifiable input
+spawns the whole panel, so a narrowed panel is always a proven reduction rather than a guess, and the predicates
 therefore ask "is EVERY file X", never "is SOME file X": one production file restores the panel.
 
 **Every reduction DISCLOSES.** A skipped aspect logs `ASPECT SKIPPED — <aspect> (<reason>)` and a

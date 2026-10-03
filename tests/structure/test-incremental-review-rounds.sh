@@ -99,13 +99,19 @@ for bad in "--log $TMP/absent.log --round 1" "--log $TMP/run.log --round 0" "--l
   esac
 done
 
-OUT="$(cd "$ROOT" && printf '' | node "$ASPECT_LIB" 2>&1)"
+OUT="$(cd "$ROOT" && printf '' | node "$ASPECT_LIB" --panel full 2>&1)"
 case "$OUT" in
   *"spawn=5"*) check "I5 empty change set fails open to all five aspects" PASS ;;
   *) check "I5 empty change set fails open to all five aspects" FAIL ;;
 esac
 
-OUT="$(cd "$ROOT" && printf 'tests/structure/test-a.sh\n' | node "$ASPECT_LIB" 2>&1)"
+OUT="$(cd "$ROOT" && printf '' | node "$ASPECT_LIB" 2>&1)"
+case "$OUT" in
+  *"spawn=3"*) check "I5b the default lean panel fails open to its three perspectives" PASS ;;
+  *) check "I5b the default lean panel fails open to its three perspectives" FAIL ;;
+esac
+
+OUT="$(cd "$ROOT" && printf 'tests/structure/test-a.sh\n' | node "$ASPECT_LIB" --panel full 2>&1)"
 case "$OUT" in
   *"spawn security"*) check "I6 a tests-only change set still runs security" PASS ;;
   *) check "I6 a tests-only change set still runs security" FAIL ;;
@@ -115,7 +121,7 @@ case "$OUT" in
   *) check "I6a a tests-only change set drops architecture" FAIL ;;
 esac
 
-OUT="$(cd "$ROOT" && printf 'src/a.ts\ndocs/b.md\n' | node "$ASPECT_LIB" 2>&1)"
+OUT="$(cd "$ROOT" && printf 'src/a.ts\ndocs/b.md\n' | node "$ASPECT_LIB" --panel full 2>&1)"
 case "$OUT" in
   *"spawn=5"*) check "I7 one production file restores the full panel" PASS ;;
   *) check "I7 one production file restores the full panel" FAIL ;;
@@ -136,7 +142,7 @@ check "I16 tdd skill spawns all five when activation is unavailable" "$(grep_ok 
 # appear TWICE — a one-sided edit is the failure this counts rather than greps.
 for needle in 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
               'status=empty or status=degraded' 'always keeps the full cumulative diff' \
-              'hooks.aspectActivation skips one'; do
+              'aspect-activation-v1.js --panel ${PANEL} --round re'; do
   n="$(grep -cF -- "$needle" "$DELEGATE")"
   [ "$n" -eq 2 ] && check "I17 both delegate arms carry [$needle] (${n}x)" PASS \
                  || check "I17 both delegate arms carry [$needle] (${n}x, want 2)" FAIL

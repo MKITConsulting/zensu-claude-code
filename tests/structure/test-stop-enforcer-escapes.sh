@@ -24,7 +24,8 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"   # defaults: chainEnforcer enabled
+export ZENSU_CONFIG="$STATE_DIR/max-rounds-5.json"   # autoFixMaxRounds pinned to 5, other defaults: chainEnforcer enabled
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
@@ -74,7 +75,7 @@ else
 fi
 
 # --- E3 anti-deadlock: blocks > CAP -> allow + stderr warning ---
-# Default autoFixMaxRounds=5 -> CAP=MAX_ROUNDS+3=8. Pre-seed CAP 'x's so THIS run
+# autoFixMaxRounds pinned to 5 -> CAP=MAX_ROUNDS+3=8. Pre-seed CAP 'x's so THIS run
 # (which appends one) crosses the cap (9 > 8) and releases.
 SID3="esc-budget-exhausted"
 arm "$SID3"

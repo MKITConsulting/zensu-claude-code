@@ -56,7 +56,7 @@ as it is.
 | TDD mode — vanilla vs. strict RED→GREEN | `hooks.tddImplementation` | bool | `false` (vanilla) |
 | Review-chain enforcer | `hooks.chainEnforcer` | bool | `true` |
 | Durable Autopilot enforcer | `hooks.autopilotEnforcer` | bool | `true` |
-| Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `5` |
+| Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `1` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
 | Pulse telemetry session | `hooks.pulseSession` | bool | `true` |
@@ -111,7 +111,7 @@ most two `AskUserQuestion` calls (≤4 questions each):
 
 - **Booleans** (`tddImplementation`, `chainEnforcer`, `autopilotEnforcer`, `pulseSession`,
   `compactionNudge`) → two options (on / off), current state labelled.
-- **`autoFixMaxRounds`** → presets `3` / `5` / `8` plus the free-text "Other" (accept
+- **`autoFixMaxRounds`** → presets `1` / `2` / `5` plus the free-text "Other" (accept
   any integer 1–99).
 - **`nudgeThreshold`** → presets `40` / `50` / `70` plus "Other" (1–99). Ask this
   **only** when `compactionNudge` ends up enabled.
