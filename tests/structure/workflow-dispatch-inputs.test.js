@@ -228,6 +228,8 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ toJSON(github) }}',
     '${{ INPUTS.skip_reason }}',
     '${{ GitHub.head_ref }}',
+    '${{ github.repository_owner }}',
+    '${{ github.sha || github.head_ref }}',
   ];
   const trusted = [
     '${{ github.sha }}',
@@ -237,6 +239,8 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ GITHUB.SHA }}',
     '${{ steps.github.outputs.sha }}',
     '${{ needs.env.outputs.value }}',
+    '${{ needs.build-github.outputs.inputs }}',
+    "${{ github.event_name == 'workflow_dispatch' }}",
     '${{ steps.ver.outputs.version }}',
     '${{ runner.temp }}',
     '${{ matrix.shard }}',
