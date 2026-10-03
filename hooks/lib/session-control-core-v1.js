@@ -1096,6 +1096,13 @@ function withFileLock(lockDirectory, key, callback) {
       sleep(20);
       continue;
     }
+    if (fs.existsSync(lockFile)) {
+      if (externalArtifactNeedsRecovery(lockOwner(lockFile), attempt)) {
+        recoverStaleLock(directory, key, lockFile);
+      }
+      sleep(20);
+      continue;
+    }
     acquired = createOwnedArtifact(lockFile, 'lock');
     if (acquired) {
       // A recovery owner may have won immediately after our pre-check. Do not
@@ -1103,8 +1110,6 @@ function withFileLock(lockDirectory, key, callback) {
       if (!fs.existsSync(recoveryFile)) break;
       releaseOwnedLock(directory, key, lockFile, acquired);
       acquired = undefined;
-    } else {
-      recoverStaleLock(directory, key, lockFile);
     }
     sleep(20);
   }
