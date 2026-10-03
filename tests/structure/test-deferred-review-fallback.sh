@@ -129,6 +129,7 @@ else
   chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
   if [ "$RC" -eq 0 ] \
     && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
+    && ! printf '%s' "$OUT" | grep -qF 'Autopilot state could not be read' \
     && [ -f "$MARKER" ] \
     && [ ! -e "${MARKER}.claim" ] \
     && [ "$FAIL_BEFORE" = "$(cksum < "$FAIL_FILE")" ]; then

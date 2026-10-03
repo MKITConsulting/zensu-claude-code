@@ -129,6 +129,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Automatic Adoption (`hooks/lib/session-auto-adopt-v1.js`)** — the hook-side adoption of a compatible-schema record across a lineage break, its opt-out and the refusal tokens its denies name: `.claude/rules/automatic-adoption.md`
 - **Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)** — rebuilding a missing workflow document without relaxing the deny: `.claude/rules/workflow-baseline-repair.md`
 - **Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)** — owner versus workspace scoping, release and adoption of durable runs: `.claude/rules/autopilot-run-scope.md`
+- **Owner-Scoped Active-Run Read (`autopilot_read_active_strict`)** — which callers read the owner-scoped question strictly, the read-only look on a held lease, and the lease checks: `.claude/rules/autopilot-active-read.md`
 - **CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)** — which `zensu` CLI verbs the write-gate treats as mutations: `.claude/rules/cli-command-classification.md`
 - **Foreign-Chain Row (`zensu-doctor.sh` + `zensu-doctor-report.js`)** — the `/zensu:doctor` rows about chains and their record anchor: `.claude/rules/foreign-chain-row.md`
 - **Autopilot Lease Row (`leaseRow` in `hooks/lib/zensu-doctor-report.js`)** — the read-only `/zensu:doctor` rows for the Autopilot project lease and its recovery sentinel, rendered from the core's `inspectExternalProcessLock`: `.claude/rules/autopilot-lease-row.md`

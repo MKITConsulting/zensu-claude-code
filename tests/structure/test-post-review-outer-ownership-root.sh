@@ -43,6 +43,7 @@ unset CLAUDE_PLUGIN_DATA ZENSU_PROJECT_ROOT ZENSU_SESSION_CONTEXT ZENSU_SESSION_
 source "$PHASE"
 # shellcheck disable=SC1090
 source "$AUTOPILOT"
+source "$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh"
 
 MARKER='PRE-MERGED FINDINGS (fan-out)'
 
@@ -99,11 +100,26 @@ run_hook_in() {
   ' | ( cd "$cwd" && env CLAUDE_PROJECT_DIR="$ambient" bash "$HOOK" 2>/dev/null )
 }
 
+run_hook_leased() {
+  local project="$1" ticket="$2"
+  SID="$CLAUDE_CODE_SESSION_ID" TICKET="$ticket" MARKER="$MARKER" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `${process.env.MARKER}\nREVIEW-TICKET: ${process.env.TICKET}\nVerdict: PASS`
+      },
+      session_id: process.env.SID
+    }));
+  ' | CLAUDE_PROJECT_DIR="$project" with_autopilot_lease "$project" bash "$HOOK" 2>/dev/null
+}
+
 ticket_consumed() {
   FILE="$1" node -e '
     try {
       const s = JSON.parse(require("fs").readFileSync(process.env.FILE, "utf8"));
-      process.exit(s.reviewTicket === "" && s.reviewRound >= 1 ? 0 : 1);
+      process.exit(s.reviewTicketConsumed === true && s.reviewRound >= 1 ? 0 : 1);
     } catch (_) { process.exit(1); }
   ' 2>/dev/null
 }
@@ -145,6 +161,57 @@ if ! ticket_consumed "$OWNED_STATE"; then
   check "O2a the one-shot review ticket survives the refusal unconsumed" PASS
 else
   check "O2a review ticket was consumed despite the refusal" FAIL
+fi
+
+arm outer-leased || { echo "O2d fixture failed" >&2; exit 1; }
+LEASED_PROJECT="$ARMED_PROJECT"
+LEASED_STATE="$(tdd_state_file "$ARMED_KEY")"
+autopilot_begin_run outer-leased-run "$ARMED_KEY" "$LEASED_PROJECT" >/dev/null 2>&1 \
+  || { echo "O2d fixture: outer run could not be started" >&2; exit 1; }
+START2D=$SECONDS
+OUT2D="$(run_hook_leased "$LEASED_PROJECT" "$ARMED_TICKET")"; RC2D=$?
+ELAPSED2D=$((SECONDS - START2D))
+if [ "$RC2D" -eq 0 ] && [ "$ELAPSED2D" -ge 8 ] && [ -z "$OUT2D" ] && ! ticket_consumed "$LEASED_STATE"; then
+  check "O2d a held Autopilot lease refuses the unbound claim and keeps the ticket unconsumed" PASS
+else
+  check "O2d a held lease must not read as no run (rc=$RC2D elapsed=${ELAPSED2D}s out='$OUT2D')" FAIL
+fi
+
+arm outer-leased-free || { echo "O2e fixture failed" >&2; exit 1; }
+LEASED_FREE_STATE="$(tdd_state_file "$ARMED_KEY")"
+START2E=$SECONDS
+OUT2E="$(run_hook_leased "$ARMED_PROJECT" "$ARMED_TICKET")"; RC2E=$?
+ELAPSED2E=$((SECONDS - START2E))
+if [ "$RC2E" -eq 0 ] && [ "$ELAPSED2E" -ge 8 ] && [ -n "$OUT2E" ] && ticket_consumed "$LEASED_FREE_STATE"; then
+  check "O2e a held Autopilot lease still routes a session that provably owns no run" PASS
+else
+  check "O2e a held lease must not drop routing for a session without a run (rc=$RC2E elapsed=${ELAPSED2E}s out='$OUT2E')" FAIL
+fi
+
+arm outer-unsafe-storage || { echo "O2f fixture failed" >&2; exit 1; }
+UNSAFE_STATE="$(tdd_state_file "$ARMED_KEY")"
+mkdir -p "$ARMED_PROJECT/.zensu/state/autopilot"
+OUT2F="$(run_hook "$ARMED_PROJECT" "$ARMED_TICKET")"; RC2F=$?
+rmdir "$ARMED_PROJECT/.zensu/state/autopilot"
+if [ "$RC2F" -eq 0 ] && [ -z "$OUT2F" ] && ! ticket_consumed "$UNSAFE_STATE"; then
+  check "O2f unsafe Autopilot storage refuses the unbound claim instead of reading as no run" PASS
+else
+  check "O2f unsafe storage must not read as no run (rc=$RC2F out='$OUT2F')" FAIL
+fi
+
+arm outer-leased-cancelled || { echo "O2g fixture failed" >&2; exit 1; }
+CANCELLED_STATE="$(tdd_state_file "$ARMED_KEY")"
+autopilot_begin_run outer-cancelled-run "$ARMED_KEY" "$ARMED_PROJECT" >/dev/null 2>&1 \
+  || { echo "O2g fixture: outer run could not be started" >&2; exit 1; }
+autopilot_apply_event outer-cancelled-run cancel-outer-leased CANCEL '{}' "$ARMED_PROJECT" >/dev/null 2>&1 \
+  || { echo "O2g fixture: outer run could not be cancelled" >&2; exit 1; }
+START2G=$SECONDS
+OUT2G="$(run_hook_leased "$ARMED_PROJECT" "$ARMED_TICKET")"; RC2G=$?
+ELAPSED2G=$((SECONDS - START2G))
+if [ "$RC2G" -eq 0 ] && [ "$ELAPSED2G" -ge 8 ] && [ -n "$OUT2G" ] && ticket_consumed "$CANCELLED_STATE"; then
+  check "O2g a held Autopilot lease still routes a session whose own run is cancelled" PASS
+else
+  check "O2g a held lease must not drop routing behind a cancelled own run (rc=$RC2G elapsed=${ELAPSED2G}s out='$OUT2G')" FAIL
 fi
 
 # --- O2b a foreign nonterminal run HOLDING THIS WORKING TREE ---
