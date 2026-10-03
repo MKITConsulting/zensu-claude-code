@@ -850,6 +850,7 @@ emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=$
 if [ "$RECEIPT_EXPLICIT" -eq 1 ] && [ "$RECEIPT_PATH" = "-" ]; then
   :
 else
+  _key_refusal="the session key resolved empty"
   if [ -z "$RECEIPT_PATH" ] && [ -n "$SESSION_ID" ]; then
     # Canonicalize through the same helper the rest of the plugin uses, so the
     # receipt lands where `--tdd-complete` looks for it. A harness session id and
@@ -863,15 +864,22 @@ else
     # value like `../../tmp/x` yields an absolute path that passes every guard
     # below and would place session state outside .zensu/state entirely.
     if [ -z "$_key" ]; then
-      # ANCHORED, not a `case` glob: in a glob `*` matches `/` and `.`, so
-      # `scv1_a/../../tmp/x` would pass a `scv1_[0-9a-f]*` pattern and then pass
-      # the prefix containment below as well, because the string does start with
-      # the state directory. The canonical key is exactly 64 hex characters.
-      if [[ "$SESSION_ID" =~ ^scv1_[0-9a-f]{64}$ ]]; then
-        _key="$SESSION_ID"
-      else
-        _key=""
+      _EL_SESSION_LIB="$(dirname "$0")/zensu-session.sh"
+      _key_shape_rc=2
+      if [ -f "$_EL_SESSION_LIB" ] && [ ! -L "$_EL_SESSION_LIB" ] && [ -r "$_EL_SESSION_LIB" ]; then
+        (
+          set +u
+          unset -f zensu_session_key_canonical
+          . "$_EL_SESSION_LIB" || exit 2
+          zensu_session_key_canonical "$SESSION_ID"
+        ) >/dev/null 2>&1
+        _key_shape_rc=$?
       fi
+      case "$_key_shape_rc" in
+        0) _key="$SESSION_ID" ;;
+        1) ;;
+        *) _key_refusal="the session-key shape check in zensu-session.sh could not be loaded" ;;
+      esac
     fi
     RECEIPT_PATH="$PROJECT_ABS/.zensu/state/edit-landing-${_key}.json"
   fi
@@ -907,7 +915,7 @@ else
       # blame a missing receipt instead of naming this cause. It is deliberately
       # NOT `CLEAN=0` — see the exit contract at the foot of this file: the claims
       # may all have landed perfectly, and saying otherwise names the wrong cause.
-      [ -n "$RECEIPT_PATH" ] && { emit "RECEIPT REFUSED — the session key resolved empty, so no receipt was written (would have been $(zensu_safe_render "${RECEIPT_PATH}"))"; RECEIPT_FAILED=1; }
+      [ -n "$RECEIPT_PATH" ] && { emit "RECEIPT REFUSED — ${_key_refusal}, so no receipt was written (would have been $(zensu_safe_render "${RECEIPT_PATH}"))"; RECEIPT_FAILED=1; }
       RECEIPT_PATH=""
       ;;
     /*) ;;
