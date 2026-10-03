@@ -47,10 +47,10 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites and they differ. `--tdd-complete`'s change count is NOT
 ambient: it resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1381`) and runs every `git` call with the discovery and
-config-injection variables unset (`:1425`, `:1438-1440`). The `--chain-done`
+(`hooks/lib/zensu-log.sh:1384`) and runs every `git` call with the discovery and
+config-injection variables unset (`:1428`, `:1441-1443`). The `--chain-done`
 zero-change terminus still reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` unscrubbed
-(`:2263-2265`) — ambient, with the same `.` fallback. An earlier revision of this
+(`:2266-2268`) — ambient, with the same `.` fallback. An earlier revision of this
 paragraph called the whole row ambient, which contradicted the superseded-fact
 paragraph below in the same section. Which root the ambient variable names in a
 multi-root topology, and what the fallback means when it is unset, is an open
@@ -61,7 +61,7 @@ question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:876`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1370`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1373`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -358,7 +358,7 @@ candidate whose price did not rise.
 chain at `UNINITIALIZED` denies all three destinations, but with the phase
 wording and for the unrelated directory too: that is TDD discipline, not
 containment, and it lifts at `RED_WRITE` and `REFACTOR`
-(`hooks/pre-edit-tdd-reminder.sh:209`). Reading that deny as a boundary is the
+(`hooks/pre-edit-tdd-reminder.sh:206, :219`). Reading that deny as a boundary is the
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
@@ -422,7 +422,7 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:876` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1438-1440`, `:2263-2265` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1441-1443`, `:2266-2268` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:573`, `:550` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -557,12 +557,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/SKILL.md:406`) and runs in vanilla
+Drift Audit does the same (`skills/tdd/SKILL.md:409`) and runs in vanilla
 (`skills/tdd/SKILL.md:202`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/SKILL.md:412`), which is a test vanilla cannot be made to produce.
+(`skills/tdd/SKILL.md:415`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/SKILL.md:415`), AND reword the finding
+level as step 6c already is (`skills/tdd/SKILL.md:417`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
@@ -634,7 +634,7 @@ with it: `adoptContext` re-mints through `buildContext`
 (`hooks/lib/session-control-core-v1.js:607`), so a new field
 must be threaded there or it is silently dropped at every adoption; and a
 `SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
-one release boundary as `record-unreadable` (`:1845`).
+one release boundary as `record-unreadable` (`:1850`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger
@@ -797,7 +797,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1348`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1351`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

@@ -13,6 +13,7 @@ check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else ech
 [ -f "$HOOK" ] && bash -n "$HOOK" 2>/dev/null && check "P1 plan hook exists and parses" PASS || check "P1 plan hook exists and parses" FAIL
 [ -f "$LIB" ] && bash -n "$LIB" 2>/dev/null && check "P2 state library exists and parses" PASS || { check "P2 state library exists and parses" FAIL; exit 1; }
 source "$LIB"
+source "$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh"
 
 review_marker() {
   local operation_key="$1" head_sha="$2" payload_digest="$3"
@@ -175,6 +176,98 @@ if printf '%s' "$HIDDEN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$HIDDEN_OUT" | grep -qF 'AskUserQuestion'; then
   check "P7d terminal pointer cannot hide a newer nonterminal run from plan routing" PASS
 else check "P7d hidden nonterminal run cannot inherit standalone plan policy" FAIL; fi
+
+LEASE_PROJECT="$TMP/lease-project"; mkdir -p "$LEASE_PROJECT"
+provision_session "$LEASE_PROJECT" lease_plan_session lease || exit 1
+LEASE_OWNER="$PROVISIONED_KEY"; LEASE_DATA="$PROVISIONED_DATA"
+autopilot_begin_run lease_plan_run "$LEASE_OWNER" "$LEASE_PROJECT" >/dev/null || exit 1
+LEASE_RUN_FILE="$(autopilot_run_file lease_plan_run "$LEASE_PROJECT")"
+LEASE_PLAN='# leased plan
+
+<!-- zensu-autopilot:lease_plan_run -->'
+LEASE_BEFORE="$(digest "$LEASE_RUN_FILE")"
+LEASE_OUT="$(
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$LEASE_DATA" \
+    CLAUDE_PROJECT_DIR="$LEASE_PROJECT" ZENSU_CONFIG="$CFG_OFF"
+  payload "$LEASE_PLAN" lease_plan_session | with_autopilot_lease "$LEASE_PROJECT" bash "$HOOK" 2>/dev/null
+)"
+LEASE_HELD_DIGEST="$(digest "$LEASE_RUN_FILE")"
+LEASE_FREE_OUT="$(invoke "$(payload "$LEASE_PLAN" lease_plan_session)" "$LEASE_PROJECT" "$CFG_OFF" "$LEASE_DATA")"
+if printf '%s' "$LEASE_OUT" | grep -qF 'PLAN_GATE_BLOCKED code=ACTIVE_STATE_UNREADABLE' \
+  && ! printf '%s' "$LEASE_OUT" | grep -qF 'PLAN_APPROVED' \
+  && ! printf '%s' "$LEASE_OUT" | grep -qF 'AskUserQuestion' \
+  && [ "$LEASE_HELD_DIGEST" = "$LEASE_BEFORE" ] \
+  && printf '%s' "$LEASE_FREE_OUT" | grep -qF 'PLAN_APPROVED runId=lease_plan_run'; then
+  check "P7e a held Autopilot lease blocks the plan gate instead of reading as no run" PASS
+else check "P7e held lease must block the plan gate (held=$(printf '%s' "$LEASE_OUT" | head -c 200))" FAIL; fi
+
+NORUN_PROJECT="$TMP/lease-norun-project"; mkdir -p "$NORUN_PROJECT"
+provision_session "$NORUN_PROJECT" lease_norun_session lease_norun || exit 1
+NORUN_DATA="$PROVISIONED_DATA"
+mkdir -p "$NORUN_PROJECT/.zensu/state"
+NORUN_START=$SECONDS
+NORUN_OUT="$(
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$NORUN_DATA" \
+    CLAUDE_PROJECT_DIR="$NORUN_PROJECT" ZENSU_CONFIG="$TMP/missing.json"
+  payload 'ordinary plan' lease_norun_session | with_autopilot_lease "$NORUN_PROJECT" bash "$HOOK" 2>/dev/null
+)"
+NORUN_ELAPSED=$((SECONDS - NORUN_START))
+if [ "$NORUN_ELAPSED" -ge 8 ] \
+  && printf '%s' "$NORUN_OUT" | grep -qF 'AskUserQuestion' \
+  && ! printf '%s' "$NORUN_OUT" | grep -qF 'PLAN_GATE_BLOCKED'; then
+  check "P7f a held Autopilot lease keeps the standalone policy for a session that provably owns no run" PASS
+else check "P7f held lease without a run (elapsed=${NORUN_ELAPSED}s out=$(printf '%s' "$NORUN_OUT" | head -c 200))" FAIL; fi
+
+UNSAFE_PROJECT="$TMP/unsafe-storage-project"; mkdir -p "$UNSAFE_PROJECT"
+provision_session "$UNSAFE_PROJECT" unsafe_storage_session unsafe_storage || exit 1
+UNSAFE_DATA="$PROVISIONED_DATA"
+mkdir -p "$UNSAFE_PROJECT/.zensu/state/autopilot"
+UNSAFE_OUT="$(invoke "$(payload 'ordinary plan' unsafe_storage_session)" "$UNSAFE_PROJECT" "$TMP/missing.json" "$UNSAFE_DATA")"
+rmdir "$UNSAFE_PROJECT/.zensu/state/autopilot"
+if printf '%s' "$UNSAFE_OUT" | grep -qF 'PLAN_GATE_BLOCKED code=ACTIVE_STATE_UNREADABLE' \
+  && ! printf '%s' "$UNSAFE_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
+  && ! printf '%s' "$UNSAFE_OUT" | grep -qF 'AskUserQuestion'; then
+  check "P7g unsafe Autopilot storage blocks the plan gate as unreadable state, never as no run" PASS
+else check "P7g unsafe storage (out=$(printf '%s' "$UNSAFE_OUT" | head -c 200))" FAIL; fi
+
+ENDED_PROJECT="$TMP/lease-ended-project"; mkdir -p "$ENDED_PROJECT"
+provision_session "$ENDED_PROJECT" lease_ended_session lease_ended || exit 1
+ENDED_OWNER="$PROVISIONED_KEY"; ENDED_DATA="$PROVISIONED_DATA"
+autopilot_begin_run lease_ended_run "$ENDED_OWNER" "$ENDED_PROJECT" >/dev/null || exit 1
+autopilot_apply_event lease_ended_run cancel-lease-ended CANCEL '{}' "$ENDED_PROJECT" >/dev/null || exit 1
+ENDED_START=$SECONDS
+ENDED_OUT="$(
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$ENDED_DATA" \
+    CLAUDE_PROJECT_DIR="$ENDED_PROJECT" ZENSU_CONFIG="$TMP/missing.json"
+  payload 'ordinary plan after a cancelled run' lease_ended_session | with_autopilot_lease "$ENDED_PROJECT" bash "$HOOK" 2>/dev/null
+)"
+ENDED_ELAPSED=$((SECONDS - ENDED_START))
+if [ -f "$(autopilot_active_file "$ENDED_PROJECT" "$ENDED_OWNER")" ] \
+  && [ "$ENDED_ELAPSED" -ge 8 ] \
+  && printf '%s' "$ENDED_OUT" | grep -qF 'AskUserQuestion' \
+  && ! printf '%s' "$ENDED_OUT" | grep -qF 'PLAN_GATE_BLOCKED'; then
+  check "P7h a held Autopilot lease keeps the standalone policy for a session whose own run is cancelled" PASS
+else check "P7h held lease over a cancelled own run (elapsed=${ENDED_ELAPSED}s out=$(printf '%s' "$ENDED_OUT" | head -c 200))" FAIL; fi
+
+LEASE_ORPHAN_PROJECT="$TMP/lease-orphan-project"; mkdir -p "$LEASE_ORPHAN_PROJECT"
+provision_session "$LEASE_ORPHAN_PROJECT" lease_orphan_owner lease_orphan || exit 1
+LEASE_ORPHAN_OWNER="$PROVISIONED_KEY"; LEASE_ORPHAN_DATA="$PROVISIONED_DATA"
+autopilot_begin_run lease_orphan_run "$LEASE_ORPHAN_OWNER" "$LEASE_ORPHAN_PROJECT" >/dev/null || exit 1
+rm -f "$(autopilot_active_file "$LEASE_ORPHAN_PROJECT" "$LEASE_ORPHAN_OWNER")"
+LEASE_ORPHAN_OUT="$(
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$LEASE_ORPHAN_DATA" \
+    CLAUDE_PROJECT_DIR="$LEASE_ORPHAN_PROJECT" ZENSU_CONFIG="$TMP/missing.json"
+  payload 'ordinary plan during a leased orphan' lease_orphan_owner | with_autopilot_lease "$LEASE_ORPHAN_PROJECT" bash "$HOOK" 2>/dev/null
+)"
+if printf '%s' "$LEASE_ORPHAN_OUT" | grep -qF 'PLAN_GATE_BLOCKED code=ACTIVE_STATE_UNREADABLE' \
+  && ! printf '%s' "$LEASE_ORPHAN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
+  && ! printf '%s' "$LEASE_ORPHAN_OUT" | grep -qF 'AskUserQuestion'; then
+  check "P7i a held Autopilot lease keeps an orphaned own run blocked as unreadable state" PASS
+else check "P7i held lease over an orphaned own run (out=$(printf '%s' "$LEASE_ORPHAN_OUT" | head -c 200))" FAIL; fi
 
 # --- P8a-P8c the empty-owner fail-closed arm --------------------------------
 # What these pin is that the hook FAILS CLOSED — a PLAN_GATE_BLOCKED receipt

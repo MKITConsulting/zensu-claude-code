@@ -1,0 +1,186 @@
+TDD STARTED — Strict Autopilot active-run reads where a lease fault relaxes a guard | steps: 8
+TASK TRACKING UNAVAILABLE — this harness exposes no TaskCreate/TaskUpdate; the run log is the progress channel
+BASE — stacked on claude/inspiring-clarke-be6d3e 43b93f32 (origin/main 704df189 + ccf55b9c), the only tree carrying autopilot_read_active_strict
+EXECUTION STARTED
+S1 WIRED — files: tests/structure/lib-autopilot-lease.sh | smoke: under a held lease autopilot_read_active_strict answered 5 and autopilot_read_active answered 1; the background holder released cleanly
+S2 IMPL completed — files: hooks/plan-approved-delegate.sh, tests/structure/test-autopilot-plan-delegate.sh | strict read; rc 5 emits PLAN_GATE_BLOCKED code=ACTIVE_STATE_UNREADABLE with its own cause; P7e holds the lease
+S3 IMPL completed — files: hooks/stop-chain-enforcer.sh, tests/structure/test-autopilot-stop-enforcer.sh | initial outer read strict; rc 5 blocks with its own reason ahead of the corrupt-or-unsafe arm; S16a holds the lease
+S4 IMPL completed — files: hooks/stop-chain-enforcer.sh, tests/structure/test-autopilot-stop-enforcer.sh | outer_finish stale-generation re-read strict; rc 5 takes the existing -ne 1 block; S16b takes the lease between the budget CAS and the re-read
+S5 WIRED — files: tests/structure/test-autopilot-stop-enforcer.sh | S8g, S8h, S8k, S8i stubs and the S9f, S9g, S9i race wrappers now name autopilot_read_active_strict
+S6 IMPL completed — files: hooks/post-review-tdd-delegate.sh, tests/structure/test-post-review-outer-ownership-root.sh | standalone preflight strict; rc 5 falls into the existing exit-0 arm before the ticket claim; the bound preflight keeps autopilot_read_active; O2d holds the lease
+S7 IMPL completed — files: hooks/lib/zensu-log.sh, tests/structure/test-autopilot-state-machine.sh, docs/tdd-manager-workflow.md | --autopilot-status reads strict; rc 5 exits 5 with its own stderr line and no hold report; W33 holds the lease; the five W32z disclosure needles stay in the case body
+RED BASELINE — the new checks run against the unchanged hooks at 43b93f32 in a throwaway worktree: S16a FAIL (held lease: Stop released with no decision; free: blocked on stop_run_lease_initial), S16b FAIL (lease taken before the re-read: Stop released) | cmd: bash tests/structure/red-mini-stop.sh (prologue + S16a/S16b of test-autopilot-stop-enforcer.sh)
+RED BASELINE — test-post-review-outer-ownership-root.sh against the unchanged hooks: 8 PASS / 1 FAIL, the one failure O2d (held lease: the unbound claim proceeded and the review directive was emitted) | cmd: bash tests/structure/test-post-review-outer-ownership-root.sh
+S7 WIRED — files: docs/multi-repo-chains-overview.html, docs/multi-repo-chains-spec.md | re-pointed the seven zensu-log.sh line citations by +3 after the status verb grew three lines; every cited range verified byte-identical to its pre-change target
+RED BASELINE — test-autopilot-plan-delegate.sh against the unchanged hooks: 28 PASS / 1 FAIL, the one failure P7e (held lease: the plan gate fell through to the standalone policy, which is silent with autoTdd off, so no PLAN_APPROVED and no block) | cmd: bash tests/structure/test-autopilot-plan-delegate.sh
+RED BASELINE — test-autopilot-state-machine.sh against the unchanged hooks: 128 PASS / 1 FAIL, the one failure W33 (held lease: --autopilot-status exited 1, a no-run answer; free: exited 0 with the run) | cmd: bash tests/structure/test-autopilot-state-machine.sh
+S8 WIRED — files: .claude/rules/autopilot-run-scope.md | per-caller verdicts (five strict, three lenient with reasons), the lease-holding helper, known gaps (reconcile and workspace reads, the hung-holder trade, Windows budget) and the patch version walk
+S3b IMPL completed — files: hooks/stop-chain-enforcer.sh, hooks/plan-approved-delegate.sh, hooks/lib/zensu-log.sh, .claude/rules/autopilot-run-scope.md | the three rc-5 texts name /zensu:doctor for a fault that keeps recurring, because 5 also carries storage and path faults that a retry does not clear
+S1-S8 CHECKPOINT — PASS: test-autopilot-stop-enforcer 74/0, test-post-review-outer-ownership-root 9/0, test-autopilot-plan-delegate 29/0, test-autopilot-state-machine 129/0, test-plan-payload-fallback 71/0, test-multi-repo-doc-citations 5/0, bash -n clean on all nine changed shell files | cmd: bash tests/structure/<suite>.sh in a throwaway worktree at 43b93f32 with the final diff applied | scope: 6 suites over hooks/plan-approved-delegate.sh, hooks/stop-chain-enforcer.sh, hooks/post-review-tdd-delegate.sh, hooks/lib/zensu-log.sh, docs/multi-repo-chains-overview.html, docs/multi-repo-chains-spec.md, tests/structure/lib-autopilot-lease.sh and the four changed suites
+FULL SUITE NOT RUN LOCALLY — repository rule: tests/run-all.sh is CI-only and .zensu/config.json sets evidence.fullSuiteGate advisory; the pull request CI run is the full-suite gate
+BUILD — n/a: the plugin has no build step (bash hooks and node helpers, no scripts.build)
+COVERAGE SKIPPED — no tool: c8 is wired only for skills/session-trail scripts, nothing instruments the bash hooks
+DISCIPLINE AUDIT SKIPPED — vanilla mode
+LINT SKIPPED — no linter configured: package.json has no lint script and no workflow under .github/workflows runs shellcheck or eslint; bash -n was the syntax gate for the changed shell files
+EDIT LANDING AUDIT — claims=20 landed=20 not_landed=0 unverified=0 pending=0 exempt_ignored=0 exempt_verified=0
+PRECONDITION DRIFT AUDIT — clean: every precondition is present with decision n/a, so no install, skip or substitute decision exists to drift from
+REQUIREMENT COVERAGE — clean: all 8 steps carry Covers, and AC-001..AC-008 plus FR-001..FR-003 are each covered by at least one step
+VANILLA COMPLETE — 8/8 implemented | Build: – n/a | Coverage: skipped
+REVIEW ROUND 1 — panel: 5 aspects spawned (conventions, bugs, architecture, tests, security), 0 skipped, no custom personas; judge: 2 deltas (JUDGE-1 IMPORTANT, JUDGE-2 SUGGESTION), 0 Panel-FP; merged: 0 CRITICAL, 7 IMPORTANT, 9 SUGGESTION
+FINDING VERIFICATION — 16 verified, 0 unsupported, 0 phantom, 1 off-changeset
+FINDING LEDGER — R1-F1 routed IMPORTANT .claude/rules/autopilot-run-scope.md:2 | rule paths frontmatter misses the hooks whose read-verb verdicts the section records
+FINDING LEDGER — R1-F2 routed IMPORTANT docs/multi-repo-chains-spec.md:51 | three continuation line citations into the log helper were not shifted by three
+FINDING LEDGER — R1-F3 routed IMPORTANT hooks/stop-chain-enforcer.sh:907 | lease-fault refusals block sessions that own no run and offer no retry or proof
+FINDING LEDGER — R1-F4 routed IMPORTANT hooks/stop-chain-enforcer.sh:907 | storage and path half of the new fault status has no test at any switched caller
+FINDING LEDGER — R1-F5 routed IMPORTANT tests/structure/test-deferred-review-fallback.sh:128 | seed-failure check now passes through the early fault block, not its own path
+FINDING LEDGER — R1-F6 routed IMPORTANT tests/structure/test-post-review-outer-ownership-root.sh:171 | held-lease check cannot tell a held lease from a helper that never ran
+FINDING LEDGER — R1-F7 routed SUGGESTION .claude/rules/autopilot-run-scope.md:141 | stub fixture list omits one case that runs under the same stub
+FINDING LEDGER — R1-F8 routed SUGGESTION .claude/rules/autopilot-run-scope.md:158 | stale-lock reclaim is overstated for owners without a recorded start identity
+FINDING LEDGER — R1-F9 routed SUGGESTION .claude/rules/autopilot-run-scope.md:171 | a fifth version paragraph contradicts the file's own count of four
+FINDING LEDGER — R1-F10 deferred SUGGESTION hooks/plan-approved-delegate.sh:128 | the unreadable-state remedy sentence is hand-copied at three sites
+FINDING LEDGER — R1-F11 deferred SUGGESTION hooks/plan-approved-delegate.sh:150 | new code inherits a generic repair or cancel tail unsuited to a transient lock
+FINDING LEDGER — R1-F12 deferred SUGGESTION tests/structure/lib-autopilot-lease.sh:26 | background holder does not clear stale signal files in a reused directory
+FINDING LEDGER — R1-F13 deferred SUGGESTION tests/structure/lib-autopilot-lease.sh:45 | background holder pid is not kept and one caller stops it unguarded
+FINDING LEDGER — R1-F14 deferred SUGGESTION tests/structure/test-autopilot-plan-delegate.sh:199 | negative ask-question check cannot fail under the auto-TDD-off config
+FINDING LEDGER — R1-F15 routed IMPORTANT hooks/post-review-tdd-delegate.sh:197 | a lease fault silently drops review routing for standalone chains that own no run
+FINDING LEDGER — R1-F16 deferred SUGGESTION .claude/rules/autopilot-run-scope.md:184 | reachability note for the own-run fence arm is stale after the strict read
+R1-F1 IMPL completed — files: .claude/rules/autopilot-active-read.md, .claude/rules/autopilot-run-scope.md, CLAUDE.md
+R1-F2 IMPL completed — files: docs/multi-repo-chains-spec.md
+R1-F3 IMPL completed — files: hooks/lib/zensu-autopilot-state.sh, .claude/rules/autopilot-active-read.md, .claude/rules/session-reanchor.md, docs/session-control.md, docs/tdd-manager-workflow.md
+R1-F4 IMPL completed — files: tests/structure/test-autopilot-plan-delegate.sh, tests/structure/test-autopilot-stop-enforcer.sh, tests/structure/test-post-review-outer-ownership-root.sh, tests/structure/test-autopilot-state-machine.sh
+R1-F5 IMPL completed — files: tests/structure/test-deferred-review-fallback.sh
+R1-F6 IMPL completed — files: tests/structure/test-post-review-outer-ownership-root.sh
+R1-F7 IMPL completed — files: .claude/rules/autopilot-active-read.md
+R1-F8 IMPL completed — files: .claude/rules/autopilot-active-read.md
+R1-F9 IMPL completed — files: .claude/rules/autopilot-run-scope.md
+R1-F15 IMPL completed — files: hooks/lib/zensu-autopilot-state.sh, tests/structure/test-post-review-outer-ownership-root.sh, tests/structure/test-autopilot-plan-delegate.sh, tests/structure/test-autopilot-stop-enforcer.sh, tests/structure/test-autopilot-state-machine.sh
+R1 CHECKPOINT — PASS: test-autopilot-stop-enforcer 76/0, test-autopilot-plan-delegate 31/0, test-autopilot-state-machine 131/0, test-deferred-review-fallback 9/0, test-multi-repo-doc-citations 5/0, session-reanchor-v1.test.js 67/0, test-post-review-outer-ownership-root 10/1 then 11/0 after its ticket_consumed helper was corrected to read reviewTicketConsumed, bash -n clean on every changed shell file | cmd: bash tests/structure/<suite>.sh and node --test tests/structure/session-reanchor-v1.test.js in a throwaway worktree at 43b93f32 with the fix-round diff applied | scope: the round's own suites over hooks/lib/zensu-autopilot-state.sh, the four switched callers, the lease helper and the six changed suites
+PENDING PREDICATE — S1: tests/structure/lib-autopilot-lease.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: hooks/plan-approved-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/post-review-tdd-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/plan-approved-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F6: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=43 landed=10 not_landed=0 unverified=0 pending=33 exempt_ignored=0 exempt_verified=0
+R1 PENDING PREDICATES RE-READ — every R1 claim's target predicate holds: the run-scope pointer is present and the moved verdict text is absent, the spec cites :1391, :1404-1406 and :2229-2231 with :1388 and :2226-2228 absent, the workflow-doc sentence names the read-only look, P7f P7g S16c S16d O2e O2f W34 W35 exist, O2d checks the helper status and the wait, ticket_consumed reads reviewTicketConsumed, and the run-scope file carries four Version paragraphs; the S1-S8 and S3b claims were graded EDIT LANDED by the implementation-pass audit and their files were not reverted
+FINDING LEDGER — R1-F1 fixed IMPORTANT .claude/rules/autopilot-run-scope.md:2 | rule paths frontmatter misses the hooks whose read-verb verdicts the section records
+FINDING LEDGER — R1-F2 fixed IMPORTANT docs/multi-repo-chains-spec.md:51 | three continuation line citations into the log helper were not shifted by three
+FINDING LEDGER — R1-F3 fixed IMPORTANT hooks/stop-chain-enforcer.sh:907 | lease-fault refusals block sessions that own no run and offer no retry or proof
+FINDING LEDGER — R1-F4 fixed IMPORTANT hooks/stop-chain-enforcer.sh:907 | storage and path half of the new fault status has no test at any switched caller
+FINDING LEDGER — R1-F5 fixed IMPORTANT tests/structure/test-deferred-review-fallback.sh:128 | seed-failure check now passes through the early fault block, not its own path
+FINDING LEDGER — R1-F6 fixed IMPORTANT tests/structure/test-post-review-outer-ownership-root.sh:171 | held-lease check cannot tell a held lease from a helper that never ran
+FINDING LEDGER — R1-F7 fixed SUGGESTION .claude/rules/autopilot-run-scope.md:141 | stub fixture list omits one case that runs under the same stub
+FINDING LEDGER — R1-F8 fixed SUGGESTION .claude/rules/autopilot-run-scope.md:158 | stale-lock reclaim is overstated for owners without a recorded start identity
+FINDING LEDGER — R1-F9 fixed SUGGESTION .claude/rules/autopilot-run-scope.md:171 | a fifth version paragraph contradicts the file's own count of four
+FINDING LEDGER — R1-F15 fixed IMPORTANT hooks/post-review-tdd-delegate.sh:197 | a lease fault silently drops review routing for standalone chains that own no run
+REVIEW ROUND 2 — panel: 5 aspects spawned on the round delta plus open-finding paths, 0 skipped, no custom personas; judge: 2 NOT FIXED covers lines on R2-F1, 1 STILL OPEN covers line (R1-F12 covers R2-F12), 1 new delta (R2-F14); merged: 0 CRITICAL, 2 IMPORTANT, 12 SUGGESTION
+FINDING VERIFICATION — 14 verified, 0 unsupported, 0 phantom, 0 off-changeset
+REVIEW CONVERGENCE — routable: R2-F1 (judge NOT FIXED covers, cites code this fix pass edited), R2-F2 (cites code this fix pass edited); deferred: R2-F3 to R2-F11, R2-F13, R2-F14; R2-F12 stays under R1-F12
+FINDING LEDGER — R2-F3 deferred SUGGESTION .claude/rules/autopilot-active-read.md:40 | rule text describes the branch's own earlier state and a within-branch change
+FINDING LEDGER — R2-F4 deferred SUGGESTION .claude/rules/autopilot-active-read.md:50 | re-anchor relief under a held lease has no test
+FINDING LEDGER — R2-F5 deferred SUGGESTION .claude/rules/autopilot-active-read.md:158 | ubuntu shard weights for the touched suites predate the added waits
+FINDING LEDGER — R2-F6 deferred SUGGESTION .claude/rules/autopilot-run-scope.md:33 | owner-scoped caller list omits the re-anchor module
+FINDING LEDGER — R2-F7 deferred SUGGESTION .claude/rules/session-reanchor.md:43 | exit-code contract repeated from its owner and one line left unwrapped
+FINDING LEDGER — R2-F8 deferred SUGGESTION .claude/rules/session-reanchor.md:52 | two-file rename claim is stale and no coupled-sites roster exists
+FINDING LEDGER — R2-F9 deferred SUGGESTION hooks/lib/zensu-autopilot-state.sh:2376 | hold report keeps a lease policy that differs from the strict read
+FINDING LEDGER — R2-F10 deferred SUGGESTION hooks/lib/zensu-autopilot-state.sh:2378 | storage checks around the unleased look have no test
+FINDING LEDGER — R2-F11 deferred SUGGESTION hooks/plan-approved-delegate.sh:155 | existing comment still calls every status of two or more corruption
+FINDING LEDGER — R2-F13 deferred SUGGESTION tests/structure/test-deferred-review-fallback.sh:132 | seed-failure check does not require its own reason text
+FINDING LEDGER — R2-F14 deferred SUGGESTION .claude/rules/autopilot-active-read.md:133 | a new check relies on the workspace read taking a lease fault as free
+FINDING LEDGER — R2-F1 routed IMPORTANT hooks/lib/zensu-autopilot-state.sh:2380 | the unleased look answers five for a finished own run that the locked read reports
+FINDING LEDGER — R2-F2 routed IMPORTANT hooks/lib/zensu-autopilot-state.sh:2380 | no held-lease check keeps an orphaned own run at the fault status
+SELF-REVIEW MUST-FIX — R2-F1 and R2-F2, the max-rounds findings carried from review round 2; the single self-review fix round takes them in vanilla mode
+R2-F1 IMPL completed — files: hooks/lib/zensu-autopilot-state.sh, tests/structure/test-autopilot-plan-delegate.sh, tests/structure/test-autopilot-stop-enforcer.sh, tests/structure/test-post-review-outer-ownership-root.sh, tests/structure/test-autopilot-state-machine.sh, .claude/rules/autopilot-active-read.md, .claude/rules/session-reanchor.md, docs/session-control.md, docs/tdd-manager-workflow.md
+R2-F2 IMPL completed — files: tests/structure/test-autopilot-plan-delegate.sh, .claude/rules/autopilot-active-read.md
+R2-F3 IMPL completed — files: .claude/rules/autopilot-active-read.md
+EDIT LANDING AUDIT STARTED — round self-review
+PENDING PREDICATE — S1: tests/structure/lib-autopilot-lease.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: hooks/plan-approved-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: hooks/post-review-tdd-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/stop-chain-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/plan-approved-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3b: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: CLAUDE.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: hooks/lib/zensu-autopilot-state.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: tests/structure/test-deferred-review-fallback.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F6: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F8: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F9: .claude/rules/autopilot-run-scope.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: hooks/lib/zensu-autopilot-state.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F15: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: hooks/lib/zensu-autopilot-state.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: tests/structure/test-autopilot-stop-enforcer.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: tests/structure/test-post-review-outer-ownership-root.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: tests/structure/test-autopilot-state-machine.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F1: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F2: tests/structure/test-autopilot-plan-delegate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F2: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R2-F3: .claude/rules/autopilot-active-read.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=55 landed=0 not_landed=0 unverified=0 pending=55 exempt_ignored=0 exempt_verified=0
+SELF-REVIEW PENDING PREDICATES RE-READ — every self-review claim's target predicate holds (fixed-string counts): zensu-autopilot-state.sh carries _autopilot_active_read_without_lease twice (definition and call) and _autopilot_active_absence_proven zero times, with the DONE/CANCELLED stage test inside the look; the P7h and P7i, S16e, O2g and W36 checks are present in their suites; autopilot-active-read.md names the new helper, P7i and W36, says "would fail closed", and no longer carries the old helper name, "owns no run failed closed" or the 5-to-1 clause; session-reanchor.md, docs/session-control.md and docs/tdd-manager-workflow.md carry the terminal-run wording with the old sentences absent. The earlier S1-S8, S3b and R1 claims were re-read in round 1 and their files were not reverted since.
+SELF-REVIEW CHECKPOINT — PASS: test-autopilot-stop-enforcer 77/0, test-autopilot-state-machine 132/0, test-autopilot-plan-delegate 33/0, test-post-review-outer-ownership-root 12/0, session-reanchor-v1.test.js 67/0, bash -n clean on every changed shell file | cmd: bash tests/structure/<suite>.sh and node --test tests/structure/session-reanchor-v1.test.js in a throwaway worktree at 43b93f32 with the self-review diff applied | scope: hooks/lib/zensu-autopilot-state.sh and the four suites that gained P7h, P7i, S16e, O2g and W36, plus the re-anchor module that calls the strict verb
+SELF-REVIEW MUTANT PROBE — under a held lease the library answers 0 for a CANCELLED own run and 5 for an orphaned own run; with the look's terminal acceptance removed it answers 5 for the CANCELLED run (P7h, S16e, O2g and W36 require the locked answer), and with its absence test widened to every non-zero worker status it answers 1 for the orphan (P7i requires ACTIVE_STATE_UNREADABLE); without the lease both variants answer 0 and 2 | cmd: bash mutants/probe.sh <worktree> <mutants> <real|mutA|mutB> <cancelled|orphan> in the session scratchpad
+FULL SUITE NOT RUN LOCALLY — repository rule: tests/run-all.sh is CI-only and .zensu/config.json sets evidence.fullSuiteGate advisory; the pull request CI run is the full-suite gate for the tree this self-review fix round leaves
+FINDING LEDGER — R2-F1 fixed IMPORTANT hooks/lib/zensu-autopilot-state.sh:2380 | the unleased look answers five for a finished own run that the locked read reports
+FINDING LEDGER — R2-F2 fixed IMPORTANT hooks/lib/zensu-autopilot-state.sh:2380 | no held-lease check keeps an orphaned own run at the fault status
+FINDING LEDGER — R2-F3 fixed SUGGESTION .claude/rules/autopilot-active-read.md:40 | rule text describes the branch's own earlier state and a within-branch change

@@ -10,17 +10,7 @@
           "runner": "bash",
           "path": "tests/structure/test-autopilot-state-machine.sh",
           "args": [],
-          "timeoutMs": 900000
-        },
-        {
-          "id": "deferred-lease-refresh",
-          "runner": "bash",
-          "path": "tests/structure/test-deferred-review-claim.sh",
-          "args": [
-            "--cases",
-            "C6a,C6b,C7,C7-renew,C8"
-          ],
-          "timeoutMs": 900000
+          "timeoutMs": 1280000
         },
         {
           "id": "installed-plugin-provisioner",
@@ -231,7 +221,7 @@
           "runner": "bash",
           "path": "tests/structure/test-autopilot-plan-delegate.sh",
           "args": [],
-          "timeoutMs": 600000
+          "timeoutMs": 720000
         },
         {
           "id": "coverage-report-windows-paths",
@@ -386,6 +376,16 @@
       "platform": "win32",
       "profileTimeoutMs": 1800000,
       "suites": [
+        {
+          "id": "deferred-lease-refresh",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-claim.sh",
+          "args": [
+            "--cases",
+            "C6a,C6b,C7,C7-renew,C8"
+          ],
+          "timeoutMs": 900000
+        },
         {
           "id": "stop-enforcer-reviewer-denial-note",
           "runner": "bash",
