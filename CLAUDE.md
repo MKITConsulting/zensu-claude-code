@@ -156,6 +156,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)** — the prompt timeline and the separate list of withdrawn prompts: `.claude/rules/session-trail-prompt-listing.md`
 - **zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)** — the hook-supplied progress anchor of zen-mode: `.claude/rules/zen-mode-chain-anchor.md`
 - **bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)** — why `case` patterns inside `$( )` need the leading paren: `.claude/rules/bash32-command-substitution.md`
+- **Skill Argument Placeholders (`test-skill-workflow-markers.sh` AP checks)** — why a skill body never carries `$1` or `$ARGUMENTS` in a shell snippet, and the allowlist for a skill that consumes its arguments: `.claude/rules/skill-argument-placeholders.md`
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`
 - **Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)** — the findings ledger, the shared severity rubric and round-aware routing of the auto-fix loop: `.claude/rules/review-convergence.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
