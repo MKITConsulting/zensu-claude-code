@@ -258,6 +258,45 @@ every installation carrying this change accepts a superset of what an older one 
 runtime is left unable to read what another wrote. A releaser who prefers the letter of that
 entry picks `minor`; the argument above is why this file does not.
 
+**Network-only origins are a second policy class, and the gate derives it from the policy.**
+`parsePolicyTargets` returns `networkOnly` beside `targets`, read from the optional top-level
+`networkOnlyOrigins` (`NETWORK_ONLY_POLICY_KEYS`, at most `MAX_NETWORK_ONLY_ORIGINS`). Both lists
+pass ONE entry parser (`policyOriginEntry`) and ONE floor (`policyFloorFault`): a network-only
+origin in a remote policy obeys the target floor, one in a local policy is loopback or public
+HTTPS (`FLOOR_REASONS.NETWORK_ONLY_HTTPS` otherwise), and the hostname rule
+(`FLOOR_REASONS.HOSTNAME_PATTERN`: an IP literal or `[a-z0-9._-]` only) binds targets too. That
+is a deliberate tightening, not a side effect: playwright-core turns each allowed origin into the
+URL glob `<origin>/**` (`originOrHostGlob` in the bundled `coreBundle.js` of 0.1.21), so a `*`,
+`{` or `,` in a hostname was a browser-side wildcard the parser used to accept. The run config
+stays ONE plain `network.allowedOrigins` list and `runConfigShape` keeps its key set, so
+navigability is derived, never written: `judgeOrigin` takes an optional `role` — `navigable` for
+the helper's `--origin`, `network-only` for `--network-only-origin` — and a `navigation: true`
+call is navigable by definition. At `open` a network-only run-config origin is admitted with its
+pin and gets NO plan entry, so the recorder writes no consent record for it: a record would make
+it remembered, and navigable, for a later consent-mode run. `NETWORK_ONLY_NAVIGATION`,
+`NOT_POLICY_NETWORK_ONLY` and `NETWORK_ONLY_NEEDS_POLICY` are FINAL reasons. Consent mode has no
+network-only class: without a policy the role is refused, and the skill passes a loopback API
+origin as an ordinary `--origin`. The redirect rule stays prose, and the reason is measured
+rather than argued: the browser has ONE class of allowed origin, so a page-initiated navigation
+onto a network-only origin is followed, and the triggering call prints that page's URL and title
+before the skill can stop. **WebSockets are outside the browser fence for every origin** —
+measured with playwright-cli 0.1.21 and Chrome 154: `context.route` does not intercept them —
+so the docs say "every HTTP(S) request"; fencing them is a separate change. The decisions and the
+security analysis live in §11 of `docs/verify-feature-consent-spec.md`. **Version for this
+delta: `patch`**, by the route-retirement argument above — the policy is read from the launch
+environment, which no runtime writes, and an installation that predates the key refuses a policy
+carrying it rather than misreading it. The hostname rule is the one place it accepts LESS than
+before; a releaser who weighs that by the letter of the strict-key-set entry picks `minor`.
+Sites that move together: `POLICY_KEYS`, `NETWORK_ONLY_POLICY_KEYS`, `MAX_NETWORK_ONLY_ORIGINS`,
+`policyOriginEntry`, `policyFloorFault` and the two floor reasons; `readPolicy`, the `role`
+option of `judgeOrigin`, the network-only skip in `judgeCall` and the three reasons in `REASONS`
+and `FINAL_REASONS`; the network-only arm of `checkOrigin`, `CHECK_ROLES`, `USAGE`,
+`CHECK_USAGE` and the `network-only-origin=` output line in the helper;
+`CHECK_POLICY_OPERANDS`, the `--network-only-origin` count in `isRunConfigInvocation` and
+`remoteNetworkOnlyTools` in `evals/verify-feature/assertions/transcript-check.js`; the
+`validate.networkOnly` schema in `skills/autopilot/rules/config.md`; and the policy row of the
+doctor report.
+
 **No execution marker, and why.** The MCP-era gate wrote a per-session marker so that a SEPARATE
 process, the broker, could tell whether the gate had run before it self-approved an origin. With no
 broker, nothing consumes such a marker, so the whole family (`writeExecutionEvidence`,

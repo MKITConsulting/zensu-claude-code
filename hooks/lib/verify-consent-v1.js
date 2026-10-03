@@ -148,6 +148,9 @@ const REASONS = Object.freeze({
   GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the run config resolver pins',
   POLICY_INVALID: 'the navigation policy in the launch environment is invalid',
   NOT_POLICY_TARGET: 'origin is not a target of the navigation policy',
+  NETWORK_ONLY_NAVIGATION: 'origin is network-only in the navigation policy: pages on its targets may request it, but no navigation command may open it and nothing on it counts as evidence',
+  NOT_POLICY_NETWORK_ONLY: 'origin is not a network-only origin of the navigation policy',
+  NETWORK_ONLY_NEEDS_POLICY: 'a network-only origin needs the parent-environment navigation policy; consent mode has no network-only class, so pass a loopback API origin with --origin and consent to it like any other loopback origin',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   NEW_ORIGIN: 'new-origin-needs-consent',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
@@ -159,7 +162,8 @@ const SHAPE_REASONS = Object.freeze([
 const FINAL_REASONS = Object.freeze([
   'PAYLOAD_UNREADABLE', 'COMMAND_TOO_LARGE', 'NOT_MAIN_THREAD', 'SESSION_MALFORMED', 'INDIRECT', 'UNJUDGED_BODY', 'ENV_BUILTIN',
   'AMBIENT_TEXT', 'REDEFINED', 'COMMAND_DENIED', 'FLAG_DENIED', 'CONFIG_REQUIRED', 'OPEN_OUTSIDE_CONFIG', 'BROWSER_NOT_CHROMIUM',
-  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
+  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NETWORK_ONLY_NAVIGATION', 'NOT_POLICY_NETWORK_ONLY',
+  'NETWORK_ONLY_NEEDS_POLICY', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
   'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED',
 ]);
 const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
@@ -1176,7 +1180,9 @@ function readPolicy(env) {
   const raw = env && typeof env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 === 'string' ? env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 : '';
   if (raw === '') return null;
   const parsed = floor.parsePolicyTargets(raw);
-  return parsed.ok ? { ok: true, mode: parsed.mode, targets: parsed.targets } : { ok: false, fault: parsed.fault };
+  return parsed.ok
+    ? { ok: true, mode: parsed.mode, targets: parsed.targets, networkOnly: parsed.networkOnly }
+    : { ok: false, fault: parsed.fault };
 }
 
 function readInputs(env) {
@@ -1193,12 +1199,18 @@ function judgeOrigin(rawUrl, options) {
   const { origin, pathname: route, mode, hostname } = classified;
   if (options.policy) {
     if (!options.policy.ok) return { deny: `${REASONS.POLICY_INVALID}: ${options.policy.fault}` };
-    if (!options.policy.targets.has(origin)) return { deny: `${origin}: ${REASONS.NOT_POLICY_TARGET}` };
+    const networkOnly = options.policy.networkOnly.has(origin);
+    if (options.role === 'network-only' && !networkOnly) return { deny: `${origin}: ${REASONS.NOT_POLICY_NETWORK_ONLY}` };
+    if (networkOnly && (options.navigation || options.role === 'navigable')) {
+      return { deny: `${origin}: ${REASONS.NETWORK_ONLY_NAVIGATION}` };
+    }
+    if (!networkOnly && !options.policy.targets.has(origin)) return { deny: `${origin}: ${REASONS.NOT_POLICY_TARGET}` };
     if (mode === 'remote' && !net.isIP(hostname) && options.pins && !options.pins.has(hostname)) {
       return { deny: `${origin}: the run config carries no resolver pin for this remote host` };
     }
-    return { origin, route, mode, decidedBy: 'policy-mode' };
+    return { origin, route, mode, decidedBy: 'policy-mode', networkOnly };
   }
+  if (options.role === 'network-only') return { deny: REASONS.NETWORK_ONLY_NEEDS_POLICY };
   if (mode !== 'local') return { deny: REASONS.REMOTE_NEEDS_POLICY };
   return { origin, route, mode };
 }
@@ -1243,6 +1255,7 @@ function judgeCall(call, context) {
     for (const origin of configOrigins) {
       const judged = judgeOrigin(origin, { navigation: false, policy: context.policy, pins });
       if (judged.deny) return { deny: judged.deny };
+      if (judged.networkOnly) continue;
       targets.push({ origin: judged.origin, route: '/', mode: judged.mode, decidedBy: judged.decidedBy });
     }
   }

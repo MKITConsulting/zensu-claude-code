@@ -390,7 +390,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
   [ "$STOP_REBOUND" = true ] || exit 0
 fi
 
-if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
+if ! zensu_memoize_project_dir || ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
   # Kept deliberately, though it is now only the residual race window: binding
   # validates that the recorded root exists, so the steady-state deleted-root
   # session is released above and never reaches here. What survives is the
@@ -514,11 +514,10 @@ read_field() {
   ' 2>/dev/null
 }
 
-SESSION_ID="$(read_field session_id)"
 TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "$SESSION_LIB"
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
+SESSION_ID="$(zensu_resolve_session_id "")" || exit 0
 source "$CONFIG_LIB"
 source "$TDD_PHASE_LIB"
 source "$BOUNDED_RUN_LIB"

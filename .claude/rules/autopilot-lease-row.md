@@ -45,8 +45,12 @@ calls an artifact stale exactly when acquisition reclaims it` holds the verdict 
   `lockOwner`, and the inspector returns it as refused, so it never throws out of the renderer
   (`P1le21`);
 - `ownerless` with `stale` and `mtimeMs`;
-- `owned` with `pid`, `alive`, `identityRecorded`, `identityCurrent`, `createdAtMs` and `stale`.
-  The token and the release digest are never returned.
+- `owned` with `pid`, `alive`, `identityRecorded`, `identityCurrent`, `startedAfterRecord`,
+  `createdAtMs` and `stale`. `startedAfterRecord` says that the process now holding a live pid
+  provably started after the record was written, which is the second way a live owner turns
+  stale (`.claude/rules/deferred-review-claim-ownership.md` §"Lock staleness"); the row names
+  that cause instead of a start-identity mismatch. The token and the release digest are never
+  returned.
 
 **The row ages every artifact on the inspection's own clock.** The inspector returns
 `inspectedAtMs`, sampled after both reads, and the row measures `created_at` and the owner-less
@@ -60,14 +64,16 @@ never reads "free" while a sentinel exists and renders the sentinel's own verdic
 lock's (`P1le22`).
 
 **Removal by hand is named only where the core cannot decide.** A live owner without a recorded
-start identity, or with one that cannot be re-read now, is never reclaimed while that pid lives,
-and the row says the doctor cannot establish whether the pid is still the lock keeper. It names
+start identity, or with one that cannot be re-read now, is reclaimed only once the process
+holding that pid provably started more than a second after the record was written. Without that
+proof the core never reclaims it while the pid lives, and the row says the doctor cannot
+establish whether the pid is still the lock keeper. It names
 what a live lock keeper looks like, and both shapes are load-bearing: under bash 4 or later
 `_tdd_locked_run` runs a coprocess `node` keeper that owns the lease itself
 (`ownerPid: process.pid` in `_tdd_core_lock_keeper`), and under bash 3.2 the owner is the shell
-that runs `_tdd_locked_run` (`ownerPid: process.ppid`). On Windows no start identity exists, so
-every lease older than 30 s lands in this arm, and its live owner there is the `node.exe`
-keeper. The recovery sentinel has one shape: `withRecoverySentinel` records the node process
+that runs `_tdd_locked_run` (`ownerPid: process.ppid`). On Windows no start identity exists, so a
+lease older than 30 s lands in this arm unless its pid provably started after the record, and
+its live owner there is the `node.exe` keeper. The recovery sentinel has one shape: `withRecoverySentinel` records the node process
 that runs the core, under any bash. The row says removal by hand clears the artifact only when
 the pid is neither shape, and it never calls that artifact removable.
 
@@ -127,8 +133,10 @@ census of run-record hand copies, and this row copies no run record. Operator ac
 - No refusal names this row yet.
 - `leaseResolveCause` keys on the core's refusal text rather than an error code.
 - Windows is unmeasured. `test-doctor.sh` runs only in the weekly Windows Safety structure
-  shard, where no start identity is readable, so `P1le8` skips and `P1le7` takes its
-  unreadable-identity arm.
+  shard, where no start identity is readable, so `P1le8` skips, and `P1le7` and `P1le10` take
+  their start-time arms when `powershell.exe` answers there. The arm that cannot decide is
+  pinned by a shim (`P1le10b`), because a live owner older than its record and older than 30 s
+  cannot be planted cheaply.
 
 **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md` entry by entry: no
 context-record or workflow-state field, no strict key set, no hook added, removed or renamed, no

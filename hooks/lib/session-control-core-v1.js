@@ -748,16 +748,37 @@ function sleep(milliseconds, options) {
   }
 }
 
+function linuxProcessStartTicks(pid) {
+  const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const commandEnd = stat.lastIndexOf(')');
+  if (commandEnd < 0) return null;
+  const fields = stat.slice(commandEnd + 2).trim().split(/\s+/);
+  const startTicks = fields[19];
+  if (!startTicks || !/^\d+$/.test(startTicks)) return null;
+  return startTicks;
+}
+
+function darwinProcessStartText(pid) {
+  const started = childProcess.execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 1000,
+    env: {
+      PATH: '/usr/bin:/bin',
+      LC_ALL: 'C',
+      LANG: 'C',
+      TZ: 'UTC',
+    },
+  }).trim().replace(/\s+/g, ' ');
+  return DARWIN_PROCESS_START_RE.test(started) ? started : null;
+}
+
 function processStartIdentity(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     if (process.platform === 'linux') {
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const commandEnd = stat.lastIndexOf(')');
-      if (commandEnd < 0) return null;
-      const fields = stat.slice(commandEnd + 2).trim().split(/\s+/);
-      const startTicks = fields[19];
-      if (!startTicks || !/^\d+$/.test(startTicks)) return null;
+      const startTicks = linuxProcessStartTicks(pid);
+      if (!startTicks) return null;
       let bootId = 'unknown-boot';
       try {
         bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
@@ -768,18 +789,8 @@ function processStartIdentity(pid) {
       return LOCK_IDENTITY_RE.test(identity) ? identity : null;
     }
     if (process.platform === 'darwin') {
-      const started = childProcess.execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 1000,
-        env: {
-          PATH: '/usr/bin:/bin',
-          LC_ALL: 'C',
-          LANG: 'C',
-          TZ: 'UTC',
-        },
-      }).trim().replace(/\s+/g, ' ');
-      if (!DARWIN_PROCESS_START_RE.test(started)) return null;
+      const started = darwinProcessStartText(pid);
+      if (!started) return null;
       const digest = crypto.createHash('sha256')
         .update(DARWIN_PROCESS_START_DOMAIN)
         .update(started, 'utf8')
@@ -799,6 +810,125 @@ function currentProcessStartIdentity() {
     ownProcessStartIdentity = processStartIdentity(process.pid) || null;
   }
   return ownProcessStartIdentity;
+}
+
+const LINUX_USER_HZ = 100;
+const DARWIN_PROCESS_START_FIELDS_RE = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) ([0-9]{1,2}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) ([0-9]{4})$/;
+const DARWIN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WIN32_PROCESS_START_TIMEOUT_MS = 5000;
+const WIN32_FILETIME_TICKS_PER_MS = 10000n;
+const WIN32_FILETIME_UNIX_EPOCH_MS = 11644473600000n;
+const OWNER_START_SKEW_MS = 1000;
+const OWNER_START_PROBE_INTERVAL_MS = 2000;
+const OWNER_START_PROBE_LIMIT = 256;
+
+function linuxBootTimeMs() {
+  const match = /^btime ([0-9]{1,15})$/m.exec(fs.readFileSync('/proc/stat', 'utf8'));
+  return match ? Number(match[1]) * 1000 : null;
+}
+
+function darwinProcessStartMs(started) {
+  const match = DARWIN_PROCESS_START_FIELDS_RE.exec(started);
+  if (!match) return null;
+  const month = DARWIN_MONTHS.indexOf(match[1]);
+  if (month < 0) return null;
+  const startedMs = Date.UTC(
+    Number(match[6]),
+    month,
+    Number(match[2]),
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+  );
+  return Number.isFinite(startedMs) ? startedMs : null;
+}
+
+function win32ProcessStartMs(pid) {
+  const configuredRoot = process.env.SystemRoot;
+  const root = configuredRoot && path.win32.isAbsolute(configuredRoot) ? configuredRoot : 'C:\\Windows';
+  const powershellDirectory = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0');
+  const program = [
+    "$ProgressPreference='SilentlyContinue'",
+    "$PSModuleAutoLoadingPreference='None'",
+    `try { [System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToFileTimeUtc() }`,
+    'catch {',
+    'Import-Module CimCmdlets -ErrorAction Stop',
+    `(Get-CimInstance -Query 'SELECT CreationDate FROM Win32_Process WHERE ProcessId = ${pid}' -ErrorAction Stop).CreationDate.ToFileTimeUtc()`,
+    '}',
+  ].join('\n');
+  const output = childProcess.execFileSync(
+    path.win32.join(powershellDirectory, 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(program, 'utf16le').toString('base64')],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: WIN32_PROCESS_START_TIMEOUT_MS,
+      windowsHide: true,
+      env: {
+        SystemRoot: root,
+        windir: root,
+        SystemDrive: path.win32.parse(root).root.replace(/\\+$/, ''),
+        ComSpec: path.win32.join(root, 'System32', 'cmd.exe'),
+        PATH: [
+          path.win32.join(root, 'System32'),
+          root,
+          path.win32.join(root, 'System32', 'Wbem'),
+          powershellDirectory,
+        ].join(';'),
+        PSModulePath: path.win32.join(powershellDirectory, 'Modules'),
+        PATHEXT: '.COM;.EXE;.BAT;.CMD',
+        TEMP: process.env.TEMP || path.win32.join(root, 'Temp'),
+        TMP: process.env.TMP || path.win32.join(root, 'Temp'),
+        LOCALAPPDATA: process.env.LOCALAPPDATA || '',
+        APPDATA: process.env.APPDATA || '',
+        USERPROFILE: process.env.USERPROFILE || '',
+        HOMEDRIVE: process.env.HOMEDRIVE || '',
+        HOMEPATH: process.env.HOMEPATH || '',
+      },
+    },
+  );
+  const lines = String(output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const last = lines.length ? lines[lines.length - 1] : '';
+  if (!/^[0-9]{1,20}$/.test(last)) return null;
+  const startedMs = Number(BigInt(last) / WIN32_FILETIME_TICKS_PER_MS - WIN32_FILETIME_UNIX_EPOCH_MS);
+  return Number.isSafeInteger(startedMs) && startedMs > 0 ? startedMs : null;
+}
+
+function processStartLowerBoundMs(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    if (process.platform === 'linux') {
+      const startTicks = linuxProcessStartTicks(pid);
+      const bootMs = linuxBootTimeMs();
+      if (!startTicks || bootMs === null) return null;
+      return bootMs + Number(startTicks) * (1000 / LINUX_USER_HZ);
+    }
+    if (process.platform === 'darwin') {
+      const started = darwinProcessStartText(pid);
+      return started ? darwinProcessStartMs(started) : null;
+    }
+    if (process.platform === 'win32') return win32ProcessStartMs(pid);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+const ownerStartProbes = new Map();
+
+function liveOwnerStartedAfterRecord(owner) {
+  const recordedAt = Date.parse(owner.created_at);
+  if (!Number.isFinite(recordedAt) || Date.now() - recordedAt <= OWNER_START_SKEW_MS) return false;
+  const key = `${owner.pid}:${owner.token}`;
+  const previous = ownerStartProbes.get(key);
+  if (previous && (previous.replaced || Date.now() - previous.at < OWNER_START_PROBE_INTERVAL_MS)) {
+    return previous.replaced;
+  }
+  const started = processStartLowerBoundMs(owner.pid);
+  const replaced = started !== null && started > recordedAt + OWNER_START_SKEW_MS;
+  if (ownerStartProbes.size >= OWNER_START_PROBE_LIMIT) ownerStartProbes.clear();
+  ownerStartProbes.set(key, { replaced, at: Date.now() });
+  return replaced;
 }
 
 function lockOwner(file) {
@@ -1001,27 +1131,33 @@ function createOwnedArtifact(
 }
 
 function artifactStaleness(snapshot) {
-  if (!snapshot) return { stale: false, alive: false, identity: null };
+  if (!snapshot) return { stale: false, alive: false, identity: null, startedAfterRecord: false };
   if (!snapshot.owner) {
     return {
       stale: Date.now() - snapshot.stat.mtimeMs > LOCK_STALE_MS,
       alive: false,
       identity: null,
+      startedAfterRecord: false,
     };
   }
-  if (!processIsAlive(snapshot.owner.pid)) return { stale: true, alive: false, identity: null };
+  if (!processIsAlive(snapshot.owner.pid)) {
+    return { stale: true, alive: false, identity: null, startedAfterRecord: false };
+  }
   if (snapshot.owner.process_start_identity) {
     const actual = snapshot.owner.pid === process.pid
       ? currentProcessStartIdentity()
       : processStartIdentity(snapshot.owner.pid);
-    const identity = actual || null;
-    return {
-      stale: identity !== null && identity !== snapshot.owner.process_start_identity,
-      alive: true,
-      identity,
-    };
+    if (actual) {
+      return {
+        stale: actual !== snapshot.owner.process_start_identity,
+        alive: true,
+        identity: actual,
+        startedAfterRecord: false,
+      };
+    }
   }
-  return { stale: false, alive: true, identity: null };
+  const startedAfterRecord = liveOwnerStartedAfterRecord(snapshot.owner);
+  return { stale: startedAfterRecord, alive: true, identity: null, startedAfterRecord };
 }
 
 function artifactIsStale(snapshot) {
@@ -1096,6 +1232,13 @@ function withFileLock(lockDirectory, key, callback) {
       sleep(20);
       continue;
     }
+    if (fs.existsSync(lockFile)) {
+      if (externalArtifactNeedsRecovery(lockOwner(lockFile), attempt)) {
+        recoverStaleLock(directory, key, lockFile);
+      }
+      sleep(20);
+      continue;
+    }
     acquired = createOwnedArtifact(lockFile, 'lock');
     if (acquired) {
       // A recovery owner may have won immediately after our pre-check. Do not
@@ -1103,8 +1246,6 @@ function withFileLock(lockDirectory, key, callback) {
       if (!fs.existsSync(recoveryFile)) break;
       releaseOwnedLock(directory, key, lockFile, acquired);
       acquired = undefined;
-    } else {
-      recoverStaleLock(directory, key, lockFile);
     }
     sleep(20);
   }
@@ -1230,6 +1371,7 @@ function inspectLockArtifact(file) {
     alive: staleness.alive,
     identityRecorded: Boolean(snapshot.owner.process_start_identity),
     identityCurrent: staleness.identity,
+    startedAfterRecord: staleness.startedAfterRecord,
     createdAtMs: Date.parse(snapshot.owner.created_at),
   };
 }
@@ -1297,7 +1439,6 @@ function externalArtifactNeedsRecovery(snapshot, attempt) {
   if (!snapshot.owner || !processIsAlive(snapshot.owner.pid)) {
     return artifactIsStale(snapshot);
   }
-  if (!snapshot.owner.process_start_identity) return false;
   // A live PID cannot become a different process without first going dead.
   // Probe at 0, 1, 3, and 7 seconds during the bounded ten-second wait. This
   // remains conservative while avoiding a /bin/ps burst on every 50 ms poll.
@@ -4723,6 +4864,13 @@ function processStartIdentityForPid(pid) {
   return processStartIdentity(pid);
 }
 
+function processStartLowerBoundForPid(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    fail('process id is invalid');
+  }
+  return processStartLowerBoundMs(pid);
+}
+
 function prepareDeferredReviewTransfer(options) {
   const inspection = inspectDeferredReviewOwner(options);
   if (!['transfer', 'owner-retired'].includes(inspection.status)) {
@@ -5899,6 +6047,7 @@ module.exports = {
   cancelDeferredReviewClaim,
   clearTerminalDeferredReviewClaim,
   processStartIdentityForPid,
+  processStartLowerBoundForPid,
   createAttestation,
   externalProcessLockPath,
   inspectExternalProcessLock,

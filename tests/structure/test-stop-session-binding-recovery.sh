@@ -304,7 +304,7 @@ fi
 # the way B5 pins the block payloads: it must release (exit 0, no decision
 # payload) and its message must still name the recorded root, or a future edit
 # could delete it and turn that race back into the wedge this hook no longer has.
-TOCTOU_BRANCH="$(sed -n '/^if ! PROJECT_ROOT=/,/^fi$/p' "$STOP")"
+TOCTOU_BRANCH="$(sed -n '/^if .*! PROJECT_ROOT=/,/^fi$/p' "$STOP")"
 if printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'ZENSU_PROJECT_ROOT' \
   && printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'no longer exists' \
   && printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'releasing Stop' \

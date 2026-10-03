@@ -427,8 +427,9 @@ classifier will refuse a spawn, not only when the whole table is green.
   their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
   set when Claude Code started and passes the policy contract, so it governs every browser
-  origin and the consent prompt never fires this session; the browser consent gate admits only
-  its target origins, and every route on them. Nothing to do.
+  origin and the consent prompt never fires this session; the browser consent gate navigates only
+  its target origins, and every route on them, and lets pages request the policy's network-only
+  origins, if it declares any, without ever navigating them. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
   registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
   `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
@@ -829,8 +830,8 @@ whether browser verification is enforced, not only when a row is red.
 - **⚠️ autopilot lease: … is removable; the next lease acquisition reclaims it on its own** →
   the lock artifact or the recovery sentinel names an owner that no longer holds it: the
   owner pid is gone, the pid now belongs to a different process because its start identity
-  no longer matches, or it carries no owner record the core can read and is past the core's
-  30 s bound. The verdict is the core's own reclaim rule, read through
+  no longer matches or because that process started after the record was written, or it
+  carries no owner record the core can read and is past the core's 30 s bound. The verdict is the core's own reclaim rule, read through
   `inspectExternalProcessLock`. Relay the facts and the path the row prints. **Never delete
   the artifact and never offer to** — the next lease acquisition reclaims it on its own, so
   no manual removal is needed, and a removal run later can delete the lock of whichever
@@ -859,8 +860,9 @@ whether browser verification is enforced, not only when a row is red.
   the user's decision.
 - **⚠️ autopilot lease: held for … by pid `<pid>`, which is alive**, its future-`created_at`
   twin, or **the recovery sentinel … has been held … by pid `<pid>`, which is alive** → no
-  start identity was recorded, or the recorded one cannot be read now, so the core never
-  reclaims the artifact while that pid lives; it clears only when that process releases it or
+  start identity was recorded, or the recorded one cannot be read now, and nothing shows that
+  the process holding that pid started after the record was written, so the core does not
+  reclaim the artifact while that pid lives; it clears only when that process releases it or
   exits. The row says the doctor cannot establish whether pid `<pid>` is still the lock keeper
   or the holder of the recovery sentinel, and names what a live one looks like. For the lock:
   the node lock keeper whose command line names `session-control-core-v1.js` and this project's
