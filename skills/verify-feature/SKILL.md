@@ -450,7 +450,7 @@ or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one a
 pattern it cannot judge. Single-quote an argument that carries `$`: double quotes do not help,
 because the gate reads a `$` outside single quotes as an expansion it cannot judge unless
 whitespace, the end of the command or a closing double quote follows it, so a `fill` or `type`
-value such as `"$12"` is denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
+value such as `"$price"` is denied and `'$price'` is not. A denial that objects only to how a call is spelled is answered once,
 as `rules/browser-verification.md` section 0 describes; every other denial is final.
 
 ### Authentication (both modes)

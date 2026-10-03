@@ -508,10 +508,33 @@ else
 fi
 ARMED_COUNT="$NODE_COUNT"
 
+cat >"$WORK/link-lib.sh" <<EOF
+make_directory_symlink() {
+  "$REAL_NODE" -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"junction":"dir");
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "\$1" "\$2"
+}
+make_file_symlink() {
+  "$REAL_NODE" -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "\$1" "\$2"
+}
+EOF
+source "$WORK/link-lib.sh"
+
 cat >"$WORK/memo-driver.sh" <<'EOF'
 #!/bin/bash
 set -u
 source "$MEMO_SESSION_LIB"
+source "$MEMO_LINK_LIB"
 case "${1:-}" in
   (plain)
     zensu_resolve_project_dir && zensu_resolve_project_dir
@@ -540,7 +563,7 @@ case "${1:-}" in
   (swap-ancestor)
     zensu_memoize_project_dir || exit 9
     mv "$MEMO_SWAP_PARENT" "$MEMO_SWAP_PARENT.real" || exit 6
-    ln -s "$MEMO_SWAP_PARENT.real" "$MEMO_SWAP_PARENT" 2>/dev/null || exit 6
+    make_directory_symlink "$MEMO_SWAP_PARENT.real" "$MEMO_SWAP_PARENT" || exit 5
     zensu_resolve_project_dir
     ;;
   (remove)
@@ -561,8 +584,7 @@ case "${1:-}" in
   (record-link)
     zensu_memoize_project_dir || exit 9
     mv "$ZENSU_SESSION_CONTEXT" "$ZENSU_SESSION_CONTEXT.moved" || exit 6
-    ln -s "$ZENSU_SESSION_CONTEXT.moved" "$ZENSU_SESSION_CONTEXT" 2>/dev/null || exit 5
-    [ -L "$ZENSU_SESSION_CONTEXT" ] || exit 5
+    make_file_symlink "$ZENSU_SESSION_CONTEXT.moved" "$ZENSU_SESSION_CONTEXT" || exit 5
     zensu_resolve_project_dir
     ;;
   (hook-rebind)
@@ -585,8 +607,9 @@ memo_run() {
   local mode="$1"
   shift
   : >"$WORK/count"
-  MEMO_OUT="$(env "$@" MEMO_SESSION_LIB="$SESSION_LIB" ZENSU_TEST_NODE_COUNT="$WORK/count" \
-    PATH="$WORK/count-shim:$PATH" bash "$WORK/memo-driver.sh" "$mode" 2>/dev/null)"
+  MEMO_OUT="$(env "$@" MEMO_SESSION_LIB="$SESSION_LIB" MEMO_LINK_LIB="$WORK/link-lib.sh" \
+    ZENSU_TEST_NODE_COUNT="$WORK/count" PATH="$WORK/count-shim:$PATH" \
+    bash "$WORK/memo-driver.sh" "$mode" 2>/dev/null)"
   MEMO_RC=$?
   ROOT_COUNT="$(grep -c '^root$' "$WORK/count")"
   KEY_COUNT="$(grep -c '^key$' "$WORK/count")"
@@ -693,6 +716,22 @@ for near in "scv1_${HEX63}A" "scv1_${HEX63}" "scv1_${HEX63}00" "scv1_${HEX63}g" 
 done
 check "L42 an id that only resembles a canonical key is hashed by the core module, never returned as it is" "$NEAR_OK"
 
+COLLATED_KEYS="$(LC_ALL=en_US.UTF-8 bash -c '
+  source "$1" >/dev/null 2>&1 || exit 9
+  for key in "$2" "$3" "$4"; do
+    if zensu_session_key_canonical "$key"; then printf a; else printf r; fi
+  done
+  case B in ([a-f]) printf :collating ;; (*) printf :ascii ;; esac
+' _ "$SESSION_LIB" "scv1_${HEX63}f" "scv1_${HEX63}B" "$(printf 'scv1_%s\303\251' "$HEX63")" 2>/dev/null)"
+case "$COLLATED_KEYS" in
+  (arr:collating)
+    check "L42b a locale whose bracket ranges collate does not widen the canonical-key test" PASS ;;
+  (arr:ascii)
+    check "L42b bracket ranges did not collate under en_US.UTF-8 in this shell, so the locale probe could not discriminate" PASS ;;
+  (*)
+    check "L42b canonical-key test under a collating locale (got '$COLLATED_KEYS', want arr)" FAIL ;;
+esac
+
 memo_run set-input MEMO_SET_NAME=ZENSU_SESSION_KEY MEMO_SET_VALUE="scv1_$(printf '%064d' 0)"
 if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
   check "L44 the memo answers only for the session key it verified: another key is verified again and refused" PASS
@@ -746,7 +785,7 @@ else
 fi
 
 new_session lat-alias "$WORK/alias-target/proj" || check "L50 fixture: alias session baseline" FAIL
-if ln -s "$WORK/alias-target" "$WORK/alias-link" 2>/dev/null && [ -L "$WORK/alias-link" ]; then
+if make_directory_symlink "$WORK/alias-target" "$WORK/alias-link"; then
   memo_run set-input MEMO_SET_NAME=ZENSU_PROJECT_ROOT MEMO_SET_VALUE="$WORK/alias-link/proj"
   if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
     check "L50 the same root spelled through a symlinked ancestor is not answered by the memo: it is verified again and refused" PASS
@@ -759,19 +798,18 @@ fi
 
 new_session lat-swap "$WORK/swap-parent/proj" || check "L43 fixture: swap session baseline" FAIL
 memo_run swap-ancestor MEMO_SWAP_PARENT="$WORK/swap-parent"
-if [ -L "$WORK/swap-parent" ]; then
-  if [ "$MEMO_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
-    check "L43 a project root that starts resolving through a symlinked ancestor after the memo was taken is verified again and refused" PASS
-  else
-    check "L43 memo after an ancestor swap (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
-  fi
-elif [ -d "$WORK/swap-parent.real" ]; then
+SWAP_RC="$MEMO_RC"
+if [ "$SWAP_RC" -eq 5 ]; then
   check "L43 this host creates no symbolic link, so there is no ancestor swap to detect" PASS
+elif [ "$SWAP_RC" -ne 0 ] && [ -z "$MEMO_OUT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+  check "L43 a project root that starts resolving through a symlinked ancestor after the memo was taken is verified again and refused" PASS
 else
-  check "L43 ancestor swap fixture (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+  check "L43 memo after an ancestor swap (rc=$SWAP_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
 fi
 
-if [ -L "$WORK/swap-parent" ]; then
+if [ "$SWAP_RC" -eq 5 ]; then
+  check "L51 this host creates no symbolic link, so there is no mismatched root to stop on" PASS
+else
   stop_run lat-swap "$FULL_PATH_DEADLINE"
   if [ "$STOP_DECISION" = "block" ] && [ "$ROOT_COUNT" -eq 1 ] && [ -z "$STOP_NOTE" ] \
       && printf '%s' "$STOP_ERR" | grep -q 'exists but does not match'; then
@@ -779,29 +817,24 @@ if [ -L "$WORK/swap-parent" ]; then
   else
     check "L51 Stop with a mismatched root (decision=$STOP_DECISION verifications=$ROOT_COUNT err=$STOP_ERR)$STOP_NOTE" FAIL
   fi
-else
-  check "L51 this host creates no symbolic link, so there is no mismatched root to stop on" PASS
 fi
 
 new_session lat-gap "$WORK/gap-parent/proj" || check "L52 fixture: gap session baseline" FAIL
 cat >"$WORK/swap-after-root.sh" <<'EOF'
 #!/bin/bash
-[ -L "$MEMO_SWAP_PARENT" ] && exit 0
+[ -e "$MEMO_SWAP_PARENT.real" ] && exit 0
 [ -d "$MEMO_SWAP_PARENT" ] || exit 0
 mv "$MEMO_SWAP_PARENT" "$MEMO_SWAP_PARENT.real" || exit 0
-ln -s "$MEMO_SWAP_PARENT.real" "$MEMO_SWAP_PARENT" 2>/dev/null || exit 0
+source "$MEMO_LINK_LIB"
+make_directory_symlink "$MEMO_SWAP_PARENT.real" "$MEMO_SWAP_PARENT" || : >"$MEMO_SWAP_PARENT.unlinked"
 EOF
 memo_run gap-swap MEMO_SWAP_PARENT="$WORK/gap-parent" ZENSU_TEST_AFTER_ROOT="$WORK/swap-after-root.sh"
-if [ -L "$WORK/gap-parent" ]; then
-  if [ "$MEMO_RC" -ne 0 ] && [ "$MEMO_OUT" = "refused" ] && [ "$ROOT_COUNT" -eq 2 ]; then
-    check "L52 an ancestor swapped between the verification and the render is not memoized, and the root is refused" PASS
-  else
-    check "L52 swap inside the memoizing call (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
-  fi
-elif [ -d "$WORK/gap-parent.real" ]; then
+if [ -e "$WORK/gap-parent.unlinked" ]; then
   check "L52 this host creates no symbolic link, so there is no swap inside the memoizing call" PASS
+elif [ "$MEMO_RC" -ne 0 ] && [ "$MEMO_OUT" = "refused" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+  check "L52 an ancestor swapped between the verification and the render is not memoized, and the root is refused" PASS
 else
-  check "L52 gap swap fixture (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
+  check "L52 swap inside the memoizing call (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
 fi
 
 echo "----"

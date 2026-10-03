@@ -179,7 +179,7 @@ The review chain may have deferred findings instead of re-reviewing them, but on
 `hooks.reviewConvergence` is enabled: resolve it against the `TOP` from Phase 1, because this
 Bash carries no `CLAUDE_PROJECT_DIR` and would otherwise skip the project config the review
 hook reads, with
-`CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off' _ "${CLAUDE_PLUGIN_ROOT}"`,
+`ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off'`,
 and on `off` skip this paragraph and add no ledger rows to `## Open`. On `on`, run
 `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$TOP"`
 over the run log of the `/zensu:tdd` chain this stage closes: the log that chain has been

@@ -92,13 +92,33 @@ Wall time for the armed Stop fell from about 11 s to about 6 s at load 19–30. 
 bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer children there.
 
 - **Session key.** `sessionKey` returns a value matching `^scv1_[a-f0-9]{64}$` unchanged, so
-  `_zensu_session_key_canonical` answers that one shape in shell and every other input still
+  `zensu_session_key_canonical` answers that one shape in shell and every other input still
   goes to the core. It is a pure-function shortcut, not a cache, and applies to every caller of
   `zensu_resolve_session_id`. The pattern lists the hex digits instead of using a range, so no
   collation can widen it. `SESSION_KEY_RE` in `session-control-core-v1.js` owns the shape;
   `L38` and `L42` hold the shell copy to it, so a drift between the two surfaces there as a
   spawn-count or output failure. The hook passes no raw id any more: the bind already derived
   the key from the same payload, so `zensu_resolve_session_id ""` returns the bound key.
+- **One shell spelling of the key shape.** `zensu_session_key_canonical` is public and sits in
+  the `export -f` list of the non-Windows arm, and `reviewer_denial_note_path` in the Stop hook
+  calls it instead of keeping a test of its own. That test was the range form `scv1_*[!0-9a-f]*`
+  plus 64 `?`. Measured on macOS `/bin/bash` 3.2.57 under `LC_ALL=en_US.UTF-8`: `[a-f]` matches
+  `B` and `é`, so the range form accepted `scv1_` plus 63 hex digits plus `B`. The doctor's
+  `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$` in `reviewerDenialRows` and the reaper's
+  `NAME` never match such a name, which is the "doctor goes quiet with everything still green"
+  failure the comment in that function names. The private `_zensu_session_key_canonical` was
+  renamed, not wrapped: it never shipped in a release, and a wrapper would add a second name and
+  nothing else. `L42b` runs the predicate under `LC_ALL=en_US.UTF-8` and requires a canonical
+  control to pass and an upper-case and an accented last character to fail. It discriminates
+  only in a shell whose bracket ranges collate under that locale: macOS `/bin/bash` 3.2.57 does,
+  the local `bash:5` image (musl) does not, and the check's label says which case ran.
+- **Every shell test of the shape calls it.** `grep -rn 'scv1_' hooks/` is the census
+  (`.claude/rules/foreign-chain-row.md`). The receipt fallback in `zensu-edit-landing.sh` calls
+  the predicate in a subshell (`.claude/rules/multi-repo-stage1.md` records why, together with
+  the locale measurement of the range it replaced), and the session-pair guard in
+  `zensu-doctor.sh` calls it in the subshell that already sources this file. The other hits in
+  shell files are file-name prefix globs such as `tdd-phase-scv1_*.json` and JavaScript regexes
+  inside `node` programs, and neither collates.
 - **Project root.** `zensu_memoize_project_dir` renders the root (`cd -P && pwd -P`), runs the
   unchanged full verification once, and records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT,
   ZENSU_SESSION_KEY, rendered root)` in the shell ARRAY `_ZENSU_PROJECT_DIR_MEMO` only when the
@@ -158,9 +178,18 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on bash
   3.2) and the config reads (4).
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
-  container). Git Bash is unverified, and the symlink checks `L43`, `L48`, `L50`, `L51` and
-  `L52` assert nothing on a host that creates no symbolic link, which includes Git Bash in the
-  weekly Windows Safety shard.
+  container). Git Bash is unverified. The symlink checks `L43`, `L48`, `L50`, `L51` and `L52`
+  make their links through Node, never with `ln -s`, which Git Bash satisfies with a copy.
+  `L43`, `L50`, `L51` and `L52` link a directory with `make_directory_symlink`: a junction on
+  win32, a directory symlink elsewhere. `L48` links the session record, a file, which a junction
+  cannot do. It uses `make_file_symlink`, a native file symlink, which Windows creates only for
+  an elevated token or in Developer Mode, so `L48` keeps its skip arm. Each of the five checks
+  skips only when its helper fails, never on what `[ -L ]` reports: `L43` and `L51` read exit
+  code 5 of the memo driver, and `L52` reads the `.unlinked` marker of `swap-after-root.sh`. The
+  suite is excluded from the blocking Windows shards in
+  `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
+  workflow through `ciStructureTests`. `L13` and `L17d` still link with `ln -s`; their
+  behavior on Git Bash is unverified.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
@@ -179,4 +208,5 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
 **Version: `patch`.** No schema field, no strict key set, no hook added, removed or renamed, no
 matcher change, no `permissionDecision`; the knob is an environment variable, not a config key.
 The per-run memo and the canonical-key shortcut persist nothing and add no hook, matcher, knob
-or config key.
+or config key. Routing the denial-note name through `zensu_session_key_canonical` changes no
+persisted shape: a canonical key yields the same file name as before.

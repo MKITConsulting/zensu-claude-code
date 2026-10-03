@@ -2390,6 +2390,15 @@ _autopilot_active_read_without_lease() {
   _ZENSU_AP_ACTIVE_RECORD="$record"
 }
 
+_autopilot_workspace_read_without_lease() {
+  local root="$1" workspace="$2" prefer_owner="$3" rc=0
+  _autopilot_storage_safe "$root" "" || return 5
+  _autopilot_read_workspace_critical "$root" "$workspace" "$prefer_owner" >/dev/null 2>&1 || rc=$?
+  _autopilot_storage_safe "$root" "" || return 5
+  [ "$rc" -eq 1 ] && return 1
+  return 5
+}
+
 autopilot_read_active_strict() {
   local root owner="${2:-}"
   [ "$#" -eq 2 ] && [ -n "${1:-}" ] || return 3
@@ -3618,9 +3627,9 @@ _autopilot_begin_standalone_tdd_critical() {
 # names two guided skills, adoption first.)
 autopilot_read_workspace() {
   local root workspace prefer_owner="${3:-}"
-  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 5
   workspace="${2:-}"
-  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
+  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 5
   # An unrecognizable preference is dropped to "no preference" rather than
   # travelling to the worker, matching `autopilot_read_active`s gate on its own
   # owner argument. It can only change WHICH holder is reported, never whether
@@ -3632,8 +3641,27 @@ autopilot_read_workspace() {
   # simply absent -- the same "nothing holds this tree" verdict the locked read
   # would reach. The project lease below still lands its own lock artifacts
   # inside an EXISTING state directory; that is not what this swap is about.
-  _autopilot_read_storage_ready "$root" || return $?
-  _autopilot_locked_run "$root" "" _autopilot_read_workspace_critical "$root" "$workspace" "$prefer_owner"
+  _autopilot_read_storage_ready "$root"
+  case "$?" in
+    0) ;;
+    1) return 1 ;;
+    *) return 5 ;;
+  esac
+  _ZENSU_AP_HOLD_RECORD=""
+  _ZENSU_AP_HOLD_WORKER_RC=""
+  _autopilot_locked_run "$root" "" _autopilot_hold_probe "$root" "$workspace" "$prefer_owner" || {
+    [ -z "$_ZENSU_AP_HOLD_WORKER_RC" ] || return 5
+    _autopilot_workspace_read_without_lease "$root" "$workspace" "$prefer_owner"
+    return $?
+  }
+  case "$_ZENSU_AP_HOLD_WORKER_RC" in
+    0) ;;
+    1) return 1 ;;
+    2) return 2 ;;
+    *) return 5 ;;
+  esac
+  [ -n "$_ZENSU_AP_HOLD_RECORD" ] || return 5
+  printf '%s\n' "$_ZENSU_AP_HOLD_RECORD"
 }
 
 # The rendered hold sentence for the CALLER's own working tree, or a non-zero
@@ -3665,7 +3693,7 @@ autopilot_read_workspace() {
 # It also separates a PROVEN-FREE verdict from a lease that could not be acquired.
 # `_tdd_locked_run` returns 1 for a storage-safety failure, a keeper launch failure
 # and a failed acquisition, and the worker's own "no run holds this tree" is also
-# 1 — so composing on `autopilot_read_workspace` alone makes a could-not-look
+# 1 — so composing on `_autopilot_locked_run`'s status alone makes a could-not-look
 # indistinguishable from an all-clear. The probe below always returns 0, so a
 # non-zero from `_autopilot_locked_run` is unambiguously the LOCK's, and the
 # worker's own status is carried out separately.
@@ -4312,14 +4340,36 @@ _autopilot_reconcile_stop_critical() {
   _autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root"
 }
 
+_ZENSU_AP_RECONCILE_RECORD=""
+_ZENSU_AP_RECONCILE_WORKER_RC=""
+_autopilot_reconcile_probe() {
+  _ZENSU_AP_RECONCILE_RECORD="$(_autopilot_reconcile_stop_critical "$1" "$2")"
+  _ZENSU_AP_RECONCILE_WORKER_RC=$?
+  return 0
+}
+
 autopilot_reconcile_stop_active() {
   local root caller_session_id="${2:-}"
   [ "$#" -eq 2 ] || return 3
   _autopilot_session_id_ok "$caller_session_id" || return 3
-  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
-  _autopilot_read_storage_ready "$root" || return $?
-  _autopilot_locked_run "$root" "" _autopilot_reconcile_stop_critical \
-    "$root" "$caller_session_id"
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 5
+  _autopilot_read_storage_ready "$root"
+  case "$?" in
+    0) ;;
+    1) return 1 ;;
+    *) return 5 ;;
+  esac
+  _ZENSU_AP_RECONCILE_RECORD=""
+  _ZENSU_AP_RECONCILE_WORKER_RC=""
+  _autopilot_locked_run "$root" "" _autopilot_reconcile_probe "$root" "$caller_session_id" || {
+    [ -z "$_ZENSU_AP_RECONCILE_WORKER_RC" ] || return 5
+    _autopilot_active_read_without_lease "$root" "$caller_session_id" || return $?
+    printf '%s\n' "$_ZENSU_AP_ACTIVE_RECORD"
+    return 0
+  }
+  [ "$_ZENSU_AP_RECONCILE_WORKER_RC" -eq 0 ] || return "$_ZENSU_AP_RECONCILE_WORKER_RC"
+  [ -n "$_ZENSU_AP_RECONCILE_RECORD" ] || return 5
+  printf '%s\n' "$_ZENSU_AP_RECONCILE_RECORD"
 }
 
 _autopilot_increment_inner_budget_critical() {

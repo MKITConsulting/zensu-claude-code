@@ -48,8 +48,9 @@ OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
 `post-review-tdd-delegate.sh` preflight, which passes a single argument. **A SECOND
 lease-taking public reader of the owner-independent question now exists and deliberately does
 NOT route through that wrapper**: `autopilot_workspace_hold_report` needs the worker's own rc
-AND the holder record, and the wrapper collapses both into one status — the exact conflation
-that verb was built to remove. Say "two public readers", never "one wrapper". The Stop hook's rc=4
+AND the holder record from ONE leased read, while the wrapper answers with a status and prints
+the record only on 0. Both run `_autopilot_hold_probe`, but only the wrapper takes a read-only
+look when the lease cannot be taken; the report answers 5 there. Say "two public readers", never "one wrapper". The Stop hook's rc=4
 read was deleted when the fence began publishing its sentence, so the wrapper's preference
 parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
 parameter, not a line number. Do NOT restate this as "there is deliberately no public
@@ -62,7 +63,9 @@ its owner's, not the attesting caller's.
 
 **The owner-scoped read has a strict form, `autopilot_read_active_strict`.** Which callers use
 it, the read-only look it takes when the lease cannot be taken, and the checks that hold the real
-lease are in `.claude/rules/autopilot-active-read.md`.
+lease are in `.claude/rules/autopilot-active-read.md`. The public workspace read above and the
+Stop hook's `autopilot_reconcile_stop_active` keep a lease fault apart from their own verdict IN
+PLACE, with no strict twin; the same file records how and why.
 
 **The two deferred-review fences ask the owner-independent question and then WEIGH the
 answer; that is not a fourth shape and it is not owner-scoping.** They still call
@@ -235,7 +238,7 @@ the `--autopilot-adopt` arm of `zensu-log.sh`. Only this one is DECLARED at modu
 adoption pair is assigned inside the verb that publishes it. The hold-report verb added two further
 module-scope declarations, `_ZENSU_AP_HOLD_RECORD` and `_ZENSU_AP_HOLD_WORKER_RC`, and those carry
 the underscore-private prefix deliberately: they are an intra-file callback channel read only by
-`_autopilot_hold_probe` and `autopilot_workspace_hold_report`, never across a file boundary — which
+`_autopilot_hold_probe`, `autopilot_workspace_hold_report` and `autopilot_read_workspace`, never across a file boundary — which
 is exactly what the three unprefixed names are NOT, and the house precedent for a sourced-library
 global the Stop hook reads by name is `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
 stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a

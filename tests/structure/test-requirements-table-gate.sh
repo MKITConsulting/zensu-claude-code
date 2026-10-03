@@ -1039,7 +1039,8 @@ echo "== The receipt writer's own refusal arms =="
 RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
-cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BIN/"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$RW_BIN/"
 # A real repo with a real landed change, so the GRADING verdict is clean and the
 # exit code below can only be about receipt plumbing.
 RW_PROJ="$RW_DIR/proj"
@@ -1068,6 +1069,45 @@ check "RW2 a non-canonical --session is refused by the anchored fallback, not tu
 # — an assertion that "no receipt escaped" proves nothing if none is ever written.
 [ -z "$(find "$RW_DIR" -path "$RW_PROJ/.zensu" -prune -o -name 'edit-landing-*.json' -print 2>/dev/null)" ]
 check "RW2b the refused key wrote no receipt outside the project state dir" "$(verdict $?)"
+RW_HEX63="$(printf '%063d' 0)"
+RW_WIDE="scv1_${RW_HEX63}B"
+RW_WIDE_OUT="$(LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_WIDE" 2>&1)"
+RW_WIDE_RC=$?
+RW_LOCALE_GOOD="scv1_$(printf 'c%.0s' $(seq 64))"
+LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_LOCALE_GOOD" >/dev/null 2>&1
+RW_LOCALE_GOOD_RC=$?
+RW_RANGE="$(LC_ALL=en_US.ISO8859-1 /bin/bash -c '[[ "$1" =~ ^scv1_[0-9a-f]{64}$ ]] && printf collating || printf ascii' _ "$RW_WIDE" 2>/dev/null)"
+if [ "$RW_WIDE_RC" -eq 2 ] && printf '%s' "$RW_WIDE_OUT" | grep -qF 'session key resolved empty' \
+    && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_WIDE}.json" ] \
+    && [ "$RW_LOCALE_GOOD_RC" -eq 0 ] && [ -f "$RW_PROJ/.zensu/state/edit-landing-${RW_LOCALE_GOOD}.json" ]; then
+  case "$RW_RANGE" in
+    (collating) check "RW2c a locale whose bracket ranges collate does not widen the fallback's key test" PASS ;;
+    (*) check "RW2c bracket ranges did not collate under en_US.ISO8859-1 in this shell, so the locale probe could not discriminate" PASS ;;
+  esac
+else
+  check "RW2c under en_US.ISO8859-1 the fallback refuses scv1_ plus 63 hex plus B and still lands a canonical key (rc=$RW_WIDE_RC, control rc=$RW_LOCALE_GOOD_RC)" FAIL
+fi
+RW_BARE="$RW_DIR/bare"
+mkdir -p "$RW_BARE"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BARE/"
+RW_BARE_KEY="scv1_$(printf 'd%.0s' $(seq 64))"
+RW_BARE_OUT="$(/bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_BARE_KEY" 2>&1)"
+[ $? -eq 2 ] \
+  && printf '%s' "$RW_BARE_OUT" | grep -qF 'the session-key shape check in zensu-session.sh could not be loaded' \
+  && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_BARE_KEY}.json" ]
+check "RW2d without zensu-session.sh beside the script the fallback refuses even a canonical key and names that cause" "$(verdict $?)"
+: > "$RW_BARE/zensu-session.sh"
+RW_STUB_OUT="$(zensu_session_key_canonical() { return 0; }
+  export -f zensu_session_key_canonical
+  /bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+    --project "$RW_PROJ" --session "$RW_WIDE" 2>&1)"
+[ $? -eq 2 ] \
+  && printf '%s' "$RW_STUB_OUT" | grep -qF 'the session-key shape check in zensu-session.sh could not be loaded' \
+  && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_WIDE}.json" ]
+check "RW2e an inherited zensu_session_key_canonical never stands in for the one the library defines" "$(verdict $?)"
 # A receipt-plumbing failure is an ENVIRONMENT error (exit 2), never the claim
 # verdict (exit 1) — a caller reads exit 1 as "an edit did not land". Staged by
 # making the destination unwritable while the claim itself really landed.
