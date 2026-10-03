@@ -722,7 +722,7 @@ if [ -n "$SBOX" ]; then
     *)
       check "P5x1 standalone chain: the delegate directive actually emits the converge offer line (selfReview off)" FAIL ;;
   esac
-  printf '{"hooks":{"selfReview":false,"combinedSummary":false}}\n' > "$SBOX/config-doubleoff.json"
+  printf '{"hooks":{"selfReview":false,"combinedSummary":false,"autoFixMaxRounds":5}}\n' > "$SBOX/config-doubleoff.json"
   start_session dx
   DOUT3="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
   case "$DOUT3" in
