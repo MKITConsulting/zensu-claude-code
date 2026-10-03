@@ -6922,10 +6922,12 @@ else
   cp -R "$SBOX/plug" "$LE_NOPROOF"
   le_shim "$LE_NOPROOF" 'function (options) {
     var inspection = real.inspectExternalProcessLock(options);
-    if (inspection.lock.state === "owned" && inspection.lock.alive && !inspection.lock.identityRecorded) {
-      inspection.lock.stale = false;
-      inspection.lock.startedAfterRecord = false;
-    }
+    [inspection.lock, inspection.recovery].forEach(function (artifact) {
+      if (artifact.state === "owned" && artifact.alive && !artifact.identityRecorded) {
+        artifact.stale = false;
+        artifact.startedAfterRecord = false;
+      }
+    });
     return inspection;
   }'
   le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null
@@ -7156,7 +7158,18 @@ else
   le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null "" "$LE_RECOVERY"
   LE_REC_BARE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
   le_keep "$LE_REC_BARE_ROW"
+  LE_REC_NOPROOF_ROW="$(le_row "$(le_report "$LE_NOPROOF" "$AP_P")")"
+  le_keep "$LE_REC_NOPROOF_ROW"
   le_clear
+  if [ -n "$LE_LIVE_START" ]; then
+    printf '%s' "$LE_REC_BARE_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the recovery sentinel" \
+      && printf '%s' "$LE_REC_BARE_ROW" | grep -qF 'started after the record was written, so its pid was reused' \
+      && printf '%s' "$LE_REC_BARE_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own'
+  else
+    printf '%s' "$LE_REC_BARE_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the holder of the recovery sentinel" \
+      && ! printf '%s' "$LE_REC_BARE_ROW" | grep -qF 'removable'
+  fi
+  LE_REC_BARE_OK=$?
   mkdir "$LE_RECOVERY"
   LE_REC_DIR_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
   le_keep "$LE_REC_DIR_ROW"
@@ -7165,14 +7178,15 @@ else
     && printf '%s' "$LE_REC_DEAD_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel was left by a process that is gone' \
     && printf '%s' "$LE_REC_DEAD_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own' \
     && printf '%s' "$LE_REC_BUSY_ROW" | grep -qF '✅  autopilot lease: a lease is being recovered or released right now' \
-    && printf '%s' "$LE_REC_BARE_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel' \
-    && printf '%s' "$LE_REC_BARE_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the holder of the recovery sentinel" \
-    && ! printf '%s' "$LE_REC_BARE_ROW" | grep -qF 'removable' \
+    && [ "$LE_REC_BARE_OK" -eq 0 ] \
+    && printf '%s' "$LE_REC_NOPROOF_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel' \
+    && printf '%s' "$LE_REC_NOPROOF_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the holder of the recovery sentinel" \
+    && ! printf '%s' "$LE_REC_NOPROOF_ROW" | grep -qF 'removable' \
     && printf '%s' "$LE_REC_DIR_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel path holds an entry that is not a regular file' \
     && printf '%s' "$LE_REC_DIR_ROW" | grep -qF 'every lease acquisition and release fails while it stays'; then
     check "P1le22 a recovery sentinel is judged with the lock's verdicts, and the lease never reads free while one exists" PASS
   else
-    check "P1le22 recovery sentinel rows (dead: $LE_REC_DEAD_ROW; busy: $LE_REC_BUSY_ROW; bare: $LE_REC_BARE_ROW; directory: $LE_REC_DIR_ROW)" FAIL
+    check "P1le22 recovery sentinel rows (dead: $LE_REC_DEAD_ROW; busy: $LE_REC_BUSY_ROW; bare: $LE_REC_BARE_ROW; no proof: $LE_REC_NOPROOF_ROW; directory: $LE_REC_DIR_ROW)" FAIL
   fi
 
   if [ -z "$LE_LIVE_IDENTITY" ]; then
