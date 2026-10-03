@@ -675,3 +675,5 @@ Release PR B (mark ready, merge, Actions → Release `minor`) only if all hold:
 - at most 50 USD API-equivalent and at most 180 net minutes per run (the run's metrics file, cost from the last `result` event of its stream log).
 
 Otherwise keep PR B as a draft and report which criterion failed. In both cases add a section on the lean runs to the kit's benchmark analysis, a README addendum with the config change and the changed checksum, and state that two runs are a small sample.
+
+Before a release, read each run's Stop blocks: `stopBlockCount` in the run's `tdd-phase-<session key>.json`, and any `did not converge after <n> nudges` line of the chain enforcer. The guard releases after `autoFixMaxRounds + 3` blocks, so the default of one fix round lowers that cap from 8 to 4. If a run reached 3 or more blocks or a release, decouple the cap from `autoFixMaxRounds` in `hooks/stop-chain-enforcer.sh` first.
