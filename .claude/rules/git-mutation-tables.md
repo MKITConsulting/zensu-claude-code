@@ -284,7 +284,7 @@ contract it names, and none is observable from a POSIX host:
 `timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
 after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
 everything after them never executed on Windows at all while the shard still reported.
-It is 600000 now (matching `autopilot-plan-delegate`). Adding checks costs Windows wall
+It is 600000 now. Adding checks costs Windows wall
 clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
 unverified regardless of how many checks passed before it.
 

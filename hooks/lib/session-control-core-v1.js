@@ -25,6 +25,7 @@ const EXTERNAL_LOCK_POLL_MS = 50;
 const EXTERNAL_LOCK_DEFAULT_ATTEMPTS = 200;
 const LOCK_TOKEN_RE = /^[a-f0-9]{48}$/;
 const LOCK_IDENTITY_RE = /^[a-z0-9._:-]{1,160}$/;
+const LOCK_OWNER_MAX_BYTES = 4096;
 const TRANSIENT_LOCK_SNAPSHOT_ERROR_RE = /^session-control-v1: (?:file identity changed while opening|file (?:path )?changed while reading|missing file): /;
 const DARWIN_PROCESS_START_RE = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [0-9]{4}$/;
 const WORKFLOW_RESERVED_FIELDS = new Set([
@@ -804,7 +805,7 @@ function lockOwner(file) {
   let snapshot = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      snapshot = readRegularFileSnapshot(file, 4096, true, true);
+      snapshot = readRegularFileSnapshot(file, LOCK_OWNER_MAX_BYTES, true, true);
       break;
     } catch (error) {
       if (!TRANSIENT_LOCK_SNAPSHOT_ERROR_RE.test(error.message)) throw error;
@@ -999,19 +1000,32 @@ function createOwnedArtifact(
   }
 }
 
-function artifactIsStale(snapshot) {
-  if (!snapshot) return false;
+function artifactStaleness(snapshot) {
+  if (!snapshot) return { stale: false, alive: false, identity: null };
   if (!snapshot.owner) {
-    return Date.now() - snapshot.stat.mtimeMs > LOCK_STALE_MS;
+    return {
+      stale: Date.now() - snapshot.stat.mtimeMs > LOCK_STALE_MS,
+      alive: false,
+      identity: null,
+    };
   }
-  if (!processIsAlive(snapshot.owner.pid)) return true;
+  if (!processIsAlive(snapshot.owner.pid)) return { stale: true, alive: false, identity: null };
   if (snapshot.owner.process_start_identity) {
     const actual = snapshot.owner.pid === process.pid
       ? currentProcessStartIdentity()
       : processStartIdentity(snapshot.owner.pid);
-    if (actual && actual !== snapshot.owner.process_start_identity) return true;
+    const identity = actual || null;
+    return {
+      stale: identity !== null && identity !== snapshot.owner.process_start_identity,
+      alive: true,
+      identity,
+    };
   }
-  return false;
+  return { stale: false, alive: true, identity: null };
+}
+
+function artifactIsStale(snapshot) {
+  return artifactStaleness(snapshot).stale;
 }
 
 function reclaimStaleArtifact(file) {
@@ -1175,6 +1189,61 @@ function externalProcessLockBinding(options) {
 
 function externalProcessLockPath(options) {
   return externalProcessLockBinding(options).lockFile;
+}
+
+function lockArtifactRefusal(file) {
+  let entry;
+  try {
+    entry = fs.lstatSync(file);
+  } catch {
+    return 'unreadable';
+  }
+  if (entry.isSymbolicLink()) return 'symlink';
+  if (!entry.isFile()) return 'irregular';
+  if (entry.size > LOCK_OWNER_MAX_BYTES) return 'oversized';
+  return 'unreadable';
+}
+
+function inspectLockArtifact(file) {
+  let snapshot;
+  try {
+    snapshot = lockOwner(file);
+  } catch {
+    return { state: 'refused', cause: lockArtifactRefusal(file) };
+  }
+  if (!snapshot) {
+    try {
+      fs.lstatSync(file);
+    } catch (error) {
+      if (error.code === 'ENOENT') return { state: 'absent' };
+    }
+    return { state: 'changing' };
+  }
+  const staleness = artifactStaleness(snapshot);
+  if (!snapshot.owner) {
+    return { state: 'ownerless', stale: staleness.stale, mtimeMs: snapshot.stat.mtimeMs };
+  }
+  return {
+    state: 'owned',
+    stale: staleness.stale,
+    pid: snapshot.owner.pid,
+    alive: staleness.alive,
+    identityRecorded: Boolean(snapshot.owner.process_start_identity),
+    identityCurrent: staleness.identity,
+    createdAtMs: Date.parse(snapshot.owner.created_at),
+  };
+}
+
+function inspectExternalProcessLock(options) {
+  const binding = externalProcessLockBinding(options);
+  return {
+    lockFile: binding.lockFile,
+    recoveryFile: binding.recoveryFile,
+    staleAfterMs: LOCK_STALE_MS,
+    lock: inspectLockArtifact(binding.lockFile),
+    recovery: inspectLockArtifact(binding.recoveryFile),
+    inspectedAtMs: Date.now(),
+  };
 }
 
 function externalProcessLockAttemptLimit(value) {
@@ -5832,6 +5901,7 @@ module.exports = {
   processStartIdentityForPid,
   createAttestation,
   externalProcessLockPath,
+  inspectExternalProcessLock,
   acquireExternalProcessLock,
   releaseExternalProcessLock,
   releaseExternalProcessLockByToken,

@@ -927,7 +927,7 @@ still covers only the LEGACY pointer by name.
   through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
   gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
   present in the true-claim one — and P1nz13 pins the second row plus its control.
-- **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
+- **The Windows wall clock of `test-doctor.sh` is UNMEASURED.** `test-autopilot-state-machine.sh`
   runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
   and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
@@ -944,8 +944,11 @@ still covers only the LEGACY pointer by name.
   bullet read `P1na`-`P1ny` while `P1nz` already existed, with no rename involved. Re-grep the
   family before trusting either form.
   This repository's rule is that a ceiling comes from a green shard measurement
-  and never from an estimate, so no ceiling was raised: take both figures from the next green
-  Windows run and record them before adding further fixtures to either file.
+  and never from an estimate, so no ceiling was raised: take the `test-doctor.sh` figure from
+  the next green Windows run that runs it and record it before adding further fixtures to that
+  file. `test-autopilot-state-machine.sh` has been measured since, at 969005 and 878950 ms on run
+  37064216294, after run 37060398940 timed it out at its old 900000 ms cap;
+  `.claude/rules/windows-budget-best-solution-first.md` records the figures and its new cap.
 - **A foreign nonterminal run permanently withholds the green summary.** The row is `WARN` and
   `line()` counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so while
   any other session in this project holds a nonterminal run, `/zensu:doctor` cannot print a clean
