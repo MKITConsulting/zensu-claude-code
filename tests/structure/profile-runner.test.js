@@ -23,12 +23,12 @@ const { RUNTIME_PATHS } = require('../windows-profile-contract.js');
 
 const WINDOWS_TEST_WAIT_MS = 30000;
 const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
-// A cold Windows PowerShell Add-Type compilation can exceed 30 seconds while
-// the Windows contract shards share one hosted runner pool. Keep the fixture
-// bounded, but leave enough room to observe the child process's real exit code.
+// The Windows job helper reaches the suite in under 2 s, under 4 s on a VM's first
+// PowerShell. Module auto-loading in the sandbox would add 11-43 s, so the profile
+// deadline stays below that, and the suite timeout leaves room for the real exit code.
 const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
-const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 60000 : 120;
+const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 10000 : 120;
 const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
   process.platform === 'win32' ? 90000 : 5000;
 const TEST_PROFILE_DEADLINE_ASSERT_MS =
