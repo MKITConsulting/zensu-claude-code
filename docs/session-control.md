@@ -194,8 +194,9 @@ thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main
   Finding Verification Gate, the ticket and the consume-mode reviewer run as usual. See
   [Ultracode and external reviews](review-chain.md#ultracode-and-external-reviews).
 - **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
-  after it finished. A `Stop` that falls while it still runs is released up to three times in
-  a row, so the chain waits for the workflow instead of starting a review beside it.
+  after it finished. Once implementation is marked complete, a `Stop` that falls while the
+  workflow still runs is released up to three times before the first review, so the chain
+  waits for the workflow instead of starting a review beside it; a fix round never waits.
 - **No chain is armed in this session.** The main thread records a project-scoped marker
   with `zensu-log.sh --pending-review --files "<changed>"`; the **next interactive `Stop`**
   in that project adopts it and runs the full chain once, then clears it.

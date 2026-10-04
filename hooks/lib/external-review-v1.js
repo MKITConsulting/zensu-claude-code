@@ -14,12 +14,13 @@ const ID_RE = /^xr1_[0-9]{13}_[0-9a-f]{12}$/;
 const RECORD_FILE_RE = /^xr1_[0-9]{13}_[0-9a-f]{12}\.json$/;
 const SESSION_KEY_RE = /^scv1_[0-9a-f]{64}$/;
 const RUN_ID_RE = /\bwf_[a-z0-9-]{6,64}\b/;
+const RUN_ID_EXACT_RE = /^wf_[a-z0-9-]{6,64}$/;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const META_NAME_RE = /export\s+const\s+meta\s*=\s*\{[\s\S]{0,4000}?\bname\s*:\s*(['"`])([^'"`\r\n]{1,128})\1/;
 const SOURCES = Object.freeze(['script', 'script-path', 'named']);
 const STATUSES = Object.freeze(['ok', 'stale', 'none', 'off', 'unavailable']);
-const TERMINAL_TASK_STATUSES = Object.freeze(['completed', 'complete', 'done', 'failed', 'killed', 'stopped', 'cancelled', 'canceled', 'error']);
+const RUNNING_TASK_STATUSES = Object.freeze(['running', 'pending', 'queued', 'in_progress', 'in-progress', 'starting', 'started', 'active']);
 const LOG_PREFIX = 'EXTERNAL REVIEW —';
 const RECORD_KEYS = Object.freeze([
   'args',
@@ -50,6 +51,7 @@ const LIMITS = Object.freeze({
   listedLaunches: 8,
   maxWaits: 3,
   waitTtlMs: 24 * 60 * 60 * 1000,
+  clockSkewMs: 5 * 60 * 1000,
   listedTaskNames: 3,
 });
 
@@ -133,7 +135,9 @@ function validateRecord(record, expected = {}, limits = LIMITS) {
   if (expected.id !== undefined && record.id !== expected.id) return 'id does not match its file name';
   if (typeof record.session_key !== 'string' || !SESSION_KEY_RE.test(record.session_key)) return 'malformed session key';
   if (expected.sessionKey !== undefined && record.session_key !== expected.sessionKey) return 'bound to another session';
-  if (!isIsoTimestamp(record.recorded_at)) return 'malformed record time';
+  if (!isIsoTimestamp(record.recorded_at) || record.recorded_at !== new Date(recordTime(record.id)).toISOString()) {
+    return 'malformed record time';
+  }
   if (!(record.name === null || screenName(record.name) !== null)) return 'malformed name';
   if (!SOURCES.includes(record.source)) return 'unknown source';
   if (!nullableString(record.script, limits.maxScriptChars)) return 'malformed script';
@@ -144,7 +148,7 @@ function validateRecord(record, expected = {}, limits = LIMITS) {
   if (typeof record.script_truncated !== 'boolean') return 'malformed script truncation flag';
   if (!nullableString(record.args, limits.maxArgsChars)) return 'malformed args';
   if (typeof record.args_truncated !== 'boolean') return 'malformed args truncation flag';
-  if (!(record.run_id === null || (typeof record.run_id === 'string' && RUN_ID_RE.test(record.run_id) && record.run_id.length <= 67))) {
+  if (!(record.run_id === null || (typeof record.run_id === 'string' && RUN_ID_EXACT_RE.test(record.run_id)))) {
     return 'malformed run id';
   }
   if (!nullableString(record.plugin_version, 64)) return 'malformed plugin version';
@@ -281,6 +285,23 @@ function sweepIdleSessions(root, currentSessionKey, limits = LIMITS, now = Date.
   return swept;
 }
 
+function sweepStaleWaits(root, limits = LIMITS, now = Date.now()) {
+  let swept = 0;
+  const base = path.join(root, 'waits');
+  let names;
+  try { names = fs.readdirSync(base); } catch { return 0; }
+  for (const name of names) {
+    if (!/^scv1_[0-9a-f]{64}\.json$/.test(name)) continue;
+    const file = path.join(base, name);
+    try {
+      if (now - fs.lstatSync(file).mtimeMs <= limits.waitTtlMs) continue;
+      fs.rmSync(file, { force: true });
+      swept += 1;
+    } catch { }
+  }
+  return swept;
+}
+
 function clip(text, max) {
   if (text.length <= max) return { text, truncated: false };
   return { text: text.slice(0, max), truncated: true };
@@ -389,7 +410,9 @@ function recordLaunch(payload, env = process.env, options = {}) {
   const record = buildRecord(payload, sessionKey, { limits, now: options.now });
   writeRecordAtomic(locations.records, record, limits);
   const pruned = prune(locations.records, limits);
-  const swept = sweepIdleSessions(locations.root, sessionKey, limits, options.now === undefined ? Date.now() : options.now);
+  const now = options.now === undefined ? Date.now() : options.now;
+  const swept = sweepIdleSessions(locations.root, sessionKey, limits, now);
+  sweepStaleWaits(locations.root, limits, now);
   return { outcome: 'recorded', id: record.id, pruned, swept };
 }
 
@@ -459,6 +482,24 @@ function parseChangedPaths(text, limits = LIMITS) {
   return { paths: [...new Set(kept)], excluded };
 }
 
+function changeTime(stat) {
+  return Math.max(stat.mtimeMs, stat.ctimeMs);
+}
+
+function nearestParentTime(root, relative) {
+  let current = path.dirname(path.join(root, relative));
+  while (isInside(root, current)) {
+    try {
+      return changeTime(fs.lstatSync(current));
+    } catch (error) {
+      if (!error || (error.code !== 'ENOENT' && error.code !== 'ENOTDIR')) return null;
+    }
+    if (current === root) break;
+    current = path.dirname(current);
+  }
+  return null;
+}
+
 function newestChangeTime(root, paths) {
   let newest = 0;
   let existing = 0;
@@ -470,12 +511,15 @@ function newestChangeTime(root, paths) {
     } catch (error) {
       if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
         missing += 1;
+        const parent = nearestParentTime(root, relative);
+        if (parent === null) return { error: 'unreadable-path' };
+        newest = Math.max(newest, parent);
         continue;
       }
       return { error: 'unreadable-path' };
     }
     existing += 1;
-    newest = Math.max(newest, stat.mtimeMs);
+    newest = Math.max(newest, changeTime(stat));
   }
   return { newest, existing, missing };
 }
@@ -512,6 +556,10 @@ function check(options, limits = LIMITS) {
   if (!options.enabled) {
     return { status: 'off', lines: [`${LOG_PREFIX} status=off reason=disabled — hooks.externalReviewImport is false`] };
   }
+  if (options.judge === false) {
+    return { status: 'off', lines: [`${LOG_PREFIX} status=off reason=review-judge-disabled — the import needs the judge, and hooks.reviewJudge is false`] };
+  }
+  if (options.changedText === null) return unavailable('change-set-too-large');
   if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return unavailable('session');
   if (typeof options.pluginData !== 'string' || options.pluginData === '') return unavailable('plugin-data');
   const root = canonicalDirectoryOrNull(options.root);
@@ -533,7 +581,8 @@ function check(options, limits = LIMITS) {
       return unavailable('store-unreadable');
     }
   }
-  const valid = entries.filter((entry) => entry.record).reverse();
+  const horizon = (options.now === undefined ? Date.now() : options.now) + limits.clockSkewMs;
+  const valid = entries.filter((entry) => entry.record && recordTime(entry.id) <= horizon).reverse();
   const skipped = entries.length - valid.length;
   const counts = `changed=${changes.existing} missing=${changes.missing} excluded=${parsed.excluded} skipped=${skipped}`;
   if (valid.length === 0) {
@@ -553,6 +602,9 @@ function check(options, limits = LIMITS) {
   if (options.launch) {
     selected = fresh.find((entry) => entry.id === options.launch);
     if (!selected) return unavailable('launch-not-fresh');
+  } else if (fresh.length > 1) {
+    lines[0] = `${LOG_PREFIX} status=unavailable reason=ambiguous-launch launches=${fresh.length}/${valid.length} last-change=${iso(changes.newest)} ${counts} — re-run with --launch <id> of the launch whose run id is the workflow whose result you hold`;
+    return { status: 'unavailable', lines };
   }
   lines.push(...scriptBlock(selected.record));
   return { status, lines, selected: selected.id };
@@ -563,7 +615,19 @@ function inFlightWorkflows(payload) {
   return tasks.filter((task) => task
     && typeof task === 'object'
     && task.type === 'workflow'
-    && !(typeof task.status === 'string' && TERMINAL_TASK_STATUSES.includes(task.status.toLowerCase())));
+    && typeof task.status === 'string'
+    && RUNNING_TASK_STATUSES.includes(task.status.toLowerCase()));
+}
+
+function clearWait(options) {
+  if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return false;
+  if (typeof options.pluginData !== 'string' || options.pluginData === '') return false;
+  try {
+    fs.rmSync(path.join(options.pluginData, ...STORE_SEGMENTS, 'waits', `${options.sessionKey}.json`), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readWaitCount(file, limits, now) {
@@ -581,7 +645,10 @@ function readWaitCount(file, limits, now) {
 
 function stopWait(payload, options, limits = LIMITS) {
   const workflows = inFlightWorkflows(payload);
-  if (workflows.length === 0) return { wait: false, reason: 'none', workflows: 0, line: 'nowait reason=none workflows=0' };
+  if (workflows.length === 0) {
+    clearWait(options);
+    return { wait: false, reason: 'none', workflows: 0, line: 'nowait reason=none workflows=0' };
+  }
   const names = [...new Set(workflows.map((task) => screenName(task.name)).filter(Boolean))].slice(0, limits.listedTaskNames);
   const nameText = names.length ? names.join(',') : '(unnamed)';
   if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) {
@@ -592,6 +659,7 @@ function stopWait(payload, options, limits = LIMITS) {
   let count;
   try {
     const locations = waitLocations(options.pluginData);
+    sweepStaleWaits(locations.root, limits, now);
     file = path.join(locations.waits, `${options.sessionKey}.json`);
     count = readWaitCount(file, limits, now);
   } catch {
@@ -649,12 +717,13 @@ function main(argv, env = process.env, io = {}) {
     try {
       result = check({
         enabled: env.ZENSU_XR_ENABLED !== '0',
+        judge: env.ZENSU_XR_JUDGE !== '0',
         pluginData: env.ZENSU_XR_PLUGIN_DATA,
         sessionKey: env.ZENSU_XR_SESSION_KEY,
         projectRoot: env.ZENSU_XR_PROJECT_ROOT,
         root: env.ZENSU_XR_ROOT,
         launch: env.ZENSU_XR_LAUNCH || '',
-        changedText: env.ZENSU_XR_ENABLED === '0' ? '' : readInput(LIMITS.maxChangedBytes + 1),
+        changedText: env.ZENSU_XR_ENABLED === '0' || env.ZENSU_XR_JUDGE === '0' ? '' : readInput(LIMITS.maxChangedBytes),
       });
     } catch {
       result = unavailable('fault');
@@ -669,7 +738,6 @@ function main(argv, env = process.env, io = {}) {
       result = stopWait(payload || {}, {
         pluginData: env.ZENSU_XR_PLUGIN_DATA,
         sessionKey: env.ZENSU_XR_SESSION_KEY,
-        max: env.ZENSU_XR_MAX_WAITS === undefined ? undefined : Number(env.ZENSU_XR_MAX_WAITS),
       });
     } catch {
       result = { line: 'nowait reason=fault workflows=0' };
@@ -689,7 +757,7 @@ module.exports = {
   RECORD_KEYS,
   LIMITS,
   LOG_PREFIX,
-  TERMINAL_TASK_STATUSES,
+  RUNNING_TASK_STATUSES,
   ExternalReviewError,
   limitsWith,
   newRecordId,
@@ -700,6 +768,7 @@ module.exports = {
   listRecords,
   prune,
   sweepIdleSessions,
+  sweepStaleWaits,
   buildRecord,
   recordLaunch,
   parseChangedPaths,

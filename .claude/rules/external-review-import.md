@@ -25,14 +25,22 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   rename at `0600`, newest 64 per session, idle sessions swept after 14 days. It prints
   nothing and exits 0 on every fault, so it can never return a decision.
 - `check` — `zensu-log.sh --external-review --root <top>`, strict bind, change set on stdin.
-  `ok` only when a launch is newer than the newest mtime of every existing changed path;
-  `.zensu` paths are excluded and counted. Every fault answers `unavailable`, and every answer
-  but `ok` leaves the panel path unchanged. The script block is fenced by a per-call random
-  nonce, so a recorded script cannot forge its own end line.
+  `ok` only when exactly one launch is newer than the change time (`max(mtime, ctime)`) of
+  every existing changed path and of the nearest existing parent of every missing one;
+  `.zensu` paths are excluded and counted. Several fresh launches answer
+  `unavailable reason=ambiguous-launch` until `--launch <id>` names one, `hooks.reviewJudge`
+  off answers `off reason=review-judge-disabled`, and a record dated beyond `clockSkewMs` is
+  skipped. Every fault answers `unavailable`, a module that fails to load included, and every
+  answer but `ok` leaves the panel path unchanged. The script block is fenced by a per-call
+  random nonce, so a recorded script cannot forge its own end line.
 - `stop-wait` — the Stop hook's `external_review_workflow_wait`. It releases a standalone
-  chain's Stop while `background_tasks` lists a non-terminal `workflow` entry, before the inner
-  budget increment, after `outer_finish`, at most `LIMITS.maxWaits` (3) times in a row. The
-  counter is `waits/<scv1-key>.json` in the store, so no workflow-state field was added.
+  chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
+  is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
+  most `LIMITS.maxWaits` (3) times; after that every Stop blocks until one sees no running
+  workflow, which deletes the counter. A session that owns a live Autopilot run
+  (`OUTER_PRESENT`), a Stop that adopted a deferred review and a project holding a deferred
+  claim never wait. The counter is `waits/<scv1-key>.json` in the store, swept after 24 hours,
+  so no workflow-state field was added.
 
 **Decisions.**
 
@@ -49,11 +57,16 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   receive the diff in their prompt.
 - The judge is the gap detector because it already re-reads every changed file fresh. The
   `## Gaps` section exists only with an `external_review` input, so the panel path renders
-  the judge exactly as before.
+  the judge exactly as before. A judge that fails falls back to the full panel.
+- An unknown or absent task status gets no wait, so the guard blocks: the status vocabulary
+  was never captured, and a wait is the one relaxation of the chain guarantee.
+- The wait bound has no environment override. A release that exits before the claim handoff
+  would recreate the crashed-adopter state, hence the adoption and claim exclusions.
 
-**Coupled sites.** The wait-file layout is spelled twice: `waitLocations` in the module and
-`external_review_wait_file` in the Stop hook, whose resume block deletes it; `X14` drives the
-reset. The resume reason names the panel and the import path (`X12`). The store is in both
+**Coupled sites.** The wait-file layout is spelled three times: `waitLocations` and
+`clearWait` in the module and `external_review_wait_file` in the Stop hook, whose prefilter
+miss deletes it; `X14` drives the limit and the reset, `X20`-`X23` the round, Autopilot and
+deferred-review exclusions. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
 `skills/tdd/SKILL.md` steps 3, 4, 4b, 4c and 5 plus the `Subagent / Claude Code Workflow
 safety` and `Work sequentially` bullets; the file is at its 433-line cap, so edits fold into
@@ -67,12 +80,13 @@ of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.m
   id inside `tool_response`) and the Stop `background_tasks` entry of a running workflow follow
   the Claude Code hook and workflow documentation; no live capture was taken. A missing field
   degrades to no record or no wait, never to a block.
-- Freshness compares launch time with mtimes. A tool that preserves mtimes, or a filesystem
-  with coarse timestamps, can make an older review look fresh; the judge is the backstop.
+- Freshness compares launch time with change times. A filesystem with coarse timestamps can
+  make an older review look fresh, and a changed directory entry (a submodule) is judged by
+  the directory's own times; the judge is the backstop.
 - The record proves a launch, not what was reviewed or whether the workflow finished. The
   skill requires the finished result before an import; nothing enforces it.
-- The wait counter is per session and resets only on the resume block or after 24 hours, so a
-  second chain within that window can start with fewer waits.
+- The wait counter is per session and resets only when a Stop sees no running workflow or
+  after 24 hours, so a second chain started while the same workflow runs inherits its count.
 - The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB).
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard.
 

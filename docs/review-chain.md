@@ -58,38 +58,51 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   time, the workflow name, a digest and a bounded copy of the script (64 KiB), the arguments
   (8 KiB) and the run id when the tool result names one. Records live in the plugin's
   private data store under `external-review/v1/`, one file per launch at mode `0600`, at
-  most 64 per session, and idle sessions are swept after 14 days. `PostToolUse` runs only
+  most 64 per session; idle sessions are swept after 14 days and wait counters after 24 hours. `PostToolUse` runs only
   after a tool call succeeded, so a launch a permission rule or hook refused leaves no
   record, and a subagent's launch is never recorded. The hook prints nothing and exits 0 on
   every fault.
 - **Import on the first review.** In `/zensu:tdd` Phase 6.10 step 3, with `hooks.reviewJudge`
   on, the main thread pipes the review's change set into
   `zensu-log.sh --external-review --root <top>`. It answers `status=ok` only when a recorded
-  launch is newer than the newest modification time of every changed file that still exists
-  (the plugin's own `.zensu` files excluded); every other answer (`none`, `stale`, `off`,
-  `unavailable`) leaves the panel exactly as before. On `ok` the main thread skips the aspect
-  panel, logs `PANEL SKIPPED — external review <name> imported`, and merges the workflow's
-  findings as `EXT-<n>`, where a severity may be raised but never lowered.
+  launch is newer than the change time (the later of modification and status-change time) of
+  every changed file that still exists and of the nearest existing parent of every changed
+  path that no longer does (the plugin's own `.zensu` files excluded). When several launches
+  are that fresh it answers `status=unavailable reason=ambiguous-launch`, and the main thread
+  re-runs it with `--launch <id>` for the workflow whose result it holds. With
+  `hooks.reviewJudge` off it answers `status=off`, because only the judge names the gaps.
+  Every other answer (`none`, `stale`, `off`, `unavailable`) leaves the panel exactly as
+  before. On `ok` the main thread skips the aspect panel, logs
+  `PANEL SKIPPED — external review <name> imported`, and merges the workflow's findings as
+  `EXT-<n>`, where a severity may be raised but never lowered and a finding without a file
+  anchor keeps the anchor `-`.
 - **The judge names the gaps.** On the import path `zensu:review-judge` always runs. It
   receives the recorded script as data, reads every changed file fresh, and ends its report
   with a `## Gaps` section naming each file and panel perspective the external review did not
-  cover. Each gap line gets exactly one targeted `zensu:review-aspect` over the gap files.
+  cover. Each gap line gets exactly one targeted `zensu:review-aspect` over the gap files. A
+  judge that fails, or answers without a parseable `## Gaps` section, means no coverage check
+  ran: the main thread logs `REVIEW GAP UNAVAILABLE` and spawns the full panel.
 - **Everything after the merge is unchanged.** The Finding Verification Gate, the review
   ticket, the counted consume-mode round, the fix loop, the self-review terminus and the
   full-suite and acceptance gates run as for a panel review. A re-review never imports.
 - **The Stop guard waits for a running workflow.** When the review chain still awaits its
-  first review and the Stop input's `background_tasks` lists a workflow in flight, the guard
-  releases that `Stop` without charging the review budget and says so on stderr, at most
-  three times in a row. A durable Autopilot run still blocks, and a converged chain, an
-  Autopilot-bound chain and a refused reviewer spawn are unaffected.
+  first review and the Stop input's `background_tasks` lists a workflow whose status reads as
+  running, the guard releases that `Stop` without charging the review budget and says so on
+  stderr, at most three times: after the third release every `Stop` blocks until one sees no
+  running workflow, which resets the count. A session that owns a live Autopilot run, a chain
+  that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
+  chain and a refused reviewer spawn never wait.
 
 `hooks.externalReviewImport` (default `true`) switches the record, the import and the wait
 off; the chain then reviews exactly as before.
 
 **Residuals.** A thin external review is backstopped by the judge, not by the full panel.
-Freshness compares the launch time with file modification times, so a tool that preserves
-modification times, or a filesystem with coarse timestamps, can make an older review look
-fresh; the judge's fresh reads remain the backstop. The record proves only that a workflow
+Freshness compares the launch time with file change times, so a filesystem with coarse
+timestamps can make an older review look fresh, and a changed directory entry (a submodule)
+is judged by the directory's own times; the judge's fresh reads remain the backstop. The
+running statuses the wait accepts (`running`, `pending`, `queued`, `in_progress`, `starting`,
+`started`, `active`) were not captured from a live host, and any other status gets no wait,
+so the guard blocks. The record proves only that a workflow
 launched after the last change, not what it reviewed: the main thread must hold the
 workflow's finished result before it imports, and the recorded script is the judge's only
 evidence of the review's scope.

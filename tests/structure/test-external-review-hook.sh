@@ -56,10 +56,10 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_meet_floor "$WORK/unit.out" 14; then
-  check "X0c the unit suite registered at least 14 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_meet_floor "$WORK/unit.out" 19; then
+  check "X0c the unit suite registered at least 19 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 14 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 19 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
 fi
 
 REG="$(node -e '
@@ -299,11 +299,16 @@ for _ in 2 3 4; do
 done
 OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait5.err")"
 DECISIONS="$DECISIONS $(printf '%s' "$OUT" | decision)"
-if [ "$DECISIONS" = " allow allow block allow" ] && grep -qF 'wait 1 of 3' "$WORK/wait5.err" \
-  && [ "$(stop_count "$WAIT_KEY")" = "$((AFTER + 1))" ]; then
-  check "X14 at most three consecutive waits; the fourth Stop blocks and resets the counter" PASS
+OUT="$(stop_payload stop-wait | bash "$STOP" 2>/dev/null)"
+RESET_DECISION="$(printf '%s' "$OUT" | decision)"
+OUT="$(stop_payload stop-wait "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/wait7.err")"
+AGAIN_DECISION="$(printf '%s' "$OUT" | decision)"
+if [ "$DECISIONS" = " allow allow block block" ] && ! grep -qF 'releasing this Stop while' "$WORK/wait5.err" \
+  && [ "$RESET_DECISION" = "block" ] && [ "$AGAIN_DECISION" = "allow" ] && grep -qF 'wait 1 of 3' "$WORK/wait7.err" \
+  && [ "$(stop_count "$WAIT_KEY")" = "$((AFTER + 3))" ]; then
+  check "X14 at most three waits; the limit holds every later Stop until one sees no workflow, which resets it" PASS
 else
-  check "X14 bounded waits (decisions=$DECISIONS count=$(stop_count "$WAIT_KEY"))" FAIL
+  check "X14 bounded waits (decisions=$DECISIONS reset=$RESET_DECISION again=$AGAIN_DECISION count=$(stop_count "$WAIT_KEY"))" FAIL
 fi
 
 DIFF_OK=true
@@ -361,12 +366,53 @@ else
   check "X19 implementing (out=$OUT)" FAIL
 fi
 
-WAIT_BLOCK="$(awk '/^if \[ -z "\$INNER_BOUND_RUN" \] && \[ "\$_SESSION_CODE_REVIEW_DONE" != "true" \] && external_review_workflow_wait; then$/{on=1} on{print} on&&/^fi$/{exit}' "$STOP")"
-if printf '%s' "$WAIT_BLOCK" | grep -qF 'outer_finish' && printf '%s' "$WAIT_BLOCK" | grep -qF 'DECISION_EMITTED' \
-  && [ "$(grep -c 'external_review_wait_reset$' "$STOP")" = "1" ]; then
-  check "X20 the wait runs outer_finish before it releases, and only the resume block resets the counter" PASS
+arm stop-fix-round || { check "X20 arm" FAIL; finish; exit 1; }
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  s.reviewRound = 1;
+  fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+' "$CLAUDE_PROJECT_DIR/.zensu/state/tdd-phase-$ARMED_KEY.json"
+OUT="$(stop_payload stop-fix-round "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/fix.err")"
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/fix.err"; then
+  check "X20 a fix round keeps its block while a workflow runs; only the first review waits" PASS
 else
-  check "X20 wait block shape" FAIL
+  check "X20 fix round (out=$OUT err=$(cat "$WORK/fix.err"))" FAIL
+fi
+
+OUTER_PROJECT="$WORK/outer-project"
+mkdir -p "$OUTER_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd -P "$OUTER_PROJECT" && pwd -P)"
+cd "$CLAUDE_PROJECT_DIR" || exit 1
+arm stop-outer || { check "X21 arm" FAIL; finish; exit 1; }
+bash -c 'source "$1"; autopilot_begin_run run-xr-outer "$2" "$3"' _ "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" "$ARMED_KEY" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1 || { check "X21 the Autopilot run fixture begins" FAIL; finish; exit 1; }
+OUT="$(stop_payload stop-outer "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/outer.err")"
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/outer.err" \
+  && [ ! -e "$ARMED_DATA/external-review/v1/waits/$ARMED_KEY.json" ]; then
+  check "X21 a session that owns a live Autopilot run neither waits nor spends a wait" PASS
+else
+  check "X21 own Autopilot run (out=$OUT err=$(cat "$WORK/outer.err"))" FAIL
+fi
+
+ADOPT_PROJECT="$WORK/adopt-project"
+mkdir -p "$ADOPT_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd -P "$ADOPT_PROJECT" && pwd -P)"
+cd "$CLAUDE_PROJECT_DIR" || exit 1
+export ZENSU_TEST_PLUGIN_DATA="$WORK/stop-data/stop-adopt"
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" stop-adopt || { check "X22 baseline" FAIL; finish; exit 1; }
+bash "$LOG" --pending-review --files "src/x.ts" --summary "queued work" >/dev/null 2>&1
+OUT="$(stop_payload stop-adopt "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/adopt.err")"
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && printf '%s' "$OUT" | reason | grep -qF 'zensu:code-reviewer' \
+  && ! grep -qF 'releasing this Stop while' "$WORK/adopt.err" && [ -e "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim" ]; then
+  check "X22 a Stop that adopts a deferred review blocks with its handoff while a workflow runs" PASS
+else
+  check "X22 adopting Stop (out=$OUT err=$(cat "$WORK/adopt.err"))" FAIL
+fi
+OUT="$(stop_payload stop-adopt "$WORKFLOW_TASKS" | bash "$STOP" 2>"$WORK/adopt2.err")"
+if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing this Stop while' "$WORK/adopt2.err"; then
+  check "X23 a chain that holds a deferred-review claim never waits on a later Stop" PASS
+else
+  check "X23 claimed chain (out=$OUT err=$(cat "$WORK/adopt2.err"))" FAIL
 fi
 
 finish

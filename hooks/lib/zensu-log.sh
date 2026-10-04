@@ -395,17 +395,20 @@ case "${1:-}" in
       || { echo "EXTERNAL REVIEW — status=unavailable reason=project-root"; exit 0; }
     _xr_enabled=1
     zensu_hook_enabled externalReviewImport || _xr_enabled=0
+    _xr_judge=1
+    zensu_hook_enabled reviewJudge || _xr_judge=0
     _xr_excl="$(zensu_msys_env_exclusions ZENSU_XR_LIB ZENSU_XR_PLUGIN_DATA ZENSU_XR_PROJECT_ROOT ZENSU_XR_ROOT)" \
       || _xr_excl="${MSYS2_ENV_CONV_EXCL:-}"
     MSYS2_ENV_CONV_EXCL="$_xr_excl" \
     ZENSU_XR_LIB="$_xr_lib/external-review-v1.js" \
     ZENSU_XR_ENABLED="$_xr_enabled" \
+    ZENSU_XR_JUDGE="$_xr_judge" \
     ZENSU_XR_PLUGIN_DATA="$_xr_data" \
     ZENSU_XR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
     ZENSU_XR_PROJECT_ROOT="$_xr_project" \
     ZENSU_XR_ROOT="$_xr_root_native" \
     ZENSU_XR_LAUNCH="$_xr_launch" \
-      node -e 'process.exitCode = require(process.env.ZENSU_XR_LIB).main(["check"])'
+      node -e 'let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write("EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main(["check"]);'
     exit $?
     ;;
   --acceptance-record|--acceptance-status)

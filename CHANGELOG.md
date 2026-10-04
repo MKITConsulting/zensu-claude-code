@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (an Ultracode review, for example) reviewed the change after its last edit, the first
   `/zensu:tdd` review imports its findings instead of running the aspect panel, the judge
   always runs and names the files and perspectives it left uncovered, and only those get a
-  targeted `zensu:review-aspect`. The Stop guard releases up to three Stops in a row while a
-  workflow is still running. `"externalReviewImport": false` restores the previous behavior.
+  targeted `zensu:review-aspect`. Before the first review, the Stop guard releases up to three
+  Stops while such a workflow still runs, then blocks until it ends. The import needs the
+  judge, so `"reviewJudge": false` turns it off as well; `"externalReviewImport": false`
+  restores the previous behavior.
 
 ## [0.24.0] - 2026-10-04
 
