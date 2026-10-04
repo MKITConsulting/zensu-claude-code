@@ -181,36 +181,27 @@ candidate execution is unsupported; its hermetic fake remains solely for local
 deterministic coverage.
 See [Session Control release gate](session-control-release-gate.md).
 
-**Getting a guaranteed review for a Workflow-triggered run.** Because the worker `Stop`
-no-ops, run the review **once over the aggregate diff** — either in-script (recommended) or
-deferred:
+**Getting a guaranteed review for a Workflow-triggered run.** A worker's `Stop` no-ops, a
+workflow's agents cannot run `zensu-log.sh`, and a review round counts only when the main
+thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main thread,
+**once over the aggregate diff**:
 
-```js
-// Orchestrator-driven: after all implementation agents have joined, run ONE
-// review pass over the combined diff — 5 read-only aspects → merge → judge
-// (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
-const ASPECTS = ['conventions', 'bugs', 'architecture', 'tests', 'security']
-const changed = /* `git diff --name-only HEAD`, comma-joined */
-const aspects = await parallel(ASPECTS.map(a => () =>
-  agent(`Perspective: ${a}. Files changed: [${changed}]`, { agentType: 'zensu:review-aspect' })))
-let merged = /* dedupe + sort the five findings lists in-script */
-const judge = await agent(`Judge pass. Files changed: [${changed}]\n${merged}`, { agentType: 'zensu:review-judge' })
-merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
-// Finding Verification Gate (hooks.findingVerification, default on): grade every merged
-// anchor with `node hooks/lib/finding-verify-v1.js --root <top>` (model-free, always exit 0),
-// read each surviving citation yourself, then mark whatever does not hold up
-// [Unverified — do not fix] and downgrade it to SUGGESTION. Annotate, never delete.
-merged = /* apply the verification verdicts */
-const reviewTicket = /* stdout from the top-level Skill command template:
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket */
-await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${merged}`, { agentType: 'zensu:code-reviewer' })
-```
+- **The workflow reviewed the change (an Ultracode review, for example).** Let it finish.
+  Phase 6.10 step 3 of `/zensu:tdd` then imports it: `zensu-log.sh --external-review`
+  confirms from the Workflow launch record that the review started after the newest change,
+  the workflow's findings join the merge as `EXT-<n>`, and the judge names the files and
+  perspectives it left uncovered, each of which gets one targeted `zensu:review-aspect`. The
+  Finding Verification Gate, the ticket and the consume-mode reviewer run as usual. See
+  [Ultracode and external reviews](review-chain.md#ultracode-and-external-reviews).
+- **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
+  after it finished. A `Stop` that falls while it still runs is released up to three times in
+  a row, so the chain waits for the workflow instead of starting a review beside it.
+- **No chain is armed in this session.** The main thread records a project-scoped marker
+  with `zensu-log.sh --pending-review --files "<changed>"`; the **next interactive `Stop`**
+  in that project adopts it and runs the full chain once, then clears it.
+  `zensu-log.sh --pending-review-done` clears it when the review already ran.
 
-If you cannot review in-script, a worker records a project-scoped marker
-(`zensu-log.sh --pending-review --files "<changed>"`); the **next interactive `Stop`** in
-that project adopts it and runs the full chain once, then clears it. The orchestrator clears
-it itself with `zensu-log.sh --pending-review-done` when it reviewed in-script. Review is
-per-implementation over the aggregate diff — **never per spawned worker**.
+Review is per-implementation over the aggregate diff — **never per spawned worker**.
 
 **Who holds an adopted review.** Adoption turns the marker into a claim
 (`pending-review.json.claim`) owned by the adopting session, and a lease decides how

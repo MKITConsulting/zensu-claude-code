@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.24.0, and `hooks.autoFixIncludeSuggestions: true` still routes every severity. The loop allows
   two fix rounds by default (`hooks.autoFixMaxRounds`, 1 in 0.24.0), so the Stop chain guard
   releases after 5 nudges instead of 4.
+- **external review import**: a new `PostToolUse` hook on the `Workflow` tool records each
+  workflow the main thread launches in the plugin's private data store. When such a workflow
+  (an Ultracode review, for example) reviewed the change after its last edit, the first
+  `/zensu:tdd` review imports its findings instead of running the aspect panel, the judge
+  always runs and names the files and perspectives it left uncovered, and only those get a
+  targeted `zensu:review-aspect`. The Stop guard releases up to three Stops in a row while a
+  workflow is still running. `"externalReviewImport": false` restores the previous behavior.
 
 ## [0.24.0] - 2026-10-04
 

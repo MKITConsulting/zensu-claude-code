@@ -159,6 +159,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Skill Argument Placeholders (`test-skill-workflow-markers.sh` AP checks)** — why a skill body never carries `$1` or `$ARGUMENTS` in a shell snippet, and the allowlist for a skill that consumes its arguments: `.claude/rules/skill-argument-placeholders.md`
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`
 - **Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)** — the findings ledger, the shared severity rubric and round-aware routing of the auto-fix loop: `.claude/rules/review-convergence.md`
+- **External Review Import (`external-review-v1.js` + `post-workflow-launch.sh`)** — importing a finished workflow review on the first review, the judge's gap list and the Stop guard's workflow wait: `.claude/rules/external-review-import.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
 - **Worktree Keep (`hooks/lib/worktree-keep-v1.js` + three advisory hooks)** — keeping a live session's worktree out of the Claude Desktop pool, and the drift notice when it is taken anyway: `.claude/rules/worktree-keep.md`
