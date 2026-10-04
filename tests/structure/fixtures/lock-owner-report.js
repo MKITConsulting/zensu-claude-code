@@ -15,10 +15,10 @@ function liveness(pid) {
   }
 }
 
-function run(command, args, timeout) {
+function run(command, args, timeout, env = { ...process.env, LC_ALL: 'C', LANG: 'C' }) {
   return execFileSync(command, args, {
     encoding: 'utf8',
-    env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+    env,
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout,
     windowsHide: true,
@@ -26,11 +26,41 @@ function run(command, args, timeout) {
 }
 
 function describeWindows(pid) {
-  const script = [
+  const configuredRoot = process.env.SystemRoot;
+  const root = configuredRoot && path.win32.isAbsolute(configuredRoot) ? configuredRoot : 'C:\\Windows';
+  const powershellDirectory = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0');
+  const program = [
+    "$PSModuleAutoLoadingPreference='None'",
+    'Import-Module CimCmdlets -ErrorAction Stop',
     `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'`,
     "if ($p) { '{0}|{1}|{2}|{3}' -f $p.CreationDate.ToUniversalTime().ToString('o'), $p.Name, $p.ParentProcessId, $p.CommandLine }",
-  ].join('; ');
-  const row = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 30000);
+  ].join('\n');
+  const row = run(
+    path.win32.join(powershellDirectory, 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(program, 'utf16le').toString('base64')],
+    30000,
+    {
+      SystemRoot: root,
+      windir: root,
+      SystemDrive: path.win32.parse(root).root.replace(/\\+$/, ''),
+      ComSpec: path.win32.join(root, 'System32', 'cmd.exe'),
+      PATH: [
+        path.win32.join(root, 'System32'),
+        root,
+        path.win32.join(root, 'System32', 'Wbem'),
+        powershellDirectory,
+      ].join(';'),
+      PSModulePath: path.win32.join(powershellDirectory, 'Modules'),
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      TEMP: process.env.TEMP || path.win32.join(root, 'Temp'),
+      TMP: process.env.TMP || path.win32.join(root, 'Temp'),
+      LOCALAPPDATA: process.env.LOCALAPPDATA || '',
+      APPDATA: process.env.APPDATA || '',
+      USERPROFILE: process.env.USERPROFILE || '',
+      HOMEDRIVE: process.env.HOMEDRIVE || '',
+      HOMEPATH: process.env.HOMEPATH || '',
+    },
+  );
   if (!row) return { text: 'no such process', startedMs: NaN, resolutionMs: 0 };
   const [started, name, parent, ...command] = row.split('|');
   return {
