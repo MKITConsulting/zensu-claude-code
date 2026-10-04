@@ -48,9 +48,9 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 row covers TWO sites and they differ. `--tdd-complete`'s change count is NOT
 ambient: it resolves its root through `zensu_resolve_project_dir()`
 (`hooks/lib/zensu-log.sh:1434`) and runs every `git` call with the discovery and
-config-injection variables unset (`:1477`, `:1490-1492`). The `--chain-done`
+config-injection variables unset (`:1478`, `:1491-1493`). The `--chain-done`
 zero-change terminus still reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` unscrubbed
-(`:2315-2317`) — ambient, with the same `.` fallback. An earlier revision of this
+(`:2316-2318`) — ambient, with the same `.` fallback. An earlier revision of this
 paragraph called the whole row ambient, which contradicted the superseded-fact
 paragraph below in the same section. Which root the ambient variable names in a
 multi-root topology, and what the fallback means when it is unset, is an open

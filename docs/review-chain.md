@@ -75,7 +75,7 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   before. On `ok` the main thread skips the aspect panel, logs
   `PANEL SKIPPED — external review <name> imported`, and merges the workflow's findings as
   `EXT-<n>`, where a severity may be raised but never lowered and a finding without a file
-  anchor keeps the anchor `-`.
+  anchor keeps the anchor `-` and is deferred to `## Open`, because nothing can grade it.
 - **The judge names the gaps.** On the import path `zensu:review-judge` always runs. It
   receives the recorded script as data, reads every changed file fresh, and ends its report
   with a `## Gaps` section naming each file and panel perspective the external review did not
@@ -88,9 +88,9 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
 - **The Stop guard waits for a running workflow.** When the review chain still awaits its
   first review and the Stop input's `background_tasks` lists a workflow whose status reads as
   running, the guard releases that `Stop` without charging the review budget and says so on
-  stderr, at most three times per chain: after the third release every `Stop` blocks until one
-  sees no running workflow, which resets the count, and arming a new chain with
-  `--tdd-begin` resets it too. A session that owns a live Autopilot run, a chain
+  stderr, at most three times in a row: after the third release every `Stop` blocks until one
+  sees no running workflow, which restarts the count, and arming a new chain with
+  `--tdd-begin` restarts it too. A session that owns a live Autopilot run, a chain
   that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
   chain and a refused reviewer spawn never wait.
 

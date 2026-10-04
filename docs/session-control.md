@@ -195,7 +195,7 @@ thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main
   [Ultracode and external reviews](review-chain.md#ultracode-and-external-reviews).
 - **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
   after it finished. Once implementation is marked complete, a `Stop` that falls while the
-  workflow still runs is released up to three times before the first review, so the chain
+  workflow still runs is released up to three times in a row before the first review, so the chain
   waits for the workflow instead of starting a review beside it; a fix round never waits.
 - **No chain is armed in this session.** The main thread records a project-scoped marker
   with `zensu-log.sh --pending-review --files "<changed>"`; the **next interactive `Stop`**

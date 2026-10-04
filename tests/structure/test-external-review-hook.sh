@@ -92,11 +92,11 @@ else
 fi
 
 SKILL_FILE="$PLUGIN_DIR/skills/tdd/SKILL.md"
-if grep -qF 'and so is an `EXT-<n>` finding the merge kept with the anchor `-`: a missing anchor is not a hallucinated one, so it keeps its severity, is never neutralized, and its ledger line carries the anchor `-`' "$SKILL_FILE" \
+if grep -qF 'and an `EXT-<n>` finding the merge kept with the anchor `-` is never neutralized either, because a missing anchor is not a hallucinated one; nothing can grade it, so retitle it `[Deferred — do not fix]` with its original severity in its text, set it to SUGGESTION so no severity mode routes it, ledger it with the anchor `-`' "$SKILL_FILE" \
   && grep -qF 'keep a finding without a file anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
-  check "X26 the verification gate keeps an unanchored imported finding at its severity and ledgers it with the anchor -" PASS
+  check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" PASS
 else
-  check "X26 the verification gate keeps an unanchored imported finding at its severity and ledgers it with the anchor -" FAIL
+  check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" FAIL
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"

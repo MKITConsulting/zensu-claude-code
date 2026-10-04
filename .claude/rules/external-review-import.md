@@ -37,9 +37,9 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
 - `stop-wait` — the Stop hook's `external_review_workflow_wait`. It releases a standalone
   chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
-  most `LIMITS.maxWaits` (3) times; after that every Stop blocks until one sees no running
-  workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
-  generation. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
+  most `LIMITS.maxWaits` (3) times in a row; after that every Stop blocks until one sees no
+  running workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
+  generation. A chain whose workflows end and start again therefore waits again. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
   chain (`INNER_BOUND_RUN`), a Stop that adopted a deferred review and a project holding a
   deferred claim never wait; all four exclusions sit inside the function. The counter is
   `waits/<scv1-key>.json` in the store, swept after 24 hours, so no workflow-state field was
@@ -66,8 +66,8 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
 - The wait bound has no environment override. A release that exits before the claim handoff
   would recreate the crashed-adopter state, hence the adoption and claim exclusions.
 
-**Coupled sites.** The wait-file layout is spelled three times: `waitLocations` and
-`clearWait` in the module and `zensu_external_review_wait_file` in `zensu-tdd-phase.sh`, which
+**Coupled sites.** The wait-file layout is spelled four times: `waitLocations`, `clearWait`
+and `sweepStaleWaits` in the module and `zensu_external_review_wait_file` in `zensu-tdd-phase.sh`, which
 the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
 `zensu_external_review_wait_reset`; `X14` drives the limit and the reset, `X25` the reset at
 `--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
@@ -75,8 +75,8 @@ bound-chain exclusion by running the shipped function with stubbed collaborators
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
 `skills/tdd/SKILL.md` steps 3, 4, 4b, 4c and 5 plus the `Subagent / Claude Code Workflow
 safety` and `Work sequentially` bullets; the file is at its 433-line cap, so edits fold into
-existing lines; step 4c exempts an `EXT-<n>` finding kept with the anchor `-` from
-neutralization (`X26`). `agents/review-judge.md` carries the `external_review` input and `## Gaps`
+existing lines; step 4c defers an `EXT-<n>` finding kept with the anchor `-` to `## Open`
+instead of neutralizing or routing it (`X26`). `agents/review-judge.md` carries the `external_review` input and `## Gaps`
 (`P2m`), `agents/code-reviewer.md` names `EXT-<n>`. Operator rows: the hook, flag and Stop rows
 of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.md`.
 
