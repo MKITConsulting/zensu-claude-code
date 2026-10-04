@@ -591,9 +591,9 @@ function check(options, limits = LIMITS) {
   const isFresh = (entry) => recordTime(entry.id) > changes.newest;
   const fresh = valid.filter(isFresh);
   const status = fresh.length > 0 ? 'ok' : 'stale';
-  const newest = (fresh.length > 0 ? fresh : valid)[0].record;
+  const launchLabel = (record) => `${record.name || '(unnamed)'}@${record.recorded_at}`;
   const lines = [
-    `${LOG_PREFIX} status=${status} launches=${fresh.length}/${valid.length} newest=${newest.name || '(unnamed)'}@${newest.recorded_at} last-change=${iso(changes.newest)} ${counts}`,
+    `${LOG_PREFIX} status=stale launches=0/${valid.length} newest=${launchLabel(valid[0].record)} last-change=${iso(changes.newest)} ${counts}`,
   ];
   for (const entry of valid.slice(0, limits.listedLaunches)) lines.push(launchLine(entry, isFresh(entry)));
   if (valid.length > limits.listedLaunches) lines.push(`launches-not-listed ${valid.length - limits.listedLaunches}`);
@@ -606,6 +606,7 @@ function check(options, limits = LIMITS) {
     lines[0] = `${LOG_PREFIX} status=unavailable reason=ambiguous-launch launches=${fresh.length}/${valid.length} last-change=${iso(changes.newest)} ${counts} — re-run with --launch <id> of the launch whose run id is the workflow whose result you hold`;
     return { status: 'unavailable', lines };
   }
+  lines[0] = `${LOG_PREFIX} status=ok launches=${fresh.length}/${valid.length} selected=${launchLabel(selected.record)} id=${selected.id} last-change=${iso(changes.newest)} ${counts}`;
   lines.push(...scriptBlock(selected.record));
   return { status, lines, selected: selected.id };
 }

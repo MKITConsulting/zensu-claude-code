@@ -56,10 +56,10 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_meet_floor "$WORK/unit.out" 19; then
-  check "X0c the unit suite registered at least 19 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_registered_floor "$WORK/unit.out" 19; then
+  check "X0c the unit suite registered at least 19 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 19 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 19 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
 fi
 
 REG="$(node -e '
@@ -89,6 +89,14 @@ if bash -n "$HOOK" && bash -n "$STOP" && bash -n "$LOG" && node --check "$LIB"; 
   check "X1b the hook, the Stop hook, zensu-log.sh and the module parse" PASS
 else
   check "X1b the hook, the Stop hook, zensu-log.sh and the module parse" FAIL
+fi
+
+SKILL_FILE="$PLUGIN_DIR/skills/tdd/SKILL.md"
+if grep -qF 'and so is an `EXT-<n>` finding the merge kept with the anchor `-`: a missing anchor is not a hallucinated one, so it keeps its severity, is never neutralized, and its ledger line carries the anchor `-`' "$SKILL_FILE" \
+  && grep -qF 'keep a finding without a file anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
+  check "X26 the verification gate keeps an unanchored imported finding at its severity and ledgers it with the anchor -" PASS
+else
+  check "X26 the verification gate keeps an unanchored imported finding at its severity and ledgers it with the anchor -" FAIL
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -193,7 +201,7 @@ fi
 sleep 1
 launch_payload "$VERB_RAW" | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n')"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 newest=review-changes@.* excluded=1 ' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
   && printf '%s' "$OUT" | grep -qE '^script xr1_[0-9]{13}_[0-9a-f]{12} begin nonce=[0-9a-f]{16} ' \
   && printf '%s' "$OUT" | grep -qF 'phase("Review")'; then
   check "X7 a launch after the last change answers ok, excludes .zensu and prints the recorded script" PASS
@@ -311,6 +319,16 @@ else
   check "X14 bounded waits (decisions=$DECISIONS reset=$RESET_DECISION again=$AGAIN_DECISION count=$(stop_count "$WAIT_KEY"))" FAIL
 fi
 
+WAIT_FILE="$ARMED_DATA/external-review/v1/waits/$WAIT_KEY.json"
+WAIT_PRESENT=false
+[ -f "$WAIT_FILE" ] && WAIT_PRESENT=true
+bash "$LOG" --tdd-begin --session "$WAIT_KEY" >/dev/null 2>&1; BEGIN_RC=$?
+if [ "$WAIT_PRESENT" = true ] && [ "$BEGIN_RC" -eq 0 ] && [ ! -e "$WAIT_FILE" ] && [ ! -L "$WAIT_FILE" ]; then
+  check "X25 arming a new chain generation deletes the session's wait counter" PASS
+else
+  check "X25 generation reset (present=$WAIT_PRESENT rc=$BEGIN_RC left=$(ls "$(dirname "$WAIT_FILE")" 2>/dev/null))" FAIL
+fi
+
 DIFF_OK=true
 for tasks in absent '[]' "$SHELL_TASKS" '"workflow"' '[{"type":"workflow","status":"completed","name":"old"}]'; do
   arm "stop-diff-$RANDOM" || DIFF_OK=false
@@ -413,6 +431,40 @@ if [ "$(printf '%s' "$OUT" | decision)" = "block" ] && ! grep -qF 'releasing thi
   check "X23 a chain that holds a deferred-review claim never waits on a later Stop" PASS
 else
   check "X23 claimed chain (out=$OUT err=$(cat "$WORK/adopt2.err"))" FAIL
+fi
+
+WAIT_FN="$(sed -n '/^external_review_workflow_wait() {/,/^}/p' "$STOP")"
+probe_wait() {
+  BOUND="$1" MARK="$2" WAIT_FN="$WAIT_FN" PLUGIN_DIR="$PLUGIN_DIR" PROBE_DATA="$WORK/probe-data" bash -c '
+    eval "$WAIT_FN"
+    INPUT="{\"background_tasks\":[{\"type\":\"workflow\",\"status\":\"running\",\"name\":\"review-changes\"}]}"
+    OUTER_PRESENT=false
+    DEFERRED_ADOPTED=false
+    INNER_BOUND_RUN="$BOUND"
+    SESSION_ID="scv1_0000000000000000000000000000000000000000000000000000000000000000"
+    STATE_FILE=/dev/null
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+    CLAUDE_PLUGIN_DATA="$PROBE_DATA"
+    zensu_external_review_wait_reset() { return 0; }
+    zensu_session_key_canonical() { return 0; }
+    zensu_hook_enabled() { return 0; }
+    reviewer_spawn_denied() { return 1; }
+    zensu_pending_review_file() { printf "%s\n" "$PROBE_DATA/pending-review.json"; }
+    zensu_pending_review_claim_file() { printf "%s\n" "$1.claim"; }
+    tdd_get_counter() { printf "0\n"; }
+    zensu_msys_env_exclusions() { printf "\n"; }
+    zensu_run_bounded() { : >"$MARK"; printf "wait count=1 max=3 workflows=1 names=review-changes\n"; }
+    if external_review_workflow_wait; then printf "released\n"; else printf "kept\n"; fi
+  '
+}
+mkdir -p "$WORK/probe-data"
+UNBOUND_PROBE="$(probe_wait "" "$WORK/probe-unbound.mark" 2>"$WORK/probe-unbound.err")"
+BOUND_PROBE="$(probe_wait "run-xr-bound" "$WORK/probe-bound.mark" 2>"$WORK/probe-bound.err")"
+if [ -n "$WAIT_FN" ] && [ "$UNBOUND_PROBE" = "released" ] && [ -e "$WORK/probe-unbound.mark" ] \
+  && [ "$BOUND_PROBE" = "kept" ] && [ ! -e "$WORK/probe-bound.mark" ]; then
+  check "X24 the shipped wait function refuses an Autopilot-bound chain before it consults the wait counter" PASS
+else
+  check "X24 bound chain (unbound=$UNBOUND_PROBE bound=$BOUND_PROBE err=$(cat "$WORK/probe-bound.err" "$WORK/probe-unbound.err"))" FAIL
 fi
 
 finish

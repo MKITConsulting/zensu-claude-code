@@ -88,8 +88,9 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
 - **The Stop guard waits for a running workflow.** When the review chain still awaits its
   first review and the Stop input's `background_tasks` lists a workflow whose status reads as
   running, the guard releases that `Stop` without charging the review budget and says so on
-  stderr, at most three times: after the third release every `Stop` blocks until one sees no
-  running workflow, which resets the count. A session that owns a live Autopilot run, a chain
+  stderr, at most three times per chain: after the third release every `Stop` blocks until one
+  sees no running workflow, which resets the count, and arming a new chain with
+  `--tdd-begin` resets it too. A session that owns a live Autopilot run, a chain
   that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
   chain and a refused reviewer spawn never wait.
 

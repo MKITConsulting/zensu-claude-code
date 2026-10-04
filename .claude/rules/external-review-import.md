@@ -28,7 +28,8 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `ok` only when exactly one launch is newer than the change time (`max(mtime, ctime)`) of
   every existing changed path and of the nearest existing parent of every missing one;
   `.zensu` paths are excluded and counted. Several fresh launches answer
-  `unavailable reason=ambiguous-launch` until `--launch <id>` names one, `hooks.reviewJudge`
+  `unavailable reason=ambiguous-launch` until `--launch <id>` names one, and the `ok` line names
+  the launch it selected (`selected=<name>@<time> id=<id>`), `hooks.reviewJudge`
   off answers `off reason=review-judge-disabled`, and a record dated beyond `clockSkewMs` is
   skipped. Every fault answers `unavailable`, a module that fails to load included, and every
   answer but `ok` leaves the panel path unchanged. The script block is fenced by a per-call
@@ -37,10 +38,12 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
   most `LIMITS.maxWaits` (3) times; after that every Stop blocks until one sees no running
-  workflow, which deletes the counter. A session that owns a live Autopilot run
-  (`OUTER_PRESENT`), a Stop that adopted a deferred review and a project holding a deferred
-  claim never wait. The counter is `waits/<scv1-key>.json` in the store, swept after 24 hours,
-  so no workflow-state field was added.
+  workflow, which deletes the counter, and `--tdd-begin` deletes it for every new chain
+  generation. A session that owns a live Autopilot run (`OUTER_PRESENT`), an Autopilot-bound
+  chain (`INNER_BOUND_RUN`), a Stop that adopted a deferred review and a project holding a
+  deferred claim never wait; all four exclusions sit inside the function. The counter is
+  `waits/<scv1-key>.json` in the store, swept after 24 hours, so no workflow-state field was
+  added.
 
 **Decisions.**
 
@@ -64,13 +67,16 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   would recreate the crashed-adopter state, hence the adoption and claim exclusions.
 
 **Coupled sites.** The wait-file layout is spelled three times: `waitLocations` and
-`clearWait` in the module and `external_review_wait_file` in the Stop hook, whose prefilter
-miss deletes it; `X14` drives the limit and the reset, `X20`-`X23` the round, Autopilot and
-deferred-review exclusions. The resume reason names the panel and the import path (`X12`). The store is in both
+`clearWait` in the module and `zensu_external_review_wait_file` in `zensu-tdd-phase.sh`, which
+the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
+`zensu_external_review_wait_reset`; `X14` drives the limit and the reset, `X25` the reset at
+`--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
+bound-chain exclusion by running the shipped function with stubbed collaborators. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
 `skills/tdd/SKILL.md` steps 3, 4, 4b, 4c and 5 plus the `Subagent / Claude Code Workflow
 safety` and `Work sequentially` bullets; the file is at its 433-line cap, so edits fold into
-existing lines. `agents/review-judge.md` carries the `external_review` input and `## Gaps`
+existing lines; step 4c exempts an `EXT-<n>` finding kept with the anchor `-` from
+neutralization (`X26`). `agents/review-judge.md` carries the `external_review` input and `## Gaps`
 (`P2m`), `agents/code-reviewer.md` names `EXT-<n>`. Operator rows: the hook, flag and Stop rows
 of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.md`.
 
@@ -85,8 +91,9 @@ of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.m
   the directory's own times; the judge is the backstop.
 - The record proves a launch, not what was reviewed or whether the workflow finished. The
   skill requires the finished result before an import; nothing enforces it.
-- The wait counter is per session and resets only when a Stop sees no running workflow or
-  after 24 hours, so a second chain started while the same workflow runs inherits its count.
+- The wait counter is per session. It resets when a Stop sees no running workflow, when
+  `--tdd-begin` arms a new chain and after 24 hours; a chain armed some other way, such as a
+  deferred-review adoption, inherits the count, but such a chain never waits.
 - The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB).
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard.
 

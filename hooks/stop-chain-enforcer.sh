@@ -674,19 +674,6 @@ reviewer_spawn_denied() {
   [ "$REVIEWER_DENIAL_STATUS" = "blocked" ]
 }
 
-external_review_wait_file() {
-  zensu_session_key_canonical "$SESSION_ID" || return 1
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
-  printf '%s/external-review/v1/waits/%s.json' "$CLAUDE_PLUGIN_DATA" "$SESSION_ID"
-}
-
-external_review_wait_reset() {
-  local file
-  file="$(external_review_wait_file)" || return 0
-  if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
-  return 0
-}
-
 external_review_workflow_wait() {
   local lib data verdict word count max workflows names exclusions pending claim
   EXTERNAL_REVIEW_WAIT_COUNT=""
@@ -695,10 +682,11 @@ external_review_workflow_wait() {
   EXTERNAL_REVIEW_WAIT_NAMES=""
   case "$INPUT" in
     *'"background_tasks"'*'"workflow"'*) ;;
-    *) external_review_wait_reset; return 1 ;;
+    *) zensu_external_review_wait_reset "$SESSION_ID"; return 1 ;;
   esac
   [ "$OUTER_PRESENT" = false ] || return 1
   [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/external-review-v1.js"
   [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
   zensu_session_key_canonical "$SESSION_ID" || return 1
@@ -1695,7 +1683,7 @@ if [ "$SESSION_ACTIVE" != "true" ]; then reviewer_denial_note_clear; outer_finis
 if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; zensu_impl_stop_nudge; exit 0; fi
 if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
 
-if [ -z "$INNER_BOUND_RUN" ] && [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
+if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     echo "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence." >&2

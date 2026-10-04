@@ -188,7 +188,7 @@ test('check answers ok for a launch newer than every existing changed file and p
   xr.recordLaunch(payload(), { CLAUDE_PLUGIN_DATA: data }, { now: (BASE + 120000) });
   const result = xr.check(checkOptions(data, root, { changedText: 'src/a.js\n.zensu/state/x.json\nsrc/deleted.js\n' }));
   assert.equal(result.status, 'ok');
-  assert.match(result.lines[0], /^EXTERNAL REVIEW — status=ok launches=1\/1 newest=review-changes@/);
+  assert.match(result.lines[0], /^EXTERNAL REVIEW — status=ok launches=1\/1 selected=review-changes@\S+ id=xr1_\d{13}_[0-9a-f]{12} /);
   assert.match(result.lines[0], / changed=1 missing=1 excluded=1 skipped=0$/);
   assert.match(result.lines[1], / fresh$/);
   const begin = result.lines.findIndex((line) => / begin nonce=[0-9a-f]{16} /.test(line));
@@ -277,9 +277,11 @@ test('check refuses to guess between fresh launches and selects the one named by
   assert.equal(ambiguous.lines.some((line) => / begin nonce=/.test(line)), false);
   const named = xr.check(checkOptions(data, root, { launch: files[1] }));
   assert.equal(named.selected, files[1]);
+  assert.match(named.lines[0], new RegExp(`^EXTERNAL REVIEW — status=ok launches=2/2 selected=deep-research@\\S+ id=${files[1]} `));
   assert.ok(named.lines.some((line) => line.startsWith(`script ${files[1]} none`)));
   const chosen = xr.check(checkOptions(data, root, { launch: files[0] }));
   assert.equal(chosen.selected, files[0]);
+  assert.match(chosen.lines[0], new RegExp(`^EXTERNAL REVIEW — status=ok launches=2/2 selected=review-changes@\\S+ id=${files[0]} `));
   assert.equal(xr.check(checkOptions(data, root, { launch: 'xr1_0000000000000_000000000000' })).lines[0],
     'EXTERNAL REVIEW — status=unavailable reason=launch-not-fresh');
 });
@@ -391,7 +393,7 @@ test('check skips a record dated beyond the clock skew', () => {
   xr.recordLaunch(payload({ tool_input: { name: 'from-the-future' } }), { CLAUDE_PLUGIN_DATA: data }, { now: (BASE + 120000) + 60 * 60 * 1000 });
   const result = xr.check(checkOptions(data, root, { now: (BASE + 130000) }));
   assert.equal(result.status, 'ok');
-  assert.match(result.lines[0], /launches=1\/1 newest=review-changes@/);
+  assert.match(result.lines[0], /launches=1\/1 selected=review-changes@/);
   assert.match(result.lines[0], / skipped=1$/);
 });
 
