@@ -328,6 +328,7 @@ git commit -m "feat(review): default the auto-fix loop to one fix round"
 **Interfaces:**
 - Produces: config key `hooks.criticalReproduction` (boolean, default `true`, read with `zensu_hook_enabled`).
 - Produces: run-log line `FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE> <record id or one-line reason>`.
+- Refined during implementation: a `NOT-REPRODUCED` or `NOT-TESTABLE` finding leaves the loop through the existing `[Deferred — do not fix]` annotation instead of an IMPORTANT downgrade, because both delegate arms route IMPORTANT findings and enumerate exactly three do-not-fix annotations, and a `parked` IMPORTANT entry would be a self-review must-fix. The delegate reads the flag together with `findingVerification`, and the max-rounds sentence goes into the self-review hand-off only. RP0 to RP5 in `evals/config-gate/test-review-convergence-directive.sh` render the directives, and LC2i and LC2j pin the hand-off and the annotation.
 
 - [ ] **Step 1: Add failing checks** before `finish` in `tests/structure/test-review-convergence.sh`
 
@@ -540,6 +541,7 @@ git commit -m "feat(review): add the lean three-perspective panel to aspect acti
 - Consumes: `activate` / CLI flags from Task B3.
 - Produces: `zensu_review_panel` — prints `lean` (default, also on any unreadable config) or `full`.
 - Produces: config key `hooks.reviewPanel` (`"lean"` | `"full"`).
+- Refined during implementation: step 3 passes `--round <round>` (`re` on a re-review the post-review directive launched), because re-reviews follow the same skill step; the convergence clause runs its helpers before classifying when no judge runs; `test-incremental-review-rounds.sh` I5 to I7 pin the full panel and I5b the lean default; I17 and R16 count the new directive needle; LP1 to LP4 render the lean and full directives.
 
 - [ ] **Step 1: Add failing checks** before `finish` in `tests/structure/test-review-convergence.sh`
 
@@ -673,3 +675,5 @@ Release PR B (mark ready, merge, Actions → Release `minor`) only if all hold:
 - at most 50 USD API-equivalent and at most 180 net minutes per run (the run's metrics file, cost from the last `result` event of its stream log).
 
 Otherwise keep PR B as a draft and report which criterion failed. In both cases add a section on the lean runs to the kit's benchmark analysis, a README addendum with the config change and the changed checksum, and state that two runs are a small sample.
+
+Before a release, read each run's Stop blocks: `stopBlockCount` in the run's `tdd-phase-<session key>.json`, and any `did not converge after <n> nudges` line of the chain enforcer. The guard releases after `autoFixMaxRounds + 3` blocks, so the default of one fix round lowers that cap from 8 to 4. If a run reached 3 or more blocks or a release, decouple the cap from `autoFixMaxRounds` in `hooks/stop-chain-enforcer.sh` first.

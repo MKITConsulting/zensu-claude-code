@@ -11,7 +11,9 @@ default, SUGGESTION findings only under `hooks.autoFixIncludeSuggestions`. While
 and the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous
 fix pass edited, and defers everything else; with
 `hooks.selfReview` off it keeps every IMPORTANT finding routable (see
-[configuration.md](configuration.md)). An undefined scale let every reviewer promote its own
+[configuration.md](configuration.md)). While `hooks.criticalReproduction` is enabled (the default),
+a CRITICAL finding of a re-review routes only when a failing test reproduces it; see `/zensu:tdd`
+step 4c stage 3. An undefined scale let every reviewer promote its own
 taste to IMPORTANT, and every such finding opened another full review round.
 
 `/zensu:pr-team-review` keeps its own P1/P2/P3 scale for forge comments. The two scales answer

@@ -172,6 +172,8 @@ problems where none exist.
 Classify each finding: a **must-fix** is a Risk that would ship a defect — a real
 bug, a security hole, or a broken convention the gate would reject. Everything else
 is advisory and is buffered into the final report, not fixed here.
+A CRITICAL finding from a re-review is a must-fix only when its FINDING REPRODUCTION line reads REPRODUCED,
+whenever the chain logged one for it; NOT-REPRODUCED and NOT-TESTABLE findings go to `## Open`.
 
 The review chain may have deferred findings instead of re-reviewing them, but only while
 `hooks.reviewConvergence` is enabled: resolve it against the `TOP` from Phase 1, because this

@@ -34,8 +34,8 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults
-printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
+export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate), autoFixMaxRounds pinned to 5, all other defaults
+printf '%s' '{"hooks":{"tddImplementation":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE 2>/dev/null || true   # the whole point: no subagent scoping
 unset ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
@@ -158,7 +158,7 @@ echo "$CTX" | grep -q "subagent_type='zensu:code-reviewer'" && check "4c re-veri
 RCOUNT="$(tdd_get_counter "$SF" reviewRound)"
 [ "$RCOUNT" = "1" ] && check "4d integrated reviewRound increments (1)" PASS || check "4d reviewRound=1 (got $RCOUNT)" FAIL
 [ "$(flag chainDone)" = "false" ] && check "4e chainDone stays false under max" PASS || check "4e chainDone false" FAIL
-# Force max rounds (default 5): advance reviewRound from 1 to 5 through the CAS
+# Force max rounds (pinned to 5 above): advance reviewRound from 1 to 5 through the CAS
 # helper; the next reviewer completion becomes 6 and converges.
 # (selfReview is on by default; the code-reviewer chain converges via codeReviewDone, and
 # /zensu:self-review owns the final --chain-done. Set hooks.selfReview=false to restore the

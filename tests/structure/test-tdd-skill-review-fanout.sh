@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pins the parallel review fan-out wiring in the /zensu:tdd review chain:
-#   skills/tdd/SKILL.md Phase 6.10 spawns 5 zensu:review-aspect agents in ONE parallel
+#   skills/tdd/SKILL.md Phase 6.10 spawns the panel's zensu:review-aspect agents in ONE parallel
 #   batch, merges their findings in-thread, then spawns ONE thin zensu:code-reviewer in
 #   "fan-out consume mode" (marker: PRE-MERGED FINDINGS (fan-out)) so the existing
 #   post-review hook fires exactly once per round and the downstream chain is unchanged.
@@ -33,9 +33,9 @@ check "F0 skill + code-reviewer files exist" PASS
 grep -qF 'zensu:review-aspect' "$SKILL_MD" \
   && check "F1 skill spawns zensu:review-aspect aspects" PASS || check "F1 review-aspect spawn" FAIL
 
-# Five aspects, in a single parallel batch.
-grep -qiE 'five|5).{0,40}(review-aspect|aspect)|(review-aspect|aspect).{0,40}(five|5)' "$SKILL_MD" \
-  && check "F2 skill fans out the five perspectives" PASS || check "F2 five perspectives" FAIL
+# One aspect agent per perspective of the configured panel, in a single parallel batch.
+grep -qF 'one `zensu:review-aspect` agent per perspective of the panel' "$SKILL_MD" \
+  && check "F2 skill fans out one aspect agent per perspective of the panel" PASS || check "F2 panel perspectives" FAIL
 grep -qiE 'parallel batch|in parallel|one parallel' "$SKILL_MD" \
   && check "F3 skill spawns the aspects in parallel" PASS || check "F3 parallel batch" FAIL
 

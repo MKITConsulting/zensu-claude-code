@@ -106,10 +106,10 @@ if [ "$(_zensu_log_style)" = "wall" ]; then
 else
   check "(e) no config -> _zensu_log_style default 'wall' (got '$(_zensu_log_style)')" FAIL
 fi
-if [ "$(zensu_autofix_max_rounds)" = "5" ]; then
-  check "(e) no config -> zensu_autofix_max_rounds default 5" PASS
+if [ "$(zensu_autofix_max_rounds)" = "1" ]; then
+  check "(e) no config -> zensu_autofix_max_rounds default 1" PASS
 else
-  check "(e) no config -> zensu_autofix_max_rounds default 5 (got '$(zensu_autofix_max_rounds)')" FAIL
+  check "(e) no config -> zensu_autofix_max_rounds default 1 (got '$(zensu_autofix_max_rounds)')" FAIL
 fi
 if zensu_autofix_include_suggestions; then
   check "(e) no config -> autofix suggestions disabled (default)" FAIL
