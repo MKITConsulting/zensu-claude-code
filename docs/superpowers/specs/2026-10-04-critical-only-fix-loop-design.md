@@ -1,7 +1,7 @@
 # Critical-Only Fix Loop — Design
 
 Status: approved in chat on 2026-10-04.
-Target repository: `zensu-claude-code` (base `main` at `039f16e8`, after #362 and #372; latest release v0.23.0).
+Target repository: `zensu-claude-code` (base `main` at `039f16e8`, after #362 and #372, which shipped in 0.24.0 on 2026-10-04).
 Follows: `docs/superpowers/specs/2026-09-28-review-cost-levers-design.md` (D1 to D5); the decisions below continue its numbering.
 
 ## 1. Problem
@@ -82,7 +82,8 @@ before" and logs `CONVERGENCE UNAVAILABLE`; in `critical` mode that review route
 ## 4. Delivery
 
 - One pull request from `main` on the branch `feat/critical-only-fix-loop`.
-- Version: minor. It ships in the same release as #362 and #372, because neither has been released yet.
+- Version: minor, like #372, because changed defaults change behavior. #362 and #372 shipped in 0.24.0 while this
+  change was in progress, so it ships in the release after it.
 - Texts that state which severities route and change with this design: `hooks/post-review-tdd-delegate.sh` (its
   directive arms and its header), `hooks/lib/zensu-config.sh`, `config.example.json`, `docs/configuration.md`,
   `docs/review-severity.md`, `docs/architecture.md` and `skills/tdd/SKILL.md`.

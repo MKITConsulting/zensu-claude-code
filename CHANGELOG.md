@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **review loop**: the `/zensu:tdd` auto-fix loop now fixes only CRITICAL findings by default
+  (`hooks.autoFixSeverity: critical`). Every IMPORTANT finding is parked, and `/zensu:self-review`
+  fixes it once at the end of the chain; `"autoFixSeverity": "important"` restores the routing of
+  0.24.0, and `hooks.autoFixIncludeSuggestions: true` still routes every severity. The loop allows
+  two fix rounds by default (`hooks.autoFixMaxRounds`, 1 in 0.24.0), so the Stop chain guard
+  releases after 5 nudges instead of 4.
+
 ## [0.24.0] - 2026-10-04
 
 ### Added
@@ -46,14 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
-- **review loop**: the `/zensu:tdd` auto-fix loop now fixes only CRITICAL findings by default
-  (`hooks.autoFixSeverity: critical`). Every IMPORTANT finding is parked, and `/zensu:self-review`
-  fixes it once at the end of the chain; `"autoFixSeverity": "important"` restores the earlier
-  routing, and `hooks.autoFixIncludeSuggestions: true` still routes every severity. The loop allows
-  two fix rounds by default (`hooks.autoFixMaxRounds`, 5 in 0.23.0), a re-review spawns only the
-  `correctness` perspective (`hooks.reviewPanel: full` restores five perspectives and the judge), and
-  a re-review CRITICAL routes only when a failing test reproduces it (`hooks.criticalReproduction`).
-  The Stop chain guard releases after `autoFixMaxRounds + 3` nudges, so 5 by default.
 - **verify-feature**: a navigation policy may now list, beside its targets, up to 8
   `networkOnlyOrigins` — a REST API, an OIDC issuer, a token endpoint — that the application's
   pages may request but no navigation command may open, and nothing on them counts as evidence.
