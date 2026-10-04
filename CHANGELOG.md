@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-04
+
+### Added
+
+- **review**: Lean review loop by default (#372)
+- **source-write-gate**: Make the Bash source-write gate opt-in (#368)
+- **verify-feature**: Add network-only origins to the navigation policy (#367)
+- **doctor**: Show who holds the Autopilot project lease (#360)
+- **session-control**: Let the chain skills follow a re-anchored session (#354)
+- **worktree-keep**: Keep the marker while a nested repository remains (#356)
+- **session-trail**: Release the old session's keep protection after a takeover (#355)
+
+### Changed
+
+- **stop**: Link the latency memo fixtures through Node (#371)
+- **release**: Pin the run-block scan's boundary cases (#369)
+- **requirements-gate**: Refuse an unresolved receipt path instead of writing into the cwd (#314)
+- **stop**: Resolve the project root and session key once per Stop run (#366)
+- **windows**: Move deferred-lease-refresh to the front of windows-shard-9 (#363)
+- **multi-repo**: Re-point stale line citations by content (#361)
+- **ci**: Keep the Stop deadline out of the deferred-claim suite and raise the shard-5 handoff cap (#358)
+
+### Fixed
+
+- **tests**: Keep the lock-owner report's PowerShell probe off module auto-loading (#378)
+- **tests**: Import the Windows job helper's one module by path (#377)
+- **tests**: Fire the nested-tree timeout only after the grandchild exists (#374)
+- **edit-landing**: Check the raw --session key through the shared predicate (#376)
+- **skills**: Keep argument placeholders out of skill shell snippets (#375)
+- **autopilot**: Keep a lease fault apart from no-run in the Stop reconcile and the workspace read (#357)
+- **stop**: Route the denial-note key check through one canonical predicate (#370)
+- **evidence-run**: Fingerprint the nested work tree a test run reaches (#362)
+- **tests**: Read npm-dependent structure suites from the suite manifest (#359)
+- **session-control**: Stop a reused Windows PID from wedging a lock (#364)
+- **session-control**: End the withFileLock livelock behind two Windows CI hangs (#365)
+- **autopilot**: Stop reading a held Autopilot lease as no active run (#352)
+
 ### Upgrade notes
 
 - **verify-feature**: a navigation policy may now list, beside its targets, up to 8
