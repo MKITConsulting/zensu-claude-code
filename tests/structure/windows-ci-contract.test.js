@@ -304,7 +304,7 @@ test('slow profile lifecycle coverage has an independent measured deadline', () 
     runner: 'bash',
     path: 'tests/structure/test-windows-ci-contract.sh',
     args: ['lifecycle'],
-    timeoutMs: 420000,
+    timeoutMs: 100000,
   });
   const contractRunner = fs.readFileSync(
     path.join(root, 'tests', 'structure', 'test-windows-ci-contract.sh'),

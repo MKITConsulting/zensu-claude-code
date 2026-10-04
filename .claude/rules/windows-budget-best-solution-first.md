@@ -132,3 +132,14 @@ measured), the inter-suite overhead and the cleanup after each timeout. Those fo
 would leave at most about 7 s of the envelope. `deferred-lease-refresh`'s 900000 ms cap is 15%
 over that 780910 ms. Further growth on shard 9 has to move a suite off it rather than raise a cap.
 Re-measure on the next green Windows run and replace these figures.
+
+**`windows-profile-lifecycle-contract` on `windows-shard-3` dropped from a 420000 to a 100000 ms
+cap.** The suite drives `tests/structure/profile-runner.test.js`, where each nested `runProfile`
+started a Windows PowerShell job helper that scanned every module on `PSModulePath`. #377 removed
+that scan and lowered the test's Windows profile deadline from 60 s to 10 s. The suite measured
+244395 and 229606 ms before #377 (runs 37151198067 and 37150000165) and 23621, 24220 and 25265 ms
+after it (runs 37156373713, 37158951388 and 37159426509). 100000 ms is 3.96x the slowest of those
+three. It also stays below what a returning scan would cost: about eight helper starts at no less
+than 11.5 s each (run 37155469145) push the suite past 110 s, so that regression surfaces as this
+suite's own `TIMED_OUT`. The suite still runs last on shard 3, so its timeout cannot starve a neighbour.
+Re-measure on the next green Windows run and replace these figures.
