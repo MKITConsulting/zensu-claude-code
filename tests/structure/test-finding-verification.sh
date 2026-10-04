@@ -199,10 +199,10 @@ if grep -qF "items annotated '$MARKER' failed the Finding Verification Gate" "$D
 else
   check "P3a the include-suggestions route exempts an unverified finding from fixing" FAIL
 fi
-if [ "$(grep -c 'step 4c Finding Verification Gate' "$DELEGATE")" -eq 2 ]; then
-  check "P3b BOTH post-review directives re-run the gate before re-verifying" PASS
+if [ "$(grep -c 'step 4c Finding Verification Gate' "$DELEGATE")" -eq 3 ]; then
+  check "P3b EVERY post-review directive re-runs the gate before re-verifying" PASS
 else
-  check "P3b BOTH post-review directives re-run the gate before re-verifying (got $(grep -c 'step 4c Finding Verification Gate' "$DELEGATE"))" FAIL
+  check "P3b EVERY post-review directive re-runs the gate before re-verifying (got $(grep -c 'step 4c Finding Verification Gate' "$DELEGATE"))" FAIL
 fi
 if grep -qF 'step 4c Finding Verification Gate' "$ENFORCER" && grep -qF "$MARKER" "$ENFORCER"; then
   check "P3c the Stop-hook resume directive names the gate and its marker" PASS

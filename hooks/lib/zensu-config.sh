@@ -488,11 +488,12 @@ zensu_zen_mode_default_on() {
   [ "$val" = "1" ]
 }
 
-zensu_autofix_include_suggestions() {
-  command -v node >/dev/null 2>&1 || return 1
+zensu_autofix_severity() {
+  command -v node >/dev/null 2>&1 || { printf 'critical'; return 0; }
   local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.autoFixIncludeSuggestions===true?"1":"0")' 2>/dev/null)
-  [ "$val" = "1" ]
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var h=(j&&j.hooks)||{};var s=h.autoFixSeverity;process.stdout.write(s==="critical"||s==="important"||s==="all"?s:(h.autoFixIncludeSuggestions===true?"all":"critical"))' 2>/dev/null)
+  [ -z "$val" ] && val="critical"
+  printf '%s' "$val"
 }
 
 zensu_review_panel() {
@@ -566,7 +567,7 @@ _zensu_config_bounded_int() {
 # read `j.context.*` and are therefore not omitted members of this family — folding
 # them in would mean widening this contract with a namespace parameter, which is a
 # different decision from the one taken here.
-zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 1 1 99; }
+zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 2 1 99; }
 zensu_pending_review_ttl_hours()  { _zensu_config_bounded_int pendingReviewTtlHours 6 0 8760; }
 zensu_impl_stop_nudge_after()     { _zensu_config_bounded_int implStopNudgeAfter 12 0 999999; }
 zensu_worktree_keep_idle_hours()  { _zensu_config_bounded_int worktreeKeepIdleHours 72 1 8760; }

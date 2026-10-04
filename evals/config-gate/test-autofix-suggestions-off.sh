@@ -52,10 +52,10 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"Fixing critical+important findings in-thread, then re-reviewing"*)
-    check "flag absent: 'Fixing critical+important findings in-thread' status line (main thread)" PASS ;;
+  *"Fixing critical findings in-thread, then re-reviewing"*)
+    check "flag absent: 'Fixing critical findings in-thread' status line (default autoFixSeverity critical)" PASS ;;
   *)
-    check "flag absent: 'Fixing critical+important findings in-thread' status line (main thread)" FAIL ;;
+    check "flag absent: 'Fixing critical findings in-thread' status line (default autoFixSeverity critical)" FAIL ;;
 esac
 
 case "$OUT" in

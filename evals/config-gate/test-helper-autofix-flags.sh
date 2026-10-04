@@ -24,67 +24,35 @@ trap cleanup EXIT
 
 source "$HELPER"
 
-# --- zensu_autofix_include_suggestions ---
+# --- zensu_autofix_severity ---
 
-cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true}}
-EOF
 export ZENSU_CONFIG="$TMP_CFG"
-
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: absent flag returns 1 (disabled, default off)" FAIL
-else
-  check "include_suggestions: absent flag returns 1 (disabled, default off)" PASS
-fi
-
-cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFixIncludeSuggestions": true}}
-EOF
-
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: explicit true returns 0 (enabled)" PASS
-else
-  check "include_suggestions: explicit true returns 0 (enabled)" FAIL
-fi
-
-cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFixIncludeSuggestions": false}}
-EOF
-
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: explicit false returns 1 (disabled)" FAIL
-else
-  check "include_suggestions: explicit false returns 1 (disabled)" PASS
-fi
-
-cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFixIncludeSuggestions": "true"}}
-EOF
-
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: string 'true' returns 1 (strict ===)" FAIL
-else
-  check "include_suggestions: string 'true' returns 1 (strict ===)" PASS
-fi
+severity_case() {
+  local label="$1" json="$2" want="$3" val
+  printf '%s\n' "$json" > "$TMP_CFG"
+  val=$(zensu_autofix_severity)
+  if [ "$val" = "$want" ]; then check "severity: $label echoes $want" PASS
+  else check "severity: $label echoes $want (got '$val')" FAIL; fi
+}
+severity_case "absent key" '{"hooks": {"autoFix": true}}' critical
+severity_case "explicit critical" '{"hooks": {"autoFixSeverity": "critical"}}' critical
+severity_case "explicit important" '{"hooks": {"autoFixSeverity": "important"}}' important
+severity_case "explicit all" '{"hooks": {"autoFixSeverity": "all"}}' all
+severity_case "legacy autoFixIncludeSuggestions true" '{"hooks": {"autoFixIncludeSuggestions": true}}' all
+severity_case "legacy autoFixIncludeSuggestions false" '{"hooks": {"autoFixIncludeSuggestions": false}}' critical
+severity_case "legacy string 'true' (strict ===)" '{"hooks": {"autoFixIncludeSuggestions": "true"}}' critical
+severity_case "explicit critical beats legacy true" '{"hooks": {"autoFixSeverity": "critical", "autoFixIncludeSuggestions": true}}' critical
+severity_case "unknown value falls back to legacy true" '{"hooks": {"autoFixSeverity": "blocker", "autoFixIncludeSuggestions": true}}' all
+severity_case "unknown value alone" '{"hooks": {"autoFixSeverity": "blocker"}}' critical
+severity_case "malformed JSON" '{this is not json' critical
 
 MISSING_CFG="/tmp/zensu-autofix-flags-missing-$$.json"
 rm -f "$MISSING_CFG"
 export ZENSU_CONFIG="$MISSING_CFG"
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: missing config returns 1 (disabled)" FAIL
-else
-  check "include_suggestions: missing config returns 1 (disabled)" PASS
-fi
-
+val=$(zensu_autofix_severity)
+if [ "$val" = "critical" ]; then check "severity: missing config echoes critical" PASS
+else check "severity: missing config echoes critical (got '$val')" FAIL; fi
 export ZENSU_CONFIG="$TMP_CFG"
-cat > "$TMP_CFG" <<'EOF'
-{this is not json
-EOF
-if zensu_autofix_include_suggestions; then
-  check "include_suggestions: malformed JSON returns 1 (disabled)" FAIL
-else
-  check "include_suggestions: malformed JSON returns 1 (disabled)" PASS
-fi
 
 # --- zensu_autofix_max_rounds ---
 
@@ -92,10 +60,10 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: absent flag echoes default 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: absent flag echoes default 2" PASS
 else
-  check "max_rounds: absent flag echoes default 1 (got '$val')" FAIL
+  check "max_rounds: absent flag echoes default 2 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
@@ -132,58 +100,58 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 0}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: 0 out of range, fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: 0 out of range, fallback to 2" PASS
 else
-  check "max_rounds: 0 out of range, fallback to 1 (got '$val')" FAIL
+  check "max_rounds: 0 out of range, fallback to 2 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 100}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: 100 out of range, fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: 100 out of range, fallback to 2" PASS
 else
-  check "max_rounds: 100 out of range, fallback to 1 (got '$val')" FAIL
+  check "max_rounds: 100 out of range, fallback to 2 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": "five"}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: non-int 'five', fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: non-int 'five', fallback to 2" PASS
 else
-  check "max_rounds: non-int 'five', fallback to 1 (got '$val')" FAIL
+  check "max_rounds: non-int 'five', fallback to 2 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 1.5}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: non-integer 1.5, fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: non-integer 1.5, fallback to 2" PASS
 else
-  check "max_rounds: non-integer 1.5, fallback to 1 (got '$val')" FAIL
+  check "max_rounds: non-integer 1.5, fallback to 2 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {also broken
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: malformed JSON, fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: malformed JSON, fallback to 2" PASS
 else
-  check "max_rounds: malformed JSON, fallback to 1 (got '$val')" FAIL
+  check "max_rounds: malformed JSON, fallback to 2 (got '$val')" FAIL
 fi
 
 export ZENSU_CONFIG="$MISSING_CFG"
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "1" ]; then
-  check "max_rounds: missing config, fallback to 1" PASS
+if [ "$val" = "2" ]; then
+  check "max_rounds: missing config, fallback to 2" PASS
 else
-  check "max_rounds: missing config, fallback to 1 (got '$val')" FAIL
+  check "max_rounds: missing config, fallback to 2 (got '$val')" FAIL
 fi
 
 # --- zensu_combined_summary_enabled ---
@@ -252,6 +220,11 @@ if zensu_combined_summary_enabled; then
   check "combined_summary: node missing on PATH returns 0 (fail-open enabled)" PASS
 else
   check "combined_summary: node missing on PATH returns 0 (fail-open enabled)" FAIL
+fi
+if [ "$(zensu_autofix_severity)" = "critical" ]; then
+  check "severity: node missing on PATH echoes critical" PASS
+else
+  check "severity: node missing on PATH echoes critical" FAIL
 fi
 export PATH="$ORIG_PATH"
 rm -rf "$HIDE_DIR"
