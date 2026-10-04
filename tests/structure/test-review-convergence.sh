@@ -282,6 +282,8 @@ check "LC1c config.example.json ships two fix rounds" "$(node -e 'process.stdout
 check "LC4 the severity getter defaults to critical" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG=/nonexistent zensu_autofix_severity' _ "$ROOT" | grep -qx critical && echo PASS || echo FAIL)"
 check "LC4b config.example.json ships the critical threshold" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.autoFixSeverity==="critical"?"PASS":"FAIL")' "$CONFIG_EX")"
 check "LC4c the old suggestions getter is gone" "$(grep_absent "$ROOT/hooks/lib/zensu-config.sh" 'zensu_autofix_include_suggestions')"
+check "LC4d configuration.md documents autoFixSeverity" "$(grep_ok "$CONFIG_DOC" '| `autoFixSeverity` |')"
+check "LC4e the rubric doc states the critical default" "$(grep_ok "$RUBRIC_DOC" 'By default (`hooks.autoFixSeverity: critical`) only CRITICAL findings route')"
 check "LC2 the delegate reads hooks.criticalReproduction behind the verification gate" "$(grep_ok "$DELEGATE" 'zensu_hook_enabled criticalReproduction && zensu_hook_enabled findingVerification')"
 check "LC2b the convergence clause requires a reproduction for a re-review CRITICAL" "$(grep_ok "$DELEGATE" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
 check "LC2c step 4c carries stage 3" "$(grep_ok "$TDD_MD" '**Stage 3 (reproduction, re-reviews only, config-gated).**')"

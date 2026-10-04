@@ -647,7 +647,7 @@ check "S12 the audit anchors --project on the bound project root, never the work
 echo "== Skill: surrounding contract intact =="
 grep -qF 'BASELINE_SHA=$(git -C "{project_root}" rev-parse --verify --quiet HEAD)' "$SKILL_TDD"
 check "P1 Phase 0 still captures the baseline SHA the library consumes, from the bound project root" "$(verdict $?)"
-grep -F 'On Critical/Important findings' "$SKILL_TDD" | grep -qF 'Edit Landing Audit'
+grep -F 'On routed findings' "$SKILL_TDD" | grep -qF 'Edit Landing Audit'
 check "P2 every review-fix round re-runs the audit over that round's claims" "$(verdict $?)"
 grep -qF 'Mechanical or bulk replacement — confirm by RE-READING the result, never by the test run.' "$SKILL_TDD"
 check "P3 Phase 4 keeps the mechanical-replacement re-read rule" "$(verdict $?)"

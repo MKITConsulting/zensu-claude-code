@@ -5,13 +5,13 @@ delimited block below is carried verbatim by `agents/review-aspect.md`,
 `agents/review-judge.md` and `agents/code-reviewer.md`, and `/zensu:tdd` step 3 prepends it,
 read at run time from this file, to every repo-custom persona spawn prompt.
 
-The scale decides what the auto-fix loop routes. CRITICAL and IMPORTANT findings route by
-default, SUGGESTION findings only under `hooks.autoFixIncludeSuggestions`. While
-`hooks.reviewConvergence` is enabled (the default), every re-review routes only CRITICAL findings
-and the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous
-fix pass edited, and defers everything else; with
-`hooks.selfReview` off it keeps every IMPORTANT finding routable (see
-[configuration.md](configuration.md)). While `hooks.criticalReproduction` is enabled (the default),
+The scale decides what the auto-fix loop routes. By default (`hooks.autoFixSeverity: critical`) only CRITICAL findings route;
+every IMPORTANT finding is parked, and `/zensu:self-review` fixes it once at the end of the chain. `important` routes
+CRITICAL and IMPORTANT findings, and `all`, or the legacy `hooks.autoFixIncludeSuggestions`, routes SUGGESTION findings
+too. Under `important` and `all`, while `hooks.reviewConvergence` is enabled (the default), every re-review routes only
+CRITICAL findings and the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass
+edited, and defers everything else; with `hooks.selfReview` off it keeps every IMPORTANT finding routable, under
+`critical` as well (see [configuration.md](configuration.md)). While `hooks.criticalReproduction` is enabled (the default),
 a CRITICAL finding of a re-review routes only when a failing test reproduces it; see `/zensu:tdd`
 step 4c stage 3. An undefined scale let every reviewer promote its own
 taste to IMPORTANT, and every such finding opened another full review round.
