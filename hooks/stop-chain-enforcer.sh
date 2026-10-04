@@ -674,6 +674,55 @@ reviewer_spawn_denied() {
   [ "$REVIEWER_DENIAL_STATUS" = "blocked" ]
 }
 
+external_review_wait_file() {
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  printf '%s/external-review/v1/waits/%s.json' "$CLAUDE_PLUGIN_DATA" "$SESSION_ID"
+}
+
+external_review_wait_reset() {
+  local file
+  file="$(external_review_wait_file)" || return 0
+  if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
+  return 0
+}
+
+external_review_workflow_wait() {
+  local lib data verdict word count max workflows names exclusions
+  EXTERNAL_REVIEW_WAIT_COUNT=""
+  EXTERNAL_REVIEW_WAIT_MAX=""
+  EXTERNAL_REVIEW_WAIT_WORKFLOWS=""
+  EXTERNAL_REVIEW_WAIT_NAMES=""
+  case "$INPUT" in
+    *'"background_tasks"'*'"workflow"'*) ;;
+    *) return 1 ;;
+  esac
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/external-review-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  zensu_hook_enabled externalReviewImport || return 1
+  if reviewer_spawn_denied; then return 1; fi
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_XR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_XR_PLUGIN_DATA="$data" \
+    ZENSU_XR_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
+  read -r word count max workflows names <<<"$verdict"
+  [ "$word" = "wait" ] || return 1
+  count="${count#count=}"
+  max="${max#max=}"
+  workflows="${workflows#workflows=}"
+  names="${names#names=}"
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  case "$max" in ''|*[!0-9]*) return 1 ;; esac
+  case "$workflows" in ''|*[!0-9]*) return 1 ;; esac
+  case "$names" in ''|*[!A-Za-z0-9._:,\(\)-]*) names="(unnamed)" ;; esac
+  EXTERNAL_REVIEW_WAIT_COUNT="$count"
+  EXTERNAL_REVIEW_WAIT_MAX="$max"
+  EXTERNAL_REVIEW_WAIT_WORKFLOWS="$workflows"
+  EXTERNAL_REVIEW_WAIT_NAMES="$names"
+  return 0
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1639,6 +1688,14 @@ if [ "$SESSION_ACTIVE" != "true" ]; then reviewer_denial_note_clear; outer_finis
 if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; zensu_impl_stop_nudge; exit 0; fi
 if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
 
+if [ -z "$INNER_BOUND_RUN" ] && [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    echo "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence." >&2
+  fi
+  exit 0
+fi
+
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
@@ -1990,7 +2047,7 @@ else
     INNER_EXCEPTION_LEAD="Only valid exception:"
     INNER_EXCEPTION_SECOND=""
   fi
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the review panel's zensu:review-aspect agents over the changed files ('git diff --name-only HEAD') — on the first review, import a finished external review workflow through zensu-log.sh --external-review instead and spawn only the aspects the zensu:review-judge names as gaps — merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
   REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
 fi
 
@@ -2010,5 +2067,6 @@ fi
 if [ "$REVIEWER_DENIAL_ROUTED" = "true" ]; then
   reviewer_denial_note
 fi
+external_review_wait_reset
 emit_block "$REASON"
 exit 0
