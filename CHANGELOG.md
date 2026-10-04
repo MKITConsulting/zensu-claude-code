@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **review loop**: the `/zensu:tdd` auto-fix loop now fixes only CRITICAL findings by default
+  (`hooks.autoFixSeverity: critical`). Every IMPORTANT finding is parked, and `/zensu:self-review`
+  fixes it once at the end of the chain; `"autoFixSeverity": "important"` restores the routing of
+  0.24.0, and `hooks.autoFixIncludeSuggestions: true` still routes every severity. The loop allows
+  two fix rounds by default (`hooks.autoFixMaxRounds`, 1 in 0.24.0), so the Stop chain guard
+  releases after 5 nudges instead of 4.
+
 ## [0.24.0] - 2026-10-04
 
 ### Added

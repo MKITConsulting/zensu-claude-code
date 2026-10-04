@@ -138,14 +138,14 @@ check "I14 tdd skill exempts the judge from the delta" "$(grep_ok "$TDD_MD" 'ALW
 check "I15 tdd skill logs every skipped aspect" "$(grep_ok "$TDD_MD" 'ASPECT SKIPPED —')"
 check "I16 tdd skill spawns all five when activation is unavailable" "$(grep_ok "$TDD_MD" 'ASPECT ACTIVATION UNAVAILABLE —')"
 
-# The two delegate arms are verbatim-identical by contract, so every needle must
-# appear TWICE — a one-sided edit is the failure this counts rather than greps.
+# The three delegate arms are verbatim-identical by contract, so every needle must
+# appear THREE times — a one-sided edit is the failure this counts rather than greps.
 for needle in 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
               'status=empty or status=degraded' 'always keeps the full cumulative diff' \
               'aspect-activation-v1.js --panel ${PANEL} --round re'; do
   n="$(grep -cF -- "$needle" "$DELEGATE")"
-  [ "$n" -eq 2 ] && check "I17 both delegate arms carry [$needle] (${n}x)" PASS \
-                 || check "I17 both delegate arms carry [$needle] (${n}x, want 2)" FAIL
+  [ "$n" -eq 3 ] && check "I17 every delegate arm carries [$needle] (${n}x)" PASS \
+                 || check "I17 every delegate arm carries [$needle] (${n}x, want 3)" FAIL
 done
 
 # --- Config and operator accounts -------------------------------------------

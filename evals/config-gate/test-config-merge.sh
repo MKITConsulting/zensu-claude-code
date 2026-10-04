@@ -39,7 +39,7 @@ export CLAUDE_PROJECT_DIR="$PROJECT_DIR"
 printf '{"hooks":{"autoFixIncludeSuggestions":true}}' > "$HOME_CFG"
 printf '{"logging":{"timestampStyle":"none"}}' > "$PROJECT_CFG"
 
-if zensu_autofix_include_suggestions; then
+if [ "$(zensu_autofix_severity)" = "all" ]; then
   check "(b) global autoFixIncludeSuggestions:true honored when project omits the key" PASS
 else
   check "(b) global autoFixIncludeSuggestions:true honored when project omits the key" FAIL
@@ -63,7 +63,7 @@ fi
 # ---- (c) nested hooks.* merge: global one key, project another, both survive ----
 printf '{"hooks":{"autoFixIncludeSuggestions":true}}' > "$HOME_CFG"
 printf '{"hooks":{"combinedSummary":false}}'          > "$PROJECT_CFG"
-if zensu_autofix_include_suggestions; then
+if [ "$(zensu_autofix_severity)" = "all" ]; then
   check "(c) nested merge: global hooks.autoFixIncludeSuggestions survives project hooks override" PASS
 else
   check "(c) nested merge: global hooks.autoFixIncludeSuggestions survives project hooks override" FAIL
@@ -92,7 +92,7 @@ if zensu_combined_summary_enabled; then
 else
   check "(d) ZENSU_CONFIG overrides project combinedSummary" FAIL
 fi
-if zensu_autofix_include_suggestions; then
+if [ "$(zensu_autofix_severity)" = "all" ]; then
   check "(d) ZENSU_CONFIG is a full override — global autoFix flag not merged in" FAIL
 else
   check "(d) ZENSU_CONFIG is a full override — global autoFix flag not merged in" PASS
@@ -106,15 +106,15 @@ if [ "$(_zensu_log_style)" = "wall" ]; then
 else
   check "(e) no config -> _zensu_log_style default 'wall' (got '$(_zensu_log_style)')" FAIL
 fi
-if [ "$(zensu_autofix_max_rounds)" = "1" ]; then
-  check "(e) no config -> zensu_autofix_max_rounds default 1" PASS
+if [ "$(zensu_autofix_max_rounds)" = "2" ]; then
+  check "(e) no config -> zensu_autofix_max_rounds default 2" PASS
 else
-  check "(e) no config -> zensu_autofix_max_rounds default 1 (got '$(zensu_autofix_max_rounds)')" FAIL
+  check "(e) no config -> zensu_autofix_max_rounds default 2 (got '$(zensu_autofix_max_rounds)')" FAIL
 fi
-if zensu_autofix_include_suggestions; then
-  check "(e) no config -> autofix suggestions disabled (default)" FAIL
+if [ "$(zensu_autofix_severity)" = "all" ]; then
+  check "(e) no config -> autofix severity is not all (default critical)" FAIL
 else
-  check "(e) no config -> autofix suggestions disabled (default)" PASS
+  check "(e) no config -> autofix severity is not all (default critical)" PASS
 fi
 
 # ---- (f) SECURITY: a project __proto__ key must NOT flip a gated default ----

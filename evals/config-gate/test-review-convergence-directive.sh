@@ -20,7 +20,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
 render_rounds() {
-  local name="$1" config="$2"
+  local name="$1" config="$2" rounds="${3:-2}"
   mkdir -p "$TMP_DIR/$name/project/.zensu/state"
   printf '%s' "$config" > "$TMP_DIR/$name/config.json"
   (
@@ -30,7 +30,7 @@ render_rounds() {
     source "$BASELINE" "$SID" || exit 1
     bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
     bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1
-    for round in 1 2; do
+    for round in $(seq 1 "$rounds"); do
       TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
       STDIN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
       printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null > "$TMP_DIR/$name/round-$round.json"
@@ -62,7 +62,7 @@ clause_of() {
 }
 
 render_rounds on-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"autoFixMaxRounds":5}}'
-render_rounds on-default '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}'
+render_rounds on-default '{"hooks":{"autoFix":true,"autoFixSeverity":"important","autoFixMaxRounds":5}}'
 render_rounds off-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds off-default '{"hooks":{"autoFix":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":5}}'
@@ -71,8 +71,10 @@ render_rounds max-rounds '{"hooks":{"autoFix":true,"autoFixMaxRounds":1}}'
 render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}'
 render_rounds repro-off '{"hooks":{"autoFix":true,"criticalReproduction":false}}'
 render_rounds repro-fv-off '{"hooks":{"autoFix":true,"findingVerification":false}}'
-render_rounds one-round '{"hooks":{"autoFix":true}}'
+render_rounds one-round '{"hooks":{"autoFix":true}}' 3
 render_rounds full-panel '{"hooks":{"autoFix":true,"reviewPanel":"full"}}'
+render_rounds sev-all '{"hooks":{"autoFix":true,"autoFixSeverity":"all","autoFixMaxRounds":5}}'
+render_rounds sev-crit-legacy '{"hooks":{"autoFix":true,"autoFixSeverity":"critical","autoFixIncludeSuggestions":true}}'
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL
@@ -199,10 +201,12 @@ ONE2="$(context_of "$TMP_DIR/one-round/round-2.json")"
 RPOFF2="$(context_of "$TMP_DIR/repro-off/round-2.json")"
 RPOFF1="$(context_of "$TMP_DIR/repro-off/round-1.json")"
 RPFV1="$(context_of "$TMP_DIR/repro-fv-off/round-1.json")"
-check "RP0 the default budget routes one fix round after the first review" "$(has "$ONE1" 'Review convergence (hooks.reviewConvergence is on)')"
-check "RP0b the default budget hands the verification review over at max rounds" "$(has "$ONE2" 'max 1 rounds reached')"
+check "RP0 the default budget routes a fix round after the first review" "$(has "$ONE1" 'Review convergence (hooks.reviewConvergence is on)')"
+ONE3="$(context_of "$TMP_DIR/one-round/round-3.json")"
+check "RP0b the default budget routes a second fix round" "$(has "$ONE2" "'Fixing critical findings in-thread, then re-reviewing (round 2/2)' (case C)")"
+check "RP0c the default budget hands the third review over at max rounds" "$(has "$ONE3" 'max 2 rounds reached')"
 check "RP1 the default clause gates a re-review CRITICAL on a reproduction" "$(has "$ONE1" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
-check "RP2 the default hand-off names the reproduction rule for self-review" "$(has "$ONE2" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "RP2 the default hand-off names the reproduction rule for self-review" "$(has "$ONE3" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
 check "RP3 criticalReproduction off drops the rule from the clause" "$(lacks "$RPOFF1" 'FINDING REPRODUCTION')"
 check "RP4 criticalReproduction off drops the rule from the hand-off" "$(lacks "$RPOFF2" 'FINDING REPRODUCTION')"
 check "RP5 findingVerification off drops the rule, since stage 3 lives in that gate" "$(lacks "$RPFV1" 'FINDING REPRODUCTION')"
@@ -211,6 +215,33 @@ check "LP1 the default fix round re-reviews with the lean panel" "$(has "$ONE1" 
 check "LP2 the default fix round keeps the judge for the full panel only" "$(has "$ONE1" 'only when hooks.reviewJudge is enabled and hooks.reviewPanel is full')"
 check "LP3 reviewPanel full re-reviews with the full panel" "$(has "$FULL1" 'aspect-activation-v1.js --panel full --round re answers spawn')"
 check "LP4 no unexpanded panel variable reaches the model" "$(lacks "$ONE1" '${PANEL}')"
+
+SEVALL1="$(context_of "$TMP_DIR/sev-all/round-1.json")"
+SEVCL1="$(context_of "$TMP_DIR/sev-crit-legacy/round-1.json")"
+check "SV1 the default threshold is critical" "$(has "$ONE1" 'hooks.autoFixSeverity is critical: this loop fixes only Critical findings')"
+check "SV2 case B parks IMPORTANT findings under the round's ids" "$(has "$ONE1" "exactly in the form 'FINDING LEDGER — R1-F<n> parked IMPORTANT <path>:<line> | <paraphrase>'")"
+check "SV3 the clause form admits the parked state" "$(has "$ONE1" "'FINDING LEDGER — R1-F<n> <routed|deferred|neutralized|parked>")"
+check "SV4 case C parks every IMPORTANT finding it leaves unfixed" "$(has "$ONE1" "'parked' for every IMPORTANT finding you leave unfixed, 'deferred' for every other finding you leave unfixed")"
+check "SV5 a re-review never keeps an IMPORTANT finding routable" "$(has "$ONE1" 'An IMPORTANT finding never stays routable, because hooks.autoFixSeverity is critical')"
+check "SV6 the judge exceptions are absent under critical" "$(lacks "$ONE1" 'An IMPORTANT finding stays routable only when')"
+check "SV7 case C names the critical status line" "$(has "$ONE1" "'Fixing critical findings in-thread, then re-reviewing (round 1/2)' (case C)")"
+check "SV8 case B names the parked status line" "$(has "$ONE1" "'No critical findings — important findings parked for /zensu:self-review' (case B)")"
+check "SV9 case C lists only Critical findings" "$(has "$ONE1" 'List ONLY Critical findings. EXCLUDE all Important findings')"
+check "SV10 an unavailable convergence fixes IMPORTANT findings too" "$(has "$ONE1" 'fixing its IMPORTANT findings with its CRITICAL ones because no ledger carries a parked finding to /zensu:self-review')"
+check "SV11 the important arm keeps its own wording" "$(has "$DEF1" "'Fixing critical+important findings in-thread, then re-reviewing (round 1/5)' (case C)")"
+check "SV12 the important arm carries no critical sentence" "$(lacks "$DEF1" 'hooks.autoFixSeverity is critical')"
+check "SV13 convergence off falls back to the important arm" "$(has "$OFFD1" 'Fixing critical+important findings in-thread')"
+check "SV14 selfReview off falls back to the important arm" "$(has "$SUM1" 'Fixing critical+important findings in-thread')"
+check "SV15 autoFixSeverity all renders the suggestions arm" "$(has "$SEVALL1" 'Fixing all findings in-thread')"
+check "SV16 an explicit critical beats the legacy key" "$(has "$SEVCL1" 'hooks.autoFixSeverity is critical')"
+PARK_LOG="$TMP_DIR/park.log"
+node -e '
+  const m = /exactly in the form \x27(FINDING LEDGER — R1-F<n> parked[^\x27]*)\x27/.exec(process.argv[1]);
+  if (!m) process.exit(1);
+  const line = m[1].replace("<n>", "1").replace("<path>:<line>", "src/a.ts:3").replace("<paraphrase>", "filled from the park template");
+  require("fs").writeFileSync(process.argv[2], line + "\n");
+' "$ONE1" "$PARK_LOG" && PARK_OUT="$(node "$LEDGER_LIB" --log "$PARK_LOG" 2>&1)" || PARK_OUT=""
+check "SV17 a parked line written from the rendered template parses as an open ledger entry" "$(has "$PARK_OUT" 'entry R1-F1 parked IMPORTANT src/a.ts:3')"
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"

@@ -56,7 +56,7 @@ as it is.
 | TDD mode — vanilla vs. strict RED→GREEN | `hooks.tddImplementation` | bool | `false` (vanilla) |
 | Review-chain enforcer | `hooks.chainEnforcer` | bool | `true` |
 | Durable Autopilot enforcer | `hooks.autopilotEnforcer` | bool | `true` |
-| Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `1` |
+| Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `2` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
 | Pulse telemetry session | `hooks.pulseSession` | bool | `true` |

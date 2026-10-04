@@ -656,7 +656,7 @@ fi
 # that carries the config gate (and, in the Stop enforcer, the probe gate) — so the
 # constant's own count is 1 per consumer and the RENDER count moved to the clause.
 # Both are pinned: dropping the clause count would restore exactly the blind spot the
-# occurrence form exists for, since the delegate's two arms sit on single mega-lines.
+# occurrence form exists for, since the delegate's arms sit on single mega-lines.
 IN_SCOPE_DEF="$(occ 'ZENSU_REVIEW_SPAWN_IN_SCOPE="' "$IN_SCOPE_OWNER")"
 IN_SCOPE_STOP="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$STOP")"
 IN_SCOPE_DELEGATE="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$IN_SCOPE_DELEGATE_FILE")"
@@ -684,7 +684,7 @@ IN_SCOPE_TREE="$(grep -rlF "$IN_SCOPE_NEEDLE" \
 IN_SCOPE_LINE="$(grep -E '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
 IN_SCOPE_DEF_LINES="$(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
 if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEGATE" = "1" ] \
-  && [ "$IN_SCOPE_CLAUSE_STOP" = "1" ] && [ "$IN_SCOPE_CLAUSE_DELEGATE" = "2" ] \
+  && [ "$IN_SCOPE_CLAUSE_STOP" = "1" ] && [ "$IN_SCOPE_CLAUSE_DELEGATE" = "3" ] \
   && [ "$IN_SCOPE_REDECL" = "0" ] && [ "$IN_SCOPE_TREE" = "1" ] && [ "$IN_SCOPE_DEF_LINES" = "1" ] \
   && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE="These spawns' \
   && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'a host permission refusal is still a refusal."' \

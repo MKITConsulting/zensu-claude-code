@@ -246,7 +246,7 @@ Finally, the rule yields where another contract already fixes an order. A skill 
 2. /zensu:implement ZEN-1    → Load context, plan implementation
 3. /zensu:tdd                → Guided main-thread implementation (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-hook guaranteed)
-5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
+5. auto-fix loop             → Critical findings fixed in-thread (Important ones too under hooks.autoFixSeverity important or all, otherwise parked for the self-review), then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 
