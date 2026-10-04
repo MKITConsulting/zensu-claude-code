@@ -362,6 +362,52 @@ case "${1:-}" in
     zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
     exit $?
     ;;
+  --external-review)
+    _xr_root=""
+    _xr_launch=""
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --root) _xr_root="${2:-}"; shift 2 || break ;;
+        --launch) _xr_launch="${2:-}"; shift 2 || break ;;
+        *) echo "zensu-log.sh --external-review: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_xr_root" ]; then
+      echo "zensu-log.sh --external-review: --root <repository top level> is required" >&2
+      exit 2
+    fi
+    if [ -t 0 ]; then
+      echo "zensu-log.sh --external-review: pipe the Phase 6 step-2 change set on stdin, one repository-relative path per line" >&2
+      exit 2
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+      echo "EXTERNAL REVIEW — status=unavailable reason=node"
+      exit 0
+    fi
+    _xr_lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — status=unavailable reason=plugin-lib"; exit 0; }
+    _xr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — status=unavailable reason=plugin-data"; exit 0; }
+    _xr_root_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_xr_root" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — status=unavailable reason=root"; exit 0; }
+    _xr_project="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — status=unavailable reason=project-root"; exit 0; }
+    _xr_enabled=1
+    zensu_hook_enabled externalReviewImport || _xr_enabled=0
+    _xr_excl="$(zensu_msys_env_exclusions ZENSU_XR_LIB ZENSU_XR_PLUGIN_DATA ZENSU_XR_PROJECT_ROOT ZENSU_XR_ROOT)" \
+      || _xr_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    MSYS2_ENV_CONV_EXCL="$_xr_excl" \
+    ZENSU_XR_LIB="$_xr_lib/external-review-v1.js" \
+    ZENSU_XR_ENABLED="$_xr_enabled" \
+    ZENSU_XR_PLUGIN_DATA="$_xr_data" \
+    ZENSU_XR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+    ZENSU_XR_PROJECT_ROOT="$_xr_project" \
+    ZENSU_XR_ROOT="$_xr_root_native" \
+    ZENSU_XR_LAUNCH="$_xr_launch" \
+      node -e 'process.exitCode = require(process.env.ZENSU_XR_LIB).main(["check"])'
+    exit $?
+    ;;
   --acceptance-record|--acceptance-status)
     avr_verb="$1"
     avr_start=""
