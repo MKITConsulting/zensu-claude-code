@@ -519,7 +519,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 | Workflow | Invokes |
 |---|---|
 | `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 9 Windows profiles via `run-profile.js` |
-| `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
+| `release.yml` | `bash tests/run-all.sh --ci` **twice**, each as parallel `--shard=I/N` legs — once in `prepare-suite` against the bundled release commit, once in `publish-suite` against the exact `github.sha`; plus runtime-digest and clean-tree evidence in `prepare` and `publish` |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 
 The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo profiles are
