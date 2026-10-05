@@ -105,6 +105,19 @@ remove_owned_container_if_present() {
   docker rm -f "$container" >/dev/null
 }
 
+postgres_accepts_tcp() {
+  docker exec "$1" pg_isready -h 127.0.0.1 -p 5432 -U zensu -d zensu >/dev/null 2>&1
+}
+
+wait_for_postgres() {
+  local container="$1"
+  for ((attempt=0; attempt<60; attempt++)); do
+    postgres_accepts_tcp "$container" && return 0
+    sleep 1
+  done
+  return 1
+}
+
 SUPERVISOR_UNREACHABLE=3
 
 supervisor_request() {
@@ -233,7 +246,9 @@ case "$ACTION" in
     ORIGIN="$(parent_origin)"
     FRONTEND_PORT="${ORIGIN##*:}"
     if port_listening "$FRONTEND_PORT"; then
-      fail "the parent-authorized frontend port is already in use"
+      [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
+        || fail "the planned frontend port $FRONTEND_PORT is already in use, and this run directory keeps that port; start over from planned-origin in a fresh run directory"
+      fail "the parent-authorized frontend port $FRONTEND_PORT is already in use; free it, or start a new session whose policy names a free port"
     fi
 
     WTKEY="$(worktree_key)"
@@ -297,8 +312,9 @@ case "$ACTION" in
       -e POSTGRES_USER=zensu -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=zensu \
       -p "127.0.0.1:${PG_PORT}:5432" pgvector/pgvector:pg17 >/dev/null
     PG_STARTED=true
+    wait_for_postgres "$CONTAINER" || fail "PostgreSQL did not accept TCP connections within 60 seconds"
 
-    ZENSU_VERIFY_RUNTIME_LEASE="$RUNTIME_LEASE" SERVER_HOST=127.0.0.1 SERVER_PORT="$BACKEND_PORT" \
+    ZENSU_VERIFY_RUNTIME_LEASE="$RUNTIME_LEASE" SERVER_HOST=127.0.0.1 SERVER_PORT="$BACKEND_PORT" METRICS_PORT=0 \
       DB_HOST=localhost DB_PORT="$PG_PORT" DB_USER=zensu DB_PASSWORD="$DB_PASSWORD" \
       DB_NAME=zensu DB_SSLMODE=disable REGISTRATION_ENABLED=true EMAIL_ALLOW_NOOP=true \
       NOTIFICATION_ALLOW_NOOP=true TRUSTED_PROXY_CIDRS=none JWT_SECRET="$JWT_SECRET" APP_BASE_URL="$ORIGIN" \
@@ -344,7 +360,7 @@ case "$ACTION" in
     supervisor_request status "$BACKEND_READY" && supervisor_request status "$FRONTEND_READY" \
       || fail "runtime supervisor identity is unavailable"
     for ((attempt=0; attempt<90; attempt++)); do
-      docker exec "$CONTAINER" pg_isready -U zensu -d zensu >/dev/null 2>&1 \
+      postgres_accepts_tcp "$CONTAINER" \
         && curl -fsS "http://127.0.0.1:${BACKEND_PORT}/api/health" >/dev/null 2>&1 && break
       sleep 1
     done

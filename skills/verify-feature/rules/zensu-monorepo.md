@@ -75,17 +75,24 @@ every route on the origin, so no route list is needed.
 `up` uses that exact frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at
 `55432` and `8090`, creates per-run database/JWT secrets and a private runtime lease,
-starts `pgvector/pgvector:pg17`, and launches the backend and Vite with `--strictPort` on
-literal loopback. Secrets are stored mode `0600` beneath the run directory solely for later
-controller actions; never read, print, or pass that file to another tool. The persistent JSON
-state contains no secret values or killable PIDs.
+starts `pgvector/pgvector:pg17`, waits until PostgreSQL accepts TCP connections, and launches
+the backend and Vite with `--strictPort` on literal loopback. Secrets are stored mode `0600`
+beneath the run directory solely for later controller actions; never read, print, or pass that
+file to another tool. The persistent JSON state contains no secret values or killable PIDs.
+
+A run directory keeps its planned frontend port, so when `up` reports that port as already in
+use, every retry in the same run directory fails the same way. Without a parent policy, run the
+registered `down`, then start over from `planned-origin` in a fresh run directory, which picks a
+new free port. With a parent policy the port is fixed for the session: free it, or report
+PARTIAL with instructions to launch a new session whose policy names a free port.
 
 ## Keeping up with the monorepo
 
-The controller hard-codes the start contract of two services it does not own, so a monorepo
-change can break it without any change here. Both contracts are pinned by
+The controller hard-codes the start contracts of services it does not own, so a monorepo or
+image change can break it without any change here. Each contract is pinned by
 `tests/structure/test-zensu-runtime-controller.sh`, whose stubs record the exact argv and
-environment the controller hands each service.
+environment the controller hands each service, and every database probe it makes before the
+backend starts.
 
 - **Backend environment.** The backend refuses to boot when a required variable is missing
   (`validateConfigs` in `backend/cmd/zensu/main.go`); the controller then reports only that
@@ -94,9 +101,21 @@ environment the controller hands each service.
   (`middleware.TrustedProxiesNone`), the value for a backend that receives client connections
   directly: no forwarding header is trusted, so every request is attributed to its TCP peer,
   which in this single-user loopback run is the Vite dev server's proxy. The backend logs a
-  `WARN` that the trust set is empty; that is expected here. When the monorepo makes another
-  variable required, add it to the backend environment in the controller and to the expected
-  environment in that suite in the same change.
+  `WARN` that the trust set is empty; that is expected here. The controller also passes
+  `METRICS_PORT=0`, which turns the metrics listener off. At its default that listener binds
+  the fixed `127.0.0.1:9091`, so any other local backend, such as another worktree's verify
+  run, makes ours exit with `bind: address already in use` right after its migrations. A
+  verify run never scrapes `/metrics`, so the `WARN` that the listener is disabled is expected
+  too. When the monorepo makes another variable required, add it to the backend environment in
+  the controller and to the expected environment in that suite in the same change.
+- **Database readiness.** The backend runs its migrations once at boot and exits when
+  PostgreSQL does not answer yet (`running migrations` with `failed to open database: EOF` in
+  `backend.log`); `ready` then fails with `runtime supervisor identity is unavailable`. `up`
+  therefore runs `pg_isready -h 127.0.0.1 -p 5432` inside the container once a second, at most
+  60 times, before it starts the backend, and fails through its cleanup path when no probe
+  succeeds. The probe must use TCP: the image initializes the database with a temporary server
+  that listens only on the Unix socket, so a socket probe passes while the published port still
+  drops every connection.
 - **Frontend flags.** The frontend starts as `pnpm dev --host 127.0.0.1 --port <port>
   --strictPort`. Never put a literal `--` between the script name and the flags: npm strips it,
   but pnpm forwards it, and Vite then ignores every flag after it. Vite falls back to
@@ -104,8 +123,8 @@ environment the controller hands each service.
   `ready` fails on `127.0.0.1` and a planned origin on `5173` matches only by accident.
 
 `ready` authenticates both supervisors with the private lease, verifies the container's
-lease-hash label, then checks PostgreSQL readiness, `/api/health`, and the frontend origin. A
-sleep alone is never readiness evidence. The controller never uses the repository's
+lease-hash label, then checks PostgreSQL readiness over TCP, `/api/health`, and the frontend
+origin. A sleep alone is never readiness evidence. The controller never uses the repository's
 fixed-port Compose stack and never removes a pre-existing container.
 
 ## Runtime identity and fixture data

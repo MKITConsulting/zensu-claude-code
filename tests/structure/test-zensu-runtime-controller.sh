@@ -81,7 +81,18 @@ cat >"$STUBS/docker" <<'STUB'
 #!/bin/bash
 set -u
 case "${1:-}" in
-  info|exec) exit 0 ;;
+  info) exit 0 ;;
+  exec)
+    shift
+    printf '%s\n' "$*" >>"$DOCKER_STATE/exec.log"
+    case " $* " in
+      *' pg_isready -h 127.0.0.1 -p 5432 '*)
+        [ "$(grep -c ' pg_isready ' "$DOCKER_STATE/exec.log")" -gt "${PG_TCP_READY_AFTER:-0}" ] || exit 2
+        : >"$DOCKER_STATE/pg-accepting"
+        ;;
+    esac
+    exit 0
+    ;;
   run)
     [ "${DOCKER_FAIL_RUN:-0}" != 1 ] || exit 17
     shift
@@ -111,7 +122,8 @@ if [ -n "${ARGV_DIR:-}" ]; then
   printf '%s\n' "$@" >"$ARGV_DIR/go.argv"
   pwd -P >"$ARGV_DIR/go.cwd"
   env | grep -E '^(DB_PASSWORD|JWT_SECRET)=' | cut -d= -f1 | LC_ALL=C sort >"$ARGV_DIR/go.secret-names"
-  env | grep -E '^(TRUSTED_PROXY_CIDRS|SERVER_HOST|SERVER_PORT|DB_HOST|DB_PORT|DB_USER|DB_NAME|DB_SSLMODE|REGISTRATION_ENABLED|EMAIL_ALLOW_NOOP|NOTIFICATION_ALLOW_NOOP|APP_BASE_URL|ZENSU_VERIFY_RUNTIME_LEASE)=' \
+  if [ -e "$DOCKER_STATE/pg-accepting" ]; then echo accepting; else echo not-accepting; fi >"$ARGV_DIR/go.pg"
+  env | grep -E '^(TRUSTED_PROXY_CIDRS|METRICS_PORT|SERVER_HOST|SERVER_PORT|DB_HOST|DB_PORT|DB_USER|DB_NAME|DB_SSLMODE|REGISTRATION_ENABLED|EMAIL_ALLOW_NOOP|NOTIFICATION_ALLOW_NOOP|APP_BASE_URL|ZENSU_VERIFY_RUNTIME_LEASE)=' \
     | LC_ALL=C sort >"$ARGV_DIR/go.env.tmp"
   mv "$ARGV_DIR/go.env.tmp" "$ARGV_DIR/go.env"
 fi
@@ -171,6 +183,15 @@ printf 'seeded\n' >>"$EVENTS"
 exit 0
 STUB
 chmod +x "$STUBS"/*
+FAST_SLEEP="$TMP/fast-sleep"
+mkdir -p "$FAST_SLEEP"
+cat >"$FAST_SLEEP/sleep" <<'STUB'
+#!/bin/bash
+[ "${1:-}" = 1 ] && exit 0
+exec "$REAL_SLEEP" "$@"
+STUB
+chmod +x "$FAST_SLEEP/sleep"
+REAL_SLEEP="$(command -v sleep)"
 
 POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe"}]}'
 COMMON_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
@@ -232,16 +253,16 @@ fi
 EXPECTED_GO_ENV="$(printf '%s\n' \
   "APP_BASE_URL=http://127.0.0.1:45173" "DB_HOST=localhost" "DB_NAME=zensu" "DB_PORT=${STATE_PG_PORT}" \
   "DB_SSLMODE=disable" "DB_USER=zensu" "EMAIL_ALLOW_NOOP=true" "NOTIFICATION_ALLOW_NOOP=true" \
-  "REGISTRATION_ENABLED=true" "SERVER_HOST=127.0.0.1" "SERVER_PORT=${STATE_BACKEND_PORT}" \
+  "METRICS_PORT=0" "REGISTRATION_ENABLED=true" "SERVER_HOST=127.0.0.1" "SERVER_PORT=${STATE_BACKEND_PORT}" \
   "TRUSTED_PROXY_CIDRS=none" | LC_ALL=C sort)"
 GO_ENV="$(cat "$ARGV_DIR/go.env" 2>/dev/null)"
 if [ "$(cat "$ARGV_DIR/go.argv" 2>/dev/null)" = "$(printf '%s\n' run ./cmd/zensu)" ] \
   && [ "$(cat "$ARGV_DIR/go.cwd" 2>/dev/null)" = "$(cd "$WORKTREE/backend" && pwd -P)" ] \
   && [ "$GO_ENV" = "$EXPECTED_GO_ENV" ] \
   && [ "$(cat "$ARGV_DIR/go.secret-names" 2>/dev/null)" = "$(printf '%s\n' DB_PASSWORD JWT_SECRET)" ]; then
-  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease" PASS
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none, METRICS_PORT=0 and the exact loopback, database and noop environment, without the runtime lease" PASS
 else
-  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease (got '$(printf '%s' "$GO_ENV" | tr '\n' ' ')')" FAIL
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none, METRICS_PORT=0 and the exact loopback, database and noop environment, without the runtime lease (got '$(printf '%s' "$GO_ENV" | tr '\n' ' ')')" FAIL
 fi
 
 DOWN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" 2>&1)"
@@ -257,6 +278,26 @@ if [ "$DOWN_RC" = 0 ] && [ "$SECOND_DOWN_RC" = 0 ] \
 else
   check "down is idempotent and removes exactly the lease-owned resources" FAIL
 fi
+
+PG_WAIT="$RUN_PARENT/run-pg-wait"
+PG_WAIT_DOCKER="$TMP/docker-pg-wait"
+PG_WAIT_ARGV="$TMP/argv-pg-wait"
+mkdir -p "$PG_WAIT" "$PG_WAIT_DOCKER" "$PG_WAIT_ARGV"
+: >"$PG_WAIT_DOCKER/events"
+PG_WAIT_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$PG_WAIT_DOCKER" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
+env "${PG_WAIT_ENV[@]}" ARGV_DIR="$PG_WAIT_ARGV" PG_TCP_READY_AFTER=1 bash "$CONTROLLER" up "$PG_WAIT" "$WORKTREE" >/dev/null 2>&1
+PG_WAIT_UP_RC=$?
+wait_for_file "$PG_WAIT_ARGV/go.env"
+PG_WAIT_PROBES="$(grep -c ' pg_isready ' "$PG_WAIT_DOCKER/exec.log" 2>/dev/null)"
+PG_WAIT_TCP_PROBES="$(grep -c ' pg_isready -h 127.0.0.1 -p 5432 ' "$PG_WAIT_DOCKER/exec.log" 2>/dev/null)"
+PG_WAIT_BACKEND="$(cat "$PG_WAIT_ARGV/go.pg" 2>/dev/null)"
+if [ "$PG_WAIT_UP_RC" = 0 ] && [ "$PG_WAIT_PROBES" = 2 ] && [ "$PG_WAIT_TCP_PROBES" = 2 ] \
+  && [ "$PG_WAIT_BACKEND" = accepting ]; then
+  check "up polls PostgreSQL over TCP inside the container and starts the backend only once it accepts connections" PASS
+else
+  check "up polls PostgreSQL over TCP inside the container and starts the backend only once it accepts connections (up=$PG_WAIT_UP_RC probes=$PG_WAIT_PROBES tcp=$PG_WAIT_TCP_PROBES backend saw '$PG_WAIT_BACKEND')" FAIL
+fi
+env "${PG_WAIT_ENV[@]}" bash "$CONTROLLER" down "$PG_WAIT" "$WORKTREE" >/dev/null 2>&1
 
 CONSENT_RUN="$RUN_PARENT/run-consent"
 mkdir -p "$CONSENT_RUN"
@@ -426,6 +467,50 @@ if [ "$FAILED_RC" != 0 ] && [ ! -e "$FAILED/zensu-runtime.json" ] && [ ! -e "$FA
   check "failed up removes partial secret/state ownership files" PASS
 else
   check "failed up removes partial secret/state ownership files" FAIL
+fi
+
+PG_TIMEOUT="$RUN_PARENT/run-pg-timeout"
+PG_TIMEOUT_DOCKER="$TMP/docker-pg-timeout"
+PG_TIMEOUT_ARGV="$TMP/argv-pg-timeout"
+mkdir -p "$PG_TIMEOUT" "$PG_TIMEOUT_DOCKER" "$PG_TIMEOUT_ARGV"
+: >"$PG_TIMEOUT_DOCKER/events"
+PG_TIMEOUT_OUT="$(env PATH="$FAST_SLEEP:$STUBS:$PATH" REAL_SLEEP="$REAL_SLEEP" DOCKER_STATE="$PG_TIMEOUT_DOCKER" \
+  EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY" ARGV_DIR="$PG_TIMEOUT_ARGV" PG_TCP_READY_AFTER=1000 \
+  bash "$CONTROLLER" up "$PG_TIMEOUT" "$WORKTREE" 2>&1)"
+PG_TIMEOUT_RC=$?
+PG_TIMEOUT_PROBES="$(grep -c ' pg_isready -h 127.0.0.1 -p 5432 ' "$PG_TIMEOUT_DOCKER/exec.log" 2>/dev/null)"
+PG_TIMEOUT_CONTAINER="$(cat "$PG_TIMEOUT_DOCKER/name" 2>/dev/null)"
+if [ "$PG_TIMEOUT_RC" != 0 ] \
+  && printf '%s' "$PG_TIMEOUT_OUT" | grep -qF 'PostgreSQL did not accept TCP connections within 60 seconds' \
+  && [ "$PG_TIMEOUT_PROBES" = 60 ] && [ ! -e "$PG_TIMEOUT_ARGV/go.argv" ] \
+  && [ -n "$PG_TIMEOUT_CONTAINER" ] && [ "$(cat "$PG_TIMEOUT_DOCKER/events")" = "rm $PG_TIMEOUT_CONTAINER" ] \
+  && [ ! -e "$PG_TIMEOUT/zensu-runtime.json" ] && [ ! -e "$PG_TIMEOUT/zensu-runtime.secrets" ] \
+  && [ ! -e "$PG_TIMEOUT/backend-supervisor.ready" ]; then
+  check "up stops after 60 PostgreSQL probes, never starts the backend, and removes the owned container and secrets" PASS
+else
+  check "up stops after 60 PostgreSQL probes, never starts the backend, and removes the owned container and secrets (rc=$PG_TIMEOUT_RC probes=$PG_TIMEOUT_PROBES)" FAIL
+fi
+env "${COMMON_ENV[@]}" DOCKER_STATE="$PG_TIMEOUT_DOCKER" bash "$CONTROLLER" down "$PG_TIMEOUT" "$WORKTREE" >/dev/null 2>&1
+
+BUSY_CONSENT="$RUN_PARENT/run-busy-consent"
+BUSY_POLICY="$RUN_PARENT/run-busy-policy"
+mkdir -p "$BUSY_CONSENT" "$BUSY_POLICY"
+printf 'http://127.0.0.1:45174\n' >"$BUSY_CONSENT/zensu-planned-origin"
+BUSY_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS" \
+  CURL_LISTENING_PORTS=45174 bash "$CONTROLLER" up "$BUSY_CONSENT" "$WORKTREE" 2>&1)"
+BUSY_CONSENT_RC=$?
+BUSY_POLICY_OUT="$(env "${COMMON_ENV[@]}" CURL_LISTENING_PORTS=45173 bash "$CONTROLLER" up "$BUSY_POLICY" "$WORKTREE" 2>&1)"
+BUSY_POLICY_RC=$?
+if [ "$BUSY_CONSENT_RC" != 0 ] \
+  && printf '%s' "$BUSY_CONSENT_OUT" | grep -qF 'the planned frontend port 45174 is already in use, and this run directory keeps that port; start over from planned-origin in a fresh run directory' \
+  && [ "$(cat "$BUSY_CONSENT/zensu-planned-origin")" = 'http://127.0.0.1:45174' ] \
+  && [ ! -e "$BUSY_CONSENT/zensu-runtime.secrets" ] \
+  && [ "$BUSY_POLICY_RC" != 0 ] \
+  && printf '%s' "$BUSY_POLICY_OUT" | grep -qF 'the parent-authorized frontend port 45173 is already in use; free it, or start a new session whose policy names a free port' \
+  && [ ! -e "$BUSY_POLICY/zensu-runtime.secrets" ]; then
+  check "a busy frontend port fails before any resource exists and names its remedy: a fresh run directory without a policy, a free port in a new session's policy with one" PASS
+else
+  check "a busy frontend port fails before any resource exists and names its remedy (consent rc=$BUSY_CONSENT_RC: $BUSY_CONSENT_OUT / policy rc=$BUSY_POLICY_RC: $BUSY_POLICY_OUT)" FAIL
 fi
 
 # The secrets write moved from a truncating > plus a follow-up chmod to an O_EXCL create at
