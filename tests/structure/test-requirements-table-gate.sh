@@ -33,9 +33,36 @@ verdict() { if [ "$1" -eq 0 ]; then echo PASS; else echo FAIL; fi; }
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 PROJ="$(mktemp -d)" || exit 1
 export CLAUDE_PROJECT_DIR="$PROJ"
+# The CANONICAL spelling of the same directory, and the two genuinely differ: on
+# macOS `mktemp -d` answers /var/... while the kernel answers /private/var/... .
+# `tdd_state_file` reports the root the immutable record carries, minted with
+# realpathSync.native, so every containment bound below compares against this value
+# and never "$PROJ". R0pre asserts the two really do name one directory.
+PROJ_REAL="$(cd -P -- "$PROJ" && pwd -P)" || exit 1
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
-cleanup() { [ -n "${PROJ:-}" ] && rm -rf "$PROJ"; return 0; }
+SUITE_TMP="$(mktemp -d)" || exit 1
+cleanup() {
+  [ -n "${PROJ:-}" ] && rm -rf "$PROJ"
+  [ -n "${SUITE_TMP:-}" ] && rm -rf "$SUITE_TMP"
+  return 0
+}
 trap cleanup EXIT INT TERM
+# The directory the suite was STARTED from, snapshotted before anything runs. R1
+# at the end compares it back: this suite once dropped a stray `edit-landing-.json`
+# here and every check still passed, so nothing observed it.
+SUITE_CWD="$(pwd -P)" || exit 1
+ls -A "$SUITE_CWD" 2>/dev/null | LC_ALL=C sort > "$SUITE_TMP/cwd-before"
+# Fixture-level faults are LATCHED rather than reported inline, because the two
+# helpers that raise them are called inside `$( )`, where anything written to
+# stdout is captured as the helper's return value instead of being shown. stderr
+# is not captured, so the operator sees the line immediately; R0 turns the latch
+# into a red check so a fault can never pass unnoticed.
+FAULTS="$SUITE_TMP/fixture-faults"
+: > "$FAULTS"
+hard_fault() {  # latch a fixture fault; SAFE to call from inside a command substitution
+  printf 'FIXTURE FAULT: %s\n' "$1" >&2
+  printf '%s\n' "$1" >> "$FAULTS"
+}
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN \
   ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE \
   GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE 2>/dev/null || true
@@ -506,16 +533,44 @@ activate_session() {
   export CLAUDE_CODE_SESSION_ID="$1"
   # shellcheck disable=SC1090
   source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
-  zensu_bind_model_session
+  # Report the bind rather than discarding it. `zensu_bind_model_session` UNSETS
+  # all five ZENSU_* bindings up front AND again on failure, so a failed bind
+  # leaves `zensu_resolve_project_dir` with no candidate, `tdd_state_file` then
+  # returns 1 and echoes NOTHING, and every path derived from it collapses to a
+  # relative one. That is the whole causal chain behind the stray R1 pins, and it
+  # stayed invisible because the status was dropped here and again in `receipt_for`.
+  if ! zensu_bind_model_session; then
+    hard_fault "activate_session($1): zensu_bind_model_session failed — session unbound"
+    return 1
+  fi
 }
 # shellcheck disable=SC1090
 source "$PHASE_LIB"
 
+# Derive the receipt path the gate will read, or REFUSE — never fall back.
+# `tdd_state_file` returns 1 and echoes nothing for an unbound session, and both
+# `basename ""` and `dirname ""` answer `.`, so the previous spelling handed the
+# caller a relative `edit-landing-.json` that the caller's own redirect then wrote
+# into whatever directory the suite was started from. Every refusal here prints
+# NOTHING on stdout, so a caller's `> "$(receipt_for ...)"` fails outright instead
+# of writing somewhere unintended, and latches the cause for R0.
 receipt_for() {  # echo the path the GATE will look at for session $1
-  local sf key
-  sf="$(tdd_state_file "$1")"
-  key="$(basename "$sf")"; key="${key#tdd-phase-}"; key="${key%.json}"
-  printf '%s' "$(dirname "$sf")/edit-landing-${key}.json"
+  local sf key dir
+  if ! sf="$(tdd_state_file "$1")" || [ -z "$sf" ]; then
+    hard_fault "receipt_for($1): tdd_state_file resolved nothing — the session is not bound"
+    return 1
+  fi
+  dir="${sf%/*}"
+  key="${sf##*/}"; key="${key#tdd-phase-}"; key="${key%.json}"
+  if [ "$dir" != "$PROJ_REAL/.zensu/state" ]; then
+    hard_fault "receipt_for($1): state file lies outside this suite's project ($sf)"
+    return 1
+  fi
+  case "$key" in
+    scv1_*) ;;
+    *) hard_fault "receipt_for($1): state file carries no session key ($sf)"; return 1 ;;
+  esac
+  printf '%s' "$dir/edit-landing-${key}.json"
 }
 # Stage one session: arm it, plant a run log with the given plan body beside a
 # same-stem plan, and deposit a receipt naming that log — the exact shape the
@@ -531,7 +586,10 @@ stage() {  # stage <session> <stem> <plan-body-file|->
   mkdir -p "$PROJ/.zensu/logs" "$PROJ/.zensu/plans"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/${stem}.log"
   if [ "$body" != "-" ]; then cp "$body" "$PROJ/.zensu/plans/${stem}.md"; fi
-  rp="$(receipt_for "$sid")"
+  if ! rp="$(receipt_for "$sid")"; then
+    check "stage(): receipt_for resolved nothing for session $sid" FAIL
+    return 1
+  fi
   mkdir -p "$(dirname "$rp")"
   printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
     "$sid" "$PROJ/.zensu/logs/${stem}.log" > "$rp"
@@ -561,6 +619,13 @@ printf 'v2\n' > "$PROJ/tracked.txt"
 echo "== AC-001: no Requirements section =="
 SID_M="rq-missing"
 activate_session "$SID_M"
+# `receipt_for` bounds its answer against "$PROJ_REAL". That bound is only a real
+# containment check while the canonical spelling of "$PROJ" is the same string the
+# immutable record carries; if the two ever diverge, every receipt below would be
+# refused for a reason unrelated to its own contract, so name the divergence here
+# instead of letting it surface as twenty unrelated failures.
+[ "$(zensu_resolve_project_dir 2>/dev/null)" = "$PROJ_REAL" ]
+check "R0pre the record's project root is the canonical spelling receipt_for bounds against" "$(verdict $?)"
 stage "$SID_M" "2026-01-01-0101_tdd-missing" "$BODIES/none.md"
 ERR_M="$(bash "$LOG" --tdd-complete --session "$SID_M" 2>&1 >/dev/null)"
 RC_M=$?
@@ -974,7 +1039,8 @@ echo "== The receipt writer's own refusal arms =="
 RW_DIR="$(mktemp -d)"
 RW_BIN="$RW_DIR/bin"
 mkdir -p "$RW_BIN"
-cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BIN/"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" "$RW_BIN/"
 # A real repo with a real landed change, so the GRADING verdict is clean and the
 # exit code below can only be about receipt plumbing.
 RW_PROJ="$RW_DIR/proj"
@@ -1003,6 +1069,45 @@ check "RW2 a non-canonical --session is refused by the anchored fallback, not tu
 # — an assertion that "no receipt escaped" proves nothing if none is ever written.
 [ -z "$(find "$RW_DIR" -path "$RW_PROJ/.zensu" -prune -o -name 'edit-landing-*.json' -print 2>/dev/null)" ]
 check "RW2b the refused key wrote no receipt outside the project state dir" "$(verdict $?)"
+RW_HEX63="$(printf '%063d' 0)"
+RW_WIDE="scv1_${RW_HEX63}B"
+RW_WIDE_OUT="$(LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_WIDE" 2>&1)"
+RW_WIDE_RC=$?
+RW_LOCALE_GOOD="scv1_$(printf 'c%.0s' $(seq 64))"
+LC_ALL=en_US.ISO8859-1 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_LOCALE_GOOD" >/dev/null 2>&1
+RW_LOCALE_GOOD_RC=$?
+RW_RANGE="$(LC_ALL=en_US.ISO8859-1 /bin/bash -c '[[ "$1" =~ ^scv1_[0-9a-f]{64}$ ]] && printf collating || printf ascii' _ "$RW_WIDE" 2>/dev/null)"
+if [ "$RW_WIDE_RC" -eq 2 ] && printf '%s' "$RW_WIDE_OUT" | grep -qF 'session key resolved empty' \
+    && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_WIDE}.json" ] \
+    && [ "$RW_LOCALE_GOOD_RC" -eq 0 ] && [ -f "$RW_PROJ/.zensu/state/edit-landing-${RW_LOCALE_GOOD}.json" ]; then
+  case "$RW_RANGE" in
+    (collating) check "RW2c a locale whose bracket ranges collate does not widen the fallback's key test" PASS ;;
+    (*) check "RW2c bracket ranges did not collate under en_US.ISO8859-1 in this shell, so the locale probe could not discriminate" PASS ;;
+  esac
+else
+  check "RW2c under en_US.ISO8859-1 the fallback refuses scv1_ plus 63 hex plus B and still lands a canonical key (rc=$RW_WIDE_RC, control rc=$RW_LOCALE_GOOD_RC)" FAIL
+fi
+RW_BARE="$RW_DIR/bare"
+mkdir -p "$RW_BARE"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BARE/"
+RW_BARE_KEY="scv1_$(printf 'd%.0s' $(seq 64))"
+RW_BARE_OUT="$(/bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_BARE_KEY" 2>&1)"
+[ $? -eq 2 ] \
+  && printf '%s' "$RW_BARE_OUT" | grep -qF 'the session-key shape check in zensu-session.sh could not be loaded' \
+  && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_BARE_KEY}.json" ]
+check "RW2d without zensu-session.sh beside the script the fallback refuses even a canonical key and names that cause" "$(verdict $?)"
+: > "$RW_BARE/zensu-session.sh"
+RW_STUB_OUT="$(zensu_session_key_canonical() { return 0; }
+  export -f zensu_session_key_canonical
+  /bin/bash "$RW_BARE/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+    --project "$RW_PROJ" --session "$RW_WIDE" 2>&1)"
+[ $? -eq 2 ] \
+  && printf '%s' "$RW_STUB_OUT" | grep -qF 'the session-key shape check in zensu-session.sh could not be loaded' \
+  && [ ! -e "$RW_PROJ/.zensu/state/edit-landing-${RW_WIDE}.json" ]
+check "RW2e an inherited zensu_session_key_canonical never stands in for the one the library defines" "$(verdict $?)"
 # A receipt-plumbing failure is an ENVIRONMENT error (exit 2), never the claim
 # verdict (exit 1) — a caller reads exit 1 as "an edit did not land". Staged by
 # making the destination unwritable while the claim itself really landed.
@@ -1092,6 +1197,31 @@ grep -qF 'refusing the unqualified standalone terminus' "$LOG"
 check "S4 the --chain-done dirty-tree refusal is intact" "$(verdict $?)"
 grep -qF 'PLAN REQUIREMENTS MISSING' "$REQ"
 check "S5 the library's own verdict vocabulary is intact" "$(verdict $?)"
+
+echo "== The suite's own hygiene =="
+# R0 surfaces the latch `hard_fault` writes. Both raisers run inside `$( )`, where
+# a `check` line would be swallowed into the caller's variable, so without this the
+# whole fixture-fault channel could fire on every session and the suite would still
+# report all green.
+if [ -s "$FAULTS" ]; then
+  check "R0 no fixture fault was latched ($(wc -l < "$FAULTS" | tr -d ' ') raised; first: $(head -1 "$FAULTS"))" FAIL
+else
+  check "R0 no fixture fault was latched" PASS
+fi
+# R1 is the observable the whole guard above exists for. A relative receipt path
+# used to land an `edit-landing-.json` in the directory the suite was started from
+# — the repository root, in practice — and nothing in 100 passing checks saw it.
+# Compare ADDED entries only: a deletion, or an unrelated editor writing into that
+# directory during the run, is not this suite's doing. An unrelated process
+# CREATING a file there mid-run is the one residual false positive, and it is worth
+# far less than the silence it replaces.
+ls -A "$SUITE_CWD" 2>/dev/null | LC_ALL=C sort > "$SUITE_TMP/cwd-after"
+STRAYS="$(LC_ALL=C comm -13 "$SUITE_TMP/cwd-before" "$SUITE_TMP/cwd-after" | tr '\n' ' ')"
+if [ -z "${STRAYS// /}" ]; then
+  check "R1 the suite left nothing behind in the directory it was started from" PASS
+else
+  check "R1 the suite left nothing behind in the directory it was started from (strays: $STRAYS)" FAIL
+fi
 
 echo "----"
 echo "test-requirements-table-gate: $T_PASS PASS / $T_FAIL FAIL"

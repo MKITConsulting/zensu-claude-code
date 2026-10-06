@@ -18,8 +18,12 @@ description: >
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
-  Autopilot run holding a working tree, whether this session's app-managed worktree
-  carries the desktop-pool keep marker and still sits on its recorded branch, any reviewer spawn
+  Autopilot run holding a working tree, who holds the Autopilot project lease — its
+  owner pid, whether that pid is alive, whether a process start identity was recorded,
+  its created_at, and whether a stale lock artifact or recovery sentinel is removable —
+  whether this session's app-managed worktree
+  carries the desktop-pool keep marker, still sits on its recorded branch and holds a nested
+  repository that keeps the marker after the session ends, any reviewer spawn
   the host permission layer refused, any claim this session audited against a root
   that is not the anchor, this session's recorded delivery route, expired pending-review
   surfaced).
@@ -423,8 +427,9 @@ classifier will refuse a spawn, not only when the whole table is green.
   their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
   set when Claude Code started and passes the policy contract, so it governs every browser
-  origin and the consent prompt never fires this session; the browser consent gate admits only
-  its target origins, and every route on them. Nothing to do.
+  origin and the consent prompt never fires this session; the browser consent gate navigates only
+  its target origins, and every route on them, and lets pages request the policy's network-only
+  origins, if it declares any, without ever navigating them. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
   registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
   `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
@@ -509,10 +514,10 @@ whether browser verification is enforced, not only when a row is red.
   described above probes the recorded root and reports what is there now, so relay
   the row's own sentence rather than this forecast once the repair has run.
   Otherwise start a fresh session. If the directory was MOVED rather than deleted,
-  moving it back is better than re-creating it, because its state is still there. Meanwhile the session is diagnosable but not
-  workable — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
-  project. Do NOT report this row as a missing record.
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed but
+  not edited — this read-only report runs, `Stop` is released rather than wedged,
+  and `Edit`, `Write` and `MultiEdit` stay denied because nothing can anchor a write to a
+  project, and so does any Bash command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`). Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
   the recorded one — strict `X.Y.Z`, equal major, equal minor while major is `0`,
@@ -527,16 +532,34 @@ whether browser verification is enforced, not only when a row is red.
   above, and it has its own row naming BOTH declared versions (`record minted by
   X, executing Y`). Never report it as a missing record: the record is intact in
   plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
-  place — run `/zensu:adopt-session` to see whether the running installation may
-  take the record over, then `/zensu:adopt-session --confirm`. Both stay
-  reachable in this state; so does this diagnostic. A refusal names the exact
-  condition that failed, and `workflow-schema-mismatch` in particular means a
-  persisted shape really did change and a fresh session is the only way forward.
+  place — and Zensu attempts that repair itself: the first hook contact after
+  `/reload-plugins` adopts the record automatically when its persisted schemas
+  still match. A session that still shows this row is therefore one whose
+  adoption was refused, opted out or did not complete — the row itself says so, and
+  a gate's deny names the token. Run `/zensu:adopt-session`: it prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption.
+  An ADOPTABLE answer there has TWO causes, never one:
+  the automatic path was either opted out
+  through `hooks.sessionAutoAdopt: false` — the opt-out governs the automatic path only —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`.
+  Reading ADOPTABLE as the opt-out alone sends a user whose adoption merely timed out
+  looking for a config key nobody set. Then
+  `/zensu:adopt-session --confirm` retries by hand — it ignores the
+  opt-out, so on an opted-out record ask the user before running it: the operator
+  switched the automatic path off on purpose.
+  Both stay reachable in this state; so does this diagnostic. A refusal names the
+  exact condition that failed:
+  `workflow-schema-mismatch` means a persisted shape really did change and a
+  fresh session is the only way forward, and `executing-runtime-older` means the
+  running installation is a downgrade, so the newer version has to be
+  re-installed.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
-  clears the lineage break while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied until that exact
-  directory is re-created. This row is reachable in that state — the doctor
+  clears the lineage break while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES while the
+  opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. This row is reachable in that state — the doctor
   falls back to it whenever the third-fact probe cannot answer — so offering the
   remedy without the clause would promise something this check did not establish.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
@@ -544,12 +567,22 @@ whether browser verification is enforced, not only when a row is red.
   incompatible lineage** → both of the two rows above at once, and it is its own
   row because each of those two answers "not me" for it. It prints the dead path
   AND both declared versions. Never report it as a missing record. It IS
-  repairable in place and `/zensu:adopt-session` applies — that is the difference
-  from the plain orphaned row, which the running installation already serves and
-  which adoption refuses as `already-served`. State the limit whenever you offer
-  the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
-  diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
-  stay denied until that exact directory is re-created by
+  repairable in place — attempted automatically on the first hook contact, so a row
+  still rendered means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
+  (ask the user before `--confirm` then)
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and `/zensu:adopt-session --confirm`
+  retries by hand — that is the
+  difference from the plain orphaned row, which the running installation already
+  serves and which adoption refuses as `already-served`. State the limit whenever you offer
+  the repair: adoption clears the LINEAGE break, so Bash and this
+  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that WRITES
+  while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created by
   `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
   requires the running installation to SERVE the record, which is exactly what the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
@@ -596,8 +629,20 @@ whether browser verification is enforced, not only when a row is red.
   cache, so a session that outlives them lands here whatever its lineage: nothing
   can re-verify the record any more and no installation serves it. Never report
   it as a missing record. The remedy is the same in-place adoption as the lineage
-  row — `/zensu:adopt-session`, then `/zensu:adopt-session --confirm` — and the
-  adoption report marks the minting version `(installation no longer on disk)`.
+  row — attempted automatically on the first hook contact, so a row still rendered
+  means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
+  — ask the user before `--confirm` then, since the operator switched the automatic
+  path off on purpose —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and
+  `/zensu:adopt-session --confirm` retries by hand.
+  The adoption report marks the minting version
+  `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
@@ -774,6 +819,79 @@ whether browser verification is enforced, not only when a row is red.
   document it has just refused, in a directory any session in the project can
   write. Leave the removal to the user, and never generalize this permission to
   the row above.
+- **✅ autopilot lease: free** → no lock artifact and no recovery sentinel exist, so no
+  process holds the Autopilot project lease right now. Say so; a refusal that named
+  `/zensu:doctor` earlier was not caused by a lease that is still held.
+- **✅ autopilot lease: held right now** → a process took the lease within the last 30 s. A
+  lease covers one short critical section and clears on its own; relay the owner pid,
+  liveness, start identity and `created_at` the row prints, and suggest running
+  `/zensu:doctor` again if an Autopilot state read keeps failing. **✅ autopilot lease: a
+  lease is being recovered or released right now** says the same of the recovery sentinel.
+- **⚠️ autopilot lease: … is removable; the next lease acquisition reclaims it on its own** →
+  the lock artifact or the recovery sentinel names an owner that no longer holds it: the
+  owner pid is gone, the pid now belongs to a different process because its start identity
+  no longer matches or because that process started after the record was written, or it
+  carries no owner record the core can read and is past the core's 30 s bound. The verdict is the core's own reclaim rule, read through
+  `inspectExternalProcessLock`. Relay the facts and the path the row prints. **Never delete
+  the artifact and never offer to** — the next lease acquisition reclaims it on its own, so
+  no manual removal is needed, and a removal run later can delete the lock of whichever
+  process takes the lease next. Phase 3 covers `pending-review.json` alone.
+- **⚠️ autopilot lease: held for … by a live lock keeper**, or **held since a created_at that
+  lies in the future by a live lock keeper** → a live process that still carries the recorded
+  start identity holds the lease. Past 30 s every other lease acquisition gives up waiting and
+  its Autopilot state read fails; with a future `created_at` the hold time is unknown. The
+  artifact is NOT removable. The owner record lives in the session-writable `.zensu/state`, so
+  its pid and start identity are evidence, not proof: relay the row's check,
+  `ps -ww -p <pid> -o args=`, which must show one of the two lock keeper shapes named in the next
+  bullet but one. Relay the row's remedy for a hung run: the user ends the shell that runs
+  `_tdd_locked_run` for that run together with every process under it — the pid itself under
+  bash 3.2, the parent of the parent of the pid under bash 4 or later, because the node lock
+  keeper runs inside a coprocess shell. That ends the run, and the lease clears. Never end the
+  node lock keeper alone, which lets the next lease acquisition in while that shell still runs
+  its critical section, and never its coprocess shell alone, which releases nothing. Ending a
+  process is the user's decision.
+- **⚠️ autopilot lease: the recovery sentinel … has been held … by pid `<pid>`, which still
+  carries the recorded start identity** → a node process began a lease recovery or release and
+  has not finished it. The sentinel is NOT removable, and while it stays every lease acquisition
+  gives up. A process that holds the recovery sentinel is a node process whose command line
+  names `session-control-core-v1.js`, under any bash. The owner record is evidence, not proof,
+  so relay the row's check, `ps -ww -p <pid> -o args=`. If the pid is such a process and hung,
+  the user may end it, and the next lease acquisition reclaims the sentinel. Ending a process is
+  the user's decision.
+- **⚠️ autopilot lease: held for … by pid `<pid>`, which is alive**, its future-`created_at`
+  twin, or **the recovery sentinel … has been held … by pid `<pid>`, which is alive** → no
+  start identity was recorded, or the recorded one cannot be read now, and nothing shows that
+  the process holding that pid started after the record was written, so the core does not
+  reclaim the artifact while that pid lives; it clears only when that process releases it or
+  exits. The row says the doctor cannot establish whether pid `<pid>` is still the lock keeper
+  or the holder of the recovery sentinel, and names what a live one looks like. For the lock:
+  the node lock keeper whose command line names `session-control-core-v1.js` and this project's
+  `.zensu/state` (bash 4 or later, every Windows host), or the bash process that runs a Zensu
+  hook or `zensu-log.sh` (bash 3.2). For the recovery sentinel: a node process whose command
+  line names `session-control-core-v1.js`, under any bash. Relay that. Only when the pid is not
+  such a process is the process that took the lease or the sentinel gone, and only a removal by
+  hand clears it then: the user checks the full command line with `ps -ww -p <pid> -o args=`
+  (without `-ww`, `ps` cuts the line before the arguments that carry these names) and decides.
+  Never remove the artifact yourself and never call it removable.
+- **⚠️ autopilot lease: the lease path holds …** or **the recovery sentinel path holds …** (a
+  symbolic link, an entry that is not a regular file, or an oversized file), or **the core
+  cannot read the lock artifact** (or the recovery sentinel) → the core never writes that
+  there, or cannot parse what is there: every lease acquisition fails while it stays, and
+  nothing reclaims it. Relay the path; the user inspects it (its permissions and content) and
+  removes it by hand. The same holds when the artifact carries no owner record the core can
+  read and its modification time lies in the future.
+- **⚠️ autopilot lease: the lease artifact could not be resolved** → the state directory is a
+  symbolic link or not a directory, or `.zensu/state/autopilot` is not a single-link regular
+  file. The lease cannot be taken while that holds, and running `/zensu:doctor` again does not
+  clear it; relay the cause, and the user fixes the path it names by hand.
+- **⚠️ autopilot lease: not checked** → the Session Control core did not load with its lease
+  inspection, or the row failed while it was rendered: a missing check, not an all-clear.
+  Suggest running `/zensu:doctor` again; if the row repeats, the plugin tree is damaged and the
+  user reinstalls or updates the plugin.
+- **⚠️ autopilot lease: … changed while it was read**, or an artifact that carries no owner
+  record the core can read and is still inside the 30 s bound → a lease is being taken,
+  released or recovered right now: a missing check, not an all-clear. Suggest running
+  `/zensu:doctor` again; offer no cleanup.
 - **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)
   that are not the anchor** → the chain logged edits in another repository. Every
   other row in this block can be green beside it: the anchor's own tree is clean,
@@ -889,10 +1007,23 @@ whether browser verification is enforced, not only when a row is red.
   not read the restore phase token from the Session Control core, or the workflow
   document did not read back. That is a MISSING CHECK, never an all-clear: relay it as
   a check that did not run, and do not tell the user their project root is verified.
+- **✅ state: this session's Session Control record was ADOPTED across a plugin update** →
+  informational, and the one place an automatic adoption stays visible after the fact: a
+  plugin update landed while the session was running and a hook re-minted its record
+  under the new installation. The row names the entry count, the timestamp, the version
+  pair and the name the previous record was kept under. Relay it as a repair that
+  SUCCEEDED — no workflow state was lost and nothing is left to do — and do NOT tell the
+  user to restart. Two bounds travel with it. Review-evidence leases minted before the
+  update were set aside, so a review that was in flight then has to be re-gathered. And an
+  adoption made while no workflow document existed — a deleted worktree — wrote no entry,
+  so the ABSENCE of this row is never evidence that no adoption happened; the kept record
+  is then its only trace.
 - **⚠️ state: this session's workflow document was not checked for rebuild provenance**
-  → either the core exported no rebuild phase token or the document did not read back,
-  so the check did NOT run. A missing check, never an all-clear, and never a claim that
-  the document was not rebuilt.
+  (the row also reads `adoption provenance`; an unreadable document produces one such
+  row per check)
+  → either the core exported no phase token for that check or the document did not read
+  back, so the check did NOT run. A missing check, never an all-clear, and never a claim
+  that the document was not rebuilt or that the record was not adopted.
 - **⚠️ state: this session's own workflow document could not be classified** → the
   Session Control core did not load from the plugin directory the row names, so the check
   did NOT run. A missing check, never an all-clear.
@@ -957,6 +1088,23 @@ whether browser verification is enforced, not only when a row is red.
   how many session anchors are live could not be read** says the marker is in place while the
   anchor directory itself could not be listed, so the count is withheld rather than rendered
   as zero.
+- **✅ worktree: a nested repository in … keeps the keep marker once no session anchor holds
+  it — the first in name order is X (kind)** → a repository other than a submodule of the
+  worktree's own repository sits inside this worktree: a worktree of another repository in a
+  `.worktrees/<repo>/<branch>` layout, a worktree of this repository nested under
+  `.claude/worktrees/`, a tree a takeover moved in with `git worktree move`, or a dependency
+  checkout such as SwiftPM's `SourcePackages`. Claude Desktop's archive cleanup judges the
+  directory by a `git status` that does not see an ignored nested repository and then removes
+  it whole, so the plugin keeps the marker after the last session anchor here ends and the app
+  leaves the directory on disk when the session is archived. Nothing to do while work
+  continues; tell the user that once every nested repository is moved out or removed on
+  purpose, the next SessionStart in this repository releases the marker and the app can clean
+  the directory up.
+- **⚠️ worktree: the scan for nested repositories in … did not finish (reason)** → the scan
+  met a directory it could not read or ran past its entry bound, so it cannot rule out a
+  nested repository and the marker stays once no session anchor holds it. Relay the reason;
+  the remedy is to make that directory readable or to remove dependency or build directories
+  that are no longer needed, then run the doctor again.
 - **⚠️ worktree: anchors in … could not be read** → the session-anchor directory could not be
   listed, so this check did not run. It is a missing check, not an all-clear, and no
   live-anchor count and no rejected-anchor row can be trusted for that directory. When the
@@ -982,7 +1130,12 @@ whether browser verification is enforced, not only when a row is red.
   expired anchors it read and releases the marker once the directory is back under the bound.
   When nothing holds it, the row says it stays
   until the next SessionStart or SessionEnd in it releases the marker; a SessionStart in any
-  sibling worktree releases it too. Name the file, the hold and the flag; offer no cleanup,
+  sibling worktree releases it too. When a nested repository sits inside it, the row says
+  the release pass keeps the marker until every nested repository there is moved out or removed,
+  and when the scan for one did not finish, that
+  the release pass keeps the marker until a scan finishes; the nested-repository row beside it
+  names which. Where live or unvalidated anchors hold it as well, their release promise ends
+  with once nothing else holds it. Name the file, the hold and the flag; offer no cleanup,
   since Phase 3 covers `pending-review.json` alone.
 - **✅ worktree: this session still sits on its recorded branch … in …** (or **… its recorded
   detached HEAD in …**) → the branch, or the detached HEAD, this session recorded when it

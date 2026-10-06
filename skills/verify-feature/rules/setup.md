@@ -27,6 +27,10 @@ A port the application binds is proposed only when the evidence shows how to pas
 `$ZENSU_VERIFY_PORT` in; an application that can bind only a fixed port is reported as
 "fixed port, shared resource" and left for the user to decide, never rewritten by setup.
 
+Flags must reach the dev server itself. npm needs a `--` before them and strips it
+(`npm run dev -- --host …`). pnpm forwards a literal `--` to the script, and Vite ignores every
+flag after it, so the pnpm form passes the flags directly (`pnpm dev --host …`).
+
 ## 2. Propose per service
 
 For every service the evidence names, propose:
@@ -45,6 +49,14 @@ no user, tenant, credential, or production-derived content, and `pre-classified-
 only if the user confirms it; without either, leave the block out. Never propose a route list:
 the evidence boundary is the approved origin, which covers every page on it, and `routes` is no
 longer read.
+
+Propose `validate.networkOnly` only when a tracked file names another origin the application's
+pages request — an API base URL, an OIDC authority or a token endpoint in a tracked environment
+or configuration file — and only for the deployment the recipe selects. Each origin gets its own
+evidence line, and an origin no tracked file names stays out: never propose one from a running
+application, a browser's network log, a guess, or a file `git ls-files` does not report.
+Propose it as the bare origin, with no path, and propose `appOrigin` only for a remote recipe,
+where it must be the origin of the validated remote base URL.
 
 ## 3. One confirmation round
 
@@ -79,7 +91,8 @@ validate:
 reads `.zensu/autopilot.yaml` only — it does NOT read `runtime.yaml` — so a project that wants one
 recipe to serve both skills writes `autopilot.yaml` rather than `runtime.yaml`.
 `validate.navigationBroker` declares policy mode; it is optional in consent mode and honoured
-when present.
+when present. `validate.networkOnly` takes `origins`, a list of exact origins, and in a remote
+recipe `appOrigin`, as `../../autopilot/rules/config.md` describes.
 
 ## 5. `--print-policy`
 
@@ -91,6 +104,13 @@ with `<port>` taken from `--port=<n>` when given, else from
 once, with the rendered JSON assigned on that command only, and report its exit code: `policy`
 on stdout with exit `0` means the rendered JSON approves that origin, and with it every route on
 it. The policy carries no route list.
+When the recipe declares `validate.networkOnly`, the rendered JSON also carries a top-level
+`"networkOnlyOrigins"` list with every declared origin, and the preflight runs once more per
+network-only origin, with the same rendered JSON assigned on that command only:
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<network-only origin>" network-only`.
+`policy` with exit `0` means the rendered JSON lists that origin as network-only. A non-loopback
+network-only origin in a local policy must be public HTTPS, and the preflight resolves it and
+refuses a non-public answer.
 Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
 job's `env`, or the `env` block of `~/.claude/settings.json`) and that the project-level
 settings files are not the place, because the session can write them.

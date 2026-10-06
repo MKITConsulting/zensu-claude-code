@@ -117,6 +117,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const childProcess = require('node:child_process');
 
 const { msysDrivePrefix } = require('./claude-path-v1.js');
 
@@ -148,9 +149,16 @@ const ARTIFACT_DIR = '.zensu';
 const SWEEP_WINDOW_SECONDS = 300;
 
 // How many artifacts one sweep may process. A `git checkout` refreshes every
-// tracked artifact mtime at once, so without a cap the next tool call redacts
-// all of them synchronously inside a PostToolUse hook, which declares no
-// timeout of its own.
+// tracked artifact mtime at once, and redacting those rewrites committed files
+// that were clean. `sweepTargets` therefore drops, BEFORE this cap, every
+// candidate git confirms as tracked and unchanged: `git status` does not list
+// it and `git ls-files` does. Status alone cannot vouch for a file — it lists
+// nothing inside a nested repository and spells a macOS NFD name in NFC — so an
+// artifact git cannot confirm is kept. When git cannot be asked at all, the set
+// stays unscoped and the result names why in `fallback`: redacting too much is
+// the safer failure for this net. The cap then bounds whatever is left, which
+// runs synchronously inside a PostToolUse hook that declares no timeout of its
+// own.
 //
 // Newest first, because a fresh unredacted append is what the sweep exists to
 // catch and the newest mtime is the best available proxy for it. Nothing is
@@ -164,11 +172,11 @@ const SWEEP_WINDOW_SECONDS = 300;
 // few later tool calls, which presupposes some number of them that drains it.
 // There is none. The sort below is a TOTAL deterministic order
 // (mtime desc, then path) over a candidate set the sweep never shrinks, so with
-// more than this many in-window artifacts the SAME ones are selected on every
-// invocation: a clean artifact answers `no-op` and is not rewritten, so its
-// mtime never changes and it keeps its place at the head forever. Within the
-// window, the tail is not reached at all — not slowly, never. It becomes
-// reachable only when the head ages out of the window.
+// more than this many artifacts left after the git scope the SAME ones are
+// selected on every invocation: a clean artifact answers `no-op` and is not
+// rewritten, so its mtime never changes and it keeps its place at the head
+// forever. Within the window, the tail is not reached at all — not slowly,
+// never. It becomes reachable only when the head ages out of the window.
 //
 // Rotating the selection (an offset, or spending part of the budget oldest-first)
 // would fix it and is deliberately not done: writer-side redaction already covers
@@ -176,6 +184,16 @@ const SWEEP_WINDOW_SECONDS = 300;
 // append. Bounding a hook's synchronous work is worth an unreached tail; claiming
 // the tail drains is not.
 const SWEEP_MAX_TARGETS = 25;
+
+const SWEEP_GIT_TIMEOUT_MS = 5000;
+const SWEEP_GIT_MAX_BUFFER = 8 * 1024 * 1024;
+const GIT_ENV_SCRUB = Object.freeze([
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
+  'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CEILING_DIRECTORIES', 'GIT_DISCOVERY_ACROSS_FILESYSTEM',
+  'GIT_NAMESPACE', 'GIT_PREFIX', 'GIT_CONFIG', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS',
+]);
 
 // 8 MiB. A narrative log that large is pathological; refusing to load it is
 // better than an out-of-memory kill inside a PostToolUse hook. The refusal is
@@ -504,6 +522,77 @@ function resolveArtifactTarget(filePath, expectedRoot, base) {
   };
 }
 
+function artifactKey(parts) {
+  if (parts.length !== 3) return '';
+  const [dir, bucket, name] = parts;
+  if (dir !== ARTIFACT_DIR || name === '') return '';
+  if (!Object.prototype.hasOwnProperty.call(ARTIFACT_BUCKETS, bucket)) return '';
+  return `${bucket}/${name}`.normalize('NFC');
+}
+
+function sweepGit(projectRoot, args, deadline) {
+  const timeout = deadline - Date.now();
+  if (timeout <= 0) return { ok: false, reason: 'git-timed-out' };
+  const env = { ...process.env };
+  for (const name of GIT_ENV_SCRUB) delete env[name];
+  env.GIT_OPTIONAL_LOCKS = '0';
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.LC_ALL = 'C';
+  env.LANG = 'C';
+  delete env.LANGUAGE;
+  const result = childProcess.spawnSync('git',
+    ['-C', projectRoot, '-c', 'core.fsmonitor=false', ...args], {
+      env,
+      encoding: 'buffer',
+      maxBuffer: SWEEP_GIT_MAX_BUFFER,
+      timeout,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  const code = result.error ? result.error.code : '';
+  if (code === 'ENOENT') return { ok: false, reason: 'git-unavailable' };
+  if (code === 'ETIMEDOUT') return { ok: false, reason: 'git-timed-out' };
+  if (!result.error && result.status !== 0
+    && /not a git repository/i.test(String(result.stderr || ''))) {
+    return { ok: false, reason: 'not-a-git-repository' };
+  }
+  if (result.error || result.status !== 0) return { ok: false, reason: `git-${args[0]}-failed` };
+  const text = result.stdout.toString('utf8');
+  if (text !== '' && !text.endsWith('\0')) {
+    return { ok: false, reason: `git-${args[0]}-unparseable` };
+  }
+  return { ok: true, fields: text === '' ? [] : text.slice(0, -1).split('\0') };
+}
+
+function gitScope(projectRoot, candidates, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const pathspecs = Object.keys(ARTIFACT_BUCKETS).map((bucket) => `${ARTIFACT_DIR}/${bucket}`);
+  const status = sweepGit(projectRoot, ['status', '--porcelain=v1', '-z',
+    '--untracked-files=all', '--no-renames', '--', ...pathspecs], deadline);
+  if (!status.ok) return { kept: candidates, fallback: status.reason };
+  const changed = new Set();
+  for (let i = 0; i < status.fields.length; i += 1) {
+    const record = /^([ MTADRCU?!]{2}) (.+)$/s.exec(status.fields[i]);
+    if (!record) return { kept: candidates, fallback: 'git-status-unparseable' };
+    const listed = [record[2]];
+    if (/[RC]/.test(record[1]) && i + 1 < status.fields.length) {
+      i += 1;
+      listed.push(status.fields[i]);
+    }
+    for (const entry of listed) changed.add(artifactKey(entry.split('/').slice(-3)));
+  }
+  if (candidates.every((entry) => changed.has(entry.key))) {
+    return { kept: candidates, fallback: null };
+  }
+  const index = sweepGit(projectRoot, ['ls-files', '-z', '--cached', '--', ...pathspecs], deadline);
+  if (!index.ok) return { kept: candidates, fallback: index.reason };
+  const tracked = new Set(index.fields.map((entry) => artifactKey(entry.split('/'))));
+  return {
+    kept: candidates.filter((entry) => changed.has(entry.key) || !tracked.has(entry.key)),
+    fallback: null,
+  };
+}
+
 // The Bash sweep's candidate set, owned here rather than in a shell-quoted
 // `node -e` program no unit test can reach.
 function sweepTargets(projectRoot, options = {}) {
@@ -513,8 +602,12 @@ function sweepTargets(projectRoot, options = {}) {
   const cutoff = nowMs - windowSeconds * 1000;
   const maxTargets = Number.isInteger(options.maxTargets) && options.maxTargets >= 0
     ? options.maxTargets : SWEEP_MAX_TARGETS;
+  const gitTimeoutMs = typeof options.gitTimeoutMs === 'number'
+    ? options.gitTimeoutMs : SWEEP_GIT_TIMEOUT_MS;
   const out = [];
-  if (typeof projectRoot !== 'string' || projectRoot.trim() === '') return out;
+  if (typeof projectRoot !== 'string' || projectRoot.trim() === '') {
+    return { targets: [], fallback: null };
+  }
   for (const [bucket, extension] of Object.entries(ARTIFACT_BUCKETS)) {
     const dir = path.join(projectRoot, ARTIFACT_DIR, bucket);
     let entries;
@@ -542,14 +635,20 @@ function sweepTargets(projectRoot, options = {}) {
       }
       if (!stat.isFile()) continue;
       if (stat.mtimeMs < cutoff) continue;
-      out.push({ full, mtimeMs: stat.mtimeMs });
+      out.push({ full, mtimeMs: stat.mtimeMs, key: artifactKey([ARTIFACT_DIR, bucket, name]) });
     }
   }
+  const scope = out.length === 0
+    ? { kept: out, fallback: null }
+    : gitScope(projectRoot, out, gitTimeoutMs);
   // Path is the tie-break, not decoration: a checkout stamps many artifacts with
   // the same mtime, and without it the capped SET would depend on readdir order.
-  out.sort((a, b) => (b.mtimeMs - a.mtimeMs)
+  scope.kept.sort((a, b) => (b.mtimeMs - a.mtimeMs)
     || (a.full < b.full ? -1 : (a.full > b.full ? 1 : 0)));
-  return out.slice(0, maxTargets).map((entry) => entry.full);
+  return {
+    targets: scope.kept.slice(0, maxTargets).map((entry) => entry.full),
+    fallback: scope.fallback,
+  };
 }
 
 // What this check DELIVERS, stated without the claim it used to carry: the path

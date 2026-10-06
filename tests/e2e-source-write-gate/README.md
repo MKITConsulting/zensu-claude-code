@@ -8,6 +8,10 @@ fires and blocks a **real** Bash tool call inside a live `claude --print` sessio
 
 ## Layers
 
+The gate is opt-in (`hooks.bashWriteGate: true`, off by default), so both layers
+opt it in: the deterministic layer through `ZENSU_CONFIG`, the live layer through
+the fixture's `.zensu/config.json`, which `setup-fixtures.sh` writes.
+
 `run.sh [mode]`:
 
 - `--self-check` — structural skeleton only, no claude: hook present + executable,

@@ -40,7 +40,7 @@ const pushIndex = prepare.indexOf(push);
 const publishGate = publish.findIndex((step) => step.name === 'Deterministic exact-main-SHA gate');
 const publishEvidence = publish.findIndex((step) => step.name === 'Upload deterministic exact-main-SHA evidence');
 const publishMutation = publish.findIndex((step) => step.name === 'Draft, attach, publish, and verify immutable release');
-const githubTokenSteps = [...prepare, ...publish].filter(
+const githubTokenSteps = Object.values(release?.jobs || {}).flatMap((job) => job.steps || []).filter(
   (step) => step.env?.GH_TOKEN === '${{ secrets.GITHUB_TOKEN }}',
 );
 const result = {

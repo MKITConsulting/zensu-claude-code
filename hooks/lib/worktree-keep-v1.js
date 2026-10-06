@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 
 const KEEP_FILENAME = '.worktree-keep';
 const KEEP_SOURCE_BUILD = '2.2553.1';
@@ -29,6 +30,9 @@ const MAX_EXCLUDE_BYTES = 1024 * 1024;
 const MAX_SWEEP_DIRS = 64;
 const MAX_ANCHOR_FILES = 256;
 const MAX_PAUSED_TARGET_BYTES = 4096;
+const MAX_GITFILE_BYTES = 4096;
+const MAX_NESTED_SCAN_ENTRIES = 500000;
+const NESTED_SCAN_DEADLINE_MS = 3000;
 const HEADS_PREFIX = 'refs/heads/';
 const LINK_UNSUPPORTED_CODES = Object.freeze(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV', 'EMLINK']);
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -74,6 +78,16 @@ const ACTIONS = Object.freeze({
   PRESENT: 'present',
   ADDED: 'added',
   AGED: 'aged',
+});
+const NESTED_KINDS = Object.freeze({
+  REPOSITORY: 'repository',
+  WORKTREE: 'worktree',
+  SUBMODULE: 'submodule',
+  UNKNOWN: 'unknown',
+});
+const NESTED_HOLDS = Object.freeze({
+  REPOSITORY: 'nested-repository',
+  SCAN_INCOMPLETE: 'nested-scan-incomplete',
 });
 const VERBS = Object.freeze(['session-start', 'prompt', 'session-end', 'release']);
 const RESUME_SOURCES = Object.freeze(['resume', 'compact']);
@@ -508,6 +522,8 @@ function reconcileKeep(worktreeRoot, nowMs, idleMs, options) {
   }
   if (marker.state === MARKER_STATES.OURS) {
     if (counts.rejected > 0) return { action: ACTIONS.KEPT, reason: 'rejected-anchors', file: marker.file, ...counts };
+    const nested = nestedHold(worktreeRoot, opts.deadline);
+    if (nested !== null) return { action: ACTIONS.KEPT, ...nested, file: marker.file, ...counts };
     try {
       fs.unlinkSync(marker.file);
     } catch (error) {
@@ -694,7 +710,7 @@ function sweepSiblings(baseRepo, nowMs, idleMs, options) {
         continue;
       }
       summary.scanned += 1;
-      const result = reconcileKeep(root, nowMs, idleMs, { reap: false, create: opts.create });
+      const result = reconcileKeep(root, nowMs, idleMs, { reap: false, create: opts.create, deadline: opts.deadline });
       if (result.action === ACTIONS.CREATED) summary.created += 1;
       else if (result.action === ACTIONS.REMOVED) summary.removed += 1;
       else if (result.action === ACTIONS.KEPT) summary.kept += 1;
@@ -913,9 +929,9 @@ function sessionStart(input) {
   out.head = record.head;
   out.exclude = ensureExclude(managed.worktreeRoot);
   if (out.exclude.action === ACTIONS.REFUSED) out.faults.push('exclude:' + out.exclude.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
-  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot });
+  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, deadline: input.deadline });
   return out;
 }
 
@@ -969,7 +985,7 @@ function prompt(input) {
   } else {
     out.anchor = { ok: true, unchanged: true };
   }
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
   out.branch = current.ok ? current.branch : null;
   out.recordedBranch = record.branch;
@@ -1002,7 +1018,7 @@ function sessionEnd(input) {
     out.anchor = removeAnchor(managed.worktreeRoot, input.sessionKey);
   }
   if (out.anchor.action === ACTIONS.REFUSED) out.faults.push('anchor-remove:' + out.anchor.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs);
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
   return out;
 }
@@ -1019,15 +1035,188 @@ function release(input) {
   }
   out.anchor = removeAnchor(managed.worktreeRoot, input.sessionKey);
   if (out.anchor.action === ACTIONS.REFUSED) out.faults.push('anchor-remove:' + out.anchor.reason);
-  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { create: false });
+  out.keep = reconcileKeep(managed.worktreeRoot, input.nowMs, input.idleMs, { create: false, deadline: input.deadline });
   if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
-  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, create: false });
+  out.sweep = sweepSiblings(managed.baseRepo, input.nowMs, input.idleMs, { maxDirs: input.maxDirs, skipRoot: managed.worktreeRoot, create: false, deadline: input.deadline });
+  return out;
+}
+
+function realOrSelf(target) {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return path.resolve(target);
+  }
+}
+
+function insideDir(parent, child) {
+  const rel = path.relative(parent, child);
+  return rel.length > 0 && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+}
+
+function gitfileTarget(dir) {
+  const opened = openPlainFile(path.join(dir, '.git'), MAX_GITFILE_BYTES);
+  if (opened.status !== 'ok') return null;
+  const match = /^gitdir:[ \t]*(\S.*?)[ \t]*$/.exec(opened.content.split(/\r?\n/)[0]);
+  return match ? path.resolve(dir, match[1]) : null;
+}
+
+function ownGitDir(worktreeRoot) {
+  let entry;
+  try {
+    entry = lstatOrNull(path.join(worktreeRoot, '.git'));
+  } catch {
+    return null;
+  }
+  if (entry === null || entry.isSymbolicLink()) return null;
+  if (entry.isDirectory()) return realOrSelf(path.join(worktreeRoot, '.git'));
+  if (!entry.isFile()) return null;
+  const target = gitfileTarget(worktreeRoot);
+  return target === null ? null : realOrSelf(target);
+}
+
+function nestedKind(dir, ownGit) {
+  let entry;
+  try {
+    entry = lstatOrNull(path.join(dir, '.git'));
+  } catch {
+    return NESTED_KINDS.UNKNOWN;
+  }
+  if (entry === null || entry.isSymbolicLink()) return NESTED_KINDS.UNKNOWN;
+  if (entry.isDirectory()) return NESTED_KINDS.REPOSITORY;
+  if (!entry.isFile()) return NESTED_KINDS.UNKNOWN;
+  const target = gitfileTarget(dir);
+  if (target === null) return NESTED_KINDS.UNKNOWN;
+  if (submoduleGitDir(realOrSelf(target), ownGit)) return NESTED_KINDS.SUBMODULE;
+  return NESTED_KINDS.WORKTREE;
+}
+
+function submoduleGitDir(resolved, ownGit) {
+  if (ownGit === null || !insideDir(path.join(ownGit, 'modules'), resolved)) return false;
+  try {
+    const dir = lstatOrNull(resolved);
+    return dir !== null && dir.isDirectory() && lstatOrNull(path.join(resolved, 'commondir')) === null;
+  } catch {
+    return false;
+  }
+}
+
+function bareRepositoryListing(listing) {
+  const has = (name, test) => listing.some((entry) => entry.name === name && test(entry));
+  return has('HEAD', (entry) => entry.isFile()) && has('objects', (entry) => entry.isDirectory()) && has('refs', (entry) => entry.isDirectory());
+}
+
+function nestedRepositories(worktreeRoot, options) {
+  const opts = options || {};
+  const limit = Number.isInteger(opts.maxEntries) && opts.maxEntries > 0
+    ? Math.min(opts.maxEntries, MAX_NESTED_SCAN_ENTRIES)
+    : MAX_NESTED_SCAN_ENTRIES;
+  const deadline = Number.isFinite(opts.deadline) ? opts.deadline : null;
+  const firstBlocking = opts.firstBlocking === true;
+  const sorted = (list) => list.slice().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  if (typeof worktreeRoot !== 'string' || !path.isAbsolute(worktreeRoot)) {
+    return { ok: false, reason: 'root-not-absolute', entries: 0, nested: [] };
+  }
+  const ownGit = ownGitDir(worktreeRoot);
+  const nested = [];
+  const stack = [worktreeRoot];
+  let entries = 0;
+  while (stack.length > 0) {
+    if (deadline !== null && performance.now() > deadline) return { ok: false, reason: 'scan-deadline', entries, nested: sorted(nested) };
+    const dir = stack.pop();
+    let listing;
+    try {
+      listing = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      const code = error && error.code ? error.code : 'unreadable';
+      if (dir !== worktreeRoot && (code === 'ENOENT' || code === 'ENOTDIR')) continue;
+      return { ok: false, reason: 'unreadable:' + code, entries, nested: sorted(nested) };
+    }
+    entries += listing.length;
+    if (entries > limit) return { ok: false, reason: 'scan-budget', entries, nested: sorted(nested) };
+    if (dir !== worktreeRoot) {
+      const hasGit = listing.some((entry) => entry.name === '.git');
+      if (hasGit || bareRepositoryListing(listing)) {
+        const kind = hasGit ? nestedKind(dir, ownGit) : NESTED_KINDS.REPOSITORY;
+        nested.push({ path: path.relative(worktreeRoot, dir), kind });
+        if (kind !== NESTED_KINDS.SUBMODULE) {
+          if (firstBlocking) return { ok: true, entries, nested: sorted(nested) };
+          continue;
+        }
+      }
+    }
+    const children = listing.filter((entry) => entry.name !== '.git' && entry.isDirectory()).map((entry) => entry.name).sort();
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push(path.join(dir, children[i]));
+  }
+  return { ok: true, entries, nested: sorted(nested) };
+}
+
+function nestedHold(worktreeRoot, deadline) {
+  const scan = nestedRepositories(worktreeRoot, { firstBlocking: true, deadline });
+  if (!scan.ok) return { reason: NESTED_HOLDS.SCAN_INCOMPLETE, scan: scan.reason };
+  const blocking = scan.nested.find((entry) => entry.kind !== NESTED_KINDS.SUBMODULE);
+  return blocking ? { reason: NESTED_HOLDS.REPOSITORY, nested: blocking } : null;
+}
+
+function retireAnchors(worktreeRoot, targets, nowMs, idleMs) {
+  const out = { managed: false, faults: [], ended: [], skipped: [] };
+  const managed = managedWorktree(worktreeRoot);
+  if (!managed) return out;
+  out.managed = true;
+  out.worktreeRoot = managed.worktreeRoot;
+  const seen = new Set();
+  for (const target of Array.isArray(targets) ? targets : []) {
+    const key = target && typeof target === 'object' ? target.key : target;
+    if (!isSessionKey(key)) {
+      out.skipped.push({ key: String(key), reason: 'session-key-shape' });
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const expected = target && typeof target === 'object' ? target.lastSeenAt : undefined;
+    if (!Number.isFinite(expected)) {
+      out.skipped.push({ key, reason: 'expected-stamp-missing' });
+      continue;
+    }
+    const existing = readAnchor(managed.worktreeRoot, key);
+    if (existing.status === VERDICTS.MISSING) {
+      out.skipped.push({ key, reason: 'missing' });
+      continue;
+    }
+    if (existing.status !== 'ok') {
+      out.skipped.push({ key, reason: 'rejected:' + existing.reason });
+      continue;
+    }
+    if (!anchorMatchesRoot(existing.record, managed.worktreeRoot)) {
+      out.skipped.push({ key, reason: 'worktree-root-mismatch' });
+      continue;
+    }
+    if (classifyAnchor(existing.record, nowMs, idleMs) !== VERDICTS.LIVE) {
+      out.skipped.push({ key, reason: 'not-live' });
+      continue;
+    }
+    if (existing.record.lastSeenAt !== expected) {
+      out.skipped.push({ key, reason: 'changed-since-listing' });
+      continue;
+    }
+    const written = writeAnchor(managed.worktreeRoot, key, { ...existing.record, endedAt: nowMs });
+    if (written.ok) {
+      out.ended.push(key);
+    } else {
+      out.faults.push('anchor-write:' + written.reason);
+      out.skipped.push({ key, reason: 'write-failed:' + written.reason });
+    }
+  }
+  out.keep = reconcileKeep(managed.worktreeRoot, nowMs, idleMs, { create: false, reap: false });
+  if (out.keep.action === ACTIONS.REFUSED) out.faults.push('keep:' + out.keep.reason);
   return out;
 }
 
 function inputFromEnv(env, testMode) {
   const now = testMode ? Number(env.WK_NOW) : NaN;
   const maxDirs = testMode ? Number(env.WK_MAX_DIRS) : NaN;
+  const rawDeadline = env.WK_SCAN_DEADLINE_MS;
+  const deadline = testMode && typeof rawDeadline === 'string' && rawDeadline.trim() !== '' ? Number(rawDeadline) : NaN;
   return {
     cwd: typeof env.WK_CWD === 'string' ? env.WK_CWD : '',
     sessionKey: typeof env.WK_SESSION_KEY === 'string' ? env.WK_SESSION_KEY : '',
@@ -1036,6 +1225,7 @@ function inputFromEnv(env, testMode) {
     idleMs: idleMsFromHours(env.WK_IDLE_HOURS),
     nowMs: Number.isFinite(now) && now > 0 ? now : Date.now(),
     maxDirs: Number.isInteger(maxDirs) && maxDirs > 0 ? maxDirs : undefined,
+    deadline: Number.isFinite(deadline) && deadline >= 0 ? deadline : NESTED_SCAN_DEADLINE_MS,
   };
 }
 
@@ -1104,6 +1294,10 @@ module.exports = {
   MAX_EXCLUDE_BYTES,
   MAX_SWEEP_DIRS,
   MAX_ANCHOR_FILES,
+  MAX_NESTED_SCAN_ENTRIES,
+  NESTED_SCAN_DEADLINE_MS,
+  NESTED_KINDS,
+  NESTED_HOLDS,
   MARKER_STATES,
   IGNORE_STATES,
   ANCHOR_REMEDIES,
@@ -1136,6 +1330,9 @@ module.exports = {
   gitEnvironment,
   ensureExclude,
   sweepSiblings,
+  nestedRepositories,
+  nestedHold,
+  retireAnchors,
   currentBranch,
   unresolvedRecord,
   anchorMatchesRoot,

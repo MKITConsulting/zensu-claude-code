@@ -25,8 +25,10 @@ if ! zensu_bind_hook_session "$PAYLOAD"; then
   # to a project — but a deny still has to name its cause. The named-state ladder
   # and its rationale live in zensu_emit_named_bind_deny
   # (hooks/lib/zensu-session.sh). No fallback scope here, so an unnamed state gets
-  # the generic deny.
-  zensu_emit_named_bind_deny "$PAYLOAD"
+  # the generic deny. The audience is handed in: the principal check above already
+  # exited for everything but the main thread, so deriving it again would spawn a
+  # process to learn what this hook knows.
+  zensu_emit_named_bind_deny "$PAYLOAD" "" main
   exit 0
 fi
 

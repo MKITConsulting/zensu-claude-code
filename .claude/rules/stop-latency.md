@@ -3,7 +3,10 @@ paths:
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/zensu-stop-deadline.sh"
   - "hooks/lib/stop-idle-probe-v1.js"
+  - "hooks/lib/zensu-session.sh"
+  - "hooks/lib/session-control-core-v1.js"
   - "tests/structure/test-stop-enforcer-latency.sh"
+  - "tests/structure/test-deferred-review-claim.sh"
 ---
 
 # Stop Hook Latency (`zensu-stop-deadline.sh` + `stop-idle-probe-v1.js`)
@@ -79,19 +82,131 @@ kills both groups at once.
   silently stop enforcing there. The floor keeps a lowered value above an ordinary macOS or
   Linux armed Stop.
 
+**One resolution per run (`zensu_memoize_project_dir` + the canonical-key shortcut).** Measured
+on `dc9f0ff8` with a classifying `node` shim, an armed Stop spawned **96** `node` children: 28
+project-root verifications (`zensu_resolve_project_dir`, each a record read plus a runtime
+digest) and 18 `session-key` calls, 17 of them on a key that was already canonical. After this
+change the same Stop spawns **50**: one verification and no `session-key` call. Other paths:
+implementing 70 → 37, deferred-review adoption 170 → 87, `ZENSU_CHAIN=off` 88 → 37, idle 4 → 4.
+Wall time for the armed Stop fell from about 11 s to about 6 s at load 19–30. On Linux with
+bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer children there.
+
+- **Session key.** `sessionKey` returns a value matching `^scv1_[a-f0-9]{64}$` unchanged, so
+  `zensu_session_key_canonical` answers that one shape in shell and every other input still
+  goes to the core. It is a pure-function shortcut, not a cache, and applies to every caller of
+  `zensu_resolve_session_id`. The pattern lists the hex digits instead of using a range, so no
+  collation can widen it. `SESSION_KEY_RE` in `session-control-core-v1.js` owns the shape;
+  `L38` and `L42` hold the shell copy to it, so a drift between the two surfaces there as a
+  spawn-count or output failure. The hook passes no raw id any more: the bind already derived
+  the key from the same payload, so `zensu_resolve_session_id ""` returns the bound key.
+- **One shell spelling of the key shape.** `zensu_session_key_canonical` is public and sits in
+  the `export -f` list of the non-Windows arm, and `reviewer_denial_note_path` in the Stop hook
+  calls it instead of keeping a test of its own. That test was the range form `scv1_*[!0-9a-f]*`
+  plus 64 `?`. Measured on macOS `/bin/bash` 3.2.57 under `LC_ALL=en_US.UTF-8`: `[a-f]` matches
+  `B` and `é`, so the range form accepted `scv1_` plus 63 hex digits plus `B`. The doctor's
+  `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$` in `reviewerDenialRows` and the reaper's
+  `NAME` never match such a name, which is the "doctor goes quiet with everything still green"
+  failure the comment in that function names. The private `_zensu_session_key_canonical` was
+  renamed, not wrapped: it never shipped in a release, and a wrapper would add a second name and
+  nothing else. `L42b` runs the predicate under `LC_ALL=en_US.UTF-8` and requires a canonical
+  control to pass and an upper-case and an accented last character to fail. It discriminates
+  only in a shell whose bracket ranges collate under that locale: macOS `/bin/bash` 3.2.57 does,
+  the local `bash:5` image (musl) does not, and the check's label says which case ran.
+- **Every shell test of the shape calls it.** `grep -rn 'scv1_' hooks/` is the census
+  (`.claude/rules/foreign-chain-row.md`). The receipt fallback in `zensu-edit-landing.sh` calls
+  the predicate in a subshell (`.claude/rules/multi-repo-stage1.md` records why, together with
+  the locale measurement of the range it replaced), and the session-pair guard in
+  `zensu-doctor.sh` calls it in the subshell that already sources this file. The other hits in
+  shell files are file-name prefix globs such as `tdd-phase-scv1_*.json` and JavaScript regexes
+  inside `node` programs, and neither collates.
+- **Project root.** `zensu_memoize_project_dir` renders the root (`cd -P && pwd -P`), runs the
+  unchanged full verification once, and records `(ZENSU_PROJECT_ROOT, ZENSU_SESSION_CONTEXT,
+  ZENSU_SESSION_KEY, rendered root)` in the shell ARRAY `_ZENSU_PROJECT_DIR_MEMO` only when the
+  verified render is the path it rendered before. An ancestor swapped between the verification
+  and its render is therefore never memoized (`L52`). A later `zensu_resolve_project_dir` still
+  runs every shell-side check and skips only the `node` child, and only when all three inputs
+  match as spelled and the root still renders to the recorded physical path. Any mismatch falls
+  through to the full verification (`L43`–`L46`, `L50`); a record that vanished or became a
+  link is refused before the memo is consulted (`L47`, `L48`).
+- **One verification decides.** The Stop hook's first verification IS
+  `zensu_memoize_project_dir`. When it fails, the hook takes its existing failure branch
+  directly (`L51`), so a refusal costs one verification, as before the memo existed, and a Stop
+  that proceeds always holds the memo.
+- **Why an array.** An environment variable becomes a scalar, which fills index 0 only, and
+  bash never exports an array. The memo is accepted only when index 3 is set, so no environment
+  variable can stand in for it and no child process inherits it; `L33` and `L35` pin both. Both
+  bind functions unset it (`L36`, `L49`). A variable or a file that a model-side Bash command
+  could set is never a pre-verified binding; `CONTROL_BINDINGS` needs no new entry for that
+  reason.
+- **Opt-in, Stop hook only.** Only the Stop hook calls `zensu_memoize_project_dir`. Every other
+  entry point verifies on every call, as before. `zensu-log.sh` is a candidate, not a caller. A
+  future caller may memoize only after its last bind, and only in a process that runs no record
+  writer.
+- **What a reuse no longer re-checks.** The record file's content and the runtime digest are read
+  once per hook run. A record or plugin tree changed WHILE one Stop runs is not seen again. The
+  digest was never a defence there, because a changed tree includes the code that checks it.
+  Two writers replace the record behind a session. Automatic adoption re-mints it around the
+  same project root, so the memo stays right. A re-anchor (`performReanchor`) supersedes it at
+  the same key and path with a NEW project root, and a Stop already running keeps answering the
+  old root until it ends. What bounds that window is the re-anchor's own refusal while the
+  workflow document holds open work or the session owns an open Autopilot run
+  (`.claude/rules/session-reanchor.md`).
+- **Coupled sites.** The suite's counting shim classifies a spawn by two literals: the inline
+  `core.readContext({ recordsDir, sessionId: key })` in `zensu_resolve_project_dir` and the argv
+  `session-control-core-v1.js session-key `. Rewording either turns the count checks of the
+  latency suite red. Three in-code rationales assume every `zensu_resolve_project_dir` call
+  spawns `node`: the optional argument of `zensu_pending_review_claim_file` in
+  `zensu-tdd-phase.sh`, the `zensu_pending_review_file` note in `zensu-autopilot-state.sh`, and
+  the `S7t` comment in `tests/structure/test-autopilot-stop-enforcer.sh`. They hold for every
+  caller that does not memoize; on the Stop path the memo answers instead.
+- **Port.** Host half only; `session-control-core-v1.js` is unchanged. `zensu-codex`,
+  `zensu-kiro` and `zensu-antigravity` were NOT included. A port that adopts the memo must take
+  the `_ZENSU_PROJECT_DIR_MEMO` unset in both bind functions with it, or a re-bind keeps a stale
+  memo.
+- **Rejected.** Priming the memo from the bind: `validateContext` canonicalizes the recorded
+  root without comparing it, so the bind accepts a root reached through a symlinked ancestor
+  that the resolver refuses. A cache file: poisonable. Memoizing `_tdd_paths_safe`: it is the
+  per-operation symlink check and must see every swap.
+
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
   that caused the deadline) and renders no ledger line. It is INDUCIBLE — by loading the machine,
   or by lowering `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment — the same class as
   the other inducible releases this hook records.
-- The armed path still spawns 100+ `node` children; the deadline bounds it and does not make it
-  fast. The durable fix is to resolve the project root and session key once per hook run and
-  pass them down, which changes shared libraries every gate sources.
+- The armed path still spawns 50 `node` children on macOS with bash 3.2 (38 on Linux with
+  bash 5.2), so at a load in the high hundreds it can still reach the deadline. The largest
+  remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on bash
+  3.2) and the config reads (4).
+- The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
+  container). Git Bash is unverified. The symlink checks `L43`, `L48`, `L50`, `L51` and `L52`
+  make their links through Node, never with `ln -s`, which Git Bash satisfies with a copy.
+  `L43`, `L50`, `L51` and `L52` link a directory with `make_directory_symlink`: a junction on
+  win32, a directory symlink elsewhere. `L48` links the session record, a file, which a junction
+  cannot do. It uses `make_file_symlink`, a native file symlink, which Windows creates only for
+  an elevated token or in Developer Mode, so `L48` keeps its skip arm. Each of the five checks
+  skips only when its helper fails, never on what `[ -L ]` reports: `L43` and `L51` read exit
+  code 5 of the memo driver, and `L52` reads the `.unlinked` marker of `swap-after-root.sh`. The
+  suite is excluded from the blocking Windows shards in
+  `tests/profiles/windows-native-structure.v1.json` and runs in the weekly Windows Safety
+  workflow through `ciStructureTests`. `L13` and `L17d` still link with `ln -s`; their
+  behavior on Git Bash is unverified.
 - The early exit's wall time is dominated by two runtime-digest computations (bind and resolve).
 - Under extreme local load a suite that drives the full Stop path can now FAIL at the deadline
   where it used to pass slowly; the release notice in its stderr names the cause. Measured at
   load ~740: the `hooks.chainEnforcer=false` branch needed more than 45 s.
+- `test-deferred-review-claim.sh` runs EVERY Stop through the worker directly
+  (`--zensu-stop-worker`, in its `stop()` helper), because it tests the claim protocol, not the
+  bound; the latency suite pins the bound. The deadline is per Stop, and this suite's Stops are
+  the slowest the hook makes. C1 starts 20 Stops together and took 186 s on the Windows runner
+  on `main`; under the default deadline all 20 were released before any adopted the queued
+  review. C7's Stops preload the owner observer into every Node child. On a slow
+  `windows-shard-1` one of them was released mid-transfer (run 36724193854): the claim's lease
+  was renewed, and the block decision was never written. A release whose decision was never
+  written reads as `allow`, which such a check cannot tell apart from a protocol defect.
 - On Git Bash the process-group kill is unverified; its fallback kills only the worker pid.
 
 **Version: `patch`.** No schema field, no strict key set, no hook added, removed or renamed, no
 matcher change, no `permissionDecision`; the knob is an environment variable, not a config key.
+The per-run memo and the canonical-key shortcut persist nothing and add no hook, matcher, knob
+or config key. Routing the denial-note name through `zensu_session_key_canonical` changes no
+persisted shape: a canonical key yields the same file name as before.

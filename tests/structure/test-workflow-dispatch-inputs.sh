@@ -20,7 +20,7 @@ check() {
 if [ -f "$UNIT" ]; then
   OUT="$(node --test "$UNIT" 2>&1)"
   RC=$?
-  if [ "$RC" -eq 0 ] && unit_cases_registered_floor_text "$OUT" 19; then
+  if [ "$RC" -eq 0 ] && unit_cases_registered_floor_text "$OUT" 24; then
     check "workflow dispatch-input suite passes ($(unit_cases_report_text "$OUT"))" PASS
   else
     check "workflow dispatch-input suite passes (rc=$RC, $(unit_cases_report_text "$OUT"))" FAIL

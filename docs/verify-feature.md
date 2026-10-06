@@ -69,8 +69,9 @@ run was started with `--no-validate`, and the chain's terminus line says which.
 
 Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
-`zensu-verify-<run>`. The run config makes the browser isolated, restricts every request to the
-run's origins (`network.allowedOrigins`), blocks service workers, and keeps screenshots and
+`zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
+to the run's origins (`network.allowedOrigins`) — a WebSocket connection is not fenced by it,
+which is an open gap — blocks service workers, and keeps screenshots and
 snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
@@ -190,8 +191,9 @@ value.
 | `version` | the integer `1` |
 | `mode` | `local` or `remote`; it must match the `--mode` the skill runs in |
 | `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
-| `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets |
+| `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only, so a wildcard such as `https://*.example.com` is refused |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
+| `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one |
 | `routes` | not part of the contract; a list a policy written for the earlier contract still carries is checked for its shape — 1 to 64 page paths, each starting with `/`, carrying no `?`, `#`, or `*`, already normalized and unique — and then ignored, so it narrows nothing |
 
 No other key is accepted at either level. A target approves its origin, and with it every page
@@ -201,12 +203,49 @@ gate judges the origin of every navigation command it sees — opening the brows
 `tab-new` — and the API and asset requests a page makes only have to hit an origin in the run
 config.
 
+### Network-only origins
+
+A page that calls a REST API, an OIDC discovery document or a token endpoint on another origin
+needs the browser to reach that origin, but declaring it as a target would make it navigable and
+evidence-eligible. List it in `networkOnlyOrigins` instead, and in the recipe under
+`validate.networkOnly`:
+
+```bash
+ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://app.example.com","evidenceMode":"declared-safe"},{"origin":"https://login.example.net","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://api.example.com","https://issuer.example.net"]}' claude
+```
+
+The skill passes each one to the run-config helper with `--network-only-origin`, and the run
+config allows it beside the targets. The gate then lets the pages request it, while `open`,
+`goto` and `tab-new` aimed at it are denied with their own reason, and no consent record is
+written for it. Two limits are stated rather than hidden:
+
+- The browser knows one class of allowed origin, so a page can still navigate itself onto a
+  network-only origin, by a link click or a script, and the call that triggered it prints that
+  page's URL and title. The skill reads the `Page URL` line after every navigating call and ends
+  the scenario there, reading nothing else from that page.
+- Page code on a target can send data to every network-only origin, including what the skill
+  types into a form. The list is yours, declared in the launch environment the session cannot
+  write, bounded at 8 exact origins, and in remote mode public `https://` only, pinned to an
+  approved address, so no entry reaches a private, metadata or loopback address.
+
+Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
+policy. A loopback API origin is then passed as an ordinary origin and covered by the consent
+prompt, and an application that calls a non-loopback API needs a launch-time policy.
+`policy contains unknown or missing keys` from an older installation means it predates the key:
+it refuses such a policy rather than misreading it.
+
 ### Checking the policy before the run
 
 The skill runs this preflight once for every origin before its first browser call:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" declared-safe
+```
+
+and once more for every network-only origin, with the operand `network-only`:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" network-only
 ```
 
 It judges the target exactly as the gate does and starts no browser. Before it judges the target
@@ -227,7 +266,12 @@ The messages you will meet:
 | `remote-target-needs-parent-environment-policy: …` | a remote target with no policy in the launch environment |
 | `local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost` | a local origin uses a hostname other than `localhost`, for example `app.localhost` or `localhost.` |
 | `<origin>: origin is not a target of the navigation policy` | the origin is not listed; a different port is enough |
-| `usage: verify-browser-config.js --check-policy <local\|remote> <origin> declared-safe` | the call carries an operand the preflight does not take, such as the route the earlier contract checked; drop it |
+| `<origin>: origin is network-only in the navigation policy: …` | a network-only origin was checked with `declared-safe`, or passed to the helper as `--origin`; it is never a page to open |
+| `<origin>: origin is not a network-only origin of the navigation policy` | the origin checked with `network-only` is not in `networkOnlyOrigins` |
+| `a network-only origin needs the parent-environment navigation policy; …` | a network-only check or `--network-only-origin` without a policy; consent mode has no network-only class |
+| `a network-only origin outside loopback requires HTTPS` | a local policy or check names a non-loopback network-only origin over `http://` |
+| `policy origin must name its host exactly: …` | an origin in either list uses a wildcard or another pattern character in its host |
+| `usage: verify-browser-config.js --check-policy <local\|remote> <origin> <declared-safe\|network-only>` | the call carries an operand the preflight does not take, such as the route the earlier contract checked; drop it |
 | `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
 | `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
 
@@ -248,11 +292,13 @@ that worktree on an origin the policy already names.
   or `/etc/hosts`, so an app bound to either family is reached. Every other hostname is
   rejected — `app.localhost`, `localhost.` and `/etc/hosts` aliases included — because the gate
   refuses to trust DNS for a boundary decision.
-- **An API on another origin goes into the recipe as `auth.baseUrl`.** The browser requests
-  nothing from an origin outside `allowedOrigins`, so a frontend on `http://localhost:4200` that
-  logs in against an API on `http://localhost:9090` needs both origins in the run config. Declare
-  the API origin as the recipe's `auth.baseUrl`; the skill then passes both origins to the
-  run-config helper, and one prompt covers both.
+- **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
+  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, so a frontend on
+  `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
+  run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
+  the skill passes it as an ordinary origin, and one prompt covers both; under a policy that
+  lists it in `networkOnlyOrigins`, the pages may request it and no navigation command may open
+  it. `auth.baseUrl` stays the navigable authentication origin, for a login page you sign in on.
 - **The port is fixed before launch.** The policy carries it, so the application must bind
   exactly that port and fail rather than fall back to another one (Vite's `--strictPort`, or
   an explicit bind in your own script). A server that silently moves to a free port produces
@@ -406,6 +452,11 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
   every page of the policy's origin is then in scope, protected pages included, at any path.
   Without a login, authenticated scenarios are skipped and the run is PARTIAL. A configured
   `auth.appOrigin` must equal the validated base URL's origin exactly.
+- An API, OIDC issuer or token endpoint on another origin is a network-only origin: list it in
+  the policy's `networkOnlyOrigins` and in the recipe's `validate.networkOnly.origins`, whose
+  `appOrigin` must equal the validated base URL's origin exactly, as `auth.appOrigin` must. Every
+  such hostname is resolved and pinned like a target's. A hosted login page you sign in on is
+  navigated, so it stays a target.
 - Remote mode verifies what is deployed at that URL, not the files in your worktree. The skill
   says so before its first browser call, and the verdict stays PARTIAL unless a deployment
   identity ties that URL to the branch under test.
@@ -419,7 +470,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Nothing in the recipe replaces that answer: consent is per origin, and there is no route list to declare |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback origins only` | local origin spelled with a hostname other than `localhost` | use `localhost`, `127.0.0.1` or `[::1]` consistently in the policy, the recipe, and the `baseUrlCommand` output |
-| the page loads, but its API calls fail with `net::ERR_BLOCKED_BY_CLIENT` | the API runs on an origin the run config does not name | declare that origin as the recipe's `auth.baseUrl`, so the run config allows it next to the page's origin |
+| the page loads, but its API calls fail with `net::ERR_BLOCKED_BY_CLIENT` | the API runs on an origin the run config does not name | declare that origin in the recipe's `validate.networkOnly.origins` (and, under a policy, in its `networkOnlyOrigins`), or as the recipe's `auth.baseUrl` when it is a login origin you navigate, so the run config allows it next to the page's origin |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |

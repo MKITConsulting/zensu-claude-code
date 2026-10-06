@@ -112,6 +112,28 @@ else
   check "security cases remain present behind only their narrow portability guards" FAIL
 fi
 
+SESSION_LIB="$ROOT/hooks/lib/zensu-session.sh"
+session_lib_exports() {
+  env -i PATH="$PATH" HOME="${HOME:-/tmp}" OSTYPE_PROBE="$1" bash -c '
+    OSTYPE="$OSTYPE_PROBE"
+    source "$1" >/dev/null 2>&1 || { printf unsourceable; exit 0; }
+    fns=0
+    for fn in zensu_bind_hook_session zensu_emit_hook_session_deny zensu_resolve_project_dir; do
+      declare -F -x | grep -q " $fn\$" && fns=$((fns + 1))
+    done
+    vars=0
+    compgen -e | grep -qx ZENSU_SAFE_VERSION_RE && vars=1
+    printf "%s/%s" "$fns" "$vars"
+  ' _ "$SESSION_LIB"
+}
+SESSION_LIB_MSYS="$(session_lib_exports msys)"
+SESSION_LIB_POSIX="$(session_lib_exports linux-gnu)"
+if [ "$SESSION_LIB_MSYS" = 0/0 ] && [ "$SESSION_LIB_POSIX" = 3/1 ]; then
+  check "Session Control library keeps its functions out of child environments on Windows only" PASS
+else
+  check "Session Control library keeps its functions out of child environments on Windows only (msys=$SESSION_LIB_MSYS posix=$SESSION_LIB_POSIX)" FAIL
+fi
+
 WINDOWS_CANARY_COMMANDS="$(node -e '
   const fs=require("fs");
   const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));

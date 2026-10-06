@@ -10,6 +10,7 @@ plugin from the current worktree and grades the resulting skill and `playwright-
 | `local-happy-path.yaml` | Starts an isolated loopback application on a parent-reserved exact port, verifies inventory loading through a gated `playwright-cli` session, requires DOM/data, screenshot, console, and network evidence, and pins exact teardown. |
 | `remote-unsafe-url.yaml` | Supplies a synthetic query-bearing preview URL and requires a credential-blind PARTIAL stop before browser navigation or runtime startup. |
 | `remote-accepted-public.yaml` | Uses a dedicated remote-policy provider to navigate the pre-classified public static `example.com` root, prove gated remote DOM/visual/runtime evidence, then require PARTIAL because no deployment identity ties it to the worktree. |
+| `remote-separate-api-origin.yaml` | Uses a second remote-policy provider whose policy declares `https://example.org` as a network-only origin of the `example.com` target, and the recipe `.zensu/remote-network-only.yaml` that names it under `validate.networkOnly`. It requires the run-config helper call to pass `--network-only-origin https://example.org` and print it back, a session opened with that helper's config, no navigation command aimed anywhere but the `example.com` root, the same gated evidence as the accepted remote scenario, and the deployment-identity PARTIAL. The public page makes no request to the declared origin, so this scenario proves the workflow and the navigation boundary, not a cross-origin fetch. |
 
 The fixture in `test-projects/live-app/` has no external dependencies. Its checked-in runtime
 recipe owns one exact PID, binds only to `127.0.0.1`, and consumes the exact port held open by
@@ -31,7 +32,7 @@ evidence is the image file a `screenshot` call printed, opened with the Read too
 file name alone is not evidence.
 
 The runner exports `ZENSU_VERIFY_NAVIGATION_POLICY_V1` for the reserved fixture origin, and the
-remote provider exports it for `https://example.com`, so the gate runs in policy mode: a
+remote providers export it for `https://example.com`, the second one with `https://example.org` as a network-only origin, so the gate runs in policy mode: a
 non-interactive Promptfoo run cannot answer the consent prompt that consent mode opens for a new
 loopback origin. The runner also clears every `PLAYWRIGHT_MCP_*` and `PWTEST_*` variable from its
 environment: the gate refuses to open a browser while a `PLAYWRIGHT_MCP_*` variable is set, and

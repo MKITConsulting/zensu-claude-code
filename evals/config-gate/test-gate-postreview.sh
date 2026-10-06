@@ -49,6 +49,20 @@ source "$BASELINE" fixture-review
 bash "$LOG" --tdd-begin --session fixture-review >/dev/null
 bash "$LOG" --tdd-complete --session fixture-review >/dev/null
 
+unset ZENSU_CONFIG
+NOTHING_CFG="$TMP_DIR/no-config.json"
+rm -f "$NOTHING_CFG"
+export ZENSU_CONFIG="$NOTHING_CFG"
+TICKET_DEFAULT="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_DEFAULT="$(render_code_reviewer_fixture "$TICKET_DEFAULT")"
+OUT_DEFAULT="$(printf '%s' "$STDIN_DEFAULT" | "$SCRIPT" 2>/dev/null)"
+case "$OUT_DEFAULT" in
+  *"zensu:code-reviewer"*) check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" PASS ;;
+  *)                       check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" FAIL ;;
+esac
+
+export ZENSU_CONFIG="$TMP_CFG"
+
 TICKET_DISABLED="$(bash "$LOG" --review-ticket --session fixture-review)"
 STDIN_DISABLED="$(render_code_reviewer_fixture "$TICKET_DISABLED")"
 OUT_DISABLED="$(printf '%s' "$STDIN_DISABLED" | "$SCRIPT" 2>/dev/null)"
@@ -68,7 +82,7 @@ else
 fi
 
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true}}
+{"hooks": {"autoFix": true, "autoFixMaxRounds": 5}}
 EOF
 
 TICKET_ENABLED="$(bash "$LOG" --review-ticket --session fixture-review)"
@@ -86,18 +100,6 @@ if [ -z "$OUT_OTHER" ]; then
 else
   check "autoFix=true + non-code-reviewer subagent: empty stdout (isolation preserved)" FAIL
 fi
-
-unset ZENSU_CONFIG
-NOTHING_CFG="$TMP_DIR/no-config.json"
-rm -f "$NOTHING_CFG"
-export ZENSU_CONFIG="$NOTHING_CFG"
-TICKET_DEFAULT="$(bash "$LOG" --review-ticket --session fixture-review)"
-STDIN_DEFAULT="$(render_code_reviewer_fixture "$TICKET_DEFAULT")"
-OUT_DEFAULT="$(printf '%s' "$STDIN_DEFAULT" | "$SCRIPT" 2>/dev/null)"
-case "$OUT_DEFAULT" in
-  *"zensu:code-reviewer"*) check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" PASS ;;
-  *)                       check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" FAIL ;;
-esac
 
 rm -f "$TMP_CFG"
 

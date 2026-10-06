@@ -7,12 +7,14 @@ description: >
   either declares an incompatible lineage or cannot re-verify the record, so every
   stateful tool fails closed: Edit, Write, MultiEdit and writing Bash
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
-  and Stop cannot prove completion. This skill reports whether the running installation
-  may take the record over in place, and with `--confirm` performs that adoption: it
-  mints a new record for the same session under the executing runtime, sets the previous
-  one aside unchanged, and records the takeover in the workflow history. The session is
+  and Stop cannot prove completion. Zensu adopts such a record automatically on the first
+  hook contact after the update, so this skill is the REPORT for an adoption that was
+  refused, opted out or did not complete and, with `--confirm`, the manual retry, which
+  ignores hooks.sessionAutoAdopt being false. The adoption mints a new record for the same session under the executing
+  runtime, sets the previous one aside unchanged, and records the takeover in the
+  workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
-  also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
+  also gone the lineage break is cleared while Edit, Write, MultiEdit and, with the opt-in source-write gate on, writing Bash stay denied until that
   directory is re-created, which a SECOND mode, `--restore-root --confirm`, does in one step together with the
   workflow document the removal took with it — it restores the anchor and not the work, so the directory comes
   back empty and the chain that lived there is gone, unless another run finished that directory first, in which
@@ -24,8 +26,11 @@ description: >
   missing` — a served record whose baseline a deleted and re-created worktree took with
   it, which is NOT a plugin update and which `--confirm` rebuilds in place — when
   /zensu:doctor reports that the recorded project root itself no longer exists, the ordinary
-  shape after `git worktree remove`, which `--restore-root --confirm` repairs — or via
-  /zensu:adopt-session. No network or API key. It never edits code, never touches the
+  shape after `git worktree remove`, which `--restore-root --confirm` repairs — when the
+  opt-in source-write gate denies `git add` in a sibling worktree of the same repository that this
+  session now works in, which `--reanchor --confirm`, run from inside that worktree, moves
+  this session's anchor to once it finds no other live session there —
+  or via /zensu:adopt-session. No network or API key. It never edits code, never touches the
   workflow document's decision fields, and never bypasses a review.
 ---
 
@@ -44,6 +49,18 @@ While the plugin is at major `0` the MINOR is the breaking axis, so a record
 minted by `0.17.2` is not served by `0.18.0`. When such an update lands mid
 session the record stays valid against the installation that minted it, and the
 running one refuses to serve it. Everything stateful then fails closed at once.
+
+Not on its own any more: the first hook contact after `/reload-plugins` adopts such a
+record itself when the persisted schemas still match — the same adoption this skill
+performs, with the same provenance, and a deny that names the refusal when it did not
+happen. This skill is for the remainder, which has THREE causes and not two: the
+adoption was REFUSED (every gate's deny names the refusal token), the automatic path is
+switched off with `hooks.sessionAutoAdopt: false` — in either config layer, since for
+this key `false` is sticky — or the adoption did NOT COMPLETE (a lock timeout, or a
+fault inside the adoption itself; the deny reads `it did not complete: <token>`). It is
+also the full report whenever the user wants one. One precondition
+the plugin cannot supply: a session keeps executing its previous version until
+`/reload-plugins` runs in it, and nothing on that older version reaches this state.
 
 `/zensu:doctor` names this state explicitly:
 
@@ -84,6 +101,13 @@ state, which sets aside superseded lease records. Nothing is re-minted and the
 record is untouched — but a reader who takes "refuse" to mean "does nothing at
 all" would be wrong about the lease store.
 
+A fourth state belongs here and binds perfectly well: the session has moved on to
+work in a DIFFERENT worktree of the same repository — typically one it created itself
+with `git worktree add` — while its record still names the worktree it started in.
+Every Zensu gate anchors on that recorded root, so `git add` in the worktree the session
+really works in is denied as a write "OUTSIDE this session's worktree/project root", and
+the deny names `/zensu:adopt-session --reanchor`. That is the `--reanchor` mode below.
+
 ## Do NOT Use For
 
 - A session that is binding normally — with TWO exceptions, which are the whole
@@ -109,6 +133,10 @@ all" would be wrong about the lease store.
 - Any bind failure other than the declared-incompatible lineage and the pruned
   minting installation — the refusal table in Phase 1 below names each one and its
   own remedy.
+- Moving this session into a worktree in which another live session is found, into a
+  checkout that contains its own root or other worktrees, into another repository, or to
+  a directory outside git. `--reanchor` refuses each of these by design; a Claude Code
+  session started in that directory is the route there.
 
 ## What This Skill Does
 
@@ -191,9 +219,9 @@ lived under that root and is not reachable from this record; if it was moved rat
 than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
-in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
-diagnostics work again while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay
-denied until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
+in the ordinary orphaned-project-root state, so Bash and the read-only
+diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that
+WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
 announcing an unqualified success, or the user walks straight into a deny they
 were just told was fixed. The adoption never re-creates the deleted directory —
 `--restore-root` is the mode that does, and it is a SEPARATE run.
@@ -221,15 +249,20 @@ is gone rather than restored — a forecast of what this command plants, which t
 replaces with "what is in that directory is NOT reported here" when another run wins the
 race and creates it first), and say plainly that if the directory was MOVED rather than
 deleted, moving it back is the better repair. Only after the user agrees, run the same
-command with `--confirm`. This mirrors Step 2 of 4 of the adoption flow below, and it
-matters at least as much here: this is the mode that creates a directory.
+command with `--confirm`. This mirrors the confirm-first uses that Step 2 of 3 of the
+adoption flow below names, and it matters at least as much here: this is the mode that
+creates a directory.
 
 **The destination is carried from the record and never from an argument.** Neither
 literal takes a value, and the PreToolUse gate admits no other token, so no
 invocation can name a directory. The anchor does not MOVE; only the path the record
-already names is created. Re-anchoring a record to a caller-named directory was
-considered and refused — a session may delete its own root, so a caller-named anchor
-would be a cross-project write escape — and this mode is not a step toward it.
+already names is created. Re-anchoring a record to an arbitrary caller-named directory
+was considered and refused — a session may delete its own root, so a caller-named
+anchor would be a cross-project write escape — and this mode is not a step toward it.
+The one anchor move that exists is `--reanchor` below, and it is bounded rather than
+caller-named: the recorded root must still exist, the target must be a registered
+worktree of that same repository that contains neither the recorded root nor another
+worktree, and it refuses a worktree in which it finds another live session.
 
 **It restores the anchor, not the work — as a FORECAST of what it plants.** When another
 run wins the race, the report says it never saw the contents instead, and `/zensu:doctor`
@@ -275,17 +308,129 @@ version are taken on the record's word there — the stated cost, and the reason
 a record is adopted once rather than served. The COMBINED state — project root gone
 AND installation pruned — still refuses `record-unreadable`.
 
+### `--reanchor` — moving the anchor to a sibling worktree of the same repository
+
+A third mode, and its own question: the record is healthy and served, but this session
+now works in a DIFFERENT worktree of the same repository than the one its record names.
+Until the anchor moves, the opt-in source-write gate, while it is on (`hooks.bashWriteGate:
+true`), denies `git add` and new source writes in the worktree the session actually works in,
+and at every setting `zensu:review-aspect` reviewers are confined to the recorded worktree
+and cannot read the changed files.
+
+Run it FROM INSIDE the worktree this session should be anchored to. The working
+directory of the command is the target; a subdirectory is fine, because the worktree's
+top-level is what moves in. No argument names the target, so render the `cd` into it as
+part of the command rather than relying on the Bash tool's current directory:
+
+```bash
+cd -- '<the worktree to move to>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-reanchor.sh"
+```
+
+Read-only — it reports `MOVABLE` or `NOT MOVABLE (<reason>)` and writes nothing. **With
+`--confirm`** it re-mints this session's Session Control record with the new project root
+and nothing else changed — the same installation, runtime digest, version and
+`created_at` — and sets the previous record aside unchanged as
+`<session-key>.superseded-reanchor-<UTC stamp>.json`. It then creates this session's
+workflow document under the new worktree when there is none, writes one
+`PROJECT_ROOT_REANCHORED` history entry into the new AND the old workflow document, sets
+aside review-evidence leases bound to the old root, moves this session's `tdd-mode`,
+`delivery-route` and `zen-mode` markers to the new worktree, and, while
+`hooks.worktreeKeep` is on, ages this session's keep anchor in the old worktree and
+writes one in the new one. The move takes effect from the next tool call for the
+source-write gate, the reviewers and the `zensu-log.sh` verbs. The host does not move: it
+keeps this session's start directory, and the Bash tool returns there after a command that
+leaves it, so give your own commands — a build, a test run, `git` — a `cd` into the new
+anchor. `/zensu:tdd`, `/zensu:self-review`, `/zensu:converge` and
+`/zensu:verify-feature --chain` read the anchor from `zensu-log.sh --project-root` and run
+their own commands inside it, and `--evidence-run` runs there too, so their plan, run log,
+baseline, edit-landing audit, test runs and acceptance checks follow the move, and a new
+`/zensu:tdd` chain can start in this session — unless the new anchor's path holds a double
+quote, a dollar sign, a backtick or a backslash, which `--project-root` refuses; the report
+then says so instead of promising a chain. `/zensu:plan-review`, `/zensu:setup`,
+`/zensu:cover`, `/zensu:autopilot` and `/zensu:pilot` still read plans, config, overlays and
+templates from the start directory, and so does the source-write gate's project-level
+`hooks.bashWriteGate` opt-in, which it reads through the host's project directory ahead of
+its bind.
+
+The target is verified, never trusted. It refuses unless every one of these holds:
+
+- the record reads strictly and this installation serves it — after a plugin update
+  that breaks the lineage, adopt first;
+- the recorded project root still EXISTS inside a git worktree, because a root that is
+  gone cannot prove which repository it belonged to — `--restore-root` is the mode for
+  that state;
+- the command's directory is inside a git worktree of the SAME repository (the same git
+  common directory), and that worktree is registered with git and not prunable;
+- it is not already the anchor, it does not contain the recorded root — that would widen
+  the anchor instead of moving it — and no other registered worktree lies inside it;
+- this session's workflow document under the recorded root is readable and holds no open
+  work: no armed chain short of its terminus, no open skill workflow, no linked Autopilot
+  run, no pending review rearm and no claimed deferred review. That evidence is bound to
+  the old root and is never carried across;
+- no Autopilot run this session owns under the recorded root is still open. The Autopilot
+  state library answers that, so a run no chain links yet counts too; a run at `DONE` or
+  `CANCELLED` does not, and a run state or lock the library cannot read refuses. Cancel an
+  open run of this session through `--autopilot-event --event CANCEL`:
+  `/zensu:autopilot-release` refuses the caller's own run;
+- no other live session is found in that worktree. A live session is found when this
+  Claude Code configuration's live-session registry (`<config dir>/sessions/`) lists it
+  with a working directory or a Zensu-recorded project root there, or when its
+  worktree-keep anchor there is live — an anchor this build cannot validate counts as
+  well. A session that only edits files there by absolute path is none of these, which is
+  why the report lists the target's uncommitted paths;
+- that evidence is complete: the registry is readable, lists THIS session, and every entry
+  of a live process in it can be read.
+
+Its refusals, each of which writes nothing and prints its own remedy: `session-id-unusable`,
+`private-record-store-unsafe`, `record-unreadable`, `recorded-root-missing`,
+`not-served-by-executing-runtime`, `plugin-data-mismatch`, `workflow-document-unusable`,
+`workflow-in-progress`, `autopilot-state-unverifiable`, `recorded-root-not-in-a-worktree`,
+`target-not-in-a-worktree`, `different-repository`, `target-not-a-registered-worktree`,
+`already-anchored`, `target-contains-recorded-root`, `target-contains-other-worktrees`,
+`target-workflow-document-unusable`, `claimed-by-live-session`,
+`live-sessions-unverifiable` and `verdict-unavailable`. Render the reason, its remedy
+and every detail line verbatim.
+
+**Confirm with the user before adding `--confirm` here too.** `--confirm` is an argument
+anyone who can run the command can add, so this step is the consent. Run the read-only
+form, relay both roots and the uncommitted paths it lists verbatim together with its
+detection bound — a session visible to none of its sources, for example one started under
+another `CLAUDE_CONFIG_DIR` without a keep anchor, or one that only edits there by
+absolute path, is not detected — and only after the user agrees run the confirm form from
+the worktree the report named as `new anchor`, so the move lands where the user agreed:
+
+```bash
+cd -- '<new anchor, verbatim from the report>' && CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-reanchor.sh" --confirm
+```
+
+**What it keeps.** The source-write gate, whenever it is opted in, still compares every write
+against the one recorded root and is not weakened: the move refuses a worktree in which it finds another
+live session and a checkout that contains other worktrees, so it never widens this
+session over another session's tree that its sources show. It only changes which
+worktree of this repository counts as this session's own. The old worktree is outside
+this session from then on, including for reviewers.
+
+Its `--confirm` output is `MOVED` with a row per fact, including which session markers
+moved; a marker that could not move keeps its setting under the old root, where this
+session no longer reads it. Relay every `WARNING:` line: one
+about the lease store means a lease still bound to the old root could not be set aside
+and review-evidence operations of this session keep failing until it is moved by hand,
+and one about provenance means the move is real but not recorded in that history. Exit
+codes: `0` for a report or a clean move, `1` for a refusal, a failure, or a move whose
+lease sweep was incomplete, `2` for a bad argument.
+
 Main thread only: a reviewer or neutral child is refused by every gate.
 
-## Phase 1: Report, confirm, adopt
+## Phase 1: Report, adopt, verify
 
 > **If the diagnosis is a vanished recorded project root, this Phase does not apply.**
 > That state has its own mode, `--restore-root`, documented under Prerequisites above —
-> including its own confirm-with-the-user step, which the four steps below do not cover.
+> including its own confirm-with-the-user step, which the three steps below do not cover.
 > Read that section before emitting anything, and never emit `--restore-root --confirm`
-> from here.
+> from here. The same holds for a session that works in a sibling worktree of the same
+> repository: that is `--reanchor`, with its own consent step.
 
-**Step 1 of 4 — report.** Run the read-only form. It changes nothing.
+**Step 1 of 3 — report.** Run the read-only form. It changes nothing.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
@@ -305,13 +450,16 @@ forge another one. Render whatever you get verbatim; do NOT un-escape it, and do
 report it as damage.
 
 Every refusal a user can see is in the table below. Most are `adoptableRecord`
-verdicts; `private-record-store-unsafe` is emitted by the ENTRY POINT before those
-are ever reached, and is marked as such. Each prints its own remedy inline, so
-render that verbatim too.
+verdicts; THREE are emitted by the ENTRY POINT and are marked as such —
+`session-id-unusable` and `private-record-store-unsafe` before those verdicts are
+ever reached, and `superseded-record-exists` after they passed. Each prints its own
+remedy inline, so render that verbatim too.
 
 | Reason | Meaning |
 |--------|---------|
+| `session-id-unusable` | Entry-point refusal, raised before anything is read: the session identity the command was given is empty, malformed, or a DERIVED Session Control identifier rather than the raw host session id. Nothing is read and nothing is changed, and the record store is not implicated — a fresh Claude Code session is the way forward. |
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
+| `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation merely pruned from the cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
@@ -320,12 +468,55 @@ render that verbatim too.
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
 | `workflow-schema-mismatch` | The workflow document cannot be read by this runtime — the case adoption must refuse. |
 
-**Step 2 of 4 — confirm with the user.** Adoption changes the session's immutable
-anchor. Ask before running it, in the user's language, naming both versions and
-the one consequence that is not obvious: any review-evidence lease from before
-the update has to be re-gathered.
+A gate's deny after an AUTOMATIC adoption that did not bind the session carries one
+of the reasons above, or one of these entry-level tokens, which are not
+`adoptableRecord` verdicts. The deny's own verb tells the two kinds apart: a record
+that was judged reads `it was REFUSED: <token>`, a ladder that never reached a
+verdict reads `it did not complete: <token>`.
+`opted-out` (`hooks.sessionAutoAdopt: false` — the operator switched the automatic
+path off on purpose; report it and ask the user whether to run the `--confirm` form,
+which ignores the opt-out, and never run it on your own initiative),
+`adopted-concurrently` (a sibling hook won the race and the record serves now; retry
+the call), `not-completed`, `lock-timeout` and `adoption-failed` (the adoption did
+not finish; retry, then run the report — the last two appear only in the all-tool
+gate's deny, which sees the adoption's own error where the shell gates see a
+preview), `superseded-record-exists` (an interrupted adoption left
+`<session-key>.superseded-<version>.json` in place; the report names it in BOTH forms —
+see the table row above — and moving it aside lets the adoption complete; a retry
+alone is a loop), and `(unknown)` when
+the binder could not answer at all. A refusal that establishes no named state —
+`record-unreadable`, `plugin-data-mismatch` — rides on the generic bind-failure deny
+as one appended sentence rather than on the lineage or pruned wording.
 
-**Step 3 of 4 — adopt.** Only after the user agrees:
+A deny can also follow an automatic adoption that DID land on the same call — the
+workflow document was missing, or the tool is one the principal may not use. The cause
+still leads, and the deny then says `This call also adopted the Session Control record
+(<recorded> -> <executing>)`. That is a completed adoption to report, not a refusal to
+repair: answer the cause the deny names — for a missing workflow document that is its
+own `--confirm` rebuild, which needs the user's yes as Step 2 below states — and never
+run `--confirm` to repeat the adoption. `/zensu:doctor` shows the adoption afterwards
+when a workflow document recorded it.
+
+**Step 2 of 3 — adopt.** The same adoption runs automatically on every hook bind, so
+this form exists for a refusal and for the opt-out — and `--confirm` is a token you
+supply yourself, not a consent the user gave. TWO of its uses therefore need the
+user's explicit yes BEFORE you run it, and you wait for that answer: when the report
+answered `already-served` and its `workflow baseline` line reads MISSING, `--confirm`
+REBUILDS the document and the review chain that was live when it vanished is lost —
+say so, in the user's language, and wait; and when a gate's deny or the Stop release
+named `opted-out`, the operator switched the automatic path off — report that and
+wait. The report itself never names `opted-out`, and neither does the `/zensu:doctor`
+row, which cannot tell the three cases apart: the report shows such
+a record as ADOPTABLE, because the opt-out governs the automatic path only. Do NOT
+read an ADOPTABLE report in a session whose tools are denied as the signature of the
+opt-out, though: an adoption that did not complete (`not-completed`, `lock-timeout`,
+`adoption-failed`) reads ADOPTABLE too, and there `--confirm` needs no one's yes. The
+TOKEN in the gate's deny or in the Stop release is what tells the two apart — when you
+have no token, ask rather than assume. For
+every other refusal, and for the idempotent lease-store repair on an `already-served`
+record whose baseline is present, run it directly. Tell the user, in their language,
+what it does — both versions, and the one consequence that is not obvious: any
+review-evidence lease from before the update has to be re-gathered — then run it:
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
@@ -367,13 +558,13 @@ leases stuck. A rebuilt baseline does not launder a stuck lease, and a clean swe
 does not launder a refused rebuild. `1` on a refusal or a precondition failure,
 `2` on a bad argument. A non-zero exit is not a broken command — read the message.
 
-**Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
+**Step 3 of 3 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row, and read it before you describe the outcome. When the recorded project root still
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
-READ-ONLY Bash and the read-only diagnostics work again, and `Edit`, `Write`, `MultiEdit` and any Bash
-command that WRITES stay denied until that exact directory is re-created. Say which of the two happened; never report the second as an
+Bash and the read-only diagnostics work again, and `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash
+command that WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that exact directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints
@@ -388,6 +579,11 @@ one reason the form above passes only the variable the script actually reads.
 Emit the command exactly as written above; do not wrap it, redirect it, or chain
 anything onto it.
 
+`--reanchor` runs a different script, `hooks/lib/zensu-session-reanchor.sh`, and the
+bind-failure recognizer admits it in NO shape: it runs only in a session whose binding
+works, where the ordinary Bash gates judge it like any other command. Its only argument
+is `--confirm`, at most once.
+
 ## Response Style
 
 Render both command outputs verbatim; they are already formatted. Name both
@@ -401,6 +597,6 @@ directory that is gone and there is nothing to rebuild into. Report that NOTE;
 do not upgrade it to the rebuild recommendation, which is for the other shape.
 After a successful adoption, do not tell the user to restart — and when the
 recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
-and so does any Bash command the source-write gate can attribute as a write,
-until it is re-created — read-only Bash and the diagnostics do run — rather than
+and so does any Bash command the source-write gate can attribute as a write
+while that opt-in gate is on (`hooks.bashWriteGate: true`), until it is re-created — read-only Bash and the diagnostics do run — rather than
 reporting an unqualified success.

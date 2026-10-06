@@ -45,6 +45,7 @@
     "test-evidence-run.sh",
     "test-file-exists-replacement.sh",
     "test-finding-verification.sh",
+    "test-full-suite-ci.sh",
     "test-full-suite-gate.sh",
     "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",
@@ -102,6 +103,7 @@
     "test-session-control-core.sh",
     "test-session-control-sandbox-hook-integration.sh",
     "test-session-id-v1.sh",
+    "test-session-reanchor.sh",
     "test-session-start-banner.sh",
     "test-session-trail-lineage.sh",
     "test-session-trail-skill.sh",
@@ -162,6 +164,13 @@
     "test-promptfoo-session-upgrade.sh",
     "test-promptfoo-verify-feature.sh",
     "test-promptfoo-zen-mode.sh"
+  ],
+  "nodeDepsStructureTests": [
+    "test-promptfoo-session-upgrade.sh",
+    "test-release-session-control-gate.sh",
+    "test-windows-ci-contract.sh",
+    "test-workflow-checkout-credentials.sh",
+    "test-workflow-dispatch-inputs.sh"
   ],
   "ciOfflineSuites": [
     {

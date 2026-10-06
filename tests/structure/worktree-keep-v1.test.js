@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 
 const ROOT = path.join(__dirname, '..', '..');
 const LIB = path.join(ROOT, 'hooks', 'lib');
@@ -1771,4 +1772,383 @@ test('anchorRemedy names what the next prompt can do with a rejected own anchor 
   assert.strictEqual(linked.reason, 'state-component-symlink');
   assert.strictEqual(keep.anchorRemedy(wt, KEY_A), keep.ANCHOR_REMEDIES.STATE_COMPONENT);
   assert.strictEqual(keep.writeAnchor(wt, KEY_A, fresh()).ok, false);
+});
+
+test('nestedRepositories names every nested repository by kind and never follows a symlink', () => {
+  assert.deepStrictEqual(Object.values(keep.NESTED_KINDS).sort(), ['repository', 'submodule', 'unknown', 'worktree']);
+  assert.ok(Object.isFrozen(keep.NESTED_KINDS));
+  const repo = makeRepo('nested');
+  const wt = addWorktree(repo, 'nest-1', 'claude/nest');
+  assert.deepStrictEqual(keep.nestedRepositories(wt), { ok: true, entries: fs.readdirSync(wt).length, nested: [] });
+  const clone = path.join(wt, '.worktrees', 'clone');
+  fs.mkdirSync(clone, { recursive: true });
+  git(clone, ['init', '-q']);
+  const other = makeRepo('nested-other');
+  const foreign = path.join(wt, '.worktrees', 'other', 'feat');
+  git(other, ['worktree', 'add', '-q', '-b', 'feat', foreign]);
+  const gitDir = git(wt, ['rev-parse', '--absolute-git-dir']);
+  const subGit = path.join(gitDir, 'modules', 'libs', 'sub');
+  fs.mkdirSync(subGit, { recursive: true });
+  fs.mkdirSync(path.join(wt, 'libs', 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'libs', 'sub', '.git'), 'gitdir: ' + path.relative(path.join(wt, 'libs', 'sub'), subGit) + '\n');
+  const odd = path.join(wt, 'odd');
+  fs.mkdirSync(odd);
+  fs.symlinkSync(path.join(other, '.git'), path.join(odd, '.git'));
+  fs.symlinkSync(other, path.join(wt, 'linked-repo'));
+  const scan = keep.nestedRepositories(wt);
+  assert.strictEqual(scan.ok, true, JSON.stringify(scan));
+  assert.deepStrictEqual(scan.nested, [
+    { path: path.join('.worktrees', 'clone'), kind: 'repository' },
+    { path: path.join('.worktrees', 'other', 'feat'), kind: 'worktree' },
+    { path: path.join('libs', 'sub'), kind: 'submodule' },
+    { path: 'odd', kind: 'unknown' },
+  ]);
+  const inRepo = keep.nestedRepositories(repo);
+  assert.ok(inRepo.nested.some((n) => n.path === path.join('.claude', 'worktrees', 'nest-1') && n.kind === 'worktree'), 'a worktree of the same repository nested in the main checkout is reported as one');
+});
+
+test('nestedRepositories refuses what it cannot finish rather than reporting a clean tree', () => {
+  const repo = makeRepo('nested-limits');
+  const wt = addWorktree(repo, 'lim-1', 'claude/lim');
+  fs.mkdirSync(path.join(wt, 'a', 'b'), { recursive: true });
+  assert.deepStrictEqual(keep.nestedRepositories('relative/root'), { ok: false, reason: 'root-not-absolute', entries: 0, nested: [] });
+  const tight = keep.nestedRepositories(wt, { maxEntries: 1 });
+  assert.strictEqual(tight.ok, false);
+  assert.strictEqual(tight.reason, 'scan-budget');
+  const missing = keep.nestedRepositories(path.join(wt, 'not-there'));
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.reason, 'unreadable:ENOENT');
+  assert.strictEqual(keep.nestedRepositories(wt, { maxEntries: keep.MAX_NESTED_SCAN_ENTRIES + 10 }).ok, true);
+});
+
+test('retireAnchors ends the named live anchor and lets reconcileKeep remove the marker', () => {
+  const repo = makeRepo('retire');
+  const wt = addWorktree(repo, 'ret-1', 'claude/ret');
+  assert.strictEqual(keep.writeAnchor(wt, KEY_A, record(KEY_A, wt, { idleHours: 72 })).ok, true);
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  const out = keep.retireAnchors(wt, [{ key: KEY_A, lastSeenAt: NOW - 1000 }, { key: KEY_A, lastSeenAt: NOW - 1000 }], NOW, IDLE);
+  assert.strictEqual(out.managed, true);
+  assert.deepStrictEqual(out.ended, [KEY_A]);
+  assert.deepStrictEqual(out.faults, []);
+  assert.strictEqual(out.keep.action, 'removed');
+  assert.strictEqual(keep.markerState(wt).state, 'absent');
+  const after = keep.readAnchor(wt, KEY_A);
+  assert.strictEqual(after.status, 'ok');
+  assert.strictEqual(after.record.endedAt, NOW);
+  assert.strictEqual(after.record.lastSeenAt, NOW - 1000, 'the real last-seen stamp is kept as the baseline');
+  assert.strictEqual(after.record.idleHours, 72, 'the writer window travels unchanged');
+  assert.strictEqual(keep.classifyAnchor(after.record, NOW, IDLE), 'stale');
+  assert.strictEqual(fs.readdirSync(path.join(wt, '.zensu', 'state')).filter((n) => n.includes('.tmp-')).length, 0);
+});
+
+test('retireAnchors keeps the marker while another live anchor holds it and never creates one', () => {
+  const repo = makeRepo('retire-held');
+  const wt = addWorktree(repo, 'held-1', 'claude/held');
+  keep.writeAnchor(wt, KEY_A, record(KEY_A, wt));
+  keep.writeAnchor(wt, KEY_B, record(KEY_B, wt));
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  const held = keep.retireAnchors(wt, [{ key: KEY_A, lastSeenAt: NOW - 1000 }], NOW, IDLE);
+  assert.deepStrictEqual(held.ended, [KEY_A]);
+  assert.strictEqual(held.keep.action, 'kept');
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  fs.unlinkSync(path.join(wt, keep.KEEP_FILENAME));
+  const quiet = keep.retireAnchors(wt, [], NOW, IDLE);
+  assert.deepStrictEqual(quiet.ended, []);
+  assert.strictEqual(quiet.keep.action, 'absent');
+  assert.strictEqual(quiet.keep.reason, 'create-disabled');
+  assert.strictEqual(keep.markerState(wt).state, 'absent', 'a release never publishes a marker');
+});
+
+test('retireAnchors leaves rejected, stale, foreign-rooted and missing anchors exactly as they are', () => {
+  const repo = makeRepo('retire-skip');
+  const wt = addWorktree(repo, 'skip-1', 'claude/skip');
+  const keyC = 'scv1_' + 'c'.repeat(64);
+  const keyD = 'scv1_' + 'd'.repeat(64);
+  const keyE = 'scv1_' + 'e'.repeat(64);
+  keep.writeAnchor(wt, KEY_A, record(KEY_A, wt));
+  keep.writeAnchor(wt, keyC, record(keyC, wt, { lastSeenAt: NOW - IDLE - 5000 }));
+  keep.writeAnchor(wt, keyD, record(keyD, path.join(repo, 'elsewhere')));
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  fs.writeFileSync(keep.anchorPath(wt, KEY_B), 'not json');
+  const rejectedBefore = fs.readFileSync(keep.anchorPath(wt, KEY_B), 'utf8');
+  const staleBefore = fs.readFileSync(keep.anchorPath(wt, keyC), 'utf8');
+  const at = (key, lastSeenAt) => ({ key, lastSeenAt });
+  const out = keep.retireAnchors(wt, [at(KEY_A, NOW - 1000), at(KEY_B, NOW - 1000), at(keyC, NOW - IDLE - 5000), at(keyD, NOW - 1000), at(keyE, NOW - 1000), 'not-a-key'], NOW, IDLE);
+  assert.deepStrictEqual(out.ended, [KEY_A]);
+  assert.deepStrictEqual(out.skipped, [
+    { key: KEY_B, reason: 'rejected:unparseable' },
+    { key: keyC, reason: 'not-live' },
+    { key: keyD, reason: 'worktree-root-mismatch' },
+    { key: keyE, reason: 'missing' },
+    { key: 'not-a-key', reason: 'session-key-shape' },
+  ]);
+  assert.strictEqual(out.keep.action, 'kept');
+  assert.strictEqual(out.keep.reason, undefined, 'the marker is held by the live anchor recorded for another root, not only by the rejected one');
+  assert.strictEqual(out.keep.live, 1);
+  assert.strictEqual(fs.readFileSync(keep.anchorPath(wt, KEY_B), 'utf8'), rejectedBefore);
+  assert.strictEqual(fs.readFileSync(keep.anchorPath(wt, keyC), 'utf8'), staleBefore);
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+});
+
+test('retireAnchors touches nothing outside an app-managed worktree', () => {
+  const repo = makeRepo('retire-unmanaged');
+  const out = keep.retireAnchors(repo, [{ key: KEY_A, lastSeenAt: NOW - 1000 }], NOW, IDLE);
+  assert.deepStrictEqual(out, { managed: false, faults: [], ended: [], skipped: [] });
+  assert.strictEqual(fs.existsSync(path.join(repo, '.zensu')), false);
+  assert.deepStrictEqual(keep.retireAnchors('relative/path', [{ key: KEY_A, lastSeenAt: NOW - 1000 }], NOW, IDLE), { managed: false, faults: [], ended: [], skipped: [] });
+});
+
+test('retireAnchors ends an anchor only when it still carries the stamp the caller measured', () => {
+  const repo = makeRepo('retire-stamp');
+  const wt = addWorktree(repo, 'stamp-1', 'claude/stamp');
+  keep.writeAnchor(wt, KEY_A, record(KEY_A, wt));
+  keep.writeAnchor(wt, KEY_B, record(KEY_B, wt, { lastSeenAt: NOW - 500 }));
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  const before = fs.readFileSync(keep.anchorPath(wt, KEY_A), 'utf8');
+  const out = keep.retireAnchors(wt, [KEY_A, { key: KEY_B, lastSeenAt: NOW - 1000 }], NOW, IDLE);
+  assert.deepStrictEqual(out.ended, []);
+  assert.deepStrictEqual(out.skipped, [
+    { key: KEY_A, reason: 'expected-stamp-missing' },
+    { key: KEY_B, reason: 'changed-since-listing' },
+  ]);
+  assert.strictEqual(fs.readFileSync(keep.anchorPath(wt, KEY_A), 'utf8'), before);
+  assert.strictEqual(keep.readAnchor(wt, KEY_B).record.endedAt, undefined);
+  assert.strictEqual(out.keep.action, 'kept');
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+});
+
+test('nestedRepositories exempts only a real submodule, walks into it, and sees a bare repository', () => {
+  const repo = makeRepo('nested-strict');
+  const wt = addWorktree(repo, 'strict-1', 'claude/strict');
+  const gitDir = git(wt, ['rev-parse', '--absolute-git-dir']);
+  const subGit = path.join(gitDir, 'modules', 'libs', 'sub');
+  fs.mkdirSync(subGit, { recursive: true });
+  const sub = path.join(wt, 'libs', 'sub');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ' + path.relative(sub, subGit) + '\n');
+  const inner = path.join(sub, 'vendor', 'clone');
+  fs.mkdirSync(inner, { recursive: true });
+  git(inner, ['init', '-q']);
+  const subWorktreeAdmin = path.join(subGit, 'worktrees', 'feat');
+  fs.mkdirSync(subWorktreeAdmin, { recursive: true });
+  fs.writeFileSync(path.join(subWorktreeAdmin, 'commondir'), '../..\n');
+  const subWorktree = path.join(wt, '.worktrees', 'sub', 'feat');
+  fs.mkdirSync(subWorktree, { recursive: true });
+  fs.writeFileSync(path.join(subWorktree, '.git'), 'gitdir: ' + subWorktreeAdmin + '\n');
+  const bare = path.join(wt, 'scratch', 'remote.git');
+  fs.mkdirSync(bare, { recursive: true });
+  git(bare, ['init', '-q', '--bare']);
+  const scan = keep.nestedRepositories(wt);
+  assert.strictEqual(scan.ok, true, JSON.stringify(scan));
+  assert.deepStrictEqual(scan.nested, [
+    { path: path.join('.worktrees', 'sub', 'feat'), kind: 'worktree' },
+    { path: path.join('libs', 'sub'), kind: 'submodule' },
+    { path: path.join('libs', 'sub', 'vendor', 'clone'), kind: 'repository' },
+    { path: path.join('scratch', 'remote.git'), kind: 'repository' },
+  ]);
+});
+
+function markedThenAged(wt, key) {
+  assert.strictEqual(keep.writeAnchor(wt, key, record(key, wt)).ok, true);
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  assert.strictEqual(keep.writeAnchor(wt, key, record(key, wt, { endedAt: NOW })).ok, true);
+}
+
+test('reconcileKeep keeps the marker while a nested repository remains and removes it once the repository is gone', () => {
+  const repo = makeRepo('nested-hold');
+  const wt = addWorktree(repo, 'hold-1', 'claude/hold');
+  markedThenAged(wt, KEY_A);
+  const other = makeRepo('nested-hold-other');
+  const foreign = path.join(wt, '.worktrees', 'other', 'feat');
+  git(other, ['worktree', 'add', '-q', '-b', 'feat', foreign]);
+  assert.deepStrictEqual(Object.values(keep.NESTED_HOLDS).sort(), ['nested-repository', 'nested-scan-incomplete']);
+  assert.ok(Object.isFrozen(keep.NESTED_HOLDS));
+  const verdict = keep.nestedHold(wt);
+  assert.deepStrictEqual(verdict, { reason: keep.NESTED_HOLDS.REPOSITORY, nested: { path: path.join('.worktrees', 'other', 'feat'), kind: 'worktree' } });
+  const held = keep.reconcileKeep(wt, NOW, IDLE);
+  assert.strictEqual(held.action, 'kept');
+  assert.strictEqual(held.reason, verdict.reason);
+  assert.deepStrictEqual(held.nested, verdict.nested, 'the reconcile holds on the exported verdict the doctor reads');
+  assert.strictEqual(held.live, 0);
+  assert.strictEqual(held.stale, 1);
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  git(other, ['worktree', 'remove', '--force', foreign]);
+  assert.strictEqual(keep.nestedHold(wt), null);
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'removed');
+  assert.strictEqual(keep.markerState(wt).state, 'absent');
+});
+
+test('a submodule of the worktree\'s own repository does not keep the marker and a bare repository does', () => {
+  const repo = makeRepo('nested-sub');
+  const wt = addWorktree(repo, 'sub-1', 'claude/sub');
+  markedThenAged(wt, KEY_A);
+  const gitDir = git(wt, ['rev-parse', '--absolute-git-dir']);
+  const subGit = path.join(gitDir, 'modules', 'libs', 'sub');
+  fs.mkdirSync(subGit, { recursive: true });
+  const sub = path.join(wt, 'libs', 'sub');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ' + path.relative(sub, subGit) + '\n');
+  const bare = path.join(wt, 'scratch', 'remote.git');
+  fs.mkdirSync(bare, { recursive: true });
+  git(bare, ['init', '-q', '--bare']);
+  const held = keep.reconcileKeep(wt, NOW, IDLE);
+  assert.strictEqual(held.action, 'kept');
+  assert.deepStrictEqual(held.nested, { path: path.join('scratch', 'remote.git'), kind: 'repository' });
+  fs.rmSync(path.join(wt, 'scratch'), { recursive: true, force: true });
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'removed', 'the submodule alone never holds the marker');
+});
+
+test('a whole-tree worktree move into the taker keeps the taker\'s marker at SessionEnd until the moved tree leaves', () => {
+  const repo = makeRepo('nested-move');
+  const old = addWorktree(repo, 'old-1', 'claude/old');
+  const taker = addWorktree(repo, 'taker-1', 'claude/taker');
+  const started = keep.run('session-start', { cwd: taker, sessionKey: KEY_B, source: 'startup', nowMs: NOW, idleMs: IDLE });
+  assert.strictEqual(started.keep.action, 'created');
+  fs.writeFileSync(path.join(old, 'carried.txt'), 'uncommitted work\n');
+  const moved = path.join(taker, '.claude', 'worktrees', 'old-1');
+  fs.mkdirSync(path.dirname(moved), { recursive: true });
+  git(taker, ['worktree', 'move', old, moved]);
+  const ended = keep.run('session-end', { cwd: taker, sessionKey: KEY_B, nowMs: NOW + 1000, idleMs: IDLE });
+  assert.strictEqual(ended.anchor.action, 'aged');
+  assert.strictEqual(ended.keep.action, 'kept');
+  assert.strictEqual(ended.keep.reason, 'nested-repository');
+  assert.deepStrictEqual(ended.keep.nested, { path: path.join('.claude', 'worktrees', 'old-1'), kind: 'worktree' });
+  assert.strictEqual(keep.markerState(taker).state, 'ours');
+  assert.strictEqual(fs.readFileSync(path.join(moved, 'carried.txt'), 'utf8'), 'uncommitted work\n');
+  git(taker, ['worktree', 'move', moved, old]);
+  assert.strictEqual(keep.reconcileKeep(taker, NOW + 2000, IDLE).action, 'removed');
+});
+
+test('the release verb and retireAnchors keep the marker over a nested repository', () => {
+  const repo = makeRepo('nested-release');
+  const wt = addWorktree(repo, 'rel-1', 'claude/rel');
+  assert.strictEqual(keep.writeAnchor(wt, KEY_A, record(KEY_A, wt)).ok, true);
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  const clone = path.join(wt, 'vendor', 'clone');
+  fs.mkdirSync(clone, { recursive: true });
+  git(clone, ['init', '-q']);
+  const retired = keep.retireAnchors(wt, [{ key: KEY_A, lastSeenAt: NOW - 1000 }], NOW, IDLE);
+  assert.deepStrictEqual(retired.ended, [KEY_A]);
+  assert.deepStrictEqual(retired.faults, []);
+  assert.strictEqual(retired.keep.action, 'kept');
+  assert.strictEqual(retired.keep.reason, 'nested-repository');
+  const released = keep.run('release', { cwd: wt, sessionKey: KEY_A, nowMs: NOW, idleMs: IDLE });
+  assert.strictEqual(released.anchor.action, 'removed');
+  assert.strictEqual(released.keep.action, 'kept');
+  assert.deepStrictEqual(released.keep.nested, { path: path.join('vendor', 'clone'), kind: 'repository' });
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+});
+
+test('sweepSiblings keeps the marker of a sibling whose anchor aged while a nested repository remains', () => {
+  const repo = makeRepo('nested-sweep');
+  const held = addWorktree(repo, 'held-1', 'claude/held');
+  const free = addWorktree(repo, 'free-1', 'claude/free');
+  markedThenAged(held, KEY_A);
+  markedThenAged(free, KEY_B);
+  const clone = path.join(held, 'vendor', 'clone');
+  fs.mkdirSync(clone, { recursive: true });
+  git(clone, ['init', '-q']);
+  const summary = keep.sweepSiblings(repo, NOW + 1000, IDLE);
+  assert.strictEqual(summary.scanned, 2);
+  assert.strictEqual(summary.kept, 1);
+  assert.strictEqual(summary.removed, 1);
+  assert.strictEqual(keep.markerState(held).state, 'ours');
+  assert.strictEqual(keep.markerState(free).state, 'absent');
+  const late = keep.sweepSiblings(repo, NOW + 2000, IDLE, { deadline: 0 });
+  assert.strictEqual(late.kept, 1, 'a sweep past its deadline holds the marker rather than releasing it');
+  fs.rmSync(clone, { recursive: true, force: true });
+  assert.strictEqual(keep.markerState(held).state, 'ours');
+  assert.strictEqual(keep.sweepSiblings(repo, NOW + 3000, IDLE, { deadline: 0 }).kept, 1, 'without a finished scan the marker stays even with the repository gone');
+  assert.strictEqual(keep.sweepSiblings(repo, NOW + 4000, IDLE).removed, 1);
+  assert.strictEqual(keep.markerState(held).state, 'absent');
+});
+
+test('an unfinished nested scan keeps the marker, and a live anchor decides before any scan runs', () => {
+  const repo = makeRepo('nested-deadline');
+  const wt = addWorktree(repo, 'dl-1', 'claude/dl');
+  assert.strictEqual(keep.writeAnchor(wt, KEY_A, record(KEY_A, wt)).ok, true);
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'created');
+  const live = keep.reconcileKeep(wt, NOW, IDLE, { deadline: 0 });
+  assert.strictEqual(live.action, 'kept');
+  assert.strictEqual(live.reason, undefined, 'a live anchor holds the marker before the scan could decide anything');
+  assert.strictEqual(keep.writeAnchor(wt, KEY_A, record(KEY_A, wt, { endedAt: NOW })).ok, true);
+  assert.deepStrictEqual(keep.nestedHold(wt, 0), { reason: keep.NESTED_HOLDS.SCAN_INCOMPLETE, scan: 'scan-deadline' });
+  const late = keep.reconcileKeep(wt, NOW, IDLE, { deadline: 0 });
+  assert.strictEqual(late.action, 'kept');
+  assert.strictEqual(late.reason, 'nested-scan-incomplete');
+  assert.strictEqual(late.scan, 'scan-deadline');
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  const locked = path.join(wt, 'locked');
+  fs.mkdirSync(locked);
+  fs.chmodSync(locked, 0o000);
+  try {
+    let readable = true;
+    try {
+      fs.readdirSync(locked);
+    } catch {
+      readable = false;
+    }
+    if (!readable) {
+      const blind = keep.reconcileKeep(wt, NOW, IDLE);
+      assert.strictEqual(blind.action, 'kept');
+      assert.strictEqual(blind.reason, 'nested-scan-incomplete');
+      assert.match(blind.scan, /^unreadable:/);
+    }
+  } finally {
+    fs.chmodSync(locked, 0o755);
+  }
+  assert.strictEqual(keep.reconcileKeep(wt, NOW, IDLE).action, 'removed');
+});
+
+test('nestedRepositories walks in name order, stops at the first blocking repository on request, and at its deadline', () => {
+  const repo = makeRepo('nested-order');
+  const wt = addWorktree(repo, 'ord-1', 'claude/ord');
+  const gitDir = git(wt, ['rev-parse', '--absolute-git-dir']);
+  const subGit = path.join(gitDir, 'modules', 'sub');
+  fs.mkdirSync(subGit, { recursive: true });
+  const sub = path.join(wt, '.mods', 'sub');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ' + path.relative(sub, subGit) + '\n');
+  for (const name of ['b-first', 'z-last']) {
+    const clone = path.join(wt, name, 'clone');
+    fs.mkdirSync(clone, { recursive: true });
+    git(clone, ['init', '-q']);
+  }
+  fs.mkdirSync(path.join(wt, 'node_modules', 'pkg', 'lib'), { recursive: true });
+  const full = keep.nestedRepositories(wt);
+  assert.strictEqual(full.ok, true);
+  assert.deepStrictEqual(full.nested.map((n) => n.path), [path.join('.mods', 'sub'), path.join('b-first', 'clone'), path.join('z-last', 'clone')]);
+  const first = keep.nestedRepositories(wt, { firstBlocking: true });
+  assert.strictEqual(first.ok, true);
+  assert.deepStrictEqual(first.nested, [
+    { path: path.join('.mods', 'sub'), kind: 'submodule' },
+    { path: path.join('b-first', 'clone'), kind: 'repository' },
+  ]);
+  assert.ok(first.entries < full.entries, 'the early stop reaches neither node_modules nor z-last');
+  assert.deepStrictEqual(keep.nestedRepositories(wt, { deadline: 0 }), { ok: false, reason: 'scan-deadline', entries: 0, nested: [] });
+  assert.deepStrictEqual(keep.nestedRepositories(wt, { deadline: performance.now() + 60000 }), full);
+});
+
+test('the CLI honours WK_SCAN_DEADLINE_MS only in the JSON test mode and otherwise scans against NESTED_SCAN_DEADLINE_MS', () => {
+  assert.strictEqual(keep.NESTED_SCAN_DEADLINE_MS, 3000);
+  const repo = makeRepo('nested-cli');
+  const wt = addWorktree(repo, 'cli-1', 'claude/cli');
+  const env = { WK_CWD: wt, WK_SESSION_KEY: KEY_A, WK_IDLE_HOURS: '72' };
+  runCli('session-start', { ...env, WK_SOURCE: 'startup', WK_NOW: String(NOW) });
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  const held = runCli('session-end', { ...env, WK_NOW: String(NOW + 1000), WK_SCAN_DEADLINE_MS: '0' });
+  assert.strictEqual(held.keep.action, 'kept');
+  assert.strictEqual(held.keep.reason, 'nested-scan-incomplete');
+  assert.strictEqual(held.keep.scan, 'scan-deadline');
+  const blank = runCli('session-end', { ...env, WK_NOW: String(NOW + 2000), WK_SCAN_DEADLINE_MS: ' ' });
+  assert.strictEqual(blank.keep.action, 'removed', 'a blank override falls back to the default deadline');
+  runCli('session-start', { ...env, WK_SOURCE: 'startup', WK_NOW: String(NOW + 3000) });
+  assert.strictEqual(keep.markerState(wt).state, 'ours');
+  execFileSync(process.execPath, [MODULE, 'session-end'], {
+    cwd: LIB,
+    encoding: 'utf8',
+    env: { ...process.env, ...env, WK_EMIT: 'claude-hook', WK_SCAN_DEADLINE_MS: '0' },
+  });
+  assert.strictEqual(keep.markerState(wt).state, 'absent', 'outside the JSON test mode the override is ignored');
 });

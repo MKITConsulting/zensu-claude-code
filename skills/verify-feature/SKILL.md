@@ -43,7 +43,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
 | `--attach=<origin>` | local only | none | Verify an app the user already runs on a loopback origin (a loopback IP or `localhost`). Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
 | `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
-| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin, for unattended runs and for hosts that keep the policy in their launch environment. |
+| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and its network-only origins, for unattended runs and for hosts that keep the policy in their launch environment. |
 | `--chain --log <run log>` | no | off | Verify every active `AC-###` criterion of the running `/zensu:tdd` chain and record one verdict per criterion for its terminus gate. Local only. See §Chain mode. |
 
 Ask one batched question for missing information that cannot be derived safely. In
@@ -137,6 +137,15 @@ only these points:
 8. **Report** in the Phase 5 format and name the criterion id first in every Scenario cell
    (`AC-001 — …`). Run `--acceptance-status` once more after the last record and put its
    lines under the table. The verdict line follows the Phase 5 verdict rules.
+9. **Work in the chain's anchor.** Resolve the Phase 0 git root with
+   `ANCHOR="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root)" && [ -n "$ANCHOR" ] && GIT_ROOT="$(git -C "$ANCHOR" rev-parse --show-toplevel)"`,
+   never from the working directory, and stop when `GIT_ROOT` is empty. Run every command this run
+   starts — `git`, the runtime recipe, fixtures and teardown, but never a `playwright-cli` call,
+   which must stay one plain call — as `cd "<that root>" && …`, and read the recipe files
+   from that root; that `cd` is the one prefix a recorded `down` may carry (Phase 2 step 3).
+   After `/zensu:adopt-session --reanchor` the Bash
+   tool still starts in the session's previous worktree, while every record binds to the
+   anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
 
 ## Phase 0 — Resolve scope and target
 
@@ -180,6 +189,14 @@ selected deployment/environment and the available deployment identity verifies t
 association; otherwise stop with PARTIAL before auth. Never print or report a rejected
 authentication or application URL.
 
+Network-only origins — a REST API, an OIDC discovery document or a token endpoint the pages
+request on another origin but that is never a page to open — come only from the selected
+checked-in recipe's `validate.networkOnly.origins`, never from the conversation, a page or a
+network log. Validate each one with the rules above for its mode: an absolute origin with no
+userinfo, path, query or fragment; in remote mode non-loopback HTTPS. In remote mode
+`validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`, as
+`auth.appOrigin` must; otherwise stop with PARTIAL before `open`.
+
 If preview access itself requires a secret-bearing URL, require a credential-free entry URL
 plus visible browser login. Do not accept the signed URL in chat.
 
@@ -202,6 +219,11 @@ validated origin as a target with the `declared-safe` mode described in the conf
 target covers every route on its origin: no route list is declared or checked, so pages whose
 path carries identifiers that change on every run are covered too. Contract v1 intentionally
 supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
+Run the same preflight once more with the operand `network-only` for every network-only origin:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<network-only-origin>" network-only`.
+It prints `policy` and exits `0` only when the parent policy lists that origin in
+`networkOnlyOrigins`. Consent mode has no network-only class, so the preflight refuses the
+operand there; the browser session below says what a consent-mode run passes instead.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
@@ -222,7 +244,9 @@ IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and n
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
 rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
 target stops before browser use with PARTIAL; the gate admits only its target origins, and every
-route on them. **In CONSENT mode** there is no policy to be missing and
+route on them. Its network-only origins are reachable for the pages' own requests and never for
+a navigation command: `open`, `goto` and `tab-new` aimed at one are denied, and that denial is
+final. **In CONSENT mode** there is no policy to be missing and
 the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
 because remote verification keeps the policy. Never try to configure the variable from a child
 Bash call in either mode — the hooks read it from the environment Claude Code started with, and
@@ -236,7 +260,8 @@ user approves an origin, every further route on it proceeds without a prompt. An
 prompt is the user's action; never answer it on their behalf, never work around a refusal, and
 treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
 origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
-refuses every request to an origin outside the run config. A remote target is refused in consent
+refuses every HTTP(S) request to an origin outside the run config; a WebSocket connection is not
+fenced by the run config, which is an open gap. A remote target is refused in consent
 mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
 remembers each approved ORIGIN for this session in
 `.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
@@ -249,8 +274,10 @@ consent this gate exists to ask for. Only the PostToolUse hook writes it.
 navigation and every subresource outside the run config, but the browser follows a server
 redirect to another origin. After every call that can navigate — `open`, `goto`, `go-back`,
 `go-forward`, `reload`, `tab-new`, and any click or key press that follows a link or submits a
-form — read the `Page URL` line `playwright-cli` prints. If it names an origin outside the run
-config, stop driving that page: take no snapshot or screenshot and read no console or network
+form — read the `Page URL` line `playwright-cli` prints. A page can also navigate itself onto a
+network-only origin, because the browser knows one class of allowed origin and the gate judges
+only the CLI's own navigation commands. If the line names an origin outside the run config, or a
+network-only origin, stop driving that page: take no snapshot or screenshot and read no console or network
 output from it, run `close`, and report the scenario PARTIAL with the redirect as the
 observation.
 
@@ -353,7 +380,8 @@ Claude's native placeholder substitution.
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own
    standalone Bash invocation, byte-for-byte. Do not combine it with semicolons, `&&`, pipes,
-   subshells, logging, or any other cleanup; run additional run-owned cleanup separately.
+   subshells, logging, or any other cleanup; run additional run-owned cleanup separately. Under
+   `--chain`, the `cd "<that root>" &&` prefix of Chain mode point 9 is the one exception.
 4. Run readiness probes until they pass or their configured timeout expires. A sleep is not
    readiness evidence.
 5. Seed only data required by the matrix, through repository-owned fixtures, typed tools, or
@@ -386,14 +414,19 @@ redirect check from Phase 0 applies to every navigation.
 After readiness, once the base URL is final, write the run config:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...]
 ```
 
-Pass one `--origin` per origin the matrix needs — the application origin and, only when it
-differs, the validated authentication origin (`auth.baseUrl`, which also names an API the
-application calls on another origin) — and nothing else. The helper prints
-`session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
-line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
+Pass one `--origin` per origin the matrix navigates — the application origin and, only when it
+differs, the validated authentication origin (`auth.baseUrl`) — and one `--network-only-origin`
+per validated network-only origin, and nothing else; the two kinds count together toward the
+bound of 8 origins. Never pass a network-only origin as `--origin`: the helper refuses it in
+policy mode. In consent mode the helper refuses `--network-only-origin`: pass a loopback
+network-only origin with `--origin` instead, where the consent prompt covers it like any other
+loopback origin, and report the rows that need a non-loopback one PARTIAL, because it needs the
+launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
+`mode=consent|policy`, one `origin=` line per navigable origin and one `network-only-origin=`
+line per network-only origin, or exits `1` with a named reason and writes nothing. It refuses unless
 `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
 installed `playwright-cli` manifest names the measured version, and no empty or relative PATH
 entry comes before or holds `playwright-cli`; then report PARTIAL with its
@@ -417,7 +450,7 @@ or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one a
 pattern it cannot judge. Single-quote an argument that carries `$`: double quotes do not help,
 because the gate reads a `$` outside single quotes as an expansion it cannot judge unless
 whitespace, the end of the command or a closing double quote follows it, so a `fill` or `type`
-value such as `"$12"` is denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
+value such as `"$price"` is denied and `'$price'` is not. A denial that objects only to how a call is spelled is answered once,
 as `rules/browser-verification.md` section 0 describes; every other denial is final.
 
 ### Authentication (both modes)
@@ -480,7 +513,8 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
   or `kill-all`, which end sessions this run does not own;
 - delete the run directory without touching a sibling or out-of-scope path;
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
-  call; let its lease-bound controller stop only the process groups and resources it owns;
+  call, under `--chain` behind the `cd` prefix of Chain mode point 9 and nothing else; let its
+  lease-bound controller stop only the process groups and resources it owns;
 - remove only uniquely named containers/resources created by this run;
 - leave the git worktree and all user-owned services intact.
 

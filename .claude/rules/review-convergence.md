@@ -44,7 +44,28 @@ judge tagged it `[NOT FIXED]` directly or through a `[NOT FIXED] <id> covers <pa
 when its cited lines are code this fix pass edited. The judge clause exists because the judge
 alone reads the ledger, so its findings already account for what earlier rounds decided.
 Everything else is deferred and ledgered right away: `parked` when it is IMPORTANT, `deferred`
-otherwise.
+otherwise. Under `hooks.autoFixSeverity: critical`, the default, no IMPORTANT finding stays
+routable in any review, the first one included: the `critical` arm parks each one, in its fix case
+and in its no-fix case (`PARK_CLAUSE`), and `/zensu:self-review` fixes it. That arm renders only
+while `hooks.selfReview` and this key are both on; otherwise `SEVERITY` falls back to `important`.
+
+**A re-review CRITICAL needs a reproduction (`hooks.criticalReproduction`, default on).**
+Stage 3 of the `/zensu:tdd` step 4c gate runs only inside the Finding Verification Gate and only
+on a re-review: every CRITICAL finding stage 2 graded `VERIFIED` must fail a test run through the
+evidence runner with `--scope scoped` before it routes, logged as
+`FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE> <record or reason>`.
+A `NOT-REPRODUCED` or `NOT-TESTABLE` finding leaves the loop through the existing
+`[Deferred — do not fix]` annotation and a `deferred` ledger line that keeps CRITICAL. It never
+becomes `parked`, because a parked entry is a self-review must-fix and this finding is not. A
+fourth annotation was rejected: both delegate arms enumerate exactly three do-not-fix
+annotations, so a new one would route. The delegate reads the flag together with
+`findingVerification`, because stage 3 does not exist with that gate off. Coupled sites:
+`REPRODUCTION_RULE` inside `CONVERGENCE_CLAUSE` and the self-review hand-off sentence in
+`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/tdd/SKILL.md` (in-line, under the
+433-line cap), the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
+`docs/review-severity.md`, the `criticalReproduction` row of `docs/configuration.md`,
+`config.example.json`, LC2 to LC2j in `tests/structure/test-review-convergence.sh`, and RP0 to
+RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
 
 **FAIL-OPEN IS THE CONTRACT.** The classification runs only for a re-review launched from the
 post-review directive AND only when `review-round-scope-v1.js` and `review-ledger-v1.js` both
@@ -59,7 +80,7 @@ for an earlier round is NOT a regression: both are transitions, `/zensu:self-rev
 first and a `[STILL OPEN]` re-raise the second. A repeated registration with the same state and
 anchor is idempotent, because a deferred finding is ledgered at classification time. So is a
 `deferred` repeat of a `parked` entry at the same anchor, which keeps it `parked`: classification
-ledgers an IMPORTANT deferral `parked`, while the fix-round form can only write `deferred`. Every cause
+ledgers an IMPORTANT deferral `parked`, while the fix-round form writes `parked` only in the `critical` arm. Every cause
 is judged per generation: a problem before the last marker never degrades the generation after it.
 
 **One verdict, two consumers, opposite safe directions.** For routing, `degraded` means "route as
@@ -112,12 +133,13 @@ CRITICAL, because a deflated blocker is the one error convergence must never mak
 
 **Coupled sites that move together:** `CONVERGENCE_CLAUSE` and `IMPORTANT_RULE` in
 `hooks/post-review-tdd-delegate.sh` (defined once after `LOG_COMMAND`, because the clause names
-`${LOG_HELPER_Q}` and the hook runs under `set -u`, and interpolated in BOTH
+`${LOG_HELPER_Q}` and the hook runs under `set -u`, and interpolated in ALL THREE
 severity arms right before `${FIX_DONE_PHRASE}`, so the clause is read before the fix-done
 instruction — the clause must contain none of the phrases `P3b`, `I17` and `S17` count per
 line, and never the literal `review-round-scope-v1.js`, which is why it says "the round-scope
 helper"); the one `CONVERGENCE_ON` read that gates both the clause and the `LEDGER_OPEN_ROWS`
-fragment; the `R${NEXT}-{step_id}` claim prefix in BOTH arms, which `hooks.incrementalReviewRounds`
+fragment; `LEDGER_STATES`, `UNFIXED_STATES`, `UNAVAILABLE_ROUTE` and `PARK_CLAUSE`, which only the
+`critical` arm changes, while `important` and `all` render the clause byte for byte as before; the `R${NEXT}-{step_id}` claim prefix in every arm, which `hooks.incrementalReviewRounds`
 depends on and which is therefore NOT gated on this key; the widened case (A) and the
 three-annotation exception list of the suggestions arm; the `--report` ledger rows in
 `COMBINED_SUMMARY_DIRECTIVE` (through `LEDGER_OPEN_ROWS`, empty with the key off, so the

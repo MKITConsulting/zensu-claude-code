@@ -23,12 +23,12 @@ const { RUNTIME_PATHS } = require('../windows-profile-contract.js');
 
 const WINDOWS_TEST_WAIT_MS = 30000;
 const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
-// A cold Windows PowerShell Add-Type compilation can exceed 30 seconds while
-// the Windows contract shards share one hosted runner pool. Keep the fixture
-// bounded, but leave enough room to observe the child process's real exit code.
+// The Windows job helper reaches the suite in under 2 s, under 4 s on a VM's first
+// PowerShell. Module auto-loading in the sandbox would add 11-43 s, so the profile
+// deadline stays below that, and the suite timeout leaves room for the real exit code.
 const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
-const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 60000 : 120;
+const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 10000 : 120;
 const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
   process.platform === 'win32' ? 90000 : 5000;
 const TEST_PROFILE_DEADLINE_ASSERT_MS =
@@ -345,20 +345,23 @@ test('times out a nested process tree and records deterministic failure evidence
         stdio: 'ignore',
       });
       nested.unref();
-      fs.writeFileSync(${JSON.stringify(pidFile)}, String(nested.pid));
+      fs.writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, String(nested.pid));
+      fs.renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});
       setInterval(() => {}, 1000);
     `);
     const result = await runProfile({
-      manifest: manifestFor(process.platform, [
-        suite('timeout', child, {
-          timeoutMs: process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 250,
-        }),
-      ]),
+      manifest: manifestFor(process.platform, [suite('timeout', child)]),
       profileId: 'test-profile',
       root,
       reportDirectory: path.join(root, 'reports'),
       output: { write() {} },
+      suiteTimeoutTrigger: () => waitFor(() => fs.existsSync(pidFile), TEST_SUITE_TIMEOUT_MS),
     });
+    assert.equal(
+      fs.existsSync(pidFile),
+      true,
+      `the suite timed out before it published the grandchild pid within ${TEST_SUITE_TIMEOUT_MS}ms`,
+    );
     assert.equal(result.exitCode, EXIT_SUITE);
     const report = JSON.parse(fs.readFileSync(result.reportPath, 'utf8'));
     assert.equal(report.status, 'failed');

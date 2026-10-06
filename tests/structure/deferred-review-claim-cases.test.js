@@ -26,9 +26,11 @@ const expectedCaseIds = [
   'P3',
   'L1',
   'L2',
+  'L3',
   'C1',
   'C2',
   'C2f',
+  'C2f-reuse',
   'C2c',
   'C2d',
   'C2e',
@@ -55,15 +57,18 @@ const expectedCaseIds = [
   'C6a',
   'C6b',
   'C7',
+  'C7-renew',
   'C8',
+  'C7-reuse',
+  'C7-identity',
   'D1',
 ];
 
-test('discovers exactly the 37 isolated deferred-review cases in source order', () => {
+test('discovers exactly the 42 isolated deferred-review cases in source order', () => {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const discovered = discoverCases(source);
   assert.deepEqual(discovered.map(({ id }) => id), expectedCaseIds);
-  assert.equal(new Set(discovered.map(({ id }) => id)).size, 37);
+  assert.equal(new Set(discovered.map(({ id }) => id)).size, 42);
 });
 
 test('the four Windows profiles assign every case exactly once', () => {

@@ -84,6 +84,7 @@ NODE
 
 CI_STRUCTURE="$(load_local_only_inventory ciStructureTests)" || exit 2
 LOCAL_ONLY_STRUCTURE="$(load_local_only_inventory localStructureTests)" || exit 2
+NODE_DEPS_STRUCTURE="$(load_local_only_inventory nodeDepsStructureTests)" || exit 2
 
 is_local_only() {
   local inventory="$1" entry="$2"
@@ -102,6 +103,9 @@ const actualStructure = fs.readdirSync(path.join(root, 'tests', 'structure'))
 const classified = [...value.ciStructureTests, ...value.localStructureTests];
 if (JSON.stringify(uniqueSorted(classified)) !== JSON.stringify(actualStructure)
     || classified.length !== new Set(classified).size
+    || !Array.isArray(value.nodeDepsStructureTests)
+    || value.nodeDepsStructureTests.length !== new Set(value.nodeDepsStructureTests).size
+    || value.nodeDepsStructureTests.some((name) => !classified.includes(name))
     || !Array.isArray(value.ciOfflineSuites)
     || value.ciOfflineSuites.some((suite) => !suite || typeof suite.label !== 'string'
       || typeof suite.path !== 'string' || !Array.isArray(suite.args)
@@ -312,11 +316,9 @@ for t in "$TESTS_DIR"/structure/test-*.sh; do
     # shard rather than only on whichever one happens to own it.
     in_shard "structure/$base" || continue
   fi
-  case "$base" in
-    test-windows-ci-contract.sh|test-workflow-checkout-credentials.sh|test-workflow-dispatch-inputs.sh)
-      deps_ready || { block_suite "structure/$base"; continue; }
-      ;;
-  esac
+  if is_local_only "$NODE_DEPS_STRUCTURE" "$base"; then
+    deps_ready || { block_suite "structure/$base"; continue; }
+  fi
   run_suite "structure/$base" bash "$t"
 done
 

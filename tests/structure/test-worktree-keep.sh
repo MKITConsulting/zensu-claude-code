@@ -70,7 +70,7 @@ UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0
 UNIT_MAX_SKIPPED=0
 # A floor fires on REMOVAL only, so it is raised in the SAME commit as any case added
 # to the unit file. Left below the real count it lets a third of the suite be deleted green.
-UNIT_FLOOR=85
+UNIT_FLOOR=101
 if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" -le "$UNIT_MAX_SKIPPED" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
   check "K3 unit suite green with at least $UNIT_FLOOR registered cases and at most $UNIT_MAX_SKIPPED skipped (pass=$UNIT_PASS)" PASS
 else

@@ -32,7 +32,8 @@ and the flags `--filename`, `--persistent` and `--profile`. A flag given twice i
 Never re-issue a denied call under another spelling, another session name, or through another
 program — with one exception, the shape denial below. A command or flag that is not available,
 an origin outside the run config or the navigation policy, a refused or unanswerable consent
-prompt, and a call from a subagent are final. A shape denial objects only to how the call is
+prompt, and a call from a subagent are final. So is a navigation command aimed at a network-only
+origin. A shape denial objects only to how the call is
 spelled, and the gate ends its text with the note `(shape denial: re-issue this call once as one
 plain playwright-cli call with single-quoted literal arguments; a second denial is final)`; no
 other denial carries it. Its reason asks for exactly one plain `playwright-cli` call
@@ -56,7 +57,9 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    approved origin, and enforce this fail-closed origin boundary before navigation,
    authentication, or screenshots. In POLICY mode an origin is approved when the
    parent-environment policy names it as a target with `evidenceMode: declared-safe`; the gate
-   admits only those targets, and every route on them. In consent mode (the preflight printed
+   admits only those targets, and every route on them. A network-only origin the policy declares
+   in `networkOnlyOrigins` is never approved: the pages may request it, and the gate denies
+   `open`, `goto` and `tab-new` aimed at it with its own final reason. In consent mode (the preflight printed
    `consent`) the user approves the origin instead: the gate admits loopback origins only (a
    loopback IP or `localhost`) and opens the host's permission prompt once per new loopback
    origin. Either way an approved origin covers every page on it, at any path, including routes
@@ -70,8 +73,9 @@ with element refs such as `e21`; target elements by those refs. Every navigating
 1. Open the run-config session at the resolved base URL and route only after the policy
    preflight passes.
 2. Read the `Page URL` line of every navigating call. An origin outside the run config means a
-   server redirect left the approved set: stop driving that page, collect no evidence from it,
-   and report the scenario PARTIAL.
+   server redirect left the approved set, and a network-only origin means the page navigated
+   itself onto an origin the run config allows for requests only: in both cases stop driving
+   that page, collect no evidence from it, and report the scenario PARTIAL.
 3. Take a `snapshot` before interacting. Confirm the URL, title/heading, authentication state,
    and that the page is not a generic error or login wall.
 4. Apply the pre-model evidence boundary below, then run `console` and `requests` to establish

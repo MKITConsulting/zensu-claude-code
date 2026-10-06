@@ -60,14 +60,18 @@ properties are easy to get wrong and cost the whole feature:
   `Edit|Write|MultiEdit`, so `NotebookEdit` is NOT phase-gated — in a healthy session
   either, which is why the relaxation restores the pre-Session-Control capability set
   rather than widening it. Say "Edit/Write/MultiEdit", never "all mutating tools".
-- **A Bash write without a project anchor denies; a read does not.** In both relaxed
-  states `CLAUDE_PROJECT_DIR` is typically gone or unset — in the orphaned state it is by
-  construction the deleted directory, since the record's `project_root` was minted from
-  the SessionStart cwd. `pre-bash-source-write-gate.sh` therefore runs the parser's
-  `BSWG_MODE=detect` channel check, which needs no anchor, and denies only commands that
-  actually write. Denying unconditionally there once put the diagnostic back behind the
-  defect it reports, and the healthy-anchor test fixtures hid it; `O29`/`O29a` pin both
-  the deleted-root and unset-anchor shapes.
+- **While `hooks.bashWriteGate` is `true`, a Bash write without a project anchor denies; a
+  read does not.** At the default the source-write gate is off and exits before its bind,
+  so a Bash write runs in both relaxed states. In both relaxed states `CLAUDE_PROJECT_DIR`
+  is typically gone or unset — in the orphaned state it is by construction the deleted
+  directory, since the record's `project_root` was minted from the SessionStart cwd, which
+  also means a project-level `.zensu/config.json` opt-in is unreadable there and only a
+  global or `ZENSU_CONFIG` opt-in reaches this branch. Opted in, `pre-bash-source-write-gate.sh`
+  runs the parser's `BSWG_MODE=targets` pass, which resolves write operands without an
+  anchor, and denies only commands that actually write. Denying unconditionally there once
+  put the diagnostic back behind the defect it reports, and the healthy-anchor test fixtures
+  hid it; `O29`/`O29a` pin both the deleted-root and unset-anchor shapes with the gate
+  opted in.
 
 **A vanished LIVE `cwd` is NOT a third member, and it must not become one.** Both states
 above are failures of the BIND. A PreToolUse `cwd` that no longer names a real directory —
@@ -125,14 +129,19 @@ present by construction. The lineage predicate matches TWO states, and they are 
 DIFFERENT reasons: with the recorded project root still present a workflow document is
 reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
 gone the document is not reachable from this record, and what stands in for the guarantee is
-that the state has a real in-place repair — adoption, a user action leaving provenance —
+that the state has a real in-place repair — adoption, which re-mints the record under the
+records lock and leaves provenance, automatically on the next hook bind or by hand —
 rather than a silent waiver. A consumer that says anything about the workflow document must
 ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
 `zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it.
-What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` now spells FIVE
-scopes, two of which — `incompatible-runtime` and `pruned-plugin-root` — take the two
-versions as positional arguments. FIVE gates can deny
-in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
+What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` spells SEVEN
+scopes, listed above the emitter in `zensu-session.sh`. Two of them — `incompatible-runtime`
+and `pruned-plugin-root` — take the two versions as their first positional arguments, the
+adoption token as `$4` and the audience as `$5`; `adoption-incomplete` takes the token
+and the audience alone, because a lost race establishes no version pair (see
+`.claude/rules/automatic-adoption.md`). FIVE gates can deny
+in either state — the source-write gate only while `hooks.bashWriteGate` is `true`, because its
+config check sits ahead of its bind: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
 left on the generic text tells the user to start a fresh session while its sibling says the session can

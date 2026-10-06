@@ -125,6 +125,7 @@ emit_autopilot_blocked() {
     const source=process.env.PLAN_SOURCE||"";
     const causes={
       CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
+      ACTIVE_STATE_UNREADABLE:" The project-local Autopilot state could not be read: its lock could not be taken, or its storage or path failed a safety check, so whether this session owns a run is unknown. That is not a no-run answer, so the standalone plan policy was not applied. Retry the approval once the concurrent Autopilot operation has finished; if it keeps failing, run /zensu:doctor, whose autopilot row reads the same records without taking the project lease.",
       SESSION_CONTEXT_UNAVAILABLE:" This session could not be resolved to a Session Control identity, so run ownership could not be established.",
       PLAN_TRANSITION_REJECTED:" The run state refused the PLAN_APPROVED transition; the plan itself was read successfully.",
       INVALID_PLAN_PAYLOAD:" Neither the ExitPlanMode input nor its tool response carried plan text or a plan file path, so the approved plan could not be read and the run could not be identified.",
@@ -226,10 +227,14 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       exit 0
     fi
     ACTIVE_RC=1
-  elif ACTIVE_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$AUTOPILOT_OWNER" 2>/dev/null)"; then
+  elif ACTIVE_JSON="$(autopilot_read_active_strict "$PROJECT_ROOT" "$AUTOPILOT_OWNER" 2>/dev/null)"; then
     ACTIVE_RC=0
   else
     ACTIVE_RC=$?
+  fi
+  if [ "$ACTIVE_RC" -eq 5 ]; then
+    emit_autopilot_blocked ACTIVE_STATE_UNREADABLE
+    exit 0
   fi
   if [ "$ACTIVE_RC" -gt 1 ]; then
     emit_autopilot_blocked CORRUPT_ACTIVE_STATE

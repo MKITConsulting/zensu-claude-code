@@ -121,10 +121,10 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
     check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 15 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 112 "verify-consent-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR" 20 "verify-navigation-floor-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 115 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 14 "verify-browser-config.test.js"
+run_unit "V7c browser-config" "$UNIT_CONFIG" 20 "verify-browser-config.test.js"
 run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
@@ -751,6 +751,27 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" post_run "$CLI goto http://127
 memory_has "http://127.0.0.1:4300" "/login" "policy-mode" \
   && check "H13d the recorder writes a policy-mode navigation as policy-mode" PASS \
   || check "H13d the recorder writes a policy-mode navigation as policy-mode" FAIL
+NETWORK_ONLY_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["http://127.0.0.1:4390"]}'
+NETWORK_ONLY_VERDICT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4390/v1/items" "$SID" "$PROJ")"
+case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_reason "$CLI goto http://127.0.0.1:4390/v1/items" "$SID" "$PROJ")" in
+  *'http://127.0.0.1:4390: origin is network-only in the navigation policy'*) NETWORK_ONLY_NAMED=1 ;;
+  *) NETWORK_ONLY_NAMED=0 ;;
+esac
+[ "$NETWORK_ONLY_VERDICT" = "DENY" ] && [ "$NETWORK_ONLY_NAMED" -eq 1 ] \
+  && check "H13e the real pre hook denies a navigation to a network-only origin with its own reason" PASS \
+  || check "H13e the real pre hook denies a navigation to a network-only origin with its own reason (verdict=$NETWORK_ONLY_VERDICT)" FAIL
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" = "NONE" ] \
+  && check "H13f-control a target of the same policy still passes without a prompt" PASS \
+  || check "H13f-control a target of the same policy still passes without a prompt" FAIL
+NETWORK_ONLY_COUNT_BEFORE="$(memory_count)"
+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$CLI goto http://127.0.0.1:4390/" "$SID" "$PROJ" >/dev/null
+[ "$(memory_count)" = "$NETWORK_ONLY_COUNT_BEFORE" ] \
+  && check "H13g the recorder writes no consent record for a network-only origin" PASS \
+  || check "H13g the recorder writes no consent record for a network-only origin" FAIL
+case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://*.example.com"]}' pre_reason "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ")" in
+  *'policy origin must name its host exactly'*) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" PASS ;;
+  *) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" FAIL ;;
+esac
 
 COUNT_BEFORE="$(memory_count)"
 post_run "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ" '{"tool_response":{"stdout":"","stderr":"","interrupted":true}}' >/dev/null

@@ -254,6 +254,16 @@ else
   check "banner loads plugin.json from the special plugin root" FAIL
 fi
 
+REANCHOR_OUT="$(cd -- "$PROJECT" \
+  && CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" HOME="$HOME_DIR" \
+    ZENSU_CONFIG="$CONFIG" bash "$PLUGIN/hooks/lib/zensu-session-reanchor.sh" \
+    2>"$RAW_TMP/reanchor.err")"
+if printf '%s' "$REANCHOR_OUT" | grep -qF 'Zensu session re-anchor — '; then
+  check "session re-anchor loads its module from the special plugin root" PASS
+else
+  check "session re-anchor loads its module from the special plugin root" FAIL
+fi
+
 PW_SOURCE_VERSION="$(cd -P -- "$PLUGIN" && node -e 'process.stdout.write(String(require("./hooks/lib/verify-consent-v1.js").PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' 2>/dev/null)"
 PW_BIN="$RAW_TMP/playwright-cli-bin"
 mkdir -p "$PW_BIN/node_modules/@playwright/cli"

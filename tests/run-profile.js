@@ -636,6 +636,7 @@ async function executeSuite({
   terminateProcessTree = terminateOwnedTree,
   heartbeatMs = HEARTBEAT_MS,
   cleanupCloseTimeoutMs = 5000,
+  suiteTimeoutTrigger = null,
 }) {
   revalidateFileBinding(root, suite.path, suite.binding, `suite ${suite.id}`);
   const command = commandForSuite(suite, bashExecutable);
@@ -705,6 +706,12 @@ async function executeSuite({
       Promise.race([
         supervisorResult.then((result) => ({ kind: 'result', result })),
         wrapperClosed.then((result) => ({ kind: 'wrapper-close', result })),
+        ...(suiteTimeoutTrigger
+          ? [Promise.resolve().then(() => suiteTimeoutTrigger(suite)).then(
+            () => ({ kind: 'timeout' }),
+            () => ({ kind: 'timeout' }),
+          )]
+          : []),
       ]),
       effectiveTimeoutMs,
     );
@@ -716,7 +723,7 @@ async function executeSuite({
   let exitCode = null;
   let signal = null;
   let spawnError = null;
-  if (typeof completion === 'symbol') {
+  if (typeof completion === 'symbol' || completion.kind === 'timeout') {
     status = 'timed_out';
   } else if (completion.kind === 'result') {
     if (completion.result.protocolError) {
@@ -844,6 +851,7 @@ async function runProfile({
   terminateProcessTree = terminateOwnedTree,
   heartbeatMs = HEARTBEAT_MS,
   cleanupCloseTimeoutMs = 5000,
+  suiteTimeoutTrigger = null,
   sourceGitRevision = null,
   runId = null,
   runAttempt = null,
@@ -972,6 +980,7 @@ async function runProfile({
         terminateProcessTree,
         heartbeatMs,
         cleanupCloseTimeoutMs,
+        suiteTimeoutTrigger,
       });
       report.suites.push(execution.result);
       atomicWriteJson(reportPath, report);
@@ -990,7 +999,12 @@ async function runProfile({
       signalEmitter.removeListener(signalName, handler);
     }
     if (!report.suites.some((suite) => suite.cleanup.status === 'failed')) {
-      fs.rmSync(sandboxRoot, { recursive: true, force: true });
+      await fs.promises.rm(sandboxRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: process.platform === 'win32' ? 20 : 0,
+        retryDelay: process.platform === 'win32' ? 100 : 0,
+      });
     }
   }
   return {

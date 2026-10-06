@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$PSModuleAutoLoadingPreference = 'None'
 
 $source = @'
 using System;
@@ -591,6 +592,7 @@ public static class ZensuWindowsProfileJobV1
 '@
 
 try {
+  Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
   if ([Text.Encoding]::UTF8.GetByteCount($Payload) -gt 32768) {
     throw 'payload too large'
   }

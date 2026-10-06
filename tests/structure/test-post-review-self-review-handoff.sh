@@ -133,7 +133,7 @@ fi
 # source-level count cannot tell a rendered interpolation from a literal that never
 # expands, which is the whole reason P3a exists for the other arm.
 INCLSUGG="$STATE_DIR/incl-sugg.json"
-printf '{"hooks":{"autoFixIncludeSuggestions":true}}' > "$INCLSUGG"
+printf '{"hooks":{"autoFixIncludeSuggestions":true,"autoFixMaxRounds":5}}' > "$INCLSUGG"
 CTX_A2="$(postrev "$SID_A" "$INCLSUGG")"
 # The arm-unique literals are what make this a pin rather than a repeat of P3a: both
 # arms emit the same sentence, so the needle alone passes whichever arm rendered. The
@@ -163,7 +163,7 @@ fi
 # Stop half; without this one the key could suppress the sentence at one render site
 # and not the other, with both suites green.
 NOSCOPE="$STATE_DIR/no-scope-sentence.json"
-printf '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$NOSCOPE"
+printf '{"hooks":{"reviewSpawnScopeSentence":false,"autoFixMaxRounds":5}}' > "$NOSCOPE"
 CTX_A3="$(postrev "$SID_A" "$NOSCOPE")"
 if [ -n "${ZENSU_REVIEW_SPAWN_IN_SCOPE:-}" ] \
   && echo "$CTX_A3" | grep -qF "subagent_type='zensu:code-reviewer'" \

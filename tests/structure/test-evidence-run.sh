@@ -133,6 +133,34 @@ else
   check "E8 the suite runs in the caller's working directory (rc=$RC/$RC_NESTED)" FAIL
 fi
 
+ELSEWHERE="$WORK/elsewhere"
+mkdir -p "$ELSEWHERE"
+ELSEWHERE="$(cd -P "$ELSEWHERE" && pwd -P)"
+git -C "$ELSEWHERE" init -q
+OUT_AWAY="$(cd "$ELSEWHERE" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e8b.err")"; RC_AWAY=$?
+if [ "$RC_AWAY" -eq 0 ] && printf '%s\n' "$OUT_AWAY" | grep -qxF "$PROJ" \
+  && ! printf '%s\n' "$OUT_AWAY" | grep -qxF "$ELSEWHERE" \
+  && grep -qF 'the working directory is not in the work tree of the bound project root, so the command runs in' "$WORK/e8b.err"; then
+  check "E8b from another work tree the suite runs in the bound project root and says so" PASS
+else
+  check "E8b from another work tree the suite runs in the bound project root and says so (rc=$RC_AWAY)" FAIL
+  printf '%s\n' "$OUT_AWAY" | tail -5
+fi
+
+INNER="$PROJ/inner-repo"
+mkdir -p "$INNER"
+git -C "$INNER" init -q
+OUT_INNER="$(cd "$INNER" && bash "$LOG" --evidence-run --scope scoped --cmd 'pwd -P' 2>"$WORK/e8c.err")"; RC_INNER=$?
+rm -rf "$INNER"
+if [ "$RC_INNER" -eq 0 ] && printf '%s\n' "$OUT_INNER" | grep -qxF "$PROJ" \
+  && ! printf '%s\n' "$OUT_INNER" | grep -qxF "$INNER" \
+  && grep -qF 'the working directory is not in the work tree of the bound project root, so the command runs in' "$WORK/e8c.err"; then
+  check "E8c from a nested work tree inside the project root the suite runs in the bound project root and says so" PASS
+else
+  check "E8c from a nested work tree inside the project root the suite runs in the bound project root and says so (rc=$RC_INNER)" FAIL
+  printf '%s\n' "$OUT_INNER" | tail -5
+fi
+
 printf '{"evidence":{"fullSuiteCommand":"echo configured-suite"}}\n' > "$ZENSU_CONFIG"
 OUT="$(bash "$LOG" --evidence-run --scope full 2>/dev/null)"; RC=$?
 ERR="$(bash "$LOG" --evidence-run --scope full --cmd 'true' 2>&1 >/dev/null)"; RC_MISMATCH=$?

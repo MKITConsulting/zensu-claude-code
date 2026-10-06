@@ -20,7 +20,10 @@ one of them lands in none of the others.
 `/zensu:session-trail` records every takeover as one edge in a **machine-wide,
 multi-writer** store, and this module is the single source of truth for its schema,
 its layout, its refusal table and the chain walk. It is the reason the skill has a
-write channel at all — before it, `trail.mjs` had none, and SKILL.md said so.
+write channel of its own at all — before it, `trail.mjs` had none, and SKILL.md said so.
+`release --apply` is the one verb that changes state outside the ledger, and it does so
+through `retireAnchors` in `hooks/lib/worktree-keep-v1.js`, never by a write in
+`trail.mjs`; §"Worktree Keep" owns that path.
 
 **The store is a DIRECTORY of one record per edge, never a shared append-only file.**
 Six windows write it concurrently and atomic append behaves differently on Windows

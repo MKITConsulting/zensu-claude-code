@@ -177,8 +177,9 @@ PLUGIN_ROOT="$(cd "$DIR/../.." && pwd -P)" || {
 # into a comment as a known gap: a list that grows by copy-paste is a list that loses a
 # member, and the loss is silent because every surviving copy still passes.
 #
-# Each row keeps its noun, so all seven emitted messages are unchanged. Why each module
-# is on the list, carried over from the guards this replaces:
+# Each row keeps its noun, so the seven original emitted messages are unchanged and the
+# eighth follows their shape. Why each module is on the list, carried over from the
+# guards this replaces:
 #   session-control-core-v1.js   the runtime that reads and re-mints the record
 #   claude-hook-session-v1.js    loaded by the report for its private-store constructor.
 #                                zensu-session.sh guards this exact file at three sites,
@@ -202,6 +203,10 @@ PLUGIN_ROOT="$(cd "$DIR/../.." && pwd -P)" || {
 #                                CLAUDE_PLUGIN_DATA value that locates the private
 #                                record store, and nothing else re-verifies the
 #                                EXECUTING tree here
+#   session-auto-adopt-v1.js     the ONE adoption implementation; --confirm runs the
+#                                record swap and the sweep through it, so a symlinked
+#                                copy would substitute the code that re-mints the
+#                                record — the same argument as for the binder
 #
 # The loop runs in THIS shell — a `while … done < input` is not a subshell in bash — so
 # `exit 1` still stops the command rather than only the loop. The loop variable is
@@ -225,6 +230,7 @@ review-evidence-sweep-v1.js|review-evidence sweep module
 review-evidence-lease-v1.js|review-evidence lease module
 zensu-safe-display-v1.js|display-safety module
 claude-path-v1.js|host-path module
+session-auto-adopt-v1.js|automatic-adoption module
 ZSA_REQUIRED_MODULES
 # A loop that never ran verified nothing, and said so to no one. The seven guards this
 # replaced could not skip — each was a straight-line test — so consolidating them into
@@ -235,7 +241,7 @@ ZSA_REQUIRED_MODULES
 # The number is spelled here rather than derived because the table is the thing being
 # verified: deriving the expectation from it would make the check agree with whatever
 # it found.
-[ "$_zsa_seen" -eq 7 ] || {
+[ "$_zsa_seen" -eq 8 ] || {
   printf '%s\n' 'zensu:adopt-session: the required-module table could not be read in full; repair the Zensu plugin installation' >&2
   exit 1
 }

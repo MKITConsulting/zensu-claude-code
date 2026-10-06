@@ -58,10 +58,10 @@ fi
 grep -qiE 'never .*run builds?/tests?|do not re-run.*build.*tests|no (shell/)?build/test' "$AGENT_MD" \
   && check "A7 prose forbids build/test execution" PASS || check "A7 prose forbids build/test execution" FAIL
 
-# Single-perspective: the perspective is a spawn-time parameter, and all five are named.
+# Single-perspective: the perspective is a spawn-time parameter, and all seven are named.
 grep -qF '{PERSPECTIVE}' "$AGENT_MD" \
   && check "A8 takes a {PERSPECTIVE} spawn parameter" PASS || check "A8 {PERSPECTIVE} parameter" FAIL
-for p in conventions bugs architecture tests security; do
+for p in correctness design conventions bugs architecture tests security; do
   grep -qiw "$p" "$AGENT_MD" \
     && check "A9 names perspective '$p'" PASS || check "A9 names perspective '$p'" FAIL
 done

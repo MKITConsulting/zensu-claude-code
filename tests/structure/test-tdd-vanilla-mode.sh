@@ -52,9 +52,9 @@ for BASELINE_SID in \
 done
 CFG_DEFAULT="$STATE_DIR/no-such-config.json"
 CFG_VANILLA="$STATE_DIR/vanilla-config.json"
-printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
+printf '%s' '{"hooks":{"tddImplementation":false,"autoFixMaxRounds":5}}' > "$CFG_VANILLA"
 CFG_STRICT="$STATE_DIR/strict-config.json"
-printf '%s' '{"hooks":{"tddImplementation":true}}' > "$CFG_STRICT"
+printf '%s' '{"hooks":{"tddImplementation":true,"autoFixMaxRounds":5}}' > "$CFG_STRICT"
 export ZENSU_CONFIG="$CFG_DEFAULT"
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$PROJ"; }

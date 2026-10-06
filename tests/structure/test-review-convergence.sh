@@ -179,11 +179,11 @@ else
 fi
 check "R14 the clause is gated on hooks.reviewConvergence" "$(grep_ok "$DELEGATE" 'if zensu_hook_enabled reviewConvergence; then')"
 n="$(grep -cF -- '${CONVERGENCE_CLAUSE}' "$DELEGATE")"
-[ "$n" -eq 2 ] && check "R15 both severity arms interpolate the clause (${n}x)" PASS \
-               || check "R15 both severity arms interpolate the clause (${n}x, want 2)" FAIL
+[ "$n" -eq 3 ] && check "R15 every severity arm interpolates the clause (${n}x)" PASS \
+               || check "R15 every severity arm interpolates the clause (${n}x, want 3)" FAIL
 RULE_LINES="$(grep -F 'IMPORTANT_RULE="' "$DELEGATE")"
 for needle in 'step 4c Finding Verification Gate' 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
-              'status=empty or status=degraded' 'always keeps the full cumulative diff' 'hooks.aspectActivation skips one' \
+              'status=empty or status=degraded' 'always keeps the full cumulative diff' 'aspect-activation-v1.js --panel ${PANEL} --round re' \
               're-run the FULL test suite over the current tree in the FOREGROUND' '${CLAUDE_PLUGIN_ROOT}'; do
   case "$CLAUSE_LINE$RULE_LINES" in
     *"$needle"*) check "R16 the clause lines avoid a per-line counted phrase [$needle]" FAIL ;;
@@ -198,8 +198,8 @@ else
   check "R16a hooks.selfReview is resolved before the clause reads it" FAIL
 fi
 n="$(grep -cF -- "log this round's 'R\${NEXT}-{step_id} IMPL completed — files: {list}' claims" "$DELEGATE")"
-[ "$n" -eq 2 ] && check "R16b both arms prescribe the round claim prefix outside the gated clause (${n}x)" PASS \
-               || check "R16b both arms prescribe the round claim prefix outside the gated clause (${n}x, want 2)" FAIL
+[ "$n" -eq 3 ] && check "R16b every arm prescribes the round claim prefix outside the gated clause (${n}x)" PASS \
+               || check "R16b every arm prescribes the round claim prefix outside the gated clause (${n}x, want 3)" FAIL
 check "R16c the clause confines the ledger read to the project root" "$(grep_ok "$DELEGATE" '--log {log_file} --root \"\$TOP\"')"
 check "R17 the suggestions arm closes a fully annotated round" "$(grep_ok "$DELEGATE" 'or every finding carries a do-not-fix annotation')"
 check "R18 the suggestions arm exempts deferred findings" "$(grep_ok "$DELEGATE" "items annotated '[Deferred — do not fix]' were deferred by review convergence")"
@@ -275,5 +275,39 @@ node -e '
   process.exit((m.ciStructureTests || []).includes("test-review-convergence.sh") ? 0 : 1);
 ' "$MANIFEST" && check "R38 this suite is registered in ciStructureTests" PASS \
              || check "R38 this suite is registered in ciStructureTests" FAIL
+
+check "LC1 the default auto-fix budget is two fix rounds" "$(grep_ok "$ROOT/hooks/lib/zensu-config.sh" '_zensu_config_bounded_int autoFixMaxRounds 2 1 99')"
+check "LC1b configuration.md documents the default of two fix rounds" "$(grep_ok "$CONFIG_DOC" 'Integer loop guard (default `2`')"
+check "LC1c config.example.json ships two fix rounds" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.autoFixMaxRounds===2?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC4 the severity getter defaults to critical" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG=/nonexistent zensu_autofix_severity' _ "$ROOT" | grep -qx critical && echo PASS || echo FAIL)"
+check "LC4b config.example.json ships the critical threshold" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.autoFixSeverity==="critical"?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC4c the old suggestions getter is gone" "$(grep_absent "$ROOT/hooks/lib/zensu-config.sh" 'zensu_autofix_include_suggestions')"
+check "LC4d configuration.md documents autoFixSeverity" "$(grep_ok "$CONFIG_DOC" '| `autoFixSeverity` |')"
+check "LC4e the rubric doc states the critical default" "$(grep_ok "$RUBRIC_DOC" 'By default (`hooks.autoFixSeverity: critical`) only CRITICAL findings route')"
+check "LC2 the delegate reads hooks.criticalReproduction behind the verification gate" "$(grep_ok "$DELEGATE" 'zensu_hook_enabled criticalReproduction && zensu_hook_enabled findingVerification')"
+check "LC2b the convergence clause requires a reproduction for a re-review CRITICAL" "$(grep_ok "$DELEGATE" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
+check "LC2c step 4c carries stage 3" "$(grep_ok "$TDD_MD" '**Stage 3 (reproduction, re-reviews only, config-gated).**')"
+check "LC2d the log line is named" "$(grep_ok "$TDD_MD" 'FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE>')"
+check "LC2e self-review fixes only reproduced re-review CRITICALs" "$(grep_ok "$SELF_REVIEW_MD" 'CRITICAL finding from a re-review is a must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "LC2f the rubric doc states the rule" "$(grep_ok "$RUBRIC_DOC" 'a CRITICAL finding of a re-review routes only when a failing test reproduces it')"
+check "LC2g configuration.md documents criticalReproduction" "$(grep_ok "$CONFIG_DOC" '| `criticalReproduction` |')"
+check "LC2h config.example.json ships criticalReproduction" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.criticalReproduction===true?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC2i the max-rounds hand-off names the reproduction rule" "$(grep_ok "$DELEGATE" 'is a self-review must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
+check "LC3 the panel getter exists and defaults to lean" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG=/nonexistent zensu_review_panel' _ "$ROOT" | grep -qx lean && echo PASS || echo FAIL)"
+LC3_CFG="$(mktemp)"
+printf '%s\n' '{"hooks":{"reviewPanel":"full"}}' > "$LC3_CFG"
+check "LC3a the panel getter reads full" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG="$2" zensu_review_panel' _ "$ROOT" "$LC3_CFG" | grep -qx full && echo PASS || echo FAIL)"
+printf '%s\n' '{"hooks":{"reviewPanel":"wide"}}' > "$LC3_CFG"
+check "LC3j an unknown panel value reads as lean" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG="$2" zensu_review_panel' _ "$ROOT" "$LC3_CFG" | grep -qx lean && echo PASS || echo FAIL)"
+rm -f "$LC3_CFG"
+check "LC3b step 3 resolves the panel and the round" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js" --panel <panel> --round <round>')"
+check "LC3c the fix-round directive re-reviews with the round flag" "$([ "$(grep -cF 'aspect-activation-v1.js --panel ${PANEL} --round re' "$DELEGATE")" -eq 3 ] && echo PASS || echo FAIL)"
+check "LC3d the judge re-runs only on the full panel" "$([ "$(grep -cF 're-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full' "$DELEGATE")" -eq 3 ] && echo PASS || echo FAIL)"
+check "LC3e step 4b skips the judge on a lean re-review" "$(grep_ok "$TDD_MD" 'On a re-review with the lean panel, skip this step')"
+check "LC3f the aspect agent knows correctness" "$(grep_ok "$ASPECT_MD" '   - correctness: control flow, boundaries, null/error paths, races, resource handling, plus test-source assertions')"
+check "LC3g the aspect agent knows design" "$(grep_ok "$ASPECT_MD" '   - design: dependency direction, layering, module boundaries, integration contracts, plus repository guidance')"
+check "LC3h configuration.md documents reviewPanel" "$(grep_ok "$CONFIG_DOC" '| `reviewPanel` |')"
+check "LC3i config.example.json ships the lean panel" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.reviewPanel==="lean"?"PASS":"FAIL")' "$CONFIG_EX")"
+check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
 finish

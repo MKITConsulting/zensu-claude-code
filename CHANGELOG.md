@@ -9,6 +9,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **review loop**: the `/zensu:tdd` auto-fix loop now fixes only CRITICAL findings by default
+  (`hooks.autoFixSeverity: critical`). Every IMPORTANT finding is parked, and `/zensu:self-review`
+  fixes it once at the end of the chain; `"autoFixSeverity": "important"` restores the routing of
+  0.24.0, and `hooks.autoFixIncludeSuggestions: true` still routes every severity. The loop allows
+  two fix rounds by default (`hooks.autoFixMaxRounds`, 1 in 0.24.0), so the Stop chain guard
+  releases after 5 nudges instead of 4.
+
+## [0.24.0] - 2026-10-04
+
+### Added
+
+- **review**: Lean review loop by default (#372)
+- **source-write-gate**: Make the Bash source-write gate opt-in (#368)
+- **verify-feature**: Add network-only origins to the navigation policy (#367)
+- **doctor**: Show who holds the Autopilot project lease (#360)
+- **session-control**: Let the chain skills follow a re-anchored session (#354)
+- **worktree-keep**: Keep the marker while a nested repository remains (#356)
+- **session-trail**: Release the old session's keep protection after a takeover (#355)
+
+### Changed
+
+- **stop**: Link the latency memo fixtures through Node (#371)
+- **release**: Pin the run-block scan's boundary cases (#369)
+- **requirements-gate**: Refuse an unresolved receipt path instead of writing into the cwd (#314)
+- **stop**: Resolve the project root and session key once per Stop run (#366)
+- **windows**: Move deferred-lease-refresh to the front of windows-shard-9 (#363)
+- **multi-repo**: Re-point stale line citations by content (#361)
+- **ci**: Keep the Stop deadline out of the deferred-claim suite and raise the shard-5 handoff cap (#358)
+
+### Fixed
+
+- **tests**: Keep the lock-owner report's PowerShell probe off module auto-loading (#378)
+- **tests**: Import the Windows job helper's one module by path (#377)
+- **tests**: Fire the nested-tree timeout only after the grandchild exists (#374)
+- **edit-landing**: Check the raw --session key through the shared predicate (#376)
+- **skills**: Keep argument placeholders out of skill shell snippets (#375)
+- **autopilot**: Keep a lease fault apart from no-run in the Stop reconcile and the workspace read (#357)
+- **stop**: Route the denial-note key check through one canonical predicate (#370)
+- **evidence-run**: Fingerprint the nested work tree a test run reaches (#362)
+- **tests**: Read npm-dependent structure suites from the suite manifest (#359)
+- **session-control**: Stop a reused Windows PID from wedging a lock (#364)
+- **session-control**: End the withFileLock livelock behind two Windows CI hangs (#365)
+- **autopilot**: Stop reading a held Autopilot lease as no active run (#352)
+
+### Upgrade notes
+
+- **verify-feature**: a navigation policy may now list, beside its targets, up to 8
+  `networkOnlyOrigins` — a REST API, an OIDC issuer, a token endpoint — that the application's
+  pages may request but no navigation command may open, and nothing on them counts as evidence.
+  Declare them in the recipe under `validate.networkOnly` too. A policy without the key is
+  unchanged. An installation older than this one refuses a policy that carries the key, so
+  launch every session that reads it on this version. Consent mode has no network-only class: a
+  loopback API origin is still passed as an ordinary origin, and a non-loopback one needs the
+  launch-time policy.
+- **verify-feature**: every origin in a navigation policy must now name its host exactly, as an
+  IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_`. A target such as
+  `https://*.example.com` was accepted before and acted as a browser-side wildcard; a policy
+  carrying one is now invalid and denies every navigation until the hostname is spelled out.
+- **verify-feature**: the run-config helper takes `--network-only-origin <origin>`, counted with
+  `--origin` toward the bound of 8, and the preflight takes the operand `network-only`:
+  `verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>`.
+
+## [0.23.0] - 2026-09-30
+
+### Added
+
+- **evidence**: Run full suites in the verified CI pipeline instead of locally (#350)
+- **session-control**: Adopt a compatible-schema record automatically across a lineage break (#343)
+- **tdd**: Verify every acceptance criterion live before a chain can close (#345)
+- **pr-fix-findings**: Follow the session's TDD mode instead of forcing strict (#342)
+- **verify-feature**: Make the origin the evidence boundary and retire the route gate (#340)
+- **verify-feature**: Admit localhost in the playwright-cli consent gate (#339)
+
+### Changed
+
+- **windows-ci**: Split the stop-enforcer routing suite across two shards (#341)
+
+### Fixed
+
+- **stop**: Exit early when nothing is armed and bound the hook with a deadline (#348)
+- **verify-feature**: Repair monorepo adapter boot, Vite binding and down (#349)
+- **session-control**: Stop a reused Windows PID from holding a deferred-review claim (#346)
+- **redact**: Skip artifacts git reports unchanged in the sweep (#351)
+- **release**: Pass dispatch inputs to run steps through env (#344)
+- **release**: Retry the publish read-back and stop failing without a message (#243)
+
+### Upgrade notes
+
 - **verify-feature**: the browser consent gate no longer checks routes. An origin approved at the
   consent prompt, or named as a target of `ZENSU_VERIFY_NAVIGATION_POLICY_V1`, now covers every
   page on it at any path, so pages whose path carries identifiers minted on every run can be
@@ -28,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stage verifies every criterion unless the run was started with `--no-validate`, and the
   terminus line says which. A max-rounds close with `hooks.selfReview` off is not gated
   either, as for the full suite, and its summary shows acceptance as not checked.
+- **redact**: the artifact sweep no longer rewrites a committed `.zensu` plan or log that a
+  checkout merely refreshed, so a fresh worktree stays clean. A stray path-only diff that an
+  earlier release left in such a file can now be discarded with `git restore <file>` and stays
+  discarded; before this fix the next tool call redacted the restored file again. The sweep asks
+  git which artifacts changed, so outside a git repository, or when `git` fails or times out, it
+  sweeps every recent artifact as before and says so on stderr.
 - **chain-enforcer**: the `Stop` hook now has a whole-hook deadline of 45 s. Checks that have
   not finished by then are stopped: a decision they already wrote stands, and otherwise the
   Stop is released with a stderr notice that no completion was proven. The next Stop

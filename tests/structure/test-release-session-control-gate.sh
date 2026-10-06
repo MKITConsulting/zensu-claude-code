@@ -32,8 +32,6 @@ line_of() {
 [ -f "$WORKFLOW" ] && check "Release workflow exists" PASS \
   || check "Release workflow exists" FAIL
 
-rejects "Prepare runs no pre-bump gate on a tree that is never released" \
-  '^ +run: bash tests/run-all\.sh --ci$'
 if [ "$(grep -Fc 'bash tests/run-all.sh --ci' "$WORKFLOW")" -eq 2 ]; then
   check "Exact release commit and publish run the non-Promptfoo CI gate" PASS
 else
@@ -61,7 +59,7 @@ contains "Prepare rejects malformed runtime digests" \
 contains "Deterministic evidence binds exact SHA, runtime, and plugin version" \
   'zensu-deterministic-release-evidence-v1'
 contains "Prepare artifact is bound to the created commit" \
-  'name: deterministic-release-${{ steps.release_commit.outputs.sha }}'
+  'name: deterministic-release-${{ steps.release_commit.outputs.sha }}-${{ github.run_attempt }}'
 contains "Push rechecks the created commit" \
   'test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"'
 
@@ -91,7 +89,7 @@ contains "Publish uses the dedicated settings token" \
 contains "Publish deterministic gate targets exact main SHA" \
   'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'
 contains "Publish artifact is bound to exact main SHA" \
-  'name: deterministic-publish-${{ github.sha }}'
+  'name: deterministic-publish-${{ github.sha }}-${{ github.run_attempt }}'
 contains "Publish rechecks Immutable Releases immediately before publication" \
   '- name: Recheck Immutable Releases immediately before publish'
 contains "Release REST calls pin API version 2026-03-10" \
@@ -120,11 +118,116 @@ else
 fi
 
 UPLOAD_PIN='actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4'
-if [ "$(grep -Fc -- "$UPLOAD_PIN" "$WORKFLOW")" -eq 2 ]; then
-  check "Both deterministic evidence uploads use the pinned artifact action" PASS
+UPLOADS="$(grep -c 'uses: actions/upload-artifact@' "$WORKFLOW")"
+if [ "$UPLOADS" -eq 3 ] && [ "$(grep -Fc -- "$UPLOAD_PIN" "$WORKFLOW")" -eq "$UPLOADS" ]; then
+  check "Both deterministic evidence uploads and the release-commit bundle use the pinned artifact action" PASS
 else
-  check "Both deterministic evidence uploads use the pinned artifact action" FAIL
+  check "Both deterministic evidence uploads and the release-commit bundle use the pinned artifact action" FAIL
 fi
+
+DOWNLOAD_PIN='actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4'
+DOWNLOADS="$(grep -c 'uses: actions/download-artifact@' "$WORKFLOW")"
+if [ "$DOWNLOADS" -eq 2 ] && [ "$(grep -Fc -- "$DOWNLOAD_PIN" "$WORKFLOW")" -eq "$DOWNLOADS" ]; then
+  check "Both release-commit bundle downloads use the pinned artifact action" PASS
+else
+  check "Both release-commit bundle downloads use the pinned artifact action" FAIL
+fi
+
+contains "The release commit travels as a bundle that excludes everything but itself" \
+  'git bundle create "$BUNDLE_DIR/release.bundle" "refs/heads/$RELEASE_BRANCH" "^$RELEASE_SHA~1"'
+contains "A prepare shard checks out the bundled commit detached at its exact SHA" \
+  'git checkout --detach "$EXPECTED_SHA"'
+contains "The branch push materializes the bundled commit as the local release branch" \
+  'git fetch --no-tags "$BUNDLE" "refs/heads/$RELEASE_BRANCH:refs/heads/$RELEASE_BRANCH"'
+
+GRAPH="$(node - "$WORKFLOW" <<'NODE'
+const fs = require('node:fs');
+const YAML = require('yaml');
+const jobs = YAML.parse(fs.readFileSync(process.argv[2], 'utf8')).jobs || {};
+const SHARD_RUN = 'bash tests/run-all.sh --ci "--shard=$((JOB_INDEX + 1))/$JOB_TOTAL"';
+const runsSuite = (step) => /tests\/run-all\.sh/.test(String(step.run || ''));
+const sharded = (id) => {
+  const job = jobs[id] || {};
+  const steps = (job.steps || []).filter(runsSuite);
+  return steps.length === 1
+    && String(steps[0].run).split('\n').filter((line) => /tests\/run-all\.sh/.test(line))
+      .every((line) => line.trim() === SHARD_RUN)
+    && steps[0].env?.JOB_INDEX === '${{ strategy.job-index }}'
+    && steps[0].env?.JOB_TOTAL === '${{ strategy.job-total }}'
+    && job.strategy?.['fail-fast'] === false
+    && Array.isArray(job.strategy?.matrix?.shard) && job.strategy.matrix.shard.length >= 2
+    && job.permissions?.contents === 'read';
+};
+const needs = (id) => [].concat(jobs[id]?.needs || []);
+const cond = (id) => String(jobs[id]?.if || '').replace(/\s+/g, ' ');
+const has = (id, ...parts) => parts.every((part) => cond(id).includes(part));
+const steps = (id) => jobs[id]?.steps || [];
+const index = (id, name) => steps(id).findIndex((step) => step.name === name);
+const named = (id, name) => steps(id).find((step) => step.name === name) || {};
+const suiteStep = (id) => steps(id).find(runsSuite) || {};
+const guarded = (run, head) => {
+  const lines = String(run || '').split('\n').map((line) => line.trim());
+  const suite = lines.findIndex((line) => /tests\/run-all\.sh/.test(line));
+  return suite > 0 && lines.slice(0, suite).includes(head) && lines.slice(suite + 1).includes(head);
+};
+const RELEASE_SHA = '${{ needs.prepare-commit.outputs.sha }}';
+const BUNDLE_CHECKOUT = 'Check out the bundled release commit';
+const PLAN_TARGET = 'Verify immutable marketplace release target before the suite';
+const FINAL_TARGET = 'Verify immutable marketplace release target';
+const withoutOutputs = (run) => String(run || '').split('\n').filter((line) => !line.includes('>> "$GITHUB_OUTPUT"')).join('\n');
+process.stdout.write(JSON.stringify({
+  suite_jobs: Object.entries(jobs).filter(([, job]) => (job.steps || []).some(runsSuite)).map(([id]) => id).sort(),
+  prepare_suite_sharded: sharded('prepare-suite'),
+  publish_suite_sharded: sharded('publish-suite'),
+  prepare_suite_on_release_commit: index('prepare-suite', BUNDLE_CHECKOUT) !== -1
+    && steps('prepare-suite').findIndex(runsSuite) > index('prepare-suite', BUNDLE_CHECKOUT)
+    && named('prepare-suite', BUNDLE_CHECKOUT).env?.EXPECTED_SHA === RELEASE_SHA
+    && String(named('prepare-suite', BUNDLE_CHECKOUT).run || '').includes('git checkout --detach "$EXPECTED_SHA"')
+    && suiteStep('prepare-suite').env?.EXPECTED_SHA === RELEASE_SHA
+    && guarded(suiteStep('prepare-suite').run, 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"'),
+  publish_suite_on_main_sha: guarded(suiteStep('publish-suite').run, 'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'),
+  plan_verifies_target_first: index('publish-plan', PLAN_TARGET) !== -1
+    && index('publish-plan', 'Decide the exact-main-SHA gate') > index('publish-plan', PLAN_TARGET)
+    && index('publish', FINAL_TARGET) !== -1
+    && String(named('publish-plan', PLAN_TARGET).run) === withoutOutputs(named('publish', FINAL_TARGET).run),
+  publish_reverifies_target_before_tagging: index('publish', FINAL_TARGET) !== -1
+    && index('publish', 'Draft, attach, publish, and verify immutable release') > index('publish', FINAL_TARGET),
+  writers: Object.entries(jobs).filter(([, job]) => job.permissions?.contents === 'write').map(([id]) => id).sort(),
+  prepare_suite_wired: needs('prepare-suite').includes('prepare-commit')
+    && has('prepare-suite', '!inputs.dry_run', '!inputs.skip_test_gate'),
+  prepare_waits_for_suite: ['prepare-commit', 'prepare-suite'].every((id) => needs('prepare').includes(id))
+    && has('prepare', '!cancelled()', '!inputs.dry_run', "needs.prepare-commit.result == 'success'",
+      "needs.prepare-suite.result == 'success'", "inputs.skip_test_gate && needs.prepare-suite.result == 'skipped'"),
+  publish_suite_wired: needs('publish-suite').includes('publish-plan')
+    && has('publish-suite', "needs.publish-plan.outputs.gate == 'run'"),
+  publish_waits_for_suite: ['publish-plan', 'publish-suite'].every((id) => needs('publish').includes(id))
+    && has('publish', '!cancelled()', "needs.publish-plan.result == 'success'",
+      "needs.publish-plan.outputs.gate == 'run' && needs.publish-suite.result == 'success'",
+      "needs.publish-plan.outputs.gate == 'skipped' && needs.publish-suite.result == 'skipped'"),
+}));
+NODE
+)"
+
+graph_is() {
+  if [ -n "$GRAPH" ] && [ "$(printf '%s' "$GRAPH" | jq -c "$2")" = "$3" ]; then
+    check "$1" PASS
+  else
+    check "$1" FAIL
+  fi
+}
+
+graph_is "Only the two suite jobs run the suite" .suite_jobs '["prepare-suite","publish-suite"]'
+graph_is "The prepare suite runs as parallel shards whose spec comes from the matrix" .prepare_suite_sharded true
+graph_is "The publish suite runs as parallel shards whose spec comes from the matrix" .publish_suite_sharded true
+graph_is "A prepare shard runs the suite only on the bundled release commit, checked before and after its slice" .prepare_suite_on_release_commit true
+graph_is "A publish shard runs the suite only at the exact main SHA, checked before and after its slice" .publish_suite_on_main_sha true
+graph_is "The publish plan verifies the release target with the checks publication repeats before it decides the gate" .plan_verifies_target_first true
+graph_is "Publication re-verifies the release target before it tags" .publish_reverifies_target_before_tagging true
+graph_is "Only the branch push and the publication jobs may write contents" .writers '["prepare","publish"]'
+graph_is "The prepare suite follows the release commit and honours dry_run and skip_test_gate" .prepare_suite_wired true
+graph_is "The branch push waits for every prepare shard or a requested skip" .prepare_waits_for_suite true
+graph_is "The publish suite runs only when the plan decided to run the gate" .publish_suite_wired true
+graph_is "Publication waits for every publish shard or a planned skip" .publish_waits_for_suite true
 
 # v0.18.0 stranded as an untagged draft because `RELEASE="$(release_json)"` ran
 # straight after `gh release create --draft`, lost the race against the release

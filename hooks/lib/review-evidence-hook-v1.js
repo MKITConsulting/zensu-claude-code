@@ -21,11 +21,28 @@ function readPayload(expectedEvent) {
   return payload;
 }
 
+// Binds with the automatic adoption opted in, and DISCLOSES an adoption this
+// process performed under THIS hook's lead-in. This hook binds IN PROCESS, never
+// through the CLI binder, so without the binder's bind-and-disclose an adoption
+// landing here re-minted the record, kept a superseded copy and swept the lease
+// store without a line anywhere — and on SubagentStop no sibling adapter exists to
+// speak for it.
+const LEAD_IN = 'review-evidence-hook-v1';
+
+function bindAndDisclose(payload) {
+  return hookSession.bindAndDisclose(payload, process.env, { autoAdopt: true }, LEAD_IN);
+}
+
 function start() {
   const payload = readPayload('SubagentStart');
   const kind = leases.kindForAgentType(payload.agent_type);
   if (!kind) return;
-  const binding = hookSession.resolveHookSession(payload);
+  // Opts into the automatic adoption: this hook runs on the same SubagentStart
+  // matcher as the session-control adapter and in parallel with it, so without
+  // adopting here it could bind-fail in the adoption window, mint no lease, and
+  // leave the reviewer denied for the whole review. The records lock serializes
+  // the two; the loser sees already-served and re-reads.
+  const binding = bindAndDisclose(payload);
   leases.bindWorker(payload, binding);
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
@@ -38,7 +55,11 @@ function start() {
 function stop() {
   const payload = readPayload('SubagentStop');
   if (!leases.kindForAgentType(payload.agent_type)) return;
-  const binding = hookSession.resolveHookSession(payload);
+  // Opts into the automatic adoption for its own reason: no adapter binds on
+  // SubagentStop, so an adoption that fell due while the worker ran lands HERE or
+  // not at all — and without it the bind fails and the worker's result is lost
+  // along with the lease retirement.
+  const binding = bindAndDisclose(payload);
   const outcome = leases.storeWorkerResult(payload, binding);
   if (outcome.action === 'block') {
     process.stdout.write(`${JSON.stringify({
@@ -55,7 +76,13 @@ function main() {
   else stop();
 }
 
-try { main(); } catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
+// The entry point runs only when this file IS the hook, so requiring it — the unit
+// layer does — runs no hook and reads no stdin.
+if (require.main === module) {
+  try { main(); } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+module.exports = { LEAD_IN, bindAndDisclose };

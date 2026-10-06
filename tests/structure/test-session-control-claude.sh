@@ -46,7 +46,8 @@ for requirement in \
   'already-running session keeps its previous `CLAUDE_PLUGIN_ROOT`' \
   'fresh sessions load the new version' \
   'Never replace bytes under an already-published version/cache directory' \
-  'do not run `/reload-plugins`' \
+  'Running `/reload-plugins` in an open session IS supported' \
+  'adopts the session'"'"'s Session Control record automatically' \
   '`~/.zensu/plugin-root` locator is neither read, migrated, nor rewritten' \
   'Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
   'the plugin never deletes it automatically'
@@ -65,8 +66,8 @@ README_TROUBLESHOOTING="$(awk '
 ' "$OPS_DOC")"
 README_TROUBLESHOOTING_ONELINE="$(printf '%s\n' "$README_TROUBLESHOOTING" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
-  'keep already-running sessions on their previous version' \
-  'Do not run `/reload-plugins` or overwrite a loaded cache directory' \
+  'an already-running session keeps its previous version until `/reload-plugins` runs in it' \
+  'Never overwrite a loaded cache directory' \
   'The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin' \
   'Delete it only once no Claude Code session from an older installation is still running' \
   'the plugin never deletes it automatically'

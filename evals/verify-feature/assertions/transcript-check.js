@@ -9,6 +9,8 @@ const SESSION_FLAG = '-s=';
 const RUN_CONFIG_HELPER = '/scripts/verify-browser-config.js';
 const FREE_PORT_HELPER = '/scripts/verify-free-port.js';
 const HELPER_MODES = Object.freeze(['local', 'remote']);
+const CHECK_POLICY_OPERANDS = Object.freeze(['declared-safe', 'network-only']);
+const NETWORK_ONLY_ORIGIN = 'https://example.org';
 const LOCAL_REQUIRED = Object.freeze(['snapshot', 'click', 'screenshot', 'console', 'requests', 'close']);
 const REMOTE_REQUIRED = Object.freeze(['snapshot', 'screenshot', 'console', 'requests', 'close']);
 const REMOTE_ROOT = 'https://example.com/';
@@ -154,7 +156,7 @@ function isPluginScript(word, suffix) {
 }
 
 function isRunConfigInvocation(args) {
-  const counts = new Map([['--run-dir', 0], ['--mode', 0], ['--origin', 0]]);
+  const counts = new Map([['--run-dir', 0], ['--mode', 0], ['--origin', 0], ['--network-only-origin', 0]]);
   if (args.length === 0 || args.length % 2 !== 0) return false;
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
@@ -178,7 +180,7 @@ function isInstructedCommand(command) {
   }
   if (!isPluginScript(words[1], RUN_CONFIG_HELPER)) return false;
   if (words[2] === '--check-policy') {
-    return words.length === 6 && HELPER_MODES.includes(words[3]) && words[5] === 'declared-safe';
+    return words.length === 6 && HELPER_MODES.includes(words[3]) && CHECK_POLICY_OPERANDS.includes(words[5]);
   }
   return isRunConfigInvocation(words.slice(2));
 }
@@ -242,6 +244,20 @@ function helperOutputs({ uses, results }) {
     const session = result.body.match(/^session=(\S+)$/m)?.[1];
     const config = result.body.match(/^config=(.+)$/m)?.[1];
     return session && config ? [{ session, config, end: result.end }] : [];
+  });
+}
+
+function networkOnlyConfigs({ uses, results }, origin) {
+  return uses.flatMap((call) => {
+    const words = shellWords(bashCommand(call));
+    if (!words || words[0] !== 'node' || !isPluginScript(words[1], RUN_CONFIG_HELPER)) return [];
+    const args = words.slice(2);
+    const flagged = args.some((word, index) => index % 2 === 0 && word === '--network-only-origin' && args[index + 1] === origin);
+    if (!flagged || !isRunConfigInvocation(args)) return [];
+    const result = correlatedResult(call, results);
+    if (!succeeded(result) || !result.body.split('\n').includes(`network-only-origin=${origin}`)) return [];
+    const config = result.body.match(/^config=(.+)$/m)?.[1];
+    return config ? [config] : [];
   });
 }
 
@@ -417,6 +433,18 @@ const checks = {
       .every((entry) => entry.positional[0] === REMOTE_ROOT);
     return verdict(proven && gaps.length === 0 && exactNavigation && !usesLocalRuntime(transcript.uses),
       `Accepted remote coverage requires a helper-configured zensu-verify session that navigates only to exactly ${REMOTE_ROOT} and then succeeds at snapshot, screenshot, console, requests, and close, with no local runtime lifecycle; missing: ${gaps.join(', ') || 'none'}`);
+  },
+
+  remoteNetworkOnlyTools(transcript) {
+    const { proven, gaps } = sessionCoverage(transcript, (url) => url === REMOTE_ROOT, REMOTE_REQUIRED);
+    const operations = browserOperations(transcript);
+    const configs = networkOnlyConfigs(transcript, NETWORK_ONLY_ORIGIN);
+    const flaggedOpen = provenOpens(transcript, operations).some((open) => configs.includes(open.args.config));
+    const exactNavigation = operations
+      .filter((entry) => consent.NAVIGATION_COMMANDS.includes(entry.operation) && entry.positional.length > 0)
+      .every((entry) => entry.positional[0] === REMOTE_ROOT);
+    return verdict(proven && gaps.length === 0 && flaggedOpen && exactNavigation && !usesLocalRuntime(transcript.uses),
+      `Network-only remote coverage requires a session opened with the config of a helper call that passed --network-only-origin ${NETWORK_ONLY_ORIGIN} and printed it back, no navigation command aimed anywhere but exactly ${REMOTE_ROOT}, the network-only origin included, and successful snapshot, screenshot, console, requests, and close, with no local runtime lifecycle; missing: ${gaps.join(', ') || 'none'}`);
   },
 
   remoteAcceptedEvidence(transcript) {

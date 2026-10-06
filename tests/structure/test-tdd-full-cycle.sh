@@ -47,8 +47,8 @@ unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
   ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
 export CLAUDE_PLUGIN_DATA="$PLUGIN_DATA"
 STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
-export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
-printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
+export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate), autoFixMaxRounds pinned to 5, other defaults (selfReview on)
+printf '%s' '{"hooks":{"tddImplementation":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT

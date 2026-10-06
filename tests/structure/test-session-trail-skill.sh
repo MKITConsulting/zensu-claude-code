@@ -372,7 +372,8 @@ fi
 # is not. A blanket ban was the original contract and had to be narrowed when
 # the ledger landed; narrowing it to "no destructive primitive at all, and every
 # surviving write targets the ledger" (T11b) keeps the property that matters —
-# another session's transcript, registry entry or worktree is never touched.
+# another session's transcript or registry entry is never touched, and its worktree
+# only through `release --apply`, which writes via hooks/lib/worktree-keep-v1.js.
 # It scans the whole skill directory, not just trail.mjs, so a second script
 # added later is covered without editing this check.
 #
@@ -831,7 +832,7 @@ if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$T
   # 20 -> 21: `cmdAdopt`'s ledger-failure branch emits its own payload, because prose on
   # stdout under --json is exactly what the `skippedNote` gate above exists to prevent
   # and that branch is reachable by configuration (`ZENSU_SESSION_LINEAGE=off`).
-  [ "$JSON_EMITS" = "21" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 21)]"
+  [ "$JSON_EMITS" = "22" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 22)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi
@@ -1095,10 +1096,11 @@ fi
 ROUTER_MISS=""
 ROUTER_CODE="$(js_outside_comments "$TRAIL_MJS")"
 ROUTER_CALLS="$(printf '%s\n' "$ROUTER_CODE" | grep -oF 'isUnmeasuredProbablyFree(' | grep -c . || true)"
-[ "$ROUTER_CALLS" = "2" ] || ROUTER_MISS="$ROUTER_MISS [predicate-called-$ROUTER_CALLS-times-not-2]"
+[ "$ROUTER_CALLS" = "3" ] || ROUTER_MISS="$ROUTER_MISS [predicate-called-$ROUTER_CALLS-times-not-3]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE '^const isUnmeasuredProbablyFree = \(v\) => .*v\.queueMeasured !== true;$' || ROUTER_MISS="$ROUTER_MISS [predicate-does-not-read-anything-but-true-as-unmeasured]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE 'const advised = isUnmeasuredProbablyFree\(v\) ' || ROUTER_MISS="$ROUTER_MISS [show-advice-does-not-ask-the-predicate]"
 printf '%s\n' "$ROUTER_CODE" | grep -qE 'else if \(isUnmeasuredProbablyFree\(tv\)\) L\.push\(' || ROUTER_MISS="$ROUTER_MISS [brief-step-4-does-not-ask-the-predicate]"
+printf '%s\n' "$ROUTER_CODE" | grep -qE '\} else if \(isUnmeasuredProbablyFree\(v\) && !v\.authorized\) \{$' || ROUTER_MISS="$ROUTER_MISS [release-gate-does-not-ask-the-predicate]"
 QM_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oF 'queueMeasured' | grep -c . || true)"
 [ "$QM_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [queueMeasured-read-or-written-$QM_USES-times-not-2]"
 MV_BODY="$(printf '%s\n' "$ROUTER_CODE" | awk '/^function measuredVerdict\(/ { f = 1 } f { print } f && /^}/ { exit }')"
@@ -1109,7 +1111,7 @@ UNMEASURED_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oE 'QUEUE_UNMEASURED([^A
 [ "$UNMEASURED_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [QUEUE_UNMEASURED-spelled-$UNMEASURED_USES-times-not-2]"
 printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF '`takeover.queueMeasured: false`' || ROUTER_MISS="$ROUTER_MISS [table-probably-free-row-lacks-the-field]"
 if [ -z "$ROUTER_MISS" ]; then
-  check "T24e both routers of an unmeasured PROBABLY_FREE — show's advice and the takeover brief's step 4 — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
+  check "T24e all three routers of an unmeasured PROBABLY_FREE — show's advice, the takeover brief's step 4 and release's go/no-go gate — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
 else
   check "T24e unmeasured-queue routing drift:$ROUTER_MISS" FAIL
 fi
@@ -1318,8 +1320,8 @@ fi
 
 # ── T26-T29 — the write-anchor routing rule and its carriers ────────────────
 # The skill tells a takeover to work in the target worktree, and the Bash
-# source-write gate refuses to commit there: the session's project root is minted
-# at SessionStart and nothing re-anchors it. Editing and testing still succeed,
+# source-write gate, while it is opted in, refuses to commit there: the session's
+# project root is minted at SessionStart and only /zensu:adopt-session --reanchor moves it. Editing and testing still succeed,
 # because no Edit-matcher hook compares a path against that root — so the failure
 # surfaces only at `git commit`, after the work is done. These pins hold the
 # disclosure and the route in the file, since prose is the entire fix.
@@ -1351,9 +1353,11 @@ printf '%s\n' "$FLOW3" | grep -qF 'containment, not equality' || ANCHOR_MISS="$A
 printf '%s\n' "$FLOW3" | grep -qF '.claude/worktrees/' || ANCHOR_MISS="$ANCHOR_MISS [nested-layout-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'rule (C)' || ANCHOR_MISS="$ANCHOR_MISS [rule-c-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'rule (B)' || ANCHOR_MISS="$ANCHOR_MISS [rule-b-not-named]"
-# The escape hatch the deny advertises is refused by the host, so a reader told
-# only "there is a prefix" is sent down a route that does not exist.
+# The escape hatch is refused by the host, and the deny no longer names it, so a
+# reader told only "there is a prefix" is sent down a route that does not exist.
 printf '%s\n' "$FLOW3" | grep -qF 'Auto-Mode classifier' || ANCHOR_MISS="$ANCHOR_MISS [classifier-caveat-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'hooks.bashWriteGate' || ANCHOR_MISS="$ANCHOR_MISS [opt-in-key-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'With the gate off — the default — the commit lands too' || ANCHOR_MISS="$ANCHOR_MISS [default-off-not-stated]"
 # Derived from THIS step's own sentence, not from the bare command names: both
 # `claude --resume` and `handoff brief` already occur in step 2, so needling them
 # alone cannot detect deletion of the routing sentence this change added.
@@ -1526,6 +1530,7 @@ fi
 LIMITS_SECTION="$(section_of '## Limits of what this can know')"
 LIMITS_MISS=""
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'but not commit it' || LIMITS_MISS="$LIMITS_MISS [asymmetry-bullet-missing]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'With the opt-in source-write gate on' || LIMITS_MISS="$LIMITS_MISS [asymmetry-not-bounded-to-the-opt-in]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-edit-tdd-reminder.sh' || LIMITS_MISS="$LIMITS_MISS [edit-hook-not-named]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-write-secret-scan.sh' || LIMITS_MISS="$LIMITS_MISS [secret-scan-hook-not-named]"
 # The roster is only complete WITH the principal. A third hook on the `.*` matcher
@@ -2201,6 +2206,9 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'containment, not construction' || T35B_MISS="$T35B_MISS [move-gate-containment]"
   printf '%s' "$STEP4" | grep -qF 'while a Zensu chain is armed' || T35B_MISS="$T35B_MISS [move-ledger-bound]"
   printf '%s' "$STEP4" | grep -qF 'never spelled, and never prescribed' || T35B_MISS="$T35B_MISS [move-escape-not-prescribed]"
+  printf '%s' "$STEP4" | grep -qF 'and only when that session has the opt-in gate on' || T35B_MISS="$T35B_MISS [move-gate-opt-in-bound]"
+  printf '%s' "$STEP4" | grep -qF 'the refusal no longer names it either' || T35B_MISS="$T35B_MISS [move-refusal-names-no-escape]"
+  printf '%s' "$STEP4" | grep -qF 'The refusal itself carries' && T35B_MISS="$T35B_MISS [move-refusal-still-carries-the-prefix]"
   # The CONSEQUENCE of taking the escape anyway, which the two needles above do not reach:
   # they pin that the gate judges both operands and that the escape is not prescribed, and
   # neither sees that the DESTINATION is then unchecked and must be placed inside the anchor by
@@ -2429,7 +2437,7 @@ T36_SPEC="$PLUGIN_DIR/docs/multi-repo-chains-spec.md"
 T36_HTML="$PLUGIN_DIR/docs/multi-repo-chains-overview.html"
 t36_cite "$TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
 t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
-t36_cite "$SKILL_MD" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/SKILL\.md:75'
+t36_cite "$SKILL_MD" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/SKILL\.md:77'
 t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/SKILL\.md:3[0-9]+'
 # For THESE three the HTML spells each citation as its own `<p class="src">` line, so the
 # two trail.mjs rows need distinguishing regexes exactly as the spec's two SKILL.md rows

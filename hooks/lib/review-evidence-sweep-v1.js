@@ -254,7 +254,7 @@ function destinationStillSafe(asideDirectory) {
 }
 
 // The sweep proper, run with the store's lock already held.
-function sweepUnderLock(pluginData, key, executingPluginRoot) {
+function sweepUnderLock(pluginData, key, executingPluginRoot, projectRoot) {
   const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
   // The owning module reaches this directory only through ensurePrivateDirectory,
   // which rejects a symlink, an alias and unsafe permissions or ownership. This
@@ -368,7 +368,8 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
     // validator, both of which the breaking-axis list in CLAUDE.md names. Adding the
     // check means pinning a `LEASE_RECORD_SCHEMA_VERSION` alongside it; it is not
     // done here, and the gap is stated rather than implied.
-    if (leaseRecordIsOwned(name, record, executingPluginRoot)) continue;
+    if (leaseRecordIsOwned(name, record, executingPluginRoot)
+      && (projectRoot === undefined || record.project_root === projectRoot)) continue;
     // No mkdir here: asideIsSafe() already created AND validated the directory. What
     // that buys is one fewer way to CREATE the target — it does not close the race.
     // link(2) resolves every non-final component, so a link swapped in at
@@ -457,7 +458,7 @@ function firstNonTraversableAncestor(base, leaf) {
   return '';
 }
 
-function discardSupersededLeases(pluginData, key, executingPluginRoot) {
+function discardSupersededLeases(pluginData, key, executingPluginRoot, projectRoot) {
   const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
   // UNLOCKED pre-check, and it is not an optimization. `withLock` runs the owner's
   // storage() CONSTRUCTOR, which ensurePrivateDirectory-creates the store root, this
@@ -493,7 +494,7 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     // which is why the narrow owner-side entry point is the real fix.
     return lease.withLock(
       { pluginData, sessionKey: key },
-      () => sweepUnderLock(pluginData, key, executingPluginRoot),
+      () => sweepUnderLock(pluginData, key, executingPluginRoot, projectRoot),
     );
   } catch (error) {
     // Distinguish the two throws this catch can see. The owner's storage()

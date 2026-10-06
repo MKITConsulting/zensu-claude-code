@@ -182,16 +182,17 @@ owner-activity accessor instead: at the documented `0`,
   deliberately: a reader told to inspect a broken document needs its name. The foreign-chain
   row truncates to 13 characters and is pinned that way; do not restate the requirement as a
   tree-wide invariant.
-- **The `scv1_` shape is an untracked hand-copy family and this change added two members.**
+- **The `scv1_` shape is an untracked hand-copy family.**
   `SESSION_KEY_RE` exists in `session-control-core-v1.js` and is not exported, so the JS copy in
-  the renderer and the bash-native one in the wrapper join a family that already spans several
-  files. **A prose census goes stale the next time a site is added, so this is a GREP and not a
+  the renderer joins a family that already spans several files. **A prose census goes stale the next time a site is added, so this is a GREP and not a
   list: before changing this shape, run `grep -rn 'scv1_' hooks/` and change every site.** An
   earlier revision of this bullet DID enumerate them and undercounted — the renderer already
   held four copies before this change added a fifth. Two facts a grep cannot supply: the
-  unexported owner is `SESSION_KEY_RE`, and `zensu-edit-landing.sh` spells the class `[0-9a-f]`
-  rather than `[a-f0-9]`, so the family had already drifted. Exporting the owner's constant is
-  the standing fix.
+  unexported owner is `SESSION_KEY_RE`, and the shell side has ONE spelling,
+  `zensu_session_key_canonical` in `hooks/lib/zensu-session.sh`, which the wrapper's guard and
+  every other shell test of the shape call instead of re-spelling the class, because a bracket
+  range collates under some locales (`.claude/rules/stop-latency.md`). Exporting the owner's
+  constant is the standing fix.
 - **A foreign chain that is WEDGED or at a DEAD END never reaches the row.** Those branches
   return first, deliberately, so one truncated key is never named twice with contradictory
   instructions — but the rows that do name it say "from the session that owns each chain",

@@ -6,8 +6,9 @@
     "chainEnforcer": true,
     "autopilotEnforcer": true,
     "autoFix": true,
+    "autoFixSeverity": "critical",
     "autoFixIncludeSuggestions": false,
-    "autoFixMaxRounds": 5,
+    "autoFixMaxRounds": 2,
     "combinedSummary": true,
     "selfReview": true,
     "pulseSession": true,
@@ -17,16 +18,19 @@
     "zenMode": true,
     "zenModeDefault": true,
     "mcpGate": true,
-    "bashWriteGate": true,
+    "bashWriteGate": false,
     "bestSolutionFirst": true,
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
     "incrementalReviewRounds": true,
     "aspectActivation": true,
+    "reviewPanel": "lean",
     "reviewConvergence": true,
+    "criticalReproduction": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
+    "sessionAutoAdopt": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12,
     "autopilotOwnerActivityTtlHours": 1,
@@ -44,6 +48,11 @@
   "evidence": {
     "fullSuiteCommand": "",
     "fullSuiteGate": "required",
+    "fullSuiteRunner": "",
+    "ci": {
+      "workflow": "",
+      "job": ""
+    },
     "acceptanceGate": "required"
   }
 }

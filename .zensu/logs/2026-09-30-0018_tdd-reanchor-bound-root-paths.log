@@ -1,0 +1,220 @@
+TDD STARTED — Zensu skills anchor their artifacts on the bound project root | steps: 10
+TASKS UNAVAILABLE — TaskCreate/TaskUpdate are not exposed in this harness (ToolSearch select:TaskCreate,TaskUpdate matched nothing); progress is tracked in this log and the plan Status column
+BASE — origin/main 704df189 merged with claude/inspiring-clarke-be6d3e ccf55b9c as 6aa2825e; two citation conflicts in docs/multi-repo-chains-spec.md and docs/multi-repo-chains-overview.html re-pointed by content; test-multi-repo-doc-citations 5/0 and test-multi-repo-doc-consistency 9/0 after the resolution
+EXECUTION STARTED
+S1 IMPL completed — files: hooks/lib/zensu-log.sh | --project-root arm beside --session-key: prints the CLAUDE_PROJECT_DIR the binding case exported, exit 2 on any extra argument; bash -n clean under bash 5 and /bin/bash 3.2
+S2 WIRED — files: docs/multi-repo-chains-spec.md, docs/multi-repo-chains-overview.html | every zensu-log.sh citation behind the S1 insertion shifted by 8; ten cited lines compared byte-equal between the pre-change file and the shifted numbers
+S3 IMPL completed — files: skills/tdd/SKILL.md | Principle 3 defines {log_file}/{plan_file} from {project_root}; Phase 0 step 2 reads it via --project-root and takes BASELINE_SHA from it; Phase 1 step 5, Phase 2 steps 1-2 (--truncate carries CLAUDE_PROJECT_DIR={project_root}), 5b a) --project, 10.1 plan bound, 10.2 TOP and 2b persona dir follow; in-line only, still 429 lines
+S4 IMPL completed — files: skills/self-review/SKILL.md, skills/converge/SKILL.md, skills/implement/SKILL.md | self-review Phase 1 resolves PROJECT_ROOT via --project-root and TOP from it (guard covers an empty PROJECT_ROOT), its ledger --root reads $TOP; converge discovers plans under the --project-root path and asks for a path when it fails; implement names {project_root}; grep finds no ${CLAUDE_PROJECT_DIR:-.} under skills/
+S5 IMPL completed — files: hooks/lib/zensu-log.sh | the three --tdd-complete refusal remedies name --project as the path zensu-log.sh --project-root prints; re-read: old spelling 0, new spelling 3, file 2754 lines, bash -n clean under both shells
+BASELINE — pristine 6aa2825e in a detached worktree: session-reanchor 61/0, tdd-log-path-anchor 4/0, edit-landing-audit 190/0, artifact-redaction 87/0, multi-repo-doc citations 5/0 consistency 9/0 contrast 6/0 structure 7/0, templates 31/0, skill-overlays 26/0, review-personas 48/0, tdd-manager-patches 62/0, self-review-skill 54/0, converge-skill 67/0, review-convergence 101/0, autopilot-durable-skill 19/0, tdd-complete-receipt-gate 95/0, bash32-portability 9/0, session-control-claude 97/0
+S6 IMPL completed — files: tests/structure/test-tdd-log-path-anchor.sh, tests/structure/test-edit-landing-audit.sh, tests/structure/test-artifact-redaction.sh | L1/L2 pin the {project_root} spellings, L4-L7 pin plan_file, Phase 0, the --truncate bind and the audit/10.1/TOP derivations, L8 pins that no skills/*/SKILL.md carries the ambient spelling; P1 and a new S12 pin the baseline and --project; R54 runs the extracted recipe from outside the project with CLAUDE_PROJECT_DIR unset; R28/R44 remarks and labels no longer call the relative form the shipped recipe (comment lines +9 -13)
+S7 IMPL completed — files: tests/structure/test-session-reanchor.sh | new E10: third move to the sibling worktree, then from the start directory with CLAUDE_PROJECT_DIR unset: --project-root (prints the new anchor, writes nothing, refuses an extra argument, fails unbound), the skill-extracted baseline, --tdd-begin, Phase 2 recipe, edit-landing audit and --tdd-complete --plan {plan_file}
+S7 CHECKPOINT — PASS | cmd: bash tests/structure/test-session-reanchor.sh | scope: 1 suite over hooks/lib/zensu-log.sh, skills/tdd/SKILL.md, tests/structure/test-session-reanchor.sh | 72 passed, 0 failed (baseline 61/0) in a detached candidate worktree
+S7 MUTATION — reverting the log/plan definitions, the audit --project and the Phase 2 recipe to the pre-change ambient spelling in the candidate turns E10i, E10j and E10k red (69 passed, 3 failed; --tdd-complete rc=1), so E10 discriminates the gap; the skill was restored byte-identical afterwards
+S8 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, .claude/rules/session-reanchor.md, docs/session-control.md, skills/adopt-session/SKILL.md, .claude/rules/artifact-path-redaction.md | report and outcome texts say Zensu skills read the anchor from zensu-log.sh --project-root and a new /zensu:tdd chain can start in this session, own commands need a leading cd; unit pins updated (67/67 in this worktree, a pure unit file); known-gap clauses rewritten to the remaining bound (non-Zensu commands, load-time overlays and templates read through the working directory); new rules paragraph and version line; grep finds no fresh-session wording left in the four carriers
+S9 WIRED — files: docs/tdd-manager-workflow.md, hooks/lib/zensu-log.sh | artifact table, append example and the --truncate paragraph describe {project_root} and the bound --truncate; three zensu-log.sh remarks that called the relative spelling the shipped recipe reworded by deletion (comment lines +7 -12, no apostrophe inside the node -e program, citations still aligned)
+S10 WIRED (verified, no change) — .claude/rules/runtime-lineage.md: walked the signed list; no record or workflow schema field, no strict key set, no hook added, removed or re-matched, no permissionDecision, no config key, no attestation change; the version line in .claude/rules/session-reanchor.md (edited under S8) records patch
+S1-S10 CHECKPOINT — PASS | cmd: bash tests/structure/<suite> per suite, run by /bin/bash 3.2 in a detached candidate worktree carrying the exact working-tree diff | scope: 19 suites over hooks/lib/zensu-log.sh, hooks/lib/session-reanchor-v1.js, skills/tdd/SKILL.md, skills/self-review/SKILL.md, skills/converge/SKILL.md, skills/implement/SKILL.md, skills/adopt-session/SKILL.md, docs/multi-repo-chains-spec.md, docs/multi-repo-chains-overview.html, docs/session-control.md, docs/tdd-manager-workflow.md and the five changed tests | session-reanchor 72/0 (baseline 61/0), tdd-log-path-anchor 9/0 (4/0), edit-landing-audit 191/0 (190/0), artifact-redaction 87/0, multi-repo-doc 5/0 9/0 6/0 7/0, templates 31/0, skill-overlays 26/0, review-personas 48/0, tdd-manager-patches 62/0, self-review-skill 54/0, converge-skill 67/0, review-convergence 101/0, autopilot-durable-skill 19/0, tdd-complete-receipt-gate 95/0, bash32-portability 9/0, session-control-claude 97/0
+PRECONDITIONS — node, git and bash present (command -v); node v26.9.0, git 2.51.0; no bash 5 on this host, so bash 5 is covered only by CI
+EVIDENCE RUN — scope=lint exit=0 duration=0.3s tree=n/a record=er1_1790723221527_a4e3ebc03f97 | cmd: bash -n hooks/lib/zensu-log.sh && bash -n tests/structure/test-session-reanchor.sh && bash -n tests/structure/test-tdd-log-path-anchor.sh && bash -n tests/structure/test-edit-landing-audit.sh && bash…
+FULL SUITE NOT RUN LOCALLY — repository rule: tests/run-all.sh is never run on this machine and .zensu/config.json sets evidence.fullSuiteGate advisory, because the PR's CI run is the full-suite gate; the scoped CHECKPOINT above is the local evidence
+BUILD — n/a: the plugin ships shell, JavaScript and Markdown with no build step (package.json carries eval scripts only) | COVERAGE SKIPPED — no coverage tool for bash; c8 is wired only for skills/session-trail
+DISCIPLINE AUDIT SKIPPED — vanilla mode
+EDIT LANDING AUDIT — claims=20 landed=20 not_landed=0 unverified=0 pending=0 exempt_verified=1; receipt written
+PRECONDITION DRIFT AUDIT — clean: every precondition was present, no install, substitute or skip decision was taken, so no tool can have drifted | CROSS-LAYER AUDIT SKIPPED — vanilla mode | REQUIREMENT COVERAGE — clean: every step names a Covers id and AC-001..AC-006, FR-001, FR-002 each have a covering step
+ACCEPTANCE VERIFICATION — not part of the executing 0.22.0 chain: its /zensu:tdd has no step 6d, its zensu-log.sh has no --acceptance-* verbs and its --chain-done no acceptance gate (grep of the installed tree); /zensu:verify-feature 0.22.0 is browser-only and was stopped before Phase 0 with nothing created, because this change has no UI. AC-001..AC-006 evidence is the S7 and S1-S10 checkpoints
+VANILLA COMPLETE — 10/10 implemented (7 [I], 3 [W]) | Build: – n/a | Coverage: SKIPPED
+REVIEW R1 FAN-OUT — 5 aspects spawned (conventions, bugs, architecture, tests, security), 0 skipped; merged 16 panel findings (R1-F1..R1-F16) + judge JUDGE-1 as R1-F17, JUDGE-2 as R1-F18
+FINDING VERIFICATION — 18 verified, 0 unsupported, 0 phantom, 3 off-changeset
+FINDING LEDGER — R1-F1 routed CRITICAL hooks/lib/zensu-log.sh:421 | shell injection class: project root pasted unescaped into double-quoted skill commands
+FINDING LEDGER — R1-F2 routed CRITICAL hooks/lib/zensu-log.sh:323 | evidence runner runs in the start directory but records the bound root tree
+FINDING LEDGER — R1-F3 routed IMPORTANT hooks/lib/session-reanchor-v1.js:741 | moved outcome says all Zensu skills follow the anchor; several still read the start dir
+FINDING LEDGER — R1-F4 routed IMPORTANT hooks/lib/zensu-edit-landing.sh:491 | stale comment still describes the retired ambient log path recipe
+FINDING LEDGER — R1-F5 routed IMPORTANT tests/structure/test-session-reanchor.sh:413 | E10 extracts the protocol completion span, not the step 10.1 command
+FINDING LEDGER — R1-F6 routed IMPORTANT hooks/lib/zensu-log.sh:1666 | tdd-complete refusal remedy texts are not pinned by any test
+FINDING LEDGER — R1-F7 routed IMPORTANT skills/self-review/SKILL.md:113 | self-review and converge root derivations are pinned only by a negative needle
+FINDING LEDGER — R1-F8 deferred SUGGESTION skills/self-review/SKILL.md:180 | convergence config probe reads the toplevel, not the record root
+FINDING LEDGER — R1-F9 deferred SUGGESTION skills/tdd/SKILL.md:275 | truncate recipe variable also selects the project config for one log line only
+FINDING LEDGER — R1-F10 deferred SUGGESTION hooks/lib/zensu-log.sh:1718 | remedies point at a second verb instead of rendering the bound root
+FINDING LEDGER — R1-F11 deferred SUGGESTION docs/review-chain.md:56 | doc still says tdd personas and templates come from the working checkout
+FINDING LEDGER — R1-F12 deferred SUGGESTION .claude/rules/session-reanchor.md:2 | rule paths frontmatter misses the skills and the test it now governs
+FINDING LEDGER — R1-F13 deferred SUGGESTION tests/structure/test-artifact-redaction.sh:696 | R28 fixture is still named after the shipped recipe
+FINDING LEDGER — R1-F14 deferred SUGGESTION tests/structure/test-tdd-log-path-anchor.sh:76 | absence check misses the cwd fallback spelling that setup uses
+FINDING LEDGER — R1-F15 deferred SUGGESTION skills/tdd/SKILL.md:273 | template and persona directory derivations are not pinned
+FINDING LEDGER — R1-F16 routed SUGGESTION tests/structure/test-session-reanchor.sh:515 | recorded mutation split predates the plan path guard
+FINDING LEDGER — R1-F17 routed CRITICAL skills/tdd/SKILL.md:211 | chain test, build and verify commands still run in the start directory after a move
+FINDING LEDGER — R1-F18 routed SUGGESTION .claude/rules/worktree-keep.md:359 | known-gap bullet still sends a new chain to a fresh session
+EVIDENCE RUN — scope=lint exit=0 duration=0.3s tree=n/a record=er1_1790727863931_1ffa6736244c | cmd: bash -n hooks/lib/zensu-log.sh && bash -n hooks/lib/zensu-edit-landing.sh && bash -n tests/structure/test-session-reanchor.sh && bash -n tests/structure/test-evidence-run.sh && bash -n tests/structur…
+R1 CHECKPOINT — PASS | cmd: bash tests/structure/<suite>.sh per suite (node --test for unit files via the suites), /bin/bash 3.2, detached candidate worktree carrying the exact working-tree diff | scope: 23 suites over the 26 changed files | session-reanchor 77/0, evidence-run 16/0, tdd-complete-receipt-gate 98/0, tdd-log-path-anchor 13/0, multi-repo-doc citations 5/0 consistency 9/0 contrast 6/0 structure 7/0, edit-landing-audit 191/0, verify-feature-skill 94/0, acceptance-gate 37/0, full-suite-gate 17/0, tdd-manager-patches 62/0, templates 31/0, skill-overlays 26/0, review-personas 48/0, autopilot-durable-skill 19/0, bash32-portability 9/0, msys-special-plugin-module-boundaries 16/0, artifact-redaction 87/0, self-review-skill 54/0, converge-skill 67/0, review-convergence 101/0
+R1 MUTATION — second detached candidate, each mutation restored before the next: (M-B) only the {plan_file} definition reverted to the ambient spelling gives session-reanchor 76 passed, 2 failed (the plan-path guard FAIL arm and E10k, --tdd-complete rc=1); (M-A) the whole of skills/tdd/SKILL.md reverted to 6aa2825e gives 68 passed, 10 failed (E10a, E10c, E10e, E10g, the guard arm, E10i, E10j, E10k, E10l, E10m); (M-C) runDirectory always keeping the caller's directory gives session-reanchor 76/1 (E10m) and evidence-run 14/2 (E1 unit, E8b); (M-D) the --project-root refusal removed gives session-reanchor 76/1 (E10p); candidate restored byte-identical afterwards
+R1-F1 IMPL completed — files: hooks/lib/zensu-log.sh, tests/structure/test-session-reanchor.sh, docs/multi-repo-chains-spec.md, docs/multi-repo-chains-overview.html
+R1-F2 IMPL completed — files: hooks/lib/evidence-run-v1.js, tests/structure/evidence-run-v1.test.js, tests/structure/test-evidence-run.sh, .claude/rules/evidence-runner.md
+R1-F3 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, skills/adopt-session/SKILL.md, docs/session-control.md, .claude/rules/session-reanchor.md
+R1-F4 IMPL completed — files: hooks/lib/zensu-edit-landing.sh
+R1-F5 IMPL completed — files: tests/structure/test-session-reanchor.sh
+R1-F6 IMPL completed — files: tests/structure/test-tdd-complete-receipt-gate.sh
+R1-F7 IMPL completed — files: tests/structure/test-tdd-log-path-anchor.sh
+R1-F17 IMPL completed — files: skills/tdd/SKILL.md, skills/verify-feature/SKILL.md, docs/tdd-manager-workflow.md
+R1-F18 IMPL completed — files: .claude/rules/worktree-keep.md
+PENDING PREDICATE — S1: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/self-review/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/converge/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/implement/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-edit-landing-audit.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-artifact-redaction.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/artifact-path-redaction.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S9: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S9: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=41 landed=8 not_landed=0 unverified=0 pending=33 exempt_ignored=0 exempt_verified=1
+R1 PREDICATES RE-READ — every PENDING PREDICATE above was re-read against its target: 22 of 22 predicate checks hold (each round-1 claim's new text is present and the replaced text is gone; each round-0 claim's text is still present); no EDIT NOT LANDED, no UNVERIFIED
+FINDING LEDGER — R1-F1 fixed CRITICAL hooks/lib/zensu-log.sh:421 | shell injection class: project root pasted unescaped into double-quoted skill commands
+FINDING LEDGER — R1-F2 fixed CRITICAL hooks/lib/zensu-log.sh:323 | evidence runner runs in the start directory but records the bound root tree
+FINDING LEDGER — R1-F3 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:741 | moved outcome says all Zensu skills follow the anchor; several still read the start dir
+FINDING LEDGER — R1-F4 fixed IMPORTANT hooks/lib/zensu-edit-landing.sh:491 | stale comment still describes the retired ambient log path recipe
+FINDING LEDGER — R1-F5 fixed IMPORTANT tests/structure/test-session-reanchor.sh:413 | E10 extracts the protocol completion span, not the step 10.1 command
+FINDING LEDGER — R1-F6 fixed IMPORTANT hooks/lib/zensu-log.sh:1666 | tdd-complete refusal remedy texts are not pinned by any test
+FINDING LEDGER — R1-F7 fixed IMPORTANT skills/self-review/SKILL.md:113 | self-review and converge root derivations are pinned only by a negative needle
+FINDING LEDGER — R1-F16 fixed SUGGESTION tests/structure/test-session-reanchor.sh:515 | recorded mutation split predates the plan path guard
+FINDING LEDGER — R1-F17 fixed CRITICAL skills/tdd/SKILL.md:211 | chain test, build and verify commands still run in the start directory after a move
+FINDING LEDGER — R1-F18 fixed SUGGESTION .claude/rules/worktree-keep.md:359 | known-gap bullet still sends a new chain to a fresh session
+REVIEW R2 FAN-OUT — 5 aspects spawned on the round delta (23 files, review-round-scope status=ok), 0 skipped; merged 21 panel findings (R2-F1..R2-F21) + judge JUDGE-1 as R2-F22, JUDGE-2 as R2-F23; JUDGE-3 [STILL OPEN] R1-F11 covers R2-F3, JUDGE-4 [STILL OPEN] R1-F12 covers R2-F4
+FINDING VERIFICATION — 23 verified, 0 unsupported, 0 phantom, 3 off-changeset
+REVIEW CONVERGENCE R2 — routable: R2-F1 (CRITICAL), R2-F22 (IMPORTANT, judge-raised), R2-F6, R2-F7, R2-F14, R2-F15, R2-F19 (IMPORTANT, cited lines edited in fix round R1); deferred as parked: R2-F2, R2-F8, R2-F17, R2-F18; deferred: R2-F5, R2-F9, R2-F10, R2-F11, R2-F12, R2-F13, R2-F16, R2-F20, R2-F21, R2-F23; covered by open ledger entries: R2-F3 (R1-F11), R2-F4 (R1-F12)
+FINDING LEDGER — R2-F2 parked IMPORTANT docs/configuration.md:175 | operator account still says the runner uses the caller's working directory
+FINDING LEDGER — R2-F5 deferred SUGGESTION .claude/rules/session-reanchor.md:181 | runner paragraph duplicates the evidence-runner rule account
+FINDING LEDGER — R2-F8 parked IMPORTANT skills/self-review/SKILL.md:229 | self-review fix-round test runs carry no instruction to run in the anchor
+FINDING LEDGER — R2-F9 deferred SUGGESTION skills/tdd/SKILL.md:220 | cd rule omits git and relative-path file checks
+FINDING LEDGER — R2-F10 deferred SUGGESTION skills/verify-feature/SKILL.md:141 | root resolution prints nothing and keeps an inherited value
+FINDING LEDGER — R2-F11 deferred SUGGESTION hooks/lib/session-reanchor-v1.js:700 | start-directory list omits the tdd overlay; carriers disagree
+FINDING LEDGER — R2-F12 deferred SUGGESTION skills/tdd/SKILL.md:211 | phase 0 misstates why the verb can exit non-zero
+FINDING LEDGER — R2-F13 deferred SUGGESTION skills/verify-feature/SKILL.md:147 | acceptance runs and recipe commands can use different directories
+FINDING LEDGER — R2-F16 deferred SUGGESTION tests/structure/session-reanchor-v1.test.js:862 | report pin misses the first two skill names
+FINDING LEDGER — R2-F17 parked IMPORTANT skills/converge/SKILL.md:49 | shell injection class: bound root unquoted in a plan glob
+FINDING LEDGER — R2-F18 parked IMPORTANT skills/tdd/SKILL.md:238 | shell injection class: bound root unquoted in a plan glob
+FINDING LEDGER — R2-F20 deferred SUGGESTION hooks/lib/evidence-run-v1.js:842 | redirect notice prints the root without shell quoting
+FINDING LEDGER — R2-F21 deferred SUGGESTION skills/tdd/SKILL.md:171 | slug characters are unconstrained inside the quoted artifact paths
+FINDING LEDGER — R2-F23 deferred SUGGESTION skills/tdd/SKILL.md:220 | step 5 stat base is wrong for a session recorded in a subdirectory
+SR-R2-F1 IMPL completed — files: tests/SUITE-OVERVIEW.md
+SR-R2-F6 IMPL completed — files: hooks/lib/evidence-run-v1.js, .claude/rules/evidence-runner.md, .claude/rules/session-reanchor.md
+SR-R2-F14 IMPL completed — files: tests/structure/evidence-run-v1.test.js, tests/structure/test-evidence-run.sh
+SR-R2-F2 IMPL completed — files: docs/configuration.md
+SR-R2-F7 IMPL completed — files: skills/verify-feature/SKILL.md, skills/verify-feature/rules/zensu-monorepo.md, tests/structure/test-tdd-log-path-anchor.sh
+SR-R2-F15 IMPL completed — files: tests/structure/test-session-reanchor.sh
+SR-R2-F19 IMPL completed — files: hooks/lib/session-reanchor-v1.js, tests/structure/session-reanchor-v1.test.js, tests/structure/test-session-reanchor.sh, skills/adopt-session/SKILL.md, docs/session-control.md, .claude/rules/session-reanchor.md
+SR-R2-F22 IMPL completed — files: skills/tdd/SKILL.md, skills/verify-feature/SKILL.md, docs/tdd-manager-workflow.md, docs/session-control.md, .claude/rules/session-reanchor.md, tests/structure/test-session-reanchor.sh, tests/structure/test-tdd-log-path-anchor.sh
+SR-R2-F8 IMPL completed — files: skills/self-review/SKILL.md, tests/structure/test-tdd-log-path-anchor.sh
+SR-R2-F17 IMPL completed — files: skills/converge/SKILL.md, tests/structure/test-tdd-log-path-anchor.sh
+SR-R2-F18 IMPL completed — files: skills/tdd/SKILL.md, tests/structure/test-tdd-log-path-anchor.sh
+SR MUTATION — unit cases over a scratch copy: M1 runDirectory reverted to the containment-first R1 code -> the run-directory case fails (a nested repo inside the root is kept); M2 containment arm dropped -> fails; M3 containment by a bare startsWith prefix -> fails; M4 UNPASTABLE_ROOT_RE never matching -> both renderer cases fail; M5 backslash removed from UNPASTABLE_ROOT_RE -> both renderer cases fail
+SR-R13B IMPL completed — files: tests/SUITE-OVERVIEW.md | the rowless-file paragraph states the measured 43 files and 38 rows; stale since the main + reanchor merge 6aa2825e, which test-restore-project-root.sh R13b caught
+SR CHECKPOINT — PASS | cmd: bash tests/structure/<suite>.sh per suite (unit files through their parent suites), /bin/bash 3.2 first on PATH, detached candidate worktree carrying the exact working-tree diff (29 files, byte-compared) | 13 suites: session-reanchor 78/0, evidence-run 17/0, tdd-log-path-anchor 15/0 (re-run after narrowing L13 to the glob form), restore-project-root 240/0 (re-run after the R13b paragraph fix), verify-feature-skill 94/0, self-review-skill 54/0, converge-skill 67/0, full-suite-gate 17/0, acceptance-gate 37/0, msys-special-plugin-module-boundaries 16/0, tdd-manager-patches 62/0, review-convergence 101/0, bash32-portability 9/0; unit files alone: session-reanchor-v1.test.js 67/67, evidence-run-v1.test.js 55/55
+FULL SUITE NOT RUN LOCALLY — repository rule: tests/run-all.sh is never run on this machine and .zensu/config.json sets evidence.fullSuiteGate advisory, because the PR's CI run is the full-suite gate; the SR CHECKPOINT above is the local evidence for the self-review fix round
+EDIT LANDING AUDIT STARTED — round self-review
+PENDING PREDICATE — S1: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S2: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S3: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/self-review/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/converge/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S4: skills/implement/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S5: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-edit-landing-audit.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S6: tests/structure/test-artifact-redaction.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S7: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S8: .claude/rules/artifact-path-redaction.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S9: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — S9: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: hooks/lib/zensu-log.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/multi-repo-chains-spec.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F1: docs/multi-repo-chains-overview.html was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: hooks/lib/evidence-run-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: tests/structure/evidence-run-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: tests/structure/test-evidence-run.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F2: .claude/rules/evidence-runner.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F3: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F4: hooks/lib/zensu-edit-landing.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F5: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F6: tests/structure/test-tdd-complete-receipt-gate.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F7: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: skills/verify-feature/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F17: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — R1-F18: .claude/rules/worktree-keep.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F6: hooks/lib/evidence-run-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F6: .claude/rules/evidence-runner.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F6: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F14: tests/structure/evidence-run-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F14: tests/structure/test-evidence-run.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F7: skills/verify-feature/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F7: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F15: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: hooks/lib/session-reanchor-v1.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: tests/structure/session-reanchor-v1.test.js was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: skills/adopt-session/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F19: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: skills/verify-feature/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: docs/tdd-manager-workflow.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: docs/session-control.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: .claude/rules/session-reanchor.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: tests/structure/test-session-reanchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F22: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F8: skills/self-review/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F8: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F17: skills/converge/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F17: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F18: skills/tdd/SKILL.md was already dirty before this round; union membership is not evidence — re-read the target predicate
+PENDING PREDICATE — SR-R2-F18: tests/structure/test-tdd-log-path-anchor.sh was already dirty before this round; union membership is not evidence — re-read the target predicate
+EDIT LANDING AUDIT — claims=72 landed=4 not_landed=0 unverified=0 pending=68 exempt_ignored=0 exempt_verified=1
+PREDICATE RE-READ — round self-review: all 68 PENDING PREDICATE pairs re-read against the current files; 67 of 70 predicate checks hold (self-review claims 27/27, carried earlier claims 21/21, round-1 set 19/22); no EDIT NOT LANDED, no UNVERIFIED
+PREDICATE SUPERSEDED — R1-F17: skills/tdd/SKILL.md and docs/tdd-manager-workflow.md no longer carry the cd -- spelling because SR-R2-F22 dropped the -- on purpose; the same cd rule in its new spelling holds (carried check R1-F17, SR-R2-F22)
+PREDICATE SUPERSEDED — S4: skills/converge/SKILL.md no longer carries the unquoted plan glob because SR-R2-F17 quoted the root on purpose; the quoted glob holds (SR-R2-F17)
+FINDING LEDGER — R2-F1 fixed CRITICAL tests/SUITE-OVERVIEW.md:358 | unit-file registration row declared 54 blocks for evidence-run-v1.test.js while the file registers 55
+FINDING LEDGER — R2-F6 fixed IMPORTANT hooks/lib/evidence-run-v1.js:337 | runDirectory containment arm kept a nested work tree inside the root path
+FINDING LEDGER — R2-F7 fixed IMPORTANT skills/verify-feature/SKILL.md:143 | chain-mode cd prefix on teardown contradicted the standalone down rule
+FINDING LEDGER — R2-F14 fixed IMPORTANT tests/structure/evidence-run-v1.test.js:406 | runDirectory containment arm, prefix sibling and non-git caller were unpinned
+FINDING LEDGER — R2-F15 fixed IMPORTANT tests/structure/test-session-reanchor.sh:602 | E10p covered only the dollar sign and no control root
+FINDING LEDGER — R2-F19 fixed IMPORTANT hooks/lib/session-reanchor-v1.js:699 | reanchor report promised a chain for a target the verb refuses
+FINDING LEDGER — R2-F22 fixed IMPORTANT skills/tdd/SKILL.md:220 | prescribed cd with a double dash scoped the source-write gate to a directory named by the dashes
+FINDING LEDGER — R2-F2 fixed IMPORTANT docs/configuration.md:175 | operator account still says the runner uses the caller's working directory
+FINDING LEDGER — R2-F8 fixed IMPORTANT skills/self-review/SKILL.md:229 | self-review fix-round test runs carry no instruction to run in the anchor
+FINDING LEDGER — R2-F17 fixed IMPORTANT skills/converge/SKILL.md:49 | shell injection class: bound root unquoted in a plan glob
+FINDING LEDGER — R2-F18 fixed IMPORTANT skills/tdd/SKILL.md:238 | shell injection class: bound root unquoted in a plan glob

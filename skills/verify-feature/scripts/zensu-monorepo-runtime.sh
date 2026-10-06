@@ -105,24 +105,38 @@ remove_owned_container_if_present() {
   docker rm -f "$container" >/dev/null
 }
 
+SUPERVISOR_UNREACHABLE=3
+
 supervisor_request() {
   local action="$1" endpoint="$2"
   [ -f "$endpoint" ] && [ ! -L "$endpoint" ] || return 1
   ZENSU_VERIFY_RUNTIME_LEASE="$RUNTIME_LEASE" node "$SUPERVISOR" "$action" "$endpoint" >/dev/null
 }
 
+port_listening() {
+  local port="$1" status=0
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 0
+  curl --noproxy '*' -s -o /dev/null --connect-timeout 2 --max-time 3 "http://127.0.0.1:${port}/" || status=$?
+  [ "$status" != 7 ]
+}
+
+stop_owned_service() {
+  local endpoint="$1" port="$2" status=0 message=""
+  if [ -e "$endpoint" ]; then
+    message="$(supervisor_request stop "$endpoint" 2>&1)" && return 0 || status=$?
+  fi
+  if [ "$status" = 0 ] || [ "$status" = "$SUPERVISOR_UNREACHABLE" ]; then
+    port_listening "$port" || return 0
+    message="zensu verify runtime: port $port still answers although no supervisor owns it"
+  fi
+  [ -z "$message" ] || printf '%s\n' "$message" >&2
+  return 1
+}
+
 stop_owned_supervisors() {
   local frontend_port="$1" backend_port="$2" failed=0
-  if [ -e "$FRONTEND_READY" ]; then
-    supervisor_request stop "$FRONTEND_READY" || failed=1
-  elif lsof -nP -iTCP:"$frontend_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
-    failed=1
-  fi
-  if [ -e "$BACKEND_READY" ]; then
-    supervisor_request stop "$BACKEND_READY" || failed=1
-  elif lsof -nP -iTCP:"$backend_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
-    failed=1
-  fi
+  stop_owned_service "$FRONTEND_READY" "$frontend_port" || failed=1
+  stop_owned_service "$BACKEND_READY" "$backend_port" || failed=1
   return "$failed"
 }
 
@@ -218,7 +232,7 @@ case "$ACTION" in
 
     ORIGIN="$(parent_origin)"
     FRONTEND_PORT="${ORIGIN##*:}"
-    if lsof -nP -iTCP:"$FRONTEND_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    if port_listening "$FRONTEND_PORT"; then
       fail "the parent-authorized frontend port is already in use"
     fi
 
@@ -229,8 +243,7 @@ case "$ACTION" in
       PG_PORT=$((55432 + OFFSET))
       BACKEND_PORT=$((8090 + OFFSET))
       if [ "$PG_PORT" != "$FRONTEND_PORT" ] && [ "$BACKEND_PORT" != "$FRONTEND_PORT" ] \
-        && ! lsof -nP -iTCP:"$PG_PORT" -sTCP:LISTEN -t >/dev/null 2>&1 \
-        && ! lsof -nP -iTCP:"$BACKEND_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+        && ! port_listening "$PG_PORT" && ! port_listening "$BACKEND_PORT"; then
         FOUND=true
         break
       fi
@@ -288,7 +301,7 @@ case "$ACTION" in
     ZENSU_VERIFY_RUNTIME_LEASE="$RUNTIME_LEASE" SERVER_HOST=127.0.0.1 SERVER_PORT="$BACKEND_PORT" \
       DB_HOST=localhost DB_PORT="$PG_PORT" DB_USER=zensu DB_PASSWORD="$DB_PASSWORD" \
       DB_NAME=zensu DB_SSLMODE=disable REGISTRATION_ENABLED=true EMAIL_ALLOW_NOOP=true \
-      NOTIFICATION_ALLOW_NOOP=true JWT_SECRET="$JWT_SECRET" APP_BASE_URL="$ORIGIN" \
+      NOTIFICATION_ALLOW_NOOP=true TRUSTED_PROXY_CIDRS=none JWT_SECRET="$JWT_SECRET" APP_BASE_URL="$ORIGIN" \
       nohup node "$SUPERVISOR" start "$BACKEND_READY" "$LOG_BACKEND" \
       "$WORKTREE/backend" go run ./cmd/zensu </dev/null >/dev/null 2>&1 &
     BACKEND_SUPERVISOR_PID=$!
@@ -297,7 +310,7 @@ case "$ACTION" in
     [ -d "$WORKTREE/frontend/node_modules" ] || pnpm -C "$WORKTREE/frontend" install --frozen-lockfile
     ZENSU_VERIFY_RUNTIME_LEASE="$RUNTIME_LEASE" VITE_API_URL="http://127.0.0.1:${BACKEND_PORT}" \
       nohup node "$SUPERVISOR" start "$FRONTEND_READY" "$LOG_FRONTEND" \
-      "$WORKTREE/frontend" pnpm dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort \
+      "$WORKTREE/frontend" pnpm dev --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort \
       </dev/null >/dev/null 2>&1 &
     FRONTEND_SUPERVISOR_PID=$!
     wait_for_supervisor "$FRONTEND_READY" || fail "frontend supervisor failed to start"

@@ -48,8 +48,9 @@ OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
 `post-review-tdd-delegate.sh` preflight, which passes a single argument. **A SECOND
 lease-taking public reader of the owner-independent question now exists and deliberately does
 NOT route through that wrapper**: `autopilot_workspace_hold_report` needs the worker's own rc
-AND the holder record, and the wrapper collapses both into one status — the exact conflation
-that verb was built to remove. Say "two public readers", never "one wrapper". The Stop hook's rc=4
+AND the holder record from ONE leased read, while the wrapper answers with a status and prints
+the record only on 0. Both run `_autopilot_hold_probe`, but only the wrapper takes a read-only
+look when the lease cannot be taken; the report answers 5 there. Say "two public readers", never "one wrapper". The Stop hook's rc=4
 read was deleted when the fence began publishing its sentence, so the wrapper's preference
 parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
 parameter, not a line number. Do NOT restate this as "there is deliberately no public
@@ -59,6 +60,12 @@ standalone `/zensu:tdd` chain arm underneath another session's durable run in th
 The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
+
+**The owner-scoped read has a strict form, `autopilot_read_active_strict`.** Which callers use
+it, the read-only look it takes when the lease cannot be taken, and the checks that hold the real
+lease are in `.claude/rules/autopilot-active-read.md`. The public workspace read above and the
+Stop hook's `autopilot_reconcile_stop_active` keep a lease fault apart from their own verdict IN
+PLACE, with no strict twin; the same file records how and why.
 
 **The two deferred-review fences ask the owner-independent question and then WEIGH the
 answer; that is not a fourth shape and it is not owner-scoping.** They still call
@@ -231,7 +238,7 @@ the `--autopilot-adopt` arm of `zensu-log.sh`. Only this one is DECLARED at modu
 adoption pair is assigned inside the verb that publishes it. The hold-report verb added two further
 module-scope declarations, `_ZENSU_AP_HOLD_RECORD` and `_ZENSU_AP_HOLD_WORKER_RC`, and those carry
 the underscore-private prefix deliberately: they are an intra-file callback channel read only by
-`_autopilot_hold_probe` and `autopilot_workspace_hold_report`, never across a file boundary — which
+`_autopilot_hold_probe`, `autopilot_workspace_hold_report` and `autopilot_read_workspace`, never across a file boundary — which
 is exactly what the three unprefixed names are NOT, and the house precedent for a sourced-library
 global the Stop hook reads by name is `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
 stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
@@ -920,7 +927,7 @@ still covers only the LEGACY pointer by name.
   through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
   gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
   present in the true-claim one — and P1nz13 pins the second row plus its control.
-- **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
+- **The Windows wall clock of `test-doctor.sh` is UNMEASURED.** `test-autopilot-state-machine.sh`
   runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
   and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
@@ -937,8 +944,11 @@ still covers only the LEGACY pointer by name.
   bullet read `P1na`-`P1ny` while `P1nz` already existed, with no rename involved. Re-grep the
   family before trusting either form.
   This repository's rule is that a ceiling comes from a green shard measurement
-  and never from an estimate, so no ceiling was raised: take both figures from the next green
-  Windows run and record them before adding further fixtures to either file.
+  and never from an estimate, so no ceiling was raised: take the `test-doctor.sh` figure from
+  the next green Windows run that runs it and record it before adding further fixtures to that
+  file. `test-autopilot-state-machine.sh` has been measured since, at 969005 and 878950 ms on run
+  37064216294, after run 37060398940 timed it out at its old 900000 ms cap;
+  `.claude/rules/windows-budget-best-solution-first.md` records the figures and its new cap.
 - **A foreign nonterminal run permanently withholds the green summary.** The row is `WARN` and
   `line()` counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so while
   any other session in this project holds a nonterminal run, `/zensu:doctor` cannot print a clean

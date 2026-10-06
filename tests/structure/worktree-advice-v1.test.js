@@ -1586,3 +1586,25 @@ test('substitutionRuleLines refuses an absent or unrecognized carrier rather tha
   assert.ok(md.includes('`<path>`'), `the markdown carrier stopped code-spanning:\n${md}`);
   assert.equal(term.includes('`<path>`'), false, `the terminal carrier grew a code span:\n${term}`);
 });
+
+test('every arm on both legs closes with the release step, whichever form renders it', () => {
+  const rows = [
+    rec({ app: { archived: true } }),
+    rec({ app: { archived: false } }),
+    rec({ app: null }),
+    rec({ app: { archived: true }, live: { pid: 4242 } }),
+  ];
+  for (const base of rows) {
+    for (const cwdExists of [true, false]) {
+      const r = { ...base, cwdExists };
+      for (const body of [mod.worktreeAdvice(r), mod.worktreeAdvice(r, { carryOver: false, move: false })]) {
+        const at = body.findIndex((l) => l.startsWith('LAST, whichever route you took'));
+        assert.ok(at > 0, `no release step for ${JSON.stringify(r)}`);
+        const step = body.slice(at);
+        assert.ok(step.every((l) => !/^ {2}\S/.test(l)), 'the release step carries a command line');
+        assert.ok(step.join(' ').includes('can now be archived or removed'), 'the release step lost its promise');
+        assert.ok(body[body.length - 1].endsWith('an archive deletes them with the worktree.'), 'the release step is not the closing block');
+      }
+    }
+  }
+});

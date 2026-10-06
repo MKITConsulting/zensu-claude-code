@@ -33,8 +33,8 @@
 // predicates below therefore answer "is every file X", never "is some file X".
 //
 // CLI (changed-file paths newline-separated on stdin):
-//   node aspect-activation-v1.js
-// prints one line per built-in aspect, in ASPECTS order:
+//   node aspect-activation-v1.js [--panel lean|full] [--round first|re]
+// prints one line per aspect of the chosen panel, in panel order:
 //   spawn <aspect>
 //   skip <aspect> <reason>
 // and always terminates with:
@@ -51,6 +51,9 @@ const STDIN_MAX_BYTES = 1 * 1024 * 1024;
 const MAX_PATHS = 5000;
 
 const ASPECTS = ["conventions", "bugs", "architecture", "tests", "security"];
+const LEAN_ASPECTS = ["correctness", "design", "security"];
+const PANELS = ["lean", "full"];
+const ROUNDS = ["first", "re"];
 
 const DOC_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".rst", ".adoc"]);
 const DOC_DIRECTORIES = new Set(["docs", "doc"]);
@@ -110,9 +113,20 @@ function classify(files) {
   return { kind: "mixed", files: usable };
 }
 
-function activate(files) {
+function activate(files, options = {}) {
+  const panel = PANELS.includes(options.panel) ? options.panel : "lean";
+  const round = ROUNDS.includes(options.round) ? options.round : "first";
   const { kind } = classify(files);
   const docsOnly = kind === "docs-only";
+  if (panel === "lean") {
+    const verdicts = LEAN_ASPECTS.map((aspect) => {
+      if (aspect === "correctness") return { aspect, spawn: true, reason: "" };
+      if (round === "re") return { aspect, spawn: false, reason: "re-review-lean-panel" };
+      if (aspect === "security" && docsOnly) return { aspect, spawn: false, reason: "documentation-only-changeset" };
+      return { aspect, spawn: true, reason: "" };
+    });
+    return { kind, panel, round, verdicts };
+  }
   const noProductionCode = docsOnly || kind === "tests-only" || kind === "docs-and-tests";
 
   const verdicts = ASPECTS.map((aspect) => {
@@ -129,7 +143,7 @@ function activate(files) {
       : { aspect, spawn: true, reason: "" };
   });
 
-  return { kind, verdicts };
+  return { kind, panel, round, verdicts };
 }
 
 function render(report) {
@@ -149,9 +163,19 @@ function render(report) {
   return lines.join("\n");
 }
 
-function cliMain(stdinText) {
+function optionsFrom(argv) {
+  const options = {};
+  const args = Array.isArray(argv) ? argv : [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--panel") options.panel = args[index + 1];
+    if (args[index] === "--round") options.round = args[index + 1];
+  }
+  return options;
+}
+
+function cliMain(stdinText, argv = []) {
   const text = String(stdinText == null ? "" : stdinText);
-  return render(activate(text.split("\n")));
+  return render(activate(text.split("\n"), optionsFrom(argv)));
 }
 
 if (require.main === module) {
@@ -169,9 +193,9 @@ if (require.main === module) {
   process.stdin.on("end", () => {
     let out;
     try {
-      out = cliMain(over ? "" : buf);
+      out = cliMain(over ? "" : buf, process.argv.slice(2));
     } catch (_) {
-      out = render(activate([]));
+      out = render(activate([], optionsFrom(process.argv.slice(2))));
     }
     process.stdout.write(out + "\n");
     process.exitCode = 0;
@@ -179,6 +203,9 @@ if (require.main === module) {
 } else {
   module.exports = {
     ASPECTS,
+    LEAN_ASPECTS,
+    PANELS,
+    ROUNDS,
     MAX_PATHS,
     normalize,
     isDocumentation,
@@ -186,6 +213,7 @@ if (require.main === module) {
     classify,
     activate,
     render,
+    optionsFrom,
     cliMain,
   };
 }

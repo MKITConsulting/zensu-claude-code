@@ -8,9 +8,12 @@ LOCAL="$EVAL_DIR/scenarios/local-happy-path.yaml"
 REMOTE="$EVAL_DIR/scenarios/remote-unsafe-url.yaml"
 REMOTE_ACCEPTED="$EVAL_DIR/scenarios/remote-accepted-public.yaml"
 REMOTE_PROVIDER="$EVAL_DIR/remote-provider.sh"
+REMOTE_NETWORK_ONLY="$EVAL_DIR/scenarios/remote-separate-api-origin.yaml"
+NETWORK_ONLY_PROVIDER="$EVAL_DIR/remote-network-only-provider.sh"
 FIXTURE="$EVAL_DIR/test-projects/live-app"
 RECIPE="$FIXTURE/.zensu/autopilot.yaml"
 REMOTE_RECIPE="$FIXTURE/.zensu/remote-example.yaml"
+NETWORK_ONLY_RECIPE="$FIXTURE/.zensu/remote-network-only.yaml"
 RUNTIME="$FIXTURE/scripts/fixture-runtime.sh"
 SERVER="$FIXTURE/scripts/fixture-server.js"
 RUNNER="$EVAL_DIR/run-eval.sh"
@@ -40,7 +43,7 @@ if node -e '
   LOOPBACK_AVAILABLE=1
 fi
 
-for file in "$CFG" "$LOCAL" "$REMOTE" "$REMOTE_ACCEPTED" "$REMOTE_PROVIDER" "$RECIPE" "$REMOTE_RECIPE" "$RUNTIME" "$SERVER" "$FIXTURE/public/index.html" "$FIXTURE/CLAUDE.md" "$FIXTURE/.gitignore" "$RUNNER" "$RESERVATION" "$README" "$ASSERTION" "$CONTRACT_TEST"; do
+for file in "$CFG" "$LOCAL" "$REMOTE" "$REMOTE_ACCEPTED" "$REMOTE_PROVIDER" "$REMOTE_NETWORK_ONLY" "$NETWORK_ONLY_PROVIDER" "$RECIPE" "$REMOTE_RECIPE" "$NETWORK_ONLY_RECIPE" "$RUNTIME" "$SERVER" "$FIXTURE/public/index.html" "$FIXTURE/CLAUDE.md" "$FIXTURE/.gitignore" "$RUNNER" "$RESERVATION" "$README" "$ASSERTION" "$CONTRACT_TEST"; do
   if [ -f "$file" ]; then
     check "file exists: ${file#$PLUGIN_DIR/}" PASS
   else
@@ -48,13 +51,13 @@ for file in "$CFG" "$LOCAL" "$REMOTE" "$REMOTE_ACCEPTED" "$REMOTE_PROVIDER" "$RE
   fi
 done
 
-if [ -x "$RUNTIME" ] && [ -x "$RUNNER" ] && [ -x "$REMOTE_PROVIDER" ]; then
+if [ -x "$RUNTIME" ] && [ -x "$RUNNER" ] && [ -x "$REMOTE_PROVIDER" ] && [ -x "$NETWORK_ONLY_PROVIDER" ]; then
   check "runtime and live runner are executable" PASS
 else
   check "runtime and live runner are executable" FAIL
 fi
 
-if bash -n "$RUNTIME" && bash -n "$RUNNER" && bash -n "$REMOTE_PROVIDER" && node --check "$SERVER" >/dev/null && node --check "$RESERVATION" >/dev/null && node --check "$ASSERTION" >/dev/null \
+if bash -n "$RUNTIME" && bash -n "$RUNNER" && bash -n "$REMOTE_PROVIDER" && bash -n "$NETWORK_ONLY_PROVIDER" && node --check "$SERVER" >/dev/null && node --check "$RESERVATION" >/dev/null && node --check "$ASSERTION" >/dev/null \
   && node --check "$CONTRACT_TEST" >/dev/null; then
   check "fixture and runner syntax checks pass" PASS
 else
@@ -62,10 +65,10 @@ else
 fi
 
 CONTRACT_OUT="$(node --test "$CONTRACT_TEST" 2>&1)"
-if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 23; then
+if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 24; then
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"))" PASS
 else
-  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 23 registered)" FAIL
+  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 24 registered)" FAIL
 fi
 
 ASSERTION_SMOKE="$(node -e 'const check=require(process.argv[1]); const attest="\n===== wrapper attestation =====\n[wrapper_attestation] {\"init_git\":true,\"tracked_clean\":true,\"manifest_version\":1,\"root\":\"/tmp/eval\"}\n"; const up="[tool_use: Bash] id=u input={\"command\":\"./scripts/fixture-runtime.sh up\"}\n[tool_result: Bash] id=u is_error=false\nfixture-runtime: started\n"; const browser="[tool_use: Bash] id=s input={\"command\":\"playwright-cli -s=zensu-verify-smoke snapshot\"}\n[tool_result: Bash] id=s is_error=false\n### Snapshot\n"; const down="[tool_use: Bash] id=d input={\"command\":\"./scripts/fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"; const good=up+browser+down+attest; const fake=up+browser+"[tool_use: Bash] id=d input={\"command\":\"printf stopped # fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"+attest; const unsafe=up+browser+"[tool_use: Bash] id=e input={\"command\":\"playwright-cli -s=zensu-verify-smoke eval document.title\"}\n"+down+attest; if(check(good,{config:{check:"localTeardown"}}).pass&&!check(fake,{config:{check:"localTeardown"}}).pass&&!check(unsafe,{config:{check:"localTeardown"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"
@@ -92,10 +95,11 @@ fi
 if grep -qF 'local-happy-path.yaml' "$CFG" \
   && grep -qF 'remote-unsafe-url.yaml' "$CFG" \
   && grep -qF 'remote-accepted-public.yaml' "$CFG" \
+  && grep -qF 'remote-separate-api-origin.yaml' "$CFG" \
   && grep -qF 'maxConcurrency: 1' "$CFG"; then
-  check "config registers all three sequential live scenarios" PASS
+  check "config registers all four sequential live scenarios" PASS
 else
-  check "config registers all three sequential live scenarios" FAIL
+  check "config registers all four sequential live scenarios" FAIL
 fi
 
 if grep -qF 'ZENSU_PLUGIN_DIR_OVERRIDE' "$RUNNER" \
@@ -261,6 +265,28 @@ else
   check "accepted remote scenario pins a dedicated exact policy and complete gated evidence" FAIL
 fi
 
+if grep -qF "id: 'exec: ./remote-network-only-provider.sh'" "$REMOTE_NETWORK_ONLY" \
+  && grep -qF 'https://example.com/' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF '.zensu/remote-network-only.yaml' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF 'check: remoteNetworkOnlyTools' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF 'check: remoteAcceptedEvidence' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF 'check: remoteAcceptedVerdict' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF 'check: reportOnly' "$REMOTE_NETWORK_ONLY" \
+  && grep -qF '"networkOnlyOrigins":["https://example.org"]' "$NETWORK_ONLY_PROVIDER" \
+  && grep -qF '"origin":"https://example.com"' "$NETWORK_ONLY_PROVIDER" \
+  && grep -qF 'appOrigin: "https://example.com"' "$NETWORK_ONLY_RECIPE" \
+  && grep -qF -- '- "https://example.org"' "$NETWORK_ONLY_RECIPE" \
+  && grep -qF 'mode: declared-safe' "$NETWORK_ONLY_RECIPE" \
+  && grep -qF "NETWORK_ONLY_ORIGIN = 'https://example.org'" "$ASSERTION" \
+  && ZENSU_VERIFY_NAVIGATION_POLICY_V1="$(sed -n "s/^export ZENSU_VERIFY_NAVIGATION_POLICY_V1='\(.*\)'$/\1/p" "$NETWORK_ONLY_PROVIDER")" node -e '
+    const policy = require(process.argv[1]).readPolicy(process.env);
+    process.exit(policy && policy.ok && policy.networkOnly.has("https://example.org") && policy.targets.has("https://example.com") ? 0 : 1);
+  ' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"; then
+  check "network-only remote scenario pins a policy the gate parses, a recipe that declares the origin, and the flag-and-boundary check" PASS
+else
+  check "network-only remote scenario pins a policy the gate parses, a recipe that declares the origin, and the flag-and-boundary check" FAIL
+fi
+
 if grep -qF 'up: "./scripts/fixture-runtime.sh up"' "$RECIPE" \
   && grep -qF 'ready: "./scripts/fixture-runtime.sh ready"' "$RECIPE" \
   && grep -qF 'down: "./scripts/fixture-runtime.sh down"' "$RECIPE" \
@@ -419,6 +445,7 @@ rm -rf "$NEG_DIR"
 
 if grep -qF 'live and advisory' "$README" \
   && grep -qF 'remote-accepted-public.yaml' "$README" \
+  && grep -qF 'remote-separate-api-origin.yaml' "$README" \
   && grep -qF 'tests/structure/test-promptfoo-verify-feature.sh' "$README" \
   && grep -qF 'playwright-cli' "$README" \
   && grep -qF 'cannot answer the consent prompt' "$README"; then

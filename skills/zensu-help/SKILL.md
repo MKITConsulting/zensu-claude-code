@@ -72,7 +72,7 @@ Before answering questions in the right column, `Read` the source file in the le
 |---|---|
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
 | CLI command surface / install; plugin tool wiring | `README.md` § Install + `zensu --help` + `.claude-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
-| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `docs/configuration.md` § Hook Opt-Out table |
+| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixSeverity`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `docs/configuration.md` § Hook Opt-Out table |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `docs/configuration.md` § Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `docs/configuration.md` § Config Resolution Order |
 | Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_FULL_SUITE_GATE`, `ZENSU_ACCEPTANCE_GATE`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `docs/configuration.md` § Claude Environment and Native Placeholders |

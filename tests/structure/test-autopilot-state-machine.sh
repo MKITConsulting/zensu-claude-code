@@ -59,6 +59,7 @@ fi
 source "$LIB"
 # shellcheck disable=SC1090
 source "$VCS_LIB"
+source "$PLUGIN_DIR/tests/structure/lib-autopilot-lease.sh"
 
 ROOT="$(mktemp -d -t za-state-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
@@ -2266,6 +2267,99 @@ else
   else
     check "W32d held and free disclosures must differ" FAIL
   fi
+fi
+
+W33_P="$ROOT/w33-status-lease"; mkdir -p "$W33_P"; W33_P="$(cd "$W33_P" && pwd -P)"
+W33_HELD_OUT="$ROOT/w33-held.out"; W33_HELD_ERR="$ROOT/w33-held.err"; W33_HELD_RCF="$ROOT/w33-held.rc"
+W33_FREE_OUT="$ROOT/w33-free.out"; W33_FREE_RCF="$ROOT/w33-free.rc"; W33_READYF="$ROOT/w33.ready"
+: > "$W33_READYF"
+(
+  export CLAUDE_PROJECT_DIR="$W33_P"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/w33-plugin-data"
+  source "$BASELINE" w33-status-owner >/dev/null 2>&1 || exit 1
+  autopilot_begin_run run_w33_status "$ZENSU_SESSION_KEY" "$W33_P" >/dev/null 2>&1 || exit 1
+  with_autopilot_lease "$W33_P" bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status \
+    >"$W33_HELD_OUT" 2>"$W33_HELD_ERR"
+  printf '%s' "$?" > "$W33_HELD_RCF"
+  bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W33_FREE_OUT" 2>/dev/null
+  printf '%s' "$?" > "$W33_FREE_RCF"
+  printf 'yes' > "$W33_READYF"
+)
+W33_HELD_RC="$(cat "$W33_HELD_RCF" 2>/dev/null || echo 99)"
+W33_FREE_RC="$(cat "$W33_FREE_RCF" 2>/dev/null || echo 99)"
+if [ "$(cat "$W33_READYF" 2>/dev/null)" != yes ]; then
+  check "W33 the held-lease --autopilot-status fixture did not complete" FAIL
+elif [ "$W33_HELD_RC" -eq 5 ] && [ ! -s "$W33_HELD_OUT" ] \
+  && grep -qF 'Autopilot state could not be read' "$W33_HELD_ERR" \
+  && ! grep -qF 'owns no durable Autopilot run' "$W33_HELD_ERR" \
+  && [ "$W33_FREE_RC" -eq 0 ] && json_ok "$W33_FREE_OUT" 'value.runId === "run_w33_status"'; then
+  check "W33 a held Autopilot lease makes --autopilot-status exit 5 instead of a no-run answer" PASS
+else
+  check "W33 held-lease status (held=$W33_HELD_RC free=$W33_FREE_RC err=$(head -c 300 "$W33_HELD_ERR" 2>/dev/null))" FAIL
+fi
+
+W34_P="$ROOT/w34-status-lease-norun"; mkdir -p "$W34_P/.zensu/state"; W34_P="$(cd "$W34_P" && pwd -P)"
+W34_OUT="$ROOT/w34.out"; W34_ERR="$ROOT/w34.err"; W34_RCF="$ROOT/w34.rc"; W34_SECF="$ROOT/w34.sec"
+(
+  export CLAUDE_PROJECT_DIR="$W34_P"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/w34-plugin-data"
+  source "$BASELINE" w34-status-norun >/dev/null 2>&1 || exit 1
+  started=$SECONDS
+  with_autopilot_lease "$W34_P" bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W34_OUT" 2>"$W34_ERR"
+  printf '%s' "$?" > "$W34_RCF"
+  printf '%s' "$((SECONDS - started))" > "$W34_SECF"
+)
+W34_RC="$(cat "$W34_RCF" 2>/dev/null || echo 99)"
+W34_SEC="$(cat "$W34_SECF" 2>/dev/null || echo 0)"
+if [ "$W34_RC" -eq 1 ] && [ "$W34_SEC" -ge 8 ] && [ ! -s "$W34_OUT" ] \
+  && grep -qF 'owns no durable Autopilot run' "$W34_ERR" \
+  && ! grep -qF 'Autopilot state could not be read' "$W34_ERR"; then
+  check "W34 a held Autopilot lease still answers no run for a session that provably owns none" PASS
+else
+  check "W34 held-lease status without a run (rc=$W34_RC elapsed=${W34_SEC}s err=$(head -c 300 "$W34_ERR" 2>/dev/null))" FAIL
+fi
+
+W35_P="$ROOT/w35-status-unsafe"; mkdir -p "$W35_P"; W35_P="$(cd "$W35_P" && pwd -P)"
+W35_OUT="$ROOT/w35.out"; W35_ERR="$ROOT/w35.err"; W35_RCF="$ROOT/w35.rc"
+(
+  export CLAUDE_PROJECT_DIR="$W35_P"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/w35-plugin-data"
+  source "$BASELINE" w35-status-unsafe >/dev/null 2>&1 || exit 1
+  mkdir -p "$W35_P/.zensu/state/autopilot"
+  bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W35_OUT" 2>"$W35_ERR"
+  printf '%s' "$?" > "$W35_RCF"
+  rmdir "$W35_P/.zensu/state/autopilot"
+)
+W35_RC="$(cat "$W35_RCF" 2>/dev/null || echo 99)"
+if [ "$W35_RC" -eq 5 ] && [ ! -s "$W35_OUT" ] \
+  && grep -qF 'Autopilot state could not be read' "$W35_ERR" \
+  && ! grep -qF 'owns no durable Autopilot run' "$W35_ERR"; then
+  check "W35 unsafe Autopilot storage makes --autopilot-status exit 5 instead of a no-run answer" PASS
+else
+  check "W35 unsafe-storage status (rc=$W35_RC err=$(head -c 300 "$W35_ERR" 2>/dev/null))" FAIL
+fi
+
+W36_P="$ROOT/w36-status-lease-cancelled"; mkdir -p "$W36_P"; W36_P="$(cd "$W36_P" && pwd -P)"
+W36_OUT="$ROOT/w36.out"; W36_ERR="$ROOT/w36.err"; W36_RCF="$ROOT/w36.rc"; W36_SECF="$ROOT/w36.sec"
+(
+  export CLAUDE_PROJECT_DIR="$W36_P"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/w36-plugin-data"
+  source "$BASELINE" w36-status-cancelled >/dev/null 2>&1 || exit 1
+  autopilot_begin_run run_w36_cancelled "$ZENSU_SESSION_KEY" "$W36_P" >/dev/null 2>&1 || exit 1
+  autopilot_apply_event run_w36_cancelled cancel-w36 CANCEL '{}' "$W36_P" >/dev/null 2>&1 || exit 1
+  started=$SECONDS
+  with_autopilot_lease "$W36_P" bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W36_OUT" 2>"$W36_ERR"
+  printf '%s' "$?" > "$W36_RCF"
+  printf '%s' "$((SECONDS - started))" > "$W36_SECF"
+)
+W36_RC="$(cat "$W36_RCF" 2>/dev/null || echo 99)"
+W36_SEC="$(cat "$W36_SECF" 2>/dev/null || echo 0)"
+if [ "$W36_RC" -eq 0 ] && [ "$W36_SEC" -ge 8 ] \
+  && json_ok "$W36_OUT" 'value.runId === "run_w36_cancelled" && value.stage === "CANCELLED"' \
+  && ! grep -qF 'Autopilot state could not be read' "$W36_ERR"; then
+  check "W36 a held Autopilot lease still reports a cancelled own run as the locked read does" PASS
+else
+  check "W36 held-lease status over a cancelled own run (rc=$W36_RC elapsed=${W36_SEC}s err=$(head -c 300 "$W36_ERR" 2>/dev/null))" FAIL
 fi
 
 # S5b — liveness. The owner's workflow document is the staleness signal this
