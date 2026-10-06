@@ -55,7 +55,8 @@ hardcoded English step names.
   `additionalContext` text into the prompt as a "hook-injected system note" and grades the reply.
   [`tests/structure/test-promptfoo-zen-mode.sh`](../../tests/structure/test-promptfoo-zen-mode.sh) pins
   that the copied text still matches the hook, so the scenarios cannot silently drift from the shipped
-  wording.
+  wording. A scenario whose anchor reads `none` carries the shorter rule 6 the hook emits while no
+  chain is armed, and that suite captures it by firing the hook.
 - **No `llm-rubric`/grader** — matching every eval in this repo. Assertions are `type: javascript` over
   the model output, keyed on measurable properties (line counts, article density, question marks, literal
   markers). `repeat: 3` averages model variance.

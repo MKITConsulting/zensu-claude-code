@@ -164,11 +164,12 @@ as an order of magnitude, not as a measurement, and do not add a new figure here
 suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects roughly 4.2 KB on the same prompt channel. The DIRECTIVE behind that figure is bounded
-since the chain-progress anchor landed — `Z30` in `tests/structure/test-zen-mode.sh` holds it
-under a declared ceiling — but `Z30` reads the hook and never opens this document, so the number
-written here is hand-derived like every other one below, and ages the same way. `C6` above stays
-the only figure a check reads out of this paragraph. A full-panel `/zensu:tdd` review round
+injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
+while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
+`Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
+they read the hook and never open this document, so the numbers written here are hand-derived
+like every other one below, and age the same way. `C6` above stays the only figure a check reads
+out of this paragraph. A full-panel `/zensu:tdd` review round
 (`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
 spawns three aspects and runs the judge on the first review only — more with repo-custom personas, and again per auto-fix
@@ -178,14 +179,26 @@ to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds 
 all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
-the packet handed to them. The dominant term, though, is the other leg, and it is the one the design deliberately
-leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
-— the shipped default — the standing per-prompt injection is 4224 + 1756 = about **5980
-characters every turn**, roughly 117 KiB over 20 turns and 351 KiB over 60. The two operands are
-stated in the SAME unit on purpose: 4224 is a character count and the sibling's headline carries
-both a character and a byte figure, so an earlier wording summed 4224 characters with 1764 bytes
-and called the result KB. That is the real price of "resident
-rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
+the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
+on every prompt with no de-bounce, and six hooks are registered on it.
+`tests/structure/test-user-prompt-budget.sh` drives every one of them on four prompt kinds — a
+typed request, a background-task notification, a shell input behind a system reminder, and a
+CI-monitor event — and holds each hook and each sum under declared ceilings, so treat that suite,
+not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
+`user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
+the helper command it renders, on typed requests and slash commands with arguments while no chain
+is armed, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, only when such a prompt
+carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
+`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above, on every prompt kind because the reply is
+user-visible) and this hook (1,756 characters, on every prompt kind for the same reason). Two emit
+only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose. With
+zen-mode active — the shipped default — a typed code request with a planning keyword therefore
+costs about **12.5 K characters per turn**, and a task notification or shell input about 4.9 K
+(5.2 K for a CI-monitor event); `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+before it every harness prompt paid the typed figure. All operands are character counts. That is
+the real price of "resident rather than periodic", and it should be argued on those numbers rather
+than on the fan-out figure.
 The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
 it never reorders output whose shape a contract fixes. `tests/structure/test-best-solution-first.sh`
