@@ -51,7 +51,8 @@ implemented nothing a criterion could observe.
 `async`, `iac`, `custom`, `library`, `artifact`) must cite an `--evidence-run --scope acceptance`
 record that completed on the current tree without changing it, and the exit code must agree
 with the verdict. `partial` needs no run. UI drivers (`browser`, `mobile`, `desktop-native`)
-are attested. The driver names are the autopilot catalog's; the browser still follows
+are attested. The driver names are the autopilot catalog's, except that the catalog's `desktop`
+is recorded as `desktop-native` (`.claude/rules/verify-feature-drivers.md`); the browser still follows
 `/zensu:verify-feature`'s credential-blind rules, never the catalog's `storageState` login.
 
 **States.** Per criterion: `pass`, `fail`, `partial`, `missing`, `stale` (another tree, or the

@@ -1,7 +1,8 @@
 # Browser verification rules
 
 These rules are the self-contained browser loop for `/zensu:verify-feature`. They replace
-the source skill's dependency on a personal `/test-feature` command.
+the source skill's dependency on a personal `/test-feature` command. They are the `browser`
+driver's rule file; every other driver has its own, listed in `rules/drivers.md`.
 
 ## 0. The command set on a `zensu-verify` session
 

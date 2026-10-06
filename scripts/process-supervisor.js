@@ -225,7 +225,7 @@ async function request(readyPath, action) {
 async function main() {
   const [action, ...args] = process.argv.slice(2);
   if (action === 'start') {
-    if (args.length < 5) fail('usage: start <ready> <log> <cwd> <command> [args...]');
+    if (args.length < 4) fail('usage: start <ready> <log> <cwd> <command> [args...]');
     await start(args[0], args[1], args[2], args[3], args.slice(4));
     return;
   }

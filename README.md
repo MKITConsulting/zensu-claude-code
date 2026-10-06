@@ -101,7 +101,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Exercise the running feature and report what actually happened, for any kind of application: a web UI in a browser through `playwright-cli`, an API, a CLI, a library, a worker, infrastructure code, an iOS or Android app in a simulator or emulator, or a desktop app. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -221,7 +221,7 @@ is unpinned).
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
-| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |

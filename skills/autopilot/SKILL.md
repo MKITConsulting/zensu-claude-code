@@ -36,7 +36,7 @@ Slash form: `/zensu:autopilot <feature in plain words> [--flag=value ...]`.
 | Arg | Required | Default | Notes |
 |---|---|---|---|
 | `<feature>` | yes | — | The feature to build, in plain language. The only thing most users type. |
-| `--driver=<name>` | no | auto (probe) | Force the validation driver: `browser`/`api`/`cli`/`async`/`iac`/`custom`. |
+| `--driver=<name>` | no | auto (probe) | Force the validation driver: `browser`/`api`/`cli`/`library`/`async`/`iac`/`mobile`/`desktop`/`custom`. |
 | `--base=<branch>` | no | `main` | PR base branch. |
 | `--no-validate` | no | off | Skip Phase 1 step 6 (live validation). Ship a reviewed+tested PR only. Degrades — note it. |
 | `--config=<path>` | no | `.zensu/autopilot.yaml` | Project recipe file (see `rules/config.md`). |
@@ -463,7 +463,7 @@ the probe:
 
 ```
 Driver           = how the app is exercised + ACs observed
-                   browser | api | cli | async | iac | mobile | desktop | custom   (rules/drivers.md)
+                   browser | api | cli | library | async | iac | mobile | desktop | custom   (rules/drivers.md)
 Session artifact = what "logged in" means for that driver
                    storageState | bearer-token-file | keychain | none              (rules/auth.md)
 ```

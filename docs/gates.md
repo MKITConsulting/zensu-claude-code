@@ -658,6 +658,19 @@ through Bash.
 - **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
   run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
   prompt.
+- **Only the `browser` driver is gated.** The other drivers of `/zensu:verify-feature` (`api`,
+  `cli`, `library`, `async`, `iac`, `mobile`, `desktop`, `custom`) run the worktree's own build on
+  run-owned local resources, bounded by the skill's rules, the host's own permission prompts and
+  the per-app or per-device grants of the host's computer-use and simulator tools. No hook judges
+  them, and how the host resolves those prompts in auto mode or a headless run is unverified.
+  Teardown is the mechanical part: `skills/verify-feature/scripts/verify-run-resources.js`
+  records every device, supervised process, emulator serial, cluster, container and `tmux`
+  socket a driver starts, and acts only on recorded entries. A simulator must still carry the
+  run's name, a process is stopped through the supervisor's lease or after a command-line check,
+  and an emulator is only stopped through its supervised process, never killed by its serial.
+  A container, a `tmux` socket and a `kind` cluster are removed by the run-prefixed name that was
+  checked when it was recorded, with no second check. A resource started outside the helper is
+  outside its reach.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.

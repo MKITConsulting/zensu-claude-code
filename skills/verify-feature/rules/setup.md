@@ -21,6 +21,14 @@ Read only files `git ls-files` reports. Record one evidence line per proposal in
 | Compose | `docker-compose*.yml`, `compose*.yml` | shared fixed ports and container names, reported as blockers |
 | Go | `go.mod`, `cmd/*/main.go` | `go run ./cmd/<name>` with a port flag or env the code reads |
 | JVM | `build.gradle*`, `pom.xml` | `./gradlew bootRun` / `mvn spring-boot:run` with a port property |
+| Xcode app | `*.xcodeproj`, `*.xcworkspace` | `mobile` for an iOS, iPadOS, watchOS, tvOS or visionOS target, `desktop` for a macOS target; the scheme from the `.xcscheme` files under `xcshareddata/xcschemes/`, never from `xcodebuild -list`, which resolves Swift packages first |
+| Android app | a Gradle module applying `com.android.application` | `mobile` with `platform: android` and the module's assemble task |
+| Cross-platform mobile | `pubspec.yaml`, a `react-native` dependency, a .NET MAUI project, a Kotlin Multiplatform app module, `capacitor.config.*` | `mobile` as a list of blocks, one per platform the change touches |
+| Electron or Tauri | an `electron` dependency, `src-tauri/tauri.conf.json` | `desktop` with the project's own start or build script |
+| CLI | `bin` in `package.json`, `[project.scripts]` in `pyproject.toml`, `cmd/*/main.go`, a Cargo `[[bin]]` | `cli` with the build command and the built entry point |
+| Library | a package manifest with no entry point | `library`, with an example or sample the repository ships |
+| Infrastructure | `*.tf`, `Chart.yaml`, `kustomization.yaml`, `cdk.json` | `iac` and the disposable target, if the evidence names one |
+| Worker | a queue or scheduler dependency with a worker or cron entry point | `async` with the producer or trigger the repository owns |
 | Seed or fixture code | `**/seed*`, `**/fixtures/**`, `**/testdata/**` | whether `synthetic` can be claimed |
 
 A port the application binds is proposed only when the evidence shows how to pass
@@ -58,6 +66,12 @@ application, a browser's network log, a guess, or a file `git ls-files` does not
 Propose it as the bare origin, with no path, and propose `appOrigin` only for a remote recipe,
 where it must be the origin of the validated remote base URL.
 
+For a build driver, propose the `validate` block instead of, or beside, the services: the
+`driver` and its block (`validate.cli`, `validate.library`, `validate.mobile` or
+`validate.desktop`, schema in `../../autopilot/rules/config.md`) with the build command, the
+artifact path, the app identifier and the device type the evidence names. Propose a desktop
+app's `dataIsolation` switch only when its code shows one; setup never invents one.
+
 ## 3. One confirmation round
 
 Ask exactly one `AskUserQuestion` whose options carry every proposal as a pre-filled answer the
@@ -93,6 +107,52 @@ recipe to serve both skills writes `autopilot.yaml` rather than `runtime.yaml`.
 `validate.navigationBroker` declares policy mode; it is optional in consent mode and honoured
 when present. `validate.networkOnly` takes `origins`, a list of exact origins, and in a remote
 recipe `appOrigin`, as `../../autopilot/rules/config.md` describes.
+
+A build driver needs no services. A native iOS app that talks to no backend:
+
+```yaml
+version: 1
+validate:
+  driver: mobile
+  mobile:
+    platform: ios
+    project: App.xcodeproj
+    scheme: App
+    appId: com.example.app
+    deviceType: com.apple.CoreSimulator.SimDeviceType.iPhone-17
+```
+
+A cross-platform app whose change touches both platforms:
+
+```yaml
+version: 1
+validate:
+  driver: mobile
+  mobile:
+    - platform: ios
+      project: ios/App.xcworkspace
+      scheme: App
+      appId: com.example.app
+      deviceType: com.apple.CoreSimulator.SimDeviceType.iPhone-17
+    - platform: android
+      project: android/app
+      appId: com.example.app
+      systemImage: "system-images;android-35;google_apis;arm64-v8a"
+```
+
+A command-line tool:
+
+```yaml
+version: 1
+validate:
+  driver: cli
+  cli:
+    build: "go build -o ${ZENSU_VERIFY_RUN_DIR:?}/bin/tool ./cmd/tool"
+    command: "${ZENSU_VERIFY_RUN_DIR:?}/bin/tool"
+```
+
+Inputs are written `${NAME:?}` so a skill that does not assign them fails the command instead of
+expanding it to an empty path.
 
 ## 5. `--print-policy`
 

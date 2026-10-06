@@ -1,18 +1,18 @@
 ---
 name: verify-feature
 description: >
-  [Zensu] Live-verify an already-built feature against either the current local git
-  worktree or a deployed preview. Discovers the changed behavior, builds a risk-ranked
-  P0/P1/P2 scenario matrix, boots an isolated local runtime from a checked-in recipe (or
-  the bundled Zensu monorepo adapter), drives the real UI through playwright-cli behind the
-  browser consent gate, and reports DOM/data, visual, console, and network evidence. Remote mode clearly
-  distinguishes deployed code from unpushed worktree changes and keeps authentication
-  credential-blind through visible manual login only.
-  Does not fix code or write committed tests. In --chain mode it verifies every acceptance
-  criterion of a running /zensu:tdd chain on this worktree and records one verdict per
-  criterion for the chain's terminus gate. Use when the user asks to verify/test a
-  worktree, test a feature live, run an end-to-end smoke check, validate a preview, or
-  invokes /zensu:verify-feature.
+  [Zensu] Live-verify an already-built feature of any kind of application against the current
+  local git worktree, or a deployed web preview. Builds a risk-ranked P0/P1/P2 scenario matrix
+  from the diff and picks a driver per scenario: a web UI through playwright-cli behind the
+  browser consent gate, an API, a CLI or TUI, a library, a worker, infrastructure code, an
+  iOS or Android app in a run-owned simulator or emulator, a desktop app, or project scripts.
+  Runs the worktree's own build in an isolated runtime and reports state, visual and
+  runtime-signal evidence, credential-blind. Does not fix code or write committed tests.
+  In --chain mode it verifies every acceptance criterion of a running /zensu:tdd chain on
+  this worktree and records one verdict per criterion for the chain's terminus gate.
+  Use when the user asks to verify/test a
+  worktree, test a feature live, run an end-to-end smoke check, validate a preview, check an
+  app in the simulator, or invokes /zensu:verify-feature.
 ---
 
 # /zensu:verify-feature
@@ -26,6 +26,15 @@ evidence. The target is either the current worktree (`local`) or an already-depl
 (`remote`). This workflow reports what it observes; it never patches the feature and never
 turns the run into a committed regression suite.
 
+The application can be of any kind. A **driver** exercises each scenario: `browser`, `api`,
+`cli`, `library`, `async`, `iac`, `mobile`, `desktop` or `custom`, catalogued with its evidence
+planes in `rules/drivers.md`. Phase 0 resolves a driver for every row, and a driver's own rule
+file is loaded only when a row uses it: `rules/browser-verification.md`,
+`rules/service-verification.md` (`api`, `async`, `iac`), `rules/cli-verification.md` (`cli`,
+`library`), `rules/mobile-verification.md` or `rules/desktop-verification.md`. The sections
+below that name the browser, `playwright-cli`, the consent gate, a policy or an origin apply to
+`browser` rows only.
+
 > `/zensu:verify-feature` is a live proof. `/zensu:cover` writes durable tests.
 > `/zensu:autopilot` owns the larger idea-to-PR build and repair loop.
 
@@ -37,6 +46,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 |---|---|---|---|
 | `<feature>` | no | current diff | Behavior to verify. Free text, a route, or acceptance criteria are valid. |
 | `--mode=local\|remote` | no | `local` | `local` must execute code from this worktree; `remote` executes deployed code. |
+| `--driver=<id>` | no | detect | `browser`, `api`, `cli`, `library`, `async`, `iac`, `mobile`, `desktop` or `custom` for every row; `remote` accepts `browser` only. Without it each row takes the recipe's `validate.driver` or the driver `rules/drivers.md` detects from the diff. |
 | `--route=<path>` | no | derive | Initial route. Derive only when the changed router or supplied criteria make it unambiguous. |
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
@@ -64,17 +74,28 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
 - **Real interfaces.** Exercise the user-visible UI and its real backend. Never run
   `playwright-cli eval` or `run-code`; the browser consent gate denies both on a
   `zensu-verify` session because even read-only page code can inspect authenticated data or
-  bypass evidence controls.
+  bypass evidence controls. Every other driver exercises its own real interface (the endpoint,
+  the command, the app's own screen) through its rule file, never a mock or stub of the product.
 - **Credential-blind.** Never receive, read, print, paste, or interpolate a real password,
   token, cookie, API key, or storage-state content. The browser consent gate denies every
   cookie, local/session-storage and state command on a `zensu-verify` session because they
   expose credential material. Do not accept an auth artifact path or run a storage-state login
   script; use visible manual browser login or report the authenticated coverage as PARTIAL.
+  Every other driver follows the same rule: only a throwaway identity the repository's own
+  fixtures create, or the user's own visible login typed by the user into the simulator,
+  emulator or app window.
 - **Safe writes.** Local throwaway fixture creation is allowed. Remote destructive or
   externally visible actions (delete, send, publish, pay, invite) require explicit user
   confirmation even when they are part of a scenario.
 - **Owned teardown only.** Stop only processes, containers, and temporary files created by
   this run. Never use broad `pkill`, shared container names, or cleanup outside the run dir.
+- **Run-owned devices only.** Simulators and emulators, never a physical device, and never a
+  simulator, emulator, app window or terminal session the user already has. The run-resource
+  helper creates, records and removes every device, supervised process, cluster, container and
+  terminal server that a driver rule file starts (`rules/drivers.md` section 5); a recipe's
+  services keep its own `down`.
+- **No host browser tools.** An in-app browser pane or a browser extension drives the user's own
+  browser profile outside the consent gate. Never use one, for any driver.
 
 ## Chain mode (`--chain`)
 
@@ -96,11 +117,11 @@ only these points:
    prove that the attached process serves this worktree, each verdict it yields is at most
    `partial`.
 3. **Use the cheapest driver that can observe the criterion,** named as in
-   `skills/autopilot/rules/drivers.md`: `browser` through this skill's `playwright-cli` flow;
-   `mobile` in the iOS Simulator or the Android emulator, through a host simulator tool or a
-   Maestro flow; `desktop-native` through the host's desktop automation; and `api`, `cli`,
-   `async`, `iac`, `custom`, `library` or `artifact` as one shell check that exits 0 exactly
-   when the criterion holds. The credential-blind rules above bind every driver: never the
+   `rules/drivers.md`: `browser` through this skill's `playwright-cli` flow; `mobile` and
+   `desktop` through their own rule files; and `api`, `cli`, `async`, `iac`, `custom` or
+   `library` as one shell check that exits 0 exactly when the criterion holds. Record a
+   `desktop` row with `--driver desktop-native`, the spelling the acceptance recorder accepts.
+   The credential-blind rules above bind every driver: never the
    autopilot `storageState` login, and never a secret in a command or in the evidence. An
    exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its
    own output (`curl -fsS -o /dev/null http://127.0.0.1:<port>/…`, `<command> >/dev/null 2>&1`),
@@ -147,7 +168,7 @@ only these points:
    tool still starts in the session's previous worktree, while every record binds to the
    anchor's tree. `--evidence-run` needs no prefix: it already runs in the anchor.
 
-## Phase 0 — Resolve scope and target
+## Phase 0 — Resolve scope, target and drivers
 
 0. If the supplied arguments select `remote`, validate the supplied base URL entirely
    in-memory before invoking any other tool. A URL with userinfo, query, fragment, or unsafe
@@ -156,6 +177,8 @@ only these points:
    transform, or report the scheme, hostname, port, path, query key, query value, fragment, or
    userinfo. Record the target only as `remote target rejected before resolution`. Do not inspect Git,
    read files, start a runtime, authenticate, or navigate after that rejection.
+   `--mode=remote` together with a `--driver` other than `browser` stops the same way, in
+   memory, with `remote mode supports the browser driver only`.
 1. Resolve the git root and current branch. Record whether the worktree is dirty.
 2. Resolve the repository default branch, then inspect both committed and uncommitted work:
    the merge-base diff through `HEAD`, plus `git diff` and `git diff --cached`.
@@ -167,6 +190,16 @@ only these points:
    - local: worktree path, branch, and `HEAD` SHA;
    - remote: only after validation succeeds, the sanitized credential-free base URL and any
      deployment/commit identifier visible from the preview.
+6. Resolve a driver for every row with `rules/drivers.md`: `--driver=`, else the recipe's
+   `validate.driver`, else detection from the diff, and record the file and the signal that
+   chose it. Run that file's toolchain preflight (section 4) for every driver chosen. In
+   `remote` mode a row whose driver is not `browser` is PARTIAL, because remote mode supports
+   the browser driver only. For a build driver the local target identity adds the build command
+   and the artifact path once Phase 2 has built it.
+
+### Browser rows: remote URL, policy and consent
+
+The rest of Phase 0 applies to `browser` rows. A run without them continues at Phase 1.
 
 For a remote target, validate the URL **before echoing, navigating, or authenticating**:
 
@@ -283,12 +316,14 @@ observation.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
-Create the matrix before opening the browser. Every row names the route and setup, precise
-steps, DOM/data assertion, visual assertion, expected network effect, and priority.
+Create the matrix before driving anything. Every row names its driver, the route or entry point
+and setup, precise steps, the state assertion, the visual assertion (`n/a` for a driver without
+a visual plane), the runtime signal or side effect, and the priority. For a `browser` row the
+state assertion is DOM/data and the signal is the expected network effect.
 
-| Scenario | Route + setup | Steps | DOM/data | Visual | Network | Pri |
-|---|---|---|---|---|---|---|
-| ... | ... | ... | ... | ... | ... | P0/P1/P2 |
+| Scenario | Driver | Route or entry point + setup | Steps | State | Visual | Signals | Pri |
+|---|---|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... | ... | P0/P1/P2 |
 
 Enumerate these dimensions from the changed code:
 
@@ -297,7 +332,9 @@ Enumerate these dimensions from the changed code:
 - 0 / 1 / many and relevant min/max or date boundaries;
 - empty, loading, validation, unauthorized, and failed-request states that can be produced
   safely through real interfaces;
-- responsive, keyboard/accessibility, permissions, and theme behavior when touched.
+- responsive, keyboard/accessibility, permissions, and theme behavior when touched;
+- the dimensions the row's driver rule file names: arguments and exit codes, status codes,
+  device appearance, orientation and permission states, window states.
 
 The list above is a discovery checklist, not permission to expand an explicitly complete
 feature scope. For a clean synthetic fixture with complete supplied criteria, create only rows
@@ -321,13 +358,32 @@ root, `$GIT_ROOT/.zensu/verify-feature-runs/<random>`, and register cleanup imme
 a symlinked `.zensu` or `verify-feature-runs` boundary. Remove only the unique leaf on cleanup.
 This common `$RUN_DIR` must exist before runtime or authentication preparation.
 
+Every driver uses this `$RUN_DIR`. Build output, device data, logs and screenshots stay beneath
+it where the tool allows it. Every device, supervised process, cluster, container or terminal
+server that a driver rule file starts goes through the run-resource helper, called with the
+physical run directory path; a recipe's services keep the recipe's own `down`, and the bundled
+monorepo adapter keeps its lease:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/scripts/verify-run-resources.js" list --run-dir "$RUN_DIR"
+```
+
+Its verbs `create-simulator`, `start`, `record`, `teardown` and `list`, and the rules for each,
+are in `rules/drivers.md` section 5.
+
 ### Local mode
 
 Local means the application process actually uses files from the current worktree.
 Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
 `rules/zensu-monorepo.md` says `<absolute-plugin-root>`, replace it with this
 concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
-Claude's native placeholder substitution.
+Claude's native placeholder substitution. The same replacement applies to every
+`<absolute-plugin-root>` in `rules/drivers.md` and in the driver rule files.
+
+Steps 1 to 5 prepare the services a row needs: every `browser`, `api` and `async` row, and a
+backend that a `mobile` or `desktop` app calls. A row whose driver builds an artifact and needs
+no service (`cli`, `library`, `iac`, `mobile`, `desktop`, `custom`) skips them and follows
+"Build drivers" below.
 
 0. When `--attach=<origin>` was given, skip runtime preparation entirely: see "Attach mode"
    below. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
@@ -399,10 +455,30 @@ the matrix: resolve the listening process with
 "worktree identity proven" only on an exact match; report "attached runtime, identity unproven"
 otherwise, which caps the verdict at PARTIAL because the worktree claim of local mode is then
 unestablished. Consent applies unchanged: the first navigation to the attached origin asks the
-user.
+user. Attach applies to `browser` and `api` rows; a build driver always builds and launches its
+own copy.
+
+### Build drivers
+
+`cli`, `library`, `iac`, `mobile`, `desktop` and `custom` rows run an artifact built from this
+worktree:
+
+1. Load the row's driver rule file and walk its toolchain ladder. A missing tool makes the row
+   PARTIAL, never a substitute that cannot observe the criterion.
+2. When the build targets the run's device, create that device through the run-resource helper
+   first: a simulator build names the run's UDID as its destination. Copy the UDID, serial or
+   name the helper prints literally into every later call.
+3. Build the worktree with the command the recipe's driver block names, else the command the
+   repository documents or the rule file derives from tracked files. Build out of tree beneath
+   `$RUN_DIR` where the tool allows it, and record the command and the artifact path: they are
+   the local target identity. A build that must download dependencies asks first.
+4. Start every long-lived process (the built app, a bundler, an emulator) through the helper's
+   `start`, in the order the driver rule file gives.
+5. Never run a build, install or launch command that targets any or all connected devices.
 
 ### Remote mode
 
+Remote mode applies to `browser` rows only.
 Use only the supplied/configured base URL. Do not boot or tear down remote infrastructure.
 Keep mutations minimal and use disposable records with recognizable run-specific names. The
 parent-environment policy from Phase 0 is mandatory for every remote origin; without it the
@@ -484,15 +560,27 @@ Use this order:
 2. **No safe path:** skip authenticated scenarios and report PARTIAL. Token extraction or
    `localStorage.setItem(...)` injection is forbidden, including for throwaway remote users.
 
+**Other drivers.** A `mobile` or `desktop` app logs in the same visible way: the user types the
+credentials into the simulator, emulator or app window, and the run never types them. When such
+an app runs against a deployed backend or a real account instead of run-owned data, ask the user
+once before the first such row and name the backend, because its screens can show personal
+data; without that yes those rows are PARTIAL. `api` rows authenticate only with a throwaway
+identity the repository's own fixtures create (`rules/service-verification.md`).
+
 ## Phase 3 — Drive and observe
 
-Load `rules/browser-verification.md` and execute the matrix against the resolved base URL.
+For `browser` rows, load `rules/browser-verification.md` and drive them against the resolved base URL.
+Every other row runs through its driver's rule file (`rules/drivers.md` section 1) against the
+endpoint, command, device or window it names, with the evidence planes of section 3.
 
 - Drive P0, then P1, then any affordable P2 rows.
 - Reset to a known state between scenarios. Use a fresh isolated context when scenario state
   can leak; re-authenticate visibly when a fresh context is required.
 - After every meaningful interaction, take a semantic snapshot before selecting the next
   action. Prefer role/name/ref-based interactions over guessed CSS selectors.
+- For `mobile`, `desktop` and terminal-UI rows, take a screenshot or pane capture, and the
+  accessibility hierarchy where a tool provides one, after every meaningful interaction, and
+  read both before choosing the next action.
 - Capture and actually inspect screenshots at the checkpoints named in the matrix.
 - `console` and `requests` output is model-visible before report redaction. Contract v1 has
   no trusted authenticated sanitizer, so do not run those commands on authenticated targets;
@@ -503,7 +591,7 @@ Load `rules/browser-verification.md` and execute the matrix against the resolved
 Parallel execution is allowed only when each lane has its own run directory, run config and
 `zensu-verify` session, its own fixtures, and no shared mutable state. Otherwise execute
 sequentially. Parallelism never
-reduces the evidence requirements.
+reduces the evidence requirements. A lane with `mobile` rows also needs its own device.
 
 ## Phase 4 — Cleanup (always)
 
@@ -511,11 +599,22 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
 - run `playwright-cli -s=<session> close` for every session this run opened; never `close-all`
   or `kill-all`, which end sessions this run does not own;
-- delete the run directory without touching a sibling or out-of-scope path;
+- run the run-resource helper's `teardown` for `$RUN_DIR` before the run directory is deleted,
+  because its ledger lives there: it stops the supervised processes, an emulator among them, and
+  removes the run's simulators, clusters, containers and terminal servers with the checks that
+  `rules/drivers.md` section 5 lists;
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
   call, under `--chain` behind the `cd` prefix of Chain mode point 9 and nothing else; let its
   lease-bound controller stop only the process groups and resources it owns;
 - remove only uniquely named containers/resources created by this run;
+- delete the run directory only after that teardown printed `teardown=complete`, and without
+  touching a sibling or out-of-scope path. After `teardown=incomplete`, keep the run directory:
+  its ledger and the supervisor lease are the only way to retry. Name every kept resource, the
+  run directory's path and the retry command
+  `node "${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/scripts/verify-run-resources.js" teardown --run-dir "<that path>"`
+  under Limitations;
+- make that deletion the last cleanup step, after every recipe `down` above has run: a `down`
+  may read state its `up` left under `$ZENSU_VERIFY_RUN_DIR`, and fails without it;
 - leave the git worktree and all user-owned services intact.
 
 ## Phase 5 — Report
@@ -524,11 +623,14 @@ Use this format:
 
 **Verdict: PASS | FAIL | PARTIAL**
 
-| Scenario | Pri | Expected | Observed | Evidence | Result |
-|---|---|---|---|---|---|
-| ... | P0 | ... | ... | screenshot / snapshot / request | ✅ / ❌ / ⏭ |
+| Scenario | Driver | Pri | Expected | Observed | Evidence | Result |
+|---|---|---|---|---|---|---|
+| ... | ... | P0 | ... | ... | screenshot / snapshot / request / output / hierarchy / log | ✅ / ❌ / ⏭ |
 
-- **Target:** mode, base URL, worktree/branch/SHA or deployed identity.
+- **Target:** mode, base URL, worktree/branch/SHA or deployed identity, and for every build
+  driver the build command and the artifact path.
+- **Drivers:** each row's driver with the file and signal that chose it, and the tools that
+  drove it; name every row a missing tool made PARTIAL.
 - **Coverage:** `N/N P0`, `N/N P1`, `N/N P2`; name every undriven row.
 - **Console:** sanitized error class and bounded message, or `clean`. Redact credentials,
   tokens, cookies, authorization data, signed/query URLs, personal data, headers, and bodies;
@@ -536,8 +638,13 @@ Use this format:
 - **Network:** failed, missing, 4xx, or 5xx requests with method/path/status, or `clean`.
   Strip query strings/fragments and never report headers, bodies, credentials, or personal
   data.
+- **Runtime signals** of every other driver: stderr, service, device and app logs, crash
+  reports. Report the class and a bounded, sanitized message, or `clean`; never copy raw log
+  lines.
 - **Visual:** what each screenshot actually showed about layout, clipping, overlap,
-  responsiveness, styling, and legibility. “Screenshot taken” is not an observation.
+  responsiveness, styling, and legibility. “Screenshot taken” is not an observation. The same
+  holds for device screenshots, app-window screenshots and terminal pane captures; a driver
+  without a visual plane reports `n/a`.
 - **Reproduction:** exact steps and captured signal for each failure.
 - **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
   holds after the run, where `decidedBy` is `asked` (the host raised a consent prompt for this
@@ -545,15 +652,19 @@ Use this format:
   executed), `remembered` (any route on an origin already present in the memory — the route is
   never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
   it). In consent mode also name every prompt the user refused.
-- **Limitations:** environment, fixture, auth, or deployment-identity gaps.
+- **Resources:** the run-resource helper's teardown lines; every resource it kept is named.
+- **Limitations:** environment, fixture, auth, toolchain, or deployment-identity gaps.
 
 Verdict rules:
 
-- **PASS** only when every P0 was driven and passed, every acceptance criterion has DOM/data
-  **and** visual proof, and relevant console/network evidence is clean.
+- **PASS** only when every P0 was driven and passed, every acceptance criterion has the
+  evidence planes its driver requires (`rules/drivers.md` section 3; for the `browser` driver
+  DOM/data **and** visual proof), and relevant console, network and runtime-signal evidence is
+  clean.
 - **FAIL** when a driven acceptance criterion or P0 behavior is demonstrably broken.
 - **PARTIAL** when setup/auth/evidence is incomplete, a required scenario was not driven, the
-  remote deployment identity is uncertain, or visual inspection is missing.
+  remote deployment identity is uncertain, visual inspection is missing, a required tool was
+  missing, or a criterion the user sees was proven only through a non-UI driver.
 
 End with exactly one greppable verdict. The final non-empty line must be a bare, unfenced
 plain-text line with no backticks, list marker, block quote, or text after it. For a passing run,
@@ -564,6 +675,9 @@ VERIFY-FEATURE-VERDICT: PASS
 Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
 ## playwright-cli preflight
+
+This section applies to `browser` rows; every other driver's toolchain preflight is in
+`rules/drivers.md` section 4.
 
 Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
 must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
