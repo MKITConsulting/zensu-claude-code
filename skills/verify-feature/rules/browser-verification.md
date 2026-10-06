@@ -57,7 +57,7 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    approved origin, and enforce this fail-closed origin boundary before navigation,
    authentication, or screenshots. In POLICY mode an origin is approved when the
    parent-environment policy names it as a target with `evidenceMode: declared-safe`; the gate
-   admits only those targets, and every route on them. A network-only origin the policy declares
+   navigates only those targets, and every route on them. A network-only origin the policy declares
    in `networkOnlyOrigins` is never approved: the pages may request it, and the gate denies
    `open`, `goto` and `tab-new` aimed at it with its own final reason. In consent mode (the preflight printed
    `consent`) the user approves the origin instead: the gate admits loopback origins only (a
@@ -71,11 +71,16 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    The session consent memory named in SKILL.md is yours to READ for the report and never to
    write, edit or delete: a record you place there skips the human's prompt for that origin.
 1. Open the run-config session at the resolved base URL and route only after the policy
-   preflight passes.
+   preflight passes for every origin: `declared-safe` for each origin the run navigates, and
+   `network-only` for each network-only origin.
 2. Read the `Page URL` line of every navigating call. An origin outside the run config means a
    server redirect left the approved set, and a network-only origin means the page navigated
    itself onto an origin the run config allows for requests only: in both cases stop driving
-   that page, collect no evidence from it, and report the scenario PARTIAL.
+   that page, collect no evidence from it, and report the scenario PARTIAL. `go-back`,
+   `go-forward`, `reload` and `tab-select` name no URL for the gate to judge, so this check is
+   the only one they get. A click can open a new tab: read `tab-list` before every `tab-select`,
+   and never select a tab whose URL is outside the run config or on a network-only origin —
+   close it with `tab-close` instead.
 3. Take a `snapshot` before interacting. Confirm the URL, title/heading, authentication state,
    and that the page is not a generic error or login wall.
 4. Apply the pre-model evidence boundary below, then run `console` and `requests` to establish

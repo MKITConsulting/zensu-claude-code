@@ -231,8 +231,10 @@ names no route. The post hook records every executed gated call as
 names an OBSERVATION — `asked`, `remembered`, `policy-mode` — never a human decision: PostToolUse
 carries no evidence of how the prompt was answered, and the host fires no PostToolUse event for a
 failed Bash call, so a failed navigation is never recorded and asks again. **Policy mode** asks
-nothing: policy target origins only, every route on them, a remote hostname only with its pin; an
-invalid policy denies every gated navigation with the broken rule named.
+nothing: it navigates policy target origins only, every route on them, admits the policy's
+network-only origins in the run config at `open` without ever navigating them, and accepts a
+remote hostname only with its pin; an invalid policy denies every gated navigation with the
+broken rule named.
 
 **The evidence boundary is the ORIGIN in both modes; the route gate is retired.** An approved
 origin — a consent-prompt Yes, or a policy target with `evidenceMode: declared-safe` — covers
@@ -292,8 +294,10 @@ Sites that move together: `POLICY_KEYS`, `NETWORK_ONLY_POLICY_KEYS`, `MAX_NETWOR
 option of `judgeOrigin`, the network-only skip in `judgeCall` and the three reasons in `REASONS`
 and `FINAL_REASONS`; the network-only arm of `checkOrigin`, `CHECK_ROLES`, `USAGE`,
 `CHECK_USAGE` and the `network-only-origin=` output line in the helper;
-`CHECK_POLICY_OPERANDS`, the `--network-only-origin` count in `isRunConfigInvocation` and
-`remoteNetworkOnlyTools` in `evals/verify-feature/assertions/transcript-check.js`; the
+`CHECK_POLICY_OPERANDS`, the `--network-only-origin` count in `isRunConfigInvocation`,
+`networkOnlyPreflightEnds` and `networkOnlyConfigs`, which read the preflight and helper calls
+in the spelling the skill documents, and `remoteNetworkOnlyTools`, which takes its coverage from
+the flagged session only, in `evals/verify-feature/assertions/transcript-check.js`; the
 `validate.networkOnly` schema in `skills/autopilot/rules/config.md`; and the policy row of the
 doctor report.
 
@@ -476,6 +480,13 @@ retirement's, rides the same mechanism with no check of its own.
   to self-approve without the gate's marker, so a disabled hook ended in a refusal; nothing stands
   in that position now, and the doctor reports registration, never execution.
 - **Other session names are ungated** — see SCOPE.
+- **The gate judges a URL only where a command names one.** `judgeCall` reads the URL of `open`,
+  `goto` and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` carry none, so where
+  they land is never judged. The browser follows a server redirect to another origin, a
+  network-only one included, and a page-initiated navigation onto a network-only origin; a click
+  can open a popup tab there; and a frame a navigable page embeds from a network-only origin
+  renders inside that page, so its content reaches that page's snapshot and screenshot. The
+  `Page URL` check and the `tab-list`/`tab-close` rule in `skills/verify-feature/**` are prose.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
   `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
   stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
