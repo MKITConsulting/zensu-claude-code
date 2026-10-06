@@ -90,6 +90,17 @@ retaining their credential-free contract, attestation, barrier, provenance,
 and deterministic wrapper selftests. Release workflows use deterministic
 exact-SHA, clean-tree, and runtime-digest evidence.
 
+`scheduled.yml` runs once a day and on manual dispatch, on Ubuntu only.
+`node tests/run-clock-shift.js` runs every `tests/structure/*.test.js` with `Date`
+moved forward by the `shiftDays` of `tests/profiles/clock-shift-allowlist.v1.json`,
+through the `tests/lib/clock-shift.cjs` preload in `NODE_OPTIONS`, so the node CLIs a
+test spawns read the same shifted clock. A fixed-date fixture that the code under test
+reads on the real clock then fails there weeks before the date turns every branch red,
+which pull-request CI cannot see. The run fails on a top-level test failure outside the
+allowlist and on an allowlist entry whose test passes or no longer exists. The same
+command takes unit files as arguments for a local check, for example
+`node tests/run-clock-shift.js tests/structure/full-suite-ci-v1.test.js`.
+
 ## Suites
 
 | Path | Kind | Covers |

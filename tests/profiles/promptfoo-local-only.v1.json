@@ -29,6 +29,7 @@
     "test-chain-recover.sh",
     "test-chain-terminus-zero-change-gate.sh",
     "test-changelog-unreleased-resolver-entries.sh",
+    "test-clock-shift.sh",
     "test-context-nudge-hook.sh",
     "test-converge-skill.sh",
     "test-cover-skill.sh",
@@ -166,6 +167,7 @@
     "test-promptfoo-zen-mode.sh"
   ],
   "nodeDepsStructureTests": [
+    "test-clock-shift.sh",
     "test-promptfoo-session-upgrade.sh",
     "test-release-session-control-gate.sh",
     "test-windows-ci-contract.sh",
