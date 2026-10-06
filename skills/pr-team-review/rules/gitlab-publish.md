@@ -121,7 +121,7 @@ none in the inline discussions — GitLab's diff view squeezes them unreadably. 
 ## Alerts, suggestions, and links
 
 The summary note and the discussions use the same Markdown as the GitHub path
-(`SKILL.md` Phase D). Four details differ on GitLab:
+(`references/publish.md`). Four details differ on GitLab:
 
 - **Alerts.** GitLab renders the lower-case `> [!caution]` family from version 17.10 on. An
   older self-managed instance shows a plain quote whose first line reads `[!caution]`; the

@@ -23,7 +23,7 @@ source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
 TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
-PR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PR_MD="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"
 PLAN_MD="$PLUGIN_DIR/skills/plan-review/SKILL.md"
 
 PASS=0; FAIL=0
@@ -315,7 +315,7 @@ fi
 
 rm -rf "$SBOX" 2>/dev/null
 
-rm -f "$TDD_MD"
+rm -f "$TDD_MD" "$PR_MD"
 echo "----"
 echo "test-review-personas: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
