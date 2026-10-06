@@ -68,11 +68,11 @@ function job(name, conclusion, commands = []) {
   return { name, conclusion, steps: [{ name: 'Set up job' }, { name: 'Run actions/checkout@v4' }, ...commands.map((command) => ({ name: `Run ${command}` }))] };
 }
 
-function responses(overrides = {}) {
+function responses(overrides = {}, at = NOW) {
   const base = {
     [`repos/${REPO}`]: { default_branch: 'main', fork: false },
     [`repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&status=completed&per_page=20`]: {
-      workflow_runs: [run(2, NOW - 2 * HOUR), run(1, NOW - 5 * HOUR, 'failure')],
+      workflow_runs: [run(2, at - 2 * HOUR), run(1, at - 5 * HOUR, 'failure')],
     },
     [`repos/${REPO}/actions/runs/2/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'success', ['npm test'])] },
     [`repos/${REPO}/actions/runs/1/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'failure', ['npm test'])] },
@@ -314,11 +314,11 @@ function policyInputs(root, data, extra = {}) {
   return { projectRoot: root, pluginData: data, sessionKey: SESSION, markerState: 'none', config: {}, env: CLEAN_ENV, now: NOW + HOUR, ...extra };
 }
 
-function verifiedProject() {
+function verifiedProject(at = NOW) {
   const root = project();
   const data = tempDir('data');
-  const gh = ghShim(responses());
-  assert.equal(contract.discover(verifyOptions(root, data, gh)).verified, true);
+  const gh = ghShim(responses({}, at));
+  assert.equal(contract.discover(verifyOptions(root, data, gh, { now: at })).verified, true);
   return { root, data, gh };
 }
 
@@ -527,7 +527,7 @@ test('a chain that chose CI but closes locally names the reason at the terminus'
 });
 
 test('the effective CLI answers ci only for a verified clone choice with a ci snapshot', () => {
-  const { root, data } = verifiedProject();
+  const { root, data } = verifiedProject(Date.now());
   const transport = tempDir('transport');
   fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
   fs.writeFileSync(path.join(transport, 'marker-state'), 'ci');
