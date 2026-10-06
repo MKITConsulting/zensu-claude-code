@@ -98,9 +98,10 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   interactive `main-v1` principal. The PLM and
   reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
   report tool in the next item; ordinary
-  host-profile children keep non-command tools granted by Claude and their
-  agent definitions, but every shell/command tool is denied because command
-  text cannot be safely confined by token inspection. Only the top-level
+  host-profile children keep only the tools on the capability gate's allowlist
+  (see **Security boundary** below) that Claude and their agent definitions grant, and
+  every shell/command tool is denied because command text cannot be safely
+  confined by token inspection. Only the top-level
   interactive thread receives `main-v1`; there
   is no transcript scan, PPID key, newest-file selection, or fallback identity.
 - **`SubagentHandback` is the one host tool beside the read trio.** In `auto`
@@ -139,14 +140,18 @@ processes that can mutate the worktree between check and use. Run untrusted
 project code inside an OS sandbox/container with a separate UID and restricted
 mounts; do not treat `host-profile-v1` as a host sandbox. Normal report prose
 cannot impersonate a principal: identity comes only from trusted hook payload
-fields. For neutral children the gate blocks every command tool, actual
-protected paths, protected traversal roots, and mutating Zensu operations while
-preserving non-command review tools. `Grep`/`Glob` must target a concrete safe
-subtree; omitted paths and project/plugin/plugin-data ancestors are denied.
+fields. For neutral children the gate admits only an allowlist of host tools
+plus a short named list of read-only MCP tools, which the capability-gate row
+in [Configuration](configuration.md) spells out. Every other tool is denied:
+every command tool, and every other MCP tool, including third-party servers that
+expose arbitrary local execution such as `ctx_execute` or `run_in_terminal`, so a
+newly connected MCP server never widens a neutral child. Within the allowlist the
+gate blocks actual protected paths, protected traversal roots, and mutating Zensu
+operations. `Grep`/`Glob` must target a concrete safe subtree; omitted paths and
+project/plugin/plugin-data ancestors are denied, and that deny, like the command
+deny, names the project's subdirectories that are safe to search.
 Neutral file mutations also deny the complete installed-plugin and private
 plugin-data trees, including symlink, case-variant, and hard-link aliases.
-Third-party MCP tools that themselves expose arbitrary local execution are
-outside this host-tool boundary; do not grant them to untrusted agents.
 
 > Naming note: this is unrelated to the MCP-gate `--workflow-begin` / `workflowActive`
 > markers above — those scope per-skill MCP mutation tools, not Claude Code Workflows.
