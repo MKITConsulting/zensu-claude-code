@@ -128,7 +128,7 @@ if [ -n "${ARGV_DIR:-}" ]; then
   mv "$ARGV_DIR/go.env.tmp" "$ARGV_DIR/go.env"
 fi
 trap 'exit 0' TERM INT HUP
-while :; do sleep 1; done
+while :; do "${REAL_SLEEP:-sleep}" 1; done
 STUB
 cat >"$STUBS/pnpm" <<'STUB'
 #!/bin/bash
@@ -144,7 +144,7 @@ if [ -n "${ARGV_DIR:-}" ]; then
   mv "$ARGV_DIR/pnpm.env.tmp" "$ARGV_DIR/pnpm.env"
 fi
 trap 'exit 0' TERM INT HUP
-while :; do sleep 1; done
+while :; do "${REAL_SLEEP:-sleep}" 1; done
 STUB
 cat >"$STUBS/curl" <<'STUB'
 #!/bin/bash
@@ -166,6 +166,13 @@ exit 0
 STUB
 cat >"$STUBS/lsof" <<'STUB'
 #!/bin/bash
+for arg in "$@"; do
+  case "$arg" in
+    -iTCP:*)
+      case ",${LSOF_LISTENING_PORTS:-}," in *",${arg#-iTCP:},"*) printf '4242\n'; exit 0 ;; esac
+      ;;
+  esac
+done
 exit 1
 STUB
 cat >"$STUBS/openssl" <<'STUB'
@@ -187,7 +194,10 @@ FAST_SLEEP="$TMP/fast-sleep"
 mkdir -p "$FAST_SLEEP"
 cat >"$FAST_SLEEP/sleep" <<'STUB'
 #!/bin/bash
-[ "${1:-}" = 1 ] && exit 0
+if [ "${1:-}" = 1 ]; then
+  printf '%s\n' "$*" >>"$DOCKER_STATE/sleep.log"
+  exit 0
+fi
 exec "$REAL_SLEEP" "$@"
 STUB
 chmod +x "$FAST_SLEEP/sleep"
@@ -218,8 +228,11 @@ UP_OUT="$(env "${COMMON_ENV[@]}" ARGV_DIR="$ARGV_DIR" bash "$CONTROLLER" up "$RU
 UP_RC=$?
 wait_for_file "$ARGV_DIR/go.env"
 wait_for_file "$ARGV_DIR/pnpm.env"
+UP_EXEC_LINES="$(wc -l <"$DOCKER_STATE/exec.log" 2>/dev/null | tr -d ' ')"
 READY_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" ready "$RUN_DIR" "$WORKTREE" 2>&1)"
 READY_RC=$?
+READY_PROBES="$(tail -n +"$((${UP_EXEC_LINES:-0} + 1))" "$DOCKER_STATE/exec.log" 2>/dev/null | grep -c ' pg_isready ')"
+READY_TCP_PROBES="$(tail -n +"$((${UP_EXEC_LINES:-0} + 1))" "$DOCKER_STATE/exec.log" 2>/dev/null | grep -c ' pg_isready -h 127.0.0.1 -p 5432 ')"
 ORIGIN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" origin "$RUN_DIR" "$WORKTREE" 2>&1)"
 SEED_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" seed "$RUN_DIR" "$WORKTREE" 2>&1)"
 SEED_RC=$?
@@ -233,6 +246,11 @@ if [ "$PLANNED_ORIGIN" = 'http://127.0.0.1:45173' ] \
   check "controller behavior covers up, ready, origin, and repository-owned seed" PASS
 else
   check "controller behavior covers up, ready, origin, and repository-owned seed" FAIL
+fi
+if [ "$READY_RC" = 0 ] && [ "${READY_PROBES:-0}" -ge 1 ] && [ "$READY_PROBES" = "$READY_TCP_PROBES" ]; then
+  check "ready probes PostgreSQL over TCP inside the container, never only on the Unix socket" PASS
+else
+  check "ready probes PostgreSQL over TCP inside the container, never only on the Unix socket (probes=$READY_PROBES tcp=$READY_TCP_PROBES)" FAIL
 fi
 
 STATE_PG_PORT="$(json_field "$RUN_DIR/zensu-runtime.json" pgPort)"
@@ -360,6 +378,32 @@ else
   [ "$POLICY_ORIGIN" = 'http://127.0.0.1:45173' ] && [ ! -e "$CONSENT_RUN/zensu-planned-origin" ] \
     && check "with a parent policy present the policy origin still wins and nothing is persisted" PASS \
     || check "with a parent policy present the policy origin still wins and nothing is persisted" FAIL
+  SKIP_RUN="$RUN_PARENT/run-consent-skip"
+  mkdir -p "$SKIP_RUN"
+  FIRST_FREE="$(node "$ROOT/scripts/verify-free-port.js" --from 5173 2>/dev/null)"
+  SKIP_ORIGIN="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" LSOF_LISTENING_PORTS="$FIRST_FREE" \
+    bash "$CONTROLLER" planned-origin "$SKIP_RUN" "$WORKTREE" 2>&1)"
+  if printf '%s' "$FIRST_FREE" | grep -qE '^[0-9]+$' \
+    && printf '%s' "$SKIP_ORIGIN" | grep -qE '^http://127\.0\.0\.1:[0-9]+$' \
+    && [ "${SKIP_ORIGIN##*:}" != "$FIRST_FREE" ] \
+    && [ "$(cat "$SKIP_RUN/zensu-planned-origin" 2>/dev/null)" = "$SKIP_ORIGIN" ]; then
+    check "planned-origin skips a port that up would report as in use, so a fresh run directory gets a port up accepts" PASS
+  else
+    check "planned-origin skips a port that up would report as in use, so a fresh run directory gets a port up accepts (first free '$FIRST_FREE', got '$SKIP_ORIGIN')" FAIL
+  fi
+  EXHAUSTED_RUN="$RUN_PARENT/run-consent-exhausted"
+  mkdir -p "$EXHAUSTED_RUN"
+  ALL_BUSY=""
+  for ((port=5173; port<5373; port++)); do ALL_BUSY="${ALL_BUSY:+$ALL_BUSY,}$port"; done
+  EXHAUSTED_ERR="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" LSOF_LISTENING_PORTS="$ALL_BUSY" \
+    bash "$CONTROLLER" planned-origin "$EXHAUSTED_RUN" "$WORKTREE" 2>&1 >/dev/null)"
+  EXHAUSTED_RC=$?
+  if [ "$EXHAUSTED_RC" != 0 ] && printf '%s' "$EXHAUSTED_ERR" | grep -qF 'no free loopback port for the frontend' \
+    && [ ! -e "$EXHAUSTED_RUN/zensu-planned-origin" ]; then
+    check "planned-origin gives up when every candidate port reads as in use and records no origin" PASS
+  else
+    check "planned-origin gives up when every candidate port reads as in use and records no origin (rc=$EXHAUSTED_RC: $EXHAUSTED_ERR)" FAIL
+  fi
 fi
 
 MISSING_CONTAINER="$RUN_PARENT/run-missing-container"
@@ -479,39 +523,47 @@ PG_TIMEOUT_OUT="$(env PATH="$FAST_SLEEP:$STUBS:$PATH" REAL_SLEEP="$REAL_SLEEP" D
   bash "$CONTROLLER" up "$PG_TIMEOUT" "$WORKTREE" 2>&1)"
 PG_TIMEOUT_RC=$?
 PG_TIMEOUT_PROBES="$(grep -c ' pg_isready -h 127.0.0.1 -p 5432 ' "$PG_TIMEOUT_DOCKER/exec.log" 2>/dev/null)"
+PG_TIMEOUT_SLEEPS="$(grep -cx '1' "$PG_TIMEOUT_DOCKER/sleep.log" 2>/dev/null)"
 PG_TIMEOUT_CONTAINER="$(cat "$PG_TIMEOUT_DOCKER/name" 2>/dev/null)"
 if [ "$PG_TIMEOUT_RC" != 0 ] \
   && printf '%s' "$PG_TIMEOUT_OUT" | grep -qF 'PostgreSQL did not accept TCP connections within 60 seconds' \
-  && [ "$PG_TIMEOUT_PROBES" = 60 ] && [ ! -e "$PG_TIMEOUT_ARGV/go.argv" ] \
+  && [ "$PG_TIMEOUT_PROBES" = 60 ] && [ "$PG_TIMEOUT_SLEEPS" = 60 ] && [ ! -e "$PG_TIMEOUT_ARGV/go.argv" ] \
   && [ -n "$PG_TIMEOUT_CONTAINER" ] && [ "$(cat "$PG_TIMEOUT_DOCKER/events")" = "rm $PG_TIMEOUT_CONTAINER" ] \
   && [ ! -e "$PG_TIMEOUT/zensu-runtime.json" ] && [ ! -e "$PG_TIMEOUT/zensu-runtime.secrets" ] \
   && [ ! -e "$PG_TIMEOUT/backend-supervisor.ready" ]; then
-  check "up stops after 60 PostgreSQL probes, never starts the backend, and removes the owned container and secrets" PASS
+  check "up stops after 60 PostgreSQL probes one second apart, never starts the backend, and removes the owned container and secrets" PASS
 else
-  check "up stops after 60 PostgreSQL probes, never starts the backend, and removes the owned container and secrets (rc=$PG_TIMEOUT_RC probes=$PG_TIMEOUT_PROBES)" FAIL
+  check "up stops after 60 PostgreSQL probes one second apart, never starts the backend, and removes the owned container and secrets (rc=$PG_TIMEOUT_RC probes=$PG_TIMEOUT_PROBES sleeps=$PG_TIMEOUT_SLEEPS)" FAIL
 fi
 env "${COMMON_ENV[@]}" DOCKER_STATE="$PG_TIMEOUT_DOCKER" bash "$CONTROLLER" down "$PG_TIMEOUT" "$WORKTREE" >/dev/null 2>&1
 
 BUSY_CONSENT="$RUN_PARENT/run-busy-consent"
 BUSY_POLICY="$RUN_PARENT/run-busy-policy"
-mkdir -p "$BUSY_CONSENT" "$BUSY_POLICY"
+BUSY_DOCKER="$TMP/docker-busy"
+mkdir -p "$BUSY_CONSENT" "$BUSY_POLICY" "$BUSY_DOCKER"
+: >"$BUSY_DOCKER/events"
 printf 'http://127.0.0.1:45174\n' >"$BUSY_CONSENT/zensu-planned-origin"
-BUSY_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS" \
-  CURL_LISTENING_PORTS=45174 bash "$CONTROLLER" up "$BUSY_CONSENT" "$WORKTREE" 2>&1)"
+BUSY_CONSENT_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$BUSY_DOCKER" EVENTS="$EVENTS")
+BUSY_POLICY_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$BUSY_DOCKER" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
+BUSY_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${BUSY_CONSENT_ENV[@]}" CURL_LISTENING_PORTS=45174 \
+  bash "$CONTROLLER" up "$BUSY_CONSENT" "$WORKTREE" 2>&1)"
 BUSY_CONSENT_RC=$?
-BUSY_POLICY_OUT="$(env "${COMMON_ENV[@]}" CURL_LISTENING_PORTS=45173 bash "$CONTROLLER" up "$BUSY_POLICY" "$WORKTREE" 2>&1)"
+BUSY_POLICY_OUT="$(env "${BUSY_POLICY_ENV[@]}" LSOF_LISTENING_PORTS=45173 bash "$CONTROLLER" up "$BUSY_POLICY" "$WORKTREE" 2>&1)"
 BUSY_POLICY_RC=$?
 if [ "$BUSY_CONSENT_RC" != 0 ] \
-  && printf '%s' "$BUSY_CONSENT_OUT" | grep -qF 'the planned frontend port 45174 is already in use, and this run directory keeps that port; start over from planned-origin in a fresh run directory' \
+  && printf '%s' "$BUSY_CONSENT_OUT" | grep -qF 'the planned frontend port 45174 is held by a process this run does not own, and this run directory keeps that port; leave that process running and start over in a fresh run directory: register its down, then run planned-origin again' \
   && [ "$(cat "$BUSY_CONSENT/zensu-planned-origin")" = 'http://127.0.0.1:45174' ] \
   && [ ! -e "$BUSY_CONSENT/zensu-runtime.secrets" ] \
   && [ "$BUSY_POLICY_RC" != 0 ] \
-  && printf '%s' "$BUSY_POLICY_OUT" | grep -qF 'the parent-authorized frontend port 45173 is already in use; free it, or start a new session whose policy names a free port' \
-  && [ ! -e "$BUSY_POLICY/zensu-runtime.secrets" ]; then
-  check "a busy frontend port fails before any resource exists and names its remedy: a fresh run directory without a policy, a free port in a new session's policy with one" PASS
+  && printf '%s' "$BUSY_POLICY_OUT" | grep -qF 'the parent-authorized frontend port 45173 is held by a process this run does not own; leave that process running and report PARTIAL, so the user can free the port or start a new session whose policy names a free port' \
+  && [ ! -e "$BUSY_POLICY/zensu-runtime.secrets" ] \
+  && [ ! -e "$BUSY_DOCKER/name" ] && [ ! -s "$BUSY_DOCKER/events" ]; then
+  check "a busy frontend port fails before any resource exists, never tells the run to stop the holder, and names the remedy for each mode" PASS
 else
-  check "a busy frontend port fails before any resource exists and names its remedy (consent rc=$BUSY_CONSENT_RC: $BUSY_CONSENT_OUT / policy rc=$BUSY_POLICY_RC: $BUSY_POLICY_OUT)" FAIL
+  check "a busy frontend port fails before any resource exists, never tells the run to stop the holder, and names the remedy for each mode (consent rc=$BUSY_CONSENT_RC: $BUSY_CONSENT_OUT / policy rc=$BUSY_POLICY_RC: $BUSY_POLICY_OUT)" FAIL
 fi
+env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${BUSY_CONSENT_ENV[@]}" bash "$CONTROLLER" down "$BUSY_CONSENT" "$WORKTREE" >/dev/null 2>&1
+env "${BUSY_POLICY_ENV[@]}" bash "$CONTROLLER" down "$BUSY_POLICY" "$WORKTREE" >/dev/null 2>&1
 
 # The secrets write moved from a truncating > plus a follow-up chmod to an O_EXCL create at
 # 0600, and the threat it names is a symlink planted between the top-of-arm absence test and

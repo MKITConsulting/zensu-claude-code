@@ -179,7 +179,7 @@ PLANNED_ORIGIN_FILE="$RUN_DIR/zensu-planned-origin"
 FREE_PORT_HELPER="$PLUGIN_ROOT/scripts/verify-free-port.js"
 
 consent_origin() {
-  local origin port rest
+  local origin port rest excluded="" chosen=""
   if [ -e "$PLANNED_ORIGIN_FILE" ] || [ -L "$PLANNED_ORIGIN_FILE" ]; then
     [ -f "$PLANNED_ORIGIN_FILE" ] && [ ! -L "$PLANNED_ORIGIN_FILE" ] || fail "planned origin record is unsafe"
     origin="$(head -c 64 "$PLANNED_ORIGIN_FILE" | tr -d '\n')"
@@ -195,11 +195,22 @@ consent_origin() {
     return 0
   fi
   [ -f "$FREE_PORT_HELPER" ] && [ ! -L "$FREE_PORT_HELPER" ] || fail "free-port helper is unavailable"
-  port="$(node "$FREE_PORT_HELPER" --from 5173)" || fail "no free loopback port for the frontend"
-  case "$port" in
-    ''|*[!0-9]*) fail "free-port helper printed no port" ;;
-  esac
-  origin="http://127.0.0.1:${port}"
+  for command in curl lsof; do
+    command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+  done
+  for ((attempt=0; attempt<20; attempt++)); do
+    port="$(node "$FREE_PORT_HELPER" --from 5173 --exclude "$excluded")" || fail "no free loopback port for the frontend"
+    case "$port" in
+      ''|*[!0-9]*) fail "free-port helper printed no port" ;;
+    esac
+    if ! port_listening "$port"; then
+      chosen="$port"
+      break
+    fi
+    excluded="${excluded:+$excluded,}$port"
+  done
+  [ -n "$chosen" ] || fail "no free loopback port for the frontend"
+  origin="http://127.0.0.1:${chosen}"
   # The absence test for this path ran at the top of this function, and a free-port scan
   # plus a node run happen between there and here. A truncating > follows whatever it finds
   # by then, so a symlink planted in that window is followed and its target destroyed.
@@ -247,8 +258,8 @@ case "$ACTION" in
     FRONTEND_PORT="${ORIGIN##*:}"
     if port_listening "$FRONTEND_PORT"; then
       [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
-        || fail "the planned frontend port $FRONTEND_PORT is already in use, and this run directory keeps that port; start over from planned-origin in a fresh run directory"
-      fail "the parent-authorized frontend port $FRONTEND_PORT is already in use; free it, or start a new session whose policy names a free port"
+        || fail "the planned frontend port $FRONTEND_PORT is held by a process this run does not own, and this run directory keeps that port; leave that process running and start over in a fresh run directory: register its down, then run planned-origin again"
+      fail "the parent-authorized frontend port $FRONTEND_PORT is held by a process this run does not own; leave that process running and report PARTIAL, so the user can free the port or start a new session whose policy names a free port"
     fi
 
     WTKEY="$(worktree_key)"

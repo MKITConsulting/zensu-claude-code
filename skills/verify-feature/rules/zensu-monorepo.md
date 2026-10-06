@@ -80,11 +80,14 @@ the backend and Vite with `--strictPort` on literal loopback. Secrets are stored
 beneath the run directory solely for later controller actions; never read, print, or pass that
 file to another tool. The persistent JSON state contains no secret values or killable PIDs.
 
-A run directory keeps its planned frontend port, so when `up` reports that port as already in
-use, every retry in the same run directory fails the same way. Without a parent policy, run the
-registered `down`, then start over from `planned-origin` in a fresh run directory, which picks a
-new free port. With a parent policy the port is fixed for the session: free it, or report
-PARTIAL with instructions to launch a new session whose policy names a free port.
+A run directory keeps its planned frontend port, so when `up` reports that port as held by a
+process this run does not own, every retry in the same run directory fails the same way. Never
+stop that process: this run did not start it. Without a parent policy, run the registered
+`down`, then start over in a fresh run directory: register its own `down` before `up`, and run
+`planned-origin`, the preflight, `up` and `ready` again. `planned-origin` skips every port that
+`up` would report as in use at that moment. With a parent policy the port is fixed for the
+session: report PARTIAL with instructions for the user to free the port or to launch a new
+session whose policy names a free port.
 
 ## Keeping up with the monorepo
 
