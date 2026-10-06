@@ -34,7 +34,8 @@ HELPER="$PLUGIN_DIR/hooks/lib/zensu-tdd-mode.sh"
 PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 CONFIG_LIB="$PLUGIN_DIR/hooks/lib/zensu-config.sh"
 SKILL="$PLUGIN_DIR/skills/tdd-mode/SKILL.md"
-TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 FIX_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 REMINDER="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
@@ -1109,6 +1110,7 @@ done
   && check "T33 the tdd-mode skill keeps the rank-1 injection-resistance paragraph" PASS \
   || check "T33 injection-resistance paragraph incomplete:$INJ_BAD" FAIL
 
+rm -f "$TDD_SKILL"
 echo "----"
 # A SKIP is streamed by tests/run-all.sh but never tallied by it — the runner judges
 # a suite by its exit code alone. So a host that cannot create a symlink used to

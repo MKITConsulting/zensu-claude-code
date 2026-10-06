@@ -3,6 +3,7 @@ paths:
   - "skills/*/SKILL.md"
   - "skills/*/references/**"
   - "tests/structure/test-skill-text-budget.sh"
+  - "tests/structure/lib-skill-text.sh"
 ---
 
 # Skill Text Budget (`tests/structure/test-skill-text-budget.sh`)
@@ -55,6 +56,18 @@ pinned as one constant (`X22c`, `R24`, `P3e`, `P3d` and an unlabelled check in
 `test-tdd-manager-patches.sh`). Rule files now say "the file may not grow" where they used
 to cite that cap.
 
-**Next splits:** `skills/tdd/SKILL.md` and `skills/pr-team-review/SKILL.md`, the same way
-as `skills/session-trail/` (a router plus `references/`). Each split lowers or removes its
-allowlist entry and re-points the suites that slice the moved text.
+**A split moves text into `references/`, and a reference is not rendered.** The host
+substitutes `${CLAUDE_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` in a `SKILL.md` body only. A
+reference is read with `Read` and keeps them literal, and the Bash tool has neither variable
+set, so a command copied from a reference would run against `/hooks/…`. A reference therefore
+names a placeholder the rendered router resolves: `skills/tdd/` spells `{plugin_root}` and
+`{plugin_data}`, which its Phase 0 step 1 defines; `skills/session-trail/` names the tool
+command of its router; `skills/pr-team-review/rules/` spells `<absolute-plugin-root>`. A suite
+that runs a command extracted from a reference substitutes the placeholder itself, as
+`R54` in `test-artifact-redaction.sh` and `E10` in `test-session-reanchor.sh` do. A suite that
+pins text the split moved reads the skill through `skill_text_file` in
+`tests/structure/lib-skill-text.sh`, which concatenates `SKILL.md` and every reference.
+
+**Split so far:** `skills/session-trail/` and `skills/tdd/`. Next: `skills/pr-team-review/SKILL.md`.
+Each split lowers or removes its allowlist entry and re-points the suites that slice the
+moved text.

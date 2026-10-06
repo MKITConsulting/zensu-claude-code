@@ -166,7 +166,7 @@ documented residual of every plugin store, and no seal was added.
 `FULL_SUITE_STEP`, `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP` and `CLOSE_SUITE_REASON` of
 `hooks/post-review-tdd-delegate.sh` (both `CLOSE_PASS` arms, `CLOSE_PASS_SUITE_CI` and both
 max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
-`skills/tdd/SKILL.md`, discipline patch 12 in `docs/tdd-manager-workflow.md`,
+`skills/tdd/references/review-chain.md`, discipline patch 12 in `docs/tdd-manager-workflow.md`,
 the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in

@@ -173,7 +173,7 @@ fixture count or above does not merely fail it, it destroys its discrimination, 
 the capped and uncapped arms then agree. A new cap needs a fixture count above it. Then
 `docs/tdd-manager-workflow.md`'s §1 artifact paragraph and its writer table,
 `docs/architecture.md`'s Graceful-Degradation bullet and its flagless-hook list,
-`skills/tdd/SKILL.md` Principle 3 and Phase 2, and `templates/tdd-plan.md`.
+`skills/tdd/SKILL.md` Principle 3, Phase 2 in `skills/tdd/references/planning.md`, and `templates/tdd-plan.md`.
 
 **Test-side couplings, which break silently rather than loudly:** the manifest
 entry in `tests/profiles/promptfoo-local-only.v1.json` (`run-all.sh` refuses to
@@ -281,6 +281,6 @@ on its `--truncate` call, so the shipped destructive write IS bound; every other
 caller that omits the variable still is not.
 An env var the caller sets is not an authority; what constrains the destructive
 mode is the module; and nothing here recognizes a customer name or an internal hostname, which is why the English-only + repo-root-relative authoring rules
-ship in `templates/tdd-plan.md` and `skills/tdd/SKILL.md` Phase 2 alongside the code.
+ship in `templates/tdd-plan.md` and Phase 2 of `skills/tdd/references/planning.md` alongside the code.
 `tests/structure/test-artifact-redaction.sh` pins the rules, every writer and every
 refusal.

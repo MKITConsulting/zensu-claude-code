@@ -265,7 +265,7 @@ trim_claim() {
 }
 
 # Screen a filesystem root before it reaches a verdict line. Both callers below
-# are MODEL-READ channels: skills/tdd/SKILL.md step 5b b) instructs the model to
+# are MODEL-READ channels: skills/tdd/references/audit.md step 5b b) instructs the model to
 # copy every non-`EDIT LANDED` line verbatim into the run log, the final report
 # and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
 # REVIEW PACKET. The value itself is a work-tree root discovered by walking up
@@ -707,7 +707,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       # character screen closes it: a log line reading
       # `[ts] T05 WIRED EDIT LANDED — T01: src/x.ts` is a well-formed bare
       # claim and used to render a forged `EDIT LANDED` inside a
-      # diagnostic that skills/tdd/SKILL.md step 5b b) tells the model to copy
+      # diagnostic that skills/tdd/references/audit.md step 5b b) tells the model to copy
       # verbatim into the run log, the report and the CHAIN-END SUMMARY — and a
       # spelling with no colon carries no forbidden character under any screen.
       # Screening characters was the wrong instrument for the wrong value. The
@@ -1019,7 +1019,7 @@ fi
 
 # Two DIFFERENT failures, two different exit codes, because the caller acts on them
 # differently. `CLEAN` is the grading verdict over the claims; exit 1 means at least
-# one claimed edit is NOT LANDED / UNVERIFIED / PENDING, and skills/tdd/SKILL.md
+# one claimed edit is NOT LANDED / UNVERIFIED / PENDING, and skills/tdd/references/audit.md
 # step 5b tells the model to carry that into the report and the chain-end summary.
 # A receipt-plumbing failure — no node, an unwritable state dir, a refused path — is
 # an ENVIRONMENT error and exits 2, the code this file's header already reserved for

@@ -19,8 +19,8 @@ Runtime `.zensu/plans/*.md` and `.zensu/logs/*.log` are gitignored HERE
 exempt from this rule**. Consuming repos commit them as an audit trail and may
 later open-source the repository, so the plugin now writes them to be
 publishable: `hooks/lib/zensu-artifact-redact-v1.js` strips absolute developer
-paths at write time, and `templates/tdd-plan.md` plus `skills/tdd/SKILL.md`
-Phase 2 instruct the model to author both artifacts in English. A German plan
+paths at write time, and `templates/tdd-plan.md` plus Phase 2 of
+`skills/tdd/references/planning.md` instruct the model to author both artifacts in English. A German plan
 written in a German session would land in someone else's public history — which
 is exactly the harm this rule exists to prevent, whether or not the file is
 tracked here. Every tracked file must be English-only, and so must every

@@ -62,7 +62,7 @@
 // home segment; neither can see it anywhere else. That is a refusal to guess, not
 // an oversight: a name has no pattern, and a regex that tried would either miss
 // most of them or eat ordinary words out of the audit trail. The authoring rules
-// in `skills/tdd/SKILL.md` carry this half, and they have to. Both roots are matched in their given AND `realpath` spellings,
+// in `skills/tdd/references/planning.md` carry this half, and they have to. Both roots are matched in their given AND `realpath` spellings,
 // which closes the one alias that shows up on every macOS run (`/var/folders/…`
 // against `/private/var/folders/…`).
 //

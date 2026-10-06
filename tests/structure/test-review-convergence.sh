@@ -12,7 +12,8 @@ RUBRIC_DOC="$ROOT/docs/review-severity.md"
 ASPECT_MD="$ROOT/agents/review-aspect.md"
 JUDGE_MD="$ROOT/agents/review-judge.md"
 REVIEWER_MD="$ROOT/agents/code-reviewer.md"
-TDD_MD="$ROOT/skills/tdd/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
 SELF_REVIEW_MD="$ROOT/skills/self-review/SKILL.md"
 RESET_MD="$ROOT/skills/reset-review-limit/SKILL.md"
 DELEGATE="$ROOT/hooks/post-review-tdd-delegate.sh"
@@ -307,4 +308,5 @@ check "LC3h configuration.md documents reviewPanel" "$(grep_ok "$CONFIG_DOC" '| 
 check "LC3i config.example.json ships the lean panel" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.reviewPanel==="lean"?"PASS":"FAIL")' "$CONFIG_EX")"
 check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
+rm -f "$TDD_MD"
 finish

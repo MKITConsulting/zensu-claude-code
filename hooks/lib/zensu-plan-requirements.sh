@@ -8,7 +8,7 @@
 # mandatory gate into a silent no-op. The failure mode is invisible from both
 # ends: converge exits cleanly and the chain closes green.
 #
-# The table was required by prose only (`skills/tdd/SKILL.md` Phase 2 step 1b),
+# The table was required by prose only (`skills/tdd/references/planning.md` Phase 2 step 1b),
 # and the sole check was the Phase 6 step 6c coverage cross-check, which is
 # warning level and skips silently when the table is absent. Prose cannot be
 # unit-tested and cannot be gated on; a library can be both. `--tdd-complete`
@@ -32,7 +32,7 @@
 # row, and a brace-anywhere rule would reject the very requirement that describes
 # this check.
 #
-# Deprecated rows still count. The never-recycle rule in `skills/tdd/SKILL.md`
+# Deprecated rows still count. The never-recycle rule in `skills/tdd/references/planning.md`
 # keeps a dropped requirement's row in place, and such a plan has a real
 # requirements history for converge to audit against.
 #
@@ -120,7 +120,7 @@ AWK_OUT="$(awk -v list="$LIST" '
   # `#`, not a space, so a step subsection stays inside the table it belongs to.
   !fence && /^##?[[:space:]]/ { in_section = 0 }
   # The Requirement column is located from the header row rather than assumed to
-  # be the second one: the repo-override contract in skills/tdd/SKILL.md pins that
+  # be the second one: the repo-override contract in skills/tdd/references/planning.md pins that
   # an override keeps the section and its columns, never their ORDER, so a
   # positional read would report a compliant re-ordered table as empty. Split index
   # 3 — the second VISIBLE column, since a leading pipe makes index 1 empty — stays

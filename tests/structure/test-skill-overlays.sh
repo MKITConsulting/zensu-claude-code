@@ -11,7 +11,8 @@ set -u
 # present, so an overlay-motivated edit weakening enforcement fails the suite.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
 PRTR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
@@ -106,6 +107,7 @@ else
   check "P3c pr-team-review mandatory coverage sentence intact" FAIL
 fi
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-skill-overlays: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

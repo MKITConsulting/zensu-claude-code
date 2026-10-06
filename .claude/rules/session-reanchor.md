@@ -207,12 +207,13 @@ rule keeps a session recorded in a subdirectory able to run its suite from the w
 
 `test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
 `${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start
-directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md`,
+directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md` and its references,
 `skills/self-review/SKILL.md` and `skills/verify-feature/SKILL.md`. Rewording the `{log_file}` or
 `{plan_file}` definition, the Phase 0, Phase 2, step 5b a) or step 10.1 command, the Phase 1 `cd`
 rule, the Phase 6 step 1 evidence run, self-review's root derivation or verify-feature's git root
 fails E10a there with the extraction named; the step 10.1 command is read from step 10 itself and
-must match the Mandatory command protocol's spelling.
+must match the Mandatory command protocol's spelling once `{plugin_root}` and `{plugin_data}` are
+read as the two plugin variables.
 
 **Version: `patch`.** No record or workflow schema field, no strict key set, no hook added,
 removed or re-matched, no config key, no attestation change; a new history VALUE, a new script,

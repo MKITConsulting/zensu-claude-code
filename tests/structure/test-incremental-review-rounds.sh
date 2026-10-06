@@ -23,7 +23,8 @@ SCOPE_UNIT="$ROOT/tests/structure/review-round-scope-v1.test.js"
 ASPECT_UNIT="$ROOT/tests/structure/aspect-activation-v1.test.js"
 . "$(dirname "$0")/lib-unit-summary.sh"
 
-TDD_MD="$ROOT/skills/tdd/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
 DELEGATE="$ROOT/hooks/post-review-tdd-delegate.sh"
 CONFIG_EX="$ROOT/config.example.json"
 CONFIG_DOC="$ROOT/docs/configuration.md"
@@ -168,6 +169,7 @@ check "I27 tdd-manager-workflow.md records the per-round delta" "$(grep_ok "$WOR
 check "I28 configuration.md names the unlogged-edit gap" "$(grep_ok "$CONFIG_DOC" 'a round that edits a file without logging the claim')"
 check "I29 configuration.md names the path-shaped classifier gap" "$(grep_ok "$CONFIG_DOC" 'the classifier is path-shaped')"
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-incremental-review-rounds: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

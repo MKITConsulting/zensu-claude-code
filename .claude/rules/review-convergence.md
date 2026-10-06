@@ -7,6 +7,7 @@ paths:
   - "agents/review-judge.md"
   - "agents/code-reviewer.md"
   - "skills/tdd/SKILL.md"
+  - "skills/tdd/references/**"
   - "skills/self-review/SKILL.md"
   - "skills/reset-review-limit/SKILL.md"
   - "docs/review-severity.md"
@@ -61,8 +62,7 @@ fourth annotation was rejected: both delegate arms enumerate exactly three do-no
 annotations, so a new one would route. The delegate reads the flag together with
 `findingVerification`, because stage 3 does not exist with that gate off. Coupled sites:
 `REPRODUCTION_RULE` inside `CONVERGENCE_CLAUSE` and the self-review hand-off sentence in
-`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/tdd/SKILL.md` (the file may not grow,
-§"Skill Text Budget"), the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
+`hooks/post-review-tdd-delegate.sh`, step 4c in `skills/tdd/references/review-chain.md`, the must-fix sentence in `skills/self-review/SKILL.md`, the intro of
 `docs/review-severity.md`, the `criticalReproduction` row of `docs/configuration.md`,
 `config.example.json`, LC2 to LC2j in `tests/structure/test-review-convergence.sh`, and RP0 to
 RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
@@ -147,8 +147,7 @@ rendered `## Open` sentence then equals the pre-convergence one) and in
 `skills/self-review/SKILL.md` §Open (legend sentence untouched); the `--message-stdin` arm of
 `zensu-log.sh append`, which every ledger write in the clause and in self-review names, pinned
 by R16e–R16g in `tests/structure/test-artifact-redaction.sh`; the four byte-identical copies of the
-rubric tie-break; `skills/tdd/SKILL.md` steps 3, 4, 4b and the fix-round paragraph (the file may not
-grow, §"Skill Text Budget"); the marker in `skills/reset-review-limit/SKILL.md` and `RESET` in
+rubric tie-break; `skills/tdd/references/review-chain.md` steps 3, 4, 4b and the fix-round paragraph; the marker in `skills/reset-review-limit/SKILL.md` and `RESET` in
 `review-round-scope-v1.js`; the judge's three ledger bullets and the code reviewer's annotation
 paragraph; the config key in `config.example.json`; and the operator accounts in
 `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`,

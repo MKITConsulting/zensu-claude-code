@@ -614,7 +614,8 @@ fi
   && check "BNR4b primer (default cfg): vanilla orientation — default flipped to vanilla" PASS || check "BNR4b primer default vanilla" FAIL
 
 echo "== Content pins: SKILL.md + config.example.json =="
-SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 { grep -qF "## Vanilla Implementation Mode" "$SKILL_TDD" \
   && grep -qF "mode: vanilla" "$SKILL_TDD" \
   && grep -qF "DISCIPLINE AUDIT SKIPPED — vanilla mode" "$SKILL_TDD"; } \
@@ -633,6 +634,7 @@ grep -qF -- "--mode" "$PLUGIN_DIR/skills/self-review/SKILL.md" \
 grep -qF "checked into" "$PLUGIN_DIR/docs/configuration.md" && grep -A3 "| \`tddImplementation\` |" "$PLUGIN_DIR/docs/configuration.md" | grep -qF ".zensu/config.json" \
   && check "H5 docs/configuration.md documents the repo-shipped project-overlay vector" PASS || check "H5 config-doc overlay vector" FAIL
 
+rm -f "$SKILL_TDD"
 echo "----"
 echo "test-tdd-vanilla-mode: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

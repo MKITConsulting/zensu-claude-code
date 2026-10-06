@@ -58,7 +58,7 @@ miss on fixtures, and `AP10` requires the exact finding count, so a probe that o
 too. Each arm was bite-tested: ignoring the digit lookahead, the code mask, the allowlist, the
 declared names or the fence marking turns its own check red.
 
-**Coupled sites.** The five probes — `skills/self-review/SKILL.md` Phase 3, `skills/tdd/SKILL.md`
+**Coupled sites.** The five probes — `skills/self-review/SKILL.md` Phase 3, `skills/tdd/references/review-chain.md`
 steps 4b and 4c, `skills/plan-review/SKILL.md` step 3b and `skills/pr-team-review/SKILL.md` step 4b
 — keep the substrings `R25f`, `P3h`, `P2c` and `P4i` pin. `ZENSU_ROOT` is read by nothing else in
 the plugin; pick another name if that ever changes, because the probe hands it to every child the

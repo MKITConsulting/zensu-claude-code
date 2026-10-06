@@ -19,7 +19,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/persona-activation.js"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 PR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
@@ -314,6 +315,7 @@ fi
 
 rm -rf "$SBOX" 2>/dev/null
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-review-personas: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

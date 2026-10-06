@@ -77,7 +77,8 @@ else
   check "A0e the escape is ledgered and the record store is in both protected-root lists" FAIL
 fi
 
-TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 SELF_REVIEW_SKILL="$PLUGIN_DIR/skills/self-review/SKILL.md"
 VERIFY_SKILL="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
 PLAN_TEMPLATE="$PLUGIN_DIR/templates/tdd-plan.md"
@@ -757,4 +758,5 @@ else
   ERR
 fi
 
+rm -f "$TDD_SKILL"
 finish

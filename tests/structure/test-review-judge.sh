@@ -15,7 +15,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 AGENT_MD="$PLUGIN_DIR/agents/review-judge.md"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 CONFIG_EX="$PLUGIN_DIR/config.example.json"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
@@ -184,6 +185,7 @@ else
   check "P7 e2e-skills review-judge scenario ships (prompt/.agent/pattern)" FAIL
 fi
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-review-judge: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
