@@ -1809,6 +1809,71 @@ else
   check "R43 a mixed-separator path leaves no user segment behind (bad: $OUT43)" FAIL
 fi
 
+OUT82="$(node -e '
+  const m = require(process.argv[1]);
+  const o = { projectRoot: process.argv[2], home: process.argv[3] };
+  const enc = (p) => p.replace(/[^A-Za-z0-9]/g, "-");
+  const cases = [
+    ["/private/tmp/claude-501/" + enc(process.argv[2]) + "/s/scratchpad/ac.sh", "/private/tmp/claude-501/<project>/s/scratchpad/ac.sh"],
+    [process.argv[3] + "/.claude/projects/" + enc(process.argv[2]) + "/s.jsonl", "~/.claude/projects/<project>/s.jsonl"],
+    ["/private/tmp/claude-501/" + enc(process.argv[3] + "/IdeaProjects/other") + "/s", "/private/tmp/claude-501/~-IdeaProjects-other/s"],
+    ["cmd=\"cat /tmp/claude-501/-Users-someoneelse-work/s/x\" exit=0", "cmd=\"cat /tmp/claude-501/<home>-work/s/x\" exit=0"],
+    ["/home/ci/.claude/projects/-home-otherdev-work/s.jsonl", "<home>/.claude/projects/<home>-work/s.jsonl"],
+    ["C:\\Users\\bob\\.claude\\projects\\C--Users-bob-proj\\s.jsonl", "C:<home>\\.claude\\projects\\<home>-proj\\s.jsonl"],
+    ["/tmp/claude-0/-root-proj/s", "/tmp/claude-0/<home>-proj/s"],
+    ["\\/tmp\\/claude-501\\/-Users-bob-x\\/s", "\\/tmp\\/claude-501\\/<home>-x\\/s"],
+  ];
+  const bad = cases.filter(([i, w]) => m.redact(i, o) !== w)
+    .map(([i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$FAKE_HOME" 2>/dev/null)"
+if [ "$OUT82" = "OK" ]; then
+  check "R82 the dash-encoded spelling of the project root, \$HOME and a foreign home is redacted like the plain one" PASS
+else
+  check "R82 the dash-encoded spelling of the project root, \$HOME and a foreign home is redacted like the plain one (bad: $OUT82)" FAIL
+fi
+
+OUT83="$(node -e '
+  const m = require(process.argv[1]);
+  const o = { projectRoot: "/Users/m/app", home: "/Users/m" };
+  const cases = [
+    ["/tmp/claude-501/-Users-m-app/s", "/tmp/claude-501/<project>/s"],
+    ["/tmp/claude-501/-Users-m-app-admin/s", "/tmp/claude-501/~-app-admin/s"],
+    ["/tmp/claude-501/-Users-mm-x/s", "/tmp/claude-501/<home>-x/s"],
+    ["npm run build -- --home-dir x", "npm run build -- --home-dir x"],
+    ["tool -home-dir /tmp/x", "tool -home-dir /tmp/x"],
+    ["docs/release-Users-guide.md", "docs/release-Users-guide.md"],
+    ["src/-Users-list.ts", "src/-Users-list.ts"],
+    ["/opt/-home-x.bak/y", "/opt/-home-x.bak/y"],
+    ["/srv/-rootfs/x", "/srv/-rootfs/x"],
+  ];
+  const bad = cases.filter(([i, w]) => m.redact(i, o) !== w)
+    .map(([i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" 2>/dev/null)"
+if [ "$OUT83" = "OK" ]; then
+  check "R83 a dash-encoded rule fires only on a whole name after a path separator and leaves other -Users-, -home- and -root text alone" PASS
+else
+  check "R83 a dash-encoded rule fires only on a whole name after a path separator and leaves other -Users-, -home- and -root text alone (bad: $OUT83)" FAIL
+fi
+
+OUT84="$(node -e '
+  const m = require(process.argv[1]);
+  const cases = [
+    [{ projectRoot: "/opt/acme/app", home: "/Users/m" }, "/tmp/claude-501/-opt-acme-app/s", "/tmp/claude-501/<project>/s"],
+    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude\\C--Users-m-app\\s", "C:\\Temp\\claude\\<project>\\s"],
+    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude\\C--Users-m-other\\s", "C:\\Temp\\claude\\~-other\\s"],
+  ];
+  const bad = cases.filter(([o, i, w]) => m.redact(i, o) !== w)
+    .map(([o, i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" 2>/dev/null)"
+if [ "$OUT84" = "OK" ]; then
+  check "R84 a dash-encoded project root outside \$HOME and the Windows drive spelling are redacted" PASS
+else
+  check "R84 a dash-encoded project root outside \$HOME and the Windows drive spelling are redacted (bad: $OUT84)" FAIL
+fi
+
 # ── R56-R61: the claims this feature makes about itself ──────────────
 # Six rounds of review spent most of their findings on ONE class: a comment or a
 # shipped operator doc claiming more than the code delivers. Three of the six

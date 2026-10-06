@@ -26,6 +26,25 @@ and `/homework` becomes `<home>work`, drop the left and the rule fires inside
 `src/home/index.ts`. The segment class also excludes quotes, so the closing `"`
 of a `cmd="…"` field survives.
 
+**Each rule also covers Claude Code's dash-encoded spelling of a directory**, the
+name under `~/.claude/projects/` and in the session scratchpad
+`/private/tmp/claude-<uid>/<name>/…`: every character other than an ASCII letter or
+digit becomes `-`, so `/Users/<name>/IdeaProjects/x` turns into
+`-Users-<name>-IdeaProjects-x` and `C:\Users\<name>` into `C--Users-<name>`. The
+encoded rules run after the plain ones, in the same order, and fire only where the
+encoded name starts right after a path separator, because `-` is an ordinary name
+character and a flag such as `-home-dir` must survive. The encoded project root must
+fill the whole name, so a sibling `app-admin` never renders as `<project>-admin`. The
+encoded `$HOME` and the encoded residual prefixes (`-Users-<seg>`, `-home-<seg>`,
+`-root` and the drive form `C--Users-<seg>`) may be followed by another `-` segment,
+so the scratchpad of another project under `$HOME` renders as `~-IdeaProjects-x`. A
+residual segment ends at its first character that is not a letter or digit and must
+not run into a `.` or `_`, so `src/-Users-list.ts` survives. The encoding itself is
+Claude Code's, copied by hand here and in `normSlug` of
+`skills/session-trail/scripts/trail.mjs`; nothing pins either copy against the host,
+so a change of that encoding silently stops both. R82-R84 pin the rules and their
+bounds.
+
 **Secret NAMES are never redacted** — a name grants no access and this repo's own
 workflows carry `secrets.GITHUB_TOKEN` in public. Credential VALUES are a different
 problem: they belong to `hooks/pre-write-secret-scan.sh` / `secret-patterns.js`, and
@@ -269,7 +288,13 @@ internal URLs are NOT redacted; a DOUBLY encoded separator (`\\\\Users\\\\bob`, 
 backslashes — JSON encoding applied twice) still leaves the user segment, because
 the escaped-separator rules cap at two; neither writer produces that spelling, so
 it sits inside the textual bound
-rather than outside it; `expectedRoot` binds `append` only when
+rather than outside it; the dash-encoded spelling is lossy, so a dash cannot tell a
+separator from a name character: a foreign user segment ends at its first dash
+(`-Users-first-last-x` keeps `-last-x`), the encoded `$HOME` of `/Users/marcel` also
+matches the start of another user's `-Users-marcel-k-…` and leaves `-k`, an encoded
+name that no path separator precedes is not caught, and a project subdirectory keeps
+its product name (`~-IdeaProjects-<product>-sub`), exactly as a plain path under
+`$HOME` outside the project does; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
 nothing, and deliberately NOT gated on that variable: an earlier revision made

@@ -291,6 +291,14 @@ const RESIDUAL_RULES = [
     + '(?:' + SEP_ANY + SEGMENT + '|' + BOUNDARY + ')', 'g'),
   new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_ANY + RESIDUAL_ROOT_PREFIX + BOUNDARY, 'g'),
 ];
+const ENCODED_AFTER_SEPARATOR = '(?<=[\\\\/])';
+const ENCODED_BOUNDARY = '(?![A-Za-z0-9_.])';
+const ENCODED_SEGMENT_END = '(?![A-Za-z0-9_.\\-])';
+const ENCODED_RESIDUAL_RULES = [
+  new RegExp(ENCODED_AFTER_SEPARATOR + '(?:[A-Za-z]-)?-(?:' + RESIDUAL_HOME_PREFIXES.join('|') + ')-[A-Za-z0-9]+'
+    + ENCODED_BOUNDARY, 'g'),
+  new RegExp(ENCODED_AFTER_SEPARATOR + '-' + RESIDUAL_ROOT_PREFIX + ENCODED_BOUNDARY, 'g'),
+];
 
 // Windows has no O_NOFOLLOW, and the OR-zero coercion form is the one
 // tests/structure/test-windows-portability-guards.sh forbids, because it hides
@@ -387,6 +395,20 @@ function replaceSpellings(text, spellings, placeholder) {
   return out;
 }
 
+function encodedSpellingList(spellings) {
+  const encoded = new Set();
+  for (const spelling of spellings) encoded.add(spelling.replace(/[^A-Za-z0-9]/g, '-'));
+  return [...encoded].filter((s) => s.length >= 2 && /[A-Za-z0-9]/.test(s)).sort((a, b) => b.length - a.length);
+}
+
+function replaceEncodedSpellings(text, spellings, placeholder, end) {
+  let out = text;
+  for (const spelling of spellings) {
+    out = out.replace(new RegExp(ENCODED_AFTER_SEPARATOR + escapeRegExp(spelling) + end, 'g'), placeholder);
+  }
+  return out;
+}
+
 // A text can only be changed by a root spelling it CONTAINS or by one of the
 // three literal residual prefixes. Both are plain substring questions, and a
 // substring scan is what the regex engine would do first anyway — minus the
@@ -424,11 +446,16 @@ function redact(text, options = {}) {
   if (typeof text !== 'string' || text === '') return text;
   const projectSpellings = rootSpellingList(options.projectRoot);
   const homeSpellings = rootSpellingList(options.home);
-  if (!redactionPossible(text, projectSpellings, homeSpellings)) return text;
+  const encodedProject = encodedSpellingList(projectSpellings);
+  const encodedHome = encodedSpellingList(homeSpellings);
+  if (!redactionPossible(text, [...projectSpellings, ...encodedProject], [...homeSpellings, ...encodedHome])) return text;
   let out = text;
   out = replaceSpellings(out, projectSpellings, PROJECT_PLACEHOLDER);
   out = replaceSpellings(out, homeSpellings, HOME_PLACEHOLDER);
   for (const rule of RESIDUAL_RULES) out = out.replace(rule, RESIDUAL_PLACEHOLDER);
+  out = replaceEncodedSpellings(out, encodedProject, PROJECT_PLACEHOLDER, ENCODED_SEGMENT_END);
+  out = replaceEncodedSpellings(out, encodedHome, HOME_PLACEHOLDER, ENCODED_BOUNDARY);
+  for (const rule of ENCODED_RESIDUAL_RULES) out = out.replace(rule, RESIDUAL_PLACEHOLDER);
   return out;
 }
 

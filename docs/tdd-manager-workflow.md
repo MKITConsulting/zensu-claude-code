@@ -596,7 +596,12 @@ applies three rules **in this order**: the project root becomes `<project>`,
 `$HOME` becomes `~`, and any residual `/Users/<seg>`, `/home/<seg>` or `/root`
 prefix becomes `<home>`. Rule 1 must precede rule 2 because the project root is
 normally nested under `$HOME`; the residual rule is what makes the guarantee
-checkable rather than best-effort. Secret **names** are deliberately NOT
+checkable rather than best-effort. Each rule also covers Claude Code's
+dash-encoded spelling of a directory, the name it uses under `~/.claude/projects/`
+and in the session scratchpad, where every character other than a letter or digit
+becomes `-` (`-Users-<name>-IdeaProjects-x`). That spelling is redacted only where
+it starts right after a path separator, and the project root only when it fills
+the whole name. Secret **names** are deliberately NOT
 redacted — a name grants no access, and this repo's own workflows carry
 `secrets.GITHUB_TOKEN` in public. Credential **values** belong to a different
 gate (`hooks/pre-write-secret-scan.sh`).
