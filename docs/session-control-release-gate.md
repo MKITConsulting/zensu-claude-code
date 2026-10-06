@@ -257,15 +257,20 @@ has two deterministic exact-SHA gates:
    against that exact commit as parallel `--shard=I/N` legs, which receive it
    as a verified git bundle. `prepare` then verifies the exact clean commit SHA,
    computes the Session Control runtime digest, and uploads deterministic
-   SHA-bound evidence before pushing the release branch.
+   SHA-bound evidence before pushing the release branch. A re-run of failed
+   jobs reuses the same release commit, so every evidence artifact name also
+   carries the run attempt. The bundle is kept for 7 days; after that, a re-run
+   cannot fetch the commit and a fresh dispatch creates a new one.
 2. Landing the reviewed release commit on `main` does **not** make the new
    plugin version live. The catalog points to an as-yet unavailable tag.
 3. `publish-plan` reads the repository's `immutable-releases` setting with
-   the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN`, requires `enabled:true`, and
-   decides the gate. `publish-suite` reruns the sharded suite at the exact
-   clean `${{ github.sha }}`. `publish` verifies marketplace version and ref,
-   rejects a pre-existing tag at another SHA, recomputes the runtime digest,
-   and uploads a second deterministic evidence artifact.
+   the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN`, requires `enabled:true`,
+   verifies marketplace version and ref, rejects a pre-existing tag at another
+   SHA, and decides the gate, so a doomed publication fails before any shard
+   starts. `publish-suite` reruns the sharded suite at the exact clean
+   `${{ github.sha }}`. `publish` repeats the version, ref and tag checks,
+   recomputes the runtime digest, and uploads a second deterministic evidence
+   artifact.
 4. Immediately before publication it rechecks Immutable Releases. Publication
    uses only the job's contents-write token: create or validate an exact-SHA
    draft, attach exactly one named asset, verify its uploaded state and SHA-256

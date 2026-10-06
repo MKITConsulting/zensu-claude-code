@@ -91,8 +91,8 @@ expect_text "Release bump updates the immutable source ref" "$WORKFLOW" \
   'marketplace source ref -> $TAG'
 expect_text "Release validates source ref equals the release tag" "$WORKFLOW" \
   'test "$(jq -r '\''.plugins[0].source.ref'\'' .claude-plugin/marketplace.json)" = "$TAG"'
-expect_text "Publish verifies the immutable source before deterministic validation" "$WORKFLOW" \
-  '- name: Verify immutable marketplace release target'
+expect_text "Publish verifies the immutable source before the suite runs" "$WORKFLOW" \
+  '- name: Verify immutable marketplace release target before the suite'
 expect_text "Publish rejects a malformed plugin version before go-live" "$WORKFLOW" \
   '[[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
 expect_text "A pre-existing tag at another commit fails closed" "$WORKFLOW" \

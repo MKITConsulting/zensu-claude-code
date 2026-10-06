@@ -16,7 +16,8 @@ name: Release
 #      parallel shards. `prepare` then records deterministic exact-SHA runtime
 #      evidence, pushes `release/vX.Y.Z` and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
-#   4. When the release commit lands on main, `publish-plan` decides the gate,
+#   4. When the release commit lands on main, `publish-plan` verifies the
+#      release target and decides the gate,
 #      `publish-suite` runs the sharded suite at that exact SHA, and `publish`
 #      tags main HEAD and creates a PUBLISHED GitHub Release whose notes are the
 #      new CHANGELOG section (already reviewed in the bump PR body). The merge only
@@ -402,7 +403,7 @@ jobs:
           # Only the suite run is optional. The exact-SHA pin, the clean-tree
           # check and the runtime digest still bind the bytes that ship, so a
           # skipped release is unverified — never unattributed.
-          if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ]; then
+          if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then
             GATE=skipped
             GATE_REASON="$SKIP_REASON"
             echo "::warning::Deterministic release gate SKIPPED — the suite did not run against $EXPECTED_SHA. Reason: $GATE_REASON"
@@ -442,7 +443,7 @@ jobs:
       - name: Upload deterministic created-commit evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: deterministic-release-${{ steps.release_commit.outputs.sha }}
+          name: deterministic-release-${{ steps.release_commit.outputs.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/deterministic-release-evidence/
           if-no-files-found: error
           retention-days: 90
@@ -540,6 +541,24 @@ jobs:
             echo "::error::GitHub Immutable Releases must be enabled before publishing a marketplace tag"
             exit 1
           }
+
+      - name: Verify immutable marketplace release target before the suite
+        run: |
+          set -euo pipefail
+          VER="$(jq -r '.version' .claude-plugin/plugin.json)"
+          TAG="v$VER"
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
+          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "${{ github.sha }}" ]; then
+              echo "::error::$TAG already exists at $TAG_SHA, not exact main SHA ${{ github.sha }}"
+              exit 1
+            fi
+          fi
 
       - name: Decide the exact-main-SHA gate
         id: gate
@@ -727,7 +746,7 @@ jobs:
       - name: Upload deterministic exact-main-SHA evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: deterministic-publish-${{ github.sha }}
+          name: deterministic-publish-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/deterministic-publish-evidence/
           if-no-files-found: error
           retention-days: 90

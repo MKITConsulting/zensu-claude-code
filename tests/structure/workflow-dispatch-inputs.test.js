@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOWS = path.join(ROOT, '.github', 'workflows');
 const RELEASE = YAML.parse(fs.readFileSync(path.join(WORKFLOWS, 'release.yml'), 'utf8'));
 const EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
-const CONTEXT_REFERENCE = /(?<![\w.-])(inputs|env|github)(?![\w-])(?:\s*\.\s*([A-Za-z_][\w-]*))?/gi;
+const CONTEXT_REFERENCE = /(?<![\w.-])(inputs|env|github|needs)(?![\w-])(?:\s*\.\s*([A-Za-z_][\w-]*))?/gi;
 const TRUSTED_GITHUB_MEMBERS = new Set(['sha', 'event_name', 'repository', 'server_url']);
 const INPUT_VARIABLES = {
   SKIP_REASON: '${{ inputs.skip_reason }}',
@@ -23,7 +23,7 @@ const VALIDATE = 'Validate test-gate skip request';
 const PUBLISH_GATE = 'Deterministic exact-main-SHA gate';
 const PUBLISH_PLAN_GATE = 'Decide the exact-main-SHA gate';
 const PUBLISH_DECISION = 'COMMIT_MSG="$(git log -1 --format=%B HEAD)"';
-const PREPARE_EVIDENCE = 'if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ]; then';
+const PREPARE_EVIDENCE = 'if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then';
 const PUBLISH_EVIDENCE = 'if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then';
 const RELEASE_SUBJECT = 'chore(release): bump version to 9.9.9';
 const EXPECTED_SHA = 'f'.repeat(40);
@@ -246,6 +246,11 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ GitHub.head_ref }}',
     '${{ github.repository_owner }}',
     '${{ github.sha || github.head_ref }}',
+    '${{ needs.publish-plan.outputs.gate_reason }}',
+    "${{ needs['publish-plan'].outputs.gate }}",
+    '${{ needs.prepare-suite.result }}',
+    '${{ toJSON(needs) }}',
+    '${{ NEEDS.prepare-commit.outputs.sha }}',
   ];
   const trusted = [
     '${{ github.sha }}',
@@ -254,8 +259,10 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ github.server_url }}',
     '${{ GITHUB.SHA }}',
     '${{ steps.github.outputs.sha }}',
-    '${{ needs.env.outputs.value }}',
-    '${{ needs.build-github.outputs.inputs }}',
+    '${{ steps.env.outputs.value }}',
+    '${{ steps.needs.outputs.value }}',
+    '${{ steps.build-github.outputs.inputs }}',
+    '${{ steps.build-needs.outputs.sha }}',
     "${{ github.event_name == 'workflow_dispatch' }}",
     '${{ steps.ver.outputs.version }}',
     '${{ runner.temp }}',
@@ -512,16 +519,18 @@ test('the prepare evidence step records passed only after every suite shard succ
 });
 
 test('the prepare evidence step refuses a gate the suite result contradicts', () => {
-  for (const [skipTestGate, suiteResult] of [
-    ['false', 'failure'],
-    ['false', 'cancelled'],
-    ['false', 'skipped'],
-    ['false', ''],
-    ['true', 'success'],
-    ['true', 'failure'],
+  for (const [skipTestGate, reason, suiteResult] of [
+    ['false', HOSTILE, 'failure'],
+    ['false', HOSTILE, 'cancelled'],
+    ['false', HOSTILE, 'skipped'],
+    ['false', HOSTILE, ''],
+    ['true', HOSTILE, 'success'],
+    ['true', HOSTILE, 'failure'],
+    ['true', '', 'skipped'],
+    ['true', ' \t ', 'skipped'],
   ]) {
     withDir((cwd) => {
-      const result = evidenceDecision(cwd, skipTestGate, HOSTILE, suiteResult);
+      const result = evidenceDecision(cwd, skipTestGate, reason, suiteResult);
       assert.strictEqual(result.status, 1, `${skipTestGate}/${suiteResult}: ${result.stdout}${result.stderr}`);
       assert.match(result.stdout, /^::error::the release suite result \(.*\) does not match the gate decision/m);
       assert.doesNotMatch(result.stdout, /::warning::/);

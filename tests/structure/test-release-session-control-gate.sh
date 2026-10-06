@@ -32,8 +32,6 @@ line_of() {
 [ -f "$WORKFLOW" ] && check "Release workflow exists" PASS \
   || check "Release workflow exists" FAIL
 
-rejects "Prepare runs no pre-bump gate on a tree that is never released" \
-  '^ +run: bash tests/run-all\.sh --ci$'
 if [ "$(grep -Fc 'bash tests/run-all.sh --ci' "$WORKFLOW")" -eq 2 ]; then
   check "Exact release commit and publish run the non-Promptfoo CI gate" PASS
 else
@@ -61,7 +59,7 @@ contains "Prepare rejects malformed runtime digests" \
 contains "Deterministic evidence binds exact SHA, runtime, and plugin version" \
   'zensu-deterministic-release-evidence-v1'
 contains "Prepare artifact is bound to the created commit" \
-  'name: deterministic-release-${{ steps.release_commit.outputs.sha }}'
+  'name: deterministic-release-${{ steps.release_commit.outputs.sha }}-${{ github.run_attempt }}'
 contains "Push rechecks the created commit" \
   'test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"'
 
@@ -91,7 +89,7 @@ contains "Publish uses the dedicated settings token" \
 contains "Publish deterministic gate targets exact main SHA" \
   'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'
 contains "Publish artifact is bound to exact main SHA" \
-  'name: deterministic-publish-${{ github.sha }}'
+  'name: deterministic-publish-${{ github.sha }}-${{ github.run_attempt }}'
 contains "Publish rechecks Immutable Releases immediately before publication" \
   '- name: Recheck Immutable Releases immediately before publish'
 contains "Release REST calls pin API version 2026-03-10" \
@@ -163,10 +161,37 @@ const sharded = (id) => {
 const needs = (id) => [].concat(jobs[id]?.needs || []);
 const cond = (id) => String(jobs[id]?.if || '').replace(/\s+/g, ' ');
 const has = (id, ...parts) => parts.every((part) => cond(id).includes(part));
+const steps = (id) => jobs[id]?.steps || [];
+const index = (id, name) => steps(id).findIndex((step) => step.name === name);
+const named = (id, name) => steps(id).find((step) => step.name === name) || {};
+const suiteStep = (id) => steps(id).find(runsSuite) || {};
+const guarded = (run, head) => {
+  const lines = String(run || '').split('\n').map((line) => line.trim());
+  const suite = lines.findIndex((line) => /tests\/run-all\.sh/.test(line));
+  return suite > 0 && lines.slice(0, suite).includes(head) && lines.slice(suite + 1).includes(head);
+};
+const RELEASE_SHA = '${{ needs.prepare-commit.outputs.sha }}';
+const BUNDLE_CHECKOUT = 'Check out the bundled release commit';
+const PLAN_TARGET = 'Verify immutable marketplace release target before the suite';
+const FINAL_TARGET = 'Verify immutable marketplace release target';
+const withoutOutputs = (run) => String(run || '').split('\n').filter((line) => !line.includes('>> "$GITHUB_OUTPUT"')).join('\n');
 process.stdout.write(JSON.stringify({
   suite_jobs: Object.entries(jobs).filter(([, job]) => (job.steps || []).some(runsSuite)).map(([id]) => id).sort(),
   prepare_suite_sharded: sharded('prepare-suite'),
   publish_suite_sharded: sharded('publish-suite'),
+  prepare_suite_on_release_commit: index('prepare-suite', BUNDLE_CHECKOUT) !== -1
+    && steps('prepare-suite').findIndex(runsSuite) > index('prepare-suite', BUNDLE_CHECKOUT)
+    && named('prepare-suite', BUNDLE_CHECKOUT).env?.EXPECTED_SHA === RELEASE_SHA
+    && String(named('prepare-suite', BUNDLE_CHECKOUT).run || '').includes('git checkout --detach "$EXPECTED_SHA"')
+    && suiteStep('prepare-suite').env?.EXPECTED_SHA === RELEASE_SHA
+    && guarded(suiteStep('prepare-suite').run, 'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"'),
+  publish_suite_on_main_sha: guarded(suiteStep('publish-suite').run, 'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'),
+  plan_verifies_target_first: index('publish-plan', PLAN_TARGET) !== -1
+    && index('publish-plan', 'Decide the exact-main-SHA gate') > index('publish-plan', PLAN_TARGET)
+    && index('publish', FINAL_TARGET) !== -1
+    && String(named('publish-plan', PLAN_TARGET).run) === withoutOutputs(named('publish', FINAL_TARGET).run),
+  publish_reverifies_target_before_tagging: index('publish', FINAL_TARGET) !== -1
+    && index('publish', 'Draft, attach, publish, and verify immutable release') > index('publish', FINAL_TARGET),
   writers: Object.entries(jobs).filter(([, job]) => job.permissions?.contents === 'write').map(([id]) => id).sort(),
   prepare_suite_wired: needs('prepare-suite').includes('prepare-commit')
     && has('prepare-suite', '!inputs.dry_run', '!inputs.skip_test_gate'),
@@ -194,6 +219,10 @@ graph_is() {
 graph_is "Only the two suite jobs run the suite" .suite_jobs '["prepare-suite","publish-suite"]'
 graph_is "The prepare suite runs as parallel shards whose spec comes from the matrix" .prepare_suite_sharded true
 graph_is "The publish suite runs as parallel shards whose spec comes from the matrix" .publish_suite_sharded true
+graph_is "A prepare shard runs the suite only on the bundled release commit, checked before and after its slice" .prepare_suite_on_release_commit true
+graph_is "A publish shard runs the suite only at the exact main SHA, checked before and after its slice" .publish_suite_on_main_sha true
+graph_is "The publish plan verifies the release target with the checks publication repeats before it decides the gate" .plan_verifies_target_first true
+graph_is "Publication re-verifies the release target before it tags" .publish_reverifies_target_before_tagging true
 graph_is "Only the branch push and the publication jobs may write contents" .writers '["prepare","publish"]'
 graph_is "The prepare suite follows the release commit and honours dry_run and skip_test_gate" .prepare_suite_wired true
 graph_is "The branch push waits for every prepare shard or a requested skip" .prepare_waits_for_suite true
