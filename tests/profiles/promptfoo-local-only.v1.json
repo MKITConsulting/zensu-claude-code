@@ -167,6 +167,7 @@
   ],
   "nodeDepsStructureTests": [
     "test-promptfoo-session-upgrade.sh",
+    "test-release-session-control-gate.sh",
     "test-windows-ci-contract.sh",
     "test-workflow-checkout-credentials.sh",
     "test-workflow-dispatch-inputs.sh"
