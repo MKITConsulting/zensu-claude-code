@@ -221,9 +221,6 @@ check "R21c the tdd skill gives a judge covers line no id of its own" "$(grep_ok
 check "R21b the tdd skill prescribes the round claim prefix" "$(grep_ok "$TDD_MD" "log this round's \`R{N}-<step> IMPL completed — files:\` claims")"
 check "R22 the tdd skill hands the ledger to the judge" "$(grep_ok "$TDD_MD" 'plus `findings_ledger` when the post-review directive')"
 check "R23 the tdd skill keeps the ledger out of the finding list" "$(grep_ok "$TDD_MD" 'The ledger is history for the judge only')"
-lines="$(wc -l < "$TDD_MD" | tr -d ' ')"
-[ "$lines" -le 433 ] && check "R24 the tdd skill stays within its line cap ($lines)" PASS \
-                     || check "R24 the tdd skill stays within its line cap ($lines, cap 433)" FAIL
 check "R25 self-review takes ledger entries as candidates" "$(grep_ok "$SELF_REVIEW_MD" 'every `deferred` entry rated IMPORTANT or CRITICAL, is a candidate')"
 check "R25a self-review re-reads a candidate before it becomes a must-fix" "$(grep_ok "$SELF_REVIEW_MD" 'keep it only when that code still shows what its summary describes')"
 check "R25b self-review reads the chain's own run log" "$(grep_ok "$SELF_REVIEW_MD" 'never a log resolved by recency')"

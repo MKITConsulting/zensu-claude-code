@@ -1,15 +1,9 @@
 ---
 name: setup
 description: >
-  Interactive first-run configuration for the Zensu plugin. Verifies the zensu
-  CLI is installed and authenticated (offers `zensu auth login` when it is not),
-  asks whether to write global or project-local config, then walks the user
-  through a curated set of high-impact plugin settings via AskUserQuestion and
-  writes the answers to the chosen config.json with a jq-free deep-merge that
-  preserves every other key. Use whenever the user wants to configure or set up
-  the Zensu plugin, change their Zensu settings, onboard a new machine,
-  "configure zensu", "set up zensu", "change my zensu config", or the slash
-  command /zensu:setup.
+  [Zensu] Interactive first-run configuration: verify the zensu CLI and its
+  login, then write chosen plugin settings. Use when the user wants to set up or
+  configure the Zensu plugin, or via /zensu:setup.
 ---
 
 # /zensu:setup

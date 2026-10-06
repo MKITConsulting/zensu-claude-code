@@ -21,7 +21,7 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 §"Adopting a Record Across a Lineage Break" answers "this runtime may not SERVE the record".
 §"Workflow-Baseline Repair" answers "it serves it fine and the workflow DOCUMENT is gone".
 This one answers "it serves it fine and the DIRECTORY the record anchors is gone" — the
-ordinary shape after `git worktree remove`, which `skills/session-trail/SKILL.md` measures at
+ordinary shape after `git worktree remove`, which one machine measured at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
 `readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
 deny — a Bash write too, but only while the opt-in source-write gate is on.
@@ -136,10 +136,10 @@ and `THREE bounded exceptions`, so a maintainer who edits only the three code ro
 turns a suite red with nothing naming it — the UNOBVIOUS-direction coupling this file
 records for G12.
 
-**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (frontmatter, §"When to Use", the
-`--restore-root` section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
-state bullets this feature added (the RE-CREATED row, its not-checked arm, and the frontmatter
-`session state` clause, which reads as a complete inventory of the block and therefore goes
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (§"When to Use", the `--restore-root`
+section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
+state bullets this feature added (the RE-CREATED row, its not-checked arm, and the `Session state`
+bullet of §"What it checks", which reads as a complete inventory of the block and therefore goes
 stale silently) — `docs/session-control.md` §"Unbindable sessions", `docs/gates.md`,
 `docs/operations.md` and `docs/tdd-manager-workflow.md`. That bullet list is TIGHT: every other
 bullet in the block follows its predecessor with no blank line, and the two blanks this feature

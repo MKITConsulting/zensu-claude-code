@@ -1,37 +1,9 @@
 ---
 name: doctor
 description: >
-  [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
-  hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
-  tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, whether playwright-cli is installed and its version, and the
-  browser consent gate's registration on the Bash matcher), plugin integrity
-  (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
-  sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
-  string is silently ignored by strict === checks, and whether the permission rules
-  in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
-  before any chain has wedged), and session state (state dir writable, canonical
-  CAS workflow documents valid, whether THIS session's own workflow document is
-  there and usable and whether it was rebuilt rather than restored, whether this
-  session's recorded project root was re-created by a restore rather than being the
-  one that was there before, each review
-  chain's shape plus any wedged chain and
-  its recovery command, any open chain not owned by this session, any chain this
-  session owns that has ended many turns at implementing, any nonterminal durable
-  Autopilot run holding a working tree, who holds the Autopilot project lease — its
-  owner pid, whether that pid is alive, whether a process start identity was recorded,
-  its created_at, and whether a stale lock artifact or recovery sentinel is removable —
-  whether this session's app-managed worktree
-  carries the desktop-pool keep marker, still sits on its recorded branch and holds a nested
-  repository that keeps the marker after the session ends, any reviewer spawn
-  the host permission layer refused, any claim this session audited against a root
-  that is not the anchor, this session's recorded delivery route, expired pending-review
-  surfaced).
-  The only write is an explicit, user-confirmed cleanup of one
-  expired pending-review.json — CAS workflow documents are never deleted. Use
-  when the user asks to "diagnose zensu", "check my zensu
-  setup", "why is a zensu hook/gate not firing", "zensu doctor", or the slash
-  command /zensu:doctor.
+  [Zensu] Read-only diagnostics for the Zensu plugin: CLI, plugin integrity,
+  config and session state. Use when the user asks to "diagnose zensu" or why a
+  hook or gate is not firing, or /zensu:doctor.
 ---
 
 # /zensu:doctor
@@ -48,6 +20,34 @@ valid. It prints one four-block ✅/⚠️/❌ table and changes nothing — the
 exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 > One command to see why something is not firing. Nothing is changed unless you say so.
+
+## What it checks
+
+- **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
+  its auth resolved from the repo's provider, whether playwright-cli is installed and its
+  version, and the browser consent gate's registration on the Bash matcher.
+- **Plugin integrity** — hooks.json wired to files on disk, and plugin.json ↔
+  marketplace.json version sync.
+- **Config** — valid JSON, the quoted-boolean trap where "true"/"false" as a string is
+  silently ignored by strict === checks, and whether the permission rules in
+  ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal before any chain
+  has wedged.
+- **Session state** — the state dir is writable; canonical CAS workflow documents are valid;
+  whether THIS session's own workflow document is there and usable and whether it was rebuilt
+  rather than restored; whether this session's recorded project root was re-created by a
+  restore rather than being the one that was there before; each review chain's shape plus any
+  wedged chain and its recovery command; any open chain not owned by this session; any chain
+  this session owns that has ended many turns at implementing; any nonterminal durable
+  Autopilot run holding a working tree; who holds the Autopilot project lease — its owner pid,
+  whether that pid is alive, whether a process start identity was recorded, its created_at,
+  and whether a stale lock artifact or recovery sentinel is removable; whether this session's
+  app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
+  and holds a nested repository that keeps the marker after the session ends; any reviewer
+  spawn the host permission layer refused; any claim this session audited against a root that
+  is not the anchor; this session's recorded delivery route; and an expired pending review.
+
+The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
+CAS workflow documents are never deleted.
 
 ## When to Use
 

@@ -1,14 +1,9 @@
 ---
 name: self-review
 description: >
-  [Zensu] Terminal self-reflection stage of the post-implementation review chain. After the
-  zensu:code-reviewer chain converges (PASS, suggestions-only, or max-rounds), re-read this
-  session's own work as a senior engineer, take at most ONE fix round (under the
-  still-active TDD phase-gate) if a must-fix surfaces, then render the final
-  Positive/Improvements/Risks report and close the chain via --chain-done. It never re-runs
-  the code-reviewer. Invoked AUTOMATICALLY as the chain's terminal gate (the post-review
-  hand-off and the Stop chain-enforcer force it) — normally not run by hand, and never a
-  substitute for the zensu:code-reviewer agent.
+  [Zensu] Terminal stage of the review chain: re-read the session's work, take
+  at most one fix round, and close the chain. Use when the chain hand-off or the
+  Stop enforcer invokes it.
 ---
 
 # /zensu:self-review

@@ -116,7 +116,7 @@ and the hung remedy describe (`P1le26`). The renderer:
 `LEASE_` and `lease…` rather than `AUTOPILOT_` and `autopilot…` on purpose:
 `.claude/rules/autopilot-run-scope.md` prescribes `grep -nE 'AUTOPILOT_|autopilot[A-Z]|…'` as the
 census of run-record hand copies, and this row copies no run record. Operator account: the
-`autopilot lease:` bullets and the frontmatter session-state clause in `skills/doctor/SKILL.md`;
+`autopilot lease:` bullets and the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`;
 `P1le24` holds every row phrase against both.
 
 **Known gaps:**

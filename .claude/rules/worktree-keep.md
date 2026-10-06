@@ -399,7 +399,7 @@ the exclusive-create, `nlink` and dev/ino checks; the
 `ZDOC_WORKTREE_KEEP` / `ZDOC_WORKTREE_KEEP_IDLE_HOURS` exports in `hooks/lib/zensu-doctor.sh`
 (pinned by `P1wk13`); the
 `worktreeKeep` and `worktreeKeepIdleHours` entries in `config.example.json`; the `worktree:`
-bullets and the frontmatter `session state` clause in `skills/doctor/SKILL.md`; the hook count in
+bullets and the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`; the hook count in
 `docs/configuration.md` (header, prose and its `#hooks-N` anchor), pinned by
 `test-readme-hook-count-sync.sh`; the three
 hook rows and two config rows in `docs/configuration.md`, the README docs-index row, and

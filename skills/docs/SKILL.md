@@ -1,22 +1,9 @@
 ---
 name: docs
 description: >
-  Author genuine, code-grounded documentation for a tracked Zensu feature — or a
-  whole product/component in one batch — so the feature honestly clears the
-  hardened `docs_complete` release gate. For each feature it reads the REAL linked
-  source, writes ONE feature-specific doc of the correct type (derived from the
-  feature's `feature_scope`), publishes it as a Zensu wiki page (default) or a
-  per-feature repo markdown file, links it with `zensu link docs` so the docs
-  score recomputes, and verifies the gate flipped. It produces one doc PER feature
-  — never a shared README linked across many features (the exact false-green the
-  gate now rejects) — and forbids placeholder / metadata-dump stubs: content must
-  describe what THIS feature actually does, citing real code. Batchable across
-  parallel read-only authoring agents; idempotent (skips features already
-  `docs_complete`); logs every feature skipped or failed (no silent truncation).
-  Use whenever the user wants to document a feature, "write the docs", "generate
-  feature documentation", "clear the docs gate", "backfill missing docs" across a
-  product/component, make a feature release-ready on the docs axis, or the slash
-  command /zensu:docs.
+  [Zensu] Write code-grounded documentation for tracked Zensu features so they
+  clear the docs_complete release gate. Use when the user wants to document a
+  feature, "write the docs", or /zensu:docs.
 ---
 
 # /zensu:docs
