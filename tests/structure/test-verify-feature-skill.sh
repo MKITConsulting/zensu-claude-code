@@ -737,7 +737,7 @@ if grep -qF 'An origin the pages navigate — the application origin, or the ori
   && grep -qF 'For every network-only origin run the preflight with the operand `network-only` instead of `declared-safe`, never both, because the `declared-safe` form refuses a network-only origin as a navigation target:' <<<"$SKILL_FLAT" \
   && grep -qF '`go-back`, `go-forward`, `reload` and `tab-select` name no URL, so the gate cannot judge where they land; the `Page URL` rule below covers them.' <<<"$SKILL_FLAT" \
   && grep -qF 'read `tab-list` before every `tab-select`, never select a tab whose URL is outside the run config or on a network-only origin, and close that tab with `tab-close`.' <<<"$SKILL_FLAT" \
-  && grep -qF 'it is evidence of the target page, and its own origin is still never opened.' <<<"$SKILL_FLAT" \
+  && grep -qF 'read it as that target page'"'"'s content, which is evidence of the target page, and never open the frame'"'"'s origin with a navigation command. Only a page the browser lands on at a network-only origin is never evidence.' <<<"$SKILL_FLAT" \
   && grep -qF 'never `open`, `goto` or `tab-new` it all the same, and treat a `Page URL` on it like one on a network-only origin.' <<<"$SKILL_FLAT" \
   && grep -qF '`declared-safe` for each origin the run navigates, and `network-only` for each network-only origin.' <<<"$BROWSER_FLAT" \
   && grep -qF 'read `tab-list` before every `tab-select`, and never select a tab whose URL is outside the run config or on a network-only origin — close it with `tab-close` instead.' <<<"$BROWSER_FLAT" \

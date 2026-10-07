@@ -523,7 +523,8 @@ run-config helper uses too, so there is one floor, not two.
 
 **With a parent policy present the gate asks nothing.** It navigates only the policy's target
 origins, every route on them, admits the policy's network-only origins (below) in the run config
-at `open` without navigating them, and accepts a remote hostname only when the run config pins it; a
+at `open` while it denies every navigation command that names one, and accepts a remote hostname
+only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
 formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
 contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
@@ -619,10 +620,11 @@ through Bash.
   and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` name none, so where they land
   is never judged. The browser also follows a server redirect to another origin, a network-only
   one included, and a page-initiated navigation onto a network-only origin, and a click can open a
-  popup tab on such an origin. A frame a target page embeds from a network-only origin renders
-  inside that page, so its content reaches that page's snapshot and screenshot. The skill's
-  `Page URL` check, its `tab-list` before every `tab-select` and its rule to close such a tab with
-  `tab-close` are prose, not a boundary.
+  popup tab on such an origin. The skill's `Page URL` check, its `tab-list` before every
+  `tab-select` and its rule to close such a tab with `tab-close` answer these, and they are prose,
+  not a boundary. A frame a target page embeds from a network-only origin renders inside that
+  page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
+  that page's content, like data the page fetched.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,

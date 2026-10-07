@@ -271,8 +271,8 @@ user approves an origin, every further route on it proceeds without a prompt. An
 prompt is the user's action; never answer it on their behalf, never work around a refusal, and
 treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
 origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
-refuses every HTTP(S) request to an origin outside the run config; a WebSocket connection is not
-fenced by the run config, which is an open gap. A remote target is refused in consent
+refuses every HTTP(S) request to an origin outside the run config except a server redirect it
+follows (below); a WebSocket connection is not fenced by the run config, which is an open gap. A remote target is refused in consent
 mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
 remembers each approved ORIGIN for this session in
 `.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
@@ -295,7 +295,9 @@ observation. A click can also open a new tab on such an origin: read `tab-list` 
 `tab-select`, never select a tab whose URL is outside the run config or on a network-only origin,
 and close that tab with `tab-close`. A frame that a target page embeds from a network-only origin
 renders inside that page and appears in its snapshot and screenshot like data the page fetched:
-it is evidence of the target page, and its own origin is still never opened.
+read it as that target page's content, which is evidence of the target page, and never open the
+frame's origin with a navigation command. Only a page the browser lands on at a network-only
+origin is never evidence.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 

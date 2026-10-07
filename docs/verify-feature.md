@@ -70,9 +70,9 @@ run was started with `--no-validate`, and the chain's terminus line says which.
 Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
 `zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
-to the run's origins (`network.allowedOrigins`) — a WebSocket connection is not fenced by it,
-which is an open gap — blocks service workers, and keeps screenshots and
-snapshots inside the run directory. For a remote host it also pins the hostname to the public
+to the run's origins (`network.allowedOrigins`) except a server redirect the browser follows — a
+WebSocket connection is not fenced by it, which is an open gap — blocks service workers, and
+keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
 The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
@@ -135,7 +135,8 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 - The floor holds whatever you answer: loopback origins only (`127.0.0.1`, `[::1]` or the exact
   name `localhost`; never `app.localhost` or another hostname), no credentials, no query or
   fragment in a navigation, and the browser sends no HTTP(S) request to an origin outside the run
-  config. A WebSocket connection is not fenced by the run config, which is an open gap.
+  config, except by following a server redirect (below). A WebSocket connection is not fenced by
+  the run config, which is an open gap.
 - A remote target is refused in consent mode, by the run-config helper and by the gate, because
   the browser's DNS pins are written before it starts. Remote verification needs the policy of
   section 4.
@@ -194,7 +195,7 @@ value.
 | `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
 | `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only, so a wildcard such as `https://*.example.com` is refused |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
-| `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one with a public address, resolved and pinned like a target's |
+| `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one with a public address, resolved and pinned like a remote target's |
 | `routes` | not part of the contract; a list a policy written for the earlier contract still carries is checked for its shape — 1 to 64 page paths, each starting with `/`, carrying no `?`, `#`, or `*`, already normalized and unique — and then ignored, so it narrows nothing |
 
 No other key is accepted at either level. A target approves its origin, and with it every page
@@ -305,7 +306,8 @@ that worktree on an origin the policy already names.
   rejected — `app.localhost`, `localhost.` and `/etc/hosts` aliases included — because the gate
   refuses to trust DNS for a boundary decision.
 - **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
-  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, so a frontend on
+  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, a followed server
+  redirect aside, so a frontend on
   `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
   run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
   the skill passes it as an ordinary origin, and one prompt covers both; under a policy that

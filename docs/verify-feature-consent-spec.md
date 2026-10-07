@@ -480,16 +480,18 @@ them as targets, which made an API origin navigable and evidence-eligible.
   pointed at local services. The same data flow already existed for a same-origin API and for
   `auth.baseUrl`.
 - **What stays denied.** `open`, `goto` and `tab-new` aimed at a network-only origin, the
-  navigation commands that name a URL; every origin
-  in neither list; every HTTP(S) request to an origin outside the run config; `eval`, `run-code`,
-  request-detail and storage commands; any network-only origin in consent mode.
+  navigation commands that name a URL; every origin in neither list; every HTTP(S) request to an
+  origin outside the run config other than a server redirect the browser follows; `eval`,
+  `run-code`, request-detail and storage commands; any network-only origin in consent mode.
 - **Residuals, named.** The browser has one class of allowed origin, so a page can navigate itself
   onto a network-only origin — measured: a link click to a second allowed origin was followed,
   and the `click` output printed that page's URL and title before the skill could stop. A server
   redirect onto a network-only origin is followed the same way. `go-back`, `go-forward`, `reload`
   and `tab-select` name no URL, so the gate never judges where they land. A click can open a popup
-  tab on a network-only origin, and a frame a navigable page embeds from one renders inside that
-  page, so its content reaches that page's snapshot and screenshot. The skill's `Page URL` check
-  and its `tab-list` and `tab-close` rules answer these in prose only. WebSockets
+  tab on a network-only origin. The skill's `Page URL` check and its `tab-list` and `tab-close`
+  rules answer these in prose only. A frame a navigable page embeds from a network-only origin
+  renders inside that page, so its content reaches that page's snapshot and screenshot; the skill
+  reads it as that page's content, the same exposure as the data the page fetches, and only a page
+  the browser lands on at a network-only origin is never evidence. WebSockets
   are outside the fence for every origin (D12). The run config is still read twice, by the gate at
   `open` and by the CLI at launch.

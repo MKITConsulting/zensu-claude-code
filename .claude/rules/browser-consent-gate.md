@@ -232,7 +232,8 @@ names an OBSERVATION — `asked`, `remembered`, `policy-mode` — never a human 
 carries no evidence of how the prompt was answered, and the host fires no PostToolUse event for a
 failed Bash call, so a failed navigation is never recorded and asks again. **Policy mode** asks
 nothing: it navigates policy target origins only, every route on them, admits the policy's
-network-only origins in the run config at `open` without ever navigating them, and accepts a
+network-only origins in the run config at `open` while it denies every navigation command that
+names one, and accepts a
 remote hostname only with its pin; an invalid policy denies every gated navigation with the
 broken rule named.
 
@@ -295,9 +296,11 @@ option of `judgeOrigin`, the network-only skip in `judgeCall` and the three reas
 and `FINAL_REASONS`; the network-only arm of `checkOrigin`, `CHECK_ROLES`, `USAGE`,
 `CHECK_USAGE` and the `network-only-origin=` output line in the helper;
 `CHECK_POLICY_OPERANDS`, the `--network-only-origin` count in `isRunConfigInvocation`,
-`networkOnlyPreflightEnds` and `networkOnlyConfigs`, which read the preflight and helper calls
-in the spelling the skill documents, and `remoteNetworkOnlyTools`, which takes its coverage from
-the flagged session only, in `evals/verify-feature/assertions/transcript-check.js`; the
+`networkOnlyPreflightEnds` and `passesNetworkOnly`, which read the preflight and helper calls in
+the spelling the skill documents, `configuringHelper`, which names the helper call that last
+wrote the config an `open` uses, and `remoteNetworkOnlyTools`, which takes its coverage only from
+a session whose config that flagged call wrote, in
+`evals/verify-feature/assertions/transcript-check.js`; the
 `validate.networkOnly` schema in `skills/autopilot/rules/config.md`; and the policy row of the
 doctor report.
 
@@ -484,9 +487,11 @@ retirement's, rides the same mechanism with no check of its own.
   `goto` and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` carry none, so where
   they land is never judged. The browser follows a server redirect to another origin, a
   network-only one included, and a page-initiated navigation onto a network-only origin; a click
-  can open a popup tab there; and a frame a navigable page embeds from a network-only origin
-  renders inside that page, so its content reaches that page's snapshot and screenshot. The
-  `Page URL` check and the `tab-list`/`tab-close` rule in `skills/verify-feature/**` are prose.
+  can open a popup tab there. The `Page URL` check and the `tab-list`/`tab-close` rule in
+  `skills/verify-feature/**` answer these, and they are prose. A frame a navigable page embeds from
+  a network-only origin renders inside that page, so its content reaches that page's snapshot and
+  screenshot; the skill reads it as that page's content, like fetched data, which is why
+  `NETWORK_ONLY_NAVIGATION` denies evidence only to a page the browser lands on there.
 - **`localhost` rests on a browser property no suite exercises.** The source reading is of Chromium
   `main` and the measurement of one Chrome build; no suite drives a real browser, so a Chromium that
   stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
