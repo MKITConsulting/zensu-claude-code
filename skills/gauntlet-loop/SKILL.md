@@ -26,15 +26,14 @@ isolation wrong silently destroys the method.
 This skill is an execution loop, not a Zensu lifecycle stage. It arms no chain and
 closes none.
 
-- **A subagent gets only the gate's allowlist: no shell, no command-executing MCP
-  tool. The lead runs every gate.**
+- **A subagent gets only the gate's allowlist, so no shell. The lead runs every gate.**
   `hooks/hooks.json` registers `pre-reviewer-capability-gate.sh` on the PreToolUse
-  matcher `.*`, and for a neutral `host-profile-v1` child it admits only the host
-  tools in `HOST_PROFILE_TOOLS` plus a short list of read-only MCP tools
+  matcher `.*`, and for a neutral `host-profile-v1` child it admits only
+  `HOST_PROFILE_TOOLS` plus a few read-only MCP tools
   (`hooks/lib/reviewer-capability-v1.js`). Every command-execution tool is outside
   that list: the six shell names `Bash`, `shell`, `exec`, `exec_command`,
-  `terminal`, `command`, the host's `Monitor`, which runs a shell command too, and
-  every command-executing MCP tool, such as `ctx_execute` or `run_in_terminal`.
+  `terminal`, `command`, the host's `Monitor`, and every command-executing MCP tool
+  such as `ctx_execute`.
   `Explore` and `general-purpose` both
   classify as `host-profile-v1`, so **no builder and no critic in this loop can run
   anything through a shell** — no build, no test suite, no shell-launched server, no
@@ -48,17 +47,15 @@ closes none.
   Be precise about the bound, because an overclaim here is worse than none — it is
   what makes you stop checking. It is an ALLOWLIST, not a denylist, so a tool a later
   host adds stays denied until the list names it. Every other MCP tool is denied too,
-  the browser and preview tools (`preview_start`, `read_page`, `read_console_messages`,
-  `preview_logs`, `read_network_requests`, screenshots) included, so a critic cannot
-  inspect a live page itself either. Two admitted tools still matter here. `Agent` is
-  on the list, so a neutral child keeps its nested-spawn capability and
-  `tests/structure/test-reviewer-capability-gate.sh` pins that allowance. A
-  `general-purpose` builder can therefore start its own fan-out — outside this loop's
-  packet discipline and uncounted against the concurrency cap in step 6 — so the
-  packet has to forbid sub-spawning in words, the same way the read-only instruction
-  is what removes a critic's intent rather than its reach. `SendMessage` is on the
-  list as well, so builders can message each other directly; anything that changes
-  the plan still goes through the lead.
+  browser and preview tools included, so a critic cannot inspect a live page either.
+  Two admitted tools still matter. `Agent` is on the list, so a neutral child keeps
+  its nested-spawn capability and `tests/structure/test-reviewer-capability-gate.sh`
+  pins that allowance. A `general-purpose` builder can therefore start its own
+  fan-out — outside this loop's packet discipline and uncounted against the
+  concurrency cap in step 6 — so the packet has to forbid sub-spawning in words, the
+  same way the read-only instruction is what removes a critic's intent rather than
+  its reach. `SendMessage` is admitted too, so builders can message each other; plan
+  changes still go through the lead.
   Whether the harness grants any of these to a given child is a separate question
   this repo does not answer, so restraint there is the packet's job, not the gate's.
 
