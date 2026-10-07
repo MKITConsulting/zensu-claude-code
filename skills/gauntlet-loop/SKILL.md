@@ -1,16 +1,9 @@
 ---
 name: gauntlet-loop
 description: >
-  [Zensu] Run a long-form, evidence-driven improvement loop with builders,
-  two sequential critics, mandatory synthesis, and a third arbiter whenever
-  the critics materially disagree. Use when the user asks for a Gauntlet
-  Loop, adversarial or independent critics, autonomous refinement against a
-  benchmark, side-by-side comparison, "keep improving until it beats X", or
-  repeated improvement until an inspectable artifact wins, passes, stalls,
-  reaches a budget or authority limit, or the user stops the run. Apply to
-  code, websites, product design, games, media, writing, research, and other
-  complex artifacts that can be inspected; do not use for trivial one-shot
-  edits or advice-only questions.
+  [Zensu] Run an evidence-driven improvement loop with builders, two critics,
+  synthesis and an arbiter. Use when the user asks for a Gauntlet Loop or to
+  "keep improving until it beats X".
 ---
 
 # /zensu:gauntlet-loop

@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (159 = 152 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 152 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 159). The figures here have drifted NINE times, eight of them upward, and every
+reconciled to that manifest (162 = 155 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 155 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 162). The figures here have drifted TEN times, nine of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -24,12 +24,13 @@ next such merge was landing the 147th, then 154 = 147 + 7 while the merge of `ma
 the review-convergence branch was landing the 148th, then 155 = 148 + 7 while the merge of
 `main` into the restore-project-root branch was landing the 149th, and then 153 = 146 + 7 on the
 evidence-runner branch after it retired three witness suites and added two, leaving 145, and
-then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries. Each
+then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
+159 = 152 + 7 while it already held 154. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
 section-4 header-numeral paragraph below names — so every re-derivation since closes the
-clauses together with the headline. SIX of the nine drifts arrived the same way, through a
+clauses together with the headline. SIX of the ten drifts arrived the same way, through a
 merge of two branches that each re-derived its own count and neither of which could see the
 other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
 manifest from 143 to 144 in its own branch, so merging them is what made 145;
@@ -42,9 +43,11 @@ so merging `main` into it made 148; and `test-restore-project-root.sh` took its 
 the reverse case: a branch that removed suites without re-deriving, whose merge with `main` at
 149 lands on 148. The ninth came through three suites that reached `main` one squash-merge at a
 time — `test-stop-enforcer-reviewer-denial-note.sh`, `test-workflow-dispatch-inputs.sh` and
-`test-acceptance-gate.sh` — while the figure moved only with the first.
+`test-acceptance-gate.sh` — while the figure moved only with the first. The tenth came the same
+way: `test-full-suite-ci.sh` and `test-session-reanchor.sh` each joined its §3 group and neither
+moved the figure.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 149 against 152 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 152 against 155 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -84,8 +87,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **159** — 152 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **152 structure suites + 5 offline evals = 157 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 159 − 152 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **162** — 155 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **155 structure suites + 5 offline evals = 160 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 162 − 155 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -97,8 +100,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 159 structure suites + 5 offline evals | none |
-| `--ci` | 152 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 162 structure suites + 5 offline evals | none |
+| `--ci` | 155 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -252,11 +255,11 @@ and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
-### Skill contracts (20)
+### Skill contracts (21)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `gauntlet-loop-skill` · `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
 `pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
-`session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
+`session-trail-verdict` · `setup-skill` · `skill-overlays` · `skill-text-budget` · `templates` ·
 `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
@@ -268,6 +271,10 @@ transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decid
 taking a session over, which its structural sibling can only pin as vocabulary. It skips
 loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
 developer's real sessions.
+
+`skill-text-budget` is the one suite in this group that reads EVERY skill: it bounds each
+`SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
+listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
 ### Prompt routing & payloads (7)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·

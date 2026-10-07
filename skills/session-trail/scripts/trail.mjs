@@ -444,7 +444,7 @@ function containment(callerRoot, targetRoot) {
 // so whatever environment its parent handed it is what gets compared, and a stale
 // or hand-set value produces a confident answer about a root the gate never saw.
 // No privilege is gained either way; the line is only as trustworthy as that
-// environment, which is why SKILL.md keeps "the authoritative check is yours" as
+// environment, which is why `references/takeover.md` keeps "the authoritative check is yours" as
 // the operative instruction.
 //
 // The fail-safe direction is DENIED. When no channel resolves, `covered` is null
@@ -482,7 +482,7 @@ function writeAnchor(targetWt, opts) {
   // and the failure direction at the downgrade is the false `allowed` this feature
   // may never produce. Renaming a label was already pinned; ADDING one was not.
   // `flag:--anchor` is FIRST and TRUSTED. Neither environment variable normally
-  // reaches a subprocess a session spawns — SKILL.md states `unknown` as the
+  // reaches a subprocess a session spawns — the skill states `unknown` as the
   // expected reading — while the session driving this command does know its own
   // immutable root and can state it. A caller-supplied value is exactly as
   // authoritative as ZENSU_PROJECT_ROOT and no more: both are assertions this
@@ -626,7 +626,7 @@ function writeAnchor(targetWt, opts) {
 // whether the opt-in source-write gate would let this session write there at all.
 // Both roots are bounded like every other path in this renderer, through
 // `flatPath` — the newline that would fabricate a line directly under a verdict is
-// removed, and the spelling is left otherwise EXACT because SKILL.md flow 3 tells
+// removed, and the spelling is left otherwise EXACT because `references/takeover.md` tells
 // the reader to compare this root against the WORKTREE line above it.
 function writesLines(w) {
   // `allowed` carries its own caveat, because the header above enumerates two
@@ -659,7 +659,7 @@ function writesLines(w) {
   const why = flatPath(w.reason) || 'the anchor comparison did not produce a reason';
   // The deny head must not call a CLAUDE_PROJECT_DIR value "this session's anchor":
   // `writeAnchor` disclaims exactly that two dozen lines above, and this line is a
-  // disclosure surface SKILL.md points the reader at.
+  // disclosure surface the skill points the reader at.
   //
   // It must ALSO not assert that the immutable root lies inside that value. The
   // asymmetry argument — non-containment in the wider root implies non-containment
@@ -707,7 +707,7 @@ function writesLines(w) {
 // `\p{Cf}` is part of the class, not an extra pass: U+202A-U+202E and
 // U+2066-U+2069 reorder a rendered line, U+200B-U+200F and U+FEFF advance nothing
 // at all, and every one of them can make a path READ as a different path on the
-// line SKILL.md makes authoritative. They are neutralized to a space like every
+// line `references/takeover.md` makes authoritative. They are neutralized to a space like every
 // other member, so the tampering is visible rather than silently dropped.
 // `\p{Mn}`/`\p{Me}` are deliberately NOT here, and the split is the whole point
 // of this class: a combining mark is an ordinary character in a real filename
@@ -769,7 +769,7 @@ function flatPath(p) {
 // All FIVE runnable REACH-A-WORKTREE lines use `briefShellArg` — the two brief ones,
 // the two `printResume` prints, which flow 3 names as the remedy for a blocked commit,
 // and the one `continuationPlan` renders on its `already-contained` branch. State the
-// FAMILY or the count means nothing: the operator carrier `SKILL.md` scopes the same
+// FAMILY or the count means nothing: the operator carrier `references/gotchas.md` scopes the same
 // census to "the runnable `cd -- <cwd> && claude --resume <id>` lines", and this file
 // renders further runnable `briefShellArg` commands outside it — `continuationPlan`'s
 // four `git -C …` lines, which operate ON a worktree rather than entering one. They are
@@ -1610,7 +1610,7 @@ function liveRegistry() {
   for (const f of regFiles) {
     if (!f.endsWith('.json')) continue;
     let o;
-    // COUNTED, not swallowed. SKILL.md promises that every command prints a NOTE
+    // COUNTED, not swallowed. `references/commands.md` promises that every command prints a NOTE
     // naming how many records were skipped — so a corrupt registry file that
     // silently drops a LIVE session is exactly the state that promise exists to
     // make visible, and it is indistinguishable from an idle machine without it.
@@ -2193,7 +2193,7 @@ function extractPendingQueue(text, reliable, tailOffset = 0) {
 // the most recent enqueue even when that was the prompt removed, which can only
 // make a waiting prompt look NEWER than it is — the direction that costs one
 // question, never the one that hides a prompt — and means `last` may carry the
-// body of a prompt that already left while an older one still waits; SKILL.md
+// body of a prompt that already left while an older one still waits; the skill
 // states that bound where it describes the field. The name is used in ONE place, a
 // `tailSlice` scan: there a consumer naming a prompt the slice never enqueued is
 // treated as belonging to the unread gap and skipped, because counting it would
@@ -2249,8 +2249,8 @@ function scanQueue(text, tailSlice) {
   return q;
 }
 
-// Both thresholds are re-quoted as prose in SKILL.md's "Verified gotchas" and in
-// the PROBABLY_FREE / BUSY rows of its flow-3 verdict table. Changing a number
+// Both thresholds are re-quoted as prose in `references/gotchas.md` and in
+// the PROBABLY_FREE / BUSY rows of the verdict table in `references/takeover.md`. Changing a number
 // here without changing them there leaves the model reading one rule while this
 // resolves another; test-session-trail-skill.sh T24 pins the two literals, and
 // its T24c pins the unmeasured-queue lead-in the same way: the PROBABLY_FREE row
@@ -2815,7 +2815,7 @@ function cmdInstances(opts) {
     const out = [];
     for (const e of edges) {
       // The SHORT tier marker, not the legacy `inferred` boolean this used to read.
-      // SKILL.md says the tier is annotated in every rendering, and this is the view
+      // `references/commands.md` says the tier is annotated in every rendering, and this is the view
       // it names as the machine-wide answer — so a `provisional` edge rendered here
       // as a completed handover, which is the one claim the tier exists to prevent.
       if (e.from.sessionId === sessionId) out.push(`→ continued in ${sessionTag(e.to.sessionId)} (${endpointLabel(e.to)})${confidenceMark(e)}`);
@@ -2999,7 +2999,7 @@ function siblings(opts, row) {
 // `{ carrier: 'terminal' }`, where the same shape decides the same blocks and a blank line delivers
 // the split.
 //
-// COUPLED CARRIER: `skills/session-trail/SKILL.md` flow 3 step 4 restates this
+// COUPLED CARRIER: `skills/session-trail/references/takeover.md` step 4 restates this
 // recipe for the model, in a fenced block of its own. It is a hand-copy — the two
 // must move together, and `test-session-trail-skill.sh` extracts EVERY two-space command
 // literal from this constant through the end of `worktreeAdvice` and requires each one
@@ -3009,7 +3009,7 @@ function siblings(opts, row) {
 // quoting decision or a position a future editor would otherwise read as noise. The
 // COUNT is load-bearing: it read THREE for a round after `--binary` was added and FOUR
 // for a round after that, and the two reader-facing carriers of this sentence — here and
-// SKILL.md — must agree on it, so check the number first when they disagree.
+// `references/takeover.md` — must agree on it, so check the number first when they disagree.
 //
 //  * `--no-textconv --no-ext-diff -c core.fsmonitor=false`. "Run git against a directory
 //    you do not control" is not merely a read: a repository carries its own config, and
@@ -3039,7 +3039,7 @@ function siblings(opts, row) {
 //    SHAPE and never as a count of carriers: every operand of every runnable line in this
 //    block and in the route above it, not just the `-C` ones. The count form was here and
 //    went stale exactly as this file predicts such counts do, which is why its twin in
-//    SKILL.md was rewritten to the shape: it read "the two `git worktree add` lines" while a
+//    `references/takeover.md` was rewritten to the shape: it read "the two `git worktree add` lines" while a
 //    third runnable line, the `worktree move` alternative, carries a quoted `<path>` and
 //    `<their worktree>` of its own. The reader substitutes them by hand, and an
 //    ordinary `~/My Projects/repo` word-splits into a wrong operand without them; the same
@@ -3266,7 +3266,7 @@ const LIVE_SNAPSHOT_CAUTION = (pid) => [
 // deny no longer names it either: every rule reason ends with `OPT_IN_NOTE`, which names
 // `hooks.bashWriteGate` and leaves an intended command to the user. An earlier wording said
 // "take it from there rather than from here", which instructs the reader to TAKE it and
-// contradicts SKILL.md's own "do not go looking for the spelling in order to use it". That
+// contradicts `references/takeover.md`'s own "do not go looking for the spelling in order to use it". That
 // file also records that the host classifier commonly refuses the prefix, so the old wording
 // pointed at a remedy that usually cannot be taken. Rendering the prefix itself would ship the
 // hatch in a skill, which the repo convention forbids outright.
@@ -3410,7 +3410,7 @@ const RELEASE_AFTER = [
 // path — not an archive that has not run yet.
 const ADVICE_LEADS = {
   // States what was OBSERVED, and states it as a hazard rather than as clearance.
-  // SKILL.md section 6 measures the counter-example to the old reading: of 657
+  // One machine measured the counter-example to the old reading: of 657
   // archived worktree-sessions, the 159 survivors were overwhelmingly DIRTY, which
   // is exactly what `git worktree remove` refuses on.
   //
@@ -3484,7 +3484,7 @@ function adviceLeg(r) { return r.cwdExists ? 'present' : 'gone'; }
 // WHERE to continue another session's work. Distinct from the write-anchor
 // question `writeAnchor` answers: that one asks whether this session MAY write
 // there, this one asks whether the directory will still EXIST. Archiving removes
-// a worktree — SKILL.md section 6 measures 498 of 657 archived worktree-sessions
+// a worktree — one machine measured 498 of 657 archived worktree-sessions
 // losing theirs — and a session still working in it then loses its project root
 // mid-flight, which denies Edit/Write/MultiEdit outright.
 //
@@ -3553,7 +3553,7 @@ function worktreeAdvice(r, options = {}) {
   const withMove = options.move !== false;
   const archived = r.app ? r.app.archived === true : null;
   // `null` is not `false`. It means no record was readable for this session, and
-  // asserting "not archived" there is exactly what SKILL.md forbids.
+  // asserting "not archived" there is exactly what `references/limits.md` forbids.
   const unreadable = archived === null;
   const noStore = unreadable && r.ccdStore === false;
   const unreadableWhy = noStore
@@ -4205,7 +4205,7 @@ function whereAdviceLines(row, takerWorktree, options = {}) {
 // The DOCUMENTED `--json` contract, and nothing else. It has no runtime consumer:
 // the unknown branch's guard tests `ANCHOR_REASONS`, the producer's own set, because
 // a `writes.reasonCode` can only ever have come from there. This union is what a
-// `--json` reader may see in `continuation.reasonCode`, which is what SKILL.md
+// `--json` reader may see in `continuation.reasonCode`, which is what `references/takeover.md`
 // enumerates and what WC12 grades this function's own emissions against.
 const CONTINUATION_REASONS = new Set([
   // decided here
@@ -4242,7 +4242,7 @@ function continuationPlan(r, w, branch) {
   //
   // The implication runs ONE way: a null `src` means no verdict, never the converse.
   // `writeAnchor`'s two early returns spell `targetRoot: targetWt || null` — the RAW
-  // argument, not the validated absolute local — so on `no-channel`, which SKILL.md
+  // argument, not the validated absolute local — so on `no-channel`, which the skill
   // calls the ordinary case in a subprocess, `src` is a perfectly good absolute path
   // beside a `covered: null`. What is load-bearing is the other half: every branch
   // that builds a TARGET is one where `covered === false`, and that requires it.
@@ -4346,7 +4346,7 @@ function continuationPlan(r, w, branch) {
   // ABOVE the branch guard, because it is the CAUSE of the symptom that guard reports.
   // Measured during self-review: a source worktree that exists but is not a repository
   // makes `gitState` answer null, so `branch` is falsy and `branch-unresolved` fired
-  // first — leaving this branch UNREACHABLE while SKILL.md told a `--json` consumer to
+  // first — leaving this branch UNREACHABLE while the skill told a `--json` consumer to
   // expect the code. A documented code that can never be emitted is a false promise, and
   // the more specific diagnosis is the better one anyway: "that worktree is not in a
   // repository" beats "no branch name could be read from it".
@@ -4394,7 +4394,7 @@ function continuationPlan(r, w, branch) {
     : ['', ''];
   // THREE causes, three codes. Collapsing them read as one condition and was one code,
   // but the remedies differ — "point --anchor at a repository" is not "these are two
-  // repositories" — and a `--json` consumer branching on `reasonCode`, which SKILL.md
+  // repositories" — and a `--json` consumer branching on `reasonCode`, which `references/takeover.md`
   // tells it to do, could not tell them apart. `writeAnchor` splits `target-absent` from
   // `target-not-absolute` for the same reason one function up.
   if (!anchorRepoRoot) {
@@ -4455,7 +4455,7 @@ function continuationPlan(r, w, branch) {
   // target root then places correctly), while `ls-files --others` lists paths relative
   // to that subdirectory AND omits everything above it — so the tar half would have
   // relocated the untracked files to the target root and silently dropped the rest.
-  // SKILL.md warns in its own words that the recorded path "may be a SUBDIRECTORY the
+  // The skill warns in its own words that the recorded path "may be a SUBDIRECTORY the
   // session started in rather than a worktree root", so this is the ordinary case, not
   // an edge one.
   //
@@ -4654,7 +4654,7 @@ function cmdShow(opts) {
   // free-form. `flatPath` never lengthens a string, so no clip behaviour changes —
   // and without it a prompt beginning with a cursor-up sequence rewrites the very
   // line this feature exists to make trustworthy. The free-text carriers in the
-  // BRIEFS remain a stated gap in SKILL.md; this is the terminal renderer, where
+  // BRIEFS remain a stated gap in `references/disclosure.md`; this is the terminal renderer, where
   // there is nothing to trade away.
   for (const p of shown) print(`[${oneLine(flatPath(p.at), 40).slice(0, 16)}] ${oneLine(flatPath(p.text), 300)}`);
   const wd = r.withdrawnPrompts || [];
@@ -4692,7 +4692,7 @@ function printResume(r) {
   // Points at the taker's OWN path, not at re-creating the recorded one. This line is
   // rendered a few rows below the WHERE block, which on the same leg has already said
   // "Take your own path — never re-create theirs": the two contradicted each other in one
-  // screen of output, and SKILL.md flow 3 step 4 claims to be the only place that decides
+  // screen of output, and `references/takeover.md` step 4 claims to be the only place that decides
   // where to continue.
   if (adviceLeg(r) === 'gone') print("  # worktree missing — take your own: git worktree add '<path>' '<session-branch>'");
 }
@@ -4780,7 +4780,7 @@ function cmdTakeover(opts) {
   // renderers on a carrier `resolveCarrier` refuses — and the ledger edge below is DURABLE and
   // machine-wide. Rendering after it left a written edge with an empty output buffer for
   // `main()` to flush, so the edge landed and nothing announced it, which is exactly the
-  // contract SKILL.md states for this verb. Announcing after the write does not fix that: this
+  // contract the skill states for this verb. Announcing after the write does not fix that: this
   // verb has TWO carriers and the `--json` one returns before any announcement could be
   // reached. Rendering first covers both, and covers `cmdAdopt`'s two carriers by the same
   // move. The arrays are built here and PUSHED below, because `L` does not exist yet.
@@ -4907,7 +4907,7 @@ function cmdTakeover(opts) {
   // fenced here exactly as they do in the handoff brief, or the same array is
   // runnable in one brief and prose in the other.
   // The rule BEFORE the recipe, on the carrier that is PERSISTED: this file is opened by a
-  // different session, which need not have this skill loaded, so SKILL.md's copy of the
+  // different session, which need not have this skill loaded, so `references/takeover.md`'s copy of the
   // quoting doctrine does not reach its reader. The brief maps nothing — every placeholder in
   // it is the reader's to supply — and it said so nowhere at all.
   for (const line of wtRule) L.push(line);
@@ -4956,7 +4956,7 @@ function cmdTakeover(opts) {
   else if (isUnmeasuredProbablyFree(tv)) L.push(`4. ${tv.measuredReason} Its queue was not measured, so state that to the user in one line and ${goNoGo}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
   else if (tv.measuredLevel === 'PROBABLY_FREE') L.push(`4. ${tv.measuredReason} Taking over is fine; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
   print(`TAKEOVER_TARGET: ${target}`);
-  // ABOVE the fence, with the other provenance lines. SKILL.md instructs the model
+  // ABOVE the fence, with the other provenance lines. The skill instructs the model
   // to treat anything after `--- END ---` as untrusted text that happened to be in
   // the stream, so a write announcement emitted there is one the reader is told to
   // disbelieve — and this tool announcing its own write is the one line that must
@@ -5392,7 +5392,7 @@ function cmdAdopt(opts) {
       // A machine carrier is not a rendered line, so the value travels raw here on purpose; a
       // consumer that renders it to a human owes it a bound. It is NOT the only raw carrier
       // either — `cmdShow --json` spreads the whole row and ships `wt` the same way, and
-      // SKILL.md documents `list --json` as emitting the whole row object — so bounding this one
+      // `references/disclosure.md` documents `list --json` as emitting the whole row object — so bounding this one
       // payload would be a partial answer to a tree-wide question. Recorded rather than half-fixed.
       print(`NOT RECORDED  ${sessionTag(row.sessionId)} → ${sessionTag(me.sessionId)} — ${flatPath(why)}`);
       print('');
@@ -5405,7 +5405,7 @@ function cmdAdopt(opts) {
   // their briefs and `show` prints its decision half, while this verb — the documented
   // fallback for a handover taken some other way — printed only its receipt. Measured on
   // a real ledger edge carrying `recordedBy: "adopt"`: the taking session continued in a
-  // worktree of its own, which SKILL.md flow 3 step 4 allows, and left the source tree's
+  // worktree of its own, which `references/takeover.md` step 4 allows, and left the source tree's
   // uncommitted changes behind, which nothing on this route had told it about.
   //
   // The FULL advice on BOTH axes, unlike `cmdShow`, which passes `carryOver: false` AND
@@ -5913,7 +5913,7 @@ function lineageBackfill(opts) {
   const candidates = [];
   for (const s of stalled) {
     // Ordered by the transcript file's write time, deliberately not by turn activity
-    // (one of the two clocks SKILL.md's turn-activity gotcha keeps apart on purpose),
+    // (one of the two clocks `references/gotchas.md`'s turn-activity gotcha keeps apart on purpose),
     // and the start guard applies ONLY where a start is
     // actually observable. `r.live` is null for every finished session — the whole
     // population this verb reconstructs — so the previous `startedAt(r) >= s.mtime`
@@ -6467,7 +6467,7 @@ const COMMANDS = {
 // `--live`, `--no-git`, `--config-dir`, `--days`, `--prompts` and `--repo` were
 // accepted by every verb and quietly ignored by the ones that never read them:
 // `lineage --days 3` answered machine-wide while the user believed they had asked for
-// a three-day window. SKILL.md states the refusal is general with two exceptions, so
+// a three-day window. The skill states the refusal is general with two exceptions, so
 // the gap was a promise the code did not keep.
 //
 // `--config-dir` is consumed by `resolveRoots` before dispatch and `--json` selects the

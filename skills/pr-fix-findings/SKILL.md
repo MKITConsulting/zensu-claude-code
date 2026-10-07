@@ -1,19 +1,9 @@
 ---
 name: pr-fix-findings
 description: >
-  [Zensu] Fix every open review comment / finding on a GitHub or GitLab pull/merge request end-to-end:
-  locate the PR for the current branch (or a given URL/number), pull the unresolved
-  review threads, triage them into independent vs dependent work, use neutral
-  workers only for parallel read-only analysis, implement every fix in the
-  interactive main thread through the Zensu workflow (`/zensu:tdd` + review chain, in the
-  session's TDD mode — vanilla by default, run `/zensu:tdd-mode --strict` first for RED→GREEN),
-  push, resolve the corresponding threads on the PR, and report a summary back. A standalone run
-  carries the whole procedure through in one pass — pushing and resolving the threads
-  is one unit, never a checkpoint to hand back. Use whenever the
-  user wants to address, fix, or resolve PR review feedback / review comments /
-  reviewer findings, "work through the review", "fix the review notes", "resolve
-  the review threads", or the slash command /zensu:pr-fix-findings. Built to run
-  standalone or repeatedly under /loop until no unresolved threads remain.
+  [Zensu] Fix every unresolved review thread on a GitHub or GitLab pull request,
+  push, and resolve the threads. Use when the user wants PR review comments
+  addressed, or via /zensu:pr-fix-findings.
 ---
 
 # /zensu:pr-fix-findings

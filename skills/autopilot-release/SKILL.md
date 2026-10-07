@@ -1,18 +1,9 @@
 ---
 name: autopilot-release
 description: >
-  [Zensu] Free a git working tree that a durable Autopilot run is still holding after its
-  owner session is gone. A run is terminal only at DONE or CANCELLED, and every ordinary
-  event — cancellation included — requires the owning session, so a run abandoned in
-  BLOCKED or mid-stage keeps refusing every new Autopilot run in that working tree with no
-  way for the current session to end it. This skill reports the holding run and, only after
-  the user confirms, cancels it with one audited event that bypasses the ownership check and
-  nothing else. It never resumes a run, never advances a stage, and never releases a run
-  this session owns — that one is cancelled the ordinary way. It is scoped by run id within
-  the project rather than by working tree, so the id comes from a refusal, from the `autopilot:`
-  row of /zensu:doctor, or from the --autopilot-status stderr disclosure. Use when `--autopilot-begin` refuses because the workspace is held, when a
-  session that was running Autopilot is gone for good, or via /zensu:autopilot-release. No
-  network or API key. Do not use to escape a review or to restart a run that is still live.
+  [Zensu] Cancel a durable Autopilot run whose owning session is gone, to free
+  its working tree. Use when a held workspace blocks Autopilot and the run is
+  not worth keeping, or via /zensu:autopilot-release.
 ---
 
 # /zensu:autopilot-release

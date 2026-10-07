@@ -161,13 +161,12 @@ false.
 not one — the lease store AND the workflow document; routing the second to
 `/zensu:doctor` is wrong, that command is read-only and cannot rebuild), its "FIVE
 things are NOT clean states" list, its exit-code paragraph (EITHER half failing exits 1)
-and its Response Style rule; its FRONTMATTER description, which covered only the lineage
-break while the capability gate now routes a served-record session here as well; the FOUR
+and its Response Style rule; the FOUR
 state rows in `skills/doctor/SKILL.md` — not two, and the pair that was missing is the one
 that matters, because the UNSAFE/UNREADABLE row says `--confirm` will REFUSE while the
 documented MISSING row says to run it, so a model holding only the MISSING bullet relays a
-rebuild the repair declines by design — plus that file's frontmatter `session state`
-clause, which reads as a complete inventory of the block and did not name this row; the
+rebuild the repair declines by design — plus that file's `Session state`
+bullet of §"What it checks", which reads as a complete inventory of the block and did not name this row; the
 `stop-chain-enforcer.sh` row in `docs/configuration.md`, whose blocking-state list
 presents itself as complete and does not name a missing workflow baseline (a state whose
 record binds perfectly well);

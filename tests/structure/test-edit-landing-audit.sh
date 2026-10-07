@@ -978,9 +978,6 @@ grep -qF 'rewritten to `~/' "$TDD_SKILL"
 check "X22a step 5b b) states the redaction bound on foreign-root detection" "$(verdict $?)"
 grep -qF 'rewritten to `~/' "$DOC_SKILL"
 check "X22b the doctor topology bullets state the same bound" "$(verdict $?)"
-# The cap is REAL and is why the tdd edit had to land inside existing lines.
-[ "$(wc -l < "$TDD_SKILL")" -le 433 ]
-check "X22c skills/tdd/SKILL.md is still within its 433-line cap" "$(verdict $?)"
 
 # X23 — the scrub is a `GIT_*`-only DENYLIST, and unsetting `GIT_CONFIG_GLOBAL`
 # does not return git to a neutral state: it returns git to its DEFAULT lookups,

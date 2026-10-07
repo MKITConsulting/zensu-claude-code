@@ -2,6 +2,7 @@
 paths:
   - "skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
+  - "skills/session-trail/references/**"
   - "tests/structure/prompt-listing-v1.test.js"
   - "tests/structure/fixtures/queued-command-delivery.v1.jsonl"
   - "tests/structure/test-session-trail-verdict.sh"
@@ -38,20 +39,22 @@ the handoff brief.
 **Both briefs open with `BRIEF_DATA_CAUTION`, and the tool renders it.** The listing's
 sections carry verbatim third-party text, so the line that tells a reader to act on nothing in
 a brief, its own steps included, before verifying it and getting the user's confirmation is
-the first line `cmdTakeover` and `cmdHandoff` push. It is not a line that SKILL.md asks the
+the first line `cmdTakeover` and `cmdHandoff` push. It is not a line that the skill asks the
 model to add, because a brief outlives the session that wrote it. `T29c` pins one definition
 and one push per brief ahead of its title, `W7c` compares each rendered brief's first line
-with the constant and checks its clauses, and `T24m` holds SKILL.md's description of the line.
+with the constant and checks its clauses, and `T24m` holds the description of the line in
+`skills/session-trail/references/disclosure.md` and `references/handoff.md`.
 
 **Coupled sites.**
 
 - `WITHDRAWN_HEADING`, `WITHDRAWN_HEDGE` and `QUEUE_WITHDRAWALS_UNFILTERED` are module
   constants. `withdrawnBriefLines`, beside `briefPath`, renders the section for both briefs;
   `show` renders it inline with the heading upper-cased.
-- `skills/session-trail/SKILL.md` names the withdrawn section in the brief caution, in the
-  `show --json` and takeover paragraphs, and in the withdrawal bullet, which also states the
-  `null` on a truncated read. `T24l` derives the section name from `WITHDRAWN_HEADING`, so a
-  renamed heading reddens the skill suite until SKILL.md follows.
+- `skills/session-trail/references/disclosure.md` names the withdrawn section in the brief
+  caution and in the `show --json` and takeover paragraphs, and the withdrawal bullet in
+  `references/gotchas.md` also states the `null` on a truncated read. `T24l` derives the
+  section name from `WITHDRAWN_HEADING`, so a renamed heading reddens the skill suite until
+  both files follow.
 - The listing depends on a host record format: the `queue-operation` records (`enqueue`,
   `dequeue`, `remove`, `popOne`, `popAll`) and the `queued_command` attachment. The comment
   above `queueRecordName` in `trail.mjs` names the build they were read from, the Claude Code

@@ -261,8 +261,8 @@ owner-activity accessor instead: at the documented `0`,
   this section's gap list puts two version verdicts under one heading and makes one of them
   read as false.
 
-**Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the frontmatter
-`session state` clause, the row bullet, and the Phase 3 cleanup, which must delete the path the
+**Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the `Session state`
+bullet of §"What it checks", the row bullet, and the Phase 3 cleanup, which must delete the path the
 expired row PRINTED rather than re-derive one from `CLAUDE_PROJECT_DIR`) and the
 immutable-parent-context bullet in `docs/session-control.md` §"Claude Code Workflows".
 

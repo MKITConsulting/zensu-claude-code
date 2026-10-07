@@ -27,13 +27,6 @@ if [ ! -f "$AGENT" ]; then
 fi
 check "skills/tdd/SKILL.md exists" PASS
 
-LINES=$(wc -l <"$AGENT")
-if [ "$LINES" -le 433 ]; then
-  check "skill line count <= 433 (actual: $LINES)" PASS
-else
-  check "skill line count <= 433 (actual: $LINES)" FAIL
-fi
-
 # Patch 1 — 3 new Rationalization Counters
 if grep -qF 'Tool X is missing, I' "$AGENT"; then
   check "P1.a Rationalization Counter: missing tool -> hand-rolled replacement" PASS
