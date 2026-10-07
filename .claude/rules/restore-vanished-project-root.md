@@ -163,7 +163,12 @@ restore, and nothing points at it from the side that changes. `R13` in
 `tests/SUITE-OVERVIEW.md` and compares every declared registration count against the file that
 registers it, so adding or removing a `test()` in ANY driven `tests/structure/*.test.js`, or
 reformatting that table, reddens this suite; when it was first derived rather than
-hand-enumerated it found SEVEN stale counts at once. And the `R12` family grades COMMENT PROSE
+hand-enumerated it found SEVEN stale counts at once. The comparison and the row reader live in
+`tests/structure/lib-unit-summary.sh` (`unit_overview_check`, `unit_overview_declared`), and
+every driver that sources it and drives a file with a row reads its floor from that row and
+calls the check beside it, so the same edit also reddens the file's own driver, and a
+reformatted table reddens every one of those drivers, not only this suite. And the `R12`
+family grades COMMENT PROSE
 inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
 comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
 comment in the core reddens it too. `R13b` widens that direction again: it measures

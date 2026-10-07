@@ -30,6 +30,7 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 
 . "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 UNIT="$PLUGIN_DIR/tests/structure/git-repo-escape.test.js"
+UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
 if [ ! -f "$UNIT" ]; then
   check "W3a rule-C unit suite is missing from the checkout ($UNIT) — stage it with the change" FAIL
 elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
@@ -47,11 +48,11 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   # name whichever half failed. The *_text helper spools to a temp file rather than
   # reading /dev/stdin: this suite runs on the Windows shards, where Git Bash's
   # /dev/stdin is not something to bet a count on.
-  unit_cases_registered_floor_text "$UNIT_OUT" 45 || true
+  unit_cases_registered_floor_text "$UNIT_OUT" "$UNIT_FLOOR" || true
   UNIT_PASS="$UNIT_CASES_PASS"
   UNIT_TOTAL="$UNIT_CASES_TESTS"
   # Exit 0 alone would also accept a file that registers zero cases.
-  # Raise this with the file. The win32 cases are the ONLY witnesses of the MSYS
+  # The win32 cases are the ONLY witnesses of the MSYS
   # namespace fix — no POSIX host executes that branch end-to-end — so a stale
   # floor would let every one of them be deleted with this suite green.
   # A count floor only catches deletion-without-replacement; the win32 block could
@@ -61,13 +62,18 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
     grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
   done
-  if [ -n "$UNIT_PASS" ] && [ "$UNIT_TOTAL" -ge 45 ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
+  if [ -n "$UNIT_PASS" ] && [ -n "$UNIT_FLOOR" ] && [ "$UNIT_TOTAL" -ge "$UNIT_FLOOR" ] && [ "$UNIT_PASS" -ge "$UNIT_FLOOR" ] && [ "$UNIT_SYMS" -eq 1 ]; then
     check "W3a rule-C option lattice unit suite passes ($UNIT_PASS of $UNIT_TOTAL cases, win32 witnesses present)" PASS
   else
-    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing of '${UNIT_TOTAL}' registered (want total >= 45, pass >= 45) win32_symbols=$UNIT_SYMS" FAIL
+    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing of '${UNIT_TOTAL}' registered (want total >= ${UNIT_FLOOR:-<no overview row>}, pass >= ${UNIT_FLOOR:-<no overview row>}) win32_symbols=$UNIT_SYMS" FAIL
   fi
 else
   check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL
+fi
+if W3A_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "W3a-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
+else
+  check "W3a-overview $W3A_OVERVIEW" FAIL
 fi
 
 # `within` is a hand-copy of reviewer-capability-v1.js's isInside. Nothing but this
