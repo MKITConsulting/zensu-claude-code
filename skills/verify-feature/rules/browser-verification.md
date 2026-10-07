@@ -80,7 +80,14 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    `go-forward`, `reload` and `tab-select` name no URL for the gate to judge, so this check is
    the only one they get. A click can open a new tab: read `tab-list` before every `tab-select`,
    and never select a tab whose URL is outside the run config or on a network-only origin —
-   close it with `tab-close` instead.
+   close it with `tab-close` instead. A frame that a target page embeds from a network-only
+   origin renders inside that page and appears in its snapshot and screenshot like data the page
+   fetched: read it as that target page's content, which is evidence of the target page, and
+   never open the frame's origin with a navigation command. Only a page the browser lands on at a
+   network-only origin is never evidence. In consent mode a loopback network-only origin passed
+   with `--origin` is a consented origin to the gate, which would admit a navigation to it and
+   remembers it for the session: never `open`, `goto` or `tab-new` it all the same, and treat a
+   `Page URL` on it like one on a network-only origin.
 3. Take a `snapshot` before interacting. Confirm the URL, title/heading, authentication state,
    and that the page is not a generic error or login wall.
 4. Apply the pre-model evidence boundary below, then run `console` and `requests` to establish

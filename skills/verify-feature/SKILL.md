@@ -181,16 +181,14 @@ association; otherwise stop with PARTIAL before auth. Never print or report a re
 authentication or application URL.
 
 Network-only origins — a REST API, an OIDC discovery document or a token endpoint the pages
-request on another origin but that is never a page to open — come only from the selected
+request but never open — come only from the selected
 checked-in recipe's `validate.networkOnly.origins`, never from the conversation, a page or a
 network log. Validate each one with the rules above for its mode: an absolute origin with no
-userinfo, path, query or fragment; in remote mode non-loopback HTTPS; in local mode a loopback
-origin, or a non-loopback HTTPS origin under the remote rules, which only a local policy admits.
-An origin the pages navigate — the application origin, or the origin that serves the login page —
-is never network-only, even when it also serves a token endpoint: it stays a target. In remote mode
+userinfo, path, query or fragment; non-loopback HTTPS in remote mode; in local mode loopback, or
+HTTPS under the remote rules when a local policy declares it. In remote mode
 `validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`, as
-`auth.appOrigin` must; in local mode a present `appOrigin` must equal the run's application
-origin. Otherwise stop with PARTIAL before `open`.
+`auth.appOrigin` must, and in local mode a present one must equal the run's origin; otherwise
+stop with PARTIAL before `open`.
 
 If preview access itself requires a secret-bearing URL, require a credential-free entry URL
 plus visible browser login. Do not accept the signed URL in chat.
@@ -208,21 +206,17 @@ a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claud
 by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
 ordinary case for a user who has not configured anything. Run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe`
-as a standalone preflight once for every origin the run navigates — the application origin and,
-when it differs, the validated authentication origin. It prints `consent` or `policy`
+as a standalone preflight once for every origin the run navigates. It prints `consent` or `policy`
 and exits `0`, or exits `1` with a named reason. In policy mode the parent JSON must name each
-of those origins as a target with the `declared-safe` mode described in the config contract. A
+validated origin as a target with the `declared-safe` mode described in the config contract. A
 target covers every route on its origin: no route list is declared or checked, so pages whose
 path carries identifiers that change on every run are covered too. Contract v1 intentionally
 supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
-For every network-only origin run the preflight with the operand `network-only` instead of
-`declared-safe`, never both, because the `declared-safe` form refuses a network-only origin as a
-navigation target:
+For each network-only origin, run it with the operand `network-only` instead, never both:
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<network-only-origin>" network-only`.
 It prints `policy` and exits `0` only when the parent policy lists that origin in
-`networkOnlyOrigins`. Consent mode has no network-only class, so the preflight refuses the
-operand there; the browser session below says what a consent-mode run passes instead, and a
-loopback origin passed that way takes the `declared-safe` preflight like any other origin.
+`networkOnlyOrigins`; without a policy it refuses, and the browser session below says what a
+consent-mode run passes instead.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
@@ -236,19 +230,15 @@ gate reads that config itself: an isolated browser, the run's origins as
 `network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
 mode navigates loopback origins only: a loopback IP or the exact name `localhost`, which the
 browser resolves to loopback itself; `app.localhost`, `localhost.` and every other hostname are
-refused. The one exception is a network-only origin a local policy declares, which may be a
-non-loopback HTTPS origin under the remote rules that follow.
-`localhost` and `127.0.0.1` are different origins — use the one the application
+refused. `localhost` and `127.0.0.1` are different origins — use the one the application
 expects, everywhere. Remote mode accepts only non-loopback HTTPS,
 rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/reserved,
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
 rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
 target stops before browser use with PARTIAL; the gate navigates only its target origins, and every
-route on them. Its network-only origins are reachable for the pages' own requests: `open`, `goto`
-and `tab-new` aimed at one are denied, and that denial is final. `go-back`, `go-forward`, `reload`
-and `tab-select` name no URL, so the gate cannot judge where they land; the `Page URL` rule below
-covers them. **In CONSENT mode** there is no policy to be missing and
+route on them. Its network-only origins serve the pages' own requests only: `open`, `goto` and
+`tab-new` aimed at one are denied, and that denial is final. **In CONSENT mode** there is no policy to be missing and
 the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
 because remote verification keeps the policy. Never try to configure the variable from a child
 Bash call in either mode — the hooks read it from the environment Claude Code started with, and
@@ -262,8 +252,8 @@ user approves an origin, every further route on it proceeds without a prompt. An
 prompt is the user's action; never answer it on their behalf, never work around a refusal, and
 treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
 origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
-refuses every HTTP(S) request to an origin outside the run config except a server redirect it
-follows (below); a WebSocket connection is not fenced by the run config, which is an open gap. A remote target is refused in consent
+refuses every HTTP(S) request to an origin outside the run config; a WebSocket connection is not
+fenced by the run config, which is an open gap. A remote target is refused in consent
 mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
 remembers each approved ORIGIN for this session in
 `.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
@@ -273,22 +263,15 @@ there skips the human's permission prompt for that origin, so writing one grants
 consent this gate exists to ask for. Only the PostToolUse hook writes it.
 
 **Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
-navigation and every HTTP(S) subresource request outside the run config, but the browser follows
-a server redirect to another origin, a network-only one included. After every call that can
-navigate — `open`, `goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`,
-`tab-close`, and any click or key press that follows a link or submits a
-form — read the `Page URL` line `playwright-cli` prints. A page can also navigate itself onto a
-network-only origin, because the browser knows one class of allowed origin and the gate judges
-only the CLI's own navigation commands. If the line names an origin outside the run config, or a
+navigation and every HTTP(S) subresource request outside the run config, but the browser
+follows a server redirect to another origin. After every call that can navigate — `open`,
+`goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`, `tab-close`, and any click or
+key press that follows a link or submits a form — read the `Page URL` line `playwright-cli`
+prints. A page can also navigate itself onto a network-only origin: the browser knows one class
+of allowed origin. If the line names an origin outside the run config, or a
 network-only origin, stop driving that page: take no snapshot or screenshot and read no console or network
 output from it, run `close`, and report the scenario PARTIAL with the redirect as the
-observation. A click can also open a new tab on such an origin: read `tab-list` before every
-`tab-select`, never select a tab whose URL is outside the run config or on a network-only origin,
-and close that tab with `tab-close`. A frame that a target page embeds from a network-only origin
-renders inside that page and appears in its snapshot and screenshot like data the page fetched:
-read it as that target page's content, which is evidence of the target page, and never open the
-frame's origin with a navigation command. Only a page the browser lands on at a network-only
-origin is never evidence.
+observation.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
@@ -433,10 +416,7 @@ bound of 8 origins. Never pass a network-only origin as `--origin`: the helper r
 policy mode. In consent mode the helper refuses `--network-only-origin`: pass a loopback
 network-only origin with `--origin` instead, where the consent prompt covers it like any other
 loopback origin, and report the rows that need a non-loopback one PARTIAL, because it needs the
-launch-time policy. Such a loopback origin is then a consented origin to the gate, which would
-admit a navigation to it, and the consent memory remembers it for the session; never `open`,
-`goto` or `tab-new` it all the same, and treat a `Page URL` on it like one on a network-only
-origin. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
+launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
 `mode=consent|policy`, one `origin=` line per navigable origin and one `network-only-origin=`
 line per network-only origin, or exits `1` with a named reason and writes nothing. It refuses unless
 `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
