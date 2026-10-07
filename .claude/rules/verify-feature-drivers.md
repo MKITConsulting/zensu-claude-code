@@ -122,8 +122,12 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
   ↔ the `validate` row of `templates/autopilot-spec.md` ↔ the detection rows of
   `rules/setup.md` ↔ the "What it can verify" table in `docs/verify-feature.md`, which also says
   that a native or command-line build needs no runtime recipe ↔ the
-  "Only the `browser` driver is gated" bullet in `docs/gates.md` ↔ the `P10` checks, which derive
-  the set from the config enum. `desktop-native` survives only as a read-alias sentence.
+  "Only the `browser` driver is gated" bullet in `docs/gates.md` ↔ `DRIVERS` in
+  `hooks/lib/acceptance-verify-v1.js`, which chain mode passes to `--driver` ↔ the `P10` checks,
+  which derive the set from the config enum. `desktop-native` survives as a read-alias sentence,
+  as the spelling the acceptance recorder stores a `desktop` record under, and, with `artifact`,
+  as an earlier spelling the recorder still accepts (`.claude/rules/acceptance-verification-gate.md`
+  says why storing `desktop` itself waits for a `minor` release).
 - The helper's verbs (`VERB_NAMES`), `RECORD_KINDS`, `LEDGER_KINDS`, the `zensu-verify-` prefix,
   `RUN_ID_RE` and the ledger name ↔ `rules/drivers.md` §5 and §8 ↔ the mobile, desktop, CLI and
   service rule files ↔ `SKILL.md` Phase 4 ↔ `docs/gates.md` ↔
@@ -153,11 +157,6 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
   and its group ended and reported `gone`. #349 reads that EPERM as an unsignalable group; the
   case keeps both answers rather than depend on that timing. The helper's own probe still reads
   EPERM as alive, so it keeps an entry it cannot prove ended.
-- The acceptance recorder (`ATTESTED_DRIVERS` and `OBSERVED_DRIVERS` in
-  `hooks/lib/acceptance-verify-v1.js`) still spells the desktop driver `desktop-native` and
-  accepts `artifact`, so chain mode in `SKILL.md` records a `desktop` row with
-  `--driver desktop-native`. Aligning the recorder with the nine ids changes the value set its
-  record validator accepts; weigh it under §"Runtime Lineage" in its own change.
 - `runKeyFor` keeps a run directory name of at most 24 lowercase letters and digits joined by
   single dashes as the run key. Every other name `RUN_ID_RE` admits (up to 200 characters,
   including the `:` of an Autopilot run id) becomes a 14-character slug, `--` and the first 10

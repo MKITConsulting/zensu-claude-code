@@ -96,8 +96,8 @@ only these points:
 3. **Use the cheapest driver that can observe the criterion,** named as in
    `rules/drivers.md`: `browser` through this skill's `playwright-cli` flow; `mobile` and
    `desktop` through their own rule files; and `api`, `cli`, `async`, `iac`, `custom` or
-   `library` as one shell check that exits 0 exactly when the criterion holds. Record a
-   `desktop` row with `--driver desktop-native`, the spelling the acceptance recorder accepts.
+   `library` as one shell check that exits 0 exactly when the criterion holds. Pass the same
+   id to `--driver` when you record the criterion.
    The credential-blind rules above bind every driver: never the
    autopilot `storageState` login, and never a secret in a command or in the evidence. An
    exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its

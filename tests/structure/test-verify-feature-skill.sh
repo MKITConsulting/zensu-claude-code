@@ -1001,9 +1001,10 @@ AUTOPILOT_DRIVERS="$PLUGIN_DIR/skills/autopilot/rules/drivers.md"
 AUTOPILOT_PROBE="$PLUGIN_DIR/skills/autopilot/rules/probe.md"
 COVER_DRIVERS="$PLUGIN_DIR/skills/cover/rules/drivers.md"
 VERIFY_DOC="$PLUGIN_DIR/docs/verify-feature.md"
+ACCEPTANCE_LIB="$PLUGIN_DIR/hooks/lib/acceptance-verify-v1.js"
 P10_MISSING=""
 for f in "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" "$ATTACH_MD" "$RESOURCES_JS" "$RESOURCES_UNIT" \
-  "$AUTOPILOT_DRIVERS" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$VERIFY_DOC"; do
+  "$AUTOPILOT_DRIVERS" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$VERIFY_DOC" "$ACCEPTANCE_LIB"; do
   [ -f "$f" ] || P10_MISSING="$P10_MISSING ${f#"$PLUGIN_DIR"/}"
 done
 if [ -z "$P10_MISSING" ]; then
@@ -1026,7 +1027,9 @@ else
 fi
 P10_VOCAB="$(node -e '
   const fs = require("node:fs");
-  const [config, drivers, skill, autopilotSkill, probe, cover, autopilotDrivers, doc] = process.argv.slice(1).map((file) => fs.readFileSync(file, "utf8"));
+  const args = process.argv.slice(1);
+  const [config, drivers, skill, autopilotSkill, probe, cover, autopilotDrivers, doc] = args.slice(0, 8).map((file) => fs.readFileSync(file, "utf8"));
+  const recorder = require(args[8]);
   const problems = [];
   const enumLine = config.split("\n").find((line) => /^  driver: /.test(line)) || "";
   const found = /#\s*([a-z| -]+?)\s+\(see drivers\.md\)/.exec(enumLine);
@@ -1056,6 +1059,7 @@ P10_VOCAB="$(node -e '
   sameSet("the cover driver list", Array.from(coverList.matchAll(/`([a-z-]+)`/g), (match) => match[1]));
   same("the drivers.md evidence-plane table", tableIds(section(drivers, "## 3. Evidence planes", "## 4.")));
   same("the docs driver table", tableIds(section(doc, "## What it can verify", "## How the browser is fenced")));
+  sameSet("the acceptance recorder drivers", recorder.DRIVERS);
   const seams = (autopilotSkill.split("\n").find((line) => /^\s+browser \| api \| /.test(line)) || "").replace("(rules/drivers.md)", "");
   same("the autopilot seams line", seams.split("|").map((id) => id.trim()).filter(Boolean));
   const skillRow = skill.split("\n").find((line) => line.startsWith("| `--driver=<id>` |")) || "";
@@ -1066,20 +1070,20 @@ P10_VOCAB="$(node -e '
     if (!autopilotRow.includes("`" + id + "`")) problems.push("the autopilot --driver row misses " + id);
     if (!flatProbe.includes("→ `" + id + "`")) problems.push("the autopilot probe misses " + id);
   }
-  for (const [name, text] of [["autopilot SKILL.md", autopilotSkill], ["autopilot probe.md", probe], ["autopilot drivers.md", autopilotDrivers], ["cover drivers.md", cover]]) {
+  for (const [name, text] of [["verify-feature SKILL.md", skill], ["autopilot SKILL.md", autopilotSkill], ["autopilot probe.md", probe], ["autopilot drivers.md", autopilotDrivers], ["cover drivers.md", cover]]) {
     if (text.includes("desktop-native")) problems.push(name + " still names desktop-native");
   }
   if (/web app \(\+ electron/.test(autopilotDrivers)) problems.push("autopilot drivers.md still files Electron under browser");
   if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
   process.stdout.write(ids.join(","));
-' "$AUTOPILOT_CONFIG" "$DRIVERS_MD" "$SKILL_MD" "$AUTOPILOT_SKILL" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$AUTOPILOT_DRIVERS" "$VERIFY_DOC" 2>&1)"
+' "$AUTOPILOT_CONFIG" "$DRIVERS_MD" "$SKILL_MD" "$AUTOPILOT_SKILL" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$AUTOPILOT_DRIVERS" "$VERIFY_DOC" "$ACCEPTANCE_LIB" 2>&1)"
 P10_VOCAB_RC=$?
 if [ "$P10_VOCAB_RC" = "0" ] \
   && grep -qF 'apply to `browser` rows only; `rules/drivers.md` section 8 holds what every other row does instead.' <<<"$SKILL_FLAT" \
   && grep -qxF '## 8. Every other driver, phase by phase' "$DRIVERS_MD"; then
-  check "P10c one driver vocabulary ($P10_VOCAB) across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, and each driver's rule file" PASS
+  check "P10c one driver vocabulary ($P10_VOCAB) across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, the acceptance recorder, and each driver's rule file" PASS
 else
-  check "P10c one driver vocabulary across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, and each driver's rule file ($P10_VOCAB)" FAIL
+  check "P10c one driver vocabulary across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, the acceptance recorder, and each driver's rule file ($P10_VOCAB)" FAIL
 fi
 if grep -qF '`--mode=remote` together with a `--driver` other than `browser` stops the same way, in memory, with `remote mode supports the browser driver only`.' <<<"$SKILL_FLAT" \
   && grep -qF 'In `remote` mode a row whose driver is not `browser` is PARTIAL, because remote mode supports the browser driver only.' <<<"$SKILL_FLAT" \

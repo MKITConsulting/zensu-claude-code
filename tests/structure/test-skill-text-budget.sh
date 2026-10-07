@@ -17,7 +17,7 @@ plan-review 32957
 pr-team-review 55827
 self-review 33068
 tdd 99221
-verify-feature 40669
+verify-feature 40630
 ALLOW
 )"
 

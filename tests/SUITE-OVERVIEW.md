@@ -383,7 +383,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 80 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
-| `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
+| `acceptance-verify-v1.test.js` | 26 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, the verify-feature driver ids with the two earlier spellings still accepted, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
