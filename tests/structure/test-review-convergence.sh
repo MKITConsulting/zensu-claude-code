@@ -61,14 +61,14 @@ LEDGER_OUT="$(cd "$ROOT" && node --test "$LEDGER_UNIT" 2>&1)"
 LEDGER_RC=$?
 [ "$LEDGER_RC" -eq 0 ] && check "R1 review-ledger unit suite passes ($(unit_cases_report_text "$LEDGER_OUT"))" PASS \
                        || check "R1 review-ledger unit suite passes" FAIL
-unit_cases_registered_floor_text "$LEDGER_OUT" 42 \
-  && check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS)" PASS \
-  || check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS)" FAIL
-CELL="$(sed -n 's/^| `review-ledger-v1.test.js` | \([0-9][0-9]*\) |.*/\1/p' "$OVERVIEW_MD" | head -1)"
-if [ -n "$CELL" ] && [ "$CELL" = "$UNIT_CASES_TESTS" ]; then
-  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=$CELL)" PASS
+LEDGER_FLOOR="$(unit_overview_declared "${LEDGER_UNIT##*/}")"
+unit_cases_registered_floor_text "$LEDGER_OUT" "$LEDGER_FLOOR" \
+  && check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least $LEDGER_FLOOR)" PASS \
+  || check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least ${LEDGER_FLOOR:-<no overview row>})" FAIL
+if R1B_OVERVIEW="$(unit_overview_check "$LEDGER_UNIT")"; then
+  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=$LEDGER_FLOOR)" PASS
 else
-  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=${CELL:-<none>} registered=$UNIT_CASES_TESTS)" FAIL
+  check "R1b $R1B_OVERVIEW" FAIL
 fi
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/zensu-rcv-XXXXXX")"

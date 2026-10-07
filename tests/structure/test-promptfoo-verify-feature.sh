@@ -64,11 +64,17 @@ else
   check "fixture and runner syntax checks pass" FAIL
 fi
 
+CONTRACT_FLOOR="$(unit_overview_declared "${CONTRACT_TEST##*/}")"
 CONTRACT_OUT="$(node --test "$CONTRACT_TEST" 2>&1)"
-if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 24; then
+if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" "$CONTRACT_FLOOR"; then
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"))" PASS
 else
-  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 24 registered)" FAIL
+  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= ${CONTRACT_FLOOR:-<no overview row>} registered)" FAIL
+fi
+if CONTRACT_OVERVIEW="$(unit_overview_check "$CONTRACT_TEST")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${CONTRACT_TEST##*/} registers ($CONTRACT_FLOOR)" PASS
+else
+  check "$CONTRACT_OVERVIEW" FAIL
 fi
 
 ASSERTION_SMOKE="$(node -e 'const check=require(process.argv[1]); const attest="\n===== wrapper attestation =====\n[wrapper_attestation] {\"init_git\":true,\"tracked_clean\":true,\"manifest_version\":1,\"root\":\"/tmp/eval\"}\n"; const up="[tool_use: Bash] id=u input={\"command\":\"./scripts/fixture-runtime.sh up\"}\n[tool_result: Bash] id=u is_error=false\nfixture-runtime: started\n"; const browser="[tool_use: Bash] id=s input={\"command\":\"playwright-cli -s=zensu-verify-smoke snapshot\"}\n[tool_result: Bash] id=s is_error=false\n### Snapshot\n"; const down="[tool_use: Bash] id=d input={\"command\":\"./scripts/fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"; const good=up+browser+down+attest; const fake=up+browser+"[tool_use: Bash] id=d input={\"command\":\"printf stopped # fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"+attest; const unsafe=up+browser+"[tool_use: Bash] id=e input={\"command\":\"playwright-cli -s=zensu-verify-smoke eval document.title\"}\n"+down+attest; if(check(good,{config:{check:"localTeardown"}}).pass&&!check(fake,{config:{check:"localTeardown"}}).pass&&!check(unsafe,{config:{check:"localTeardown"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"

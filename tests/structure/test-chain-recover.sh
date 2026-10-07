@@ -43,12 +43,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_registered_floor "$WORK/unit.out" 21; then
+P1_UNIT="$ROOT/tests/structure/chain-recovery-v1.test.js"
+P1_FLOOR="$(unit_overview_declared "${P1_UNIT##*/}")"
+if node --test "$P1_UNIT" >"$WORK/unit.out" 2>&1 \
+  && unit_cases_registered_floor "$WORK/unit.out" "$P1_FLOOR"; then
   check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 21 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= ${P1_FLOOR:-<no overview row>} registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
+fi
+if P1_OVERVIEW="$(unit_overview_check "$P1_UNIT")"; then
+  check "P1-overview the SUITE-OVERVIEW Blocks cell matches what ${P1_UNIT##*/} registers ($P1_FLOOR)" PASS
+else
+  check "P1-overview $P1_OVERVIEW" FAIL
 fi
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
