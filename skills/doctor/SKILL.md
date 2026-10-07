@@ -429,8 +429,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   set when Claude Code started and passes the policy contract, so it governs every browser
   origin and the consent prompt never fires this session; the browser consent gate navigates only
   its target origins, and every route on them, and lets pages request the policy's network-only
-  origins, if it declares any, while it denies every navigation command that names one. Nothing
-  to do.
+  origins, if any, while no navigation command may open one. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
   registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
   `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
