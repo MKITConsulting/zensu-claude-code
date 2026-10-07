@@ -114,9 +114,9 @@ the navigation policy, local mode with its runtime recipe, and remote mode.
 Every run writes a **run config** into its own run directory with
 `scripts/verify-browser-config.js` and opens the browser with it, under a session named
 `zensu-verify-<run>`. The run config makes the browser isolated, restricts every HTTP(S) request
-to the run's origins (`network.allowedOrigins`) — a WebSocket connection is not fenced by it,
-which is an open gap — blocks service workers, and keeps screenshots and
-snapshots inside the run directory. For a remote host it also pins the hostname to the public
+to the run's origins (`network.allowedOrigins`) except a server redirect the browser follows — a
+WebSocket connection is not fenced by it, which is an open gap — blocks service workers, and
+keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
 The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
@@ -178,7 +178,9 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
   passes without a second prompt. The report's `Consent` block lists every record.
 - The floor holds whatever you answer: loopback origins only (`127.0.0.1`, `[::1]` or the exact
   name `localhost`; never `app.localhost` or another hostname), no credentials, no query or
-  fragment in a navigation, and the browser requests nothing from an origin outside the run config.
+  fragment in a navigation, and the browser sends no HTTP(S) request to an origin outside the run
+  config, except by following a server redirect (below). A WebSocket connection is not fenced by
+  the run config, which is an open gap.
 - A remote target is refused in consent mode, by the run-config helper and by the gate, because
   the browser's DNS pins are written before it starts. Remote verification needs the policy of
   section 4.
@@ -194,7 +196,7 @@ headless run was never observed, so run an unattended or bypass session in polic
 asks nothing. The consent memory is a file the session can
 write, so it is a control, not a proof — the floor bounds what a forged record could reach to
 other loopback services. And the browser follows a server redirect to another origin even though
-it refuses every other request there, so the skill checks the page URL after every navigation and
+it refuses every other HTTP(S) request there, so the skill checks the page URL after every navigation and
 stops a scenario that left the approved set. With the policy present the gate asks nothing and
 enforces the policy exactly as in the sections below.
 
@@ -237,7 +239,7 @@ value.
 | `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
 | `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only, so a wildcard such as `https://*.example.com` is refused |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
-| `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one |
+| `networkOnlyOrigins` | optional; 1 to 8 origins the application's pages may request and no navigation command may open. Each follows the `origin` rule above, is unique, and is never also a target. A `remote` policy accepts non-loopback `https://` only; a `local` policy accepts a loopback origin or a non-loopback `https://` one with a public address, resolved and pinned like a remote target's |
 | `routes` | not part of the contract; a list a policy written for the earlier contract still carries is checked for its shape — 1 to 64 page paths, each starting with `/`, carrying no `?`, `#`, or `*`, already normalized and unique — and then ignored, so it narrows nothing |
 
 No other key is accepted at either level. A target approves its origin, and with it every page
@@ -261,16 +263,24 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 The skill passes each one to the run-config helper with `--network-only-origin`, and the run
 config allows it beside the targets. The gate then lets the pages request it, while `open`,
 `goto` and `tab-new` aimed at it are denied with their own reason, and no consent record is
-written for it. Two limits are stated rather than hidden:
+written for it. These limits are stated rather than hidden:
 
 - The browser knows one class of allowed origin, so a page can still navigate itself onto a
-  network-only origin, by a link click or a script, and the call that triggered it prints that
-  page's URL and title. The skill reads the `Page URL` line after every navigating call and ends
-  the scenario there, reading nothing else from that page.
+  network-only origin, by a link click, a form, a script or a server redirect, and the call that
+  triggered it prints that page's URL and title. `go-back`, `go-forward`, `reload` and
+  `tab-select` carry no URL, so the gate cannot judge where they land either. The skill reads the
+  `Page URL` line after every navigating call and ends the scenario there, reading nothing else
+  from that page.
+- A click can open a new tab on a network-only origin. The skill reads `tab-list` before every
+  `tab-select`, never selects such a tab, and closes it instead.
+- A frame that a target page embeds from a network-only origin renders inside that page, so its
+  content appears in that page's snapshot and screenshot, like data the page fetched.
 - Page code on a target can send data to every network-only origin, including what the skill
   types into a form. The list is yours, declared in the launch environment the session cannot
   write, bounded at 8 exact origins, and in remote mode public `https://` only, pinned to an
   approved address, so no entry reaches a private, metadata or loopback address.
+- The fence covers HTTP(S) only: page code can open a WebSocket connection to any origin, listed
+  or not.
 
 Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
 policy. A loopback API origin is then passed as an ordinary origin and covered by the consent
@@ -280,26 +290,29 @@ it refuses such a policy rather than misreading it.
 
 ### Checking the policy before the run
 
-The skill runs this preflight once for every origin before its first browser call:
+The skill runs this preflight once for every origin the run navigates before its first browser
+call:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" declared-safe
 ```
 
-and once more for every network-only origin, with the operand `network-only`:
+and, instead of it, this one for every network-only origin, because the `declared-safe` form
+refuses a network-only origin as a navigation target:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" network-only
 ```
 
-It judges the target exactly as the gate does and starts no browser. Before it judges the target
+Each form judges its target as the gate judges that kind of origin, and starts no browser. Before it judges the target
 it runs the readiness check of the run-config helper: both consent hooks must be registered on a
 matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
 of the caller must name the measured version, and no empty or relative `PATH` entry may come
 before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
 terminal. Section 5 lists those refusals and their fixes. It prints `policy` when a
-policy approves the target, `consent` when no policy is set and the target is a loopback origin,
-and exits `0` in both cases; a refusal prints `zensu verify browser config: <reason>` on stderr
+policy approves the target, and the `declared-safe` form also prints `consent` when no policy is
+set and the target is a loopback origin; both exit `0`. The `network-only` form has no consent
+answer: without a policy it refuses. A refusal prints `zensu verify browser config: <reason>` on stderr
 and exits `1`. Run it from a terminal with `${CLAUDE_PLUGIN_ROOT}` replaced by the installed
 plugin directory, or let the skill run it, which reports a refusal as PARTIAL with that reason.
 The messages you will meet:
@@ -337,7 +350,8 @@ that worktree on an origin the policy already names.
   rejected — `app.localhost`, `localhost.` and `/etc/hosts` aliases included — because the gate
   refuses to trust DNS for a boundary decision.
 - **An API on another origin goes into the recipe under `validate.networkOnly`.** The browser
-  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, so a frontend on
+  requests nothing over HTTP(S) from an origin outside `allowedOrigins`, a followed server
+  redirect aside, so a frontend on
   `http://localhost:4200` that calls an API on `http://localhost:9090` needs both origins in the
   run config. List the API origin in the recipe's `validate.networkOnly.origins`. In consent mode
   the skill passes it as an ordinary origin, and one prompt covers both; under a policy that

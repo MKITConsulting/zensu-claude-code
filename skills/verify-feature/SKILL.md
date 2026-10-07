@@ -193,12 +193,14 @@ association; otherwise stop with PARTIAL before auth. Never print or report a re
 authentication or application URL.
 
 Network-only origins — a REST API, an OIDC discovery document or a token endpoint the pages
-request on another origin but that is never a page to open — come only from the selected
+request but never open — come only from the selected
 checked-in recipe's `validate.networkOnly.origins`, never from the conversation, a page or a
 network log. Validate each one with the rules above for its mode: an absolute origin with no
-userinfo, path, query or fragment; in remote mode non-loopback HTTPS. In remote mode
+userinfo, path, query or fragment; non-loopback HTTPS in remote mode; in local mode loopback, or
+HTTPS under the remote rules when a local policy declares it. In remote mode
 `validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`, as
-`auth.appOrigin` must; otherwise stop with PARTIAL before `open`.
+`auth.appOrigin` must, and in local mode a present one must equal the run's origin; otherwise
+stop with PARTIAL before `open`.
 
 If preview access itself requires a secret-bearing URL, require a credential-free entry URL
 plus visible browser login. Do not accept the signed URL in chat.
@@ -216,17 +218,17 @@ a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claud
 by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
 ordinary case for a user who has not configured anything. Run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe`
-as a standalone preflight once for every origin the run needs. It prints `consent` or `policy`
+as a standalone preflight once for every origin the run navigates. It prints `consent` or `policy`
 and exits `0`, or exits `1` with a named reason. In policy mode the parent JSON must name each
 validated origin as a target with the `declared-safe` mode described in the config contract. A
 target covers every route on its origin: no route list is declared or checked, so pages whose
 path carries identifiers that change on every run are covered too. Contract v1 intentionally
 supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
-Run the same preflight once more with the operand `network-only` for every network-only origin:
+For each network-only origin, run it with the operand `network-only` instead, never both:
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<network-only-origin>" network-only`.
 It prints `policy` and exits `0` only when the parent policy lists that origin in
-`networkOnlyOrigins`. Consent mode has no network-only class, so the preflight refuses the
-operand there; the browser session below says what a consent-mode run passes instead.
+`networkOnlyOrigins`; without a policy it refuses, and the browser session below says what a
+consent-mode run passes instead.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
@@ -238,7 +240,7 @@ own list, every call from a subagent, every call whose session or arguments are 
 literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
 gate reads that config itself: an isolated browser, the run's origins as
 `network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
-mode accepts loopback origins only: a loopback IP or the exact name `localhost`, which the
+mode navigates loopback origins only: a loopback IP or the exact name `localhost`, which the
 browser resolves to loopback itself; `app.localhost`, `localhost.` and every other hostname are
 refused. `localhost` and `127.0.0.1` are different origins — use the one the application
 expects, everywhere. Remote mode accepts only non-loopback HTTPS,
@@ -246,10 +248,9 @@ rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
 rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
-target stops before browser use with PARTIAL; the gate admits only its target origins, and every
-route on them. Its network-only origins are reachable for the pages' own requests and never for
-a navigation command: `open`, `goto` and `tab-new` aimed at one are denied, and that denial is
-final. **In CONSENT mode** there is no policy to be missing and
+target stops before browser use with PARTIAL; the gate navigates only its target origins, and every
+route on them. Its network-only origins serve the pages' own requests only: `open`, `goto` and
+`tab-new` aimed at one are denied, and that denial is final. **In CONSENT mode** there is no policy to be missing and
 the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
 because remote verification keeps the policy. Never try to configure the variable from a child
 Bash call in either mode — the hooks read it from the environment Claude Code started with, and
@@ -263,12 +264,12 @@ is read for the report and never written, edited or deleted: a record placed the
 human's prompt for that origin.
 
 **Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
-navigation and every subresource outside the run config, but the browser follows a server
-redirect to another origin. After every call that can navigate — `open`, `goto`, `go-back`,
-`go-forward`, `reload`, `tab-new`, and any click or key press that follows a link or submits a
-form — read the `Page URL` line `playwright-cli` prints. A page can also navigate itself onto a
-network-only origin, because the browser knows one class of allowed origin and the gate judges
-only the CLI's own navigation commands. If the line names an origin outside the run config, or a
+navigation and every HTTP(S) subresource request outside the run config, but the browser
+follows a server redirect to another origin. After every call that can navigate — `open`,
+`goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`, `tab-close`, and any click or
+key press that follows a link or submits a form — read the `Page URL` line `playwright-cli`
+prints. A page can also navigate itself onto a network-only origin: the browser knows one class
+of allowed origin. If the line names an origin outside the run config, or a
 network-only origin, stop driving that page: take no snapshot or screenshot and read no console or network
 output from it, run `close`, and report the scenario PARTIAL with the redirect as the
 observation.

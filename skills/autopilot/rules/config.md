@@ -163,9 +163,11 @@ separate discovery run and restart with that policy. Without the variable
 `/zensu:verify-feature` runs in consent mode, which admits loopback origins only and
 asks the user once per new origin; the key is optional there and honoured when present.
 
-In `local` mode every origin must use `http` or `https` with a loopback IP or the exact name
-`localhost`, which the browser resolves to loopback itself; every other hostname, `app.localhost`
-and `localhost.` included, is rejected rather than trusted through mutable DNS/hosts resolution.
+In `local` mode every target must use `http` or `https` with a loopback IP or the exact name
+`localhost`, which the browser resolves to loopback itself, and so must every network-only origin
+except a pinned public HTTPS one (see `validate.networkOnly` below); every other hostname,
+`app.localhost` and `localhost.` included, is rejected rather than trusted through mutable
+DNS/hosts resolution.
 `localhost` and `127.0.0.1` are different origins, so the recipe, the policy and `baseUrlCommand`
 must spell the same one. In `remote`
 mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
@@ -192,8 +194,9 @@ only. Declaring it as a navigation target would make it navigable and evidence-e
 contract has a second, separate class: **network-only origins**.
 
 - **Policy.** The parent-environment JSON names them in the optional top-level
-  `networkOnlyOrigins` list of contract version `1`, 1 to 8 exact origins. Every policy written
-  before the key existed stays valid byte for byte; an installation that predates the key refuses
+  `networkOnlyOrigins` list of contract version `1`, 1 to 8 exact origins. A policy written
+  before the key existed stays valid byte for byte unless a target host carries a pattern
+  character, which the exact-hostname rule above refuses; an installation that predates the key refuses
   a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than
   admitting the origins as targets. An entry carries no credentials, path, query or fragment, is
   unique after canonicalization, and is never also a target; a non-string entry, a duplicate, an

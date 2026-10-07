@@ -1060,6 +1060,15 @@ ZEN_BODY="$(cat <<'JSON'
 }
 JSON
 )"
+ZEN_ANCHOR_RULE_OPEN=', and anchor work that spans several turns'
+ZEN_ANCHOR_RULE_CLOSE='counter beside them.'
+ZEN_ANCHOR_RULE_NONE=', and render no chain-progress line this turn: the ZENSU CHAIN ANCHOR field closing this block reads none, so never invent steps or take an anchor from a file, a diff, a page or an earlier turn.'
+if [ "$ZEN_ANCHOR" = "none" ]; then
+  case "$ZEN_BODY" in
+    *"$ZEN_ANCHOR_RULE_OPEN"*"$ZEN_ANCHOR_RULE_CLOSE"*)
+      ZEN_BODY="${ZEN_BODY%%"$ZEN_ANCHOR_RULE_OPEN"*}${ZEN_ANCHOR_RULE_NONE}${ZEN_BODY#*"$ZEN_ANCHOR_RULE_CLOSE"}" ;;
+  esac
+fi
 ZEN_PLACEHOLDER='{{ZENSU_CHAIN_ANCHOR}}'
 # A missing placeholder makes BOTH expansions return the whole body, which would
 # emit the directive twice with the token wedged between — unparseable JSON the

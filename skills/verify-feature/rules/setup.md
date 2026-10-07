@@ -60,7 +60,10 @@ longer read.
 
 Propose `validate.networkOnly` only when a tracked file names another origin the application's
 pages request — an API base URL, an OIDC authority or a token endpoint in a tracked environment
-or configuration file — and only for the deployment the recipe selects. Each origin gets its own
+or configuration file — and only for the deployment the recipe selects. Never propose an origin
+the pages navigate — the application origin, or the origin of a hosted login page even when its
+token endpoint sits there too: that origin stays a target, and an authentication origin belongs in
+`auth.baseUrl`. Each origin gets its own
 evidence line, and an origin no tracked file names stays out: never propose one from a running
 application, a browser's network log, a guess, or a file `git ls-files` does not report.
 Propose it as the bare origin, with no path, and propose `appOrigin` only for a remote recipe,
@@ -171,6 +174,17 @@ network-only origin, with the same rendered JSON assigned on that command only:
 `policy` with exit `0` means the rendered JSON lists that origin as network-only. A non-loopback
 network-only origin in a local policy must be public HTTPS, and the preflight resolves it and
 refuses a non-public answer.
+For a remote recipe, render `"mode":"remote"` instead, with no port: one target for the origin of
+the recipe's validated remote base URL (`--base-url` when given, else `validate.baseUrl`), one
+more for the validated `auth.baseUrl` origin when it differs and the recipe associates it with
+that deployment, each with `"evidenceMode":"declared-safe"`, and the `"networkOnlyOrigins"` list
+when the recipe declares `validate.networkOnly` with that same application origin as its
+`appOrigin`. Validate every origin with the remote rules of the skill's Phase 0 first, and render
+nothing for an origin those rules reject. Prove each target with
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy remote "<origin>" declared-safe`
+and each network-only origin with the same command and the operand `network-only`, the rendered
+JSON assigned on each command only. The remote preflight resolves every hostname and refuses a
+non-public answer, so it needs network access.
 Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
 job's `env`, or the `env` block of `~/.claude/settings.json`) and that the project-level
 settings files are not the place, because the session can write them.

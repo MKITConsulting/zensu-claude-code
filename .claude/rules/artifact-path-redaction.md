@@ -21,10 +21,45 @@ source of truth for what makes those two artifacts publishable.
 `\Users\<seg>`) → `<home>`. Rule 1 must precede rule 2 or a nested project decays
 to `~/IdeaProjects/<product>/<repo>`, which still names the product. Rule 3 is what
 makes the guarantee CHECKABLE — "no `/Users/` in the file" is testable, "no
-sensitive path" is not. Every rule is bounded on BOTH sides; drop the right bound
+sensitive path" is not. Every plain rule is bounded on BOTH sides; drop the right bound
 and `/homework` becomes `<home>work`, drop the left and the rule fires inside
 `src/home/index.ts`. The segment class also excludes quotes, so the closing `"`
 of a `cmd="…"` field survives.
+
+**Each rule also covers Claude Code's dash-encoded spelling of a directory.** Claude
+Code names a directory after the session's working directory in three places, read out
+of the 2.1.280 binary: `<config dir>/projects/<name>/`, the temp root
+`claude-<uid>/<name>/` (`claude-0` on Windows, which has no uid) and the CLI cache
+`claude-cli-nodejs/<name>/` (`claude-cli-nodejs\Cache\<name>\` on Windows). Every
+character other than an ASCII letter or digit becomes `-`, so
+`/Users/<name>/IdeaProjects/x` turns into `-Users-<name>-IdeaProjects-x` and
+`C:\Users\<name>` into `C--Users-<name>`. The encoded rules run after the plain ones,
+in the same order.
+
+**The anchor is split, and the split is the design.** The encoded project root and
+`$HOME` name this developer, so they are matched wherever they start right after a path
+separator: a host directory nobody listed must not publish them. A spelling of two or
+more segments (`-Users-<name>`, `-opt-acme-app`) does not collide with a repository's
+own names. A one-segment spelling (`-root`, `-app`) can, so it is matched only directly
+under one of the three host directories (`ENCODED_HOST_DIRS`), and so is every residual
+encoded rule (`-Users-<seg>`, `-home-<seg>`, `-root` and the drive form
+`C--Users-<seg>`). Anchoring the residual rules on any separator rewrote in-repo names:
+`src/routes/-home-hero/index.tsx` became `src/routes/<home>/index.tsx` in an
+`IMPL completed` claim, the edit-landing audit then graded a path that does not exist,
+and `--tdd-complete` refused the chain with no in-chain remedy. A drive form is matched
+with either case of its drive letter.
+
+An encoded name holds only ASCII letters, digits and `-`. A run of those that continues
+into `_`, or into a `.` followed by a name character, is therefore a file name, and no
+encoded rule fires on it (`src/-Users-list-item.ts` survives); a `.` followed by
+anything else ends a sentence, so `…/-Users-bob.` still redacts, as the plain residual
+segment does. The encoded project root must fill the whole name, so a sibling
+`app-admin` never renders as `<project>-admin`. The encoded `$HOME` and the residual
+prefixes may be followed by another `-` segment, so the scratchpad of another project
+under `$HOME` renders as `~-IdeaProjects-x`. The encoding, its 200-character cut and
+the three host directories are Claude Code's, copied by hand here and in `normSlug` of
+`skills/session-trail/scripts/trail.mjs`; nothing pins either copy against the host, so
+a change there silently stops both. R82-R85 pin the rules and their bounds.
 
 **Secret NAMES are never redacted** — a name grants no access and this repo's own
 workflows carry `secrets.GITHUB_TOKEN` in public. Credential VALUES are a different
@@ -269,7 +304,18 @@ internal URLs are NOT redacted; a DOUBLY encoded separator (`\\\\Users\\\\bob`, 
 backslashes — JSON encoding applied twice) still leaves the user segment, because
 the escaped-separator rules cap at two; neither writer produces that spelling, so
 it sits inside the textual bound
-rather than outside it; `expectedRoot` binds `append` only when
+rather than outside it; the dash-encoded spelling is lossy, so a dash cannot tell a
+separator from a name character: a user segment the encoded `$HOME` spelling does not
+match ends at its first dash (`-Users-first-last-x` keeps `-last-x`), the encoded `$HOME`
+of `/Users/marcel` also matches the start of another user's `-Users-marcel-k-…` and
+leaves `-k`, an encoded name that no path separator precedes is not caught, another
+user's encoded home and a one-segment encoded `$HOME` or project root are not caught
+outside the three host directories (a fourth one needs an entry in
+`ENCODED_HOST_DIRS`), a working directory whose encoded name exceeds 200 characters
+is cut and hashed by Claude Code, so its encoded project spelling never matches and
+the part past `$HOME` survives, and a session started in a project subdirectory keeps
+the product name (`~-IdeaProjects-<product>-sub`), because the encoded project root
+must fill the whole name; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
 nothing, and deliberately NOT gated on that variable: an earlier revision made

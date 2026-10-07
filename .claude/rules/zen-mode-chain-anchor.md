@@ -486,30 +486,39 @@ none of. The cost is real on both sides: a malformed block drops the injection S
 which for zen-mode means the mode quietly stops; every eval `spec_block` copy still needs its
 own text regardless, so it removes one copy and not all of them. **And the bound that
 settles it is `MAX_BLOCK`**, which `rule-block-v1.js` declares and this file must never
-re-spell as a number: the Z30 floor still sits ABOVE it, so every admissible directive length
-is over the shared reader's limit — but the margin NARROWED when rule 6 shrank, so re-derive
+re-spell as a number: the Z30 floor still sits ABOVE it, so every admissible length of the
+static literal a block would have to hold is over the shared reader's limit (the shorter none
+variant `Z30b` measures is derived from that literal at emit time) — but the margin NARROWED when rule 6 shrank, so re-derive
 it rather than trusting this sentence. A further obstacle is new: the directive now carries a
 substituted field, and a markdown block read at run time would have to carry the placeholder
 and the substitution with it.
 
-**The injection is BOUNDED, and that is what makes the figures maintainable.** `Z30` in
-`tests/structure/test-zen-mode.sh` measures the emitted directive through `node`
-(`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or code
-points depending on locale) and holds it one-sidedly in BOTH directions: growth past the
-ceiling fails, and so does a shrink further below it than the declared headroom, because a
-ceiling that has drifted away from its text has stopped being a tripwire. The rule-6 rewrite
-took the directive from 2951 to 4664 characters — 57% — with nothing observing it; the
-supplied-anchor rewrite then SHRANK it to **4208** (the static literal, placeholder included)
-and the window was re-derived to a ceiling of 4300 with 95 of headroom. **4208 is the static
-literal and 4224 is what Z30 MEASURES** — it substitutes the longest producible token for the
-placeholder first — so the realized slack is 76 rather than the 92 the static figure invites,
-and both pass. 4224 is also the figure the per-turn totals use.
+**The injection is BOUNDED, and that is what makes the figures maintainable.** Rule 6 has TWO
+variants. While the anchor names a `Zensu: …` line the hook emits the static literal with the
+token substituted; when it reads `none` the hook also replaces rule 6's anchor-rendering clause —
+from `, and anchor work that spans several turns` through `counter beside them.` — with one
+sentence, by the same parameter expansion and with no process. A literal that loses either anchor
+emits the full clause with `none`, the safe direction. `Z30` in
+`tests/structure/test-zen-mode.sh` measures the armed variant (the static literal with the
+LONGEST producible token substituted: 4447 characters, ceiling 4520) and `Z30b` fires the hook
+with no chain armed and measures the none variant (3117, ceiling 3200). Both measure through
+`node` (`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or
+code points depending on locale), both carry 95 of headroom, and both are one-sided in BOTH
+directions: growth past the ceiling fails, and so does a shrink further below it than the
+headroom, because a ceiling that has drifted away from its text has stopped being a tripwire.
+`Z32f` pins that the two variants differ in rule 6 and nowhere else.
 
-**Known gap, accepted:** the KB/KiB totals in `docs/architecture.md` are still hand-derived
-from that character count, so they age whenever the directive moves even though the count
-itself is pinned. They were corrected in this change (4224 + 1756 ≈ 5980 characters per turn,
-about 117 KiB over 20 turns and 351 KiB over 60). Both operands are stated in the SAME unit
-on purpose: an earlier wording summed 4224 characters with the sibling's 1764-BYTE figure.
+**The eval carriers follow the variant their token implies.** A scenario whose token is `none`
+embeds the none variant, because that is what a session with no chain receives, and every other
+scenario embeds the static literal with a token other than `none`. `Z19b` and P8 capture the
+none variant by firing the hook rather than re-spelling the replacement, so a change to the
+emission moves the comparison with it.
+
+**Known gap, accepted:** the per-turn totals in `docs/architecture.md` are hand-derived. The
+measurement that holds them is `tests/structure/test-user-prompt-budget.sh`
+(`.claude/rules/prompt-origin.md`), which drives every `UserPromptSubmit` hook on four prompt
+kinds and holds each hook and each sum under a ceiling; the document restates its figures and
+ages when they move.
 
 **A CLOSED chain renders NO anchor, and the two readings that preceded that are why.**
 `chain-closed` maps to `null`, the same value `no-session` carries, which is how the owner

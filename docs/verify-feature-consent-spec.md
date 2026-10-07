@@ -454,7 +454,7 @@ them as targets, which made an API origin navigable and evidence-eligible.
 
 | # | Decision | Chosen |
 |---|---|---|
-| D1 | Contract | Optional top-level `networkOnlyOrigins` in contract version `1`, not a version `2`. Every existing policy stays valid byte for byte; an installation that predates the key refuses a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than reading B as a target. |
+| D1 | Contract | Optional top-level `networkOnlyOrigins` in contract version `1`, not a version `2`. Every existing policy stays valid byte for byte unless a target host carries a pattern character, which D3 refuses; an installation that predates the key refuses a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than reading B as a target. |
 | D2 | Shape | 1 to 8 origin strings, each without credentials, path, query or fragment, unique after canonicalization, never also a target. A non-string, a duplicate, an empty list or an overlap invalidates the whole policy. |
 | D3 | Hostname rule | One rule for both lists: an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only. It also closes a gap in the target list: playwright-core turns each allowed origin into the URL glob `<origin>/**`, so a target such as `https://*.example.com`, which the parser accepted until now, was a browser-side wildcard. A policy carrying a pattern character in a target host becomes invalid. |
 | D4 | Floor | Remote policy: every network-only origin is non-loopback HTTPS, a literal address must be globally routable, and each hostname gets a resolver pin. Local policy: a loopback origin, or a non-loopback HTTPS origin under the remote floor, with a pin. |
@@ -464,7 +464,7 @@ them as targets, which made an API origin navigable and evidence-eligible.
 | D8 | Consent memory | No record for a network-only origin, and `DECIDED_BY` is unchanged: a record would let a later consent-mode call treat that origin as remembered and navigable. |
 | D9 | Recipe | `validate.networkOnly: { appOrigin, origins: [...] }`. In remote mode `appOrigin` must equal the origin derived from the validated base URL, as `auth.appOrigin` must, or the run stops PARTIAL before `open`. `auth.baseUrl` keeps its meaning: the navigable authentication origin. |
 | D10 | Redirect rule | Unchanged and still prose: a `Page URL` on a network-only origin ends the scenario, with no snapshot, screenshot, console or request output read from it. |
-| D11 | Version | No manual bump; an `### Upgrade notes` entry under `## [Unreleased]`. Recommended `version_type`: `patch`, by the argument `.claude/rules/browser-consent-gate.md` records for the route retirement: the policy is read from the launch environment, which no runtime writes, and this installation accepts a superset of what an older one accepted. A releaser who reads the strict-key-set entry by the letter picks `minor`. |
+| D11 | Version | No manual bump; an `### Upgrade notes` entry under `## [Unreleased]`. Recommended `version_type`: `patch`, by the argument `.claude/rules/browser-consent-gate.md` records for the route retirement: the policy is read from the launch environment, which no runtime writes, and this installation accepts every policy an older one accepted except one whose target host carries a pattern character, which D3 now refuses. That narrowing makes it no superset, and a releaser who reads the strict-key-set entry by the letter picks `minor`. |
 | D12 | WebSockets | Measured on 2026-09-30 with playwright-cli 0.1.21 and Chrome 154.0.8037.92: `network.allowedOrigins` does not fence a `WebSocket`, while `fetch`, `<img>` and `sendBeacon` to an origin outside the run config fail with `net::ERR_BLOCKED_BY_CLIENT`. The docs this change touches now say "every HTTP(S) request"; fencing WebSockets is a separate change. |
 
 ### 11.3 Security analysis
@@ -479,11 +479,19 @@ them as targets, which made an API origin navigable and evidence-eligible.
   address; and a remote policy cannot name a loopback origin, so a deployed page cannot be
   pointed at local services. The same data flow already existed for a same-origin API and for
   `auth.baseUrl`.
-- **What stays denied.** Every CLI navigation command aimed at a network-only origin; every origin
-  in neither list; every HTTP(S) request to an origin outside the run config; `eval`, `run-code`,
-  request-detail and storage commands; any network-only origin in consent mode.
+- **What stays denied.** `open`, `goto` and `tab-new` aimed at a network-only origin, the
+  navigation commands that name a URL; every origin in neither list; every HTTP(S) request to an
+  origin outside the run config other than a server redirect the browser follows; `eval`,
+  `run-code`, request-detail and storage commands; any network-only origin in consent mode.
 - **Residuals, named.** The browser has one class of allowed origin, so a page can navigate itself
   onto a network-only origin — measured: a link click to a second allowed origin was followed,
-  and the `click` output printed that page's URL and title before the skill could stop. WebSockets
+  and the `click` output printed that page's URL and title before the skill could stop. A server
+  redirect onto a network-only origin is followed the same way. `go-back`, `go-forward`, `reload`
+  and `tab-select` name no URL, so the gate never judges where they land. A click can open a popup
+  tab on a network-only origin. The skill's `Page URL` check and its `tab-list` and `tab-close`
+  rules answer these in prose only. A frame a navigable page embeds from a network-only origin
+  renders inside that page, so its content reaches that page's snapshot and screenshot; the skill
+  reads it as that page's content, the same exposure as the data the page fetches, and only a page
+  the browser lands on at a network-only origin is never evidence. WebSockets
   are outside the fence for every origin (D12). The run config is still read twice, by the gate at
   `open` and by the CLI at launch.
