@@ -58,6 +58,12 @@ PROMPT="$(PAYLOAD="$INPUT" node -e '
 
 [ -n "$PROMPT" ] || exit 0
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
+PROMPT_ORIGIN="$(zensu_prompt_origin "$PROMPT" "$INPUT")"
+case "$PROMPT_ORIGIN" in
+  task-notification|bash-input|slash-command) exit 0 ;;
+esac
+
 SESSION_ID="$(PAYLOAD="$INPUT" node -e '
   try {
     const j = JSON.parse(process.env.PAYLOAD || "{}");
@@ -92,6 +98,11 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
 ROUTE_FIELD="$(zensu_delivery_route_field "$ROUTE_PROJECT" "${ZENSU_SESSION_KEY:-}")"
 ROUTE_COMMAND="$(zensu_delivery_route_record_command)"
 emit_route_context() { zensu_delivery_route_substitute "$ROUTE_FIELD" "$ROUTE_COMMAND"; }
+
+if [ "$PROMPT_ORIGIN" = "ci-monitor-event" ]; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Zensu workflow reminder: this prompt is a CI-monitor event, and its standing authorization to fix, commit and push answers the Zensu workflow question for changes within the scope of that pull request, so do not ask before editing, and follow the route below when it names one. <!-- zensu:delivery-route -->\nZENSU DELIVERY ROUTE: __ZENSU_DELIVERY_ROUTE__\n<!-- /zensu:delivery-route -->"}}' | emit_route_context
+  exit 0
+fi
 
 # The EFFECTIVE mode, not the configured one — a /zensu:tdd-mode session choice
 # outranks hooks.tddImplementation at `--tdd-begin`, and the reminder must name the
