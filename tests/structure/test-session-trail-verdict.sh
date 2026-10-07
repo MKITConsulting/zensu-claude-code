@@ -4713,15 +4713,15 @@ wt_case "WT8v7 the ledger disclosure is bounded to a session with an armed chain
   "$WT8_ADOPT" 'only while a Zensu chain' 'cannot run against it as printed'
 wt_case "WT8v7b the move route does not PRESCRIBE taking the escape" \
   "$WT8_ADOPT" 'do not go looking for the spelling' 'take it from there'
+wt_case "WT8v12 the move route states the gate is opt-in and off by default" \
+  "$WT8_ADOPT" 'It is OPT-IN: it runs only when the Zensu config sets hooks.bashWriteGate to true, and it' 'the refusal names it'
+wt_case "WT8v12b the move route says the refusal names the config key and no escape prefix" \
+  "$WT8_ADOPT" 'Its refusal names that config key and no escape prefix' 'An operator-facing one-off escape exists and the refusal'
 # The one instruction that survives every OTHER gate needle above: `WT8v6` pins that the gate
 # judges both operands and `WT8v7b` that the escape is not prescribed, and neither of them
 # sees the consequence of a reader taking it anyway — that the DESTINATION then has no
 # containment check and must be placed inside the anchor by hand. Unpinned on both carriers
 # until now; a grep for `containment check on` across tests/ returned nothing.
-wt_case "WT8v12 the move route states the gate is opt-in before any claim about it" \
-  "$WT8_ADOPT" 'It is OPT-IN: it runs only when the Zensu config sets hooks.bashWriteGate to true, and it' 'the refusal names it'
-wt_case "WT8v12b the move route says the refusal names the config key and no escape prefix" \
-  "$WT8_ADOPT" 'Its refusal names that config key and no escape prefix' 'An operator-facing one-off escape exists and the refusal'
 wt_case "WT8v7c taking the escape is stated to drop the DESTINATION containment check" \
   "$WT8_ADOPT" 'check on the DESTINATION, so put `<path>` inside your own anchor' 'cannot run against it as printed'
 # The SAME-BRANCH claim is the route's headline benefit and it is false across two

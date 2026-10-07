@@ -719,16 +719,39 @@ EOF
   fi
 done
 # A parser that cannot RUN must deny, never degrade into a blanket allow.
-STUB_LIB="$STATE_DIR/stub-lib"
-mkdir -p "$STUB_LIB/hooks/lib"
-cp -R "$PLUGIN_DIR/hooks/." "$STUB_LIB/hooks/" 2>/dev/null || true
-printf '#!/bin/sh\nexit 3\n' > "$STUB_LIB/hooks/lib/bash-source-write-parse.js"
-if [ "$(run_gate "$STUB_LIB/hooks/pre-bash-source-write-gate.sh" \
-  "$(bash_payload "git status")" "$GONE_DATA" "$GATE_ON_CFG" \
-  "$STATE_DIR/never-created-anchor")" = "deny" ]; then
-  check "O29d a write-target parser that fails to run denies instead of allowing unchecked" PASS
+TARGETS_FAIL_BIN="$STATE_DIR/targets-fail-bin"
+mkdir -p "$TARGETS_FAIL_BIN"
+printf '%s\n' '#!/bin/bash' \
+  'if [ "${BSWG_MODE-unset}" = "targets" ]; then exit 42; fi' \
+  'exec "${ZENSU_TEST_REAL_NODE:?}" "$@"' > "$TARGETS_FAIL_BIN/node"
+chmod +x "$TARGETS_FAIL_BIN/node"
+O29D_OUT="$(bash_payload "git status" \
+  | env PATH="$TARGETS_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+    CLAUDE_PROJECT_DIR="$STATE_DIR/never-created-anchor" ZENSU_CONFIG="$GATE_ON_CFG" \
+    ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
+    bash "$BASH_GATE" 2>/dev/null)"
+O29D_STATUS=$?
+O29D_REASON="$(printf '%s' "$O29D_OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.hookSpecificOutput||{}).permissionDecisionReason||""))}catch(_){}})')"
+if [ "$O29D_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29D_OUT" | decision)" = "deny" ] \
+  && printf '%s' "$O29D_REASON" | grep -qF 'the Bash write-target check could not be evaluated' \
+  && printf '%s' "$O29D_REASON" | grep -qF 'hooks.bashWriteGate is true'; then
+  check "O29d a write-target parser that fails to run denies with that pass's own cause instead of allowing unchecked" PASS
 else
-  check "O29d parser failure degraded into an allow" FAIL
+  check "O29d parser failure (status $O29D_STATUS, reason '$O29D_REASON')" FAIL
+fi
+O29G_PAYLOAD_FILE="$STATE_DIR/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: ": \x27" + "a".repeat(1572864) + "\x27" }, session_id: "orphan-gone", cwd: process.argv[2] }))' \
+  "$O29G_PAYLOAD_FILE" "$GATE_PROJECT"
+O29G_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  CLAUDE_PROJECT_DIR="$STATE_DIR/never-created-anchor" ZENSU_CONFIG="$GATE_ON_CFG" \
+  ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
+  bash "$BASH_GATE" < "$O29G_PAYLOAD_FILE" 2>/dev/null)"
+O29G_STATUS=$?
+if [ "$O29G_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29G_OUT" | decision)" = "allow" ]; then
+  check "O29g a read-only command whose payload exceeds the exec argument limit still reaches the write-target parser" PASS
+else
+  check "O29g oversized read-only payload refused (status $O29G_STATUS, output '$(printf '%s' "$O29G_OUT" | cut -c1-160)')" FAIL
 fi
 OVERLAY_ARMED="$( { arm orphan-overlay >/dev/null 2>&1 && printf '%s\n%s\n' "$ARMED_ROOT" "$ARMED_DATA"; } )" \
   || { echo "O29f fixture failed" >&2; exit 1; }
@@ -739,11 +762,18 @@ mkdir -p "$OVERLAY_ROOT/.zensu" "$OVERLAY_HOME"
 printf '{"hooks":{"bashWriteGate":true}}\n' > "$OVERLAY_ROOT/.zensu/config.json"
 OVERLAY_PAYLOAD="$(bash_payload "printf x > $STATE_DIR/overlay-outside.ts" "orphan-overlay")"
 overlay_gate() {
-  printf '%s' "$OVERLAY_PAYLOAD" \
+  local out status
+  out="$(printf '%s' "$OVERLAY_PAYLOAD" \
     | env HOME="$OVERLAY_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$OVERLAY_DATA" \
       CLAUDE_PROJECT_DIR="$OVERLAY_ROOT" ZENSU_CONFIG= \
       ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
-      bash "$BASH_GATE" 2>/dev/null | decision
+      bash "$BASH_GATE" 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    printf 'deny\n'
+    return
+  fi
+  printf '%s' "$out" | decision
 }
 OVERLAY_LIVE="$(overlay_gate)"
 rm -rf "$OVERLAY_ROOT"

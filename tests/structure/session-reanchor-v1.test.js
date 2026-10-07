@@ -868,6 +868,8 @@ test('the verdict renderer names both roots and the uncommitted paths before --c
   assert.match(report.text, /\/zensu:converge and \/zensu:verify-feature\n--chain read the anchor from zensu-log\.sh --project-root and run their commands inside it,\n/);
   assert.match(report.text, /and --evidence-run runs there too, so a new \/zensu:tdd chain can start in this session\.\n/);
   assert.match(report.text, /\/zensu:plan-review, \/zensu:setup, \/zensu:cover, \/zensu:autopilot and \/zensu:pilot still\nread plans, config, overlays and templates from the start directory\./);
+  assert.match(report.text, /the reviewer confinement, the zensu-log\.sh workflow verbs and, while\nhooks\.bashWriteGate is true, the source-write gate anchor on the new worktree/);
+  assert.match(report.text, /from the start directory\. The source-write\ngate reads its project-level hooks\.bashWriteGate opt-in there too\./);
   assert.doesNotMatch(report.text, /fresh session/);
   assert.doesNotMatch(report.text, /cannot run there/);
   const unpastable = reanchor.renderReanchorVerdict({ ...verdict, targetRoot: '/work/re$po/b' }, false).text;
@@ -914,6 +916,7 @@ test('the outcome renderer reports a move, its unrecorded provenance, a failure 
   assert.doesNotMatch(moved.text, /no\s+restart/);
   assert.match(moved.text, /leading cd into the project above\. \/zensu:tdd, \/zensu:self-review, \/zensu:converge,\n\/zensu:verify-feature --chain and --evidence-run work in the project above, so a new\n\/zensu:tdd chain can start in this session\./);
   assert.match(moved.text, /\/zensu:plan-review, \/zensu:setup,\n\/zensu:cover, \/zensu:autopilot and \/zensu:pilot still read plans, config, overlays and\ntemplates from the start directory\./);
+  assert.match(moved.text, /templates from the start directory\. The source-write gate reads its project-level\nhooks\.bashWriteGate opt-in there too\.\n/);
   assert.doesNotMatch(moved.text, /Zensu skills read the anchor/);
   assert.doesNotMatch(moved.text, /fresh session/);
   assert.doesNotMatch(moved.text, /cannot\s+run there/);
@@ -921,6 +924,7 @@ test('the outcome renderer reports a move, its unrecorded provenance, a failure 
   assert.equal(unpastable.code, 0);
   assert.match(unpastable.text, /leading cd into the project above, with its path in single quotes\. That path holds a double\nquote, a dollar sign, a backtick or a backslash, which zensu-log\.sh --project-root refuses,\n/);
   assert.match(unpastable.text, /--chain cannot\nrun there: move the worktree to a path without these characters before you start a chain\nthere\. \/zensu:plan-review, \/zensu:setup, \/zensu:cover, \/zensu:autopilot and \/zensu:pilot\nstill read plans, config, overlays and templates from the start directory\.\n/);
+  assert.match(unpastable.text, /from the start directory\.\nThe source-write gate reads its project-level hooks\.bashWriteGate opt-in there too\.\n/);
   assert.doesNotMatch(unpastable.text, /can start in this session/);
   for (const character of ['"', '$', '\\']) {
     const text = reanchor.renderReanchorOutcome({ ...movedOutcome, projectRoot: `/work/re${character}po/b` }).text;

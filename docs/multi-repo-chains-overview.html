@@ -637,7 +637,8 @@
   <div class="note">
     <strong>The root list must be frozen at arming — a carrier is chosen, and nothing holds it yet.</strong>
     <p>It must not come from an environment variable and must not be derived from model-authored
-    text, because it governs the write gate and the capability confinement: extending it is a
+    text, because it governs the write gate, while that opt-in gate is on, and the capability
+    confinement: extending it is a
     capability grant, not configuration. Every root must canonicalize, be a real work tree, and be
     neither a parent of the anchor nor a filesystem root.</p>
     <p>The workflow document is <em>not</em> that carrier. It is writable from inside the session and
@@ -648,7 +649,8 @@
     confirmation at arming for provenance — and §8.1 states what that pair does not buy: the record
     does not authenticate its own contents either, so the list's security rests on the records
     directory being unwritable. Stage 2 stays BLOCKED until §6.1.1's three preconditions are built
-    in order, the first of which is the containment gate that makes that directory unwritable.</p>
+    in order, the first of which is the containment gate that makes that directory unwritable — on
+    a path that runs at every setting, never as a fourth opt-in rule of the source-write gate.</p>
   </div>
 
   <div class="note">

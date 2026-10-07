@@ -696,8 +696,9 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += 'paths above before you confirm.\n';
   text += '\n--confirm re-mints this session\'s Session Control record with the new project root and\n';
   text += 'nothing else changed, and sets the previous record aside unchanged. From the next tool\n';
-  text += 'call the source-write gate, the reviewer confinement and the zensu-log.sh workflow verbs\n';
-  text += 'anchor on the new worktree, and the recorded root is outside this session from then on.\n';
+  text += 'call the reviewer confinement, the zensu-log.sh workflow verbs and, while\n';
+  text += 'hooks.bashWriteGate is true, the source-write gate anchor on the new worktree, and the\n';
+  text += 'recorded root is outside this session from then on.\n';
   text += 'The host does not move: it keeps this session\'s start directory, and the Bash tool\n';
   text += 'returns there after a command that leaves it, so give your own commands a leading cd into\n';
   if (unpastableRoot(verdict.targetRoot)) {
@@ -711,7 +712,8 @@ function renderReanchorVerdict(verdict, confirmed) {
     text += 'and --evidence-run runs there too, so a new /zensu:tdd chain can start in this session.\n';
   }
   text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
-  text += 'read plans, config, overlays and templates from the start directory. The workflow\n';
+  text += 'read plans, config, overlays and templates from the start directory. The source-write\n';
+  text += 'gate reads its project-level hooks.bashWriteGate opt-in there too. The workflow\n';
   text += 'document under the recorded root stays where it is; review-evidence leases bound to it\n';
   text += 'are set aside, and this session\'s tdd-mode, delivery-route and zen-mode markers move\n';
   text += 'with the anchor.\n';
@@ -760,12 +762,14 @@ function renderReanchorOutcome(outcome) {
     text += 'run there: move the worktree to a path without these characters before you start a chain\n';
     text += 'there. /zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot\n';
     text += 'still read plans, config, overlays and templates from the start directory.\n';
+    text += 'The source-write gate reads its project-level hooks.bashWriteGate opt-in there too.\n';
   } else {
     text += 'leading cd into the project above. /zensu:tdd, /zensu:self-review, /zensu:converge,\n';
     text += '/zensu:verify-feature --chain and --evidence-run work in the project above, so a new\n';
     text += '/zensu:tdd chain can start in this session. /zensu:plan-review, /zensu:setup,\n';
     text += '/zensu:cover, /zensu:autopilot and /zensu:pilot still read plans, config, overlays and\n';
-    text += 'templates from the start directory.\n';
+    text += 'templates from the start directory. The source-write gate reads its project-level\n';
+    text += 'hooks.bashWriteGate opt-in there too.\n';
   }
   if (markers.faults.length > 0) {
     text += '\nA session marker that did not move stays under the previous root, where this session no\n';

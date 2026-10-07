@@ -275,7 +275,11 @@ record as trusted.
 is the exact failure §8.1 exists to name.
 
 1. **The gate.** A containment rule in `hooks/lib/bash-source-write-parse.js`
-   refusing a Bash write into `CLAUDE_PLUGIN_DATA`. That parser carries no rule
+   refusing a Bash write into `CLAUDE_PLUGIN_DATA`, on a path that runs at every
+   setting — the `BSWG_MODE=control` pass the hook runs ahead of its
+   `hooks.bashWriteGate` check, or a hook with no flag of its own such as
+   `pre-write-plugin-data-guard.sh` — never as a fourth rule beside (A)/(B)/(C),
+   which are opt-in and off by default. That parser carries no rule
    naming that store, or `.zensu`, at all. Adding one widens a DENY gate, which
    costs a `minor` release under CLAUDE.md §"Runtime Lineage". This gate is worth
    building whether or not stage 2 is ever built: the same store holds every
@@ -339,8 +343,10 @@ occurrences of `CLAUDE_PLUGIN_DATA` or `.zensu`, and CLAUDE.md §"Plugin-Data Gu
 records the uncovered Bash channel as that guard's own first residual. **This was
 NOT re-measured behaviorally, and the reason is this section's own trap one field
 over:** a synthetic payload carrying no session id makes the gate fail closed on
-the binding, so the deny it returns says nothing about containment. Re-measure it
-with a real bound session before writing precondition 1, exactly as the paragraph
+the binding while `hooks.bashWriteGate` is `true`, and at the default the gate
+allows it before any bind, so neither answer says anything about containment.
+Re-measure it with a real bound session and the gate opted in, or through the
+always-on control pass, before writing precondition 1, exactly as the paragraph
 below requires a `cwd`.
 
 **The ordering is a requirement, not a preference.** The gate first, then the
@@ -388,9 +394,10 @@ containment in both directions.
 **Location.** It does not contain the user's own control surfaces — not `$HOME`,
 not any directory containing `.claude/` or the plugin-data directory, and not a
 directory containing another project's `.zensu/`. §3 declares `~/.claude` changes a
-non-goal; without this rule a home-directory code root would make
-`~/.claude/settings.json` Bash-writable, which is a file the agent would then be
-able to widen its own permissions in.
+non-goal; without this rule a home-directory code root would put `~/.claude`
+inside the reviewer confinement and inside rule (C)'s repository test. It is not
+what keeps `~/.claude/settings.json` from Bash: rule (B) judges source extensions
+only and is opt-in, so that file is Bash-writable with or without a code root.
 
 **Exclusivity.** It is not the recorded `project_root` of any other live Session
 Control record. The records directory is enumerable, so this is checkable. Without
@@ -579,7 +586,9 @@ wanted before stage 2 exists.
 
 Two of the changes are capability grants, not configuration.
 
-Widening rule (B)/(C) lets Bash write outside the previously bound tree. Widening
+Widening rule (B)/(C) lets Bash write outside the previously bound tree while the
+opt-in gate is on (`hooks.bashWriteGate: true`); at its default nothing binds a
+Bash write to that tree in the first place. Widening
 the reviewer confinement lets a read-only agent read outside it. Both are
 therefore bound to the same list, and that list must satisfy all of:
 
@@ -642,7 +651,8 @@ one release boundary as `record-unreadable` (`:1986`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger
-entries. Nothing here adds a new escape.
+entries whenever they escape a gate — for the source-write gate, only while
+`hooks.bashWriteGate` is `true`. Nothing here adds a new escape.
 
 ## 9. Versioning
 

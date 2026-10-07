@@ -163,8 +163,8 @@ When enabled, the gate denies a write through one of those channels to a source-
 
 - **(A) Clobber** — the target already **exists and is git-tracked** inside the project (a raw
   shell overwrite of real tracked source), or
-- **(B) Escape** — the resolved path lands **outside the session root** (`CLAUDE_PROJECT_DIR`, else
-  the command's cwd) — a sibling or main checkout. Relative targets resolve against a cwd that
+- **(B) Escape** — the resolved path lands **outside the session root** (the recorded Session
+  Control project root, or the host's `CLAUDE_PROJECT_DIR` in a relaxed unbound session) — a sibling or main checkout. Relative targets resolve against a cwd that
   **tracks `cd` across the command**, so `cd ../main && printf … >> src/x.rs` is caught. (B) fires
   even for a new file, since writing fresh source into another checkout is the breach.
 
@@ -199,8 +199,8 @@ session that was handed over; what still keys on the anchor is the review chain,
 subagents read only inside the recorded project root. A session that continues
 work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
 files and run tests there — on the main thread no Edit-matcher hook compares a path against the
-project root, and the all-tool capability gate that does compare exempts the main principal — but its
-first `git add`/`git commit` denies, because the session root is minted at SessionStart and only
+project root, and the all-tool capability gate that does compare exempts the main principal — but with
+the gate enabled its first `git add`/`git commit` denies, because the session root is minted at SessionStart and only
 the verified move below re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
 `git worktree add .claude/worktrees/<name>` every worktree sits inside the main checkout and a session
 anchored there commits in all of them. The blocked shapes are a sibling worktree, another repository,

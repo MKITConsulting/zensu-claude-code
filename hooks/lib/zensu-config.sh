@@ -10,8 +10,9 @@
 #   3. $ZENSU_CONFIG                          (full override — used verbatim, NOT
 #                                             merged; the explicit escape hatch)
 #
-# A missing or malformed file degrades to {} (so a broken project file can no
-# longer blank a valid global). When a key is absent from the merged object the
+# A missing or unparseable file degrades to {}, so it cannot blank a valid global;
+# a project file that parses to a non-object (null, an array, a bare value) still
+# replaces the merged config. When a key is absent from the merged object the
 # getters apply their hardcoded defaults: enabled for an ordinary hook flag, off
 # for an opt-in key read through `zensu_hook_opted_in`.
 #

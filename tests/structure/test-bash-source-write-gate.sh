@@ -293,10 +293,10 @@ mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
     && printf 'pub fn x(){}\n' > src/lib.rs && git add src/lib.rs && git commit -qm init
 ) >/dev/null 2>&1
 
-CFG_ON="$(mktemp -t bswgate-on-XXXXXX)";     printf '%s' '{"hooks":{"bashWriteGate":true}}'   > "$CFG_ON"
-CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}'  > "$CFG_OFF"
-CFG_UNSET="$(mktemp -t bswgate-unset-XXXXXX)"; printf '%s' '{"hooks":{}}'                     > "$CFG_UNSET"
-CFG_QUOTED="$(mktemp -t bswgate-quoted-XXXXXX)"; printf '%s' '{"hooks":{"bashWriteGate":"true"}}' > "$CFG_QUOTED"
+CFG_ON="$WORKROOT/cfg-on.json";         printf '%s' '{"hooks":{"bashWriteGate":true}}'   > "$CFG_ON"
+CFG_OFF="$WORKROOT/cfg-off.json";       printf '%s' '{"hooks":{"bashWriteGate":false}}'  > "$CFG_OFF"
+CFG_UNSET="$WORKROOT/cfg-unset.json";   printf '%s' '{"hooks":{}}'                     > "$CFG_UNSET"
+CFG_QUOTED="$WORKROOT/cfg-quoted.json"; printf '%s' '{"hooks":{"bashWriteGate":"true"}}' > "$CFG_QUOTED"
 export CLAUDE_PROJECT_DIR="$PROJ"
 export ZENSU_TEST_PLUGIN_DATA="$WORKROOT/plugin-data"
 # shellcheck disable=SC1091

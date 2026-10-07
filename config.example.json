@@ -32,6 +32,7 @@
     "externalReviewImport": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
+    "reviewerSpawnPermissionCheck": true,
     "subagentShell": true,
     "sessionAutoAdopt": true,
     "pendingReviewTtlHours": 6,

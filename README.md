@@ -29,8 +29,8 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 - **Findings you can trust.** Every finding is graded against the real source
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or
-  mutating tracked product data outside a workflow, and an opt-in gate keeps it
-  from writing into a sibling checkout. Each one has a documented escape hatch.
+  mutating tracked product data outside a workflow, and an opt-in gate refuses raw
+  Bash writes of source files and git mutations aimed at a sibling checkout. Each one has a documented escape hatch.
 - **Features, not commits.** Security profiles, user journeys, tiers, and
   release readiness live in a dashboard instead of in your head.
 
@@ -149,7 +149,7 @@ hook can be turned off in `~/.zensu/config.json` (global) or
 
 The full flag reference, the merge order, and the hook table are in
 [docs/configuration.md](docs/configuration.md). A complete file with every flag
-is included as [`config.example.json`](config.example.json).
+that has a default is included as [`config.example.json`](config.example.json).
 
 ## Works without a Zensu account
 
