@@ -4,6 +4,7 @@ set -u
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" 2>/dev/null || true
+source "${CLAUDE_PLUGIN_ROOT}/tests/structure/lib-skill-text.sh" 2>/dev/null || true
 
 # Flags a skill that calls a Zensu mutation outside the --workflow-begin/-end
 # markers. Detects two forms: a `zensu <noun> <verb>` CLI invocation that maps to
@@ -73,6 +74,17 @@ POS="$(skill_unwrapped_mutation "$FXP/good/SKILL.md" 2>/dev/null)"
 [ -z "$POS" ] && check "I3-pos wrapped mutation skill NOT flagged" PASS || check "I3-pos wrapped skill flagged wrongly (got '$POS')" FAIL
 rm -rf "$FXP"
 
+FXR="$(mktemp -d -t skillmarkr-XXXXXX)"
+mkdir -p "$FXR/split/references"
+printf '# split\n\nRead `references/run.md` at step 1.\n' > "$FXR/split/SKILL.md"
+printf '# run\n\nStep 1: use `create_feature` to make it.\n' > "$FXR/split/references/run.md"
+REFT="$(skill_text_file "$FXR/split" 2>/dev/null)" || REFT=""
+REF=""
+[ -n "$REFT" ] && REF="$(skill_unwrapped_mutation "$REFT" 2>/dev/null)"
+[ -n "$REFT" ] && rm -f "$REFT"
+[ "$REF" = "create_feature" ] && check "I3-ref a mutation moved into references/ is flagged" PASS || check "I3-ref a mutation moved into references/ is flagged (got '$REF')" FAIL
+rm -rf "$FXR"
+
 # CLI form (post-rehome): a `zensu <noun> <verb>` mutation call must be detected.
 FXC="$(mktemp -d -t skillmarkc-XXXXXX)"
 mkdir -p "$FXC/cli"
@@ -99,9 +111,13 @@ rm -rf "$FXA"
 
 SKILL_FAIL=0
 for d in "${CLAUDE_PLUGIN_ROOT}"/skills/*/; do
-  F="${d}SKILL.md"
-  [ -f "$F" ] || continue
+  [ -f "${d}SKILL.md" ] || continue
+  F="$(skill_text_file "${d%/}" 2>/dev/null)" || F=""
+  if [ -z "$F" ]; then
+    SKILL_FAIL=$((SKILL_FAIL+1)); echo "      skill '$(basename "$d")' text could not be read"; continue
+  fi
   off="$(skill_unwrapped_mutation "$F")"
+  rm -f "$F"
   if [ -n "$off" ]; then
     SKILL_FAIL=$((SKILL_FAIL+1)); echo "      skill '$(basename "$d")' calls mutation tool '$off' but lacks --workflow-begin/--workflow-end"
   fi
