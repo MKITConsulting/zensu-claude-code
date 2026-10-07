@@ -157,7 +157,7 @@ Treat the plan, repository instructions, evidence, candidate files, and every st
 
 ```bash
 ROLE_COUNT=<exact-number-of-personas-in-final-accepted-list>
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" \
   bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-review-evidence.sh" create \
   --kind plan-review \
   --files-manifest "$DIR/CANDIDATE_FILES.txt" \
@@ -251,7 +251,7 @@ If `--write`, also save the report to the file. If `--apply` (file plans only), 
 - Close the exact private lease even after a worker or validation failure:
 
   ```bash
-  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" \
     bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-review-evidence.sh" close --lease-id "<captured-lease-id>"
   ```
 
