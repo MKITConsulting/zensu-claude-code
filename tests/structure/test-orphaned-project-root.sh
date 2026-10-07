@@ -741,15 +741,20 @@ else
   check "O29d parser failure (status $O29D_STATUS, reason '$O29D_REASON')" FAIL
 fi
 O29G_PAYLOAD_FILE="$STATE_DIR/large-payload.json"
-node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: ": \x27" + "a".repeat(1572864) + "\x27" }, session_id: "orphan-gone", cwd: process.argv[2] }))' \
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: ": \x27" + "a".repeat(700000) + "\x27" }, session_id: "orphan-gone", cwd: process.argv[2] }))' \
   "$O29G_PAYLOAD_FILE" "$GATE_PROJECT"
-O29G_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+O29G_PAD=
+if [ "$(uname -s)" = Darwin ]; then
+  O29G_PAD="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+O29G_OUT="$(env O29G_PAD_A="$O29G_PAD" O29G_PAD_B="$O29G_PAD" O29G_PAD_C="$O29G_PAD" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
   CLAUDE_PROJECT_DIR="$STATE_DIR/never-created-anchor" ZENSU_CONFIG="$GATE_ON_CFG" \
   ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
   bash "$BASH_GATE" < "$O29G_PAYLOAD_FILE" 2>/dev/null)"
 O29G_STATUS=$?
 if [ "$O29G_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29G_OUT" | decision)" = "allow" ]; then
-  check "O29g a read-only command whose payload exceeds the exec argument limit still reaches the write-target parser" PASS
+  check "O29g a read-only command whose payload is under the binder's 1 MiB cap but over the exec size limit still reaches the write-target parser" PASS
 else
   check "O29g oversized read-only payload refused (status $O29G_STATUS, output '$(printf '%s' "$O29G_OUT" | cut -c1-160)')" FAIL
 fi

@@ -1559,13 +1559,14 @@ function main(deps = {}) {
     // Write do not. Saying otherwise would send the user straight into a deny.
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
-    process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work, except a\n");
-    process.stdout.write("zensu CLI call, whose gate needs a binding, while Edit, Write and MultiEdit stay\n");
-    process.stdout.write("denied, and so does any Bash command the source-write gate can attribute as a\n");
-    process.stdout.write("write while that opt-in gate is on (hooks.bashWriteGate: true) — a write cannot be\n");
-    process.stdout.write("attributed to a project that is not there. NotebookEdit still passes, as it does\n");
-    process.stdout.write("in a healthy session. To restore Edit, Write and MultiEdit, run this command once\n");
-    process.stdout.write("more with --restore-root --confirm — now that the lineage break is cleared, this\n");
+    process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work,\n");
+    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
+    process.stdout.write("the source-write gate can attribute as a write while that opt-in gate is on\n");
+    process.stdout.write("(hooks.bashWriteGate: true) — a write cannot be attributed to a project that is\n");
+    process.stdout.write("not there. A zensu CLI call stays denied as well, because its gate needs a\n");
+    process.stdout.write("binding. NotebookEdit still passes, as it does in a healthy session. To restore\n");
+    process.stdout.write("Edit, Write and MultiEdit, run this command once more with\n");
+    process.stdout.write("--restore-root --confirm — now that the lineage break is cleared, this\n");
     process.stdout.write("installation serves the record, which is what that repair requires. It re-creates\n");
     process.stdout.write("exactly that directory and rebuilds the workflow document in one step, restoring\n");
     process.stdout.write("the anchor and not the work: the directory comes back empty and the chain that\n");

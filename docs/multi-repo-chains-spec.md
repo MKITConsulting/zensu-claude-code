@@ -278,7 +278,7 @@ is the exact failure §8.1 exists to name.
    refusing a Bash write into `CLAUDE_PLUGIN_DATA`, on a path that runs at every
    setting — the `BSWG_MODE=control` pass the hook runs ahead of its
    `hooks.bashWriteGate` check, or a hook with no flag of its own such as
-   `pre-write-plugin-data-guard.sh` — never as a fourth rule beside (A)/(B)/(C),
+   `hooks/pre-write-plugin-data-guard.sh` — never as a fourth rule beside (A)/(B)/(C),
    which are opt-in and off by default. That parser carries no rule
    naming that store, or `.zensu`, at all. Adding one widens a DENY gate, which
    costs a `minor` release under CLAUDE.md §"Runtime Lineage". This gate is worth
