@@ -293,8 +293,8 @@ GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (15)
-`changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
+### Release & repo hygiene (16)
+`changelog-unreleased-resolver-entries` · `clock-shift` · `drift-assertion-or-logic` · `drift-audit-regex` ·
 `file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
 `promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
@@ -304,8 +304,9 @@ reconciliation (~107), commentable-diff-line validation, credential handling.
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
 invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
 only reference existing files, that Promptfoo stays local-only, that no workflow `run:`
-block template-expands a dispatcher-controlled expression, and the runner's own contract.
-`workflow-dispatch-inputs` needs `node_modules` → `BLOCK` without `npm ci`.
+block template-expands a dispatcher-controlled expression, the shifted-clock pass behind
+`scheduled.yml` (its preload, its allowlist and its runner), and the runner's own contract.
+`workflow-dispatch-inputs` and `clock-shift` need `node_modules` → `BLOCK` without `npm ci`.
 
 ### Windows & portability (5)
 `bash32-portability` · `msys-runtime-boundaries` ·
@@ -383,6 +384,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 80 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
+| `clock-shift-v1.test.js` | 17 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the allowlist validator, the runner's verdict (allowed, unexpected, stale and unexercised results) end to end against synthetic unit files, that every shipped allowlist entry names a top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
@@ -423,8 +425,8 @@ file with a row calls the same helper beside the floor it reads from that cell t
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (45
-files) against this table's 40 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (46
+files) against this table's 41 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
@@ -533,6 +535,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 | `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 9 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice**, each as parallel `--shard=I/N` legs — once in `prepare-suite` against the bundled release commit, once in `publish-suite` against the exact `github.sha`; plus runtime-digest and clean-tree evidence in `prepare` and `publish` |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
+| `scheduled.yml` | `node tests/run-clock-shift.js` — scheduled daily + manual, Ubuntu only; runs every `tests/structure/*.test.js` with `Date` moved forward by the allowlist's `shiftDays` through the `tests/lib/clock-shift.cjs` preload (passed on in `NODE_OPTIONS`, so spawned node CLIs see the same clock), and fails on any top-level test failure outside `tests/profiles/clock-shift-allowlist.v1.json` and on any stale entry there. It catches a fixed-date fixture that the code under test reads on the real clock before the date arrives, which `ci.yml` cannot: it runs only on pull requests and pushes to `main` |
 
 The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo profiles are
 **never** invoked by GitHub Actions — local-only by design, machine-enforced by
@@ -542,6 +545,13 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 
 - `tests/session-control/run.sh` (Session Control core unit suite) is **not** in
   `run-all.sh` — only in the Windows profiles and the legacy canary.
+- The shifted-clock pass in `scheduled.yml` moves `Date` in node processes only, and only
+  for `tests/structure/*.test.js`: the shell suites, `tests/session-control/`, child
+  processes that are not node (`git`, `date`), file mtimes and any node child whose
+  environment drops `NODE_OPTIONS` stay on the real clock. A test that compares a file
+  mtime, a git date or a lease age with `Date.now()` therefore fails under the shift by
+  design; the allowlist names each such test with its dependency (`file-mtime`,
+  `git-date` or `lease-staleness`).
 - 4 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
 - The 2 offline eval self-checks whose `ciOfflineSuites` entry sets `needsNodeDeps`
