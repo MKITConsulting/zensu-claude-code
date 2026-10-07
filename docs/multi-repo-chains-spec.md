@@ -94,9 +94,9 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:573` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:629` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:536-538` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:592-594` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -362,7 +362,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:256`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:288`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -423,7 +423,7 @@ dropped: a dropped root is a root nothing audits.
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1441-1443`, `:2266-2268` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:573`, `:550` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:629`, `:606` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -528,7 +528,7 @@ one capability grant instead of two and delete the open question below. It is no
 chosen here only because it moves the read cost onto the main thread; it should be
 weighed again before stage 3 is built.
 
-The Grep/Glob pattern rule at `reviewer-capability-v1.js:536-538` needs a
+The Grep/Glob pattern rule at `reviewer-capability-v1.js:592-594` needs a
 decision this document does not make: a cross-root reviewer needs to search more
 than one tree, and the present rule forbids an absolute pattern. Either the tool
 call carries an explicit root selector, or the pattern rule learns the same leased

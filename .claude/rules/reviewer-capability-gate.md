@@ -63,9 +63,75 @@ void. Measured on 51 denied `pr-review-worker` transcripts: after one to four de
 attempts, every one ended with its pure-JSON result as final text. Admitting the tool for
 workers first needs the `SubagentStop` reader to take the result from the handback.
 
-**Neutral children** (`host-profile-v1`) stay host-governed. Their handback runs through
-`neutralViolation`: allowed with an existing `cwd`, denied with a vanished one. The suite pins
-both as current behavior.
+**Neutral children** (`host-profile-v1`) get an ALLOWLIST, not a denylist. `neutralViolation`
+admits a tool only when it is in `HOST_PROFILE_TOOLS`, is named in
+`HOST_PROFILE_MCP_READ_TOOLS`, or is a Zensu MCP read tool (`/^mcp__.*zensu/i` plus
+`ZENSU_MCP_READ_RE`, kept from before); every other tool is denied. The six-name
+`COMMAND_TOOLS` denylist and the Zensu-only MCP check it replaced let every command-executing
+MCP tool through (`ctx_execute`, `ctx_execute_file`, `ctx_batch_execute`, `run_in_terminal`,
+`browser_run_code_unsafe`), and the host's `Monitor`, whose `command` input is a shell script,
+although the comment above the check promised neutral children no command-execution tool at
+all. Their handback is on the list and still passes the `cwd`
+resolution first: allowed with an existing `cwd`, denied with a vanished one.
+
+- **Sized from transcripts.** Measured on 2026-10-06 over the local subagent transcripts under
+  `~/.claude/projects`, all projects: 8,159 typed neutral transcripts with 276,590 tool calls.
+  The list the fix was specified with (`Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit`, `WebFetch`, `WebSearch`, `ToolSearch`, `TodoWrite`, `StructuredOutput`,
+  `SubagentHandback`, `AskUserQuestion`) gained `LSP` (1,315 calls in 776 transcripts), `Agent`
+  (108 in 70; a child spawned by a child is classified by this same gate, and the suite pins
+  the allowance), `SendMessage` (132 in 81; gauntlet-loop builders coordinate through it), the
+  task-list tools `TaskCreate`, `TaskGet`, `TaskList` and `TaskUpdate` (the newer `TodoWrite`,
+  pinned as kept before), `ReportFindings` (a report channel like `StructuredOutput`) and
+  `apply_patch` (path-checked like the other file tools, pinned before). None of them runs
+  code, and every filesystem argument of an admitted tool still goes through the path checks.
+- **Named read-only MCP tools: only the two Context7 documentation tools.** They reach no
+  local state. Deliberately NOT named: `ctx_search` (it reads an index other principals
+  filled, a read no path check can see), the browser and preview tools (a `file://`
+  navigation reads protected state, and `javascript_tool` and `browser_run_code_unsafe` run
+  code), and the desktop session tools (they read other sessions' transcripts). The `mcp__`
+  prefix test is case-sensitive, so `MCP__zensu__…` is not a Zensu read tool.
+- **Why not the minimum fix.** Denying only MCP tools whose last segment matches
+  `MCP_COMMAND_SEGMENT_RE` leaves host command tools outside `COMMAND_TOOLS` open — `Monitor`
+  runs a shell command — and every MCP server whose code path has no telling name. Measured
+  cost on the same transcripts: the minimum fix newly denies 24,354 calls in 1,334
+  transcripts, the allowlist 32,033 calls in 1,671. The 551 transcripts only the allowlist
+  affects are browser automation (134), context-mode search and indexing (229), desktop
+  session tools (170), one inventory connector (42), `Skill` (18), `TaskStop` (11) and
+  `Monitor` (5), with overlaps. `MCP_COMMAND_SEGMENT_RE` now only picks the deny text: a
+  command-executing MCP tool gets the command deny and its remedy.
+- **Path heuristic.** `pathInputs` returns nothing for `NON_PATH_TOOLS` (`StructuredOutput`,
+  `ReportFindings`, `SubagentHandback`, `AskUserQuestion`): they take no filesystem argument,
+  and a `target_files` key or a quoted patch header was misread as one. Every other tool keeps
+  the heuristic, MCP tools included, because `ctx_execute_file` takes a `path`.
+- **Remedy.** The command deny and the traversal deny end with `searchRemedy`: the real,
+  non-hidden subdirectories of the project root that the traversal check admits, read at deny
+  time and capped at `SEARCH_EXAMPLE_LIMIT`, or a `Read` fallback when none qualifies. With
+  the bare denies a subagent concluded that it could not search the tree at all.
+- **Coupled sites.** `renderHostContext` in `hooks/lib/session-control-core-v1.js` enumerates
+  both sets, and `tests/structure/test-reviewer-capability-gate.sh` parses that sentence back
+  and compares it with the module's exports. The same sentence is pinned in
+  `tests/structure/test-session-control-claude.sh` and
+  `evals/session-control/tests/wrapper-selftest.sh`. The deny texts are pinned in
+  `evals/session-control/lib/contract-provider.js`; `evals/session-control/lib/live-evidence.js`
+  matches the command deny by prefix. `skills/gauntlet-loop/SKILL.md` states the bound and G15
+  in `tests/structure/test-gauntlet-loop-skill.sh` pins it. `docs/multi-repo-chains-spec.md`
+  and `docs/multi-repo-chains-overview.html` cite lines of this module. Operator accounts of
+  the allowlist: the capability-gate row in `docs/configuration.md`, the principal item and
+  §"Security boundary" in `docs/session-control.md`, the reviewer-boundary paragraph and the
+  custom-persona note in `docs/review-chain.md`, the two neutral-child paragraphs in
+  `docs/tdd-manager-workflow.md`, the neutral item in `docs/session-control-release-gate.md`,
+  and `skills/gauntlet-loop/references/harness.md`.
+- **Known gaps.** `SendMessage` can reach other local sessions, whose main thread is not
+  confined; that is a prompt-injection path, not a capability this gate grants. `LSP`
+  `workspaceSymbol` searches the whole workspace, `.zensu` included, but only for symbols of
+  source files, and `.zensu` holds JSON, logs and Markdown. A host tool added or renamed later
+  is denied until the list names it, by design. `zensu-codex`, `zensu-kiro` and
+  `zensu-antigravity` carry their own gates and were not changed.
+- **Version: `minor`.** The hook now refuses tool calls it used to allow, so it changes the
+  capability set of every session a newer installation would serve, which
+  `.claude/rules/runtime-lineage.md` makes the breaking test. The earlier changes to this
+  module were `patch` because they denied strictly less; this one denies strictly more.
 
 **Version: `patch`.** The change lifts a deny inside an existing hook and rewords a deny
 reason. No schema field, persisted strict key set, hook registration, matcher, config key or
