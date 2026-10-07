@@ -30,7 +30,7 @@ Any language, any stack. Nothing to configure, and no account needed to start.
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or
   mutating tracked product data outside a workflow, and an opt-in gate refuses raw
-  Bash writes of source files and git mutations aimed at a sibling checkout. Each one has a documented escape hatch.
+  Bash writes that clobber tracked source or land in a sibling checkout, and git mutations aimed at one. Each one has a documented escape hatch.
 - **Features, not commits.** Security profiles, user journeys, tiers, and
   release readiness live in a dashboard instead of in your head.
 

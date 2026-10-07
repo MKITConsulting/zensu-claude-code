@@ -775,7 +775,7 @@ overlay_gate() {
       bash "$BASH_GATE" 2>/dev/null)"
   status=$?
   if [ "$status" -ne 0 ]; then
-    printf 'deny\n'
+    printf 'exit-%s\n' "$status"
     return
   fi
   printf '%s' "$out" | decision

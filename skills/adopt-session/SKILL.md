@@ -535,8 +535,8 @@ row, and read it before you describe the outcome. When the recorded project root
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
-Bash and the read-only diagnostics work again, and `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash
-write the opted-in source-write gate attributes (`hooks.bashWriteGate: true`), until that exact directory is re-created. Say which of the two happened; never report the second as an
+Bash (except a `zensu` CLI call) and the read-only diagnostics work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash
+write the opted-in source-write gate attributes, until that exact directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints

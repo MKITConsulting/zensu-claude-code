@@ -651,8 +651,8 @@ one release boundary as `record-unreadable` (`:1986`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger
-entries whenever they escape a gate — for the source-write gate, only while
-`hooks.bashWriteGate` is `true`. Nothing here adds a new escape.
+entries while a chain is active in a bound session — for the source-write gate,
+only while `hooks.bashWriteGate` is `true` as well. Nothing here adds a new escape.
 
 ## 9. Versioning
 

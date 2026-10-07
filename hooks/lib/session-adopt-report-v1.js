@@ -913,7 +913,8 @@ function renderRestoreVerdict(verdict, confirmed) {
     w("The record is readable and this installation serves it. Only the recorded project\n");
     w("root is not reachable, which is why Edit, Write and MultiEdit are denied, and so is any\n");
     w("Bash command the source-write gate can attribute as a write while that opt-in gate is\n");
-    w("on (hooks.bashWriteGate: true); other shell commands and reads still work.\n");
+    w("on (hooks.bashWriteGate: true). A zensu CLI call is denied as well, because its gate\n");
+    w("needs a binding; other shell commands and reads still work.\n");
     // The whole evidence base here is one ENOENT, which a deleted directory, a MOVED
     // or renamed one and an unmounted volume all produce identically. Both Stop-hook
     // arms carry this caveat; this block is the surface where the user DECIDES, and

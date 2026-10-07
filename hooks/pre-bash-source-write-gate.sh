@@ -194,7 +194,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # branch used to deny every Bash command unconditionally, which put the
     # diagnostic back behind the defect it reports. In the orphaned state
     # CLAUDE_PROJECT_DIR is usually the directory that is gone (the record's root is
-    # the SessionStart cwd, and only a re-anchor moves it off the host's), and in the
+    # minted from the SessionStart cwd, which is normally the host's), and in the
     # no-record state it may simply be unset — so this branch is the NORMAL
     # case for both relaxed states, not an edge case.
     #

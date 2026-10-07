@@ -4713,8 +4713,10 @@ wt_case "WT8v7 the ledger disclosure is bounded to a session with an armed chain
   "$WT8_ADOPT" 'only while a Zensu chain' 'cannot run against it as printed'
 wt_case "WT8v7b the move route does not PRESCRIBE taking the escape" \
   "$WT8_ADOPT" 'do not go looking for the spelling' 'take it from there'
-wt_case "WT8v12 the move route states the gate is opt-in and off by default" \
+wt_case "WT8v12 the move route states the gate is opt-in" \
   "$WT8_ADOPT" 'It is OPT-IN: it runs only when the Zensu config sets hooks.bashWriteGate to true, and it' 'the refusal names it'
+wt_case "WT8v12c the move route says the gate is off by default and refuses nothing there" \
+  "$WT8_ADOPT" 'is off by default, so at the default nothing refuses this move' 'cannot run against it as printed'
 wt_case "WT8v12b the move route says the refusal names the config key and no escape prefix" \
   "$WT8_ADOPT" 'Its refusal names that config key and no escape prefix' 'An operator-facing one-off escape exists and the refusal'
 # The one instruction that survives every OTHER gate needle above: `WT8v6` pins that the gate

@@ -581,9 +581,9 @@ whether browser verification is enforced, not only when a row is red.
   retries by hand — that is the
   difference from the plain orphaned row, which the running installation already
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
-  the repair: adoption clears the LINEAGE break, so Bash and this
-  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash write the source-write gate attributes
-  while it is opted in (`hooks.bashWriteGate: true`), until that exact directory is re-created by
+  the repair: adoption clears the LINEAGE break, so Bash (except a `zensu` CLI call) and this
+  diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the source-write gate attributes
+  while it is opted in, until that exact directory is re-created by
   `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
   requires the running installation to SERVE the record, which is exactly what the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
