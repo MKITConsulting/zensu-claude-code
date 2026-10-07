@@ -661,6 +661,12 @@ test('the network-only remote scenario needs a passing network-only preflight be
   assert.equal(check(remoteRun({ helper: declaredSafe + flagged }), 'remoteNetworkOnlyTools').pass, false);
   const otherOrigin = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT.replace('https://example.org', 'https://example.net'), 'policy');
   assert.equal(check(remoteRun({ helper: otherOrigin + flagged }), 'remoteNetworkOnlyTools').pass, false);
+  const echoed = bash('remote-preflight', `${NETWORK_ONLY_PREFLIGHT}; echo "exit=$?"`, 'policy\nexit=0');
+  assert.equal(check(remoteRun({ helper: echoed + flagged }), 'remoteNetworkOnlyTools').pass, true);
+  const chained = bash('remote-helper', `${NETWORK_ONLY_HELPER} && echo done`, `${NETWORK_ONLY_HELPER_BODY}\ndone`);
+  assert.equal(check(remoteRun({ helper: preflight + chained }), 'remoteNetworkOnlyTools').pass, true);
+  const lookalike = bash('remote-helper', NETWORK_ONLY_HELPER.replace(/https:\/\/example\.org$/, 'https://example.org.evil'), NETWORK_ONLY_HELPER_BODY);
+  assert.equal(check(remoteRun({ helper: preflight + lookalike }), 'remoteNetworkOnlyTools').pass, false);
 });
 
 test('the network-only remote evidence must come from the flagged session, in the spelling the skill documents', () => {
@@ -695,6 +701,12 @@ test('the network-only remote evidence must come from the flagged session, in th
   });
   assert.equal(check(evidenceElsewhere, 'remoteAcceptedEvidence').pass, true);
   assert.equal(check(evidenceElsewhere, 'remoteNetworkOnlyTools').pass, false);
+  const preflight = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'policy');
+  const flagged = bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY);
+  const rewritten = remoteRun({ helper: preflight + flagged + parts.helper.replaceAll('id=remote-helper', 'id=remote-helper-rewrite') });
+  assert.equal(check(rewritten, 'remoteNetworkOnlyTools').pass, false);
+  const flaggedLast = remoteRun({ helper: parts.helper.replaceAll('id=remote-helper', 'id=remote-helper-first') + preflight + flagged });
+  assert.equal(check(flaggedLast, 'remoteNetworkOnlyTools').pass, true);
 });
 
 test('unsafe remote rejection uses a bare PARTIAL verdict without leaking any URL component', () => {

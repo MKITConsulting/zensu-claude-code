@@ -17,6 +17,7 @@ const REMOTE_ROOT = 'https://example.com/';
 const WORD_CHARACTER = /^[A-Za-z0-9_@%+=:,.\/-]$/;
 const HELPER_SCRIPT = String.raw`(?:^|[\s;&|(])node\s+(["']?)[^\s"';&|()]*\/scripts\/verify-browser-config\.js\1\s+`;
 const HELPER_RUN = new RegExp(`${HELPER_SCRIPT}--run-dir\\s`);
+const OPERAND_END = String.raw`(?=[\s;&|)]|$)`;
 const CLI_MENTION = /\bplaywright-cli\b|@playwright\/cli\b/;
 const BROWSER_WORD = /\b(?:playwright|puppeteer|chromium|chrome|google-chrome|selenium)\b|require\s*\(\s*["'](?:playwright|puppeteer)["']/i;
 const BROWSER_TOOL_NAME = /browser|playwright|puppeteer|chrom(?:e|ium)|selenium/i;
@@ -244,8 +245,14 @@ function helperOutputs({ uses, results }) {
     if (!succeeded(result)) return [];
     const session = result.body.match(/^session=(\S+)$/m)?.[1];
     const config = result.body.match(/^config=(.+)$/m)?.[1];
-    return session && config ? [{ session, config, end: result.end }] : [];
+    return session && config ? [{ call, command, body: result.body, session, config, end: result.end }] : [];
   });
+}
+
+function configuringHelper(open, printed) {
+  return printed.filter((helper) => helper.session === open.session && helper.config === open.args.config
+    && helper.end <= open.call.start)
+    .reduce((latest, helper) => (!latest || helper.end > latest.end ? helper : latest), null);
 }
 
 function literalPattern(text) {
@@ -253,7 +260,7 @@ function literalPattern(text) {
 }
 
 function networkOnlyPreflightEnds({ uses, results }, origin) {
-  const preflight = new RegExp(`${HELPER_SCRIPT}--check-policy\\s+(["']?)remote\\2\\s+(["']?)${literalPattern(origin)}\\3\\s+(["']?)network-only\\4(?=\\s|$)`);
+  const preflight = new RegExp(`${HELPER_SCRIPT}--check-policy\\s+(["']?)remote\\2\\s+(["']?)${literalPattern(origin)}\\3\\s+(["']?)network-only\\4${OPERAND_END}`);
   return uses.flatMap((call) => {
     const command = bashCommand(call);
     if (command === null || !preflight.test(command)) return [];
@@ -262,27 +269,17 @@ function networkOnlyPreflightEnds({ uses, results }, origin) {
   });
 }
 
-function networkOnlyConfigs(transcript, origin) {
-  const { uses, results } = transcript;
-  const flag = new RegExp(`\\s--network-only-origin\\s+(["']?)${literalPattern(origin)}\\1(?=\\s|$)`);
-  const preflights = networkOnlyPreflightEnds(transcript, origin);
-  return uses.flatMap((call) => {
-    const command = bashCommand(call);
-    if (command === null || !HELPER_RUN.test(command) || !flag.test(command)) return [];
-    if (!preflights.some((end) => end <= call.start)) return [];
-    const result = correlatedResult(call, results);
-    if (!succeeded(result) || !result.body.split('\n').includes(`network-only-origin=${origin}`)) return [];
-    const config = result.body.match(/^config=(.+)$/m)?.[1];
-    return config ? [config] : [];
-  });
+function passesNetworkOnly(helper, origin, preflightEnds) {
+  const flag = new RegExp(`\\s--network-only-origin\\s+(["']?)${literalPattern(origin)}\\1${OPERAND_END}`);
+  return flag.test(helper.command) && helper.body.split('\n').includes(`network-only-origin=${origin}`)
+    && preflightEnds.some((end) => end <= helper.call.start);
 }
 
 function provenOpens(transcript, operations) {
   const printed = helperOutputs(transcript);
   return successes(operations, 'open').filter((open) =>
     open.result.body.includes(`### Browser \`${open.session}\` opened with pid `)
-      && printed.some((helper) => helper.session === open.session
-        && helper.config === open.args.config && helper.end <= open.call.start));
+      && configuringHelper(open, printed) !== null);
 }
 
 function landedOn(entry, isTarget) {
@@ -452,14 +449,18 @@ const checks = {
   },
 
   remoteNetworkOnlyTools(transcript) {
-    const configs = networkOnlyConfigs(transcript, NETWORK_ONLY_ORIGIN);
-    const { proven, gaps } = sessionCoverage(transcript, (url) => url === REMOTE_ROOT, REMOTE_REQUIRED,
-      (open) => configs.includes(open.args.config));
+    const printed = helperOutputs(transcript);
+    const preflightEnds = networkOnlyPreflightEnds(transcript, NETWORK_ONLY_ORIGIN);
+    const flagged = (open) => {
+      const helper = configuringHelper(open, printed);
+      return helper !== null && passesNetworkOnly(helper, NETWORK_ONLY_ORIGIN, preflightEnds);
+    };
+    const { proven, gaps } = sessionCoverage(transcript, (url) => url === REMOTE_ROOT, REMOTE_REQUIRED, flagged);
     const exactNavigation = browserOperations(transcript)
       .filter((entry) => consent.NAVIGATION_COMMANDS.includes(entry.operation) && entry.positional.length > 0)
       .every((entry) => entry.positional[0] === REMOTE_ROOT);
     return verdict(proven && gaps.length === 0 && exactNavigation && !usesLocalRuntime(transcript.uses),
-      `Network-only remote coverage requires a --check-policy remote ${NETWORK_ONLY_ORIGIN} network-only preflight that printed policy, then a helper call that passed --network-only-origin ${NETWORK_ONLY_ORIGIN} and printed it back, a session opened with that helper's config which itself navigates to exactly ${REMOTE_ROOT} and succeeds at snapshot, screenshot, console, requests, and close, no navigation command aimed anywhere but exactly ${REMOTE_ROOT}, the network-only origin included, and no local runtime lifecycle; flagged session opened: ${proven ? 'yes' : 'no'}; missing: ${gaps.join(', ') || 'none'}`);
+      `Network-only remote coverage requires a --check-policy remote ${NETWORK_ONLY_ORIGIN} network-only preflight that printed policy, then a helper call that passed --network-only-origin ${NETWORK_ONLY_ORIGIN} and printed it back, a session opened with the config that helper call wrote with no later helper call rewriting it, which itself navigates to exactly ${REMOTE_ROOT} and succeeds at snapshot, screenshot, console, requests, and close, no navigation command aimed anywhere but exactly ${REMOTE_ROOT}, the network-only origin included, and no local runtime lifecycle; flagged session opened: ${proven ? 'yes' : 'no'}; missing: ${gaps.join(', ') || 'none'}`);
   },
 
   remoteAcceptedEvidence(transcript) {
