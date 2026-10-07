@@ -148,7 +148,7 @@ const REASONS = Object.freeze({
   GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the run config resolver pins',
   POLICY_INVALID: 'the navigation policy in the launch environment is invalid',
   NOT_POLICY_TARGET: 'origin is not a target of the navigation policy',
-  NETWORK_ONLY_NAVIGATION: 'origin is network-only in the navigation policy: pages on its targets may request it, but no navigation command may open it and nothing on it counts as evidence',
+  NETWORK_ONLY_NAVIGATION: 'origin is network-only in the navigation policy: pages on its targets may request it, but no navigation command may open it, and a page the browser lands on there is never evidence',
   NOT_POLICY_NETWORK_ONLY: 'origin is not a network-only origin of the navigation policy',
   NETWORK_ONLY_NEEDS_POLICY: 'a network-only origin needs the parent-environment navigation policy; consent mode has no network-only class, so pass a loopback API origin with --origin and consent to it like any other loopback origin',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,

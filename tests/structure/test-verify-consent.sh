@@ -763,11 +763,38 @@ esac
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" = "NONE" ] \
   && check "H13f-control a target of the same policy still passes without a prompt" PASS \
   || check "H13f-control a target of the same policy still passes without a prompt" FAIL
+NETWORK_ONLY_RUN_DIR="$PROJ/run-network-only"
+mkdir -p "$NETWORK_ONLY_RUN_DIR"
+NETWORK_ONLY_HELPER_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" config_helper --run-dir "$NETWORK_ONLY_RUN_DIR" --mode local --origin 'http://127.0.0.1:4300' --network-only-origin 'http://127.0.0.1:4390' 2>/dev/null)"
+NETWORK_ONLY_SESSION="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^session=//p')"
+NETWORK_ONLY_CONFIG="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^config=//p')"
+NETWORK_ONLY_OPEN="playwright-cli -s=$NETWORK_ONLY_SESSION open --config='$NETWORK_ONLY_CONFIG' http://127.0.0.1:4300/network-only-open"
+network_only_records() {
+  node -e '
+    try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records.filter((r) => r.origin === process.argv[2]).length)); }
+    catch (_) { process.stdout.write("none"); }
+  ' "$MEMORY" "$1" 2>/dev/null
+}
 NETWORK_ONLY_COUNT_BEFORE="$(memory_count)"
-ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$CLI goto http://127.0.0.1:4390/" "$SID" "$PROJ" >/dev/null
-[ "$(memory_count)" = "$NETWORK_ONLY_COUNT_BEFORE" ] \
-  && check "H13g the recorder writes no consent record for a network-only origin" PASS \
-  || check "H13g the recorder writes no consent record for a network-only origin" FAIL
+if [ -n "$NETWORK_ONLY_SESSION" ] && [ -n "$NETWORK_ONLY_CONFIG" ] && [ -f "$NETWORK_ONLY_CONFIG" ] \
+  && printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | grep -qxF 'network-only-origin=http://127.0.0.1:4390' \
+  && grep -qF '"http://127.0.0.1:4390"' "$NETWORK_ONLY_CONFIG" \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$NETWORK_ONLY_OPEN" "$SID" "$PROJ")" = "NONE" ]; then
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$NETWORK_ONLY_OPEN" "$SID" "$PROJ" >/dev/null
+  NETWORK_ONLY_COUNT_AFTER="$(memory_count)"
+  case "$NETWORK_ONLY_COUNT_BEFORE:$NETWORK_ONLY_COUNT_AFTER" in
+    (*[!0-9:]*|:*|*:) NETWORK_ONLY_GREW=0 ;;
+    (*) [ "$NETWORK_ONLY_COUNT_AFTER" -eq "$((NETWORK_ONLY_COUNT_BEFORE + 1))" ] && NETWORK_ONLY_GREW=1 || NETWORK_ONLY_GREW=0 ;;
+  esac
+  if [ "$NETWORK_ONLY_GREW" -eq 1 ] && memory_has "http://127.0.0.1:4300" "/network-only-open" "policy-mode" \
+    && [ "$(network_only_records 'http://127.0.0.1:4390')" = "0" ]; then
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin" PASS
+  else
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (records: $NETWORK_ONLY_COUNT_BEFORE->$NETWORK_ONLY_COUNT_AFTER, network-only: $(network_only_records 'http://127.0.0.1:4390'))" FAIL
+  fi
+else
+  check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (the helper wrote no such run config, or the gate did not admit its open)" FAIL
+fi
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://*.example.com"]}' pre_reason "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ")" in
   *'policy origin must name its host exactly'*) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" PASS ;;
   *) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" FAIL ;;
@@ -779,7 +806,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \

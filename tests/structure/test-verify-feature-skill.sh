@@ -459,8 +459,9 @@ else
   check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" FAIL
 fi
 if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe' "$SKILL_MD" \
-  && grep -qF 'as a standalone preflight once for every origin the run needs.' <<<"$SKILL_FLAT" \
+  && grep -qF 'as a standalone preflight once for every origin the run navigates.' <<<"$SKILL_FLAT" \
   && grep -qF 'It prints `consent` or `policy` and exits `0`, or exits `1` with a named reason.' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'once for every origin the run needs.' <<<"$SKILL_FLAT" \
   && ! grep -qF 'exact-page-route' "$SKILL_MD"; then
   check "P4u every origin runs the run-config helper's --check-policy preflight, with no route operand" PASS
 else
@@ -730,6 +731,35 @@ if [ "$NETWORK_ONLY_CHECK_RC" = "0" ] && [ "$NETWORK_ONLY_CHECK_OUT" = "policy" 
   check "P6s --check-policy proves a declared network-only origin, refuses it as a navigation target, and refuses the operand without a policy" PASS
 else
   check "P6s --check-policy proves a declared network-only origin, refuses it as a navigation target, and refuses the operand without a policy (rc=$NETWORK_ONLY_CHECK_RC out=$NETWORK_ONLY_CHECK_OUT; rc=$NETWORK_ONLY_SWAP_RC; rc=$NETWORK_ONLY_CONSENT_RC)" FAIL
+fi
+if grep -qF 'non-loopback HTTPS in remote mode; in local mode loopback, or HTTPS under the remote rules when a local policy declares it.' <<<"$SKILL_FLAT" \
+  && grep -qF '`auth.appOrigin` must, and in local mode a present one must equal the run'"'"'s origin; otherwise stop with PARTIAL before `open`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'For each network-only origin, run it with the operand `network-only` instead, never both:' <<<"$SKILL_FLAT" \
+  && grep -qF '`goto`, `go-back`, `go-forward`, `reload`, `tab-new`, `tab-select`, `tab-close`, and any click or key press that follows a link or submits a form — read the `Page URL` line' <<<"$SKILL_FLAT" \
+  && grep -qF '`go-back`, `go-forward`, `reload` and `tab-select` name no URL for the gate to judge, so this check is the only one they get.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'read it as that target page'"'"'s content, which is evidence of the target page, and never open the frame'"'"'s origin with a navigation command. Only a page the browser lands on at a network-only origin is never evidence.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'never `open`, `goto` or `tab-new` it all the same, and treat a `Page URL` on it like one on a network-only origin.' <<<"$BROWSER_FLAT" \
+  && grep -qF '`declared-safe` for each origin the run navigates, and `network-only` for each network-only origin.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'read `tab-list` before every `tab-select`, and never select a tab whose URL is outside the run config or on a network-only origin — close it with `tab-close` instead.' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Never propose an origin the pages navigate — the application origin, or the origin of a hosted login page even when its token endpoint sits there too: that origin stays a target, and an authentication origin belongs in `auth.baseUrl`.' <<<"$SETUP_FLAT" \
+  && ! grep -qF 'Run the same preflight once more with the operand `network-only`' <<<"$SKILL_FLAT"; then
+  check "P4x a navigated origin stays a target, each origin takes one preflight form, and tabs, frames and no-URL commands fall to the Page URL rule" PASS
+else
+  check "P4x a navigated origin stays a target, each origin takes one preflight form, and tabs, frames and no-URL commands fall to the Page URL rule" FAIL
+fi
+if grep -qF 'and so must every network-only origin except a pinned public HTTPS one' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && grep -qF 'stays valid byte for byte unless a target host carries a pattern character, which the exact-hostname rule above refuses' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P4y the recipe contract admits a pinned public HTTPS network-only origin in local mode and names the hostname rule as the one compatibility break" PASS
+else
+  check "P4y the recipe contract admits a pinned public HTTPS network-only origin in local mode and names the hostname rule as the one compatibility break" FAIL
+fi
+if grep -qF 'For a remote recipe, render `"mode":"remote"` instead, with no port:' <<<"$SETUP_FLAT" \
+  && grep -qF '`appOrigin`. Validate every origin with the remote rules of the skill'"'"'s Phase 0 first, and render nothing for an origin those rules reject.' <<<"$SETUP_FLAT" \
+  && grep -qF -- '--check-policy remote "<origin>" declared-safe' "$SETUP_MD" \
+  && grep -qF 'The remote preflight resolves every hostname and refuses a non-public answer, so it needs network access.' <<<"$SETUP_FLAT"; then
+  check "P6t --print-policy renders a remote policy from validated remote origins only and proves each with the remote preflight" PASS
+else
+  check "P6t --print-policy renders a remote policy from validated remote origins only and proves each with the remote preflight" FAIL
 fi
 CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
