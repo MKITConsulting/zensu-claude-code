@@ -1,16 +1,9 @@
 ---
 name: gauntlet-loop
 description: >
-  [Zensu] Run a long-form, evidence-driven improvement loop with builders,
-  two sequential critics, mandatory synthesis, and a third arbiter whenever
-  the critics materially disagree. Use when the user asks for a Gauntlet
-  Loop, adversarial or independent critics, autonomous refinement against a
-  benchmark, side-by-side comparison, "keep improving until it beats X", or
-  repeated improvement until an inspectable artifact wins, passes, stalls,
-  reaches a budget or authority limit, or the user stops the run. Apply to
-  code, websites, product design, games, media, writing, research, and other
-  complex artifacts that can be inspected; do not use for trivial one-shot
-  edits or advice-only questions.
+  [Zensu] Run an evidence-driven improvement loop with builders, two critics,
+  synthesis and an arbiter. Use when the user asks for a Gauntlet Loop or to
+  "keep improving until it beats X".
 ---
 
 # /zensu:gauntlet-loop
@@ -33,11 +26,14 @@ isolation wrong silently destroys the method.
 This skill is an execution loop, not a Zensu lifecycle stage. It arms no chain and
 closes none.
 
-- **A subagent is denied the six shell tool names. The lead runs every gate.**
+- **A subagent gets only the gate's allowlist, so no shell. The lead runs every gate.**
   `hooks/hooks.json` registers `pre-reviewer-capability-gate.sh` on the PreToolUse
-  matcher `.*`, and for a neutral `host-profile-v1` child it denies every
-  command-execution tool in that set — `Bash`, `shell`, `exec`, `exec_command`,
-  `terminal`, `command` (`hooks/lib/reviewer-capability-v1.js`).
+  matcher `.*`, and for a neutral `host-profile-v1` child it admits only
+  `HOST_PROFILE_TOOLS` plus a few read-only MCP tools
+  (`hooks/lib/reviewer-capability-v1.js`). Every command-execution tool is outside
+  that list: the six shell names `Bash`, `shell`, `exec`, `exec_command`,
+  `terminal`, `command`, the host's `Monitor`, and every command-executing MCP tool
+  such as `ctx_execute`.
   `Explore` and `general-purpose` both
   classify as `host-profile-v1`, so **no builder and no critic in this loop can run
   anything through a shell** — no build, no test suite, no shell-launched server, no
@@ -48,21 +44,18 @@ closes none.
   `tests/structure/test-reviewer-capability-gate.sh` pins an external write as
   allowed. Size a builder's blast radius from that, not from the word "project".
 
-  Be precise about the bound, because it is narrower than the headline sounds and an
-  overclaim here is worse than none — it is what makes you stop checking.
-  It is a six-name DENYLIST, not an allowlist, and THREE things fall outside it.
-  First, the non-shell inspection tools (`preview_start`, `read_page`, `read_console_messages`,
-  `preview_logs`, `read_network_requests`, screenshots) are not denied. Second, the
-  only OTHER branch that can deny on the tool name alone matches `mcp__*zensu*`, so a
-  code-executing MCP tool from a non-Zensu server is not denied either — a Python, container or
-  app-scripting MCP server is an arbitrary-code capability the gate never sees.
-  Third, `Agent` is in none of `neutralViolation`'s denied sets, so a neutral child
-  keeps its nested-spawn capability and
-  `tests/structure/test-reviewer-capability-gate.sh` pins that allowance. A
-  `general-purpose` builder can therefore start its own fan-out — outside this loop's
-  packet discipline and uncounted against the concurrency cap in step 6 — so the
-  packet has to forbid sub-spawning in words, the same way the read-only instruction
-  is what removes a critic's intent rather than its reach.
+  Be precise about the bound, because an overclaim here is worse than none — it is
+  what makes you stop checking. It is an ALLOWLIST, not a denylist, so a tool a later
+  host adds stays denied until the list names it. Every other MCP tool is denied too,
+  browser and preview tools included, so a critic cannot inspect a live page either.
+  Two admitted tools still matter. `Agent` is on the list, so a neutral child keeps
+  its nested-spawn capability and `tests/structure/test-reviewer-capability-gate.sh`
+  pins that allowance. A `general-purpose` builder can therefore start its own
+  fan-out — outside this loop's packet discipline and uncounted against the
+  concurrency cap in step 6 — so the packet has to forbid sub-spawning in words, the
+  same way the read-only instruction is what removes a critic's intent rather than
+  its reach. `SendMessage` is admitted too, so builders can message each other; plan
+  changes still go through the lead.
   Whether the harness grants any of these to a given child is a separate question
   this repo does not answer, so restraint there is the packet's job, not the gate's.
 
@@ -265,9 +258,9 @@ continuing the aesthetic or comparative loop.
 Write the capture path down as an executable recipe (a script, a documented
 command sequence, a `preview_start` name). The lead runs it every round, and that
 is what keeps conditions comparable — a critic never reproduces it, because inside
-this plugin it holds no shell. Only the non-shell entries of that recipe can travel
-into a packet at all; everything shell-borne is captured by the lead and handed in
-as redacted output.
+this plugin it holds no shell and no browser or preview tool. The lead captures every
+entry of that recipe and hands it in as redacted output, or as a file the critic can
+`Read`.
 
 ## 3. Decompose by judgment and coupling
 

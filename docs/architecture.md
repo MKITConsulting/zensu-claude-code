@@ -164,11 +164,12 @@ as an order of magnitude, not as a measurement, and do not add a new figure here
 suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects roughly 4.2 KB on the same prompt channel. The DIRECTIVE behind that figure is bounded
-since the chain-progress anchor landed — `Z30` in `tests/structure/test-zen-mode.sh` holds it
-under a declared ceiling — but `Z30` reads the hook and never opens this document, so the number
-written here is hand-derived like every other one below, and ages the same way. `C6` above stays
-the only figure a check reads out of this paragraph. A full-panel `/zensu:tdd` review round
+injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
+while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
+`Z30b` in `tests/structure/test-zen-mode.sh` hold the two variants under declared ceilings, but
+they read the hook and never open this document, so the numbers written here are hand-derived
+like every other one below, and age the same way. `C6` above stays the only figure a check reads
+out of this paragraph. A full-panel `/zensu:tdd` review round
 (`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
 spawns three aspects and runs the judge on the first review only — more with repo-custom personas, and again per auto-fix
@@ -178,14 +179,26 @@ to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds 
 all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
-the packet handed to them. The dominant term, though, is the other leg, and it is the one the design deliberately
-leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
-— the shipped default — the standing per-prompt injection is 4224 + 1756 = about **5980
-characters every turn**, roughly 117 KiB over 20 turns and 351 KiB over 60. The two operands are
-stated in the SAME unit on purpose: 4224 is a character count and the sibling's headline carries
-both a character and a byte figure, so an earlier wording summed 4224 characters with 1764 bytes
-and called the result KB. That is the real price of "resident
-rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
+the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
+on every prompt with no de-bounce, and six hooks are registered on it.
+`tests/structure/test-user-prompt-budget.sh` drives every one of them on four prompt kinds — a
+typed request, a background-task notification, a shell input behind a system reminder, and a
+CI-monitor event — and holds each hook and each sum under declared ceilings, so treat that suite,
+not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
+`user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
+the helper command it renders, on typed requests and slash commands with arguments while no chain
+is armed, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, only when such a prompt
+carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
+`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above, on every prompt kind because the reply is
+user-visible) and this hook (1,756 characters, on every prompt kind for the same reason). Two emit
+only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose. With
+zen-mode active — the shipped default — a typed code request with a planning keyword therefore
+costs about **12.5 K characters per turn**, and a task notification or shell input about 4.9 K
+(5.2 K for a CI-monitor event); `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+before it every harness prompt paid the typed figure. All operands are character counts. That is
+the real price of "resident rather than periodic", and it should be argued on those numbers rather
+than on the fan-out figure.
 The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
 it never reorders output whose shape a contract fixes. `tests/structure/test-best-solution-first.sh`
@@ -236,6 +249,42 @@ sibling install — which `servesRecordedRuntime` permits — is diagnosed throu
 rather than the recorded one. That is the same limit the tamper-evidence sentence above states.
 
 Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
+
+## Hook Output Size Limit
+
+The host delivers a hook's `additionalContext` to the model inline only up to **10,000
+characters**. Above that it saves the text to
+`<session dir>/tool-results/hook-<id>-additionalContext.txt` and hands the model a
+`<persisted-output>` wrapper instead: `Output too large (…KB)`, the file path, and a preview of
+the first **2,000 characters**. When the last newline inside that window falls after character
+1,000, the preview stops at that newline instead.
+
+Measured on 2026-10-06 against Claude Code 2.1.288, the build the desktop app bundles: one
+headless session ran three `UserPromptSubmit` hooks emitting 6,144, 8,192 and 10,240
+characters. The first two arrived inline. The third arrived as the wrapper with a
+2,000-character preview, and the saved file held all 10,240. The binary agrees: its threshold
+constant is `1e4`, compared as `length <= 10000` on the JavaScript string, so the unit is
+UTF-16 code units, not bytes. The same function receives the `additionalContext` of every
+hook event; the binary also routes `systemMessage` and plain stdout through it, which was
+read from the code and not measured.
+
+Two rules follow for hook authors:
+
+- **Stay well below the limit.** Text rendered into a directive at run time, such as a
+  `printf %q` command carrying the plugin data root, changes length from machine to
+  machine. `hooks/plan-approved-delegate.sh` keeps a ceiling of 9,000 characters for that
+  reason. `D44` in `tests/structure/test-plan-approved-delegate.sh` drives both heredocs
+  with the longest route field, counts the rendered record command at a fixed 300
+  characters so that the checkout path cannot move the result, and fails above the ceiling. Until that check landed, the directive
+  carried 12,453 (strict) and 12,966 (vanilla) characters before rendering and reached the
+  model only as its preview.
+- **Put what the model acts on first.** If a directive does cross the limit, its preview is
+  all the model sees, and a directive that forbids tool calls before a question leaves an
+  obedient model no way to read the saved file. `D44` therefore also requires the route
+  field and the four option labels inside the preview.
+
+The figure belongs to one host build, and an upgrade can move it. Re-measure before relying
+on it. What the suite enforces is the 9,000-character ceiling, never the host's number.
 
 ## Typical Workflows
 

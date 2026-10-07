@@ -351,7 +351,7 @@ file and drifts silently — but NOT that file's "bounded-counter enumeration an
 label", which this roster named and which do not exist there: a grep for `implStopCount`,
 `implStopNudgeAfter` or any counter enumeration in `docs/gates.md` returns nothing, so the
 obligation pointed at content that was never in that file), and the implementing-turns bullets
-plus the frontmatter `session state` clause in `skills/doctor/SKILL.md` — "the parked-chain
+plus the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md` — "the parked-chain
 bullet" is what this roster said, and that name was retired on every emitted surface a round
 earlier, so a maintainer navigating by it found nothing.
 `tests/structure/test-impl-stop-counter.sh` pins the counter, both surfaces, the reset on

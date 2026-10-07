@@ -203,7 +203,7 @@ decides the anchor only for a **fresh** source — `--fork-session`, or a sessio
 pruned — and there it matters: compare the `WORKTREE` and `CWD` rows and start in `WORKTREE` if they
 differ, or the forked session anchors *inside* the worktree and, while the gate is enabled, still
 cannot commit at its root.
-Flow 3 of `skills/session-trail/SKILL.md` carries the routing rule and is the authority.
+Flow 3 of the session-trail skill, in `skills/session-trail/references/takeover.md`, carries the routing rule and is the authority.
 
 ## Secret Scan
 

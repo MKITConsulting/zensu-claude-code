@@ -1,19 +1,9 @@
 ---
 name: recover-chain
 description: >
-  [Zensu] Diagnose the CURRENT session's review chain and, only when it is genuinely
-  wedged, restore it to a reviewable state with one guarded transition. Reports the
-  chain shape and the supported next command via `zensu-log.sh --chain-status`, and
-  repairs the single shape no other command can reach: a pending rearm receipt that
-  disagrees with its own workflow document, which makes every future review ticket
-  refuse, permanently. It drops that receipt and records its own history entry — nothing
-  else. It never sets a terminal flag, never grants another auto-fix round, never
-  discards an outstanding ticket, never rewrites the ticket slot and never unbinds an
-  Autopilot generation — every other shape is refused with the supported command. Use
-  when a review chain cannot be advanced, when `--review-ticket` refuses, when
-  `--current-review-ticket` and `/zensu:reset-review-limit` both report nothing to work
-  with, or via /zensu:recover-chain. No network or API key. Do not use to bypass
-  findings.
+  [Zensu] Diagnose a wedged review chain and restore it with one guarded
+  transition. Use when a review chain cannot advance or `--review-ticket`
+  refuses, or via /zensu:recover-chain. Never bypasses findings.
 ---
 
 # /zensu:recover-chain

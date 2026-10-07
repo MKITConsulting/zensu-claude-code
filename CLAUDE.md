@@ -149,6 +149,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Reviewer-Spawn Grant (`hooks/pre-agent-reviewer-allow.sh` + `reviewer-spawn-allow-v1.js`)** — the PreToolUse allow for the plugin's own read-only reviewers: `.claude/rules/reviewer-spawn-grant.md`
 - **Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)** — the sentence that answers a host rule against unrequested spawns: `.claude/rules/review-spawn-scope-sentence.md`
 - **Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)** — the two hooks that inject a rule from a docs marker block: `.claude/rules/marker-block-carriers.md`
+- **Prompt Origin and the UserPromptSubmit Budget (`hooks/lib/zensu-prompt-origin.sh` + `test-user-prompt-budget.sh`)** — which prompt kinds each `UserPromptSubmit` hook answers, what the host sends, and the budget row a new hook owes: `.claude/rules/prompt-origin.md`
 - **Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12** — adding a `ZENSU_*=off` escape means editing `ESCAPE_STEMS`: `.claude/rules/gate-disable-prefixes.md`
 - **Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)** — the promptfoo wrapper's transient-mutation detection: `.claude/rules/fixture-mutation-events.md`
 - **Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)** — the machine-wide takeover ledger of `/zensu:session-trail`: `.claude/rules/session-lineage-ledger.md`
@@ -157,6 +158,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)** — the hook-supplied progress anchor of zen-mode: `.claude/rules/zen-mode-chain-anchor.md`
 - **bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)** — why `case` patterns inside `$( )` need the leading paren: `.claude/rules/bash32-command-substitution.md`
 - **Skill Argument Placeholders (`test-skill-workflow-markers.sh` AP checks)** — why a skill body never carries `$1` or `$ARGUMENTS` in a shell snippet, and the allowlist for a skill that consumes its arguments: `.claude/rules/skill-argument-placeholders.md`
+- **Skill Text Budget (`tests/structure/test-skill-text-budget.sh`)** — the body and description caps for every skill, the shrink-only allowlist, and how the host builds its skill listing: `.claude/rules/skill-text-budget.md`
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`
 - **Review Convergence (`review-ledger-v1.js` + `hooks.reviewConvergence`)** — the findings ledger, the shared severity rubric and round-aware routing of the auto-fix loop: `.claude/rules/review-convergence.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`

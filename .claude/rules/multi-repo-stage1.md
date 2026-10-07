@@ -174,7 +174,7 @@ capability change to a session an older runtime is serving.
 **Operator-facing accounts that must move with it:** discipline patch 10 in
 `docs/tdd-manager-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
 `docs/configuration.md`, the two-refusal lead-in of `docs/gates.md`, the topology bullets
-plus the frontmatter `session state` clause in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
+plus the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
 and step 10.1 in `skills/tdd/SKILL.md`, and ALL THREE multi-repo documents —
 `docs/multi-repo-chains-spec.md` (its status line, the two §2 paragraphs stage 1
 superseded, the §5 heading and the pin roster at the end of §10) together with

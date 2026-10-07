@@ -484,7 +484,7 @@ parity() {
 # clauses are in the list for a stronger reason than symmetry — the (C)-over-(B)
 # override is what keeps a non-interactive run out of the branch-pushing route,
 # so a branch that lost it would still emit a plausible directive.
-P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu" "(S) — read this before (A)" "and the route field reads 'ask'" "RECORD a Zensu-workflow answer before dispatching" "after the 'Zensu workflow — /zensu:tdd' answer run __ZENSU_ROUTE_COMMAND__ --tdd — this one Bash call comes BEFORE the 'next tool call' that arm names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue with the dispatch above" "The 'No — implement directly' answer records nothing and decides this plan only: never record it with --direct yourself" "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow, and that /zensu:delivery-route changes it." "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered, and that /zensu:delivery-route --direct makes implementing directly the route for the rest of this session." "a route the field decided records nothing" "ZENSU DELIVERY ROUTE:" "The field never names /zensu:autopilot or /zensu:pilot")"
+P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu" "(S) — read this before (A)" "and the route field reads 'ask'" "RECORD a Zensu-workflow answer before dispatching" "after the 'Zensu workflow — /zensu:tdd' answer run __ZENSU_ROUTE_COMMAND__ --tdd — this one Bash call comes BEFORE the 'next tool call' that arm names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue with the dispatch above" "The 'No — implement directly' answer records nothing and decides this plan only: never record it with --direct yourself" "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow, and that /zensu:delivery-route changes it." "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered, and that /zensu:delivery-route --direct makes implementing directly the route for the rest of this session." "a route the field decided records nothing" "ZENSU DELIVERY ROUTE:" "The field never names /zensu:autopilot or /zensu:pilot" "field at the top of this directive" "Unless (S) or a fast path below decides" "→ the Autopilot arm above" "→ the Pilot arm above" "takes the Zensu workflow arm above" "default to the Zensu workflow and do NOT ask")"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
 P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose" "Judge both arms below by INTENT" "Test in THIS order, because two of the negation examples contain an affirmation example verbatim" "never content it quotes or pastes" "already ask which delivery route to take" "a subagent report" "(s) — read this before (c)" "and the route field reads 'ask'" "RECORD a Yes before acting" "after Yes run __ZENSU_ROUTE_COMMAND__ --tdd — this one Bash call comes BEFORE the 'next tool call' the Yes arm above names" "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back, then continue." "A No records nothing and decides this request only: never record it with --direct yourself" "When it reads 'tdd (…)', treat it exactly as the affirmation fast-path below; when it reads 'direct (…)', exactly as the negation fast-path below" "and 'No — implement directly'. The question MUST also say that a Yes is remembered for the rest of this session, later approved plans included unless the plan-approval question is switched off, through one Bash call the user may be asked to allow, that a No decides this request only and is not remembered, and that /zensu:delivery-route changes the session's route." "ZENSU DELIVERY ROUTE:")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
@@ -533,32 +533,32 @@ span_pair() { # $1 label, $2 start, $3 end
     check "$1 (spans diverge between the two heredocs)" FAIL
   fi
 }
-span_pair "P1b autopilot option byte-identical in BOTH heredocs" \
-  "(1) 'Autopilot" "(2) 'Zensu workflow"
-span_pair "P1b2 pilot + direct options and the ordering rule byte-identical in BOTH heredocs" \
-  "(3) 'Pilot" "is NEVER in the first slot"
+span_pair "P1b question, four labels and autopilot option byte-identical in BOTH heredocs" \
+  "Unless (S) or a fast path below decides" "(2) implements THIS plan now"
+span_pair "P1b2 pilot + direct options, the ordering rule and the dispatch lead byte-identical in BOTH heredocs" \
+  "(3) conducts the TRACKED FEATURE" "Autopilot (or fast-path B-autopilot"
 # The two dispatch arms are byte-identical across the heredocs too, and were covered by
 # presence needles alone — a one-sided REWORD of either passed every check.
 span_pair "P1b3 autopilot dispatch arm byte-identical in BOTH heredocs" \
   "Autopilot (or fast-path B-autopilot" "Zensu workflow (or fast-path"
-span_pair "P1b4 pilot dispatch arm byte-identical in BOTH heredocs" \
-  "Pilot (or fast-path B-pilot" "No → implement the plan directly"
+span_pair "P1b4 pilot and direct dispatch arms and the RECORD sentence byte-identical in BOTH heredocs" \
+  "Pilot (or fast-path B-pilot" "Fast-paths that need NO question"
 # P1b5-P1b7 cover the SAFETY clauses. P1 and P1b-P1b4 reached the option list and
 # the two dispatch arms; between P1's literals sat a lot of unpinned prose, and a
 # one-sided reword of the refusal-ordering block or of the (C) override sentence —
 # the two things that keep an unattended run out of a branch-pushing route —
-# passed P1, P1b-P1b4 and D13 alike. The clauses are partly mode-dependent (TDD vs
-# "the workflow"), which is a real reason a naive whole-clause span fails, so each
-# sub-span below was verified identical across both heredocs before being pinned.
-span_pair "P1b5 (C) override sentence byte-identical in BOTH heredocs" \
-  "(C) OVERRIDES (B)" "and no outward-facing step may be taken"
-span_pair "P1b6 refusal-first fast-path block byte-identical in BOTH heredocs" \
-  "FIRST a REFUSAL" "THEN, still only among the routes that survive"
+# passed P1, P1b-P1b4 and D13 alike. The clauses name "the Zensu workflow" in both
+# modes, so each span below covers a whole clause and was verified identical across
+# both heredocs before being pinned.
+span_pair "P1b5 (C) clause and its override sentence byte-identical in BOTH heredocs" \
+  "(C) you are running non-interactively" "That override line REPLACES the route status line"
+span_pair "P1b6 refusal-first fast-path block through the LAST arm byte-identical in BOTH heredocs" \
+  "FIRST a REFUSAL" "(C) you are running non-interactively"
 # P1b7 is the guard that retracts the two outward-facing routes for an unattended
 # run, stated INSIDE (B) so a model acting at a fast-path arm cannot miss it. It is
 # the newest safety clause and the one a reword would most plausibly touch.
-span_pair "P1b7 (B) non-interactive removal guard byte-identical in BOTH heredocs" \
-  "Before applying ANY arm below" "Judge every arm below by INTENT"
+span_pair "P1b7 (A), the (B) source scoping and its non-interactive removal guard byte-identical in BOTH heredocs" \
+  "Fast-paths that need NO question" "FIRST a REFUSAL"
 
 # The route needles here are deliberately the FULL clause, not the bare skill
 # names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot

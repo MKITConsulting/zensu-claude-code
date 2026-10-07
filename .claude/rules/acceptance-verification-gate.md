@@ -90,7 +90,7 @@ bound and `not-applicable` answers, so it is ledgered only where the gate applie
 `zensu-tdd-phase.sh`; both protected-root lists in `reviewer-capability-v1.js`;
 `zensu_evidence_acceptance_gate` in `zensu-config.sh`; `SCOPES`/`TREE_SCOPES` and per-scope
 retention in `evidence-run-v1.js`; the `receipt-log` call and its exit handling in
-`--tdd-complete`; step 6d, Phase 1.5 and step 2c of `skills/tdd/SKILL.md` (433-line cap); the
+`--tdd-complete`; step 6d, Phase 1.5 and step 2c of `skills/tdd/SKILL.md` (the file may not grow, §"Skill Text Budget"); the
 re-verification paragraph, finalize steps and the `Acceptance` row of
 `skills/self-review/SKILL.md`; `COMBINED_SUMMARY_DIRECTIVE`, `ACCEPTANCE_REVERIFY`,
 `ACCEPTANCE_REFUSAL`, `MAX_ROUNDS_VERDICTS` and the self-review-off `CLOSE_PASS` in

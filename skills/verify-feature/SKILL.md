@@ -1,18 +1,9 @@
 ---
 name: verify-feature
 description: >
-  [Zensu] Live-verify an already-built feature against either the current local git
-  worktree or a deployed preview. Discovers the changed behavior, builds a risk-ranked
-  P0/P1/P2 scenario matrix, boots an isolated local runtime from a checked-in recipe (or
-  the bundled Zensu monorepo adapter), drives the real UI through playwright-cli behind the
-  browser consent gate, and reports DOM/data, visual, console, and network evidence. Remote mode clearly
-  distinguishes deployed code from unpushed worktree changes and keeps authentication
-  credential-blind through visible manual login only.
-  Does not fix code or write committed tests. In --chain mode it verifies every acceptance
-  criterion of a running /zensu:tdd chain on this worktree and records one verdict per
-  criterion for the chain's terminus gate. Use when the user asks to verify/test a
-  worktree, test a feature live, run an end-to-end smoke check, validate a preview, or
-  invokes /zensu:verify-feature.
+  [Zensu] Live-verify a built feature in the local worktree or a deployed
+  preview through playwright-cli. Use when the user asks to test a feature live,
+  run an end-to-end smoke check, or /zensu:verify-feature.
 ---
 
 # /zensu:verify-feature
