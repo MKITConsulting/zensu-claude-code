@@ -30,6 +30,17 @@ most of those sentences with LINE-based `grep -qF`, so a reflow breaks a pin eve
 survives. Add lines beside a pinned one; do not rewrap it. The awk anchors `^## Phase 4` and
 `^## playwright-cli preflight` take no new `## ` heading inside their sections.
 
+**`SKILL.md` may not grow, so the driver prose lives in `rules/drivers.md` section 8.** The body
+sits on the shrink-only allowlist of `tests/structure/test-skill-text-budget.sh`
+(`.claude/rules/skill-text-budget.md`). `SKILL.md` keeps only what must run before any rule file
+is read or on every run: the `--driver` row, the in-memory remote refusal of step 0, step 6,
+the matrix's `Driver` column, the Phase 4 teardown and the verdict rules. Everything a
+non-`browser` row does in each phase is in section 8. Two browser blocks moved out for the same
+budget, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins: attach mode to `rules/attach.md`
+(`P10m`), and the consent-mode details to `rules/browser-verification.md` section 1, which a
+consent-mode run reads before its first browser call (`P10n`). `SKILL.md` keeps the sentence that
+the consent memory is never written.
+
 **Only the `browser` driver is gated, and that is a decision.** The consent gate exists because a
 browser session renders arbitrary origin content, cookies and storage into the model. The other
 drivers run the worktree's own build on run-owned local resources, bounded by the skill's rules,
@@ -103,19 +114,19 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
 
 **Coupled sites that move together:**
 
-- The nine driver ids ↔ the `rules/drivers.md` §1 catalog, §2 detection table and §3 evidence
-  planes ↔ the `--driver` row, the intro list and the service/build split of Phase 2 ("Steps 1
-  to 5" and "Build drivers") in `SKILL.md` ↔ the `validate.driver` enum and the driver blocks in
+- The nine driver ids ↔ the `rules/drivers.md` §1 catalog, §2 detection table, §3 evidence
+  planes and the service/build split of §8 ↔ the `--driver` row of `SKILL.md` ↔ the
+  `validate.driver` enum and the driver blocks in
   `skills/autopilot/rules/config.md` ↔ `skills/autopilot/rules/drivers.md`, `probe.md` and the
   `--driver` row and seams block of `skills/autopilot/SKILL.md` ↔ `skills/cover/rules/drivers.md`
   ↔ the `validate` row of `templates/autopilot-spec.md` ↔ the detection rows of
-  `rules/setup.md` ↔ the "What it can verify" table in `docs/verify-feature.md` ↔ the
-  "Only the `browser` driver is gated" bullet in `docs/gates.md` ↔ the no-recipe sentence in
-  `skills/doctor/SKILL.md` ↔ the `P10` checks, which derive the set from the config enum.
-  `desktop-native` survives only as a read-alias sentence.
+  `rules/setup.md` ↔ the "What it can verify" table in `docs/verify-feature.md`, which also says
+  that a native or command-line build needs no runtime recipe ↔ the
+  "Only the `browser` driver is gated" bullet in `docs/gates.md` ↔ the `P10` checks, which derive
+  the set from the config enum. `desktop-native` survives only as a read-alias sentence.
 - The helper's verbs (`VERB_NAMES`), `RECORD_KINDS`, `LEDGER_KINDS`, the `zensu-verify-` prefix,
-  `RUN_ID_RE` and the ledger name ↔ `rules/drivers.md` §5 ↔ the mobile, desktop, CLI and service
-  rule files ↔ `SKILL.md` Phase 2 and Phase 4 ↔ `docs/gates.md` ↔
+  `RUN_ID_RE` and the ledger name ↔ `rules/drivers.md` §5 and §8 ↔ the mobile, desktop, CLI and
+  service rule files ↔ `SKILL.md` Phase 4 ↔ `docs/gates.md` ↔
   `tests/structure/verify-run-resources.test.js`, which `test-verify-feature-skill.sh` runs with
   an exact case count that its `tests/SUITE-OVERVIEW.md` row must equal.
 - `scripts/process-supervisor.js` (its lease variable, its ready-file JSON, `status`, `stop` and

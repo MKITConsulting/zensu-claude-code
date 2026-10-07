@@ -82,7 +82,7 @@ recipe, a build driver derives its facts from tracked files as its rule file des
 - **Screens are evidence; raw logs follow the console rule.** Screenshots and the accessibility
   tree of the app under test are its DOM and visual planes. Read them when the app runs on
   run-owned or synthetic data, and against a deployed backend or a real account only after the
-  user's yes that `SKILL.md` asks for under Authentication. Raw logs of an authenticated session
+  user's yes that section 8 asks for under Authentication. Raw logs of an authenticated session
   can carry tokens and personal data, like console output: read them only from a target proven
   synthetic, otherwise that plane is PARTIAL. Filter logs to the app's own process, bound them,
   and never copy raw log lines into the report.
@@ -150,7 +150,10 @@ node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.
     removed from the run's own kubeconfig only.
 
   Exit `1` lists what it kept and why; the report names each kept resource under Limitations, and
-  nothing else is deleted to make up for it.
+  nothing else is deleted to make up for it. After `teardown=incomplete` keep the run directory:
+  its ledger and the supervisor lease are the only way to retry. Name its path and the retry
+  command under Limitations:
+  `node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" teardown --run-dir "<that path>"`.
 - **No bulk verbs.** Never `xcrun simctl delete all`, `delete unavailable`, `shutdown all` or
   `erase`, never `adb emu kill`, never a `docker rm` by pattern, never
   `kind delete clusters --all`, never `tmux kill-server` without `-L`, never `pkill` or `killall`.
@@ -172,3 +175,81 @@ Each runs from the worktree with `ZENSU_VERIFY_RUN_DIR` set, writes only beneath
 evidence, and exits `0` on pass. The skill reads the exit code and the output; it never edits the
 scripts and never invents them. Without them, offer `--setup`; still without them, the rows are
 PARTIAL with the missing scripts named.
+
+## 8. Every other driver, phase by phase
+
+`SKILL.md` runs one flow for every driver. This section holds what a row whose driver is not
+`browser` does differently in each phase; read it once any row resolves to such a driver.
+
+**Boundaries.** Every boundary in `SKILL.md` binds every driver, and three of them read as
+follows here:
+
+- **Real interfaces.** Exercise the product's own interface (the endpoint, the command, the
+  app's own screen) through the driver's rule file, never a mock or stub of the product.
+- **Credential-blind.** Use only a throwaway identity the repository's own fixtures create, or
+  the user's own visible login typed by the user into the simulator, emulator or app window.
+- **Run-owned devices only.** Simulators and emulators, never a physical device, and never a
+  simulator, emulator, app window or terminal session the user already has. Every device,
+  supervised process, cluster, container and terminal server that a driver rule file starts goes
+  through the run-resource helper of section 5; a recipe's services keep its own `down`.
+
+**Phase 0.** Record each row's driver with the file and the signal that chose it (section 2),
+and run the toolchain preflight of section 4 for every driver chosen. For a build driver the
+local target identity adds the build command and the artifact path once Phase 2 has built it.
+
+**Phase 1.** The matrix columns map to the driver's evidence planes (section 3): `DOM/data` is
+its state plane, `Visual` is `n/a` for a driver without a visual plane, and `Network` is its
+runtime signal or side effect. Add the dimensions the row's driver rule file names: arguments
+and exit codes, status codes, device appearance, orientation and permission states, window
+states.
+
+**Phase 2.** Build output, device data, logs and screenshots stay beneath the run's `$RUN_DIR`
+where the tool allows it, and the run-resource helper is called with the physical run directory
+path. Steps 1 to 5 of local mode prepare the services a row needs: every `api` and `async` row,
+and a backend that a `mobile` or `desktop` app calls. A row whose driver builds an artifact and
+needs no service (`cli`, `library`, `iac`, `mobile`, `desktop`, `custom`) skips them and runs an
+artifact built from this worktree:
+
+1. Load the row's driver rule file and walk its toolchain ladder. A missing tool makes the row
+   PARTIAL, never a substitute that cannot observe the criterion.
+2. When the build targets the run's device, create that device through the run-resource helper
+   first: a simulator build names the run's UDID as its destination. Copy the UDID, serial or
+   name the helper prints literally into every later call.
+3. Build the worktree with the command the recipe's driver block names, else the command the
+   repository documents or the rule file derives from tracked files. Build out of tree beneath
+   `$RUN_DIR` where the tool allows it, and record the command and the artifact path: they are
+   the local target identity. A build that must download dependencies asks first.
+4. Start every long-lived process (the built app, a bundler, an emulator) through the helper's
+   `start`, in the order the driver rule file gives.
+5. Never run a build, install or launch command that targets any or all connected devices.
+
+`--attach` applies to `browser` and `api` rows only (`rules/attach.md`); a build driver always
+builds and launches its own copy.
+
+**Authentication.** A `mobile` or `desktop` app logs in the same visible way as the browser: the
+user types the credentials into the simulator, emulator or app window, and the run never types
+them. When such an app runs against a deployed backend or a real account instead of run-owned
+data, ask the user once before the first such row and name the backend, because its screens can
+show personal data; without that yes those rows are PARTIAL. `api` rows authenticate only with a
+throwaway identity the repository's own fixtures create (`rules/service-verification.md`).
+
+**Phase 3.** Drive each row through its driver's rule file against the endpoint, command, device
+or window it names, with the evidence planes of section 3. For `mobile`, `desktop` and
+terminal-UI rows, take a screenshot or pane capture, and the accessibility hierarchy where a
+tool provides one, after every meaningful interaction, and read both before choosing the next
+action. A parallel lane with `mobile` rows also needs its own device.
+
+**Phase 5.** The report adds these lines:
+
+- **Target:** for every build driver, the build command and the artifact path.
+- **Drivers:** each row's driver with the file and signal that chose it, and the tools that
+  drove it; name every row a missing tool made PARTIAL.
+- **Runtime signals:** stderr, service, device and app logs, crash reports. Report the class and
+  a bounded, sanitized message, or `clean`; never copy raw log lines.
+- **Visual:** device screenshots, app-window screenshots and terminal pane captures are
+  described like browser screenshots; a driver without a visual plane reports `n/a`.
+- **Resources:** the run-resource helper's teardown lines; every resource it kept is named.
+- **Limitations:** every missing tool, beside the gaps `SKILL.md` names.
+
+An `Evidence` cell names `output`, `hierarchy` or `log` where a browser row names a screenshot,
+snapshot or request.

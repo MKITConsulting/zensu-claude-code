@@ -69,8 +69,21 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    `declared-safe`; there is no trusted redaction-driver path. Wait for the user's answer;
    a refused prompt makes that origin's rows PARTIAL.
    Never re-issue a refused navigation and never try another spelling of the same target to avoid the prompt.
-   The session consent memory named in SKILL.md is yours to READ for the report and never to
-   write, edit or delete: a record you place there skips the human's prompt for that origin.
+   In consent mode the FIRST `playwright-cli` call that reaches a new origin — `open` with the
+   run config, `goto`, or `tab-new` — opens the host's own permission prompt to the user. Consent
+   is per ORIGIN: once the user approves an origin, every further route on it proceeds without a
+   prompt. Answering that prompt is the user's action; never answer it on their behalf and never
+   work around a refusal. The floor holds in this mode: no credentials, no query or fragment in a
+   navigation, and the browser refuses every HTTP(S) request to an origin outside the run config;
+   a WebSocket connection is not fenced by the run config, which is an open gap. A remote target
+   is refused in consent mode by the helper and by the gate; remote verification keeps the parent
+   policy.
+   Consent mode remembers each approved ORIGIN for this session in
+   `.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
+   but the route steers no later decision — and the report lists every record in its `Consent`
+   block. That memory is yours to READ for the report and never to write, edit or delete: a
+   record you place there skips the human's prompt for that origin, so writing one grants
+   yourself the consent this gate exists to ask for. Only the PostToolUse hook writes it.
 1. Open the run-config session at the resolved base URL and route only after the policy
    preflight passes.
 2. Read the `Page URL` line of every navigating call. An origin outside the run config means a

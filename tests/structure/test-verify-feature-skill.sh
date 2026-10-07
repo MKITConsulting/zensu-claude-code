@@ -994,6 +994,7 @@ SERVICE_MD="$SKILL_DIR/rules/service-verification.md"
 CLI_MD="$SKILL_DIR/rules/cli-verification.md"
 MOBILE_MD="$SKILL_DIR/rules/mobile-verification.md"
 DESKTOP_MD="$SKILL_DIR/rules/desktop-verification.md"
+ATTACH_MD="$SKILL_DIR/rules/attach.md"
 RESOURCES_JS="$SKILL_DIR/scripts/verify-run-resources.js"
 RESOURCES_UNIT="$PLUGIN_DIR/tests/structure/verify-run-resources.test.js"
 AUTOPILOT_DRIVERS="$PLUGIN_DIR/skills/autopilot/rules/drivers.md"
@@ -1001,7 +1002,7 @@ AUTOPILOT_PROBE="$PLUGIN_DIR/skills/autopilot/rules/probe.md"
 COVER_DRIVERS="$PLUGIN_DIR/skills/cover/rules/drivers.md"
 VERIFY_DOC="$PLUGIN_DIR/docs/verify-feature.md"
 P10_MISSING=""
-for f in "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" "$RESOURCES_JS" "$RESOURCES_UNIT" \
+for f in "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" "$ATTACH_MD" "$RESOURCES_JS" "$RESOURCES_UNIT" \
   "$AUTOPILOT_DRIVERS" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$VERIFY_DOC"; do
   [ -f "$f" ] || P10_MISSING="$P10_MISSING ${f#"$PLUGIN_DIR"/}"
 done
@@ -1016,11 +1017,12 @@ DESKTOP_FLAT="$(tr '\n' ' ' < "$DESKTOP_MD" 2>/dev/null | tr -s ' ')"
 DOC_FLAT="$(tr '\n' ' ' < "$VERIFY_DOC" 2>/dev/null | tr -s ' ')"
 if ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" 2>/dev/null \
   && grep -qF 'node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" list --run-dir "$RUN_DIR"' "$DRIVERS_MD" \
-  && grep -qF 'The same replacement applies to every `<absolute-plugin-root>` in `rules/drivers.md` and in the driver rule files.' <<<"$SKILL_FLAT" \
-  && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/skills/verify-feature/scripts/verify-run-resources.js" list --run-dir "$RUN_DIR"' "$SKILL_MD"; then
-  check "P10b the driver rule files use the substituted plugin-root placeholder and the skill names the helper with its native root" PASS
+  && grep -qF '`node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" teardown --run-dir "<that path>"`' "$DRIVERS_MD" \
+  && grep -qF 'Whenever a bundled rule file says `<absolute-plugin-root>`, replace it with this concrete absolute `ROOT`' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'verify-run-resources.js' "$SKILL_MD"; then
+  check "P10b the driver rule files name the helper behind the plugin-root placeholder, which the skill tells the model to replace" PASS
 else
-  check "P10b the driver rule files use the substituted plugin-root placeholder and the skill names the helper with its native root" FAIL
+  check "P10b the driver rule files name the helper behind the plugin-root placeholder, which the skill tells the model to replace" FAIL
 fi
 P10_VOCAB="$(node -e '
   const fs = require("node:fs");
@@ -1073,13 +1075,13 @@ P10_VOCAB="$(node -e '
 ' "$AUTOPILOT_CONFIG" "$DRIVERS_MD" "$SKILL_MD" "$AUTOPILOT_SKILL" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$AUTOPILOT_DRIVERS" "$VERIFY_DOC" 2>&1)"
 P10_VOCAB_RC=$?
 if [ "$P10_VOCAB_RC" = "0" ] \
-  && grep -qF 'file is loaded only when a row uses it: `rules/browser-verification.md`, `rules/service-verification.md` (`api`, `async`, `iac`), `rules/cli-verification.md` (`cli`, `library`), `rules/mobile-verification.md` or `rules/desktop-verification.md`.' <<<"$SKILL_FLAT"; then
+  && grep -qF 'apply to `browser` rows only; `rules/drivers.md` section 8 holds what every other row does instead.' <<<"$SKILL_FLAT" \
+  && grep -qxF '## 8. Every other driver, phase by phase' "$DRIVERS_MD"; then
   check "P10c one driver vocabulary ($P10_VOCAB) across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, and each driver's rule file" PASS
 else
   check "P10c one driver vocabulary across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, and each driver's rule file ($P10_VOCAB)" FAIL
 fi
 if grep -qF '`--mode=remote` together with a `--driver` other than `browser` stops the same way, in memory, with `remote mode supports the browser driver only`.' <<<"$SKILL_FLAT" \
-  && grep -qF 'Remote mode applies to `browser` rows only.' "$SKILL_MD" \
   && grep -qF 'In `remote` mode a row whose driver is not `browser` is PARTIAL, because remote mode supports the browser driver only.' <<<"$SKILL_FLAT" \
   && grep -qF 'Remote mode stays browser-only.' "$DRIVERS_MD" \
   && grep -qF 'Remote mode supports the `browser` driver only.' <<<"$DOC_FLAT"; then
@@ -1122,7 +1124,7 @@ else
 fi
 if grep -qF "An in-app browser pane or a browser extension drives the user's own browser profile outside the consent gate." <<<"$SKILL_FLAT" \
   && grep -qF 'Never a host browser tool.' "$DRIVERS_MD" \
-  && grep -qF 'Simulators and emulators, never a physical device' <<<"$SKILL_FLAT"; then
+  && grep -qF 'Simulators and emulators, never a physical device' <<<"$DRIVERS_FLAT"; then
   check "P10h no host browser tool and no physical device, for any driver" PASS
 else
   check "P10h no host browser tool and no physical device, for any driver" FAIL
@@ -1207,6 +1209,24 @@ if [ -z "$P10_SAFETY_MISSING" ]; then
   check "P10l the service and CLI drivers keep off deployed targets, real accounts, installs and bulk verbs" PASS
 else
   check "P10l the service and CLI drivers keep off deployed targets, real accounts, installs and bulk verbs (missing:$P10_SAFETY_MISSING)" FAIL
+fi
+ATTACH_FLAT="$(tr '\n' ' ' < "$ATTACH_MD" 2>/dev/null | tr -s ' ')"
+if grep -qF 'skip runtime preparation entirely and follow `rules/attach.md`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'never stop, signal, or restart the attached process' <<<"$ATTACH_FLAT" \
+  && grep -qF 'report "attached runtime, identity unproven" otherwise, which caps the verdict at PARTIAL' <<<"$ATTACH_FLAT" \
+  && grep -qF 'Attach applies to `browser` and `api` rows; a build driver always builds and launches its own copy.' <<<"$ATTACH_FLAT"; then
+  check "P10m attach mode loads its own rule file, which boots nothing and caps an unproven identity at PARTIAL" PASS
+else
+  check "P10m attach mode loads its own rule file, which boots nothing and caps an unproven identity at PARTIAL" FAIL
+fi
+if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <<<"$SKILL_FLAT" \
+  && grep -qF 'is read for the report and never written, edited or deleted' <<<"$SKILL_FLAT" \
+  && grep -qF 'never answer it on their behalf and never work around a refusal' <<<"$BROWSER_FLAT" \
+  && grep -qF 'a WebSocket connection is not fenced by the run config, which is an open gap' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Only the PostToolUse hook writes it.' <<<"$BROWSER_FLAT"; then
+  check "P10n consent mode reads the browser rule before the first browser call and never writes the consent memory" PASS
+else
+  check "P10n consent mode reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
 RESOURCES_OUT="$(node --test --test-reporter=tap "$RESOURCES_UNIT" 2>&1)"
 RESOURCES_RC=$?

@@ -439,10 +439,6 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
   recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
-  The row concerns features that need a recipe. A CLI or library feature needs none, because
-  the skill derives its build from tracked files, and neither does a mobile or desktop app that
-  calls no backend; a desktop app whose data location already exists still needs the recipe's
-  `validate.desktop.dataIsolation`.
 - **❌ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)** → a
   parent-environment policy IS set, but its value does not satisfy the policy contract, so the
   browser consent gate denies every `zensu-verify` navigation. The parenthesis names the rule it
