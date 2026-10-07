@@ -119,7 +119,7 @@ The marker is session-scoped: a session with a new key starts from the configure
 
 This skill's only side effect is that one marker. It changes no code, no config
 file, and no Zensu data, and it never arms, completes, or repairs a chain.
-Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that ends the directive both hooks emit, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
+Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that opens the plan directive and ends the reminder, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
 The SessionStart banner names a configured default only; it never reads the session marker.
 
 ## Configuration

@@ -77,7 +77,9 @@ start_session() {
 # tail this was the entire unit suite, the only coverage those properties have
 # anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
 UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
-if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
+T26_UNIT="$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js"
+T26_FLOOR="$(unit_overview_declared "${T26_UNIT##*/}")"
+if node --test "$T26_UNIT" >"$UNIT_OUT" 2>&1; then
   # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
   # and the reporter-ordering caveat. This block used to carry its own copy of that
   # expression, byte-identical to the one in test-bash-source-write-gate.sh W3a;
@@ -86,15 +88,20 @@ if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"
   UNIT_TOTAL="$(unit_summary_field tests "$UNIT_OUT")"
   # The total is the real floor; the pass floor is lower because the symlink and
   # FIFO cases skip themselves where the platform cannot create one.
-  if [ "$UNIT_TOTAL" -ge 37 ] && [ "$UNIT_PASS" -ge 35 ]; then
+  if [ -n "$T26_FLOOR" ] && [ "$UNIT_TOTAL" -ge "$T26_FLOOR" ] && [ "$UNIT_PASS" -ge $((T26_FLOOR - 2)) ]; then
     check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
   else
-    check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases" FAIL
+    check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases (want >= ${T26_FLOOR:-<no overview row>} registered, at most two of them skipped)" FAIL
   fi
 else
   echo "--- reviewer-spawn-denial-v1 unit failures ---"
   grep -B2 -A 20 '^not ok' "$UNIT_OUT" | head -60
   check "T26 reviewer-spawn-denial-v1 unit suite passes" FAIL
+fi
+if T26_OVERVIEW="$(unit_overview_check "$T26_UNIT")"; then
+  check "T26-overview the SUITE-OVERVIEW Blocks cell matches what ${T26_UNIT##*/} registers ($T26_FLOOR)" PASS
+else
+  check "T26-overview $T26_OVERVIEW" FAIL
 fi
 
 # --- Scenario 1: codeReviewDone=false -> force code-reviewer (unchanged) ---
