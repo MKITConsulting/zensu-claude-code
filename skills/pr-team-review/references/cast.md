@@ -41,7 +41,7 @@ Standalone only: ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Cu
 Before Phase B, set `PERSONA_RULES` to the fully expanded concrete path formed from the validated `ROOT`, count the final roles as `ROLE_COUNT`, and register one private read lease. Do not register a lease when `REUSE_DURABLE_PAYLOAD=true`:
 
 ```bash
-CLAUDE_PLUGIN_DATA="<absolute-plugin-data>" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+CLAUDE_PLUGIN_DATA="<absolute-plugin-data>" \
   bash "$ROOT/hooks/lib/zensu-review-evidence.sh" create \
   --kind pr-review \
   --files-manifest "$WORKDIR/_leased-files.txt" \

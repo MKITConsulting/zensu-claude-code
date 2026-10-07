@@ -649,6 +649,32 @@ else
   check "P15g private lease create/finalize/collect/close and main-only materialization are complete" FAIL
 fi
 
+PARSE_JS="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
+CONTROL_HITS="$(skill_text_control_assignments "$SKILL_DIR" "$PARSE_JS")"; CONTROL_RC=$?
+if [ "$CONTROL_RC" -eq 0 ] && [ -z "$CONTROL_HITS" ]; then
+  check "P15l no skill text assigns a Session Control input the Bash gate refuses to rebind" PASS
+else
+  check "P15l skill text assigns a Session Control input the Bash gate refuses (rc=$CONTROL_RC): $(printf '%s' "$CONTROL_HITS" | tr '\n' ';')" FAIL
+fi
+
+CONTROL_FX="$(mktemp -d "${TMPDIR:-/tmp}/zensu-control-fx.XXXXXX")"
+mkdir -p "$CONTROL_FX/references"
+printf '%s\n' '# fixture' 'export ZENSU_PROJECT_ROOT=/tmp/x' 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash h.sh' > "$CONTROL_FX/SKILL.md"
+printf '%s\n' 'MY_CLAUDE_CODE_SESSION_ID=1 CLAUDE_CODE_SESSION_IDX=1 bash h.sh --session "${CLAUDE_CODE_SESSION_ID}"' \
+  'CLAUDE_PLUGIN_DATA="<d>" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \' > "$CONTROL_FX/references/cast.md"
+printf '%s\n' 'module.exports = { detectControlMutation: () => "" };' > "$CONTROL_FX/allow-all.js"
+CONTROL_FX_GOT="$(skill_text_control_assignments "$CONTROL_FX" "$PARSE_JS")"; CONTROL_FX_RC=$?
+skill_text_control_assignments "$CONTROL_FX" "$CONTROL_FX/allow-all.js" >/dev/null 2>&1; CONTROL_FX_OPEN_RC=$?
+skill_text_control_assignments "$CONTROL_FX" "$CONTROL_FX/absent.js" >/dev/null 2>&1; CONTROL_FX_ABSENT_RC=$?
+rm -rf "$CONTROL_FX"
+if [ "$CONTROL_FX_RC" -eq 0 ] \
+   && [ "$CONTROL_FX_GOT" = "$(printf '%s\n' 'SKILL.md:2: ZENSU_PROJECT_ROOT' 'references/cast.md:2: CLAUDE_CODE_SESSION_ID')" ] \
+   && [ "$CONTROL_FX_OPEN_RC" -ne 0 ] && [ "$CONTROL_FX_ABSENT_RC" -ne 0 ]; then
+  check "P15m the scan flags planted rebinds in SKILL.md and references/, spares near misses, and fails closed without the gate" PASS
+else
+  check "P15m scan fixture (rc=$CONTROL_FX_RC open_rc=$CONTROL_FX_OPEN_RC absent_rc=$CONTROL_FX_ABSENT_RC): $(printf '%s' "$CONTROL_FX_GOT" | tr '\n' ';')" FAIL
+fi
+
 if grep -qF 'rejects a tree containing symlinks, special files, protected scope, or another unsafe alias' "$SKILL_TEXT" \
    && grep -qF 'snapshots the complete allowed tree and revalidates it before every traversal call' "$SKILL_TEXT" \
    && grep -qF 'revalidates every exact file and complete safe-root snapshot' "$SKILL_TEXT" \
