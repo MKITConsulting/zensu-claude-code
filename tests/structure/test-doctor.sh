@@ -7252,7 +7252,7 @@ else
   fi
 
   LE_SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
-  LE_FRONTMATTER="$(awk 'NR == 1 && $0 == "---" { inside = 1; next } inside && $0 == "---" { exit } inside { print }' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
+  LE_INVENTORY="$(awk '$0 == "## What it checks" { inside = 1; next } inside && /^## / { exit } inside { print }' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
   LE_ROSTER_MISSING=""
   for _phrase in \
     'autopilot lease: free' \
@@ -7282,12 +7282,12 @@ else
     fi
     printf '%s' "$LE_SKILL_FLAT" | grep -qF "$_phrase" || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [skill: $_phrase]"
   done
-  printf '%s' "$LE_FRONTMATTER" | grep -qF 'who holds the Autopilot project lease' \
-    || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [frontmatter]"
+  printf '%s' "$LE_INVENTORY" | grep -qF 'who holds the Autopilot project lease' \
+    || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [inventory]"
   printf '%s' "$LE_SKILL_FLAT" | grep -qF 'Never delete the artifact and never offer to' \
     || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [no-deletion rule]"
   if [ -z "$LE_ROSTER_MISSING" ]; then
-    check "P1le24 every lease row phrase is both emitted and documented in skills/doctor/SKILL.md, with the frontmatter clause and the no-deletion rule" PASS
+    check "P1le24 every lease row phrase is both emitted and documented in skills/doctor/SKILL.md, with the inventory clause and the no-deletion rule" PASS
   else
     check "P1le24 lease row wording drifted from the skill:$LE_ROSTER_MISSING" FAIL
   fi
@@ -7988,19 +7988,19 @@ if printf -- '- a\n\n- b\n' | awk 'prev=="" && /^- / && NR>1 {n++} {prev=$0} END
   check "P6s6b-bite the separator counter sees a planted blank between two bullets" PASS
 else check "P6s6b-bite the separator counter sees a planted blank between two bullets" FAIL; fi
 
-# P6s9 — the frontmatter `session state` clause reads as a COMPLETE inventory of the
-# block, and CLAUDE.md names this exact carrier as a required site for every row the
-# block gains. It named "rebuilt rather than restored" — the DOCUMENT — and nothing
-# about the project ROOT being re-created, so a reader of the description learned the
-# block does not report the finding the renderer emits. Scoped to the frontmatter,
-# because both phrases occur later in the body.
-P6S_FRONTMATTER="$(sed -n '1,/^---$/p' "$PLUGIN_DIR/skills/doctor/SKILL.md" | sed -n '2,$p')"
-if [ -n "$P6S_FRONTMATTER" ]; then
-  check "P6s9-control the doctor skill frontmatter slice is non-empty" PASS
-else check "P6s9-control the doctor skill frontmatter slice is non-empty" FAIL; fi
-if printf '%s' "$P6S_FRONTMATTER" | grep -qF 'project root was re-created'; then
-  check "P6s9 the frontmatter session-state inventory names the restore row" PASS
-else check "P6s9 the frontmatter session-state inventory omits the restore row" FAIL; fi
+# P6s9 — the `Session state` bullet of §"What it checks" reads as a COMPLETE inventory
+# of the block, and the rule files name this exact carrier as a required site for every
+# row the block gains. It named "rebuilt rather than restored" — the DOCUMENT — and nothing
+# about the project ROOT being re-created, so a reader of the inventory learned the block
+# does not report the finding the renderer emits. Scoped to that section, because both
+# phrases occur later in the body.
+P6S_INVENTORY="$(awk '$0 == "## What it checks" { f = 1; next } f && /^## / { exit } f' "$PLUGIN_DIR/skills/doctor/SKILL.md" | tr '\n' ' ' | tr -s ' ')"
+if [ -n "$P6S_INVENTORY" ]; then
+  check "P6s9-control the doctor skill inventory slice is non-empty" PASS
+else check "P6s9-control the doctor skill inventory slice is non-empty" FAIL; fi
+if printf '%s' "$P6S_INVENTORY" | grep -qF 'project root was re-created'; then
+  check "P6s9 the session-state inventory names the restore row" PASS
+else check "P6s9 the session-state inventory omits the restore row" FAIL; fi
 
 # P6s7/P6s8 — the history `reason` reaches a RELAYED row, and it is the ONE history
 # field validateWorkflowExtensions leaves unbounded: session-control-core-v1.js tests

@@ -942,7 +942,7 @@ OUT_CUSTOM_REVIEW="$(payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-custom
 OUT_UNKNOWN="$(payload SubagentStart "$SID_A" "$PROJECT_A" unknown-custom arbitrary-custom-agent | run_hook 2>"$TMP/unknown-custom.err")"
 if printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF '[zensu-host-context]' \
   && [ "$(printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -oF 'principal=host-profile-v1' | wc -l | tr -d ' ')" -eq 2 ] \
-  && printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'Non-command tools remain governed by this agent definition and Claude Code host permissions; every command-execution tool is denied by the Zensu capability gate.' \
+  && printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool, so Bash, every shell alias, and every other MCP tool are unavailable.' \
   && ! printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'must not use shell/control tools' \
   && ! printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -Eq 'principal=(main-v1|reviewer-readonly-v1)'; then
   check "unknown and repo-local custom agents receive only neutral host-profile-v1" PASS

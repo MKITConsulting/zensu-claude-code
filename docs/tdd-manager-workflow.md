@@ -345,15 +345,18 @@ payload `cwd` is never an Autopilot-state selector.
 The plugin-scoped reviewers and `zensu:zensu-plm` expose only the host's `Read`,
 `Grep`, and `Glob` tools. The `PreToolUse` gate repeats that exact allowlist after
 context revalidation: no shell, Git, control, MCP, or other tool outside that
-trio is available to those identities. Other `host-profile-v1` children retain
-ordinary non-command tools granted by their agent frontmatter and the Claude
-host, including file, Agent/Task, coordination, and report-writing operations
-where the host provides them. They cannot invoke `Bash`, `shell`, `exec`,
-`exec_command`, `terminal`, or `command`: arbitrary command execution cannot be
-confined by scanning its source text for protected tokens. The plugin gate adds
-no separate Agent/Task or nesting policy; Claude's host and agent definition
-decide those capabilities, and Claude currently prevents a subagent from
-spawning another subagent.
+trio is available to those identities. Other `host-profile-v1` children keep,
+of the tools their agent frontmatter and the Claude host grant, only the gate's
+allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
+task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
+`StructuredOutput`, `ReportFindings` and `SubagentHandback`, and a short named
+list of read-only MCP tools; the capability-gate row in
+[Configuration](configuration.md) lists every name. They cannot invoke `Bash`,
+`shell`, `exec`, `exec_command`, `terminal`, `command`, or any other tool, every
+other MCP tool included: arbitrary command execution cannot be confined by
+scanning its source text for protected tokens, and an MCP server can expose
+exactly that. The plugin gate adds no separate nesting policy: a child spawned by
+a child is classified and gated by the same rules.
 
 The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
 the interactive main thread creates one private lease generation containing
@@ -378,7 +381,8 @@ terms such as `session-control` or `main-v1`; only traversal roots and path
 filters carry this restriction.
 
 For a neutral child, the gate derives the principal only from the trusted hook
-payload. It denies command execution independently of command text, blocks
+payload. It denies every tool outside its allowlist, command execution
+included, independently of command text, blocks
 actual canonical access to protected Session Control and workflow-root paths,
 blocks every file mutation below the installed-plugin/private plugin-data roots
 (including symlink, case, and hard-link aliases), and blocks mutating Zensu

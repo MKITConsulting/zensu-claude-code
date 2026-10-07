@@ -252,13 +252,15 @@ process.stdin.on("end", () => {
   // fixed token before any slice is taken; D36 pins the command's own text exactly.
   const cmd = process.env.ROUTE_CMD || "";
   if (cmd) s = s.split(JSON.stringify(cmd).slice(1, -1)).join("<record-command>");
+  const iq = s.indexOf("Unless (S) or a fast path below decides");
+  const ia = s.indexOf("Fast-paths that need NO question");
   const ib = s.indexOf("(B) the user");
   const ic = s.indexOf("(C) you are running non-interactively");
-  const ie = s.indexOf("In EVERY OTHER case");
-  if (ib < 0 || ic <= ib || ie <= ic) { process.stdout.write("SLICE_FAILED"); return; }
+  if (iq < 0 || ia <= iq || ib <= ia || ic <= ib) { process.stdout.write("SLICE_FAILED"); return; }
   // Slices are non-empty by construction once the guard above passes, so no
   // emptiness arm is written here — one would read as a control that cannot fire.
-  const b = s.slice(ib, ic), c = s.slice(ic, ie), tail = s.slice(ie);
+  const q = s.slice(iq, ia), b = s.slice(ib, ic), c = s.slice(ic);
+  const outside = s.slice(0, iq) + s.slice(ia, ib);
   const n = (c.match(/\/zensu:autopilot/g) || []).length;
   const bad = [];
   if (n !== 1) bad.push("c-autopilot-mentions=" + n);
@@ -301,37 +303,40 @@ process.stdin.on("end", () => {
   if (bg < 0) bad.push("b-no-noninteractive-guard");
   if (bg < 0 || pf < 0 || bg > pf) bad.push("b-guard-not-before-arms");
   // The guard legitimately carries the unattended-run vocabulary, so it is removed
-  // as a PROPERTY before the remainder is scanned — the same mechanics the tail
-  // scan uses for its own two sanctioned strings. Anything ELSE in (B) tying an
-  // unattended run to a route is the escalation this grader exists to catch, and
-  // until now the vocabulary scan ran only over the tail: (B) sits before (C), so
+  // as a PROPERTY before the remainder is scanned — the same mechanics the
+  // question-block scan uses for its own two sanctioned strings. Anything ELSE in (B)
+  // tying an unattended run to a route is the escalation this grader exists to catch,
+  // and the vocabulary scan once ran only over the text after (C): (B) sits before (C), so
   // a sentence such as "when no human is present, prefer autopilot" passed D13 in
-  // full. Same RESIDUAL as the tail scan: this is a spelling list, not a property.
+  // full. Same RESIDUAL as the question-block scan: this is a spelling list, not a property.
   const bRest = b.split(B_GUARD).join("");
   if (/non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b/i.test(bRest)) bad.push("b-unsanctioned-noninteractive");
-  // Everything AFTER the two clauses — the option list and the act-on-the-answer
+  // The question block BEFORE the fast paths — the option list and the act-on-the-answer
   // paragraph — carries TWO further /zensu:autopilot mentions (the option label and
   // the status line) plus one skill= dispatch with no leading slash, graded
-  // separately below. Guard that no clause there ties an unattended run to a route.
+  // separately below. Guard that no clause there, nor anything else outside (B) and
+  // (C), ties an unattended run to a route.
   // RESIDUAL, stated rather than implied: the detection below is a spelling list of
   // unattended-run wordings, NOT a property. It moved the needle set from the route
   // axis to the trigger axis; a sentence phrased outside this vocabulary evades it.
   // The sanctioned strings ARE removed as a property, so only the vocabulary is
   // the weak half.
-  // tail is non-empty by construction (ie came from a successful indexOf of a
-  // non-empty needle), so no emptiness arm is written — same reasoning as above.
+  // q is non-empty by construction (iq and ia came from successful indexOf calls of
+  // non-empty needles), so no emptiness arm is written — same reasoning as above.
   const SANCTIONED = "which clause (C) makes unreachable non-interactively";
   const OPTION_TEXT = "builds the feature unattended through to a reviewed, live-validated pull request";
-  if (tail.indexOf(SANCTIONED) < 0) bad.push("tail-no-sanctioned-parenthetical");
-  if (tail.indexOf(OPTION_TEXT) < 0) bad.push("tail-no-autopilot-option-text");
-  const rest = tail.split(SANCTIONED).join("").split(OPTION_TEXT).join("");
-  if (/non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b/i.test(rest)) bad.push("tail-unsanctioned-noninteractive");
-  // Any NEW mention of the route after the two clauses fails too: the option
+  if (q.indexOf(SANCTIONED) < 0) bad.push("q-no-sanctioned-parenthetical");
+  if (q.indexOf(OPTION_TEXT) < 0) bad.push("q-no-autopilot-option-text");
+  const qRest = q.split(SANCTIONED).join("").split(OPTION_TEXT).join("");
+  if (/non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b/i.test(qRest)) bad.push("q-unsanctioned-noninteractive");
+  if (/non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b/i.test(outside)) bad.push("outside-unsanctioned-noninteractive");
+  if (outside.indexOf("skill=") >= 0) bad.push("outside-dispatches-a-route");
+  // Any NEW mention of the route in the question block fails too: the option
   // label, the dispatch and the status line are the only three that belong here.
-  const ta = (tail.match(/\/zensu:autopilot/g) || []).length;
-  if (ta !== 2) bad.push("tail-autopilot-mentions=" + ta + "-expected-2");
-  const td = (tail.match(/skill=.zensu:autopilot./g) || []).length;
-  if (td !== 1) bad.push("tail-autopilot-dispatches=" + td + "-expected-1");
+  const qa = (q.match(/\/zensu:autopilot/g) || []).length;
+  if (qa !== 2) bad.push("q-autopilot-mentions=" + qa + "-expected-2");
+  const qd = (q.match(/skill=.zensu:autopilot./g) || []).length;
+  if (qd !== 1) bad.push("q-autopilot-dispatches=" + qd + "-expected-1");
   process.stdout.write(bad.length ? bad.join(",") : "OK");
 });
 JS
@@ -346,7 +351,7 @@ D13V="$(route_clause_verdict "$OUT")/$(route_clause_verdict "$OUT_STRICT")"
 if [ "$BRANCHES_DISTINCT" != yes ]; then
   check "D13 (not graded: D9pre failed, the two branches are not distinct)" FAIL
 elif [ "$D13V" = "OK/OK" ]; then
-  check "D13 non-interactive path selects NEITHER outward-facing route; (B) carries the guard, the refusal order and no escalation" PASS
+  check "D13 non-interactive path selects NEITHER outward-facing route; (B) carries the guard, the refusal order and no escalation; nothing outside (B), (C) and the question block dispatches or names an unattended run" PASS
 else
   check "D13 route-clause property ($D13V)" FAIL
 fi
@@ -1075,8 +1080,9 @@ else
   fi
 fi
 # --- Session-sticky delivery route (D34-D36) ----------------------------------
-# The two ask-hooks read a session marker and hooks.defaultDeliveryRoute and end
-# their directive with a ZENSU DELIVERY ROUTE: field. tests/structure/
+# The two ask-hooks read a session marker and hooks.defaultDeliveryRoute and carry
+# a ZENSU DELIVERY ROUTE: field: this hook opens its directive with it, the
+# reminder ends with it. tests/structure/
 # test-delivery-route.sh owns the helper, the reader and the three field states
 # in both hooks; these three rows keep the plan-hook contract visible from the
 # suite named for the hook. Both branches are graded through both_have, so a
@@ -1096,24 +1102,24 @@ both_have "D34 both branches carry the (S) clause, the ask conjunct and the work
   "ZENSU DELIVERY ROUTE:" \
   "The user changes a recorded route with /zensu:delivery-route"
 # D35 the default fixture has no marker and no config default, so the field must
-# read exactly `ask` — and it must be the LAST thing in the directive, because the
-# (S) clause tells the model to read "the field at the very end".
+# read exactly `ask` — and it must be the FIRST thing in the directive, because the
+# (S) clause tells the model to read "the field at the top".
 D35_BAD=""
 for name in OUT OUT_STRICT; do
   ctx="$(printf '%s' "${!name}" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||"")}catch(_){process.stdout.write("")}})')"
-  tailtxt="$(printf '%s' "$ctx" | tail -c 120 | tr -d '\n')"
-  case "$tailtxt" in
-    (*"ZENSU DELIVERY ROUTE: ask<!-- /zensu:delivery-route -->") ;;
-    (*) D35_BAD="$D35_BAD [$name tail: $tailtxt]" ;;
+  headtxt="$(printf '%s' "$ctx" | head -c 120 | tr -d '\n')"
+  case "$headtxt" in
+    ("<!-- zensu:delivery-route -->ZENSU DELIVERY ROUTE: ask<!-- /zensu:delivery-route -->"*) ;;
+    (*) D35_BAD="$D35_BAD [$name head: $headtxt]" ;;
   esac
   printf '%s' "$ctx" | grep -qF '__ZENSU_' && D35_BAD="$D35_BAD [$name raw placeholder]"
 done
 if [ "$BRANCHES_DISTINCT" != yes ]; then
   check "D35 (not graded: D9pre failed, the two branches are not distinct)" FAIL
 elif [ -z "$D35_BAD" ]; then
-  check "D35 with neither marker nor config the directive ends with 'ZENSU DELIVERY ROUTE: ask' and no raw placeholder" PASS
+  check "D35 with neither marker nor config the directive opens with 'ZENSU DELIVERY ROUTE: ask' and no raw placeholder" PASS
 else
-  check "D35 field tail:$D35_BAD" FAIL
+  check "D35 field head:$D35_BAD" FAIL
 fi
 # D36 a configured default is rendered into BOTH branches with its source named,
 # and the RECORD sentence carries the record command exactly as rendered, bound to
@@ -1143,6 +1149,50 @@ if [ -n "$OUT_ROUTE" ] && [ -n "$OUT_ROUTE_STRICT" ] \
 else
   check "D36 configured default (vanilla=$(printf '%s' "$OUT_ROUTE" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1) strict=$(printf '%s' "$OUT_ROUTE_STRICT" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1))" FAIL
 fi
+DIRECTIVE_CEILING=9000
+PREVIEW_CHARS=2000
+RECORD_COMMAND_RESERVE=300
+cat >"$TMP_DIR/directive-budget.js" <<'JS'
+let s = "";
+process.stdin.on("data", (c) => { s += c; });
+process.stdin.on("end", () => {
+  let ctx = "";
+  try { ctx = (JSON.parse(s).hookSpecificOutput || {}).additionalContext || ""; } catch (_) { ctx = ""; }
+  const ceiling = Number(process.env.CEILING);
+  const preview = Number(process.env.PREVIEW);
+  const reserve = Number(process.env.RESERVE);
+  const cmd = process.env.ROUTE_CMD || "";
+  const at = cmd ? ctx.indexOf(cmd) : -1;
+  const budgeted = ctx.length - (at >= 0 ? cmd.length : 0) + reserve;
+  const newline = ctx.slice(0, preview).lastIndexOf("\n");
+  const visible = ctx.length <= preview ? ctx.length : (newline > preview / 2 ? newline : preview);
+  const bad = [];
+  if (!ctx) bad.push("empty");
+  if (at < 0) bad.push("record-command-not-found");
+  if (!(ceiling > 0) || !(reserve > 0) || budgeted > ceiling) bad.push("budgeted-length=" + budgeted);
+  const needles = [
+    "ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)",
+    "(1) 'Autopilot — /zensu:autopilot'",
+    "(2) 'Zensu workflow — /zensu:tdd'",
+    "(3) 'Pilot — /zensu:pilot'",
+    "(4) 'No — implement directly'",
+  ];
+  for (const n of needles) {
+    const i = ctx.indexOf(n);
+    if (i < 0 || i + n.length > visible) bad.push("not-in-preview:" + n);
+  }
+  process.stdout.write(bad.length ? bad.join(",") : "OK:" + budgeted);
+});
+JS
+directive_budget() {
+  printf '%s' "$1" | CEILING="$DIRECTIVE_CEILING" PREVIEW="$PREVIEW_CHARS" RESERVE="$RECORD_COMMAND_RESERVE" ROUTE_CMD="$D_REC_CMD" \
+    node "$TMP_DIR/directive-budget.js" 2>/dev/null
+}
+D44V="$(directive_budget "$OUT_ROUTE")/$(directive_budget "$OUT_ROUTE_STRICT")"
+case "$D44V" in
+  (OK:*/OK:*) check "D44 with the longest route field and the record command counted at $RECORD_COMMAND_RESERVE characters, both branches stay within $DIRECTIVE_CEILING characters, below the host's measured 10000-character inline limit, and carry the field and all four option labels inside the host's $PREVIEW_CHARS-character preview (vanilla/strict: $D44V)" PASS ;;
+  (*) check "D44 directive budget (ceiling $DIRECTIVE_CEILING, record command reserve $RECORD_COMMAND_RESERVE, preview $PREVIEW_CHARS; vanilla/strict: $D44V)" FAIL ;;
+esac
 
 echo "----"
 echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

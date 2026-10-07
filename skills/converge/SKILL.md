@@ -1,15 +1,9 @@
 ---
 name: converge
 description: >
-  [Zensu] Bidirectional flow-back audit: evaluate the CURRENT code state against the
-  newest TDD plan's Requirements table (stable AC-###/FR-### IDs), classify
-  gaps (missing / partial / contradicts / unrequested), split unrequested work
-  into business rules vs implementation details, and propose spec/plan edits
-  with freshly allocated stable IDs — applied only after explicit user
-  confirmation. Use when the user asks to "converge", "audit code against the
-  plan", "check for spec drift", "flow back business rules", or as the optional
-  follow-up the /zensu:tdd chain offers; autopilot runs it report-only before
-  opening a PR.
+  [Zensu] Audit the code against the newest TDD plan's Requirements table and
+  propose spec or plan edits. Use when the user asks to "converge" or to check
+  for spec drift, or via /zensu:converge.
 ---
 
 # /zensu:converge
