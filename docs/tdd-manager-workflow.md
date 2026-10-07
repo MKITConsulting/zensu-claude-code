@@ -597,11 +597,14 @@ applies three rules **in this order**: the project root becomes `<project>`,
 prefix becomes `<home>`. Rule 1 must precede rule 2 because the project root is
 normally nested under `$HOME`; the residual rule is what makes the guarantee
 checkable rather than best-effort. Each rule also covers Claude Code's
-dash-encoded spelling of a directory, the name it uses under `~/.claude/projects/`
-and in the session scratchpad, where every character other than a letter or digit
-becomes `-` (`-Users-<name>-IdeaProjects-x`). That spelling is redacted only where
-it starts right after a path separator, and the project root only when it fills
-the whole name. Secret **names** are deliberately NOT
+dash-encoded spelling of a directory, the name it uses under `~/.claude/projects/`,
+in its `claude-<uid>` temp root and in its `claude-cli-nodejs` cache, where every
+character other than an ASCII letter or digit becomes `-`
+(`-Users-<name>-IdeaProjects-x`). This developer's encoded project root and `$HOME`
+are redacted wherever they start right after a path separator; another user's
+encoded home, and a one-segment spelling such as `-root`, only directly under one of
+those three directories, so a repository's own `-home-…` or `-root…` names stay
+untouched. The project root is redacted only when it fills the whole name. Secret **names** are deliberately NOT
 redacted — a name grants no access, and this repo's own workflows carry
 `secrets.GITHUB_TOKEN` in public. Credential **values** belong to a different
 gate (`hooks/pre-write-secret-scan.sh`).
@@ -678,6 +681,12 @@ publishable, so committing these artifacts stops adding to that pile.
 through a symlink or an alias that matches no known root is not caught (the one
 alias pair handled by hand is macOS's `/private/{tmp,var}`). A git repository
 root ABOVE the project root is covered only insofar as `$HOME` covers it. The
+dash-encoded spelling is lossy, because a dash cannot tell a separator from a name
+character: a user segment the encoded `$HOME` spelling does not match ends at its
+first dash (`-Users-first-last-x` keeps `-last-x`), another user's encoded home
+outside Claude Code's three directories is not caught, and a working directory
+whose encoded name exceeds 200 characters, which Claude Code cuts and suffixes with
+a hash, keeps the part past `$HOME`. The
 PostToolUse sweep — on BOTH registered matchers — only revisits artifacts modified in the last 5 minutes
 that git does not confirm as tracked and unchanged, so plans from earlier runs are
 out of reach — this is a writer-side fix, not a history rewrite. The same rule

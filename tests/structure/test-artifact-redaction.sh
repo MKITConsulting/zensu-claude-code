@@ -1846,32 +1846,69 @@ OUT83="$(node -e '
     ["src/-Users-list.ts", "src/-Users-list.ts"],
     ["/opt/-home-x.bak/y", "/opt/-home-x.bak/y"],
     ["/srv/-rootfs/x", "/srv/-rootfs/x"],
+    ["S3 IMPL completed - files: src/routes/-home-hero/index.tsx, src/routes/-root-layout.tsx", "S3 IMPL completed - files: src/routes/-home-hero/index.tsx, src/routes/-root-layout.tsx"],
+    ["src/routes/-root/index.tsx", "src/routes/-root/index.tsx"],
+    ["x/-Users-list/y.ts", "x/-Users-list/y.ts"],
+    ["src/-Users-list-item.ts", "src/-Users-list-item.ts"],
+    ["lib/-home-a-b_c/x", "lib/-home-a-b_c/x"],
+    ["src/-Users-m-notes.md", "src/-Users-m-notes.md"],
+    ["grep -rn \x27\\-\\-home-dir\x27 src", "grep -rn \x27\\-\\-home-dir\x27 src"],
+    ["sed \x27s/-root$//\x27 and sed \x27s/-home-dir/x/\x27", "sed \x27s/-root$//\x27 and sed \x27s/-home-dir/x/\x27"],
   ];
   const bad = cases.filter(([i, w]) => m.redact(i, o) !== w)
     .map(([i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
   process.stdout.write(bad.length ? bad.join(" | ") : "OK");
 ' "$REDACT" 2>/dev/null)"
 if [ "$OUT83" = "OK" ]; then
-  check "R83 a dash-encoded rule fires only on a whole name after a path separator and leaves other -Users-, -home- and -root text alone" PASS
+  check "R83 the residual dash-encoded rules fire only under Claude Code's own directories, so in-repo names, flags and regex text starting with -Users-, -home- or -root survive" PASS
 else
-  check "R83 a dash-encoded rule fires only on a whole name after a path separator and leaves other -Users-, -home- and -root text alone (bad: $OUT83)" FAIL
+  check "R83 the residual dash-encoded rules fire only under Claude Code's own directories, so in-repo names, flags and regex text starting with -Users-, -home- or -root survive (bad: $OUT83)" FAIL
 fi
 
 OUT84="$(node -e '
   const m = require(process.argv[1]);
+  const o = { projectRoot: "/Users/m/app", home: "/Users/m" };
   const cases = [
     [{ projectRoot: "/opt/acme/app", home: "/Users/m" }, "/tmp/claude-501/-opt-acme-app/s", "/tmp/claude-501/<project>/s"],
-    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude\\C--Users-m-app\\s", "C:\\Temp\\claude\\<project>\\s"],
-    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude\\C--Users-m-other\\s", "C:\\Temp\\claude\\~-other\\s"],
+    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude-0\\C--Users-m-app\\s", "C:\\Temp\\claude-0\\<project>\\s"],
+    [{ projectRoot: "C:\\Users\\m\\app", home: "C:\\Users\\m" }, "C:\\Temp\\claude-0\\C--Users-m-other\\s", "C:\\Temp\\claude-0\\~-other\\s"],
+    [{ projectRoot: "C:\\Users\\John.Doe\\proj", home: "C:\\Users\\John.Doe" }, "x\\claude-0\\c--Users-John-Doe-proj\\s and x\\claude-0\\c--Users-John-Doe-other\\s", "x\\claude-0\\<project>\\s and x\\claude-0\\~-other\\s"],
+    [o, "/home/ci/.cache/claude-cli-nodejs/-home-otherdev-work/mcp-logs-x/y.txt", "<home>/.cache/claude-cli-nodejs/<home>-work/mcp-logs-x/y.txt"],
+    [o, "C:\\Users\\x\\AppData\\Local\\claude-cli-nodejs\\Cache\\C--Users-bob-proj\\y", "C:<home>\\AppData\\Local\\claude-cli-nodejs\\Cache\\<home>-proj\\y"],
+    [o, "C:\\Users\\x\\AppData\\Local\\Temp\\claude-0\\C--Users-bob-proj\\s", "C:<home>\\AppData\\Local\\Temp\\claude-0\\<home>-proj\\s"],
+    [o, "C:\\\\Users\\\\x\\\\.claude\\\\projects\\\\C--Users-bob-proj\\\\s.jsonl", "C:<home>\\\\.claude\\\\projects\\\\<home>-proj\\\\s.jsonl"],
   ];
-  const bad = cases.filter(([o, i, w]) => m.redact(i, o) !== w)
-    .map(([o, i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
+  const bad = cases.filter(([c, i, w]) => m.redact(i, c) !== w)
+    .map(([c, i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, c)) + " (want " + JSON.stringify(w) + ")");
   process.stdout.write(bad.length ? bad.join(" | ") : "OK");
 ' "$REDACT" 2>/dev/null)"
 if [ "$OUT84" = "OK" ]; then
-  check "R84 a dash-encoded project root outside \$HOME and the Windows drive spelling are redacted" PASS
+  check "R84 a dash-encoded project root outside \$HOME, either case of a drive letter, and Claude Code's temp, cache and Windows directories are redacted" PASS
 else
-  check "R84 a dash-encoded project root outside \$HOME and the Windows drive spelling are redacted (bad: $OUT84)" FAIL
+  check "R84 a dash-encoded project root outside \$HOME, either case of a drive letter, and Claude Code's temp, cache and Windows directories are redacted (bad: $OUT84)" FAIL
+fi
+
+OUT85="$(node -e '
+  const m = require(process.argv[1]);
+  const o = { projectRoot: "/Users/m/app", home: "/Users/m" };
+  const r = { projectRoot: "/app", home: "/root" };
+  const cases = [
+    [o, "Transcripts live in /tmp/claude-501/-Users-bob.", "Transcripts live in /tmp/claude-501/<home>."],
+    [o, "It ran in /tmp/claude-501/-Users-m.", "It ran in /tmp/claude-501/~."],
+    [o, "It ran in /tmp/claude-501/-Users-m-app.", "It ran in /tmp/claude-501/<project>."],
+    [o, "see /tmp/claude-501/-Users-m-other. Then", "see /tmp/claude-501/~-other. Then"],
+    [o, "/var/x/-Users-m-proj/y and /var/x/-Users-m-app/y", "/var/x/~-proj/y and /var/x/<project>/y"],
+    [r, "/tmp/claude-0/-root-other/s and /tmp/claude-0/-app/s", "/tmp/claude-0/~-other/s and /tmp/claude-0/<project>/s"],
+    [r, "src/-app/x and src/routes/-root/y", "src/-app/x and src/routes/-root/y"],
+  ];
+  const bad = cases.filter(([c, i, w]) => m.redact(i, c) !== w)
+    .map(([c, i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, c)) + " (want " + JSON.stringify(w) + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" 2>/dev/null)"
+if [ "$OUT85" = "OK" ]; then
+  check "R85 an encoded name ending a sentence redacts like the plain one, this developer's spellings of two or more segments redact under any directory, and a one-segment spelling only under Claude Code's" PASS
+else
+  check "R85 an encoded name ending a sentence redacts like the plain one, this developer's spellings of two or more segments redact under any directory, and a one-segment spelling only under Claude Code's (bad: $OUT85)" FAIL
 fi
 
 # ── R56-R61: the claims this feature makes about itself ──────────────
