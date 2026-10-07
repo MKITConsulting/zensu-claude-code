@@ -54,6 +54,8 @@ unit_cases_meet_floor() {
   local file="$1" min_tests="$2" min_pass="${3:-$2}"
   UNIT_CASES_TESTS="$(unit_summary_field tests "$file")"
   UNIT_CASES_PASS="$(unit_summary_field pass "$file")"
+  case "$min_tests" in ''|*[!0-9]*) return 2 ;; esac
+  case "$min_pass" in ''|*[!0-9]*) return 2 ;; esac
   [ "$UNIT_CASES_TESTS" -ge "$min_tests" ] && [ "$UNIT_CASES_PASS" -ge "$min_pass" ]
 }
 
@@ -76,6 +78,7 @@ unit_cases_registered_floor() {
   local file="$1" min_tests="$2"
   UNIT_CASES_TESTS="$(unit_summary_field tests "$file")"
   UNIT_CASES_PASS="$(unit_summary_field pass "$file")"
+  case "$min_tests" in ''|*[!0-9]*) return 2 ;; esac
   [ "$UNIT_CASES_TESTS" -ge "$min_tests" ]
 }
 
@@ -114,4 +117,44 @@ unit_cases_report_text() {
   printf '%s\n' "$1" > "$tmp"
   unit_cases_report "$tmp"
   rm -f "$tmp"
+}
+
+UNIT_OVERVIEW_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/SUITE-OVERVIEW.md"
+UNIT_OVERVIEW_ROW='^\| `[a-z0-9._-]+\.test\.js` \| [0-9]+ \|'
+
+unit_overview_rows() {
+  [ -r "$UNIT_OVERVIEW_FILE" ] || return 1
+  grep -nE "$UNIT_OVERVIEW_ROW" "$UNIT_OVERVIEW_FILE" \
+    | awk -F'|' '{ name = $2; gsub(/[ `]/, "", name); count = $3; gsub(/ /, "", count); print $1 + 0, name, count }'
+}
+
+unit_overview_row() {
+  [ -n "${1:-}" ] || return 1
+  unit_overview_rows \
+    | UNIT_OVERVIEW_NAME="$1" awk '$2 == ENVIRON["UNIT_OVERVIEW_NAME"] && !found { print $1, $3; found = 1 } END { exit !found }'
+}
+
+unit_overview_declared() {
+  local row
+  row="$(unit_overview_row "${1:-}")" || return 1
+  printf '%s\n' "${row#* }"
+}
+
+unit_overview_check() {
+  local path="${1:-}" name row line declared registered
+  name="${path##*/}"
+  if ! row="$(unit_overview_row "$name")"; then
+    printf 'tests/SUITE-OVERVIEW.md: %s has no §4 row; add one with its Blocks cell\n' "${name:-<no file named>}"
+    return 1
+  fi
+  line="${row%% *}"
+  declared="${row#* }"
+  if [ ! -r "$path" ]; then
+    printf 'tests/SUITE-OVERVIEW.md:%s: %s declares %s, but %s is unreadable\n' "$line" "$name" "$declared" "$path"
+    return 1
+  fi
+  registered="$(grep -c '^test(' "$path")"
+  [ "$declared" = "$registered" ] && return 0
+  printf 'tests/SUITE-OVERVIEW.md:%s: %s declares %s, registers %s; edit that Blocks cell\n' "$line" "$name" "$declared" "$registered"
+  return 1
 }

@@ -1,14 +1,9 @@
 ---
 name: implement
 description: >
-  [Zensu] Implement a tracked Zensu feature end-to-end. Loads the feature context and security
-  profile, UI mocks, product design system, and org knowledge, then runs disciplined
-  implementation via the /zensu:tdd skill in the main thread (RED-GREEN TDD when armed,
-  PreToolUse phase-gate, guaranteed code-review chain), and afterwards links all artifacts
-  (tests, source, docs) and creates a revision. Use when starting implementation of a
-  planned feature, resuming an in-progress feature, completing a feature with proper
-  artifact linking, or the slash command /zensu:implement. Requires a Zensu feature ID
-  (KEY-N, e.g. ZEN-42, or UUID).
+  [Zensu] Implement a tracked Zensu feature through /zensu:tdd, then link its
+  artifacts and create a revision. Use when building a planned feature by its
+  Zensu ID (such as ZEN-42), or via /zensu:implement.
 ---
 
 # /zensu:implement

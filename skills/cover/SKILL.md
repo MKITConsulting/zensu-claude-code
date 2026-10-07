@@ -1,20 +1,9 @@
 ---
 name: cover
 description: >
-  [Zensu] Author durable, committed tests at the RIGHT level for a change — generic across any
-  stack, framework, and app type. Point it at a diff, a feature, a PR, a path, or a
-  described behavior and it probes the repo, decides per behavior whether a unit,
-  component, integration/contract, or end-to-end test is the faithful cover (the test
-  pyramid, encoded), mirrors the project's existing test conventions, and writes the
-  gap-filling tests green-first — because the code already exists, each test must pass on
-  first run; a first-run failure means either a bad test or a real bug, which it reports
-  rather than silently patching. Reuses the Zensu review chain (five review-aspect agents +
-  code-reviewer) as the quality gate and flags any surfaced bug loudly. It is the durable
-  regression-net complement to /zensu:autopilot's one-shot live validation, and can persist
-  autopilot's validated acceptance criteria into committed end-to-end tests via --from-acs.
-  Use whenever the user wants to add or backfill tests, "write e2e tests", "cover this",
-  "add regression tests", "fill the test gaps", "FE/BE/fullstack tests", a durable test net,
-  or the slash command /zensu:cover.
+  [Zensu] Write durable, committed tests at the right level for a diff, feature,
+  PR or behavior. Use when the user wants to add or backfill tests,
+  "write e2e tests", "cover this", or /zensu:cover.
 ---
 
 # /zensu:cover

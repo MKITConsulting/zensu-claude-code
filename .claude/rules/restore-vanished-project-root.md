@@ -21,7 +21,7 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 §"Adopting a Record Across a Lineage Break" answers "this runtime may not SERVE the record".
 §"Workflow-Baseline Repair" answers "it serves it fine and the workflow DOCUMENT is gone".
 This one answers "it serves it fine and the DIRECTORY the record anchors is gone" — the
-ordinary shape after `git worktree remove`, which `skills/session-trail/SKILL.md` measures at
+ordinary shape after `git worktree remove`, which one machine measured at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
 `readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
 deny — a Bash write too, but only while the opt-in source-write gate is on.
@@ -136,10 +136,10 @@ and `THREE bounded exceptions`, so a maintainer who edits only the three code ro
 turns a suite red with nothing naming it — the UNOBVIOUS-direction coupling this file
 records for G12.
 
-**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (frontmatter, §"When to Use", the
-`--restore-root` section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
-state bullets this feature added (the RE-CREATED row, its not-checked arm, and the frontmatter
-`session state` clause, which reads as a complete inventory of the block and therefore goes
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (§"When to Use", the `--restore-root`
+section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
+state bullets this feature added (the RE-CREATED row, its not-checked arm, and the `Session state`
+bullet of §"What it checks", which reads as a complete inventory of the block and therefore goes
 stale silently) — `docs/session-control.md` §"Unbindable sessions", `docs/gates.md`,
 `docs/operations.md` and `docs/tdd-manager-workflow.md`. That bullet list is TIGHT: every other
 bullet in the block follows its predecessor with no blank line, and the two blanks this feature
@@ -163,7 +163,12 @@ restore, and nothing points at it from the side that changes. `R13` in
 `tests/SUITE-OVERVIEW.md` and compares every declared registration count against the file that
 registers it, so adding or removing a `test()` in ANY driven `tests/structure/*.test.js`, or
 reformatting that table, reddens this suite; when it was first derived rather than
-hand-enumerated it found SEVEN stale counts at once. And the `R12` family grades COMMENT PROSE
+hand-enumerated it found SEVEN stale counts at once. The comparison and the row reader live in
+`tests/structure/lib-unit-summary.sh` (`unit_overview_check`, `unit_overview_declared`), and
+every driver that sources it and drives a file with a row reads its floor from that row and
+calls the check beside it, so the same edit also reddens the file's own driver, and a
+reformatted table reddens every one of those drivers, not only this suite. And the `R12`
+family grades COMMENT PROSE
 inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
 comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
 comment in the core reddens it too. `R13b` widens that direction again: it measures

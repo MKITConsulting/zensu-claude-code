@@ -2,6 +2,7 @@
 paths:
   - "skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
+  - "skills/session-trail/references/**"
   - "tests/structure/worktree-advice-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
   - "tests/structure/test-session-trail-skill.sh"
@@ -36,8 +37,8 @@ so a takeover's first commit very often removes the condition that kept it alive
 **That is a correlation over 40 samples, and the wording has to stay one:** "close to by
 construction" asserted a MECHANISM the sample does not support, and it stood here and in
 `SKILL.md` while the emitted text hedged it correctly as "almost always" — a maintainer-
-facing overstatement above a user-facing statement that was already right. SKILL.md §6
-measures the other half of the shape: 498 of 657 archived worktree-sessions lost their
+facing overstatement above a user-facing statement that was already right. One machine
+measured the other half of the shape: 498 of 657 archived worktree-sessions lost their
 directory. The arms now decide only what to SAY, never whether to stay — an arm that
 returns without a `git worktree add` line has reintroduced the defect, which is what
 `WT8k` grades over a source-derived roster of all eight fixtures rather than a hand list.
@@ -67,7 +68,7 @@ line, so `T35_EXPECT`, `recipePlaceholders` and the fence split are untouched �
 is bounded to what `release` checks: it names its refusals, and it REPORTS uncommitted, unpushed
 and ignored files rather than refusing over them. The unit case `every arm on both legs closes
 with the release step, whichever form renders it` holds both legs, both forms and the closing
-position; SKILL.md flow 3 step 4's closing paragraph carries the same instruction in its own
+position; `references/takeover.md` step 4's closing paragraph carries the same instruction in its own
 words, kept in step by hand.
 
 **The history is worth keeping because the claim was FALSE TWICE, in opposite directions.**
@@ -127,7 +128,7 @@ EXCEPTION to the rule this section states below for the sibling `CARRY_OVER` rec
 which says this section restates neither that recipe's safety properties nor their count and
 points at the two reader-facing carriers instead. The exception is narrow and it is about
 FALSIFICATION rather than about content: what is recorded here is not the correct wording —
-that lives in the emitted array and in SKILL.md flow 3 step 4, as the sibling rule requires —
+that lives in the emitted array and in `references/takeover.md` step 4, as the sibling rule requires —
 but WHICH unbounded form was measured false and against WHICH owner. A carrier cannot hold
 that; it would read as a caution about a claim it does not make. Do not extend the exception
 to the correct wordings themselves, or this becomes the fourth hand-maintained copy the
@@ -153,7 +154,7 @@ leave, which is worse than saying nothing.
 no longer names it either.** Rendering the prefix would be the shipped hatch §"Git Mutation Tables"
 forbids outright, and that much was right from the start. What was wrong was "take it from
 there rather than from here", which INSTRUCTS the reader to take it and contradicts
-`skills/session-trail/SKILL.md` flow 3 step 3's own "Do not plan around an escape prefix …
+`skills/session-trail/references/takeover.md` step 3's own "Do not plan around an escape prefix …
 do not go looking for the spelling in order to use it" — a rule that also records
 that the host classifier commonly refuses the prefix, so the old wording pointed at a remedy
 which usually cannot be taken. **The deny no longer names the escape at all.** The gate is
@@ -251,12 +252,12 @@ unit case, and it catches the both-runs-deleted edit only — measured, deleting
 run alone leaves the fences split, so the ordering case beside it is what holds the leading
 run. `WT8v8` loops `WT8k`'s roster — accumulated in THAT
 loop rather than a second one, which saved 16 node spawns — and asserts no arm spells the
-prefix. `T35b` gained needles for the SKILL.md prose, because `T35` pins the COMMAND alone
+prefix. `T35b` gained needles for the doc carrier's prose, because `T35` pins the COMMAND alone
 and the attestation and cost paragraphs were otherwise deletable with both suites green.
 Two further unit cases pin that the survey drops the route and that the two axes are
 independent. **Adding the command cost BOTH hand-maintained counters in the same change** —
 `WT8_PRESENT_EXPECT` and `T35_EXPECT`, whose sum invariant this section's own roster already
-names — plus `WT_UNIT_TOTAL_WANT` and the SKILL.md flow 3 step 4 mirror `T35` greps them
+names — plus `WT_UNIT_TOTAL_WANT` and the `references/takeover.md` step 4 mirror `T35` greps them
 against. **And it moved two line-anchored citations**: `T36` caught both immediately, which
 is exactly what that pin exists for. It introduces NO new placeholder — `<their worktree>`
 and `<path>` were both already in the present leg's command set, so `recipePlaceholders`
@@ -307,13 +308,13 @@ printing one whose source is not there.
 **The safety properties of that recipe are enumerated in the two reader-facing carriers,
 and this section deliberately restates neither them nor their COUNT.** It used to, and that made a FOURTH hand-maintained copy of text that
 already exists in the code comment above `CARRY_OVER`, in the emitted array a human reads,
-and in `SKILL.md` flow 3 step 4 — a four-way agreement whose own paragraph recorded that it
+and in `references/takeover.md` step 4 — a four-way agreement whose own paragraph recorded that it
 had already gone stale once (it read THREE for a round after `--binary` was added, and FOUR
 for a round after the quoting, the paste-unit split and the regular-files-only loop landed).
 The two READER-FACING carriers are the authority: the `CARRY_OVER` rationale comment in
-`skills/session-trail/scripts/trail.mjs` and `skills/session-trail/SKILL.md` flow 3 step 4,
+`skills/session-trail/scripts/trail.mjs` and `skills/session-trail/references/takeover.md` step 4,
 which must agree with each other on the COUNT and on every property. `T35b` pins the
-SKILL.md copy needle by needle and `WT8m3`/`WT8m4`/`WT8m5` plus
+`references/takeover.md` copy needle by needle and `WT8m3`/`WT8m4`/`WT8m5` plus
 `tests/structure/worktree-advice-v1.test.js` pin the EMITTED array. State the bound with
 them: no check compares the two COUNTS, and the rationale COMMENT above `CARRY_OVER` has
 no pin at all — which is where three stale claims were found in one review cycle. That
@@ -338,7 +339,7 @@ what was missing was signposting.
 **Coupled carriers, and the pin that holds them:** the advice command literals —
 `TAKE_YOUR_OWN`'s, `MOVE_ALTERNATIVE`'s and the gone leg's `git worktree add` /
 `git worktree move` spellings AND every `CARRY_OVER` command — are hand-restated in
-`skills/session-trail/SKILL.md` flow 3 step 4, in its table and its fenced blocks. State the
+`skills/session-trail/references/takeover.md` step 4, in its table and its fenced blocks. State the
 roster from the EXTRACTION RANGE, never from a remembered list: `T35`'s awk runs from
 `const CARRY_OVER = [` to `worktreeAdvice`'s closing brace, so every two-space literal
 declared between those two anchors is a member, and this sentence named three sources while
@@ -428,15 +429,16 @@ correction and moves with it.
 **Operator-facing accounts that must move with it**, and the first two live in DIFFERENT
 steps — bundling them under one was wrong, because `T35`'s slice is anchored on
 `/^4\. \*\*Decide WHERE to continue/` and would extract a region the content sits outside
-of: `skills/session-trail/SKILL.md` flow 3 **step 4** carries the `CARRY_OVER` hand-copy,
-while flow 3 **step 3** carries the renderer enumeration that names three commands. Then
-the `adopt <selector>` row of that file's command table, its flow 5 step 6 paragraph, its
-§"What leaves the machine's project boundaries" paragraph, and the Safety section's
+of: `skills/session-trail/references/takeover.md` **step 4** carries the `CARRY_OVER` hand-copy,
+while its **step 3** carries the renderer enumeration that names three commands. Then
+the `adopt <selector>` row of `references/commands.md`, flow 5 step 6 in
+`references/handoff.md`, and two passages of `references/disclosure.md` — the `adopt --json`
+paragraph of §"What leaves the machine's project boundaries" and the ledger-write
 `--no-record` bullet — the last FOUR all describe the `adopt` route's advice, and `T38` in
 `tests/structure/test-session-trail-skill.sh` now pins all four, slicing each passage on its
 own anchor so a reword of the `WHERE` head or of `worktreeAdvice`'s carry-over arm fails
 loudly instead of leaving them stale. The claim that nothing pinned them outlived the pin by
-a round, which is the drift this roster exists to catch and did not catch in itself. The Safety bullet joined that set only when the
+a round, which is the drift this roster exists to catch and did not catch in itself. The ledger-write bullet joined that set only when the
 `--no-record` refusal's stated ground was corrected, and it was missed on the first pass.
 
 **Coalescing is now a TWO-SIDED property, and BOTH BRIEF renderer pins assert the split as
@@ -558,7 +560,7 @@ resolve, and `adviceBlock` / `substitutionRuleLines` through `resolveCarrier`'s 
 refusal — and two verbs write a machine-wide ledger edge. `cmdTakeover` recorded its edge at the
 top of the verb and made its first `print` roughly 160 lines below, so a throw in between landed
 a durable edge with an EMPTY buffer for `main()` to flush: the edge existed and the `LINEAGE`
-line SKILL.md requires never appeared. **Announcing after the write is NOT the fix and was
+line the skill requires never appeared. **Announcing after the write is NOT the fix and was
 proposed as one**: that verb has TWO carriers and the `--json` one returns before any
 announcement could be reached, evaluating `worktreeAdvice(r)` inside the payload literal. The
 order is inverted instead — `cmdTakeover` builds its advice arrays above `recordTakeoverEdge`,
@@ -604,9 +606,9 @@ not, and three of the seven bare ones were new safety prose. Two live needles ca
 backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is emitted rather than described because prose left the reader to
   improvise a loop that word-splits on a filename with a space. It still applies to copying
   by hand, because the "do not run this at all" escape does not answer it — and that escape
-  now lives in the EMITTED array too, not only in SKILL.md, since SKILL.md is read by the
+  now lives in the EMITTED array too, not only in the skill text, since the skill is read by the
   model while the array lands in the brief a human pastes from. Pinned on both carriers, by different
-  suites: `T35b` covers the SKILL.md copy, and `WT8m3`/`WT8m4`/`WT8m5` plus
+  suites: `T35b` covers the `references/takeover.md` copy, and `WT8m3`/`WT8m4`/`WT8m5` plus
   `tests/structure/worktree-advice-v1.test.js` cover the EMITTED text — the one that reaches a persisted brief,
   and the one `T35` cannot see, since its extractor matches command literals and these
   cautions are the prose beside them.
@@ -660,9 +662,7 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   fails, re-derive the line and fix the doc — never weaken the needle. **Seven rows, across
   BOTH carriers**: grading only the spec was the first spelling, and it reproduced the very
   defect it was written for, since the overview HTML twins three of those citations and had
-  already drifted once inside this change. One row hardcodes its own line number, because the
-  spec cites `SKILL.md` twice and a generic regex cannot tell them apart — that row's regex
-  moves with the citation, which fixing the doc alone does not do. It has since caught
+  already drifted once inside this change. It has since caught
   further drifts, from both carriers at once — the first time that class failed loudly
   instead of silently. No ordinal here on purpose: the drift count lives only in run logs,
   so a number written down would be hand-maintained and would go stale, which is the failure
@@ -682,7 +682,7 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   unchanged, and `FRESH_SESSION_SOURCES` excludes `resume`, so a resumed session keeps the
   original anchor. `--fork-session` is the route whose anchor is the directory it starts in,
   and the only one where the own-worktree rule and the write anchor land on the same place —
-  but only the HANDOFF brief and SKILL.md flow 3 step 4 name it. The takeover brief renders
+  but only the HANDOFF brief and `references/takeover.md` step 4 name it. The takeover brief renders
   no resume line at all, so it does not, and any claim that "both briefs" name the fork is
   false. Either way it is guidance, not a mechanism.
 - **The `noStore` branch of `unreadableWhy` is unreachable from `test-session-trail-verdict.sh`.**

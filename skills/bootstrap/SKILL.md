@@ -1,14 +1,9 @@
 ---
 name: bootstrap
 description: >
-  [Zensu] Greenfield entry point — bootstrap a brand-new Zensu product from a plan/vision
-  document (MVP spec, PRD, idea paper) through to a fully configured product: extracted
-  features, subfeatures, user journeys, security profiles, tiers, and a generated
-  CLAUDE.md. Use when starting a new project from scratch with a plan doc, converting a
-  product vision into tracked features, setting up a product in Zensu for the first time,
-  or the slash command /zensu:bootstrap. For an existing codebase whose features are
-  untracked use /zensu:ghost-scan instead; for hybrid (code plus a forward plan) run
-  ghost-scan first, then create the not-yet-built items as planned features.
+  [Zensu] Create a Zensu product from a plan or vision document: features,
+  journeys, security profiles and tiers. Use when starting a new product from a
+  plan document, or via /zensu:bootstrap.
 ---
 
 # /zensu:bootstrap

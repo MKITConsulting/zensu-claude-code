@@ -1,14 +1,9 @@
 ---
 name: pr-team-review
 description: >
-  [Zensu] Orchestrate a comprehensive multi-agent PR/MR review on GitHub or GitLab:
-  scout the change, auto-cast a tailored team from a 25-persona engineering pool,
-  always evaluate changed-code test coverage, run reviewers in parallel, challenge
-  groupthink, synthesize the findings, and publish one consolidated review with inline
-  comments through the VCS driver. Use for "team review", "multi-agent PR review",
-  "horde review", "agent-team review", "reviewer consensus", "PR debate",
-  "publish team feedback", a GitHub/GitLab PR URL paired with a review request, or
-  /zensu:pr-team-review. Drives the workflow end-to-end and posts the result.
+  [Zensu] Run a multi-agent PR review on GitHub or GitLab and publish one
+  consolidated review. Use for "team review", "multi-agent PR review", a PR URL
+  with a review request, or /zensu:pr-team-review.
 ---
 
 # /zensu:pr-team-review

@@ -110,6 +110,7 @@
     "test-session-trail-verdict.sh",
     "test-setup-skill.sh",
     "test-skill-overlays.sh",
+    "test-skill-text-budget.sh",
     "test-skill-workflow-markers.sh",
     "test-smoke-main-thread-chain.sh",
     "test-state-verb-diagnostics.sh",
