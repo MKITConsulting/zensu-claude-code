@@ -606,7 +606,7 @@ if ln "$LOUD_PEER" "$LOUD" 2>/dev/null; then
   # `(sweep)` marks a target the sweep produced rather than one the tool named,
   # which is what lets an operator tell "the file you just wrote" from "a file in
   # this project".
-  if printf '%s' "$LOUD_ERR" | grep -qF "artifact left UNREDACTED (sweep) — $LOUD (hard-link)"; then
+  if printf '%s\n' "$LOUD_ERR" | grep -F 'artifact left UNREDACTED (sweep) — ' | grep -qF '2026-01-01-0015_tdd-loud.log (hard-link)'; then
     check "R23 the hook reports an artifact it left unredacted instead of skipping silently" PASS
   else
     check "R23 the hook reports an artifact it left unredacted (err=$LOUD_ERR)" FAIL
@@ -961,7 +961,7 @@ mkdir -p "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-adir.log"
 touch -t 202601010000 "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-old.log"
 OUT48="$(node -e '
   const fs = require("node:fs");
-  const root = process.argv[2];
+  const root = require("node:path").resolve(process.argv[2]);
   const m = require(process.argv[1]);
   const real = fs.lstatSync;
   let stats = 0;
@@ -1018,7 +1018,7 @@ OUT49="$(node -e '
   const m = require(process.argv[1]);
   const capped = m.sweepTargets(root, { windowSeconds: 300 }).targets;
   const all = m.sweepTargets(root, { windowSeconds: 300, maxTargets: 100 }).targets;
-  const base = capped.map(function (p) { return p.slice(p.lastIndexOf("/") + 1); });
+  const base = capped.map(function (p) { return require("node:path").basename(p); });
   const bad = [];
   if (capped.length !== 25) bad.push("capped=" + capped.length);
   if (all.length !== 30) bad.push("uncapped=" + all.length);
@@ -1121,7 +1121,9 @@ fi
 OUT62="$(node -e '
   const m = require(process.argv[1]);
   const r = m.sweepTargets(process.argv[2], { windowSeconds: 300 });
-  const pick = (name, file) => name + "=" + (r.targets.includes(file) ? 1 : 0);
+  const norm = (p) => require("node:path").resolve(p);
+  const targets = r.targets.map(norm);
+  const pick = (name, file) => name + "=" + (targets.includes(norm(file)) ? 1 : 0);
   process.stdout.write(["fallback=" + r.fallback, pick("clean", process.argv[3]),
     pick("nfd", process.argv[4]), pick("modified", process.argv[5]),
     pick("untracked", process.argv[6]), pick("staged", process.argv[7]),
@@ -1237,7 +1239,8 @@ unscoped_sweep() {
     const m = require(process.argv[1]);
     const started = Date.now();
     const r = m.sweepTargets(process.argv[2], { windowSeconds: 300, gitTimeoutMs: 500 });
-    const clean = r.targets.includes(process.argv[3]) ? 1 : 0;
+    const norm = (p) => require("node:path").resolve(p);
+    const clean = r.targets.map(norm).includes(norm(process.argv[3])) ? 1 : 0;
     process.stdout.write(r.fallback + " clean=" + clean + " ms=" + (Date.now() - started));
   ' "$REDACT" "$GIT_PROJ" "$GIT_CLEAN" 2>&1
 }
@@ -1247,18 +1250,32 @@ if [ "${OUT75%% ms=*}" = "git-unavailable clean=1" ]; then
 else
   check "R75 without git on PATH the sweep falls back to every in-window artifact (got: $OUT75)" FAIL
 fi
-OUT76="$(unscoped_sweep "$SLOW_GIT_BIN")"
-MS76="${OUT76##* ms=}"
-if [ "${OUT76%% ms=*}" = "git-timed-out clean=1" ] && [ "$MS76" -lt 10000 ] 2>/dev/null; then
-  check "R76 a git call that hangs is cut off at the timeout and the sweep falls back" PASS
+stub_git_starts() {
+  env PATH="$1" "$NODE_BIN" -e '
+    const r = require("node:child_process").spawnSync("git", ["--version"], { timeout: 1000, stdio: "ignore" });
+    process.exit(r.error && r.error.code === "ENOENT" ? 1 : 0);
+  ' 2>/dev/null
+}
+if stub_git_starts "$SLOW_GIT_BIN"; then
+  OUT76="$(unscoped_sweep "$SLOW_GIT_BIN")"
+  MS76="${OUT76##* ms=}"
+  if [ "${OUT76%% ms=*}" = "git-timed-out clean=1" ] && [ "$MS76" -lt 10000 ] 2>/dev/null; then
+    check "R76 a git call that hangs is cut off at the timeout and the sweep falls back" PASS
+  else
+    check "R76 a git call that hangs is cut off at the timeout and the sweep falls back (got: $OUT76)" FAIL
+  fi
 else
-  check "R76 a git call that hangs is cut off at the timeout and the sweep falls back (got: $OUT76)" FAIL
+  skip "R76 hanging-git fallback (host cannot start the shell-script git stub as a process)"
 fi
-OUT77="$(unscoped_sweep "$FAIL_GIT_BIN")"
-if [ "${OUT77%% ms=*}" = "git-status-failed clean=1" ]; then
-  check "R77 a failing git call makes the sweep fall back" PASS
+if stub_git_starts "$FAIL_GIT_BIN"; then
+  OUT77="$(unscoped_sweep "$FAIL_GIT_BIN")"
+  if [ "${OUT77%% ms=*}" = "git-status-failed clean=1" ]; then
+    check "R77 a failing git call makes the sweep fall back" PASS
+  else
+    check "R77 a failing git call makes the sweep fall back (got: $OUT77)" FAIL
+  fi
 else
-  check "R77 a failing git call makes the sweep fall back (got: $OUT77)" FAIL
+  skip "R77 failing-git fallback (host cannot start the shell-script git stub as a process)"
 fi
 
 # ── R78: the git scope runs before the cap ───────────────────────────
@@ -1293,12 +1310,13 @@ if git init -q --template= "$CAP_PROJ" >/dev/null 2>&1 \
     process.env.PATH = savedPath;
     const bad = [];
     if (scoped.fallback !== null) bad.push("scoped-fallback=" + scoped.fallback);
-    if (scoped.targets.length !== 1 || scoped.targets[0] !== append) {
+    if (scoped.targets.length !== 1 || path.resolve(scoped.targets[0]) !== path.resolve(append)) {
       bad.push("scoped=" + JSON.stringify(scoped.targets));
     }
     if (unscoped.fallback !== "git-unavailable") bad.push("unscoped-fallback=" + unscoped.fallback);
-    if (unscoped.targets.length !== 25 || unscoped.targets.includes(append)) {
-      bad.push("unscoped=" + unscoped.targets.length + "/" + unscoped.targets.includes(append));
+    const unscopedHolds = unscoped.targets.map((p) => path.resolve(p)).includes(path.resolve(append));
+    if (unscoped.targets.length !== 25 || unscopedHolds) {
+      bad.push("unscoped=" + unscoped.targets.length + "/" + unscopedHolds);
     }
     process.stdout.write(bad.length ? bad.join(" | ") : "OK");
   ' "$REDACT" "$CAP_PROJ" "$CAP_APPEND" "$NO_GIT_BIN" 2>&1)"
@@ -1342,7 +1360,8 @@ if git init -q --template= "$MONO" >/dev/null 2>&1 \
     const later = new Date(Date.now() + 2000);
     fs.utimesSync(clean, later, later);
     const r = require(lib).sweepTargets(root, { windowSeconds: 300 });
-    const names = r.targets.map((p) => (p === clean ? "clean" : (p === modified ? "modified" : p)));
+    const norm = (p) => require("node:path").resolve(p);
+    const names = r.targets.map((p) => (norm(p) === norm(clean) ? "clean" : (norm(p) === norm(modified) ? "modified" : p)));
     process.stdout.write(r.fallback + " " + JSON.stringify(names));
   ' "$REDACT" "$SUB_PROJ" "$SUB_CLEAN" "$SUB_MODIFIED" 2>&1)"
 else
@@ -1363,7 +1382,8 @@ if git init -q --template= "$NEST_PROJ" >/dev/null 2>&1 \
   && git init -q --template= "$NEST_PROJ/.zensu" >/dev/null 2>&1; then
   OUT81="$(node -e '
     const r = require(process.argv[1]).sweepTargets(process.argv[2], { windowSeconds: 300 });
-    process.stdout.write(r.fallback + " " + (r.targets.includes(process.argv[3]) ? 1 : 0));
+    const norm = (p) => require("node:path").resolve(p);
+    process.stdout.write(r.fallback + " " + (r.targets.map(norm).includes(norm(process.argv[3])) ? 1 : 0));
   ' "$REDACT" "$NEST_PROJ" "$NEST_PLAN" 2>&1)"
   NEST_STATUS="$(git -C "$NEST_PROJ" -c core.fsmonitor=false status --porcelain \
     --untracked-files=all -- .zensu/plans .zensu/logs 2>&1)"
@@ -1398,23 +1418,28 @@ SCAN_COPY="$WORK/plugin-symlinked-scanner"
 mkdir -p "$SCAN_COPY"
 cp -R "$PLUGIN_DIR/hooks" "$SCAN_COPY/hooks"
 rm -f "$SCAN_COPY/hooks/lib/secret-patterns.js"
-ln -s "$PLUGIN_DIR/hooks/lib/secret-patterns.js" "$SCAN_COPY/hooks/lib/secret-patterns.js"
-FAKE_KEY="AKIA$(head -c 16 /dev/zero | tr '\0' 'Z')"
-SCAN_LOG="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scan.log"
-ERR52="$(HOME="$FAKE_HOME" CLAUDE_PLUGIN_ROOT="$SCAN_COPY" \
-  bash "$SCAN_COPY/hooks/lib/zensu-log.sh" append \
-  --log "$SCAN_LOG" --message "CHECKPOINT key=$FAKE_KEY done" 2>&1 >/dev/null)"
-RC52=$?
-SCAN_CTL="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scanctl.log"
-HOME="$FAKE_HOME" bash "$LOG_HELPER" append \
-  --log "$SCAN_CTL" --message "CHECKPOINT key=$FAKE_KEY done" >/dev/null 2>&1
-RC52B=$?
-if [ "$RC52" -eq 0 ] && [ -f "$SCAN_LOG" ] \
-  && printf '%s' "$ERR52" | grep -qF 'credential scan unavailable' \
-  && [ "$RC52B" -ne 0 ] && [ ! -f "$SCAN_CTL" ]; then
-  check "R52 a symlinked scanner is dropped, not warned about and then used" PASS
+node -e 'require("node:fs").symlinkSync(process.argv[1], process.argv[2])' \
+  "$PLUGIN_DIR/hooks/lib/secret-patterns.js" "$SCAN_COPY/hooks/lib/secret-patterns.js" 2>/dev/null
+if [ -L "$SCAN_COPY/hooks/lib/secret-patterns.js" ]; then
+  FAKE_KEY="AKIA$(head -c 16 /dev/zero | tr '\0' 'Z')"
+  SCAN_LOG="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scan.log"
+  ERR52="$(HOME="$FAKE_HOME" CLAUDE_PLUGIN_ROOT="$SCAN_COPY" \
+    bash "$SCAN_COPY/hooks/lib/zensu-log.sh" append \
+    --log "$SCAN_LOG" --message "CHECKPOINT key=$FAKE_KEY done" 2>&1 >/dev/null)"
+  RC52=$?
+  SCAN_CTL="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scanctl.log"
+  HOME="$FAKE_HOME" bash "$LOG_HELPER" append \
+    --log "$SCAN_CTL" --message "CHECKPOINT key=$FAKE_KEY done" >/dev/null 2>&1
+  RC52B=$?
+  if [ "$RC52" -eq 0 ] && [ -f "$SCAN_LOG" ] \
+    && printf '%s' "$ERR52" | grep -qF 'credential scan unavailable' \
+    && [ "$RC52B" -ne 0 ] && [ ! -f "$SCAN_CTL" ]; then
+    check "R52 a symlinked scanner is dropped, not warned about and then used" PASS
+  else
+    check "R52 a symlinked scanner is dropped, not warned about and then used (rc=$RC52 ctl=$RC52B err=[$ERR52])" FAIL
+  fi
 else
-  check "R52 a symlinked scanner is dropped, not warned about and then used (rc=$RC52 ctl=$RC52B err=[$ERR52])" FAIL
+  skip "R52 symlinked-scanner guard (host did not create a real symlink)"
 fi
 
 # ── R53: the scan opt-out lands a bypass-ledger entry ────────────────
@@ -1555,11 +1580,11 @@ OUT33B="$(env HOME="$FAKE_HOME" node -e '
   const path = require("node:path");
   const m = require(process.argv[1]);
   const file = path.join(process.argv[2], "2026-01-01-0021_tdd-ino.log");
-  fs.writeFileSync(file, "A " + process.argv[3] + "\n");
-  const first = m.redactFile(file, { projectRoot: process.argv[4], expectedRoot: process.argv[4], home: "" });
-  const second = m.redactFile(file, { projectRoot: process.argv[4], expectedRoot: process.argv[4], home: "" });
+  fs.writeFileSync(file, "A /Users/someoneelse/work/thing.txt\n");
+  const first = m.redactFile(file, { projectRoot: process.argv[3], expectedRoot: process.argv[3], home: "" });
+  const second = m.redactFile(file, { projectRoot: process.argv[3], expectedRoot: process.argv[3], home: "" });
   process.stdout.write(first.reason + " " + second.reason);
-' "$REDACT" "$PROJ/.zensu/logs" "$FOREIGN_USER" "$PROJ" 2>/dev/null)"
+' "$REDACT" "$PROJ/.zensu/logs" "$PROJ" 2>/dev/null)"
 if [ "$OUT33B" = "redacted no-op" ]; then
   check "R33b the dev/ino guard accepts an ordinary artifact (not over-strict), twice" PASS
 else
@@ -1623,7 +1648,8 @@ rm -f "$ODD_EXT"
 
 # ── R34: a FIFO at an artifact path is refused, never hung on ─────────
 FIFO="$PROJ/.zensu/logs/2026-01-01-0023_tdd-fifo.log"
-if mkfifo "$FIFO" 2>/dev/null; then
+if mkfifo "$FIFO" 2>/dev/null \
+  && node -e 'process.exit(require("node:fs").lstatSync(process.argv[1]).isFIFO() ? 0 : 1)' "$FIFO" 2>/dev/null; then
   R34_ERR="$(env HOME="$FAKE_HOME" node "$REDACT" --file "$FIFO" --project "$PROJ" 2>&1 >/dev/null)"
   RC=$?
   if [ "$RC" -eq 2 ] && printf '%s' "$R34_ERR" | grep -qF '(not-a-file)'; then
@@ -1633,7 +1659,8 @@ if mkfifo "$FIFO" 2>/dev/null; then
   fi
   rm -f "$FIFO"
 else
-  skip "R34 FIFO refusal (host did not create a FIFO)"
+  rm -f "$FIFO"
+  skip "R34 FIFO refusal (host did not create a FIFO that node can see)"
 fi
 
 # ── R38: a refusal is reported ONCE, not once per spelling ───────────
@@ -1647,7 +1674,7 @@ if ln "$DUP_PEER" "$DUP" 2>/dev/null; then
   DUP_ERR="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
     "$(json_str "$DUP")" "$(json_str "$SESSION")" \
     | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
-  DUP_COUNT="$(printf '%s\n' "$DUP_ERR" | grep -cF "$DUP")"
+  DUP_COUNT="$(printf '%s\n' "$DUP_ERR" | grep -cF '2026-01-01-0026_tdd-dup.log (')"
   if [ "$DUP_COUNT" -eq 1 ]; then
     check "R38 a named artifact that is also swept is reported exactly once" PASS
   else

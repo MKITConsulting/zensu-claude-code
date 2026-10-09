@@ -2705,8 +2705,8 @@ case "$cmd" in
             let here;
             let rootReal;
             try {
-              here = fs.realpathSync(process.cwd());
-              rootReal = fs.realpathSync(target.projectRoot);
+              here = fs.realpathSync.native(process.cwd());
+              rootReal = fs.realpathSync.native(target.projectRoot);
             } catch (_) {
               refuse("project-root-unusable");
               return;
