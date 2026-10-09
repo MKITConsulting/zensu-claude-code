@@ -374,8 +374,8 @@ test('dropping the carry-over recipe alone keeps the move alternative', () => {
 
 // The two routes must never share a fence, and until this case nothing held that.
 // `MOVE_ALTERNATIVE`'s own header declares the separation load-bearing, and what produces
-// it is the ELEVEN column-zero prose lines between the two commands — two closing ones from
-// `TAKE_YOUR_OWN` and nine leading ones from `MOVE_ALTERNATIVE`. MEASURED: deleting either
+// it is the column-zero prose between the two commands — `TAKE_YOUR_OWN`'s closing lines and
+// `MOVE_ALTERNATIVE`'s leading ones. MEASURED: deleting either
 // run alone leaves the fences split, and deleting both collapses them into one (create=1
 // move=1), which is one copy button that creates the taker's worktree and then relocates
 // the source session's out from under it. So this case catches the condense-the-advice
@@ -385,7 +385,7 @@ test('dropping the carry-over recipe alone keeps the move alternative', () => {
 //
 // The relation is `create < move`, never a bare `notEqual`, and that is the ORDER contract
 // rather than a tighter spelling of the same one. `worktreeAdvice`'s own splice comment says
-// the create route is first because it is the default and needs no judgement from the reader;
+// the create route is first because it is the default and takes nothing from the other session;
 // three emitted sentences then depend on it — `take the create route above instead`, `the
 // -b claude/<name>-cont fork above is not needed`, and `the create recipe above stays the
 // default`. Transposing the two spliced arrays leaves them in separate fences either way, so
@@ -1603,6 +1603,7 @@ test('every arm on both legs closes with the release step, whichever form render
         const step = body.slice(at);
         assert.ok(step.every((l) => !/^ {2}\S/.test(l)), 'the release step carries a command line');
         assert.ok(step.join(' ').includes('can now be archived or removed'), 'the release step lost its promise');
+        assert.ok(step.join(' ').includes('only needs --force on the re-run'), 'the release step lost its --force note');
         assert.ok(body[body.length - 1].endsWith('an archive deletes them with the worktree.'), 'the release step is not the closing block');
       }
     }

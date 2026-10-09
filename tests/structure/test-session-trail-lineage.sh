@@ -501,8 +501,8 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --js
 
 # ── L12h — what a takeover is entitled to CLAIM ───────────────────────────
 # Generating a takeover brief is not the same event as having taken the session over:
-# the record is written at step 2 of the documented flow while the user is asked to
-# confirm at step 5, so a plain takeover may claim `provisional` and no more. --force
+# the documented flow builds its plan with --no-record and records only after the user
+# confirms it, so a plain takeover may claim `provisional` and no more. --force
 # carries the user's approval on the command line, and `adopt` is the confirmation
 # verb — both reach `confirmed`. Before the tier existed, every declined takeover
 # left a permanent, unretractable assertion that the handover had happened.
@@ -2865,6 +2865,7 @@ A70C_MISS=""
 # create line was the only route while a second one existed one verb away. The route needle
 # is therefore its own conjunct rather than folded into the brief-route one.
 case "$SHOW_OUT" in *"Run handoff or takeover for both"*) ;; *) A70C_MISS="$A70C_MISS [no-brief-route]" ;; esac
+case "$SHOW_OUT" in *"takeover with"*"--no-record until the user has confirmed the plan"*) ;; *) A70C_MISS="$A70C_MISS [plan-pass-records]" ;; esac
 case "$SHOW_OUT" in *"TWO things are withheld here"*) ;; *) A70C_MISS="$A70C_MISS [withheld-count-unstated]" ;; esac
 case "$SHOW_OUT" in *"second ROUTE"*) ;; *) A70C_MISS="$A70C_MISS [move-route-unnamed]" ;; esac
 case "$SHOW_OUT" in *"machine-wide ledger"*) ;; *) A70C_MISS="$A70C_MISS [adopt-pointer-unqualified]" ;; esac
@@ -2896,6 +2897,7 @@ A70CG_MISS=""
 case "$SHOW_G" in *"Take your own path — never re-create theirs:"*) ;; *) A70CG_MISS="$A70CG_MISS [no-gone-leg-advice-lead]" ;; esac
 case "$SHOW_G" in *"git worktree add"*) ;; *) A70CG_MISS="$A70CG_MISS [no-create-recipe]" ;; esac
 case "$SHOW_G" in *"Run handoff or takeover for both"*) A70CG_MISS="$A70CG_MISS [brief-route-on-the-gone-leg]" ;; esac
+case "$SHOW_G" in *"--no-record until the user has confirmed the plan"*) A70CG_MISS="$A70CG_MISS [plan-pass-on-the-gone-leg]" ;; esac
 case "$SHOW_G" in *"machine-wide ledger"*) A70CG_MISS="$A70CG_MISS [adopt-pointer-on-the-gone-leg]" ;; esac
 case "$SHOW_G" in *"not a read-only route to either"*) A70CG_MISS="$A70CG_MISS [ledger-cost-on-the-gone-leg]" ;; esac
 case "$SHOW_G" in *"TWO things are withheld here"*) A70CG_MISS="$A70CG_MISS [withheld-count-on-the-gone-leg]" ;; esac
