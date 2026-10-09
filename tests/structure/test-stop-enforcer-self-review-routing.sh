@@ -608,11 +608,17 @@ ASPECT_LIB="$PLUGIN_DIR/hooks/lib/aspect-activation-v1.js"
 LEAN_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).LEAN_ASPECTS.join(", "))' "$ASPECT_LIB")"
 FULL_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).ASPECTS.join(", "))' "$ASPECT_LIB")"
 if [ -n "$LEAN_PANEL_LIST" ] \
-  && printf '%s' "$REASON8" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas step 10.2b selects, over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c" \
+  && printf '%s' "$REASON8" | grep -qF "build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c" \
   && ! printf '%s' "$REASON8" | grep -qF 'five zensu:review-aspect'; then
   check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" PASS
 else
   check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" FAIL
+fi
+if printf '%s' "$REASON8" | grep -qF "second 'REVIEW-TICKET: <ticket>', followed by the complete REVIEW PACKET v1 and then the merged findings." \
+  && ! printf '%s' "$REASON8" | grep -qF 'the merged findings + build/test status'; then
+  check "T62 the standalone resume directive hands the reviewer the REVIEW PACKET v1 before the merged findings" PASS
+else
+  check "T62 the standalone resume directive hands the reviewer the REVIEW PACKET v1 before the merged findings" FAIL
 fi
 
 # The two negatives are anchored on a POSITIVE that proves each reason was
