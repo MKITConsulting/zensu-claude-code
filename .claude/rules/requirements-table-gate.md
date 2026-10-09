@@ -169,7 +169,7 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   stem, so an explicit `--plan` keeps only its plans-directory bound: a stale plan from an
   earlier session in the same project satisfies it. Disclosed on stderr, not silent, and the
   same switch already carries its own ledger entry.
-- **The git-environment scrub is scoped to this verb, and its sibling is not scrubbed.**
+- **The git-environment scrub is a denylist, so its numeral is a witness, not the contract.**
   `--tdd-complete`'s three scope `git` calls run through a subshell that unsets the FIFTEEN
   `GIT_*` variables `_tc_git` lists — discovery and config-injection levers alike, not just the
   three this paragraph used to name. **Read the numeral as a WITNESS to the last audit, never as
@@ -185,11 +185,14 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   lists directly, so a one-sided addition fails loudly. State what that pin CANNOT see: two
   lists that agree and are both short, which is exactly the state fourteen was. `X10`/`X17` and
   their controls cover that instead, one behavioural injection probe per config channel, so a
-  third channel needs a third probe rather than a bigger numeral; the `--chain-done` zero-change terminus in the same file
-  still calls bare `git`, so a one-token prefix there still drives its change count to zero. The
-  wrapper is defined INSIDE the `--tdd-complete` case arm, which makes the asymmetry structural
-  rather than a one-line follow-up: sharing it means hoisting the definition above the verb
-  dispatch. Knowingly left as is.
+  third channel needs a third probe rather than a bigger numeral. `_tc_git` sits at file scope,
+  above the verb dispatch, and every change count in `zensu-log.sh` runs through it: the three
+  scope calls here and `_zensu_unqualified_change_count`, which the `--chain-done` zero-change
+  terminus and the unqualified `--code-review-done` mark share. `Z6` in
+  `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition and the three
+  scope calls; `G11`–`G13` in `tests/structure/test-chain-terminus-zero-change-gate.sh` drive
+  both injection channels against the two unqualified verbs and fail on a bare `git -C` anywhere
+  in the file.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of
