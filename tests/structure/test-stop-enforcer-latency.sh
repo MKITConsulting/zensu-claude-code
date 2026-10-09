@@ -617,6 +617,7 @@ memo_run() {
 
 new_session lat-memo || check "L31 fixture: memo session baseline" FAIL
 MEMO_ROOT="$(cd -P -- "$CLAUDE_PROJECT_DIR" && pwd -P)"
+MEMO_NATIVE_ROOT="$ZENSU_PROJECT_ROOT"
 MEMO_KEY="$ZENSU_SESSION_KEY"
 MEMO_CONTEXT="$ZENSU_SESSION_CONTEXT"
 MEMO_OTHER="$WORK/memo-other-root"
@@ -747,8 +748,9 @@ else
   check "L45 memo under a changed record path (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL
 fi
 
-memo_run set-input MEMO_SET_NAME=ZENSU_PROJECT_ROOT MEMO_SET_VALUE="$WORK/./proj-lat-memo"
-if [ "$MEMO_RC" -eq 0 ] && [ "$MEMO_OUT" = "$MEMO_ROOT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
+MEMO_ROOT_DOTTED="$(node -e 'const path = require("path"); const root = process.argv[1]; process.stdout.write(path.dirname(root) + path.sep + "." + path.sep + path.basename(root))' "$MEMO_NATIVE_ROOT")"
+memo_run set-input MEMO_SET_NAME=ZENSU_PROJECT_ROOT MEMO_SET_VALUE="$MEMO_ROOT_DOTTED"
+if [ -n "$MEMO_ROOT_DOTTED" ] && [ "$MEMO_RC" -eq 0 ] && [ "$MEMO_OUT" = "$MEMO_ROOT" ] && [ "$ROOT_COUNT" -eq 2 ]; then
   check "L46 the memo compares the root as it is spelled: another spelling of the same directory is verified again" PASS
 else
   check "L46 memo under another root spelling (rc=$MEMO_RC verifications=$ROOT_COUNT out=$MEMO_OUT)" FAIL

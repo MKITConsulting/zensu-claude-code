@@ -879,8 +879,9 @@ node -e '
 ' "$OWN5W" "$LEGACY5W"
 activate_session "$P5W" stop_session_pref_own || exit 1
 P5W_REAL="$(cd "$P5W" && pwd -P)"
-PREF_OWN="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_REAL" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
-PREF_NONE="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
+P5W_WS="$(_autopilot_rendered_dir "$P5W_REAL")" || P5W_WS="$P5W_REAL"
+PREF_OWN="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_WS" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
+PREF_NONE="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_WS" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
 if [ "$PREF_OWN" = zz_own_run ] && [ "$PREF_NONE" = aa_legacy_foreign ]; then
   check "S7h the holder preference reports this session's own run where sort order would report the legacy foreign one" PASS
 else check "S7h holder preference must outrank sort order (preferred=$PREF_OWN unpreferenced=$PREF_NONE)" FAIL; fi
@@ -891,8 +892,8 @@ else check "S7h holder preference must outrank sort order (preferred=$PREF_OWN u
 # re-read was deleted, the wrapper's preference parameter has no production
 # caller at all -- `post-review-tdd-delegate.sh` passes one argument. This guards
 # it for the next caller, not a live path.
-PUB_OWN="$(autopilot_read_workspace "$P5W_REAL" "$P5W_REAL" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
-PUB_NONE="$(autopilot_read_workspace "$P5W_REAL" "$P5W_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+PUB_OWN="$(autopilot_read_workspace "$P5W_REAL" "$P5W_WS" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+PUB_NONE="$(autopilot_read_workspace "$P5W_REAL" "$P5W_WS" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
 if [ "$PUB_OWN" = zz_own_run ] && [ "$PUB_NONE" = aa_legacy_foreign ]; then
   check "S7h2 the public workspace read forwards the holder preference the Stop hook passes it" PASS
 else check "S7h2 the public wrapper must forward the preference (preferred=$PUB_OWN unpreferenced=$PUB_NONE)" FAIL; fi
@@ -1201,7 +1202,8 @@ else
   S7I_PREMISE=1
   [ -n "$TOP_ROOT5C" ] && [ -n "$TOP_NEST5C" ] && [ "$TOP_ROOT5C" != "$TOP_NEST5C" ] || S7I_PREMISE=0
   field_ok "$RF5C" 'typeof j.workspaceRoot==="string" && j.workspaceRoot!==j.projectRoot' || S7I_PREMISE=0
-  HELD5C="$(autopilot_read_workspace "$P5C_REAL" "$P5C_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+  P5C_WS="$(_autopilot_rendered_dir "$P5C_REAL")" || P5C_WS="$P5C_REAL"
+  HELD5C="$(autopilot_read_workspace "$P5C_REAL" "$P5C_WS" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
   BEFORE5C="$(digest "$RF5C")"
   OUT7C="$(invoke "$P5C" foreign_contain_session)"; RC7C=$?
   activate_session "$P5C" stop_session_contain_owner || exit 1

@@ -19,8 +19,13 @@ function tempDir(label) {
 }
 
 function sh(cwd, command) {
-  return childProcess.execSync(command, { cwd, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+  const result = childProcess.spawnSync('bash', ['-s'], { cwd, input: command, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`bash exited ${result.status} for: ${command}\n${result.stderr}`);
+  return result.stdout;
 }
+
+const PRINT_CWD = 'node -p "process.cwd()"';
 
 function gitRepo() {
   const root = tempDir('repo');
@@ -395,7 +400,7 @@ test('a working directory outside the work tree of the project root runs the com
   const root = gitRepo();
   const sibling = gitRepo();
   const data = pluginData();
-  const result = await runIn(root, data, { scope: 'scoped', cwd: sibling, command: 'pwd -P' });
+  const result = await runIn(root, data, { scope: 'scoped', cwd: sibling, command: PRINT_CWD });
   assert.equal(result.code, 0);
   assert.ok(result.stdout.split('\n').includes(root), result.stdout);
   assert.ok(!result.stdout.split('\n').includes(sibling), result.stdout);
@@ -880,14 +885,14 @@ test('a run whose cwd lies in a nested worktree runs in the project root and bin
   const root = gitRepo();
   const tree = nestedWorktree(root);
   const data = pluginData();
-  const result = await runIn(root, data, { cwd: tree, command: 'pwd -P' });
+  const result = await runIn(root, data, { cwd: tree, command: PRINT_CWD });
   assert.ok(result.stdout.split('\n').includes(root), result.stdout);
   const [record] = recordsOf(data);
   assert.equal(record.cwd, root);
   assert.equal(record.tree_end, evr.computeTree(root, tempDir('scratch')).tree);
   fs.writeFileSync(path.join(tree, 'a.txt'), 'edited in the worktree\n');
   assert.equal(verdictFor(root, data).state, 'pass');
-  const skipped = await runIn(root, data, { cwd: tree, command: 'pwd -P', ifStale: true });
+  const skipped = await runIn(root, data, { cwd: tree, command: PRINT_CWD, ifStale: true });
   assert.match(skipped.stdout, /skipped \(--if-stale\)/);
   assert.equal(recordsOf(data).length, 1);
 });

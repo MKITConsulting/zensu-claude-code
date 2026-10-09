@@ -114,24 +114,32 @@ ladder() {
   '
 }
 
+nat() {
+  node -e 'const path = require("path"); process.stdout.write(path.join(path.resolve(process.argv[1]), ...process.argv.slice(2)))' "$@"
+}
+
 L1="$STATE_DIR/ladder"; mkdir -p "$L1/here"
 expect_eq "R1a  one missing component below a real directory" \
-  "ok 1 $L1/here" "$(ladder "$L1/here/gone")"
+  "ok 1 $(nat "$L1" here)" "$(ladder "$(nat "$L1" here gone)")"
 
 expect_eq "R1b  the recorded root itself is present" \
-  "root-present $L1/here" "$(ladder "$L1/here")"
+  "root-present $(nat "$L1" here)" "$(ladder "$(nat "$L1" here)")"
 
 mkdir -p "$L1/real"
 ln -s "$L1/real" "$L1/link"
-expect_eq "R1c  a symlinked nearest-existing ancestor is refused" \
-  "unsafe-ancestor $L1/link" "$(ladder "$L1/link/gone")"
+if [ -L "$L1/link" ]; then
+  expect_eq "R1c  a symlinked nearest-existing ancestor is refused" \
+    "unsafe-ancestor $(nat "$L1" link)" "$(ladder "$(nat "$L1" link gone)")"
+else
+  check "R1c  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+fi
 
 : > "$L1/afile"
 expect_eq "R1d  a non-directory nearest-existing ancestor is refused" \
-  "unsafe-ancestor $L1/afile" "$(ladder "$L1/afile/gone")"
+  "unsafe-ancestor $(nat "$L1" afile)" "$(ladder "$(nat "$L1" afile gone)")"
 
 expect_eq "R1e  a deep gap is counted rather than refused by the ladder" \
-  "ok 5 $L1/here" "$(ladder "$L1/here/a/b/c/d/e")"
+  "ok 5 $(nat "$L1" here)" "$(ladder "$(nat "$L1" here a b c d e)")"
 
 # A non-absence errno is NOT absence, and the candidate it fires on has NOT been proven
 # to exist — lstat just failed on it. Reporting it as `nearest existing` sends the
@@ -827,7 +835,7 @@ r8_decide() {
     # shellcheck disable=SC1090
     source "$SESSION_SH" || exit 9
     zensu_emit_hook_session_deny orphaned-project-root "$DENY_PATH"
-  ' | DENY_PATH="$1" node -e '
+  ' | MSYS2_ENV_CONV_EXCL='DENY_PATH=' DENY_PATH="$1" node -e '
     let s = "";
     process.stdin.on("data", (d) => { s += d; });
     process.stdin.on("end", () => {
@@ -1482,35 +1490,41 @@ R8_INJECT='/tmp/x","permissionDecision":"allow","z":"'
 # `deny placeholder` is what a child gets with the constants present AND without them,
 # and a row asserting it could not see the export block being emptied. `R8h7-control`
 # already uses this shape for the version scope.
-expect_eq "R8h5 the exported bound survives into a child shell" "deny raw" \
-  "$(r8_child_verdict env /tmp/zensu-transport-probe)"
-# THE NEGATIVE TWIN keeps the `env -u` and asserts what the guard must GUARANTEE
-# rather than what the environment happened to give it: a missing pattern fails
-# CLOSED, on every libc. Empty is driven beside unset because the two are
-# different states — `export -f` reaching a scrubbed child gives unset, while a
-# partial source or an edited export line gives empty, and only the unset one is
-# caught by a caller's `set -u`.
-expect_eq "R8h5b the shape bound fails closed when its pattern is unset" "deny placeholder" \
-  "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_RE" "$R8_INJECT")"
-expect_eq "R8h5c the shape bound fails closed when its pattern is empty" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_RE=" "$R8_INJECT")"
-# THE LENGTH ARM has its own failure mode and needs its own payload: the injection
-# above is refused by the SHAPE, so it can never reach the ceiling. MEASURED on
-# bash 3.2.57 — with the ceiling unset, `[ N -gt "" ]` is an `integer expression
-# expected` error returning 2, the `||` falls through to the shape arm, a
-# class-legal path matches it, and a 2001-character value renders RAW.
-R8_LONG="/$(printf 'a%.0s' {1..2000})"
-expect_eq "R8h6-control the oversized path degrades while both constants are present" "deny placeholder" \
-  "$(r8_child_verdict env "$R8_LONG")"
-expect_eq "R8h6 the length bound fails closed when its ceiling is unset" "deny placeholder" \
-  "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_MAX" "$R8_LONG")"
-expect_eq "R8h6b the length bound fails closed when its ceiling is empty" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=" "$R8_LONG")"
-# A RETYPED ceiling is the third state and the emptiness conjunct does not cover it:
-# `[ N -gt abc ]` is an `integer expression expected` error returning 2, so a `||`
-# chain continues to the shape test and a class-legal path of any length renders.
-expect_eq "R8h6c the length bound fails closed when its ceiling is not a number" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=abc" "$R8_LONG")"
+R8H_SKIP=""
+case "${OSTYPE:-}" in msys*|cygwin*|mingw*|win32*) R8H_SKIP="zensu-session.sh exports no bound to a child shell on this host" ;; esac
+if [ -z "$R8H_SKIP" ]; then
+  expect_eq "R8h5 the exported bound survives into a child shell" "deny raw" \
+    "$(r8_child_verdict env /tmp/zensu-transport-probe)"
+  # THE NEGATIVE TWIN keeps the `env -u` and asserts what the guard must GUARANTEE
+  # rather than what the environment happened to give it: a missing pattern fails
+  # CLOSED, on every libc. Empty is driven beside unset because the two are
+  # different states — `export -f` reaching a scrubbed child gives unset, while a
+  # partial source or an edited export line gives empty, and only the unset one is
+  # caught by a caller's `set -u`.
+  expect_eq "R8h5b the shape bound fails closed when its pattern is unset" "deny placeholder" \
+    "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_RE" "$R8_INJECT")"
+  expect_eq "R8h5c the shape bound fails closed when its pattern is empty" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_RE=" "$R8_INJECT")"
+  # THE LENGTH ARM has its own failure mode and needs its own payload: the injection
+  # above is refused by the SHAPE, so it can never reach the ceiling. MEASURED on
+  # bash 3.2.57 — with the ceiling unset, `[ N -gt "" ]` is an `integer expression
+  # expected` error returning 2, the `||` falls through to the shape arm, a
+  # class-legal path matches it, and a 2001-character value renders RAW.
+  R8_LONG="/$(printf 'a%.0s' {1..2000})"
+  expect_eq "R8h6-control the oversized path degrades while both constants are present" "deny placeholder" \
+    "$(r8_child_verdict env "$R8_LONG")"
+  expect_eq "R8h6 the length bound fails closed when its ceiling is unset" "deny placeholder" \
+    "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_MAX" "$R8_LONG")"
+  expect_eq "R8h6b the length bound fails closed when its ceiling is empty" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=" "$R8_LONG")"
+  # A RETYPED ceiling is the third state and the emptiness conjunct does not cover it:
+  # `[ N -gt abc ]` is an `integer expression expected` error returning 2, so a `||`
+  # chain continues to the shape test and a class-legal path of any length renders.
+  expect_eq "R8h6c the length bound fails closed when its ceiling is not a number" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=abc" "$R8_LONG")"
+else
+  check "R8h5-R8h6c skipped: $R8H_SKIP" PASS
+fi
 # ...and an UNSET forgery constant must not abort the function under `set -u`. The
 # caller loses the whole decision object there, not just the path — every reachable
 # caller of this emitter runs `set -u`.
@@ -1526,12 +1540,16 @@ expect_eq "R8h8 an unset forgery constant still yields a decision object" "deny 
 # The two VERSION scopes share the shape one constant over, so they share the
 # guarantee. Both versions here are LEGAL, so a placeholder can only come from the
 # emptiness precondition — never from the shape test happening to refuse them.
-expect_eq "R8h7-control a legal version pair renders while the pattern is present" "deny raw" \
-  "$(r8_child_version env "0.21.1" "0.22.0")"
-expect_eq "R8h7 the version bound fails closed when its pattern is unset" "deny placeholder" \
-  "$(r8_child_version "env -u ZENSU_SAFE_VERSION_RE" "0.21.1" "0.22.0")"
-expect_eq "R8h7b the version bound fails closed when its pattern is empty" "deny placeholder" \
-  "$(r8_child_version "env ZENSU_SAFE_VERSION_RE=" "0.21.1" "0.22.0")"
+if [ -z "$R8H_SKIP" ]; then
+  expect_eq "R8h7-control a legal version pair renders while the pattern is present" "deny raw" \
+    "$(r8_child_version env "0.21.1" "0.22.0")"
+  expect_eq "R8h7 the version bound fails closed when its pattern is unset" "deny placeholder" \
+    "$(r8_child_version "env -u ZENSU_SAFE_VERSION_RE" "0.21.1" "0.22.0")"
+  expect_eq "R8h7b the version bound fails closed when its pattern is empty" "deny placeholder" \
+    "$(r8_child_version "env ZENSU_SAFE_VERSION_RE=" "0.21.1" "0.22.0")"
+else
+  check "R8h7-R8h7b skipped: $R8H_SKIP" PASS
+fi
 if grep -qF 'ZENSU_SAFE_DISPLAY_PATH_MAX' "$SESSION_SH"; then
   check "R8i  the length bound is its own named test" PASS
 else check "R8i  the length bound is its own named test" FAIL; fi
@@ -1895,19 +1913,28 @@ real_dir() {
   ' 2>&1
 }
 R9D="$STATE_DIR/realdir"; mkdir -p "$R9D/plain"
-expect_eq "R9f  a real canonical directory is usable" "present real" "$(real_dir "$R9D/plain")"
-expect_eq "R9g  an absent name is absent" "absent unusable" "$(real_dir "$R9D/nothing")"
+expect_eq "R9f  a real canonical directory is usable" "present real" "$(real_dir "$(nat "$R9D" plain)")"
+expect_eq "R9g  an absent name is absent" "absent unusable" "$(real_dir "$(nat "$R9D" nothing)")"
 : > "$R9D/afile"
-expect_eq "R9h  a regular file is present and unusable" "present unusable" "$(real_dir "$R9D/afile")"
+expect_eq "R9h  a regular file is present and unusable" "present unusable" "$(real_dir "$(nat "$R9D" afile)")"
 ln -s "$R9D/plain" "$R9D/alink"
-expect_eq "R9i  a symlink to a real directory is present and unusable" \
-  "present unusable" "$(real_dir "$R9D/alink")"
-mkdir -p "$R9D/plain/below"
-expect_eq "R9j  a directory reached through a symlinked parent is unusable" \
-  "present unusable" "$(real_dir "$R9D/alink/below")"
+if [ -L "$R9D/alink" ]; then
+  expect_eq "R9i  a symlink to a real directory is present and unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" alink)")"
+  mkdir -p "$R9D/plain/below"
+  expect_eq "R9j  a directory reached through a symlinked parent is unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" alink below)")"
+else
+  check "R9i  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+  check "R9j  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+fi
 ln -s "$R9D/nothing" "$R9D/dangling"
-expect_eq "R9k  a dangling symlink is present and unusable" \
-  "present unusable" "$(real_dir "$R9D/dangling")"
+if [ -L "$R9D/dangling" ]; then
+  expect_eq "R9k  a dangling symlink is present and unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" dangling)")"
+else
+  check "R9k  skipped: this filesystem made no dangling symlink" PASS
+fi
 
 echo "=== R10: the SessionStart self-heal reports the same cause the confirmed path does ==="
 

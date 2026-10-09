@@ -1020,9 +1020,10 @@ if [ -f "$RUN_FILE" ]; then
   # activated sessions in other roots — so re-activate THIS project's taker first or
   # every operand is refused with a bare rc 2 and no message.
   activate_session "$PROJECT" adopt_cli_taker || exit 1
+  B4B_WORKSPACE="$(_autopilot_rendered_dir "$PROJECT")" || B4B_WORKSPACE=""
   ( cd "$PROJECT" && CLAUDE_PROJECT_DIR="$PROJECT" \
     _autopilot_node adopt "$RUN_FILE" "$STATE_DIR/.b4b-run.tmp" adopt_cli_run \
-      "$PROJECT" "$TAKER_KEY" "$STATE_DIR" "$PROJECT" 1 "$STATE_DIR/.b4b-ptr.tmp" ) >/dev/null 2>"$TMP/b4b.err"
+      "$PROJECT" "$TAKER_KEY" "$STATE_DIR" "$B4B_WORKSPACE" 1 "$STATE_DIR/.b4b-ptr.tmp" ) >/dev/null 2>"$TMP/b4b.err"
   B4B_RC=$?
   rm -f "$STATE_DIR/.b4b-run.tmp" "$STATE_DIR/.b4b-ptr.tmp"
   if [ "$B4B_RC" -eq 10 ]; then

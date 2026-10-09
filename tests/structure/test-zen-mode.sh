@@ -1114,7 +1114,13 @@ if [ "$Z26_SCEN" -lt 5 ]; then
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
 else
-  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
+  Z26_FILES=()
+  while IFS= read -r Z26_F; do
+    [ -n "$Z26_F" ] && Z26_FILES+=("$Z26_F")
+  done <<Z26_ROSTER
+$Z26_LIST
+Z26_ROSTER
+  LANG_BAD="$(Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
     const fs = require("fs"), path = require("path");
     // Stems that are also English words are excluded on purpose; see above.
     // BOTH carry `g`: a non-global regex returns only the FIRST match on a
@@ -1146,12 +1152,10 @@ else
       return spans;
     };
     const inLiteral = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
-    let input = "";
-    process.stdin.on("data", (c) => { input += c; });
-    process.stdin.on("end", () => {
+    {
       const bad = [];
       let scanned = 0;
-      for (const f of input.split("\n").map((x) => x.trim()).filter(Boolean)) {
+      for (const f of process.argv.slice(1).map((x) => x.trim()).filter(Boolean)) {
         let text;
         try { text = fs.readFileSync(f, "utf8"); } catch (_) { bad.push(path.basename(f) + ":unreadable"); continue; }
         scanned += 1;
@@ -1176,8 +1180,8 @@ else
       if (!Number.isInteger(want) || want < 4) bad.push("roster-size-unresolved");
       else if (scanned !== want) bad.push("roster-scanned-" + scanned + "-of-" + want + "-files");
       process.stdout.write(bad.length ? bad.slice(0, 6).join(" ") : "OK");
-    });
-  ' 2>/dev/null)"
+    }
+  ' "${Z26_FILES[@]}" 2>/dev/null)"
   LANG_RC=$?
   if [ "$LANG_RC" -ne 0 ]; then
     check "Z26 English-only scan could not run (node exit $LANG_RC) — not an all-clear" FAIL
@@ -2395,8 +2399,14 @@ rm -rf "$P53"
 # `{"active":false}` was ignored on every prompt. The `.zensu` case is the one a
 # leaf-only arm could never catch: its own `[ -d "$ZEN_STATE_DIR" ]` cannot stat
 # through an unsearchable parent either.
+Z54_PROBE="$(mktemp -d -t zenmode-probe-XXXXXX)"; : > "$Z54_PROBE/inner"
+chmod 000 "$Z54_PROBE" 2>/dev/null
+Z54_ENFORCED=1; [ -e "$Z54_PROBE/inner" ] && Z54_ENFORCED=0
+chmod 755 "$Z54_PROBE" 2>/dev/null; rm -rf "$Z54_PROBE"
 if [ "$(id -u)" = "0" ]; then
   skipcheck "Z54 running as root, which bypasses the search-permission check"
+elif [ "$Z54_ENFORCED" -eq 0 ]; then
+  skipcheck "Z54 this host lets a mode-000 directory be searched, so the arm cannot be reached"
 else
   Z54_BAD=""
   # THREE levels, and the third is why the pair was replaced by a walk: an
