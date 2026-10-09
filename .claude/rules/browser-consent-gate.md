@@ -567,6 +567,9 @@ retirement's, rides the same mechanism with no check of its own.
   first, as the library does, closes it; `V68` pins the docs sentence that states the gap and
   must change with that fix.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
-  spellings, but no Windows run has driven a real `playwright-cli` through the gate.
+  spellings, but no Windows run has driven a real `playwright-cli` through the gate. On Git Bash
+  both hooks hand node the memory path in the MSYS-converted `C:/…` spelling while the state
+  directory node derives reads `C:\…`, so `memoryPathAllowed` compares the directory after
+  `nativeSeparators`; nothing collapses a `..` segment, so one still refuses.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
   re-decide whether its host fires a pre-tool hook on its shell tool and can render an `ask`.

@@ -929,6 +929,10 @@ function stateDirFor(projectRoot) {
   return path.join(projectRoot, ...STATE_SEGMENTS);
 }
 
+function nativeSeparators(value, api = path) {
+  return api.sep === '\\' ? value.split('/').join('\\') : value;
+}
+
 function stateComponentsSafe(rootReal) {
   let seen = rootReal;
   for (const segment of STATE_SEGMENTS) {
@@ -950,7 +954,7 @@ function memoryPathAllowed(memoryPath, projectRoot) {
   try { rootReal = fs.realpathSync.native(projectRoot); }
   catch (_error) { return { ok: false, reason }; }
   const stateDir = stateDirFor(rootReal);
-  if (path.dirname(memoryPath) !== stateDir) return { ok: false, reason };
+  if (nativeSeparators(path.dirname(memoryPath)) !== stateDir) return { ok: false, reason };
   if (!stateComponentsSafe(rootReal)) return { ok: false, reason };
   let leaf = null;
   try { leaf = fs.lstatSync(memoryPath); }
@@ -1484,6 +1488,7 @@ module.exports = {
   judgeOrigin,
   lexShell,
   memoryPathAllowed,
+  nativeSeparators,
   parseCliArgs,
   payloadFromRaw,
   preEnvelope,

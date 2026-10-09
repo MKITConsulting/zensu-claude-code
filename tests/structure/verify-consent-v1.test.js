@@ -1269,6 +1269,11 @@ test('the memory path must be the session file inside the real state directory',
   assert.deepEqual(consent.memoryPathAllowed(path.join(root, '.zensu', 'state', 'verify-consent-other.json'), root), refused);
   assert.deepEqual(consent.memoryPathAllowed(path.join(root, `verify-consent-${KEY}.json`), root), refused);
   assert.deepEqual(consent.memoryPathAllowed(memory, path.join(root, 'missing')), refused);
+  assert.deepEqual(consent.memoryPathAllowed(memory.split(path.sep).join('/'), root), { ok: true, stateDir: path.join(root, '.zensu', 'state') });
+  assert.deepEqual(consent.memoryPathAllowed(`${root}/.zensu/state/../state/verify-consent-${KEY}.json`, root), refused);
+  assert.equal(consent.nativeSeparators('C:/work/repo/.zensu/state', path.win32), 'C:\\work\\repo\\.zensu\\state');
+  assert.equal(consent.nativeSeparators('C:/work/repo/.zensu/state/../state', path.win32), 'C:\\work\\repo\\.zensu\\state\\..\\state');
+  assert.equal(consent.nativeSeparators('/work/repo/.zensu/state', path.posix), '/work/repo/.zensu/state');
 });
 
 test('a symlinked state component, a symlinked memory and a hard-linked memory are refused', { skip: process.platform === 'win32' }, (t) => {
