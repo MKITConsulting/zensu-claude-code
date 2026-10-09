@@ -965,7 +965,7 @@ fi
 
 # V11b — the appended clause states PROVENANCE, not a conclusion. The script
 # cannot see a user: `--force` is a token its caller types, and this sentence is
-# persisted into briefs that tell the next instance never to ask again. Asserting
+# persisted into briefs a different instance opens and confirms for itself, so
 # "the user authorized this" there would be a claim with no evidence behind it.
 V11B_BAD=""
 case "$FORCED_REASON" in *"--force was passed"*) ;; *) V11B_BAD="$V11B_BAD provenance-not-stated" ;; esac
@@ -1078,6 +1078,9 @@ case "$TAKEOVER_MEASURED_LINE" in *"**BUSY**"*) ;; *) V11F_BAD="$V11F_BAD takeov
 case "$TAKEOVER_MEASURED_LINE" in *"--force was passed"*) V11F_BAD="$V11F_BAD takeover-md-measured-line-carries-the-authorization" ;; esac
 case "$TAKEOVER_MD" in *"an authorization was recorded at"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-authorization-note" ;; esac
 case "$TAKEOVER_MD" in *"cannot carry it forward"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-bound-warning" ;; esac
+case "$TAKEOVER_MD" in *"re-measures and confirms its own plan with its own user before editing"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-later-reader-not-sent-to-its-own-user" ;; esac
+case "$TAKEOVER_MD" in *[Gg]"o/no-go"*) V11F_BAD="$V11F_BAD takeover-md-asks-a-go-no-go" ;; esac
+case "$HANDOFF_MD" in *[Gg]"o/no-go"*) V11F_BAD="$V11F_BAD handoff-md-asks-a-go-no-go" ;; esac
 case "$MEASURED_LINE" in *"**BUSY**"*) ;; *) V11F_BAD="$V11F_BAD handoff-measured-level" ;; esac
 case "$MEASURED_LINE" in *"--force was passed"*) V11F_BAD="$V11F_BAD handoff-measured-line-carries-the-authorization" ;; esac
 case "$HANDOFF_MD" in *"An authorization was recorded at"*) ;; *) V11F_BAD="$V11F_BAD handoff-authorization-note" ;; esac
@@ -1871,23 +1874,28 @@ UNM_BRIEF_FORCED="$(trailrun takeover 1a1a1a1a-0000-0000-0000-000000000023 --all
 PF_BRIEF="$(trailrun takeover aaaaaaaa-0000-0000-0000-000000000001 --all --no-record 2>/dev/null)"
 V19W_BAD=""
 case "$UNM_SHOW" in *"TAKEOVER PROBABLY_FREE"*"queue could not be measured"*) ;; *) V19W_BAD="$V19W_BAD fixture-is-not-an-unmeasured-probably-free" ;; esac
-case "$UNM_SHOW" in *"Its queue was not measured, so this costs the same single go/no-go BUSY does"*) ;; *) V19W_BAD="$V19W_BAD show-go-no-go-advice-missing" ;; esac
+case "$UNM_SHOW" in *"Its queue was not measured. State that in one line inside the plan confirmation, never as a"*"question of its own. On yes, take it over with takeover --force, not show --force."*) ;; *) V19W_BAD="$V19W_BAD show-unmeasured-advice-missing" ;; esac
 case "$UNM_SHOW" in *"Proceed, but tell the user not to type"*) V19W_BAD="$V19W_BAD show-prints-the-proceed-advice" ;; esac
 case "$UNM_SHOW_FORCED" in *"TAKEOVER PROBABLY_FREE"*) ;; *) V19W_BAD="$V19W_BAD forced-level-changed" ;; esac
 case "$UNM_SHOW_FORCED" in *"Proceed, but tell the user not to type"*) ;; *) V19W_BAD="$V19W_BAD forced-show-proceed-advice-missing" ;; esac
-case "$UNM_SHOW_FORCED" in *"Its queue was not measured, so this costs"*) V19W_BAD="$V19W_BAD forced-show-asks-again" ;; esac
-case "$UNM_BRIEF" in *"Its queue was not measured, so state that to the user in one line and take a single go/no-go before the first edit; on yes, re-run this command with"*) ;; *) V19W_BAD="$V19W_BAD brief-go-no-go-missing" ;; esac
+case "$UNM_SHOW_FORCED" in *"Its queue was not measured. State that"*) V19W_BAD="$V19W_BAD forced-show-repeats-the-unmeasured-advice" ;; esac
+case "$UNM_BRIEF" in *"Its queue was not measured, so state that to the user in one line and put that line in the plan confirmation of step 3, never in a question of its own. Then take it over"*) ;; *) V19W_BAD="$V19W_BAD brief-unmeasured-disclosure-missing" ;; esac
+case "$UNM_BRIEF" in *"Once the user confirms, run takeover again with"*) ;; *) V19W_BAD="$V19W_BAD brief-record-step-missing" ;; esac
+case "$UNM_BRIEF_FORCED" in *"Once the user confirms, run takeover again with"*) V19W_BAD="$V19W_BAD forced-brief-asks-to-record-again" ;; esac
 case "$UNM_BRIEF" in *"Taking over is fine"*) V19W_BAD="$V19W_BAD brief-says-taking-over-is-fine" ;; esac
-case "$UNM_BRIEF_FORCED" in *"Its queue was not measured, so state that to the user in one line and take a single go/no-go before the first edit — the authorization above was given when this brief was written, not here"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-authorization-bound-missing" ;; esac
+case "$UNM_BRIEF_FORCED" in *"Its queue was not measured, so state that to the user in one line and ask nothing about it: the session that ran this command with"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-reopens-the-confirmation" ;; esac
+case "$UNM_BRIEF_FORCED" in *"already took it and does not ask again"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-step3-reasks" ;; esac
+case "$UNM_BRIEF" in *"already took it"*) V19W_BAD="$V19W_BAD unforced-brief-claims-a-confirmation" ;; esac
+case "$UNM_BRIEF" in *"before the user has confirmed the plan in step 3"*) ;; *) V19W_BAD="$V19W_BAD brief-step1-runs-before-the-confirmation" ;; esac
 case "$SHOW_PF" in *"Its queue was not measured"*) V19W_BAD="$V19W_BAD control-show-asks" ;; esac
 case "$PF_BRIEF" in *"Taking over is fine"*) ;; *) V19W_BAD="$V19W_BAD control-brief-proceed-missing" ;; esac
 case "$PF_BRIEF" in *"Its queue was not measured"*) V19W_BAD="$V19W_BAD control-brief-asks" ;; esac
 SILENT_SHOW="$(trailrun show 11111111-0000-0000-0000-000000000015 --all --no-git 2>/dev/null)"
 case "$SILENT_SHOW" in *"TAKEOVER PROBABLY_FREE"*"has been silent for"*"queue could not be measured"*) ;; *) V19W_BAD="$V19W_BAD silent-fixture-is-not-an-unmeasured-probably-free" ;; esac
-case "$SILENT_SHOW" in *"Its queue was not measured, so this costs the same single go/no-go BUSY does"*) ;; *) V19W_BAD="$V19W_BAD silent-branch-show-go-no-go-advice-missing" ;; esac
+case "$SILENT_SHOW" in *"Its queue was not measured. State that in one line inside the plan confirmation, never as a"*"question of its own. On yes, take it over with takeover --force, not show --force."*) ;; *) V19W_BAD="$V19W_BAD silent-branch-show-unmeasured-advice-missing" ;; esac
 case "$SILENT_SHOW" in *"Proceed, but tell the user not to type"*) V19W_BAD="$V19W_BAD silent-branch-show-prints-the-proceed-advice" ;; esac
 if [ -z "$V19W_BAD" ]; then
-  check "V19w a PROBABLY_FREE whose reason says its queue could not be measured costs BUSY's go/no-go in show's advice on the ended-turn and on the silent branch and in the takeover brief's step 4, --force answers it without changing the level, and a measured PROBABLY_FREE still proceeds (control)" PASS
+  check "V19w a PROBABLY_FREE whose reason says its queue could not be measured is disclosed in one line inside the plan confirmation in show's advice on the ended-turn and on the silent branch and in the takeover brief's step 4, never as a question of its own; the unforced brief tells its reader to record with --force after the confirmation and the forced one neither repeats that nor reopens the confirmation, --force swaps in the proceed advice without changing the level, and a measured PROBABLY_FREE still proceeds (control)" PASS
 else
   check "V19w unmeasured-queue PROBABLY_FREE advice:$V19W_BAD" FAIL
 fi
@@ -4769,16 +4777,20 @@ wt_case "WT8v1 a present arm offers the worktree-move alternative, anchored at t
   "$WT8_ADOPT" 'git -c core.fsmonitor=false worktree move' 'cannot run against it as printed'
 wt_case "WT8v2 a gone arm offers no move — the recorded directory is not there to move" \
   "$WT8_ADOPT_GONE" 'cannot run against it as printed' "worktree move '<their worktree>'"
-# The CONDITION is a human attestation and must never read as a verdict this tool reached.
+# The ROUTE is the user's choice and must never read as a verdict this tool reached.
 # The run that prompted this route had a registered LIVE pid on a session its human had
 # abandoned after an account switch, so `archived`, `live` and the whole four-way ladder
-# answer the wrong question. Keying the route on any of them would offer it exactly where
-# it is unsafe and withhold it exactly where it is right, which is why the text states the
-# condition as the reader's and says so.
-wt_case "WT8v3 the move route states the condition as the reader's to attest" \
+# answer the wrong question. Keying the route on any of them would withhold from the user
+# a choice that is theirs whatever the other session is doing, which is why the text states
+# the choice as the user's and says so.
+wt_case "WT8v3 the move route states the route as the user's to authorize" \
   "$WT8_ADOPT" 'only you can authorize it' 'cannot run against it as printed'
-wt_case "WT8v4 the move route says why no predicate here can establish that condition" \
+wt_case "WT8v4 the move route says why no predicate here decides that choice" \
   "$WT8_ADOPT" 'A registered pid is a process, not an intention' 'cannot run against it as printed'
+wt_case "WT8v13 the move route is offered whatever the other session is doing" \
+  "$WT8_ADOPT" 'It is offered whatever that session is doing' 'If you KNOW that session'
+wt_case "WT8v14 no verdict withholds the move route" \
+  "$WT8_ADOPT" 'no verdict withholds this route' 'If you KNOW that session'
 # The COST half. Without it the route reads as a free upgrade over the create recipe, and
 # that reading is exactly how someone else's live worktree gets moved out from under them.
 # Each claim gets its own pin, and the three gate claims are pinned in their BOUNDED form
@@ -4820,10 +4832,10 @@ wt_case "WT8v9 the same-repository bound is enforced by git, not by the reader's
   "$WT8_ADOPT" 'is refused outright with "is not a working' 'cannot run against it as printed'
 # The move route's OWN STOP CONDITION and its fsmonitor disclosure — the emitted twins of
 # SKILL.md's, both of which were unpinned on EITHER carrier until this round while every
-# sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the attestation,
+# sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the authorization,
 # `WT8v5` the cost, `WT8v6`/`WT8v6b`/`WT8v7`/`WT8v7b` the gate claims, `WT8v9` the branch
 # bound). The doc carrier is NOT symmetrical with that and the skill suite's own comment says
-# so: its attestation paragraph had no needle at all until this round. This is the sentence
+# so: its arm-predicate paragraph had no needle at all until this round. This is the sentence
 # guarding the one rendered command in this flow that writes to the SOURCE worktree with no
 # refusal standing in front of it — "refusal standing", never "gate refusal": the renderer
 # refusals are what is absent here, while the write gate, when opted in, DOES judge this command, so naming
@@ -5358,6 +5370,7 @@ else
   # textconv, diff.external or fsmonitor driver executing, `--binary`, `mktemp`, and
   # the symlink check positioned between the diff and the apply.
   case "$C_READY" in *"\`CARRY_OVER\`"*) ;; *) WC1_BAD="$WC1_BAD no-carry-over-pointer" ;; esac
+  case "$C_READY" in *"takeover --no-record"*) ;; *) WC1_BAD="$WC1_BAD plan-pass-pointer-records" ;; esac
   WC1_REINLINED="$(recipe_reinlined "$C_READY" | head -3 | tr '\n' '|')"
   [ -z "$WC1_REINLINED" ] || WC1_BAD="$WC1_BAD recipe-reauthored:$WC1_REINLINED"
   # The two operands `CARRY_OVER` ships as placeholders and cannot compute. Without
@@ -6367,6 +6380,11 @@ case "$V21J_ROW" in
   *" 3h "*"m ago"*) check "V21j limited ages a stalled row from its turn records, not from a later metadata write" PASS ;;
   *) check "V21j limited row age ('${V21J_ROW:-<no row>}')" FAIL ;;
 esac
+V21T_NEXT="$(trailrun limited --all --no-git 2>/dev/null | grep -E '^next: ' | head -1)"
+case "$V21T_NEXT" in
+  *" takeover <session-id> --no-record") check "V21t limited points at the read-only plan pass, takeover --no-record" PASS ;;
+  *) check "V21t limited next step ('${V21T_NEXT:-<none>}')" FAIL ;;
+esac
 
 V21K_SID=3e7a0005-0000-0000-0000-0000000000b5
 V21K_CWD="$FAKE/work/plan-checkout"
@@ -7174,7 +7192,9 @@ else
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'Its process is still registered — measured: pid' || WR_BAD="$WR_BAD no-process-line"
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'too recent to judge' || WR_BAD="$WR_BAD no-measured-reason"
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'in the middle of a turn' && WR_BAD="$WR_BAD unmeasured-cause"
-  [ -z "$WR_BAD" ] && check "WR8 a busy source blocks the release until --force records the go/no-go, and the archive line then names its process with the measured reason" PASS || check "WR8 busy source:$WR_BAD" FAIL
+  wr_json "$WR_OUT" 'o.blockers.map((b) => b.text).join(" ")' | grep -qF 'their request to release, or the takeover they confirmed, is the go' || WR_BAD="$WR_BAD blocker-text-not-the-go"
+  wr_json "$WR_OUT" 'o.blockers.map((b) => b.text).join(" ")' | grep -qiF 'go/no-go' && WR_BAD="$WR_BAD blocker-text-asks"
+  [ -z "$WR_BAD" ] && check "WR8 a busy source blocks the release until --force records the authorization, its blocker names the user's request or confirmation as the go and asks nothing, and the archive line then names its process with the measured reason" PASS || check "WR8 busy source:$WR_BAD" FAIL
   wr_rel "$WR_SRC" "$WR_SRC_WT" "$WR_DEAD" 7200 "$WR_ACCT"
 
   wr_anchor "$WR_SRC" 60 >/dev/null
