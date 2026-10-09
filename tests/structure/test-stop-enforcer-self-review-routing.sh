@@ -604,6 +604,16 @@ if printf '%s' "$REASON8" | grep -qF "$IN_SCOPE_NEEDLE" \
 else
   check "T38 the resume directive renders the in-scope sentence, naming all three spawns" FAIL
 fi
+ASPECT_LIB="$PLUGIN_DIR/hooks/lib/aspect-activation-v1.js"
+LEAN_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).LEAN_ASPECTS.join(", "))' "$ASPECT_LIB")"
+FULL_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).ASPECTS.join(", "))' "$ASPECT_LIB")"
+if [ -n "$LEAN_PANEL_LIST" ] \
+  && printf '%s' "$REASON8" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas step 10.2b selects, over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c" \
+  && ! printf '%s' "$REASON8" | grep -qF 'five zensu:review-aspect'; then
+  check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" PASS
+else
+  check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" FAIL
+fi
 
 # The two negatives are anchored on a POSITIVE that proves each reason was
 # actually captured — an empty or unset capture satisfies a bare `!` and reports
@@ -1069,12 +1079,19 @@ t59_run() {
   printf '%s' '{"session_id":"'"$T59_RAW"'","transcript_path":"'"$TRANSCRIPT_CLEAR"'","hook_event_name":"Stop"}' \
     | env -u ZENSU_CONFIG HOME="$T59_HOME" CLAUDE_PROJECT_DIR="$T59_AMBIENT" bash "$STOP" 2>/dev/null | reason
 }
-printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_PROJECT/.zensu/config.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false,"reviewPanel":"full"}}' > "$T59_PROJECT/.zensu/config.json"
 T59_RECORD_OUT="$(t59_run)"
 rm -f "$T59_PROJECT/.zensu/config.json"
-printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_AMBIENT/.zensu/config.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false,"reviewPanel":"full"}}' > "$T59_AMBIENT/.zensu/config.json"
 T59_AMBIENT_OUT="$(t59_run)"
 rm -f "$T59_AMBIENT/.zensu/config.json"
+if [ -n "$FULL_PANEL_LIST" ] && [ -n "$LEAN_PANEL_LIST" ] \
+  && printf '%s' "$T59_RECORD_OUT" | grep -qF "fan out one zensu:review-aspect agent per perspective of the full review panel (${FULL_PANEL_LIST}), plus the repo-local personas" \
+  && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas"; then
+  check "T61 the record root's hooks.reviewPanel selects the resume directive's panel, the ambient root's does not" PASS
+else
+  check "T61 the record root's hooks.reviewPanel selects the resume directive's panel, the ambient root's does not" FAIL
+fi
 if printf '%s' "$T59_RECORD_OUT" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
   && ! printf '%s' "$T59_RECORD_OUT" | grep -qF "$IN_SCOPE_NEEDLE" \
   && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "$IN_SCOPE_NEEDLE"; then
