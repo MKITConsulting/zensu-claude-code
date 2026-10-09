@@ -173,10 +173,11 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   that caused the deadline) and renders no ledger line. It is INDUCIBLE — by loading the machine,
   or by lowering `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment — the same class as
   the other inducible releases this hook records.
-- The armed path still spawns 50 `node` children on macOS with bash 3.2 (38 on Linux with
-  bash 5.2), so at a load in the high hundreds it can still reach the deadline. The largest
-  remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on bash
-  3.2) and the config reads (4).
+- The armed path still spawns 51 `node` children on macOS with bash 3.2 (`L30`, measured after
+  the resume directive gained its `zensu_review_panel` read; the 38 on Linux with bash 5.2
+  predates that read), so at a load in the high hundreds it can still reach the deadline. The
+  largest remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on
+  bash 3.2) and the config reads (5).
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
   container). Git Bash is unverified. The symlink checks `L13`, `L17d`, `L43`, `L48`, `L50`, `L51`
   and `L52` make their links through Node, never with `ln -s`, which Git Bash satisfies with a

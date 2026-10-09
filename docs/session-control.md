@@ -192,14 +192,17 @@ deferred:
 
 ```js
 // Orchestrator-driven: after all implementation agents have joined, run ONE
-// review pass over the combined diff — 5 read-only aspects → merge → judge
-// (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
-const ASPECTS = ['conventions', 'bugs', 'architecture', 'tests', 'security']
-const changed = /* `git diff --name-only HEAD`, comma-joined */
+// review pass over the combined diff — the configured panel's read-only aspects → merge
+// → judge (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
+const PANEL = /* `full` or `lean`, from zensu_review_panel in hooks/lib/zensu-config.sh */
+const ASPECTS = PANEL === 'full'
+  ? ['conventions', 'bugs', 'architecture', 'tests', 'security']
+  : ['correctness', 'design', 'security']
+const PACKET = /* the complete REVIEW PACKET v1 that /zensu:tdd step 10.2c builds over the combined diff */
 const aspects = await parallel(ASPECTS.map(a => () =>
-  agent(`Perspective: ${a}. Files changed: [${changed}]`, { agentType: 'zensu:review-aspect' })))
-let merged = /* dedupe + sort the five findings lists in-script */
-const judge = await agent(`Judge pass. Files changed: [${changed}]\n${merged}`, { agentType: 'zensu:review-judge' })
+  agent(`${PACKET}\nPerspective: ${a}.`, { agentType: 'zensu:review-aspect' })))
+let merged = /* dedupe + sort the findings lists in-script */
+const judge = await agent(`${PACKET}\nmerged_panel_findings:\n${merged}`, { agentType: 'zensu:review-judge' })
 merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
 // Finding Verification Gate (hooks.findingVerification, default on): grade every merged
 // anchor with `node hooks/lib/finding-verify-v1.js --root <top>` (model-free, always exit 0),
@@ -208,7 +211,7 @@ merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the r
 merged = /* apply the verification verdicts */
 const reviewTicket = /* stdout from the top-level Skill command template:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket */
-await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${merged}`, { agentType: 'zensu:code-reviewer' })
+await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${PACKET}\n${merged}`, { agentType: 'zensu:code-reviewer' })
 ```
 
 If you cannot review in-script, a worker records a project-scoped marker

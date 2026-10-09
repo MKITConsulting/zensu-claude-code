@@ -36,6 +36,17 @@ else
   check "B3 registered as PreToolUse Bash matcher; mcp matcher removed" FAIL
 fi
 
+if node -e '
+  const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const pres=(h.hooks&&h.hooks.PreToolUse)||[];
+  const regs=pres.flatMap(e=>(e.hooks||[]).filter(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
+  process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
+' "$HOOKS_JSON" 2>/dev/null; then
+  check "B3b registration carries the 60 s gate timeout" PASS
+else
+  check "B3b registration carries the 60 s gate timeout" FAIL
+fi
+
 grep -qF 'zensu_hook_enabled mcpGate' "$HOOK" \
   && check "B4 hook config-gated via zensu_hook_enabled mcpGate (default-on)" PASS \
   || check "B4 hook config-gated via zensu_hook_enabled mcpGate (default-on)" FAIL

@@ -280,12 +280,20 @@ else
   check "R17-P11 the self-review fix round runs the full suite through the runner and the report carries the terminus verdict" FAIL
 fi
 
+RIB_ALL="$(grep -oF 'run_in_background' "$AGENT" | wc -l | tr -d ' ')"
+RIB_FOREGROUND="$(grep -oF 'run_in_background: false' "$AGENT" | wc -l | tr -d ' ')"
 if grep -qF -- 'may run with `run_in_background`: its record lands when it finishes, and until then the terminus refuses the chain as `running`' "$AGENT" \
   && grep -qF -- '**Run each checkpoint command in the foreground, one tool call at a time**' "$AGENT" \
-  && [ "$(grep -oF 'run_in_background' "$AGENT" | wc -l | tr -d ' ')" -eq 1 ]; then
+  && [ $((RIB_ALL - RIB_FOREGROUND)) -eq 1 ]; then
   check "R17-P12 only the recorded full-suite run may go to the background, and the terminus waits for its record" PASS
 else
-  check "R17-P12 only the recorded full-suite run may go to the background, and the terminus waits for its record" FAIL
+  check "R17-P12 only the recorded full-suite run may go to the background, and the terminus waits for its record (background grants=$((RIB_ALL - RIB_FOREGROUND)))" FAIL
+fi
+if [ "$RIB_FOREGROUND" -ge 1 ] \
+  && grep -qF -- 'every Agent spawn sets `run_in_background: false`' "$AGENT"; then
+  check "R17-P12b step 10 keeps every review-chain Agent spawn in the foreground" PASS
+else
+  check "R17-P12b step 10 keeps every review-chain Agent spawn in the foreground" FAIL
 fi
 
 if grep -qF -- '| scope: fallback-full' "$AGENT" \

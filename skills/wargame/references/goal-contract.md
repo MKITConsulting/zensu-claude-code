@@ -49,13 +49,13 @@ There are two cohort backends. Pick by mission type:
 
 When the findings are about real code — an ownership audit, a bug hunt, a correctness/security proof over a repo or a `ZEN-XXX` feature — do **not** invent ad-hoc verifiers. The plugin already ships a battle-tested cohort with a merge step:
 
-1. **Fan out `zensu:review-aspect` ×5** in one parallel batch — one per perspective (`conventions`, `bugs`, `architecture`, `tests`, `security`). Each spawn prompt MUST name the perspective and the files under scrutiny, e.g.:
+1. **Fan out `zensu:review-aspect` ×5** in one parallel batch — one per perspective of the full panel (`conventions`, `bugs`, `architecture`, `tests`, `security`). Each spawn prompt MUST carry a complete `REVIEW PACKET v1` (every field `/zensu:tdd` step 10.2c lists, `none` where an audit has nothing to report) and name the perspective and the files under scrutiny, e.g.:
    `Perspective: security. Files changed: [internal/orders/write.go, db/schema.sql]`
    Point them at the files your findings cite. Each is read-only and returns findings for its one lens.
-2. **Merge in the main thread**, then optionally run `zensu:code-reviewer` for a consolidated pass.
+2. **Merge in the main thread**, then optionally run `zensu:code-reviewer` with the same packet for a consolidated pass.
 3. **Measure parity** against the merged set: parity holds when the perspectives agree on every finding AND a round surfaces nothing new. A new or contradicted finding = not converged → fold it in, re-point the aspects at the changed scope, run another round.
 
-This keeps one verification machine across Zensu, lands findings in the review chain's format, and reuses the same lenses `/zensu:tdd` trusts. The five perspectives are code lenses — that is exactly why they fit code/audit missions and why the non-code path below exists.
+This keeps one verification machine across Zensu, lands findings in the review chain's format, and reuses the lenses of `/zensu:tdd`'s full review panel (`hooks.reviewPanel: full`). The five perspectives are code lenses — that is exactly why they fit code/audit missions and why the non-code path below exists.
 
 ### Non-code missions → diverse ad-hoc verifiers
 

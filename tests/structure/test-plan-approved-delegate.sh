@@ -849,6 +849,18 @@ fi
 # broken installation rather than a configured choice.
 BANNER_ROUTE_PROMISE='asks which delivery route to take'
 BANNER_SHORT_TIP='zensu: Tip — use Claude Code Plan mode for code changes.'
+banner_lines() {
+  printf '%s' "$1" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        process.stdout.write(typeof j.systemMessage === "string" ? j.systemMessage : s);
+      } catch (_) { process.stdout.write(s); }
+    });
+  '
+}
 
 # D29 node absent -> the promise is withheld. `zensu_hook_enabled` reports ENABLED
 # when node is missing, so the flag arm cannot see this one. PATH is the only lever
@@ -894,6 +906,8 @@ BN_NODE_ON=""; BN_NODE_OFF=""
 if [ -n "$ABS_BASH" ]; then
   BN_NODE_ON="$(printf '%s' '{"source":"startup"}' | PATH="$STUB_WITH_NODE" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" "$ABS_BASH" "$BANNER_HOOK" 2>/dev/null)"
   BN_NODE_OFF="$(printf '%s' '{"source":"startup"}' | PATH="$STUB_PATH_DIR" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" "$ABS_BASH" "$BANNER_HOOK" 2>/dev/null)"
+  BN_NODE_ON="$(banner_lines "$BN_NODE_ON")"
+  BN_NODE_OFF="$(banner_lines "$BN_NODE_OFF")"
 fi
 if [ -z "$ABS_BASH" ] || [ -z "$BN_NODE_ON" ]; then
   skip "D29 stub PATH cannot run the banner on this host — the node arm was NOT exercised"
@@ -929,6 +943,8 @@ else
   BN_FILE_ON="$(printf '%s' '{"source":"startup"}' | CLAUDE_PLUGIN_ROOT="$SUBSET_ROOT" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" bash "$SUBSET_BANNER" 2>/dev/null)"
   rm -f "$SUBSET_ROOT/hooks/plan-approved-delegate.sh"
   BN_FILE_OFF="$(printf '%s' '{"source":"startup"}' | CLAUDE_PLUGIN_ROOT="$SUBSET_ROOT" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" bash "$SUBSET_BANNER" 2>/dev/null)"
+  BN_FILE_ON="$(banner_lines "$BN_FILE_ON")"
+  BN_FILE_OFF="$(banner_lines "$BN_FILE_OFF")"
   if ! printf '%s' "$BN_FILE_ON" | grep -qF "$BANNER_ROUTE_PROMISE"; then
     check "D30 subset banner carries no route promise — the literal drifted or the fixture is incomplete" FAIL
   elif printf '%s' "$BN_FILE_OFF" | grep -qF "$BANNER_ROUTE_PROMISE"; then

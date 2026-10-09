@@ -136,7 +136,7 @@ check "I12 tdd skill narrows ONLY on status=ok" "$(grep_ok "$TDD_MD" 'ONLY on `s
 check "I13 tdd skill keeps the whole diff on empty/degraded" "$(grep_ok "$TDD_MD" 'the packet keeps the WHOLE diff')"
 check "I14 tdd skill exempts the judge from the delta" "$(grep_ok "$TDD_MD" 'ALWAYS keeps the full cumulative `changed_files`')"
 check "I15 tdd skill logs every skipped aspect" "$(grep_ok "$TDD_MD" 'ASPECT SKIPPED —')"
-check "I16 tdd skill spawns all five when activation is unavailable" "$(grep_ok "$TDD_MD" 'ASPECT ACTIVATION UNAVAILABLE —')"
+check "I16 tdd skill spawns the whole panel when activation is unavailable" "$(grep_ok "$TDD_MD" 'ASPECT ACTIVATION UNAVAILABLE —')"
 
 # The three delegate arms are verbatim-identical by contract, so every needle must
 # appear THREE times — a one-sided edit is the failure this counts rather than greps.

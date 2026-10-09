@@ -1474,6 +1474,11 @@ if [ "$(printf '%s' "$OUT9" | decision)" = block ] \
   && ! printf '%s' "$OUT9" | grep -qF 'nextActionCode=AWAIT_TDD_CHAIN'; then
   check "S9 inner review routing has priority over outer-stage routing" PASS
 else check "S9 inner review routing has priority" FAIL; fi
+if [ "$(printf '%s\n' "$CTX9" | grep -cFx 'AUTOPILOT-STAGE: GATES')" -eq 1 ] \
+  && printf '%s\n' "$CTX9" | grep -A1 -Fx 'AUTOPILOT-STAGE: GATES' | tail -n 1 \
+    | grep -q '^followed by the complete REVIEW PACKET v1 and then the merged findings\.'; then
+  check "S9p the bound resume directive puts the REVIEW PACKET v1 right after the five header lines" PASS
+else check "S9p the bound resume directive puts the REVIEW PACKET v1 right after the five header lines" FAIL; fi
 
 # Complete the matching reviewer ticket in the narrow window after the bound
 # budget CAS but before the fresh prompt snapshot. Stop must route from that

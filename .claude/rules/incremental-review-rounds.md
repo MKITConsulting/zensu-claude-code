@@ -3,6 +3,7 @@ paths:
   - "hooks/lib/review-round-scope-v1.js"
   - "hooks/lib/aspect-activation-v1.js"
   - "tests/structure/test-incremental-review-rounds.sh"
+  - "hooks/stop-chain-enforcer.sh"
 ---
 
 # Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)
@@ -39,7 +40,9 @@ change, and the consume-mode code-reviewer still reads the merge. `reviewPanel: 
 five perspectives and a judge on every review. Without a judge, a lean re-review routes an
 IMPORTANT finding only when it cites code the fix pass edited, and the convergence clause runs
 its helpers before classifying instead of before a judge pass. Coupled sites: `zensu_review_panel`
-in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, the `correctness`
+in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, `REVIEW_PANEL` and
+`REVIEW_PERSPECTIVES` in `hooks/stop-chain-enforcer.sh` with T60 and T61 in
+`tests/structure/test-stop-enforcer-self-review-routing.sh`, the `correctness`
 and `design` checklist lines of `agents/review-aspect.md`, the `reviewPanel` row of
 `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`, `config.example.json`,
 LC3 to LC3j in `tests/structure/test-review-convergence.sh`, and LP1 to LP4 in
@@ -64,7 +67,7 @@ spawns the whole panel, so a narrowed panel is always a proven reduction rather 
 therefore ask "is EVERY file X", never "is SOME file X": one production file restores the panel.
 
 **Every reduction DISCLOSES.** A skipped aspect logs `ASPECT SKIPPED — <aspect> (<reason>)` and a
-failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns all five. A panel that
+failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns the whole panel. A panel that
 shrank silently is indistinguishable from one that was never spawned, which is the failure this
 repository treats as worse than the cost it removes.
 
@@ -88,9 +91,19 @@ of BOTH severity arms in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:
 paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on
 that one. A round whose claims still lack the prefix answers `empty` — the safe direction.
 
-**DELIBERATELY NOT CHANGED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
-turn ended without continuing the chain, where the round number is not established, so it keeps
-prescribing the full fan-out. That is the fail-safe direction and it costs no test churn.
+**DELIBERATELY NOT NARROWED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
+turn ended without continuing the chain. Its routing fields do not include `reviewRound`, so it
+cannot tell a first review from a fix round's re-review, and it prescribes the full fan-out: one
+`zensu:review-aspect` agent per perspective of the configured panel, read with
+`zensu_review_panel` from the record's project root, plus the repo-local personas of step 10.2b,
+over the step 10.2 change set instead of a round delta, with the judge while `hooks.reviewJudge`
+is enabled. That is the fail-safe direction for the panel and the judge: a routed lean re-review
+runs `correctness` alone without the judge, while a resumed review always runs the whole panel.
+Activation would also be unsafe on this path: a model that takes `git diff --name-only HEAD` as
+the change set misses untracked files, so a change whose new code lives only in untracked files
+would classify as documentation-only. The directive therefore names the step 10.2 change set and
+says what that command leaves out. It names the panel's perspectives itself, and T60 and T61 pin
+that list against the exports of `aspect-activation-v1.js`.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
 workflow-state schema field (both libs are read-only and persist nothing), no strict key set, no
