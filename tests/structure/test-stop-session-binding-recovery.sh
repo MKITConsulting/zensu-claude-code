@@ -126,7 +126,7 @@ if grep -qF -- "/zensu:adopt-session --restore-root --confirm" "$ERR1" \
   && grep -qF "no completion was proven" "$ERR1" \
   && grep -qF "moved rather than deleted" "$ERR1" \
   && ! grep -qF "none was waived" "$ERR1" \
-  && grep -qF "$ROOT1" "$ERR1"; then
+  && grep -qF "$(printf '%s' "$ROOT1" | tr '\\' '/')" "$ERR1"; then
   check "B1a the release names the dead path, both remedies, and claims only what an ENOENT proves" PASS
 else
   check "B1a release diagnostic (err='$(cat "$ERR1" 2>/dev/null)')" FAIL

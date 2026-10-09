@@ -1010,6 +1010,12 @@ expect_eq "R8p9 the Stop guard fails closed when its ceiling is unset" \
   "(unreadable)" "$(r8_stop_sanitize 'unset ZENSU_SAFE_DISPLAY_PATH_MAX' "$R8_STOP_LONG")"
 expect_eq "R8p10 the Stop guard fails closed when its ceiling is empty" \
   "(unreadable)" "$(r8_stop_sanitize "ZENSU_SAFE_DISPLAY_PATH_MAX=''" "$R8_STOP_LONG")"
+expect_eq "R8p12 the Stop guard renders a Windows drive root with forward slashes" \
+  "C:/Users/someone/repo" "$(r8_stop_sanitize ':' 'C:\Users\someone\repo')"
+expect_eq "R8p12-control a backslash outside a drive prefix still degrades" \
+  "(unreadable)" "$(r8_stop_sanitize ':' '/tmp/a\b')"
+expect_eq "R8p12-control2 a mapped drive root still meets the injection refusal" \
+  "(unreadable)" "$(r8_stop_sanitize ':' 'C:\x","permissionDecision":"allow","z":"')"
 
 # --- R8t: the TOCTOU arm takes the same bound as its bind-time sibling ---------
 #
@@ -1406,7 +1412,7 @@ else check "R8h  the path shape uses a star, not a bash-3.2-hostile interval" FA
 # so appending one character turns ` -X` into a range from 0x20 that spans `"`. The
 # previous pin used `[^]]*` for the class body, which matches ANY body — so moving
 # the hyphen to the end passed it unchanged.
-if printf '%s' "$R8_SHAPE_LINE" | grep -qF -- "='^/[-"; then
+if printf '%s' "$R8_SHAPE_LINE" | grep -qF -- "='^([A-Za-z]:)?/[-"; then
   check "R8h2 the path class opens with a literal hyphen" PASS
 else check "R8h2 the path class opens with a literal hyphen" FAIL; fi
 # A bracket RANGE is LC_COLLATE-dependent and this class is an allowlist, so a
