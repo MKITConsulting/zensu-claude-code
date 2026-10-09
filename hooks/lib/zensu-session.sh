@@ -785,8 +785,8 @@ ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserv
 # orphaned state reviewer-capability-v1.js returns early for the main principal,
 # so this deny is the ONLY thing refusing an Edit there.
 #
-# Leading `/` is required rather than optional, so an empty value fails the
-# shape and takes the placeholder without a second arm.
+# A `/` is required after the optional drive prefix rather than optional, so an
+# empty value fails the shape and takes the placeholder without a second arm.
 #
 # The length bound is a SEPARATE `${#dead}` test and deliberately NOT an ERE
 # interval, because an interval here does not work on the shell this plugin
@@ -815,7 +815,7 @@ ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserv
 # value is rendered last — so a maintainer checking only this file would find no
 # reason for the exclusion and could reopen it for the other consumer.
 ZENSU_SAFE_DISPLAY_PATH_MAX=1024
-ZENSU_SAFE_DISPLAY_PATH_RE='^/[-0-9A-Za-z._+@:/ ,~#=!&;]*$'
+ZENSU_SAFE_DISPLAY_PATH_RE='^([A-Za-z]:)?/[-0-9A-Za-z._+@:/ ,~#=!&;]*$'
 
 # The value is not only a JSON string, it is PROSE a model reads and acts on, so
 # the two STRUCTURAL guards `hooks/lib/zensu-safe-display-v1.js` ships for this same
@@ -887,6 +887,9 @@ zensu_safe_display_path() {
   # that widens a range widens what an ALLOWLIST admits, and it makes ${#value} a byte
   # count, which is what a 1024-BYTE ceiling means.
   local LC_ALL=C
+  case "$value" in
+    ([A-Za-z]:[\\/]*) value="${value//\\//}" ;;
+  esac
   case "$value" in
     (*"${ZENSU_FORGERY_DOUBLE_SPACE:-}"*|*"${ZENSU_FORGERY_PAIR_SPACE_COLON:-}"*|*"${ZENSU_FORGERY_PAIR_COLON_SPACE:-}"*)
       printf '(unreadable)'
