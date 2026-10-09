@@ -67,7 +67,7 @@ spawns the whole panel, so a narrowed panel is always a proven reduction rather 
 therefore ask "is EVERY file X", never "is SOME file X": one production file restores the panel.
 
 **Every reduction DISCLOSES.** A skipped aspect logs `ASPECT SKIPPED — <aspect> (<reason>)` and a
-failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns all five. A panel that
+failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns the whole panel. A panel that
 shrank silently is indistinguishable from one that was never spawned, which is the failure this
 repository treats as worse than the cost it removes.
 

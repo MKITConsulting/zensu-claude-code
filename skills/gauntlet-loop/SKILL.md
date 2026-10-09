@@ -109,7 +109,7 @@ closes none.
   loop deliberately does not. The reason is NOT that its critics can run something
   the chain's cannot — neither can, as the first bullet establishes. It is the packet
   protocol: the chain's reviewers hard-refuse any spawn that is not a complete
-  `REVIEW PACKET v1`, and `zensu:review-aspect` accepts only its five fixed
+  `REVIEW PACKET v1`, and `zensu:review-aspect` accepts only seven fixed
   perspectives, so they cannot be pointed at an arbitrary artifact
   under an arbitrary bar. A rendered page, a prose draft or a game build is not a
   changed-file diff, which is the only thing that panel is built to read. Different
@@ -122,7 +122,7 @@ closes none.
   reviewer types `zensu:review-aspect`, `zensu:review-judge`, `zensu:code-reviewer`
   as well as `zensu:plan-review-worker`, `zensu:pr-review-worker` and
   `zensu:zensu-plm`. On top of that the reviewer types hard-refuse any spawn that is
-  not a complete `REVIEW PACKET v1`, `review-aspect` accepts only its five fixed
+  not a complete `REVIEW PACKET v1`, `review-aspect` accepts only seven fixed
   perspectives, and their traversal is capability-restricted. Use `Explore` for a
   gauntlet critic — bearing in mind it cannot run commands either, per the bullet
   above. A `zensu:code-reviewer` spawn made outside the TDD chain's own header

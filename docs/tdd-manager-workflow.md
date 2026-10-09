@@ -2,7 +2,7 @@
 
 End-to-end reference for the Zensu main-thread implementation workflow: vanilla by default, with strict Red/Green TDD and its PreToolUse phase gate available when configured.
 
-> **0.4.0+ architecture.** Implementation moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in `skills/tdd/SKILL.md`; its review stage uses five parallel `zensu:review-aspect` subagents, an optional `zensu:review-judge`, and one consume-mode `zensu:code-reviewer`. Sections 7–8 describe the shipped installed-plugin eval harness.
+> **0.4.0+ architecture.** Implementation moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in `skills/tdd/SKILL.md`; its review stage uses parallel `zensu:review-aspect` subagents (three by default, five with `hooks.reviewPanel: full`), an optional `zensu:review-judge`, and one consume-mode `zensu:code-reviewer`. Sections 7–8 describe the shipped installed-plugin eval harness.
 
 ---
 
@@ -433,7 +433,7 @@ At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-
 flowchart LR
     P6[Phase 6 complete<br/>--tdd-complete] --> Spawn[skill spawns<br/>zensu:code-reviewer]
     Stop[/Stop hook backstop:<br/>block until chainDone/] -.guarantees.-> Spawn
-    Spawn --> Reviewer[zensu:code-reviewer<br/>5 perspectives:<br/>conventions, bugs,<br/>architecture, tests, security]
+    Spawn --> Reviewer[zensu:code-reviewer<br/>consume mode:<br/>merged review-aspect<br/>panel findings]
     Reviewer --> Findings{Critical or<br/>Important?}
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
     Fix --> Spawn

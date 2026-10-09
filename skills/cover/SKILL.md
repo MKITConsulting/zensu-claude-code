@@ -120,11 +120,13 @@ safe (a shared test DB or fixed port serializes them).
 1. Run the target suite green (except intentional `xfail` bug flags).
 2. Apply the `rules/quality.md` gate: determinism, isolation, no over-mocking, meaningful
    assertions.
-3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn the
-   **five** `zensu:review-aspect` agents in one parallel batch (`conventions`, `bugs`,
-   `architecture`, `tests` (emphasized), `security`) over the changed test files, merge their
-   findings in this thread, consolidate through a single `zensu:code-reviewer` spawn, and fix
-   the findings in-thread. `--no-review` skips this (degrade + note).
+3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn one
+   `zensu:review-aspect` agent per perspective of the configured panel in one parallel batch
+   (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
+   `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
+   `security`) over the changed test files, give every spawn the same `REVIEW PACKET v1` that
+   `/zensu:tdd` step 10.2c builds, merge their findings in this thread, consolidate through a
+   single `zensu:code-reviewer` spawn, and fix the findings in-thread. `--no-review` skips this (degrade + note).
 
 **Not TDD — no phase-gate, no deferred marker.** cover **does not arm the phase-gate** (it
 never runs `--tdd-begin`) and records **no** `--pending-review` marker. It drives the review

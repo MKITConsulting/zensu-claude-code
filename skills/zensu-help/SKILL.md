@@ -46,13 +46,13 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 ## Three Layers (embedded — architecture overview)
 
 1. **Planning** (main-thread skills) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The interactive agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
-2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: five parallel `zensu:review-aspect` agents, the optional `zensu:review-judge` second pass (default on), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
+2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: parallel `zensu:review-aspect` agents (three by default, five with `hooks.reviewPanel: full`), the optional `zensu:review-judge` second pass (default on), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
 - `zensu-plm` — optional read-only planning analyst; it recommends a skill but never performs mutations. The interactive main thread runs bootstrap, ghost-scan, security review, and release-readiness workflows.
-- `review-aspect` — five READ-ONLY instances run in parallel, one each for conventions, bugs, architecture, tests, and security.
+- `review-aspect` — READ-ONLY instances run in parallel, one per panel perspective: correctness, design and security by default, or conventions, bugs, architecture, tests and security with `hooks.reviewPanel: full`.
 - `review-judge` — optional READ-ONLY second pass over the merged panel findings; enabled by default.
 - `code-reviewer` — one READ-ONLY consume-mode subagent that consolidates the panel + judge findings and triggers the auto-fix hook.
 
