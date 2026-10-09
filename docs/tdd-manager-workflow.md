@@ -108,7 +108,7 @@ flowchart TD
     P3 --> P4[Phase 4: Execute TDD Cycles<br/>RED to IMPL to GREEN per step]
     P4 --> P5[Phase 5: Checkpoint<br/>scoped suites + linter]
     P5 --> P6[Phase 6: Audit and Final Report<br/>full suite · build · coverage · drift audit · mtime · live acceptance]
-    P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook guarantees it]
+    P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook enforces it, bounded]
     Review --> Findings{Critical or<br/>Important findings?}
     Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 1 round by default]
     AutoFix --> Review
@@ -227,7 +227,7 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 
 **Hook scope.** With a valid SessionStart baseline, the phase gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. A valid inactive baseline exits silently before `--tdd-begin`; it must not be confused with a deleted, malformed, or unreadable mandatory baseline, which fails closed in the all-tool Session Control gate and the edit/Stop guards. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary for Claude host-tool workflow decisions, not an OS sandbox against malicious same-UID processes.
 
-**Vanilla implementation mode (`hooks.tddImplementation:false`).** At `--tdd-begin` the mode is resolved ONCE and frozen into the state file's `vanilla` flag; the command echoes the effective mode (`mode: strict` / `mode: vanilla`) so the skill knows which deltas to apply. The config flag is rank 3 of a FOUR-RANK ladder in that resolution — the session choice `/zensu:tdd-mode` recorded wins, then the caller's `--tdd-begin --tdd-mode strict` (a skill's own default; a lone `TDD-MODE: strict` line in the specification is what tells Phase 0 to pass it), then the config, then vanilla. Rank 2 is **escalation-only**: `strict` is the only value the helper accepts, because that value travels through a model-read specification and a spec body is not always user-authored — `/zensu:pr-fix-findings` builds one from PR review-comment bodies. Lowering the discipline stays the user's own `/zensu:tdd-mode --vanilla`. Because the winner is frozen, a switch governs the NEXT chain and never the running one, exactly as a config flip does not. While `vanilla` is `true` the gate exits 0 right after the `active` check — the whole phase matrix above is bypassed, no phase markers are required, and tests are at the agent's discretion. The gate reads ONLY the state flag, never live config: flipping the config mid-session can neither un-gate a strict session nor re-arm a vanilla one (whose phase stays `UNINITIALIZED` and would otherwise deny everything). Still enforced in vanilla mode: the Phase 5/6 audits (the full-suite runner and the terminus gate, build, coverage), the review fan-out → judge second pass (`review-judge`, gated by `hooks.reviewJudge`, default on — fresh-read deltas + `Panel-FP:` neutralization between the aspect merge and the consume-mode reviewer) → Finding Verification Gate (step 4c, gated by `hooks.findingVerification`, default on — the model-free `hooks/lib/finding-verify-v1.js` anchor grade plus the main thread's own read of every surviving citation, marking whatever does not hold up `[Unverified — do not fix]` and downgrading it rather than deleting it) → `code-reviewer` → auto-fix loop → `/zensu:self-review`, and the Stop-hook chain guarantee. `--tdd-reset` clears the flag; a later `--tdd-begin` re-freezes it from the then-current precedence chain (session marker → caller flag → config → vanilla). The Stop-hook adoption of a deferred review is the one other place that freezes this flag; it resolves the same chain minus rank 2, which has no carrier there (session marker → config → vanilla). The Stop block reason appends a state legend built from the same frozen flag — `mode=vanilla` / `mode=strict` plus the live `implComplete` / `chainDone` values — because a vanilla session's `phase` and `history` carry no signal and have been misread as a corrupt or never-started chain. Wording only: the routing decision is identical in both modes.
+**Vanilla implementation mode (`hooks.tddImplementation:false`).** At `--tdd-begin` the mode is resolved ONCE and frozen into the state file's `vanilla` flag; the command echoes the effective mode (`mode: strict` / `mode: vanilla`) so the skill knows which deltas to apply. The config flag is rank 3 of a FOUR-RANK ladder in that resolution — the session choice `/zensu:tdd-mode` recorded wins, then the caller's `--tdd-begin --tdd-mode strict` (a skill's own default; a lone `TDD-MODE: strict` line in the specification is what tells Phase 0 to pass it), then the config, then vanilla. Rank 2 is **escalation-only**: `strict` is the only value the helper accepts, because that value travels through a model-read specification and a spec body is not always user-authored — `/zensu:pr-fix-findings` builds one from PR review-comment bodies. Lowering the discipline stays the user's own `/zensu:tdd-mode --vanilla`. Because the winner is frozen, a switch governs the NEXT chain and never the running one, exactly as a config flip does not. While `vanilla` is `true` the gate exits 0 right after the `active` check — the whole phase matrix above is bypassed, no phase markers are required, and tests are at the agent's discretion. The gate reads ONLY the state flag, never live config: flipping the config mid-session can neither un-gate a strict session nor re-arm a vanilla one (whose phase stays `UNINITIALIZED` and would otherwise deny everything). Still enforced in vanilla mode: the Phase 5/6 audits (the full-suite runner and the terminus gate, build, coverage), the review fan-out → judge second pass (`review-judge`, gated by `hooks.reviewJudge`, default on — fresh-read deltas + `Panel-FP:` neutralization between the aspect merge and the consume-mode reviewer) → Finding Verification Gate (step 4c, gated by `hooks.findingVerification`, default on — the model-free `hooks/lib/finding-verify-v1.js` anchor grade plus the main thread's own read of every surviving citation, marking whatever does not hold up `[Unverified — do not fix]` and downgrading it rather than deleting it) → `code-reviewer` → auto-fix loop → `/zensu:self-review`, and the bounded Stop-hook chain backstop. `--tdd-reset` clears the flag; a later `--tdd-begin` re-freezes it from the then-current precedence chain (session marker → caller flag → config → vanilla). The Stop-hook adoption of a deferred review is the one other place that freezes this flag; it resolves the same chain minus rank 2, which has no carrier there (session marker → config → vanilla). The Stop block reason appends a state legend built from the same frozen flag — `mode=vanilla` / `mode=strict` plus the live `implComplete` / `chainDone` values — because a vanilla session's `phase` and `history` carry no signal and have been misread as a corrupt or never-started chain. Wording only: the routing decision is identical in both modes.
 
 ---
 
@@ -311,12 +311,13 @@ malformed lifecycle source still fails closed; an unknown but well-formed one
 does not, so the next source Claude Code adds cannot repeat that outage.
 Only a host payload with neither `agent_id` nor `agent_type` receives `main-v1`.
 Claude also reports `agent_type` on `SessionStart` for top-level `claude --agent`
-sessions; those events use the same exact reviewer/neutral classifier as
+sessions; those events use the same exact principal classifier as
 PreToolUse and can never inherit main authority. Claude reports plugin-shipped
 agents to hooks through their scoped `agent_type`. `SubagentStart` reads that same parent record and
-injects `reviewer-readonly-v1` for the five exact reviewer identities
+injects `reviewer-readonly-v1` for the three exact reviewer identities
 `zensu:code-reviewer`, `zensu:review-aspect`, and
-`zensu:review-judge`, plus the dedicated `zensu:plan-review-worker` and
+`zensu:review-judge` (and their bare names), and `evidence-worker-v1` for the
+dedicated `zensu:plan-review-worker` and
 `zensu:pr-review-worker`. Every other child receives neutral `host-profile-v1`,
 including the plugin-scoped PLM identity `zensu:zensu-plm`; that exact PLM
 identity is nevertheless subject to the strict read-only capability profile
@@ -342,10 +343,12 @@ SessionStart matchers run concurrently, `startup`/`clear` prefer an already
 valid record and otherwise use Claude's stable `CLAUDE_PROJECT_DIR`; mutable
 payload `cwd` is never an Autopilot-state selector.
 
-The plugin-scoped reviewers and `zensu:zensu-plm` expose only the host's `Read`,
-`Grep`, and `Glob` tools. The `PreToolUse` gate repeats that exact allowlist after
-context revalidation: no shell, Git, control, MCP, or other tool outside that
-trio is available to those identities. Other `host-profile-v1` children keep,
+The plugin-scoped reviewers, the two evidence workers and `zensu:zensu-plm` expose
+only the host's `Read`, `Grep`, and `Glob` tools. The `PreToolUse` gate repeats
+that allowlist after context revalidation and admits one host tool beside it,
+the `SubagentHandback` report tool, for the reviewers and the PLM only: no shell,
+Git, control, MCP, or other tool is available to those identities, and the
+evidence workers stay inside their private lease. Other `host-profile-v1` children keep,
 of the tools their agent frontmatter and the Claude host grant, only the gate's
 allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
 task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
@@ -427,12 +430,12 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 
 ## 9. Auto-Review Chain
 
-At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) guarantees the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below).
+At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) enforces the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`, and after `autoFixMaxRounds + 3` blocked Stops it releases the turn with a notice that the chain did not converge; a Stop whose checks overrun the hook's deadline (`ZENSU_STOP_DEADLINE_SECONDS`, default 45 s) before reaching a decision is released too, with its own notice. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below).
 
 ```mermaid
 flowchart LR
     P6[Phase 6 complete<br/>--tdd-complete] --> Spawn[skill spawns<br/>zensu:code-reviewer]
-    Stop[/Stop hook backstop:<br/>block until chainDone/] -.guarantees.-> Spawn
+    Stop[/Stop hook backstop:<br/>block until chainDone<br/>or the Stop cap/] -.enforces.-> Spawn
     Spawn --> Reviewer[zensu:code-reviewer<br/>5 perspectives:<br/>conventions, bugs,<br/>architecture, tests, security]
     Reviewer --> Findings{Critical or<br/>Important?}
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
