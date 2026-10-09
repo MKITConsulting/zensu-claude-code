@@ -125,7 +125,7 @@ zen_refuse_bad_shape() {  # the WRITE consequence: name the cause and refuse
 }
 
 zen_write_marker() {
-  mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || {
+  mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || { [ -d "$ZEN_STATE_DIR" ] && [ ! -L "$ZEN_STATE_DIR" ]; } || {
     echo "zensu-zen-mode.sh: cannot create state directory $ZEN_STATE_DIR" >&2
     exit 2
   }

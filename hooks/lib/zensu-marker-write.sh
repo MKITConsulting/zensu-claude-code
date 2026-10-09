@@ -24,7 +24,7 @@ zensu_write_session_marker() {
     echo "$name: refusing to follow a symlinked state path — remove $marker and its directory link by hand" >&2
     exit 2
   fi
-  mkdir -p -m 700 "$state_dir" 2>/dev/null || {
+  mkdir -p -m 700 "$state_dir" 2>/dev/null || { [ -d "$state_dir" ] && [ ! -L "$state_dir" ]; } || {
     echo "$name: cannot create state directory $state_dir" >&2
     exit 2
   }

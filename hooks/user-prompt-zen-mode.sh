@@ -773,7 +773,7 @@ if [ "$ZEN_OFF" -eq 1 ]; then
   # collision would turn one crash into a permanent refusal of the in-band exit -
   # but the consequence of randomness is that every killed write leaks a DISTINCT
   # file. `-mmin +5` leaves a write that is still in flight alone.
-  if mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null; then
+  if mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || { [ -d "$ZEN_STATE_DIR" ] && [ ! -L "$ZEN_STATE_DIR" ]; }; then
     find "$ZEN_STATE_DIR" -maxdepth 1 -type f -name "$(basename "$MARKER").tmp-*" -mmin +5 \
       -exec rm -f {} + 2>/dev/null || true
   fi

@@ -4658,6 +4658,48 @@ else
 fi
 
 
+Z100_BIN="$CONTROL_TMP/z100-bin"; mkdir -p "$Z100_BIN"
+Z100_REAL_MKDIR="$(command -v mkdir)"
+cat > "$Z100_BIN/mkdir" <<EOF
+#!/bin/sh
+case " \$* " in
+  (*" -m 700 "*) ;;
+  (*) exec "$Z100_REAL_MKDIR" "\$@" ;;
+esac
+last=""
+for a in "\$@"; do last="\$a"; done
+if [ "\${Z100_CREATE:-1}" = 1 ]; then "$Z100_REAL_MKDIR" -p "\$last" || exit 1; fi
+printf "mkdir: cannot change permissions of '%s': Permission denied\n" "\$last" >&2
+exit 1
+EOF
+chmod +x "$Z100_BIN/mkdir"
+Z100_BAD=""
+for z100_create in 1 0; do
+  P100="$(mktemp -d -t zenmode-XXXXXX)"; S100="z100-$z100_create-$$"
+  new_session "$P100" "$S100"
+  rm -rf "$P100/.zensu/state"
+  [ -e "$P100/.zensu/state" ] && Z100_BAD="$Z100_BAD [create=$z100_create state-not-fresh]"
+  CLAUDE_CODE_SESSION_ID="$S100" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$P100" ZENSU_CONFIG="$CFG_DEFAULT_OFF" Z100_CREATE="$z100_create" PATH="$Z100_BIN:$PATH" \
+    bash "$HELPER" --on >/dev/null 2>"$CONTROL_TMP/z100.err"; Z100_RC=$?
+  if [ "$z100_create" = 1 ]; then
+    Z100_ST="$(helper "$P100" "$S100" --status "$CFG_DEFAULT_OFF")"
+    { [ "$Z100_RC" -eq 0 ] && [ "$(marker_count "$P100")" = 1 ] && [ "$Z100_ST" = on ]; } \
+      || Z100_BAD="$Z100_BAD [created rc=$Z100_RC markers=$(marker_count "$P100") status=$Z100_ST err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  else
+    { [ "$Z100_RC" -eq 2 ] && [ ! -e "$P100/.zensu/state" ] \
+      && grep -qF 'zensu-zen-mode.sh: cannot create state directory' "$CONTROL_TMP/z100.err"; } \
+      || Z100_BAD="$Z100_BAD [not created rc=$Z100_RC err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  fi
+  rm -rf "$P100"
+done
+if [ -z "$Z100_BAD" ]; then
+  check "Z100 a mkdir that creates the state directory but cannot set its mode, as Git Bash on Windows does, still lets --on record the marker; one that creates nothing is still refused" PASS
+else
+  check "Z100 state directory whose mode cannot be set:$Z100_BAD" FAIL
+fi
+
+
 # The anchor fixtures are the only project directories this suite created and
 # never removed. Every other fixture above is torn down at its own site; these
 # two are torn down here because the fail-open arms need them alive until the
