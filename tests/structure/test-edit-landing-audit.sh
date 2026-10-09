@@ -349,22 +349,31 @@ new_repo "$PAIR_ROOT"
 mkdir -p "$PAIR_ROOT/src"
 printf 'v1\n' > "$PAIR_ROOT/src/app.ts"
 PAIR_ABS="$(cd "$PAIR_ROOT" && pwd -P)"
-printf '%s\n' "[10:00:01] S7 IMPL completed — files: ${PAIR_ABS}/src/app.ts" > "$MR/forged.log"
-OUT_PAIR="$(run_audit --log "$MR/forged.log" --project "$MR/anchor" --receipt -)"
-printf '%s' "$OUT_PAIR" | grep -qF 'UNVERIFIED (foreign root)'
-check "X12-control the forged-root claim reaches the foreign-root verdict at all" "$(verdict $?)"
-# The RESPONSE changed and the property did not: the pair must not form. It is
-# now ESCAPED rather than withheld, because withholding cost the reader the one
-# thing this line exists to say — which repository the claim belongs to — for a
-# root whose only sin is an ordinary colon. Assert the pair is broken AND the
-# root is still readable; asserting the withholding string would pin the weaker
-# behaviour back in place.
-{ ! printf '%s' "$OUT_PAIR" | grep -qF ' : '; }
-check "X12 a foreign root forging a 'label : value' pair cannot form one" "$(verdict $?)"
-printf '%s' "$OUT_PAIR" | grep -qF 'u003a'
-check "X12d the same root is escaped rather than withheld, so it stays readable" "$(verdict $?)"
-! printf '%s' "$OUT_PAIR" | grep -qF "$PAIR_ABS"
-check "X12a the raw forged root never reaches the verdict line" "$(verdict $?)"
+PAIR_OK=0
+case "$PAIR_ABS" in *' : '*) [ -d "$PAIR_ABS/.git" ] && PAIR_OK=1 ;; esac
+if [ "$PAIR_OK" -eq 1 ]; then
+  printf '%s\n' "[10:00:01] S7 IMPL completed — files: ${PAIR_ABS}/src/app.ts" > "$MR/forged.log"
+  OUT_PAIR="$(run_audit --log "$MR/forged.log" --project "$MR/anchor" --receipt -)"
+  printf '%s' "$OUT_PAIR" | grep -qF 'UNVERIFIED (foreign root)'
+  check "X12-control the forged-root claim reaches the foreign-root verdict at all" "$(verdict $?)"
+  # The RESPONSE changed and the property did not: the pair must not form. It is
+  # now ESCAPED rather than withheld, because withholding cost the reader the one
+  # thing this line exists to say — which repository the claim belongs to — for a
+  # root whose only sin is an ordinary colon. Assert the pair is broken AND the
+  # root is still readable; asserting the withholding string would pin the weaker
+  # behaviour back in place.
+  { ! printf '%s' "$OUT_PAIR" | grep -qF ' : '; }
+  check "X12 a foreign root forging a 'label : value' pair cannot form one" "$(verdict $?)"
+  printf '%s' "$OUT_PAIR" | grep -qF 'u003a'
+  check "X12d the same root is escaped rather than withheld, so it stays readable" "$(verdict $?)"
+  ! printf '%s' "$OUT_PAIR" | grep -qF "$PAIR_ABS"
+  check "X12a the raw forged root never reaches the verdict line" "$(verdict $?)"
+else
+  check "X12-control SKIPPED — this filesystem cannot hold a git work tree whose physical name carries ' : '" PASS
+  check "X12 SKIPPED — this filesystem cannot hold a git work tree whose physical name carries ' : '" PASS
+  check "X12d SKIPPED — this filesystem cannot hold a git work tree whose physical name carries ' : '" PASS
+  check "X12a SKIPPED — this filesystem cannot hold a git work tree whose physical name carries ' : '" PASS
+fi
 # The same screen on the OTHER emit, and on a different member of the class.
 BT_DIR="$WORK/$(printf 'back\140tick')"
 mkdir -p "$BT_DIR/scratch"
@@ -698,12 +707,13 @@ printf 'v1\n' > "$RD_SIB/src/app.ts"
 printf 'v1\n' > "$RD_OUT/src/app.ts"
 RD_SIB_ABS="$(cd "$RD_SIB" && pwd -P)"
 RD_OUT_ABS="$(cd "$RD_OUT" && pwd -P)"
+RD_HOME_ABS="$(cd "$RD_HOME" && pwd -P)"
 RD_LOG="$RD_PROJ/.zensu/logs/redact-fixture.log"
 RD_WRITER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
-( cd "$RD_PROJ" && HOME="$RD_HOME" CLAUDE_PROJECT_DIR="$RD_PROJ" \
+( cd "$RD_PROJ" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$RD_PROJ" \
     bash "$RD_WRITER" append --truncate --log "$RD_LOG" \
     --message "S1 IMPL completed — files: ${RD_SIB_ABS}/src/app.ts" >/dev/null 2>&1 )
-( cd "$RD_PROJ" && HOME="$RD_HOME" CLAUDE_PROJECT_DIR="$RD_PROJ" \
+( cd "$RD_PROJ" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$RD_PROJ" \
     bash "$RD_WRITER" append --log "$RD_LOG" \
     --message "S2 IMPL completed — files: ${RD_OUT_ABS}/src/app.ts" >/dev/null 2>&1 )
 [ -s "$RD_LOG" ]
@@ -741,7 +751,8 @@ check "H1-control the harness scan found check call sites at all" "$(verdict $?)
 # the `core.excludesFile` bypass X10 exists to close was still a one-token
 # prefix away. The comment above X10 calling GIT_CONFIG_COUNT "the single lever"
 # was the reason nobody looked for a second one: there are two.
-OUT_PARAMS="$(env GIT_CONFIG_PARAMETERS="'core.excludesFile=$MR/excl-all'" \
+EXCL_DIR_GIT="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$MR" 2>/dev/null)" || EXCL_DIR_GIT="$MR"
+OUT_PARAMS="$(env GIT_CONFIG_PARAMETERS="'core.excludesFile=$EXCL_DIR_GIT/excl-all'" \
   bash "$LIB" --log "$MR/scrub.log" --project "$MR/anchor" --receipt - 2>&1)"
 RC_PARAMS=$?
 { [ "$RC_PARAMS" -ne 0 ] && printf '%s' "$OUT_PARAMS" | grep -qF 'EDIT NOT LANDED — S9: claimed src/ghost.txt'; }
@@ -753,7 +764,7 @@ check "X17 an injected GIT_CONFIG_PARAMETERS cannot exempt an unlanded claim" "$
 MUT_PARAMS="$MR/lib-no-config-params.sh"
 sed -e '/^[[:space:]]*GIT_CONFIG /s/ GIT_CONFIG_PARAMETERS//' \
     -e '/^  git -c /s/ -c core\.excludesFile=\/dev\/null//' "$LIB" > "$MUT_PARAMS"
-OUT_MUT_PARAMS="$(env GIT_CONFIG_PARAMETERS="'core.excludesFile=$MR/excl-all'" \
+OUT_MUT_PARAMS="$(env GIT_CONFIG_PARAMETERS="'core.excludesFile=$EXCL_DIR_GIT/excl-all'" \
   bash "$MUT_PARAMS" --log "$MR/scrub.log" --project "$MR/anchor" --receipt - 2>&1)"
 { ! grep -qE '^[[:space:]]*GIT_CONFIG .*GIT_CONFIG_PARAMETERS' "$MUT_PARAMS"; } \
   && printf '%s' "$OUT_MUT_PARAMS" | grep -qF 'EDIT LANDED (untracked-by-design)'
@@ -1153,7 +1164,7 @@ check "X27b a stripped claim that climbs out of the anchor is refused, not resol
 NL_DIR="$MR/nl"$'\n'"dir"
 mkdir -p "$NL_DIR" 2>/dev/null && (cd "$NL_DIR" && git init -q . >/dev/null 2>&1) && printf 'x\n' > "$NL_DIR/f.txt" 2>/dev/null
 ln -sf "$NL_DIR" "$MR/nl-link" 2>/dev/null
-if [ -d "$MR/nl-link" ] && [ -e "$MR/nl-link/f.txt" ]; then
+if [ -L "$MR/nl-link" ] && [ -d "$MR/nl-link" ] && [ -e "$MR/nl-link/f.txt" ]; then
   printf '%s\n' "[10:00:22] S42 IMPL completed — files: $MR/nl-link/f.txt" > "$MR/nl.log"
   OUT_NL="$(bash "$LIB" --inventory --log "$MR/nl.log" --project "$MR/anchor" 2>&1)"
   RC_NL=$?
@@ -1164,7 +1175,7 @@ if [ -d "$MR/nl-link" ] && [ -e "$MR/nl-link/f.txt" ]; then
   { [ "$RC_NL" -eq 2 ] && printf '%s' "$OUT_NL" | grep -qF 'newline'; }
   check "X27c a newline-bearing root synthesized by pwd -P makes --inventory refuse" "$(verdict $?)"
 else
-  check "X27c SKIPPED — this filesystem will not hold a newline-named directory" PASS
+  check "X27c SKIPPED — this host produced no real symlink to a newline-named directory" PASS
 fi
 { ! grep -qF 'UNREACHABLE through this library' "$LIB"; }
 check "X27d the guard is no longer documented as defence in depth" "$(verdict $?)"

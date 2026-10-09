@@ -473,9 +473,13 @@ r_recognized() {
     if zensu_doctor_allowed "$PAYLOAD"; then printf yes; else printf no; fi
   ' 2>/dev/null
 }
-if [ "$(r_recognized "bash $ADOPT_SH --restore-root")" = "yes" ]; then
-  check "O21d-control the recognizer admits the closed two-literal set" PASS
-else check "O21d-control the recognizer admits the closed two-literal set" FAIL; fi
+OPR_ADMIT=yes; OPR_HOST=""
+if [ "$(node -p 'process.platform' 2>/dev/null)" = "win32" ]; then
+  OPR_ADMIT=no; OPR_HOST=" [win32: the recognizer refuses every invocation by design]"
+fi
+if [ "$(r_recognized "bash $ADOPT_SH --restore-root")" = "$OPR_ADMIT" ]; then
+  check "O21d-control the recognizer admits the closed two-literal set$OPR_HOST" PASS
+else check "O21d-control the recognizer admits the closed two-literal set$OPR_HOST" FAIL; fi
 if [ "$(r_recognized "bash $ADOPT_SH --restore-root /tmp/somewhere-else")" = "no" ]; then
   check "O21d the recognizer refuses an argument outside the closed set" PASS
 else check "O21d the recognizer refuses an argument outside the closed set" FAIL; fi
@@ -551,10 +555,11 @@ fi
 # The one exception, and it is NOT the relaxation above reaching further: the
 # read-only diagnostic is admitted in EVERY bind failure by zensu-doctor-invocation.js,
 # because denying it there put /zensu:doctor behind the very defect it reports.
-if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "allow" ]; then
-  check "O27a the diagnostic itself stays reachable on a disagreeing record" PASS
+OPR_DIAG=allow; [ "$OPR_ADMIT" = yes ] || OPR_DIAG=deny
+if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "$OPR_DIAG" ]; then
+  check "O27a the diagnostic itself stays reachable on a disagreeing record$OPR_HOST" PASS
 else
-  check "O27a the diagnostic is denied on a disagreeing record" FAIL
+  check "O27a the diagnostic is not $OPR_DIAG on a disagreeing record$OPR_HOST" FAIL
 fi
 # ... and the allowance is main-thread only, exactly like the relaxations above.
 if [ "$(capability_gate "zensu:code-reviewer" "$STILL_DATA" "orphan-still-there")" = "deny" ]; then

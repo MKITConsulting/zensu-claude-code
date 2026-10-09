@@ -24,11 +24,14 @@ SESSION="zensu-verify-vc"
 CLI="playwright-cli -s=$SESSION"
 NL=$'\n'
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 check() {
   local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  case "$cond" in
+    PASS) echo "  PASS  $label"; PASS=$((PASS+1)) ;;
+    SKIP) echo "  SKIP  $label"; SKIP=$((SKIP+1)) ;;
+    *) echo "  FAIL  $label"; FAIL=$((FAIL+1)) ;;
+  esac
 }
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
@@ -201,13 +204,14 @@ new_project() {
 }
 
 bash_payload() {
-  node -e '
-    const [event, command, sid, cwd, extra] = process.argv.slice(1);
+  printf '%s' "$2" | node -e '
+    const [event, sid, cwd, extra] = process.argv.slice(1);
+    const command = require("fs").readFileSync(0, "utf8");
     const body = { hook_event_name: event, tool_name: "Bash", tool_input: { command }, session_id: sid, cwd };
     if (event === "PostToolUse") body.tool_response = { stdout: "", stderr: "", interrupted: false };
     if (extra) Object.assign(body, JSON.parse(extra));
     process.stdout.write(JSON.stringify(body));
-  ' "$1" "$2" "$3" "$4" "${5:-}"
+  ' "$1" "$3" "$4" "${5:-}"
 }
 
 pre_verdict() {
@@ -239,12 +243,13 @@ pre_reason() {
 post_run() { bash_payload PostToolUse "$1" "$2" "$3" "${4:-}" | bash "$POST_HOOK" 2>&1 >/dev/null; }
 
 memory_has() {
-  node -e '
-    const [file, origin, route, decidedBy] = process.argv.slice(1);
-    const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
+  printf '%s\n%s\n%s' "$1" "$2" "$3" | node -e '
+    const fs = require("fs");
+    const [origin, route, decidedBy] = fs.readFileSync(0, "utf8").split("\n");
+    const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const hits = doc.records.filter((r) => r.origin === origin && r.route === route && r.decidedBy === decidedBy);
     process.exit(doc.version === 1 && hits.length === 1 ? 0 : 1);
-  ' "$MEMORY" "$1" "$2" "$3" 2>/dev/null
+  ' "$MEMORY" 2>/dev/null
 }
 
 memory_count() {
@@ -467,7 +472,8 @@ BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
 remember_tmp "$NONODE_BIN"
 for _vc_tool in cat sed tr dirname; do
-  ln -s "$(command -v "$_vc_tool")" "$NONODE_BIN/$_vc_tool"
+  printf '#!%s\nexec %q "$@"\n' "$BASH_BIN" "$(command -v "$_vc_tool")" > "$NONODE_BIN/$_vc_tool"
+  chmod 755 "$NONODE_BIN/$_vc_tool"
 done
 if env PATH="$NONODE_BIN" "$BASH_BIN" -c 'command -v node' >/dev/null 2>&1; then
   check "H17a-control the stripped PATH hides node" FAIL
@@ -679,7 +685,8 @@ mkdir -p "$RUN_DIR"
 HELPER_OUT="$(config_helper --run-dir "$RUN_DIR" --mode local --origin 'http://127.0.0.1:4310' 2>/dev/null)"
 RUN_SESSION="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^session=//p')"
 RUN_CONFIG="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^config=//p')"
-if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ "$RUN_CONFIG" = "$RUN_DIR/playwright-cli.json" ] && [ -f "$RUN_CONFIG" ] \
+RUN_CONFIG_EXPECTED="$(node -e 'const fs = require("fs"); const path = require("path"); process.stdout.write(path.join(fs.realpathSync.native(process.argv[1]), "playwright-cli.json"))' "$RUN_DIR" 2>/dev/null)"
+if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ -n "$RUN_CONFIG_EXPECTED" ] && [ "$RUN_CONFIG" = "$RUN_CONFIG_EXPECTED" ] && [ -f "$RUN_CONFIG" ] \
   && printf '%s\n' "$HELPER_OUT" | grep -qx 'mode=consent'; then
   check "H11-control the run-config helper wrote the config, named the session and reported consent mode" PASS
 else
@@ -867,12 +874,16 @@ mkdir -p "$SYMMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
 cp "$PREFILTER_LIB" "$SYMMOD_ROOT/hooks/lib/"
 ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
-SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
-case "$SYMMOD_DENY" in
-  *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
-    check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
-  *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
-esac
+if [ -L "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+  SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
+  case "$SYMMOD_DENY" in
+    *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+      check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
+    *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
+  esac
+else
+  check "V31f a plugin root whose decision module is a symlink denies — this host made no symlink, so ln -s copied the module" SKIP
+fi
 BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
 mkdir -p "$BADMOD_ROOT/hooks/lib"
@@ -1420,5 +1431,9 @@ else
 fi
 
 echo "----"
-echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+if [ "$SKIP" -gt 0 ]; then
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
+else
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+fi
 [ "$FAIL" -eq 0 ]

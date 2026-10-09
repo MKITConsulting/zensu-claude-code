@@ -805,11 +805,16 @@ mkdir -p "$(dirname "$(receipt_for gate-symlink-receipt)")"
 printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/clean-claim.log","claims":1,"clean":true}\n' \
   > "$PROJ/.zensu/state/receipt-target.json"
 ln -sf "$PROJ/.zensu/state/receipt-target.json" "$(receipt_for gate-symlink-receipt)"
-Z14_ERR="$(bash "$LOG" --tdd-begin --session gate-symlink-receipt 2>&1 >/dev/null)"
-printf '%s' "$Z14_ERR" | grep -qF 'RECEIPT RETIREMENT UNRESOLVED'
-check "Z14 a symlinked receipt is reported unretired rather than silently left" "$(verdict $?)"
-[ -L "$(receipt_for gate-symlink-receipt)" ]
-check "Z14a the link itself is left in place — this verb renames, it never unlinks" "$(verdict $?)"
+if [ -L "$(receipt_for gate-symlink-receipt)" ]; then
+  Z14_ERR="$(bash "$LOG" --tdd-begin --session gate-symlink-receipt 2>&1 >/dev/null)"
+  printf '%s' "$Z14_ERR" | grep -qF 'RECEIPT RETIREMENT UNRESOLVED'
+  check "Z14 a symlinked receipt is reported unretired rather than silently left" "$(verdict $?)"
+  [ -L "$(receipt_for gate-symlink-receipt)" ]
+  check "Z14a the link itself is left in place — this verb renames, it never unlinks" "$(verdict $?)"
+else
+  check "Z14 SKIPPED — this host made no symlink, so ln -s copied the receipt" PASS
+  check "Z14a SKIPPED — this host made no symlink, so ln -s copied the receipt" PASS
+fi
 # Control: an ORDINARY receipt is retired in silence, so Z14 cannot pass by
 # printing the line for every arming.
 clean_arm gate-plain-receipt

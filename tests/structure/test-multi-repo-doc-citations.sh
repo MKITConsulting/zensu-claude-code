@@ -146,7 +146,7 @@ mktmp PROBE zensu-citation-probe || { check "C0b probe temp file created" FAIL; 
 cat > "$PROBE" <<'NODE'
 const fs = require("fs");
 const path = require("path");
-const root = process.argv[2];
+const root = path.resolve(process.argv[2]);
 const rest = process.argv.slice(3);
 const SELFTEST = rest[0] === "--selftest";
 const docs = SELFTEST ? [] : rest;

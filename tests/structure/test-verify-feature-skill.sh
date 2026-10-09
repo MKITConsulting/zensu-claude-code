@@ -919,6 +919,11 @@ P9_VERDICTS="$(node -e '
     if (run.status !== 0) throw new Error("awk failed: " + run.stderr);
     return run.stdout;
   }
+  function script(name, text) {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, text + "\n");
+    return file;
+  }
   function blocksOf(text) {
     const lines = text.split("\n");
     const found = [];
@@ -957,7 +962,7 @@ P9_VERDICTS="$(node -e '
     const source = path.join(dir, "source.md");
     fs.writeFileSync(section, "## [" + version + "] - 2099-01-01\n\n### Added\n\n- **release**: Synthetic generated entry\n");
     fs.writeFileSync(source, text);
-    const released = awk([program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /), section, source]);
+    const released = awk(["-f", script("prepend.awk", program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /)), section, source]);
     const headings = released.split("\n").filter((line) => /^## /.test(line));
     const at = headings.indexOf("## [Unreleased]");
     if (at === -1 || headings.lastIndexOf("## [Unreleased]") !== at) throw new Error("the released file does not carry exactly one Unreleased heading");
@@ -967,7 +972,7 @@ P9_VERDICTS="$(node -e '
     if (after !== expected) throw new Error("the release left the notes under " + after + ", not " + expected);
     const releasedFile = path.join(dir, "released.md");
     fs.writeFileSync(releasedFile, released);
-    const notes = awk(["-v", "ver=" + after, program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /), releasedFile]);
+    const notes = awk(["-v", "ver=" + after, "-f", script("notes.awk", program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /)), releasedFile]);
     if (!notes.includes(blocksOf(released)[0].block)) throw new Error("the release notes for " + after + " do not carry the upgrade notes");
     return { released, version: after };
   }

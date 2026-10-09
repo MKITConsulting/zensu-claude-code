@@ -23,6 +23,7 @@ const path = require("node:path");
 
 const MODULE = path.join(__dirname, "..", "..", "hooks", "lib", "plugin-data-guard-v1.js");
 const guard = require(MODULE);
+const HOST_WINDOWS = process.platform === "win32";
 
 const roots = [];
 function scratch() {
@@ -50,8 +51,7 @@ function write(tool, field, target, extra) {
 test("a backslash is a separator when isWindows is true", () => {
   const out = guard.resolveTargetPath(path.sep + "pdg-a\\pdg-b", path.sep, true);
   assert.strictEqual(out.truncated, null);
-  assert.ok(out.path.endsWith("pdg-b"), "expected the trailing segment, got " + out.path);
-  assert.ok(!out.path.includes("\\"), "the backslash should have been consumed as a separator: " + out.path);
+  assert.strictEqual(path.resolve(out.path), path.resolve(path.sep, "pdg-a", "pdg-b"));
 });
 
 test("a backslash is an ordinary character when isWindows is false", () => {
@@ -63,13 +63,13 @@ test("a backslash is an ordinary character when isWindows is false", () => {
 // --- the two resolution bounds ----------------------------------------------
 test("a walk past MAX_COMPONENTS reports truncation instead of a prefix", () => {
   const spelling = path.sep + "pdg" + (path.sep + "a" + path.sep + "..").repeat(2100) + path.sep + "x";
-  const out = guard.resolveTargetPath(spelling, path.sep, false);
+  const out = guard.resolveTargetPath(spelling, path.sep, HOST_WINDOWS);
   assert.strictEqual(out.truncated, "components");
 });
 
 test("the identical shape under the bound completes", () => {
   const spelling = path.sep + "pdg" + (path.sep + "a" + path.sep + "..").repeat(4) + path.sep + "x";
-  const out = guard.resolveTargetPath(spelling, path.sep, false);
+  const out = guard.resolveTargetPath(spelling, path.sep, HOST_WINDOWS);
   assert.strictEqual(out.truncated, null);
 });
 
@@ -98,7 +98,7 @@ test("decide refuses a truncated resolution", () => {
     payload: write("Write", "file_path", spelling),
     pluginData: store,
     projectRoot: project,
-    isWindows: false,
+    isWindows: HOST_WINDOWS,
   });
   assert.strictEqual(v.deny, true);
   assert.strictEqual(v.reason, guard.REASONS.TRUNCATED);
@@ -465,6 +465,10 @@ test("a relative store is refused rather than resolved against the process cwd",
 // does not exist; through the kernel the link is followed first and the answer is
 // <b>/real-store, which does.
 test("a store spelled through a symlink then .. resolves like the kernel, not lexically", (t) => {
+  if (HOST_WINDOWS) {
+    t.skip("Windows applies .. to the spelling before it follows a link, so the kernel answer this case pins is POSIX only");
+    return;
+  }
   const a = scratch();
   const b = scratch();
   const real = path.join(b, "real-store");
@@ -558,7 +562,7 @@ test("a truncated walk refuses even when its prefix lands inside the project", (
     payload: write("Write", "file_path", spelling),
     pluginData: parent,
     projectRoot: project,
-    isWindows: false,
+    isWindows: HOST_WINDOWS,
   });
   assert.strictEqual(v.deny, true);
   assert.strictEqual(v.reason, guard.REASONS.TRUNCATED);

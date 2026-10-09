@@ -52,7 +52,7 @@
     },
     {
       "path": "tests/structure/test-doctor.sh",
-      "reason": "The only native-Windows branch skips P1pw4, the POSIX-only isolated-PATH assertion that the wrapper reports playwright-cli absent."
+      "reason": "Two native-Windows constructs: P1pw4 skips the POSIX-only isolated-PATH assertion that the wrapper reports playwright-cli absent, and P1o3 links the state directory as a junction, which Windows creates without the symlink privilege."
     },
     {
       "path": "tests/structure/test-evidence-discipline.sh",
