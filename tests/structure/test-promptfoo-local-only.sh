@@ -120,7 +120,7 @@ const expectedOffline = [
   ['evals/session-control/run-self-check.sh', ['--ci'], true],
   ['evals/tdd-review-chain/run-self-check.sh', [], false],
   ['evals/reset-review-limit/run-self-check.sh', ['--ci'], true],
-  ['evals/tdd-manager-pretool/run-eval.sh', ['--self-check'], false],
+  ['evals/tdd-manager-pretool/run-eval.sh', ['--self-check', '--skip-nested'], false],
 ];
 process.exit(value.schemaVersion === 1
   && JSON.stringify(value.localStructureTests) === JSON.stringify(local)

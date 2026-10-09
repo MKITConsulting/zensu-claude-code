@@ -222,7 +222,8 @@
         "--self-check"
       ],
       "ciArgs": [
-        "--self-check"
+        "--self-check",
+        "--skip-nested"
       ],
       "needsNodeDeps": false,
       "windowsSafety": true
