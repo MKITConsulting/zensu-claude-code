@@ -5,7 +5,8 @@ set -u
 # agents/tdd-manager.md subagent into the main-thread skill skills/tdd/SKILL.md.
 # This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+AGENT="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 AUTOPILOT_SKILL="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 PR_TEAM_REVIEW_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
 PR_FIX_FINDINGS_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
@@ -469,6 +470,7 @@ else
   check "PB1 expected 0 GFM checkboxes in plan template; found $CHECKBOX_COUNT" FAIL
 fi
 
+rm -f "$AGENT"
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

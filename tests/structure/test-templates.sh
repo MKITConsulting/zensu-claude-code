@@ -17,7 +17,8 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 TPL_SPEC="$PLUGIN_DIR/templates/autopilot-spec.md"
 TPL_PR="$PLUGIN_DIR/templates/autopilot-pr-body.md"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
@@ -102,7 +103,7 @@ fi
 # P3 — resolution contract in consumers
 if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md' "$TDD_MD" \
   && grep -qF 'when that file exists, else the plugin default' "$TDD_MD" \
-  && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/tdd-plan.md' "$TDD_MD" \
+  && grep -qF '{plugin_root}/templates/tdd-plan.md' "$TDD_MD" \
   && grep -qF '`${CLAUDE_PLUGIN_ROOT}` is the active plugin installation supplied to this skill component' "$TDD_MD" \
   && ! grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT' "$TDD_MD"; then
   check "P3a tdd Phase 2 resolves override then the natively rendered plugin default" PASS
@@ -199,6 +200,7 @@ else
   check "P5c docs/review-chain.md lists the shared pr-body.md template" FAIL
 fi
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-templates: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

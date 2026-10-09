@@ -16,7 +16,7 @@ AUTOPILOT_RESUME="$ROOT/hooks/session-start-autopilot-resume.sh"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 CONFIG_LIB="$ROOT/hooks/lib/zensu-config.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
-PR_SKILL="$ROOT/skills/pr-team-review/SKILL.md"
+PR_SCOUT="$ROOT/skills/pr-team-review/references/scout.md"
 STATE_READER_BLOCK="$(awk '/^_tdd_read_validated_state\(\)/,/^}/' "$PHASE")"
 PATH_SAFETY_BLOCK="$(awk '
   /^_tdd_paths_safe\(\)/ { capture=1 }
@@ -272,11 +272,11 @@ PLAN_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_DIR"' "$PLAN_SKILL" | head
 PLAN_REPO_LINE="$(grep -nF 'RAW_REPO=$(pwd -P)' "$PLAN_SKILL" | head -1 | cut -d: -f1)"
 PLAN_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$PLAN_SKILL" | head -1 | cut -d: -f1)"
 PLAN_MANIFEST_LINE="$(grep -nF "printf 'DIR=%s" "$PLAN_SKILL" | head -1 | cut -d: -f1)"
-PR_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$PR_SKILL" | head -1 | cut -d: -f1)"
-PR_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$PR_SKILL" | head -1 | cut -d: -f1)"
-PR_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$PR_SKILL" | head -1 | cut -d: -f1)"
-PR_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$PR_SKILL" | head -1 | cut -d: -f1)"
-PR_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$PR_SKILL" | head -1 | cut -d: -f1)"
+PR_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$PR_SCOUT" | head -1 | cut -d: -f1)"
+PR_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$PR_SCOUT" | head -1 | cut -d: -f1)"
+PR_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$PR_SCOUT" | head -1 | cut -d: -f1)"
+PR_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$PR_SCOUT" | head -1 | cut -d: -f1)"
+PR_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$PR_SCOUT" | head -1 | cut -d: -f1)"
 if [ -n "$PLAN_MKTEMP_LINE" ] && [ -n "$PLAN_HOST_LINE" ] && [ -n "$PLAN_MANIFEST_LINE" ] \
     && [ "$PLAN_MKTEMP_LINE" -lt "$PLAN_HOST_LINE" ] && [ "$PLAN_HOST_LINE" -lt "$PLAN_MANIFEST_LINE" ] \
     && [ -n "$PLAN_REPO_LINE" ] && [ -n "$PLAN_REPO_HOST_LINE" ] \

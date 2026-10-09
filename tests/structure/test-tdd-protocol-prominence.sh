@@ -15,7 +15,8 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$*"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$*"; }
 
-SKILL="$ROOT/skills/tdd/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+SKILL="$(skill_text_file "$ROOT/skills/tdd")"
 PRIMER="$ROOT/hooks/session-start-primer.sh"
 
 # ── 1) zensu:tdd skill: mandatory command block ABOVE "## When to Use" ──────
@@ -52,5 +53,6 @@ grep -q -- "--step" "$PRIMER" \
   && ok "primer: names the per-marker --step requirement" \
   || bad "primer: --step missing"
 
+rm -f "$SKILL"
 printf 'Result: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -14,7 +14,8 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
 
 T_PASS=0; T_FAIL=0
@@ -968,7 +969,7 @@ check "X21b a newline-bearing foreign root is refused rather than split" "$(verd
 # foreign-claim remedy. The doctor's topology bullets stated no such bound
 # either, so row-absence read as a clean topology. The two HTML docs already
 # carry it; the two skills did not.
-TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 DOC_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 grep -qF 'UNVERIFIED (undetermined root)' "$TDD_SKILL"
 check "X22 step 5b b) names the undetermined-root verdict this library emits" "$(verdict $?)"
@@ -1296,6 +1297,7 @@ OUT_DS_C="$(LC_ALL=C bash "$LIB" --log "$MR/dash.log" --project "$MR/anchor" --r
 printf '%s' "$OUT_DS_C" | grep -qF 'claims=5 '
 check "X33f the dash spellings match the same way under LC_ALL=C" "$(verdict $?)"
 
+rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]

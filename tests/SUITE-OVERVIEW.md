@@ -169,7 +169,7 @@ retained), the mode precedence at the freeze point (`tdd-mode-toggle` — sessio
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
 unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
-anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
+anchors on — and the 5-agent review fan-out wiring in `skills/tdd/references/review-chain.md`.
 
 ### Review chain & findings (29)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·

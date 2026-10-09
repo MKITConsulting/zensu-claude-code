@@ -94,8 +94,8 @@ Apply the verdict per comment (each side validates against its own numbering —
   `none` instead, because a comment 40+ lines away from its evidence is noise.
 - `none` — the side has no commentable line within reach (deleted/binary/out of
   PR, or beyond the remap cap): do NOT emit an inline comment;
-  fold the finding into the overall body as a body-only finding (`SKILL.md`
-  Phase D). It keeps its ID and its line there, marked `· no inline comment`,
+  fold the finding into the overall body as a body-only finding
+  (`references/publish.md`). It keeps its ID and its line there, marked `· no inline comment`,
   with its full explanation in a collapsed block below. Never silently drop a
   finding.
 

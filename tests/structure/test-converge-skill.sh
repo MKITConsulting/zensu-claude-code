@@ -24,7 +24,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_MD="$PLUGIN_DIR/skills/converge/SKILL.md"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 POST_REVIEW_HOOK="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
@@ -223,6 +224,7 @@ else
   check "P5 e2e-skills converge scenario ships (prompt/pattern/fixture)" FAIL
 fi
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-converge-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,6 +1,6 @@
 # Reviewer Personas
 
-25-persona pool. The skill auto-casts a tailored subset per PR in Phase A.2 (see `SKILL.md`). Four personas form the **always-on holistic core** cast on every code PR — `coverage-audit` (guaranteed test-coverage evaluation), `bug-hunter` (functional correctness), `maintainability` (design + complexity), and `adversarial` (devil's-advocate / anti-groupthink) — so no code PR is ever reviewed by specialist lenses alone. `adversarial`'s output drives the Phase C **Challenge Round** (see `workflow.md`). Docs-only PRs stay lean (`docs-only` + `coverage-audit`).
+25-persona pool. The skill auto-casts a tailored subset per PR in Phase A.2 (see `references/cast.md`). Four personas form the **always-on holistic core** cast on every code PR — `coverage-audit` (guaranteed test-coverage evaluation), `bug-hunter` (functional correctness), `maintainability` (design + complexity), and `adversarial` (devil's-advocate / anti-groupthink) — so no code PR is ever reviewed by specialist lenses alone. `adversarial`'s output drives the Phase C **Challenge Round** (see `workflow.md`). Docs-only PRs stay lean (`docs-only` + `coverage-audit`).
 
 ## Shared Output Schema
 

@@ -207,8 +207,7 @@ standing configuration, and no `ZENSU_*=off` spelling exists for it.
 - `skills/delivery-route/SKILL.md`, its `plugin.json` entry and the README row and counts;
   `config.example.json`; the `defaultDeliveryRoute` row and the hook rows in
   `docs/configuration.md`; the Layer 2 edge label in `docs/architecture.md` (the `D17` needle
-  stays contiguous); the first `## When to Use` bullet of `skills/tdd/SKILL.md` (edited INSIDE
-  its line — the file sits at its line cap); both interception paragraphs of
+  stays contiguous); the first `## When to Use` bullet of `skills/tdd/SKILL.md`; both interception paragraphs of
   `skills/gauntlet-loop/SKILL.md`.
 - The doctor probe in `zensu-doctor.sh`, the two renderer rows and the shared literals in
   `zensu-doctor-report.js`, and their `skills/doctor/SKILL.md` bullets.

@@ -47,7 +47,7 @@ one filled row would satisfy the gate — and a receipt is an ordinary file the 
 write. Every comparison canonicalizes both sides (`realpath` / `cd … && pwd -P`): on macOS a
 temp root is spelled `/var/…` by the caller and `/private/var/…` by the kernel, and a raw
 string compare there rejects the session's own plan. Four things must therefore move
-together: the stem convention in `skills/tdd/SKILL.md` Phase 2, the receipt's `log` field and
+together: the stem convention in Phase 2 of `skills/tdd/references/planning.md`, the receipt's `log` field and
 its JSON ENCODING in `hooks/lib/zensu-edit-landing.sh`, the substitution in `zensu-log.sh`,
 `templates/tdd-plan.md` — whose `{acceptance criterion — machine-checkable}` / `{functional requirement}` cells are exactly what the placeholder-stripping rule keys on, so changing that placeholder syntax makes the gate misjudge — and `{plan_file}`'s definition beside `{log_file}` in Principle 3 — which Phase 2 step 1 now
 WRITES, so producer and consumer share one spelling. The receipt's `log` is JSON-ENCODED and
@@ -111,10 +111,12 @@ written against the decoded message finds nothing.
 **The `## Requirements` shape has SEVEN readers, not two**, and all five beside this library
 and `/zensu:converge` are model-executed and PRESENCE-ONLY, so every one of them accepts a
 placeholder-only table this library refuses: `skills/self-review/SKILL.md` twice (the per-AC
-table in the chain-end summary, and the converge offer it renders), and `skills/tdd/SKILL.md`
+table in the chain-end summary, and the converge offer it renders), and the tdd skill
 three times (Phase 6 step 6c's "If the plan has no `## Requirements` table (legacy plan), skip
-silently"; the step-10 converge offer, which this thread renders when `hooks.selfReview` is
-disabled; and the vanilla-mode statement that the table and the `Covers` mapping stay binding).
+silently" in `skills/tdd/references/audit.md`; the step-10 converge offer in
+`references/review-chain.md`, which this thread renders when `hooks.selfReview` is disabled; and
+the vanilla-mode statement in `references/modes.md` that the table and the `Covers` mapping stay
+binding).
 A change to what counts as a usable table has to reach all seven. An EIGHTH reader is
 mechanical and shares this library's own parser: `--list` prints every recognized row with its
 state (`active`, `deprecated`, `placeholder`), and `hooks/lib/acceptance-verify-v1.js` takes its

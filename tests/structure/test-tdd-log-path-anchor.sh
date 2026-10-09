@@ -7,7 +7,8 @@ set -u
 # subdirectory failed with: no such file or directory: .zensu/logs/..._tdd-....log
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 
 PASS=0; FAIL=0
 check() {
@@ -59,7 +60,7 @@ else
   check "L5 Phase 0 reads {project_root} from --project-root and takes the baseline from it" FAIL
 fi
 
-if grep -Fq 'CLAUDE_PROJECT_DIR="{project_root}" CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --truncate --log {log_file}' "$SKILL"; then
+if grep -Fq 'CLAUDE_PROJECT_DIR="{project_root}" CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/hooks/lib/zensu-log.sh" append --truncate --log {log_file}' "$SKILL"; then
   check "L6 the Phase 2 --truncate binds its destructive write to {project_root}" PASS
 else
   check "L6 the Phase 2 --truncate binds its destructive write to {project_root}" FAIL
@@ -127,7 +128,7 @@ else
   check "L13 the plan globs of /zensu:tdd and /zensu:converge keep the pasted root inside double quotes" FAIL
 fi
 
-AMBIENT="$(grep -lF '${CLAUDE_PROJECT_DIR:-.}' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null)"
+AMBIENT="$(grep -lF '${CLAUDE_PROJECT_DIR:-.}' "$PLUGIN_DIR"/skills/*/SKILL.md "$PLUGIN_DIR"/skills/*/references/*.md 2>/dev/null)"
 SKILL_COUNT="$(ls "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
 if [ -z "$AMBIENT" ] && [ "${SKILL_COUNT:-0}" -gt 1 ]; then
   check "L8 no skill anchors a path on \${CLAUDE_PROJECT_DIR:-.} ($SKILL_COUNT skills scanned)" PASS
@@ -135,6 +136,7 @@ else
   check "L8 no skill anchors a path on \${CLAUDE_PROJECT_DIR:-.} (found: ${AMBIENT:-none}; scanned: ${SKILL_COUNT:-0})" FAIL
 fi
 
+rm -f "$SKILL"
 echo "----"
 echo "test-tdd-log-path-anchor: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

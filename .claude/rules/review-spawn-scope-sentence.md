@@ -108,8 +108,8 @@ could see it: counting turns ended while `implementing` with a changed worktree,
 wall time. Not addressed here — a turn counter is a workflow-state field and therefore
 a MINOR release under §"Runtime Lineage".
 
-**Residual carriers, stated rather than closed.** KNOWN BOUND 1: `skills/tdd/SKILL.md`
-Phase 6 orders the FIRST spawn of every chain before any hook directive exists, so a
+**Residual carriers, stated rather than closed.** KNOWN BOUND 1: `skills/tdd/references/review-chain.md`
+(Phase 6 step 10) orders the FIRST spawn of every chain before any hook directive exists, so a
 session that withholds the very first fan-out learns this only after one blocked Stop —
 one turn, not a wedge. KNOWN BOUND 2: `hooks/lib/chain-recovery-v1.js`'s `NEXT_COMMAND`
 instructs a reviewer spawn from JS, where a shell constant is structurally unreachable.
