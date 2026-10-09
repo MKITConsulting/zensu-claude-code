@@ -14,7 +14,7 @@ stdout line, a DB row, a screenshot). Evidence per AC feeds the PR's per-AC tabl
 | Driver | Target | Exercise → assert | Session artifact |
 |---|---|---|---|
 | `api` | HTTP / Bearer service | client call → status + JSON body / side-effect | `bearer-token-file` |
-| `browser` | web app (+ electron, responsive) | Playwright: actions → DOM assertions + screenshots | `storageState` |
+| `browser` | web app (+ responsive) | Playwright: actions → DOM assertions + screenshots | `storageState` |
 | `cli` | binary / TUI | run with args/stdin → stdout + exit code (TUI via pty) | `none` / `bearer-token-file` |
 | `async` | queue / event bus (Kafka, SQS, NATS, Rabbit) | publish a message → assert the side-effect (DB row, out-topic, log) | broker creds (script) |
 | `iac` | terraform / helm / k8s | plan/apply to **kind**/localstack → assert resources exist + are correct | kubeconfig (script) |
@@ -33,7 +33,8 @@ stdout line, a DB row, a screenshot). Evidence per AC feeds the PR's per-AC tabl
   session is already authenticated — no login typed by the AI.
 - Assert on visible DOM state (text, roles, attributes) and capture a screenshot per AC as
   evidence. Cover the states the ACs name: default, empty, error, loading.
-- Electron apps use the same engine; a responsive/mobile-web AC sets `browser.viewport`.
+- A responsive/mobile-web AC sets `browser.viewport`. Electron and Tauri apps are `desktop`:
+  the browser session cannot launch them.
 
 ### `cli`
 - Run the binary with the AC's inputs; assert on stdout/stderr content **and** exit code.
@@ -83,16 +84,31 @@ the foreground (e.g. a `browser` AC "sends a confirmation email" → `browser` a
 ## Tier 1.5 — cheap, common, add as needed
 
 - `library` — run a usage example/snippet, assert its output (for a published package/API).
-- `artifact` — assert a generated document/render without a running service.
+- generated documents and renders — no driver of their own: a `cli`, `library` or `custom`
+  row produces them, and the `file` / `artifact` augment above asserts them.
 - the `email` sink augment above.
 
 ## On-demand — real but heavier, only when the project needs them
 
 - `mobile` — iOS Simulator + Android Emulator; **Maestro** as the common cross-platform
   flow runner (one flow file drives both). Needs Xcode / Android SDK present — if absent,
-  the probe degrades and says so.
-- `desktop-native` — OS UI automation: macOS XCUITest / computer-use, Windows FlaUI, Linux
-  AT-SPI. Session artifact is typically a `keychain` entry the app reads itself.
+  the probe degrades and says so. The run-owned device lifecycle, the interaction ladder and
+  the evidence rules are in `../../verify-feature/rules/mobile-verification.md`.
+- `desktop` — OS UI automation: macOS XCUITest / computer-use, Windows FlaUI, Linux
+  AT-SPI; Electron and Tauri apps too. Session artifact is typically a `keychain` entry the
+  app reads itself. Launch, data isolation and evidence rules are in
+  `../../verify-feature/rules/desktop-verification.md`.
+
+**Run-owned devices under autopilot.** Those two rule files assume `/zensu:verify-feature`'s
+run directory, run-resource helper and cleanup, so step 6 supplies them. It creates
+`.zensu/verify-feature-runs/autopilot-<RUN_ID>` beneath the workspace root as `$RUN_DIR`, reads
+`ROOT` as the plugin root, assigns `ZENSU_VERIFY_RUN_DIR` and `ZENSU_VERIFY_DEVICE` on the
+recipe commands those rows run, and on every exit from step 6 runs the helper's `teardown` for
+that directory. It deletes the directory last: only after `teardown=complete` and after every
+recipe `down` that received it has run. Where those files send a service to
+`SKILL.md` Phase 2, the recipe the probe resolved starts it. A step they gate on the user's yes,
+a download or a deployed backend, is asked in the Phase 0.D batch; without that answer the row
+degrades and the PR says so, because Phase 1 asks nothing.
 
 These need their toolchains installed. The probe checks for the tool and **degrades the
 driver** (with a note) rather than faking success when it is missing — toolchain honesty.

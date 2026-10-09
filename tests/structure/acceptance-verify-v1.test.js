@@ -118,6 +118,24 @@ test('the record validator holds an exact key set and typed values', async () =>
   assert.equal(av.validateRecord(good, { sessionKey: OTHER_SESSION }), 'bound to another session');
 });
 
+test('the recorder takes the verify-feature driver ids, stores desktop under its released spelling and still accepts the two earlier spellings', () => {
+  assert.deepEqual([...av.DRIVERS].sort(), ['api', 'async', 'browser', 'cli', 'custom', 'desktop', 'iac', 'library', 'mobile']);
+  const fixture = project();
+  const desktop = attest(fixture, 'AC-001', 'pass', { driver: 'desktop', evidenceText: 'Launched the built app; its window and accessibility tree list every project' });
+  assert.equal(desktop.code, 0, desktop.error);
+  assert.equal(desktop.record.driver, 'desktop-native');
+  assert.equal(desktop.record.evidence_run, null);
+  assert.match(desktop.line, /^ACCEPTANCE — AC-001 pass \| driver=desktop-native attested \|/);
+  const earlier = attest(fixture, 'AC-002', 'pass', { driver: 'desktop-native', evidenceText: 'Launched the built app; the export wrote a CSV file' });
+  assert.equal(earlier.code, 0, earlier.error);
+  assert.equal(earlier.record.driver, 'desktop-native');
+  for (const driver of ['desktop', 'desktop-native', 'artifact']) assert.equal(av.validateRecord({ ...desktop.record, driver }), null);
+  assert.match(av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'artifact', evidenceText: 'checked the bundle' })).error, /decides by an exit code/);
+  const refused = av.record(base(fixture, { ac: 'AC-001', verdict: 'pass', driver: 'telepathy', evidenceText: 'x' }));
+  assert.equal(refused.code, 2);
+  assert.equal(refused.error, '--driver must be one of browser, mobile, desktop, api, cli, async, iac, custom, library');
+});
+
 test('criterion digests ignore whitespace and control characters only', () => {
   assert.equal(av.criterionDigest('The  list\tshows\nall'), av.criterionDigest('The list shows all'));
   assert.notEqual(av.criterionDigest('The list shows all'), av.criterionDigest('The list shows none'));

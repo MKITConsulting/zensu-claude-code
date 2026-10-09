@@ -672,6 +672,19 @@ through Bash.
 - **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
   run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
   prompt.
+- **Only the `browser` driver is gated.** The other drivers of `/zensu:verify-feature` (`api`,
+  `cli`, `library`, `async`, `iac`, `mobile`, `desktop`, `custom`) run the worktree's own build on
+  run-owned local resources, bounded by the skill's rules, the host's own permission prompts and
+  the per-app or per-device grants of the host's computer-use and simulator tools. No hook judges
+  them, and how the host resolves those prompts in auto mode or a headless run is unverified.
+  Teardown is the mechanical part: `skills/verify-feature/scripts/verify-run-resources.js`
+  records every device, supervised process, emulator serial, cluster, container and `tmux`
+  socket a driver starts, and acts only on recorded entries. A simulator must still carry the
+  run's name, a process is stopped through the supervisor's lease or after a command-line check,
+  and an emulator is only stopped through its supervised process, never killed by its serial.
+  A container, a `tmux` socket and a `kind` cluster are removed by the run-prefixed name that was
+  checked when it was recorded, with no second check. A resource started outside the helper is
+  outside its reach.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.
@@ -1005,14 +1018,19 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
 
 - **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
   <pass|fail|partial> --driver <driver> --log <run log> [--evidence-run <id>]`, with the
-  evidence text on stdin. The driver names come from `skills/autopilot/rules/drivers.md`.
-  - **Observed:** `api`, `cli`, `async`, `iac`, `custom`, `library` and `artifact` are decided
+  evidence text on stdin. The driver names are the nine ids of
+  `skills/verify-feature/rules/drivers.md`. `desktop-native` and `artifact`, the spellings of
+  earlier releases, stay accepted, so a running session whose skill text still names them can
+  record; `desktop-native` counts as attested and `artifact` as observed.
+  - **Observed:** `api`, `cli`, `async`, `iac`, `custom` and `library` are decided
     by an exit code. So the check must run through
     `zensu-log.sh --evidence-run --scope acceptance`, and the record must cite that run. A pass
     needs exit 0, a fail needs a non-zero exit, and a run that changed the tree while it ran is
     refused.
-  - **Attested:** `browser`, `mobile` and `desktop-native` are driven by the model and recorded
-    with the evidence text alone.
+  - **Attested:** `browser`, `mobile` and `desktop` are driven by the model and recorded
+    with the evidence text alone. A `desktop` record is stored as `desktop-native`: after an
+    update, the earlier installation can still read the same session's records, and it accepts
+    only that spelling.
 
   The verb refuses an unknown or deprecated id, empty or secret-matching evidence, and a run
   log whose stem differs from the one this session's edit-landing receipt records. It appends

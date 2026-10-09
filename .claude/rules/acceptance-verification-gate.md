@@ -48,11 +48,25 @@ changes is `unresolved`; a clean tree or no git is `not-applicable`, because tha
 implemented nothing a criterion could observe.
 
 **Observed where the plugin can observe.** A driver decided by an exit code (`api`, `cli`,
-`async`, `iac`, `custom`, `library`, `artifact`) must cite an `--evidence-run --scope acceptance`
+`async`, `iac`, `custom`, `library`) must cite an `--evidence-run --scope acceptance`
 record that completed on the current tree without changing it, and the exit code must agree
-with the verdict. `partial` needs no run. UI drivers (`browser`, `mobile`, `desktop-native`)
-are attested. The driver names are the autopilot catalog's; the browser still follows
-`/zensu:verify-feature`'s credential-blind rules, never the catalog's `storageState` login.
+with the verdict. `partial` needs no run. UI drivers (`browser`, `mobile`, `desktop`)
+are attested. The driver names are the nine ids of `skills/verify-feature/rules/drivers.md`
+(`DRIVERS`), and `P10c` in `tests/structure/test-verify-feature-skill.sh` compares them with the
+recipe enum. `desktop-native` (attested) and `artifact` (observed), the spellings of earlier
+releases, stay accepted on write and on read (`ACCEPTED_DRIVERS`): a running session can be served
+by a newer installation (§"Runtime Lineage"), so its skill text may still name them and its
+records must stay readable. The `--driver` refusal names only the nine ids. **A `desktop` record
+is STORED as `desktop-native` (`RECORDED_DRIVER_SPELLINGS`), and that is the lineage decision,
+not a leftover.** After a `patch` update the session keeps its record, both installation roots
+serve it, and a model still holding the earlier skill text calls the earlier root's
+`zensu-log.sh` against the same `records/<session key>` store. Released readers check `driver` by
+membership in `validateRecord`, so a stored `desktop` reads there as `unknown driver`: as the
+newest record it turns the gate `invalid`, and as an older one it is dropped from `valid`, which
+lets an earlier `pass` of the same criterion on the same tree stand over a newer `fail`. Storing
+`desktop` itself needs a `minor` release, whose automatic adoption retires the earlier root. The
+browser follows `/zensu:verify-feature`'s credential-blind rules, never the `storageState` login of
+the autopilot catalog (`skills/autopilot/rules/drivers.md`).
 
 **States.** Per criterion: `pass`, `fail`, `partial`, `missing`, `stale` (another tree, or the
 criterion digest changed) and `deprecated`. A deprecated criterion whose newest record is not
@@ -106,6 +120,10 @@ list in `status-marker-legend.md`; `docs/verify-feature.md`.
 
 **Version: `minor`.** Every consumer's standalone chain now needs live verification to close,
 and `--tdd-complete` loads a new module. No workflow-state field and no strict key set changed.
+Moving the driver names to the nine verify-feature ids was a `patch`: no record key changed, every
+value an earlier installation wrote or its skill text names is still accepted, and every record
+this installation writes carries a spelling the released readers accept. Accepting `desktop` on
+read is the half a later `minor` needs to start storing it.
 
 **Known gaps, accepted and named:**
 

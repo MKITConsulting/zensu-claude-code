@@ -50,11 +50,39 @@ auth:
   # skill validates/reads only the artifact path/ok — never the credential value
 
 validate:
-  driver:  browser          # browser | api | cli | async | iac | custom  (see drivers.md)
+  driver:  browser          # browser | api | cli | library | async | iac | mobile | desktop | custom  (see drivers.md)
   baseUrl: "<url>"          # browser / api
   baseUrlCommand: "<optional shell that confirms the parent-authorized URL after readiness>"
+  exercise: "<shell>"
   assert:  "<shell>"        # cli / api / custom: exit 0 = pass, prints evidence
   # driver-specific keys: browser.viewport, api.protocol, cli.pty, iac plan target, ...
+  cli:
+    build: "<shell that builds the entry point from the worktree>"
+    command: "<the built entry point>"
+    pty: false
+  library:
+    build: "<shell>"
+    consumer: "<an example or sample the repository ships>"
+  mobile:
+    platform: ios
+    project: "<App.xcodeproj | App.xcworkspace | Android module path>"
+    scheme: "<Xcode scheme>"
+    build: "<optional shell; derived from project and scheme when absent>"
+    appId: "<bundle identifier or Android application id>"
+    deviceType: "<simulator device type id>"
+    runtime: "<simulator runtime id>"
+    systemImage: "<installed Android system image the run's own virtual device is created from>"
+    launchArgs: "<launch arguments, for example the run-owned backend URL>"
+  desktop:
+    platform: macos
+    build: "<shell>"
+    app: "<path of the built app or executable>"
+    appId: "<bundle identifier or product name>"
+    dataIsolation: "<launch argument or environment assignment that points the app's data at ${ZENSU_VERIFY_RUN_DIR:?}>"
+    launchArgs: "<launch arguments or environment assignments that point the app at the run-owned backend>"
+  iac:
+    target: "<disposable target: kind | localstack | none>"
+    endpoint: "<the disposable target's endpoint, for example http://127.0.0.1:${ZENSU_VERIFY_PORT:?}>"
   sinks:                    # optional side-effect assertions (augments)
     - { type: email, at: "<url>" }
   navigationBroker:        # policy mode of /zensu:verify-feature; optional in consent mode
@@ -70,6 +98,38 @@ validate:
     containsPersonalData: false   # must be literal false (declared-safe)
     containsSecrets: false        # must be literal false (declared-safe)
 ```
+
+### Driver blocks and recipe inputs
+
+`validate.driver` names the default driver for the recipe's application; `desktop-native`, an
+earlier spelling in `drivers.md`, is read as `desktop`. `/zensu:verify-feature` resolves a driver
+for every scenario and loads that driver's rules (`../../verify-feature/rules/drivers.md`). A
+driver block carries the facts that driver would otherwise derive from tracked files:
+
+- `cli`: `build` makes the entry point from the worktree, `command` runs it, and `pty: true`
+  drives it as a terminal UI.
+- `library`: `build`, and `consumer`, an example or sample the repository ships.
+- `mobile`: `platform` (`ios` or `android`), `project`, `scheme`, `build` and `appId`; for iOS
+  the simulator `deviceType` and an optional `runtime`, for Android the installed
+  `systemImage` the run creates its own virtual device from; `launchArgs` points the app at a
+  run-owned backend. A change that touches several platforms takes a list of such blocks, one
+  per platform.
+- `desktop`: `platform` (`macos`, `windows` or `linux`), `build`, `app`, `appId`, and
+  `dataIsolation`, the switch that keeps the app off the user's own data and credentials.
+  Without it, `/zensu:verify-feature` does not launch an app whose data location already
+  exists. `launchArgs` points the app at a run-owned backend.
+- `iac`: `target`, the disposable target a plan or apply may use, and its `endpoint`; `none`
+  limits the run to validation and rendering.
+- `custom`: `exercise` and `assert`, each exiting `0` on pass and printing its evidence.
+
+`/zensu:verify-feature` assigns a recipe command's inputs on that command: `ZENSU_VERIFY_RUN_DIR`
+is the run directory, `ZENSU_VERIFY_PORT` a service's run-specific port in consent mode, and
+`ZENSU_VERIFY_DEVICE` the run's simulator UDID or emulator serial for a `mobile` build. All
+three are read permissively: a recipe that ignores one still validates. `/zensu:autopilot`
+assigns `ZENSU_VERIFY_RUN_DIR` and `ZENSU_VERIFY_DEVICE` only for the `mobile` and `desktop`
+rows it runs in a run directory (`drivers.md`, "Run-owned devices under autopilot"), so a recipe
+both skills read spells each input as `${ZENSU_VERIFY_RUN_DIR:?}`: an unassigned input then
+fails the command instead of expanding to an empty string.
 
 ### `validate.driver: browser` — needs a user-installed `playwright-cli`
 
@@ -249,8 +309,10 @@ orchestration is identical.
 
 - A project with **no auth** sets `auth.mode: none` and omits `loginScript`; the validate
   step runs unauthenticated.
-- A project with **no UI** sets `validate.driver: api` (or `cli`/`custom`) and provides an
-  `assert` command instead of a `baseUrl`.
+- A project with **no UI** sets `validate.driver: api` (or `cli`, `library`, `async`, `iac` or
+  `custom`) and provides an `assert` command or the driver's block instead of a `baseUrl`.
+- A **native app** sets `validate.driver: mobile` or `desktop` with that driver's block; it
+  needs no `services` unless the app calls a backend.
 - Collision-safe live verification may use `validate.baseUrlCommand` instead of `baseUrl`. The
   command must print exactly one credential-free URL. In policy mode that URL must already be
   allowlisted in the immutable parent-environment policy before the session began: the command

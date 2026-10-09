@@ -1,8 +1,8 @@
 ---
 name: verify-feature
 description: >
-  [Zensu] Live-verify a built feature in the local worktree or a deployed
-  preview through playwright-cli. Use when the user asks to test a feature live,
+  [Zensu] Live-verify a built web, API, CLI, mobile or desktop feature in the local
+  worktree or a deployed preview. Use when the user asks to test a feature live,
   run an end-to-end smoke check, or /zensu:verify-feature.
 ---
 
@@ -17,6 +17,10 @@ evidence. The target is either the current worktree (`local`) or an already-depl
 (`remote`). This workflow reports what it observes; it never patches the feature and never
 turns the run into a committed regression suite.
 
+A **driver** exercises each scenario. The sections below that name the browser,
+`playwright-cli`, the consent gate, a policy or an origin apply to `browser` rows only;
+`rules/drivers.md` section 8 holds what every other row does instead.
+
 > `/zensu:verify-feature` is a live proof. `/zensu:cover` writes durable tests.
 > `/zensu:autopilot` owns the larger idea-to-PR build and repair loop.
 
@@ -28,6 +32,7 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 |---|---|---|---|
 | `<feature>` | no | current diff | Behavior to verify. Free text, a route, or acceptance criteria are valid. |
 | `--mode=local\|remote` | no | `local` | `local` must execute code from this worktree; `remote` executes deployed code. |
+| `--driver=<id>` | no | detect | `browser`, `api`, `cli`, `library`, `async`, `iac`, `mobile`, `desktop` or `custom` for every row; `remote` accepts `browser` only. |
 | `--route=<path>` | no | derive | Initial route. Derive only when the changed router or supplied criteria make it unambiguous. |
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
@@ -66,6 +71,8 @@ particular, ask for the remote base URL and for genuinely ambiguous acceptance c
   confirmation even when they are part of a scenario.
 - **Owned teardown only.** Stop only processes, containers, and temporary files created by
   this run. Never use broad `pkill`, shared container names, or cleanup outside the run dir.
+- **No host browser tools.** An in-app browser pane or a browser extension drives the user's own
+  browser profile outside the consent gate. Never use one, for any driver.
 
 ## Chain mode (`--chain`)
 
@@ -87,11 +94,11 @@ only these points:
    prove that the attached process serves this worktree, each verdict it yields is at most
    `partial`.
 3. **Use the cheapest driver that can observe the criterion,** named as in
-   `skills/autopilot/rules/drivers.md`: `browser` through this skill's `playwright-cli` flow;
-   `mobile` in the iOS Simulator or the Android emulator, through a host simulator tool or a
-   Maestro flow; `desktop-native` through the host's desktop automation; and `api`, `cli`,
-   `async`, `iac`, `custom`, `library` or `artifact` as one shell check that exits 0 exactly
-   when the criterion holds. The credential-blind rules above bind every driver: never the
+   `rules/drivers.md`: `browser` through this skill's `playwright-cli` flow; `mobile` and
+   `desktop` through their own rule files; and `api`, `cli`, `async`, `iac`, `custom` or
+   `library` as one shell check that exits 0 exactly when the criterion holds. Pass the same
+   id to `--driver` when you record the criterion.
+   The credential-blind rules above bind every driver: never the
    autopilot `storageState` login, and never a secret in a command or in the evidence. An
    exit-code check reaches only an unauthenticated, synthetic, loopback target and discards its
    own output (`curl -fsS -o /dev/null http://127.0.0.1:<port>/…`, `<command> >/dev/null 2>&1`),
@@ -147,6 +154,8 @@ only these points:
    transform, or report the scheme, hostname, port, path, query key, query value, fragment, or
    userinfo. Record the target only as `remote target rejected before resolution`. Do not inspect Git,
    read files, start a runtime, authenticate, or navigate after that rejection.
+   `--mode=remote` together with a `--driver` other than `browser` stops the same way, in
+   memory, with `remote mode supports the browser driver only`.
 1. Resolve the git root and current branch. Record whether the worktree is dirty.
 2. Resolve the repository default branch, then inspect both committed and uncommitted work:
    the merge-base diff through `HEAD`, plus `git diff` and `git diff --cached`.
@@ -158,6 +167,9 @@ only these points:
    - local: worktree path, branch, and `HEAD` SHA;
    - remote: only after validation succeeds, the sanitized credential-free base URL and any
      deployment/commit identifier visible from the preview.
+6. Resolve every row's driver with `rules/drivers.md` section 2; a row that is not `browser`
+   follows its section 8 from here on. In `remote` mode a row whose driver is not `browser` is
+   PARTIAL, because remote mode supports the browser driver only.
 
 For a remote target, validate the URL **before echoing, navigating, or authenticating**:
 
@@ -245,22 +257,11 @@ Bash call in either mode — the hooks read it from the environment Claude Code 
 the gate denies an `export` or an environment assignment on a command that carries a
 `zensu-verify` call.
 
-**Consent mode (no parent policy).** When the preflight prints `consent`, the FIRST
-`playwright-cli` call that reaches a new origin — `open` with the run config, `goto`, or
-`tab-new` — opens the host's own permission prompt to the user. Consent is per ORIGIN: once the
-user approves an origin, every further route on it proceeds without a prompt. Answering that
-prompt is the user's action; never answer it on their behalf, never work around a refusal, and
-treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
-origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
-refuses every HTTP(S) request to an origin outside the run config; a WebSocket connection is not
-fenced by the run config, which is an open gap. A remote target is refused in consent
-mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
-remembers each approved ORIGIN for this session in
-`.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
-but the route steers no later decision — and the report lists every record in its `Consent`
-block. **Read that file for the report and never write, edit or delete it.** A record placed
-there skips the human's permission prompt for that origin, so writing one grants yourself the
-consent this gate exists to ask for. Only the PostToolUse hook writes it.
+**Consent mode (no parent policy).** When the preflight prints `consent`, the first call that
+reaches a new origin opens the host's permission prompt; read `rules/browser-verification.md`
+section 1 before that call. The consent memory `.zensu/state/verify-consent-<session-key>.json`
+is read for the report and never written, edited or deleted: a record placed there skips the
+human's prompt for that origin.
 
 **Redirects are not filtered by the browser.** `network.allowedOrigins` blocks a direct
 navigation and every HTTP(S) subresource request outside the run config, but the browser
@@ -275,12 +276,12 @@ observation.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
-Create the matrix before opening the browser. Every row names the route and setup, precise
-steps, DOM/data assertion, visual assertion, expected network effect, and priority.
+Create the matrix before driving anything. Every row names its driver, the route and setup,
+precise steps, DOM/data assertion, visual assertion, expected network effect, and priority.
 
-| Scenario | Route + setup | Steps | DOM/data | Visual | Network | Pri |
-|---|---|---|---|---|---|---|
-| ... | ... | ... | ... | ... | ... | P0/P1/P2 |
+| Scenario | Driver | Route + setup | Steps | DOM/data | Visual | Network | Pri |
+|---|---|---|---|---|---|---|---|
+| ... | ... | ... | ... | ... | ... | ... | P0/P1/P2 |
 
 Enumerate these dimensions from the changed code:
 
@@ -317,12 +318,13 @@ This common `$RUN_DIR` must exist before runtime or authentication preparation.
 
 Local means the application process actually uses files from the current worktree.
 Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
-`rules/zensu-monorepo.md` says `<absolute-plugin-root>`, replace it with this
+a bundled rule file says `<absolute-plugin-root>`, replace it with this
 concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
-Claude's native placeholder substitution.
+Claude's native placeholder substitution. A row that needs no service skips steps 1 to 5
+(`rules/drivers.md` section 8).
 
-0. When `--attach=<origin>` was given, skip runtime preparation entirely: see "Attach mode"
-   below. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
+0. When `--attach=<origin>` was given, skip runtime preparation entirely and follow
+   `rules/attach.md`. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
 1. Inspect the explicit `--config` path, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`,
    as a **candidate**, using `../autopilot/rules/config.md` (the two file names share one
    schema; `runtime.yaml` is the verify-owned spelling that setup writes, and it is tried first).
@@ -378,20 +380,6 @@ Claude's native placeholder substitution.
    readiness evidence.
 5. Seed only data required by the matrix, through repository-owned fixtures, typed tools, or
    the UI. Never use a hand-written raw API payload when the repository has a typed path.
-
-### Attach mode
-
-`--attach=<origin>` verifies an application the user already runs. The origin must pass the
-same loopback rule as local mode (`http://127.0.0.1:<port>`, another loopback IP, or
-`http://localhost:<port>`; never another hostname). Boot nothing, seed nothing through the runtime, register no `down`
-command, and never stop, signal, or restart the attached process. Establish identity before
-the matrix: resolve the listening process with
-`lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
-`lsof -a -p <pid> -d cwd -Fn`, and compare it with the physical worktree root. Report
-"worktree identity proven" only on an exact match; report "attached runtime, identity unproven"
-otherwise, which caps the verdict at PARTIAL because the worktree claim of local mode is then
-unestablished. Consent applies unchanged: the first navigation to the attached origin asks the
-user.
 
 ### Remote mode
 
@@ -478,7 +466,8 @@ Use this order:
 
 ## Phase 3 — Drive and observe
 
-Load `rules/browser-verification.md` and execute the matrix against the resolved base URL.
+Load `rules/browser-verification.md` and drive the `browser` rows against the resolved base URL;
+every other row follows `rules/drivers.md` section 8.
 
 - Drive P0, then P1, then any affordable P2 rows.
 - Reset to a known state between scenarios. Use a fresh isolated context when scenario state
@@ -503,11 +492,15 @@ Run cleanup on PASS, FAIL, cancellation, and setup failure:
 
 - run `playwright-cli -s=<session> close` for every session this run opened; never `close-all`
   or `kill-all`, which end sessions this run does not own;
-- delete the run directory without touching a sibling or out-of-scope path;
+- run the run-resource helper's `teardown` for `$RUN_DIR` before the run directory is deleted,
+  because its ledger lives there (`rules/drivers.md` section 5);
 - invoke every accepted recipe's configured `down` command byte-for-byte as a standalone Bash
   call, under `--chain` behind the `cd` prefix of Chain mode point 9 and nothing else; let its
   lease-bound controller stop only the process groups and resources it owns;
 - remove only uniquely named containers/resources created by this run;
+- delete the run directory last, after every `down` above, which may read what its `up` left
+  there, only after `teardown=complete`, and without touching a sibling or out-of-scope path;
+  after `teardown=incomplete` keep it, as `rules/drivers.md` section 5 says;
 - leave the git worktree and all user-owned services intact.
 
 ## Phase 5 — Report
@@ -516,9 +509,9 @@ Use this format:
 
 **Verdict: PASS | FAIL | PARTIAL**
 
-| Scenario | Pri | Expected | Observed | Evidence | Result |
-|---|---|---|---|---|---|
-| ... | P0 | ... | ... | screenshot / snapshot / request | ✅ / ❌ / ⏭ |
+| Scenario | Driver | Pri | Expected | Observed | Evidence | Result |
+|---|---|---|---|---|---|---|
+| ... | ... | P0 | ... | ... | screenshot / snapshot / request | ✅ / ❌ / ⏭ |
 
 - **Target:** mode, base URL, worktree/branch/SHA or deployed identity.
 - **Coverage:** `N/N P0`, `N/N P1`, `N/N P2`; name every undriven row.
@@ -538,14 +531,18 @@ Use this format:
   never tested), or `policy-mode` (a parent-environment policy the gate accepts authorized
   it). In consent mode also name every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
+- **Other drivers:** the lines `rules/drivers.md` section 8 adds.
 
 Verdict rules:
 
-- **PASS** only when every P0 was driven and passed, every acceptance criterion has DOM/data
-  **and** visual proof, and relevant console/network evidence is clean.
+- **PASS** only when every P0 was driven and passed, every acceptance criterion has the
+  evidence planes its driver requires (DOM/data **and** visual proof for `browser`,
+  `rules/drivers.md` section 3 otherwise), and relevant console, network and runtime-signal
+  evidence is clean.
 - **FAIL** when a driven acceptance criterion or P0 behavior is demonstrably broken.
 - **PARTIAL** when setup/auth/evidence is incomplete, a required scenario was not driven, the
-  remote deployment identity is uncertain, or visual inspection is missing.
+  remote deployment identity is uncertain, visual inspection is missing, a required tool was
+  missing, or a criterion the user sees was proven only through a non-UI driver.
 
 End with exactly one greppable verdict. The final non-empty line must be a bare, unfenced
 plain-text line with no backticks, list marker, block quote, or text after it. For a passing run,
