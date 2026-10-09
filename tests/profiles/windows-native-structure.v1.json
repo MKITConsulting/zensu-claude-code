@@ -112,7 +112,7 @@
     },
     {
       "path": "tests/structure/test-stop-enforcer-latency.sh",
-      "reason": "The native-Windows markers belong to the two link helpers. make_directory_symlink makes a junction on win32 for L43, L50, L51 and L52, and make_file_symlink makes the native file symlink of L48, which Windows creates only for an elevated token or in Developer Mode; each of the five checks skips only when its helper fails. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it. Its Windows wall clock is unmeasured, and a blocking shard would have to be paid for by moving another suite off one."
+      "reason": "The native-Windows markers belong to the two link helpers. make_directory_symlink makes a junction on win32 for L13, L17d, L43, L50, L51 and L52, and make_file_symlink makes the native file symlink of L48, which Windows creates only for an elevated token or in Developer Mode; each of the seven checks skips only when its helper fails. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it. Its Windows wall clock is unmeasured, and a blocking shard would have to be paid for by moving another suite off one."
     }
   ]
 }

@@ -65,6 +65,28 @@ exec sleep 600
 EOF
 chmod +x "$WORK/count-shim/node" "$WORK/hang-shim/node"
 
+cat >"$WORK/link-lib.sh" <<EOF
+make_directory_symlink() {
+  "$REAL_NODE" -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"junction":"dir");
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "\$1" "\$2"
+}
+make_file_symlink() {
+  "$REAL_NODE" -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "\$1" "\$2"
+}
+EOF
+source "$WORK/link-lib.sh"
+
 decision() {
   "$REAL_NODE" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'
 }
@@ -259,12 +281,15 @@ else
 fi
 
 new_session lat-unsafe || check "L13 fixture: unsafe-storage session" FAIL
-ln -s "$WORK/elsewhere" "$STATE_DIR/autopilot"
-stop_run lat-unsafe "$FULL_PATH_DEADLINE"
-if [ "$STOP_DECISION" = "block" ] && [ "$NODE_COUNT" -gt "$IDLE_SPAWN_BUDGET" ]; then
-  check "L13 unsafe Autopilot storage still blocks instead of taking the early exit" PASS
+if make_directory_symlink "$WORK/elsewhere" "$STATE_DIR/autopilot"; then
+  stop_run lat-unsafe "$FULL_PATH_DEADLINE"
+  if [ "$STOP_DECISION" = "block" ] && [ "$NODE_COUNT" -gt "$IDLE_SPAWN_BUDGET" ]; then
+    check "L13 unsafe Autopilot storage still blocks instead of taking the early exit" PASS
+  else
+    check "L13 unsafe storage block (decision=$STOP_DECISION spawns=$NODE_COUNT out=$STOP_OUT)$STOP_NOTE" FAIL
+  fi
 else
-  check "L13 unsafe storage block (decision=$STOP_DECISION spawns=$NODE_COUNT out=$STOP_OUT)$STOP_NOTE" FAIL
+  check "L13 this host creates no symbolic link, so there is no linked Autopilot sentinel to block on" PASS
 fi
 
 echo "== the idle probe's own verdicts"
@@ -299,12 +324,15 @@ V="$(probe lat-probe)"
 V="$(probe "" "relative/root")"
 [ "$V" = "busy" ] && check "L17c probe answers busy for a relative project root" PASS \
   || check "L17c probe relative root (got '$V')" FAIL
-mv "$STATE_DIR" "$STATE_DIR.real"
-ln -s "$STATE_DIR.real" "$STATE_DIR"
-V="$(probe)"
+mv "$STATE_DIR" "$STATE_DIR.real" || check "L17d fixture: state directory moved aside" FAIL
+if make_directory_symlink "$STATE_DIR.real" "$STATE_DIR"; then
+  V="$(probe)"
+  [ "$V" = "busy" ] && check "L17d probe answers busy for a symlinked state directory" PASS \
+    || check "L17d probe symlinked state dir (got '$V')" FAIL
+else
+  check "L17d this host creates no symbolic link, so there is no linked state directory to probe" PASS
+fi
 rm -f "$STATE_DIR"; mv "$STATE_DIR.real" "$STATE_DIR"
-[ "$V" = "busy" ] && check "L17d probe answers busy for a symlinked state directory" PASS \
-  || check "L17d probe symlinked state dir (got '$V')" FAIL
 V="$(probe)"
 [ "$V" = "idle" ] && check "L17e probe answers idle again once the fixture is restored (control)" PASS \
   || check "L17e probe restored fixture (got '$V')" FAIL
@@ -507,28 +535,6 @@ else
   check "L30 armed Stop spawn budget (decision=$STOP_DECISION spawns=$NODE_COUNT budget=$ARMED_SPAWN_BUDGET)$STOP_NOTE" FAIL
 fi
 ARMED_COUNT="$NODE_COUNT"
-
-cat >"$WORK/link-lib.sh" <<EOF
-make_directory_symlink() {
-  "$REAL_NODE" -e '
-    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
-    try {
-      fs.symlinkSync(target,link,process.platform==="win32"?"junction":"dir");
-      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
-    } catch (_) { process.exit(1); }
-  ' "\$1" "\$2"
-}
-make_file_symlink() {
-  "$REAL_NODE" -e '
-    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
-    try {
-      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
-      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
-    } catch (_) { process.exit(1); }
-  ' "\$1" "\$2"
-}
-EOF
-source "$WORK/link-lib.sh"
 
 cat >"$WORK/memo-driver.sh" <<'EOF'
 #!/bin/bash
