@@ -8,7 +8,7 @@
   },
   "repository": "https://github.com/MKITConsulting/zensu-claude-code",
   "license": "FSL-1.1-Apache-2.0",
-  "keywords": ["product-lifecycle", "features", "security", "mcp"],
+  "keywords": ["product-lifecycle", "features", "security", "tdd", "code-review"],
   "agents": [
     "./agents/zensu-plm.md",
     "./agents/code-reviewer.md",

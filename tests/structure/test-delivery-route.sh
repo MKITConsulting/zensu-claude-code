@@ -947,11 +947,27 @@ else
 fi
 
 echo "== Banner and primer =="
+banner_lines() {
+  printf '%s' "$1" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        process.stdout.write(typeof j.systemMessage === "string" ? j.systemMessage : s);
+      } catch (_) { process.stdout.write(s); }
+    });
+  '
+}
 BN_TDD="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_TDD" bash "$BANNER" 2>/dev/null)"
 BN_ASK="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_ASK" bash "$BANNER" 2>/dev/null)"
 BN_DIRECT="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DIRECT" bash "$BANNER" 2>/dev/null)"
 printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct","sessionBanner":false}}' > "$STATE_DIR/cfg-direct-quiet.json"
 BN_QUIET="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$STATE_DIR/cfg-direct-quiet.json" bash "$BANNER" 2>/dev/null)"
+BN_TDD="$(banner_lines "$BN_TDD")"
+BN_ASK="$(banner_lines "$BN_ASK")"
+BN_DIRECT="$(banner_lines "$BN_DIRECT")"
+BN_QUIET="$(banner_lines "$BN_QUIET")"
 ROUTE_TAIL="decides only that request, and /zensu:delivery-route changes the route for this session"
 { printf '%s' "$BN_TDD" | grep -qF 'hooks.defaultDeliveryRoute=tdd' && ! printf '%s' "$BN_TDD" | grep -qF 'asks which delivery route to take' \
   && printf '%s' "$BN_TDD" | grep -F 'hooks.defaultDeliveryRoute=tdd' | grep -qF "a preference stated in your message $ROUTE_TAIL." \
@@ -981,6 +997,9 @@ printf '%s' '{"hooks":{"defaultDeliveryRoute":"direct","autoTdd":false,"tddRemin
 BN_NOPLAN="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$STATE_DIR/cfg-tdd-noplan.json" bash "$BANNER" 2>/dev/null)"
 BN_NOPROMPT="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$STATE_DIR/cfg-direct-noprompt.json" bash "$BANNER" 2>/dev/null)"
 BN_OFF="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$STATE_DIR/cfg-direct-off.json" bash "$BANNER" 2>/dev/null)"
+BN_NOPLAN="$(banner_lines "$BN_NOPLAN")"
+BN_NOPROMPT="$(banner_lines "$BN_NOPROMPT")"
+BN_OFF="$(banner_lines "$BN_OFF")"
 { printf '%s' "$BN_NOPLAN" | grep -F 'hooks.defaultDeliveryRoute=tdd' | grep -qF 'the plan-approval half is off: hooks.autoTdd=false' \
   && printf '%s' "$BN_NOPLAN" | grep -F 'hooks.defaultDeliveryRoute=tdd' | grep -qF "a preference stated in your message $ROUTE_TAIL." \
   && printf '%s' "$BN_NOPROMPT" | grep -F 'hooks.defaultDeliveryRoute=direct' | grep -qF 'the code-request half is off: hooks.tddReminder=false' \

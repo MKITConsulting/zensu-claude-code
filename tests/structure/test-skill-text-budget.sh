@@ -16,7 +16,7 @@ ghost-scan 27978
 plan-review 32957
 pr-team-review 55827
 self-review 33068
-tdd 99221
+tdd 99218
 verify-feature 40852
 ALLOW
 )"
