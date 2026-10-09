@@ -9,8 +9,12 @@ const EXIT = Object.freeze({ ok: 0, usage: 2, none: 3 });
 
 function readBoundedJson(filePath, maxBytes) {
   let descriptor;
+  let before;
   try {
-    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
+    before = fs.lstatSync(filePath);
+    if (before.isSymbolicLink()) return { invalid: 'unreadable (symlink)' };
+    const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+    const flags = fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0);
     descriptor = fs.openSync(filePath, flags);
   } catch (error) {
     if (error && error.code === 'ENOENT') return { absent: true };
@@ -19,6 +23,7 @@ function readBoundedJson(filePath, maxBytes) {
   try {
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) return { invalid: 'not a regular file' };
+    if (stat.dev !== before.dev || stat.ino !== before.ino) return { invalid: 'unreadable (replaced)' };
     if (stat.size > maxBytes) return { invalid: 'oversized' };
     const buffer = Buffer.alloc(stat.size);
     let offset = 0;
