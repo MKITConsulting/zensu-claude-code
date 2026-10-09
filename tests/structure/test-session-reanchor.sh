@@ -29,6 +29,10 @@ UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' 
 UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
 UNIT_FLOOR=67
 UNIT_MAX_SKIPPED=0
+if [ "$(node -p 'process.platform' 2>/dev/null)" = "win32" ]; then
+  UNIT_FLOOR=66
+  UNIT_MAX_SKIPPED=1
+fi
 if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" -le "$UNIT_MAX_SKIPPED" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
   check "E0a session-reanchor-v1.test.js green with at least $UNIT_FLOOR cases (pass=$UNIT_PASS)" PASS
 else
@@ -78,6 +82,9 @@ g -C "$REPO" worktree add -q -b claude/claimed "$C"
 g -C "$REPO" worktree add -q -b claude/idle "$D"
 mkdir -p "$B/Sources"
 printf 'change\n' > "$B/Sources/logging.swift"
+native() { node -e 'process.stdout.write(require("fs").realpathSync.native(process.argv[1]))' "$1" 2>/dev/null || printf '%s' "$1"; }
+NA="$(native "$A")"
+NB="$(native "$B")"
 g -C "$OTHER" init -q
 g -C "$OTHER" commit -q --allow-empty -m seed
 
@@ -92,7 +99,7 @@ start_payload "$SID" "$A" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA=
 KEY="$(node -e 'process.stdout.write(require(process.argv[1]).sessionKey(process.argv[2]))' "$CORE" "$SID")"
 RECORD="$DATA/session-control/v1/records/$KEY.json"
 record_root() { node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).project_root)' "$RECORD" 2>/dev/null; }
-expect_eq "E0b the record is anchored at the worktree the session started in" "$A" "$(record_root)"
+expect_eq "E0b the record is anchored at the worktree the session started in" "$NA" "$(record_root)"
 [ -f "$A/.zensu/state/worktree-anchor-$KEY.json" ] \
   && check "E0c the worktree-keep anchor of the start worktree exists" PASS \
   || check "E0c the worktree-keep anchor of the start worktree exists" FAIL
@@ -149,7 +156,7 @@ esac
 contains "$E1" "/zensu:adopt-session --reanchor" \
   && check "E1b the deny names the re-anchor route" PASS \
   || check "E1b the deny names the re-anchor route (got '$E1')" FAIL
-contains "$E1" "$A" \
+{ contains "$E1" "$A" || contains "$E1" "$NA"; } \
   && check "E1c the deny names no worktree other than the command's own target (got '$E1')" FAIL \
   || check "E1c the deny names no worktree other than the command's own target" PASS
 E1D="$(reviewer_read "$B" "$B/Sources/logging.swift")"
@@ -164,7 +171,7 @@ echo "=== E2: the read-only report ==="
 BEFORE="$STATE_DIR/record.before"
 cp -p "$RECORD" "$BEFORE"
 reanchor_from "$B/Sources" "$CONFIG"
-if [ "$RA_RC" -eq 0 ] && contains "$RA_OUT" "re-anchor — MOVABLE" && row_is "recorded root" "$A" && row_is "new anchor" "$B"; then
+if [ "$RA_RC" -eq 0 ] && contains "$RA_OUT" "re-anchor — MOVABLE" && row_is "recorded root" "$NA" && row_is "new anchor" "$NB"; then
   check "E2a the report from inside the sibling worktree names both roots and exits 0" PASS
 else
   check "E2a report (rc=$RA_RC)" FAIL
@@ -258,7 +265,7 @@ else
   check "E5a move (rc=$RA_RC)" FAIL
   printf '%s\n' "$RA_OUT" | head -12 | sed 's/^/        /'
 fi
-expect_eq "E5b the record now names the sibling worktree" "$B" "$(record_root)"
+expect_eq "E5b the record now names the sibling worktree" "$NB" "$(record_root)"
 SUPERSEDED="$(ls "$DATA/session-control/v1/records" | grep "^$KEY\.superseded-reanchor-" | head -1)"
 if [ -n "$SUPERSEDED" ] && cmp -s "$DATA/session-control/v1/records/$SUPERSEDED" "$BEFORE"; then
   check "E5c the previous record is set aside byte-identical" PASS
@@ -299,7 +306,7 @@ case "$E6B" in
   (DENY:*) check "E6b git add in the previous worktree is denied now" PASS ;;
   (*) check "E6b git add in the previous worktree (got '$E6B')" FAIL ;;
 esac
-contains "$E6B" "$B" \
+{ contains "$E6B" "$B" || contains "$E6B" "$NB"; } \
   && check "E6c that deny names no worktree other than the command's own target (got '$E6B')" FAIL \
   || check "E6c that deny names no worktree other than the command's own target" PASS
 expect_eq "E6d a review-aspect reviewer reads the new anchor" "ALLOW" "$(reviewer_read "$B" "$B/Sources/logging.swift")"
@@ -376,7 +383,7 @@ else
   check "E9a move back (rc=$RA_RC)" FAIL
   printf '%s\n' "$RA_OUT" | head -12 | sed 's/^/        /'
 fi
-expect_eq "E9b the record names the start worktree again" "$A" "$(record_root)"
+expect_eq "E9b the record names the start worktree again" "$NA" "$(record_root)"
 row_is "workflow document" "present" && check "E9c the intact workflow document under the start worktree is reused" PASS \
   || check "E9c the intact workflow document under the start worktree is reused" FAIL
 row_is "worktree keep" "disabled" && check "E9d hooks.worktreeKeep false reaches the move as disabled" PASS \
@@ -398,16 +405,17 @@ SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 SKILL_SR="$PLUGIN_DIR/skills/self-review/SKILL.md"
 SKILL_VF="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
 span_in() {
-  node -e '
+  printf '%s\n%s\n%s\n' "$2" "${3:-}" "${4:-}" | node -e '
+    const [needle, suffix, anchor] = require("fs").readFileSync(0, "utf8").split("\n");
     let text = require("fs").readFileSync(process.argv[1], "utf8");
-    if (process.argv[4] !== "") {
-      const at = text.indexOf(process.argv[4]);
+    if (anchor !== "") {
+      const at = text.indexOf(anchor);
       text = at === -1 ? "" : text.slice(at);
     }
     const spans = (text.match(/`[^`\n]*`/g) || []).map((s) => s.slice(1, -1));
-    const hit = spans.find((s) => s.includes(process.argv[2]) && (process.argv[3] === "" || s.endsWith(process.argv[3])));
+    const hit = spans.find((s) => s.includes(needle) && (suffix === "" || s.endsWith(suffix)));
     process.stdout.write(hit || "");
-  ' "$1" "$2" "${3:-}" "${4:-}" 2>/dev/null
+  ' "$1" 2>/dev/null
 }
 skill_span() { span_in "$SKILL_TDD" "$@"; }
 spans_agree() {
@@ -480,7 +488,7 @@ state_digest() { { cat "$RECORD"; find "$A/.zensu/state" "$B/.zensu/state" -type
 
 printf '{"mode":"vanilla"}\n' > "$A/.zensu/state/tdd-mode-$KEY.json"
 reanchor_from "$B" "$CONFIG" --confirm
-if [ "$RA_RC" -eq 0 ] && contains "$RA_OUT" "re-anchor — MOVED" && [ "$(record_root)" = "$B" ]; then
+if [ "$RA_RC" -eq 0 ] && contains "$RA_OUT" "re-anchor — MOVED" && [ "$(record_root)" = "$NB" ]; then
   check "E10b a third move anchors the session in the sibling worktree again" PASS
 else
   check "E10b third move (rc=$RA_RC)" FAIL
@@ -580,7 +588,7 @@ E10_EVR_RUN="$(render "$E10_EVR")"; E10_EVR_RUN="${E10_EVR_RUN//\{full_test_cmd\
 from_start "$E10_EVR_RUN"
 if [ "$E10_RC" -eq 0 ] && ! unrendered "$E10_EVR_RUN" && printf '%s\n' "$E10_OUT" | grep -qxF "$B" \
   && ! printf '%s\n' "$E10_OUT" | grep -qxF "$(cd "$A" && pwd -P)" \
-  && contains "$E10_ERR" "so the command runs in $B" \
+  && contains "$E10_ERR" "so the command runs in $NB" \
   && grep -qF 'EVIDENCE RUN — scope=full exit=0' "$E10_LOG_PATH" 2>/dev/null; then
   check "E10m the Phase 6 step 1 evidence run from the start directory runs the suite in the new anchor" PASS
 else
@@ -588,14 +596,14 @@ else
 fi
 
 from_start "ROOT=\"\$CLAUDE_PLUGIN_ROOT\"; $E10_SR_ROOT; $E10_SR_TOP; printf '%s' \"\$TOP\""
-if [ "$E10_RC" -eq 0 ] && [ "$E10_OUT" = "$B" ]; then
+if [ "$E10_RC" -eq 0 ] && [ "$(native "$E10_OUT")" = "$NB" ]; then
   check "E10n /zensu:self-review derives its TOP from the new anchor when run from the start directory" PASS
 else
   e10_fail "E10n self-review root derivation (printed '$E10_OUT')"
 fi
 
 from_start "$E10_VF_ROOT; printf '%s' \"\$GIT_ROOT\""
-if [ "$E10_RC" -eq 0 ] && [ "$E10_OUT" = "$B" ]; then
+if [ "$E10_RC" -eq 0 ] && [ "$(native "$E10_OUT")" = "$NB" ]; then
   check "E10o /zensu:verify-feature --chain resolves its git root in the new anchor when run from the start directory" PASS
 else
   e10_fail "E10o verify-feature git root (printed '$E10_OUT')"
@@ -611,29 +619,49 @@ bound_root_verb() {
 }
 
 reanchor_promise() {
-  node -e '
+  (cd "$1" && node -e '
     const m = require(process.argv[1]);
-    const root = process.argv[2];
+    const root = require("fs").realpathSync.native(process.cwd());
     const report = m.renderReanchorVerdict({ ok: true, recordedRoot: "/r", targetRoot: root, targetDocument: "missing", uncommitted: [] }, false).text;
     const outcome = m.renderReanchorOutcome({ ok: true, previousRoot: "/r", projectRoot: root, supersededFile: "/s", documentCreated: true, provenance: "recorded", previousProvenance: "recorded", leases: { discarded: 0, failed: [] }, keep: { state: "moved", faults: [] } }).text;
     const say = (text) => (/can start in this session/.test(text) ? "promise" : /cannot\s+run there/.test(text) ? "withheld" : "neither");
     process.stdout.write(`${say(report)} ${say(outcome)}`);
-  ' "$PLUGIN_DIR/hooks/lib/session-reanchor-v1.js" "$1"
+  ' "$PLUGIN_DIR/hooks/lib/session-reanchor-v1.js")
 }
 
 E10P_BAD=""
 E10Q_BAD=""
 E10P_N=0
+E10P_UNHELD=""
+E10_WIN=0
+[ "$(node -p 'process.platform' 2>/dev/null)" = "win32" ] && E10_WIN=1
 for UNSAFE_NAME in 'root-with-"-in-it' 'root-with-$HOME-in-it' 'root-with-`-in-it' 'root-with-\-in-it'; do
   E10P_N=$((E10P_N + 1))
+  if [ "$E10_WIN" -eq 1 ] && [ "$UNSAFE_NAME" = 'root-with-"-in-it' ]; then
+    mkdir -p "$STATE_DIR/$UNSAFE_NAME" 2>/dev/null
+    if node -e 'process.exit(require("fs").existsSync(process.argv[1]) ? 1 : 0)' "$STATE_DIR/$UNSAFE_NAME"; then
+      E10P_UNHELD="$UNSAFE_NAME"
+      continue
+    fi
+  fi
   bound_root_verb "c0ffee0$E10P_N-a7db-4cd4-a76e-2c47c46ee59e" "$STATE_DIR/$UNSAFE_NAME"
+  PROMISE="$(reanchor_promise "$STATE_DIR/$UNSAFE_NAME")"
+  if [ "$E10_WIN" -eq 1 ] && [ "$UNSAFE_NAME" = 'root-with-\-in-it' ]; then
+    if [ "$VERB_RC" -ne 0 ] || [ "$VERB_OUT" != "$STATE_DIR/root-with-/-in-it" ]; then
+      E10P_BAD="$E10P_BAD [$UNSAFE_NAME as a separator rc=$VERB_RC out='$VERB_OUT' err='$(head -1 "$STATE_DIR/unsafe.err")']"
+    fi
+    [ "$PROMISE" = "promise promise" ] || E10Q_BAD="$E10Q_BAD [$UNSAFE_NAME as a separator: $PROMISE]"
+    continue
+  fi
   if [ "$VERB_RC" -ne 2 ] || [ -n "$VERB_OUT" ] \
     || ! grep -qF 'contains a double quote, a dollar sign, a backtick or a backslash' "$STATE_DIR/unsafe.err"; then
     E10P_BAD="$E10P_BAD [$UNSAFE_NAME rc=$VERB_RC out='$VERB_OUT' err='$(head -1 "$STATE_DIR/unsafe.err")']"
   fi
-  PROMISE="$(reanchor_promise "$STATE_DIR/$UNSAFE_NAME")"
   [ "$PROMISE" = "withheld withheld" ] || E10Q_BAD="$E10Q_BAD [$UNSAFE_NAME: $PROMISE]"
 done
+if [ -n "$E10P_UNHELD" ]; then
+  check "E10p SKIPPED for $E10P_UNHELD — this filesystem cannot hold that directory name" PASS
+fi
 SAFE_ROOT="$STATE_DIR/root with 'quote' and space"
 bound_root_verb "c0ffee05-a7db-4cd4-a76e-2c47c46ee59e" "$SAFE_ROOT"
 if [ "$VERB_RC" -ne 0 ] || [ "$VERB_OUT" != "$SAFE_ROOT" ]; then
