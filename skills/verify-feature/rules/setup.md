@@ -104,9 +104,10 @@ starting anything: `{"version":1,"mode":"local","targets":[{"origin":"http://127
 with `<port>` taken from `--port=<n>` when given, else from
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`. Print it, then run
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" declared-safe`
-once, with the rendered JSON assigned on that command only, and report its exit code: `policy`
-on stdout with exit `0` means the rendered JSON approves that origin, and with it every route on
-it. The policy carries no route list.
+once, with the rendered JSON assigned on that command only, and report what it prints, not only
+its exit code: `policy` on stdout with exit `0` means the rendered JSON approves that origin, and
+with it every route on it. `consent` with exit `0` means the JSON does not name that origin as a
+target; fix the JSON before handing it over. The policy carries no route list.
 When the recipe declares `validate.networkOnly`, the rendered JSON also carries a top-level
 `"networkOnlyOrigins"` list with every declared origin, and the preflight runs once more per
 network-only origin, with the same rendered JSON assigned on that command only:
@@ -126,5 +127,8 @@ and each network-only origin with the same command and the operand `network-only
 JSON assigned on each command only. The remote preflight resolves every hostname and refuses a
 non-public answer, so it needs network access.
 Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
-job's `env`, or the `env` block of `~/.claude/settings.json`) and that the project-level
-settings files are not the place, because the session can write them.
+job's `env`, or the `env` block of `~/.claude/settings.json`, which pre-approves its targets for
+every session of that user) and that the project-level settings files are not the place, because
+the session can write them. An interactive run needs no policy, because the permission prompt
+approves each origin; the policy is for a session that cannot show the prompt (`dontAsk` or
+bypass permissions), which is where an unattended run belongs.

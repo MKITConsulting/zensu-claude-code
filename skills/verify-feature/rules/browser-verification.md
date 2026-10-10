@@ -55,14 +55,18 @@ with element refs such as `e21`; target elements by those refs. Every navigating
 0. The evidence boundary is the ORIGIN, never the route. Because `open` and `goto` print the
    page title and write a snapshot of the page, open a page — protected or not — only on an
    approved origin, and enforce this fail-closed origin boundary before navigation,
-   authentication, or screenshots. In POLICY mode an origin is approved when the
-   parent-environment policy names it as a target with `evidenceMode: declared-safe`; the gate
-   navigates only those targets, and every route on them. A network-only origin the policy declares
-   in `networkOnlyOrigins` is never approved: the pages may request it, and the gate denies
-   `open`, `goto` and `tab-new` aimed at it with its own final reason. In consent mode (the preflight printed
-   `consent`) the user approves the origin instead: the gate admits loopback origins only (a
-   loopback IP or `localhost`) and opens the host's permission prompt once per new loopback
-   origin. Either way an approved origin covers every page on it, at any path, including routes
+   authentication, or screenshots. An origin is approved without a prompt when the
+   parent-environment policy names it as a target with `evidenceMode: declared-safe`. A
+   network-only origin the policy declares in `networkOnlyOrigins` is never approved: the pages
+   may request it, and the gate denies `open`, `goto` and `tab-new` aimed at it with its own final
+   reason. The user approves every other origin (the preflight printed `consent`) at the host's
+   permission prompt: a loopback origin (a loopback IP or `localhost`) once per session, a public
+   HTTPS origin of a remote run at every `open`, and all new origins of one `open` in one prompt.
+   In permission mode `bypassPermissions` or `dontAsk` the session cannot show the prompt, so the
+   gate denies a remote origin outside the policy and, while a policy is present, every origin it
+   does not name, and names the remedy: switch the session to Manual or Auto, or relaunch Claude
+   Code with a policy that names the origin. In such a session, stop before booting anything when
+   the preflight adds its stderr note. Either way an approved origin covers every page on it, at any path, including routes
    whose identifiers change on every run; no route list is declared or checked, and a recipe's
    `validate.evidenceSafety` block no longer gates navigation. Contract v1 supports only
    `declared-safe`; there is no trusted redaction-driver path. Wait for the user's answer;
@@ -84,10 +88,10 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    origin renders inside that page and appears in its snapshot and screenshot like data the page
    fetched: read it as that target page's content, which is evidence of the target page, and
    never open the frame's origin with a navigation command. Only a page the browser lands on at a
-   network-only origin is never evidence. In consent mode a loopback network-only origin passed
-   with `--origin` is a consented origin to the gate, which would admit a navigation to it and
-   remembers it for the session: never `open`, `goto` or `tab-new` it all the same, and treat a
-   `Page URL` on it like one on a network-only origin.
+   network-only origin is never evidence. In consent mode a network-only origin passed with
+   `--origin` — loopback in local mode, public HTTPS in remote mode — is a consented origin to the
+   gate, which would admit a navigation to it: never `open`, `goto` or `tab-new` it all the same,
+   and treat a `Page URL` on it like one on a network-only origin.
 3. Take a `snapshot` before interacting. Confirm the URL, title/heading, authentication state,
    and that the page is not a generic error or login wall.
 4. Apply the pre-model evidence boundary below, then run `console` and `requests` to establish
@@ -172,7 +176,8 @@ runtime signals; skip that plane and report PARTIAL instead of running those com
 - Use unique fixture names containing the run identifier.
 - Reset filters, navigation, and record state between rows. When cookies, local storage or
   cached app state would contaminate the next row, `close` the session and `open` it again with
-  the same run config, which starts an isolated browser.
+  the same run config, which starts an isolated browser. In a remote run that `open` asks the
+  user again for every remote origin outside the policy.
 - Never restore browser state or accept an auth artifact. Re-authenticate visibly when a fresh
   browser is required; otherwise report the row PARTIAL.
 - Do not screenshot credentials, tokens, personal data, or unrelated sensitive content.

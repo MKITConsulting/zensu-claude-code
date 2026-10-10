@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **verify-feature**: a remote HTTPS origin no longer needs `ZENSU_VERIFY_NAVIGATION_POLICY_V1`.
+  In a session that can show the permission prompt (Manual, Accept edits, Plan or Auto),
+  `/zensu:verify-feature --mode=remote` asks for each remote origin at every browser start; under
+  bypass permissions or `dontAsk` the gate still denies it and names the remedy. A navigation
+  policy now pre-approves its targets in every permission mode instead of switching consent off:
+  where a prompt can be shown, every other origin is asked, and `--check-policy` prints `consent`
+  for it instead of refusing with `navigation policy mode does not match`; where the session
+  cannot show the prompt, the policy stays the whole allowlist, and an origin of the other kind
+  than the policy's is denied with `origin is not of the kind the navigation policy names`. A
+  script that took exit `0` of `--check-policy` as proof of a policy must read `policy` on stdout
+  instead; when a present policy leaves an origin to the prompt, `--check-policy` and the
+  run-config write also print a note on stderr. **Unattended runs:** the gate cannot tell a person
+  from a program that answers the prompt, so a headless run, an SDK host or a
+  `--permission-prompt-tool` that answers it in one of those four modes decides every origin the
+  policy does not name, and how the host resolves the prompt there was not measured. Run such a
+  session under `dontAsk` or bypass permissions, with a policy that names every origin it needs.
+  Under a policy in a session that can show the prompt, a recorded loopback origin now skips its
+  prompt, as it always did without one. A run config whose remote hostname carries no resolver
+  pin, and any origin whose host is a pattern such as `https://*.example.com`, is refused.
+
 ## [0.25.0] - 2026-10-06
 
 ### Added
