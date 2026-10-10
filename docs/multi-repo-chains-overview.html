@@ -423,13 +423,13 @@
           <td>Enumerate the union. Claims carry a root label instead of being merely repo-relative,
           otherwise <code>src/foo.ts</code> is ambiguous. Exactly <strong>one</strong> merged
           receipt, written beside the anchor's workflow document.</td>
-          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:175</td>
+          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/references/execution.md:9</td>
         </tr>
         <tr>
           <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
           <td>Enumerate <code>changed_files</code> per root and emit them label-prefixed. Without it
           no reviewer sees the code.</td>
-          <td class="where mono">tdd/SKILL.md · step 10.2</td>
+          <td class="where mono">tdd/references/review-chain.md · step 10.2</td>
         </tr>
         <tr>
           <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
@@ -533,7 +533,7 @@
     <strong>Why this stage is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
-    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:188</span>). The decisive difference
+    runs “exactly as written” (<span class="mono">skills/tdd/references/modes.md:7</span>). The decisive difference
     from the mechanical audit: a reviewer <em>reports</em> a finding, it does not <em>demand</em> a
     characterization test. That demand is precisely why the Cross-Layer audit cannot run in
     vanilla.</p>
@@ -569,7 +569,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/tdd/SKILL.md:408 · skills/tdd/SKILL.md:410</p>
+    <p class="src">skills/tdd/references/audit.md:67 · skills/tdd/references/audit.md:69</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>

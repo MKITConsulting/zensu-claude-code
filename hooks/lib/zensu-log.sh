@@ -1833,7 +1833,7 @@ case "${1:-}" in
         # the plan's `## Requirements` table. Without a usable one it takes its
         # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
         # the ONLY edge into OPEN_PR, then passes on an audit that examined
-        # nothing. Prose asked for the table (skills/tdd/SKILL.md Phase 2 step 1b)
+        # nothing. Prose asked for the table (skills/tdd/references/planning.md Phase 2 step 1b)
         # and the only check was the warning-level step 6c, which skips silently
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a

@@ -16,6 +16,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/pr-team-review"
 SKILL_MD="$SKILL_DIR/SKILL.md"
+REF_DIR="$SKILL_DIR/references"
 WORKER_MD="$PLUGIN_DIR/agents/pr-review-worker.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
@@ -37,6 +38,8 @@ if [ ! -f "$SKILL_MD" ]; then
   exit 1
 fi
 check "P1 skills/pr-team-review/SKILL.md exists" PASS
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_TEXT="$(skill_text_file "$SKILL_DIR")"
 
 # P2 — the rules files ship alongside the skill (incl. the GitLab publish sibling)
 for r in reviewer-personas workflow github-publish gitlab-publish; do
@@ -77,7 +80,7 @@ ESSENTIALS=(
 )
 for entry in "${ESSENTIALS[@]}"; do
   label="${entry%%|*}"; needle="${entry#*|}"
-  if grep -qF -- "$needle" "$SKILL_MD"; then
+  if grep -qF -- "$needle" "$SKILL_TEXT"; then
     check "$label" PASS
   else
     check "$label" FAIL
@@ -179,7 +182,7 @@ fi
 # A predictable world-writable /tmp name invites a symlink / pre-creation race on
 # shared hosts, so the working dir is materialized with `mktemp -d` and no fixed
 # /tmp/pr* path may survive anywhere in the skill tree.
-if grep -qF 'mktemp -d' "$SKILL_MD"; then
+if grep -qF 'mktemp -d' "$SKILL_TEXT"; then
   check "P11a SKILL.md materializes the working dir with mktemp -d" PASS
 else
   check "P11a SKILL.md materializes the working dir with mktemp -d" FAIL
@@ -191,34 +194,34 @@ else
   check "P11b no predictable '/tmp/pr*' path remains (race-safe)" PASS
 fi
 
-if grep -qF -- '--detach' "$SKILL_MD"; then
+if grep -qF -- '--detach' "$SKILL_TEXT"; then
   check "P11c worktree is created detached (re-run never collides on the branch ref)" PASS
 else
   check "P11c worktree is created detached (re-run never collides on the branch ref)" FAIL
 fi
 
-if grep -qF 'worktree list --porcelain' "$SKILL_MD" \
-  && grep -qF 'grep -Fqx "branch $LOCAL_REVIEW_REF"' "$SKILL_MD" \
-  && grep -qF 'fetch origin "+$REF:$LOCAL_REVIEW_REF"' "$SKILL_MD"; then
+if grep -qF 'worktree list --porcelain' "$SKILL_TEXT" \
+  && grep -qF 'grep -Fqx "branch $LOCAL_REVIEW_REF"' "$SKILL_TEXT" \
+  && grep -qF 'fetch origin "+$REF:$LOCAL_REVIEW_REF"' "$SKILL_TEXT"; then
   check "P11d retained review refs refresh safely after force-pushes" PASS
 else
   check "P11d retained review refs refresh safely after force-pushes" FAIL
 fi
 
 HOST_PATH_HELPER="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
-P11_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$SKILL_MD" | head -1 | cut -d: -f1)"
-P11_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$SKILL_MD" | head -1 | cut -d: -f1)"
-P11_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$SKILL_MD" | head -1 | cut -d: -f1)"
-P11_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
-P11_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
-P11_GIT_LINE="$(grep -nF 'git -C "$REPO" rev-parse --is-inside-work-tree' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
+P11_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
+P11_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
+P11_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
+P11_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
+P11_GIT_LINE="$(grep -nF 'git -C "$REPO" rev-parse --is-inside-work-tree' "$REF_DIR/scout.md" | head -1 | cut -d: -f1)"
 if [ -x "$HOST_PATH_HELPER" ] \
    && [ -n "$P11_MKTEMP_LINE" ] && [ -n "$P11_HOST_LINE" ] && [ -n "$P11_WORKTREE_LINE" ] \
    && [ "$P11_MKTEMP_LINE" -lt "$P11_HOST_LINE" ] && [ "$P11_HOST_LINE" -lt "$P11_WORKTREE_LINE" ] \
    && [ -n "$P11_REPO_LINE" ] && [ -n "$P11_REPO_HOST_LINE" ] && [ -n "$P11_GIT_LINE" ] \
    && [ "$P11_REPO_LINE" -lt "$P11_REPO_HOST_LINE" ] && [ "$P11_REPO_HOST_LINE" -lt "$P11_GIT_LINE" ] \
-   && grep -qF 'never put a Git-Bash-only `/tmp/...` path into those artifacts' "$SKILL_MD" \
-   && grep -qF 'must be constructed from the native-host `WORKTREE`' "$SKILL_MD"; then
+   && grep -qF 'never put a Git-Bash-only `/tmp/...` path into those artifacts' "$SKILL_TEXT" \
+   && grep -qF 'must be constructed from the native-host `WORKTREE`' "$SKILL_TEXT"; then
   check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" PASS
 else
   check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" FAIL
@@ -229,7 +232,7 @@ fi
 # `### Test Coverage` synthesis section that inventories uncovered files/paths.
 PERSONAS_MD="$SKILL_DIR/rules/reviewer-personas.md"
 
-if grep -qF '### Test Coverage' "$SKILL_MD"; then
+if grep -qF '### Test Coverage' "$SKILL_TEXT"; then
   check "P12a SKILL.md mandates the '### Test Coverage' synthesis section" PASS
 else
   check "P12a SKILL.md mandates the '### Test Coverage' synthesis section" FAIL
@@ -253,7 +256,7 @@ else
   check "P12d skill flags uncovered files/paths" FAIL
 fi
 
-if grep -qF -- '--coverage-gate' "$SKILL_MD" && grep -qF -- '--run-coverage' "$SKILL_MD"; then
+if grep -qF -- '--coverage-gate' "$SKILL_TEXT" && grep -qF -- '--run-coverage' "$SKILL_TEXT"; then
   check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" PASS
 else
   check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" FAIL
@@ -285,14 +288,14 @@ else
 fi
 
 # P13l — always-on holistic core documented in both the skill body and the persona rules
-if grep -qF 'holistic core' "$SKILL_MD" && grep -qF 'holistic core' "$PERSONAS_MD"; then
+if grep -qF 'holistic core' "$SKILL_TEXT" && grep -qF 'holistic core' "$PERSONAS_MD"; then
   check "P13l always-on holistic core documented in SKILL.md + reviewer-personas.md" PASS
 else
   check "P13l always-on holistic core documented in SKILL.md + reviewer-personas.md" FAIL
 fi
 
 # P13m — anti-groupthink debate challenge round wired in SKILL.md + workflow.md
-if grep -qF 'Challenge Round' "$SKILL_MD" && grep -qF 'Challenge Round' "$WORKFLOW_MD"; then
+if grep -qF 'Challenge Round' "$SKILL_TEXT" && grep -qF 'Challenge Round' "$WORKFLOW_MD"; then
   check "P13m Phase C Challenge Round documented in SKILL.md + workflow.md" PASS
 else
   check "P13m Phase C Challenge Round documented in SKILL.md + workflow.md" FAIL
@@ -360,7 +363,7 @@ DELEGATED_NEEDLES=(
 )
 P14A=true
 for needle in "${DELEGATED_NEEDLES[@]}"; do
-  grep -qF -- "$needle" "$SKILL_MD" || P14A=false
+  grep -qF -- "$needle" "$SKILL_TEXT" || P14A=false
 done
 if [ "$P14A" = true ]; then
   check "P14a delegated review validates an exact durable envelope and fresh state" PASS
@@ -368,17 +371,20 @@ else
   check "P14a delegated review validates an exact durable envelope and fresh state" FAIL
 fi
 
-PROVIDER_GUARD_LINE="$(grep -nF -- '[ "$DELEGATED" = true ] && [ "$PROVIDER" != "$BOUND_PROVIDER" ]; then' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
-SCOUT_LINE="$(grep -nF -- 'bash "$VCS" --scout-pr --provider "$PROVIDER" <n>' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
-RECONCILE_LINE="$(grep -nF -- 'bash "$VCS" --reconcile-review --provider "$PROVIDER"' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
-if grep -qF -- 'Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`' "$SKILL_MD" \
-   && grep -qF -- 'require `PROVIDER == BOUND_PROVIDER` immediately after detection' "$SKILL_MD" \
-   && grep -qF -- 'before scout, worktree creation, payload access, or any remote write' "$SKILL_MD" \
-   && grep -qF -- 'review-provider-mismatch' "$SKILL_MD" \
-   && grep -qF -- '"$BOUND_HEAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_MD" \
-   && grep -qF -- '"$REVIEW_PAYLOAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_MD" \
+PROVIDER_GUARD_LINE="$(grep -nF -- '[ "$DELEGATED" = true ] && [ "$PROVIDER" != "$BOUND_PROVIDER" ]; then' "$REF_DIR/scout.md" | head -n 1 | cut -d: -f1)"
+SCOUT_LINE="$(grep -nF -- 'bash "$VCS" --scout-pr --provider "$PROVIDER" <n>' "$REF_DIR/scout.md" | head -n 1 | cut -d: -f1)"
+RECONCILE_LINE="$(grep -nF -- 'bash "$VCS" --reconcile-review --provider "$PROVIDER"' "$REF_DIR/publish.md" | head -n 1 | cut -d: -f1)"
+SCOUT_REF_LINE="$(grep -nF -- '`references/scout.md`' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
+PUBLISH_REF_LINE="$(grep -nF -- '`references/publish.md`' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
+if grep -qF -- 'Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`' "$SKILL_TEXT" \
+   && grep -qF -- 'require `PROVIDER == BOUND_PROVIDER` immediately after detection' "$SKILL_TEXT" \
+   && grep -qF -- 'before scout, worktree creation, payload access, or any remote write' "$SKILL_TEXT" \
+   && grep -qF -- 'review-provider-mismatch' "$SKILL_TEXT" \
+   && grep -qF -- '"$BOUND_HEAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_TEXT" \
+   && grep -qF -- '"$REVIEW_PAYLOAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_TEXT" \
    && [ -n "$PROVIDER_GUARD_LINE" ] && [ -n "$SCOUT_LINE" ] && [ -n "$RECONCILE_LINE" ] \
-   && [ "$PROVIDER_GUARD_LINE" -lt "$SCOUT_LINE" ] && [ "$PROVIDER_GUARD_LINE" -lt "$RECONCILE_LINE" ]; then
+   && [ -n "$SCOUT_REF_LINE" ] && [ -n "$PUBLISH_REF_LINE" ] \
+   && [ "$PROVIDER_GUARD_LINE" -lt "$SCOUT_LINE" ] && [ "$SCOUT_REF_LINE" -lt "$PUBLISH_REF_LINE" ]; then
   check "P14aa delegated review binds the provider before every remote write and payload access" PASS
 else
   check "P14aa delegated provider drift can reach reconciliation" FAIL
@@ -388,57 +394,57 @@ TEAM_ENVELOPE="$(awk '
   $0 == "ZENSU-DELEGATED-CALLER: autopilot" { capture=1 }
   capture && $0 == "```" { exit }
   capture { print }
-' "$SKILL_MD")"
+' "$REF_DIR/delegated.md")"
 EXPECTED_TEAM_ENVELOPE="$(printf '%s\n' \
   'ZENSU-DELEGATED-CALLER: autopilot' \
   'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' \
   'AUTOPILOT-STAGE: <outer-stage>' \
   'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>')"
 if [ "$TEAM_ENVELOPE" = "$EXPECTED_TEAM_ENVELOPE" ] \
-   && [ "$(grep -cFx -- 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_MD")" -eq 1 ] \
-   && [ "$(grep -cFx -- 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' "$SKILL_MD")" -eq 1 ] \
-   && [ "$(grep -cFx -- 'AUTOPILOT-STAGE: <outer-stage>' "$SKILL_MD")" -eq 1 ] \
-   && [ "$(grep -cFx -- 'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>' "$SKILL_MD")" -eq 1 ] \
-   && grep -qF -- 'four contiguous lines with no intervening or additional delegated headers' "$SKILL_MD"; then
+   && [ "$(grep -cFx -- 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_TEXT")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' "$SKILL_TEXT")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-STAGE: <outer-stage>' "$SKILL_TEXT")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>' "$SKILL_TEXT")" -eq 1 ] \
+   && grep -qF -- 'four contiguous lines with no intervening or additional delegated headers' "$SKILL_TEXT"; then
   check "P14b delegated review envelope is contiguous, ordered, unique, and closed" PASS
 else
   check "P14b delegated review envelope is contiguous, ordered, unique, and closed" FAIL
 fi
 
-if grep -qF -- '--reconcile-review --provider "$PROVIDER" --repo-id "$REPOID"' "$SKILL_MD" \
-   && grep -qF -- '--expected-head "$BOUND_HEAD"' "$SKILL_MD" \
-   && grep -qF -- '<n> "$REVIEW_PAYLOAD" "$OPERATION_KEY"' "$SKILL_MD" \
-   && grep -qF -- '`{status,marker,headSha,partCount,postedCount,url,provider}`' "$SKILL_MD" \
-   && grep -qF -- 'Require `provider == PROVIDER`' "$SKILL_MD" \
-   && grep -qF -- '`present|posted|reconciled`' "$SKILL_MD" \
-   && grep -qF -- '`posted` requires `postedCount == partCount`' "$SKILL_MD" \
-   && grep -qF -- '`reconciled` requires `0 < postedCount < partCount`' "$SKILL_MD" \
-   && grep -qF -- 'GitHub requires `partCount == 1` and rejects `reconciled`' "$SKILL_MD" \
-   && grep -qF -- 'GitLab requires `partCount == 1 + comments.length`' "$SKILL_MD"; then
+if grep -qF -- '--reconcile-review --provider "$PROVIDER" --repo-id "$REPOID"' "$SKILL_TEXT" \
+   && grep -qF -- '--expected-head "$BOUND_HEAD"' "$SKILL_TEXT" \
+   && grep -qF -- '<n> "$REVIEW_PAYLOAD" "$OPERATION_KEY"' "$SKILL_TEXT" \
+   && grep -qF -- '`{status,marker,headSha,partCount,postedCount,url,provider}`' "$SKILL_TEXT" \
+   && grep -qF -- 'Require `provider == PROVIDER`' "$SKILL_TEXT" \
+   && grep -qF -- '`present|posted|reconciled`' "$SKILL_TEXT" \
+   && grep -qF -- '`posted` requires `postedCount == partCount`' "$SKILL_TEXT" \
+   && grep -qF -- '`reconciled` requires `0 < postedCount < partCount`' "$SKILL_TEXT" \
+   && grep -qF -- 'GitHub requires `partCount == 1` and rejects `reconciled`' "$SKILL_TEXT" \
+   && grep -qF -- 'GitLab requires `partCount == 1 + comments.length`' "$SKILL_TEXT"; then
   check "P14c delegated publish validates the exact structured reconcile receipt" PASS
 else
   check "P14c delegated publish validates the exact structured reconcile receipt" FAIL
 fi
 
-if grep -qF -- 'autopilot_read_team_review_payload' "$SKILL_MD" \
-   && grep -qF -- 'autopilot_store_team_review_payload' "$SKILL_MD" \
-   && grep -qF -- 'REUSE_DURABLE_PAYLOAD=true' "$SKILL_MD" \
-   && grep -qF -- 'REVIEW_PAYLOAD="$WORKDIR/_synthesis.json"' "$SKILL_MD" \
-   && grep -qF -- 'before the first `--reconcile-review` call' "$SKILL_MD" \
-   && grep -qF -- 'must not re-synthesize or overwrite' "$SKILL_MD" \
-   && grep -qF -- 'skip Phases B, C, and the synthesis portion of Phase D' "$SKILL_MD"; then
+if grep -qF -- 'autopilot_read_team_review_payload' "$SKILL_TEXT" \
+   && grep -qF -- 'autopilot_store_team_review_payload' "$SKILL_TEXT" \
+   && grep -qF -- 'REUSE_DURABLE_PAYLOAD=true' "$SKILL_TEXT" \
+   && grep -qF -- 'REVIEW_PAYLOAD="$WORKDIR/_synthesis.json"' "$SKILL_TEXT" \
+   && grep -qF -- 'before the first `--reconcile-review` call' "$SKILL_TEXT" \
+   && grep -qF -- 'must not re-synthesize or overwrite' "$SKILL_TEXT" \
+   && grep -qF -- 'skip Phases B, C, and the synthesis portion of Phase D' "$SKILL_TEXT"; then
   check "P14d delegated retry reuses one durable payload and never re-synthesizes it" PASS
 else
   check "P14d delegated retry reuses one durable payload and never re-synthesizes it" FAIL
 fi
 
-if grep -qF -- 'Delegated mode MUST NOT ask' "$SKILL_MD" \
-   && grep -qF -- 'cast confirmation' "$SKILL_MD" \
-   && grep -qF -- 'body preview' "$SKILL_MD" \
-   && grep -qF -- 'cleanup/ref deletion' "$SKILL_MD" \
-   && grep -qF -- 'next-step' "$SKILL_MD" \
-   && grep -qF -- 'Standalone mode remains interactive' "$SKILL_MD" \
-   && grep -qF -- '--post-review' "$SKILL_MD"; then
+if grep -qF -- 'Delegated mode MUST NOT ask' "$SKILL_TEXT" \
+   && grep -qF -- 'cast confirmation' "$SKILL_TEXT" \
+   && grep -qF -- 'body preview' "$SKILL_TEXT" \
+   && grep -qF -- 'cleanup/ref deletion' "$SKILL_TEXT" \
+   && grep -qF -- 'next-step' "$SKILL_TEXT" \
+   && grep -qF -- 'Standalone mode remains interactive' "$SKILL_TEXT" \
+   && grep -qF -- '--post-review' "$SKILL_TEXT"; then
   check "P14e delegated mode is unattended while standalone remains interactive" PASS
 else
   check "P14e delegated mode is unattended while standalone remains interactive" FAIL
@@ -447,33 +453,42 @@ fi
 # Interactive branches are allowed only when the same line explicitly scopes
 # them to standalone mode. This catches future mid-run auth/provider/repository
 # prompts that would silently break Autopilot's unattended contract.
-UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
+UNQUALIFIED_ASKS="$(SKILL_FILES="$(printf '%s\n' "$SKILL_MD" "$REF_DIR"/*.md)" node -e '
   const fs = require("fs");
-  const lines = fs.readFileSync(process.env.SKILL_MD, "utf8").split(/\r?\n/);
+  const files = process.env.SKILL_FILES.split("\n").filter(Boolean);
   const interactive = /AskUserQuestion|ask (?:the )?user|ask again|ask anyway|always asks|pause and wait|escalate to (?:the )?user/i;
   const prohibition = /(?:do not|never|without)\b.*\bask/i;
-  lines.forEach((line, index) => {
-    const paragraphPrefix = lines.slice(Math.max(0, index - 2), index + 1).join(" ");
-    const qualified = /standalone/i.test(paragraphPrefix);
-    if (interactive.test(line) && !qualified && !prohibition.test(line)) {
-      process.stdout.write(`${index + 1}:${line}\n`);
+  for (const file of files) {
+    let lines;
+    try {
+      lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+    } catch (error) {
+      process.stdout.write(`${file}: unreadable\n`);
+      continue;
     }
-  });
+    lines.forEach((line, index) => {
+      const paragraphPrefix = lines.slice(Math.max(0, index - 2), index + 1).join(" ");
+      const qualified = /standalone/i.test(paragraphPrefix);
+      if (interactive.test(line) && !qualified && !prohibition.test(line)) {
+        process.stdout.write(`${file}:${index + 1}:${line}\n`);
+      }
+    });
+  }
 ')"
 if [ -z "$UNQUALIFIED_ASKS" ] \
-   && grep -qF -- 'review-repo-unavailable' "$SKILL_MD" \
-   && grep -qF -- 'review-provider-unknown' "$SKILL_MD" \
-   && grep -qF -- 'review-auth-unavailable' "$SKILL_MD" \
-   && grep -qF -- 'persist `BLOCK`' "$SKILL_MD"; then
+   && grep -qF -- 'review-repo-unavailable' "$SKILL_TEXT" \
+   && grep -qF -- 'review-provider-unknown' "$SKILL_TEXT" \
+   && grep -qF -- 'review-auth-unavailable' "$SKILL_TEXT" \
+   && grep -qF -- 'persist `BLOCK`' "$SKILL_TEXT"; then
   check "P14f delegated repository/provider/auth blockers never enter an interactive ask path" PASS
 else
   [ -z "$UNQUALIFIED_ASKS" ] || printf '%s\n' "$UNQUALIFIED_ASKS" >&2
   check "P14f delegated repository/provider/auth blockers never enter an interactive ask path" FAIL
 fi
 
-if grep -qF -- 'hexadecimal head between 7 and 64 characters' "$SKILL_MD" \
-   && grep -qF -- '[ "$SHA" = "$BOUND_HEAD" ]' "$SKILL_MD" \
-   && grep -qF -- 'never substitute the freshly fetched SHA for the capability-bound head' "$SKILL_MD"; then
+if grep -qF -- 'hexadecimal head between 7 and 64 characters' "$SKILL_TEXT" \
+   && grep -qF -- '[ "$SHA" = "$BOUND_HEAD" ]' "$SKILL_TEXT" \
+   && grep -qF -- 'never substitute the freshly fetched SHA for the capability-bound head' "$SKILL_TEXT"; then
   check "P14g delegated review keeps the state SHA domain and bound head" PASS
 else
   check "P14g delegated review keeps the state SHA domain and bound head" FAIL
@@ -494,32 +509,32 @@ REVIEWER_CONTRACT="$(awk '
   /^Every reviewer prompt MUST contain this exact semantic contract:/ { capture=1 }
   capture { print }
   capture && /^The private SubagentStop validator/ { exit }
-' "$SKILL_MD")"
+' "$REF_DIR/spawn.md")"
 
-if grep -qF 'Main-thread evidence packet (mandatory before any reviewer spawn)' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_pr.diff' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_review-shards/' "$SKILL_MD" \
-   && grep -qF 'For PRs over 50 files' "$SKILL_MD" \
-   && grep -qF 'role prompt names only the smallest relevant shard set' "$SKILL_MD" \
-   && grep -qF '_pr.diff` remains main-thread-only and is not entered in the worker lease for a large PR' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_review-evidence.md' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_candidate-files.txt' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_safe-subtrees.txt' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_coverage-evidence.md' "$SKILL_MD" \
-   && grep -qF '$WORKDIR/_changed-production-files.txt' "$SKILL_MD" \
-   && grep -qF 'The worktree/repository root and every ancestor are forbidden safe-search entries' "$SKILL_MD"; then
+if grep -qF 'Main-thread evidence packet (mandatory before any reviewer spawn)' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_pr.diff' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_review-shards/' "$SKILL_TEXT" \
+   && grep -qF 'For PRs over 50 files' "$SKILL_TEXT" \
+   && grep -qF 'role prompt names only the smallest relevant shard set' "$SKILL_TEXT" \
+   && grep -qF '_pr.diff` remains main-thread-only and is not entered in the worker lease for a large PR' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_review-evidence.md' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_candidate-files.txt' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_safe-subtrees.txt' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_coverage-evidence.md' "$SKILL_TEXT" \
+   && grep -qF '$WORKDIR/_changed-production-files.txt' "$SKILL_TEXT" \
+   && grep -qF 'The worktree/repository root and every ancestor are forbidden safe-search entries' "$SKILL_TEXT"; then
   check "P15a main thread materializes bounded role/area evidence, candidates, safe roots, and coverage" PASS
 else
   check "P15a main thread materializes bounded role/area evidence, candidates, safe roots, and coverage" FAIL
 fi
 
-if grep -qF 'Deterministic changed-production definition' "$SKILL_MD" \
-   && grep -qF "Prefer the repository's own checked-in coverage/source inclusion rules" "$SKILL_MD" \
-   && grep -qF 'For a rename, classify only the destination path' "$SKILL_MD" \
-   && grep -qF 'Exclude tests, test fixtures, mocks' "$SKILL_MD" \
-   && grep -qF 'purely declarative configuration or CI files' "$SKILL_MD" \
-   && grep -qF 'fail safe by including it in `_changed-production-files.txt`' "$SKILL_MD" \
-   && grep -qF 'state the classification reason in `_coverage-evidence.md`' "$SKILL_MD"; then
+if grep -qF 'Deterministic changed-production definition' "$SKILL_TEXT" \
+   && grep -qF "Prefer the repository's own checked-in coverage/source inclusion rules" "$SKILL_TEXT" \
+   && grep -qF 'For a rename, classify only the destination path' "$SKILL_TEXT" \
+   && grep -qF 'Exclude tests, test fixtures, mocks' "$SKILL_TEXT" \
+   && grep -qF 'purely declarative configuration or CI files' "$SKILL_TEXT" \
+   && grep -qF 'fail safe by including it in `_changed-production-files.txt`' "$SKILL_TEXT" \
+   && grep -qF 'state the classification reason in `_coverage-evidence.md`' "$SKILL_TEXT"; then
   check "P15aa changed-production classification is deterministic and fail-safe" PASS
 else
   check "P15aa changed-production classification is deterministic and fail-safe" FAIL
@@ -597,53 +612,53 @@ if grep -qF 'Evidence collection belongs to the main thread' "$WORKFLOW_MD" \
    && grep -qF 'Deny all reviewer command execution with no exception' "$WORKFLOW_MD" \
    && grep -qF '$WORKTREE` is identity context only' "$WORKFLOW_MD" \
    && ! grep -qF 'use `$WORKTREE` as CWD for git/grep/file reads' "$WORKFLOW_MD" \
-   && grep -qF 'The main thread alone may run the coverage process' "$SKILL_MD"; then
+   && grep -qF 'The main thread alone may run the coverage process' "$SKILL_TEXT"; then
   check "P15e workflow keeps repository discovery and coverage execution in the main thread" PASS
 else
   check "P15e workflow keeps repository discovery and coverage execution in the main thread" FAIL
 fi
 
-if grep -qF 'subagent_type: zensu:pr-review-worker' "$SKILL_MD" \
+if grep -qF 'subagent_type: zensu:pr-review-worker' "$SKILL_TEXT" \
    && grep -qF 'subagent_type: zensu:plan-review-worker' "$PLUGIN_DIR/skills/plan-review/SKILL.md" \
-   && ! grep -qF 'subagent_type: general-purpose' "$SKILL_MD" \
+   && ! grep -qF 'subagent_type: general-purpose' "$SKILL_TEXT" \
    && ! grep -qF 'subagent_type: general-purpose' "$PLUGIN_DIR/skills/plan-review/SKILL.md" \
-   && ! grep -qF 'TaskUpdate' "$SKILL_MD" \
-   && ! grep -qF 'SendMessage' "$SKILL_MD" \
-   && ! grep -qF 'TeamCreate' "$SKILL_MD" \
-   && ! grep -qF 'use `Write`' "$SKILL_MD" \
-   && ! grep -qF 'Reviewers write only' "$SKILL_MD"; then
+   && ! grep -qF 'TaskUpdate' "$SKILL_TEXT" \
+   && ! grep -qF 'SendMessage' "$SKILL_TEXT" \
+   && ! grep -qF 'TeamCreate' "$SKILL_TEXT" \
+   && ! grep -qF 'use `Write`' "$SKILL_TEXT" \
+   && ! grep -qF 'Reviewers write only' "$SKILL_TEXT"; then
   check "P15f both review workflows use exact dedicated workers without team/task/write instructions" PASS
 else
   check "P15f both review workflows use exact dedicated workers without team/task/write instructions" FAIL
 fi
 
-if grep -qF 'zensu-review-evidence.sh" create' "$SKILL_MD" \
-   && grep -qF -- '--kind pr-review' "$SKILL_MD" \
-   && grep -qF 'git -c core.quotePath=false -C "$WORKTREE" diff origin/<base>...HEAD --name-status' "$SKILL_MD" \
-   && grep -qF -- '--name-status-file "$WORKDIR/_name-status.txt"' "$SKILL_MD" \
-   && grep -qF -- '--changed-production-files-file "$WORKDIR/_changed-production-files.txt"' "$SKILL_MD" \
-   && grep -qF 'zensu-review-evidence.sh finalize --lease-id "<captured-lease-id>"' "$SKILL_MD" \
-   && grep -qF 'Stdout must be exactly `sealed=<captured-lease-id>`' "$SKILL_MD" \
-   && grep -qF 'collect --kind pr-review --agent-id "<agent-id>" --expected-role "<role-id>"' "$SKILL_MD" \
-   && grep -qF 'Stdout must be exactly one canonical JSON object with `kind:"pr-review"`' "$SKILL_MD" \
-   && grep -qF 'Only the main thread may later materialize accepted results' "$SKILL_MD" \
-   && grep -qF 'zensu-review-evidence.sh" close --lease-id' "$SKILL_MD" \
-   && grep -qF 'on every error path' "$SKILL_MD"; then
+if grep -qF 'zensu-review-evidence.sh" create' "$SKILL_TEXT" \
+   && grep -qF -- '--kind pr-review' "$SKILL_TEXT" \
+   && grep -qF 'git -c core.quotePath=false -C "$WORKTREE" diff origin/<base>...HEAD --name-status' "$SKILL_TEXT" \
+   && grep -qF -- '--name-status-file "$WORKDIR/_name-status.txt"' "$SKILL_TEXT" \
+   && grep -qF -- '--changed-production-files-file "$WORKDIR/_changed-production-files.txt"' "$SKILL_TEXT" \
+   && grep -qF 'zensu-review-evidence.sh finalize --lease-id "<captured-lease-id>"' "$SKILL_TEXT" \
+   && grep -qF 'Stdout must be exactly `sealed=<captured-lease-id>`' "$SKILL_TEXT" \
+   && grep -qF 'collect --kind pr-review --agent-id "<agent-id>" --expected-role "<role-id>"' "$SKILL_TEXT" \
+   && grep -qF 'Stdout must be exactly one canonical JSON object with `kind:"pr-review"`' "$SKILL_TEXT" \
+   && grep -qF 'Only the main thread may later materialize accepted results' "$SKILL_TEXT" \
+   && grep -qF 'zensu-review-evidence.sh" close --lease-id' "$SKILL_TEXT" \
+   && grep -qF 'on every error path' "$SKILL_TEXT"; then
   check "P15g private lease create/finalize/collect/close and main-only materialization are complete" PASS
 else
   check "P15g private lease create/finalize/collect/close and main-only materialization are complete" FAIL
 fi
 
-if grep -qF 'rejects a tree containing symlinks, special files, protected scope, or another unsafe alias' "$SKILL_MD" \
-   && grep -qF 'snapshots the complete allowed tree and revalidates it before every traversal call' "$SKILL_MD" \
-   && grep -qF 'revalidates every exact file and complete safe-root snapshot' "$SKILL_MD" \
-   && grep -qF 'fresh lease generation, and spawning the complete batch again' "$SKILL_MD"; then
+if grep -qF 'rejects a tree containing symlinks, special files, protected scope, or another unsafe alias' "$SKILL_TEXT" \
+   && grep -qF 'snapshots the complete allowed tree and revalidates it before every traversal call' "$SKILL_TEXT" \
+   && grep -qF 'revalidates every exact file and complete safe-root snapshot' "$SKILL_TEXT" \
+   && grep -qF 'fresh lease generation, and spawning the complete batch again' "$SKILL_TEXT"; then
   check "P15h symlink/TOCTOU drift and failed generations fail closed" PASS
 else
   check "P15h symlink/TOCTOU drift and failed generations fail closed" FAIL
 fi
 
-if grep -qF 'explicitly listed absolute refinement-context files' "$SKILL_MD" \
+if grep -qF 'explicitly listed absolute refinement-context files' "$SKILL_TEXT" \
    && grep -qF 'Only the explicitly enumerated exact refinement-context files' "$PERSONAS_MD" \
    && grep -qF '<exact-context-files>' "$PERSONAS_MD" \
    && ! grep -qF 'Read every file under `<context-paths>`' "$PERSONAS_MD"; then
@@ -652,13 +667,13 @@ else
   check "P15i domain-refiner receives only enumerated exact context files" FAIL
 fi
 
-if grep -qF 'In standalone mode, show the user the final body preview + inline count as a progress' "$SKILL_MD" \
-   && grep -qF 'record and publish at once. Do not ask for publication approval: invoking the skill on a' "$SKILL_MD" \
-   && grep -qF 'It never asks before' "$SKILL_MD" \
-   && grep -qF 'PR is the user'"'"'s authorization to post the synthesized review. In delegated mode, record' "$SKILL_MD" \
-   && grep -qF 'the count as a progress update and continue without a preview question or approval gate' "$SKILL_MD" \
+if grep -qF 'In standalone mode, show the user the final body preview + inline count as a progress' "$SKILL_TEXT" \
+   && grep -qF 'record and publish at once. Do not ask for publication approval: invoking the skill on a' "$SKILL_TEXT" \
+   && grep -qF 'It never asks before' "$SKILL_TEXT" \
+   && grep -qF 'PR is the user'"'"'s authorization to post the synthesized review. In delegated mode, record' "$SKILL_TEXT" \
+   && grep -qF 'the count as a progress update and continue without a preview question or approval gate' "$SKILL_TEXT" \
    && grep -qF 'Neither mode waits for a publication approval' "$WORKFLOW_MD" \
-   && ! grep -qF 'explicit publication approval' "$SKILL_MD" \
+   && ! grep -qF 'explicit publication approval' "$SKILL_TEXT" \
    && ! grep -qF 'explicit publication approval' "$WORKFLOW_MD"; then
   check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" PASS
 else
@@ -669,32 +684,32 @@ fi
 # personas via persona-activation.js, discovered from the BASE checkout ($REPO), never
 # the untrusted PR head ($WORKTREE). Custom seats run as confined zensu:pr-review-worker
 # under the read lease (Session Control v1), NOT as their own subagent_type.
-if grep -qF 'persona-activation.js' "$SKILL_MD"; then
+if grep -qF 'persona-activation.js' "$SKILL_TEXT"; then
   check "P16a SKILL.md Phase A.2 runs persona-activation.js for repo-custom seats" PASS
 else
   check "P16a SKILL.md Phase A.2 runs persona-activation.js for repo-custom seats" FAIL
 fi
-if grep -qF '$REPO/.claude/agents' "$SKILL_MD" && ! grep -qF '$WORKTREE/.claude/agents' "$SKILL_MD"; then
+if grep -qF '$REPO/.claude/agents' "$SKILL_TEXT" && ! grep -qF '$WORKTREE/.claude/agents' "$SKILL_TEXT"; then
   check "P16b discovery reads \$REPO/.claude/agents, never \$WORKTREE/.claude/agents (trust guard)" PASS
 else
   check "P16b discovery reads \$REPO/.claude/agents, never \$WORKTREE/.claude/agents (trust guard)" FAIL
 fi
-if grep -qF '(repo-custom)' "$SKILL_MD"; then
+if grep -qF '(repo-custom)' "$SKILL_TEXT"; then
   check "P16c custom seats are marked (repo-custom) in the cast" PASS
 else
   check "P16c custom seats are marked (repo-custom) in the cast" FAIL
 fi
-if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$SKILL_MD" && grep -qF '(unreadable)' "$SKILL_MD"; then
+if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$SKILL_TEXT" && grep -qF '(unreadable)' "$SKILL_TEXT"; then
   check "P16d discovery-unavailable + unreadable-persona logging pinned" PASS
 else
   check "P16d discovery-unavailable + unreadable-persona logging pinned" FAIL
 fi
-if grep -qF -- '--no-custom-roles' "$SKILL_MD"; then
+if grep -qF -- '--no-custom-roles' "$SKILL_TEXT"; then
   check "P16e --no-custom-roles opt-out documented" PASS
 else
   check "P16e --no-custom-roles opt-out documented" FAIL
 fi
-if grep -qF 'Repo-custom seats spawn as confined workers' "$SKILL_MD" && grep -qF 'zensu:pr-review-worker' "$SKILL_MD"; then
+if grep -qF 'Repo-custom seats spawn as confined workers' "$SKILL_TEXT" && grep -qF 'zensu:pr-review-worker' "$SKILL_TEXT"; then
   check "P16f custom seats spawn as confined zensu:pr-review-worker (not their own subagent_type)" PASS
 else
   check "P16f custom seats spawn as confined zensu:pr-review-worker (not their own subagent_type)" FAIL
@@ -715,17 +730,17 @@ BODY_TEMPLATE="$(awk '
   /^Overall body structure \(Markdown\):/ { armed=1; next }
   armed && /^```$/ { if (inside) exit; inside=1; next }
   inside { print }
-' "$SKILL_MD")"
+' "$REF_DIR/publish.md")"
 INLINE_TEMPLATE="$(awk '
   /^Inline comment structure \(Markdown\)/ { armed=1; next }
   armed && /^````$/ { if (inside) exit; inside=1; next }
   inside { print }
-' "$SKILL_MD")"
+' "$REF_DIR/publish.md")"
 
 if [ -n "$BODY_TEMPLATE" ] \
    && [ "$(printf '%s\n' "$BODY_TEMPLATE" | head -1)" = '## Zensu team review' ] \
    && printf '%s\n' "$BODY_TEMPLATE" | grep -qxF '> [!caution]' \
-   && ! grep -qE '^## Multi-Agent Review|^### Required Changes|^### Recommendation|^### TL;DR' "$SKILL_MD"; then
+   && ! grep -qE '^## Multi-Agent Review|^### Required Changes|^### Recommendation|^### TL;DR' "$SKILL_TEXT"; then
   check "P17a body template opens with the heading and a lower-case verdict alert; legacy headings are gone" PASS
 else
   check "P17a body template opens with the heading and a lower-case verdict alert; legacy headings are gone" FAIL
@@ -771,7 +786,7 @@ if [ -n "$INLINE_TEMPLATE" ] \
    && [ "$(printf '%s\n' "$INLINE_TEMPLATE" | head -1)" = '🔴 **Blocking** · **F1** · <category>' ] \
    && printf '%s\n' "$INLINE_TEMPLATE" | grep -qF '<!-- zensu-finding:v1 id=F1 sev=P1 cat=<category-slug> head=<sha7> -->' \
    && ! printf '%s\n' "$INLINE_TEMPLATE" | grep -qF 'zensu-review:v1' \
-   && grep -qF 'A P2 comment opens with `🟡 **Should fix** · **F<n>** · <category>`' "$SKILL_MD"; then
+   && grep -qF 'A P2 comment opens with `🟡 **Should fix** · **F<n>** · <category>`' "$SKILL_TEXT"; then
   check "P17f inline comments share one severity line and carry the finding marker, never the reconcile marker" PASS
 else
   check "P17f inline comments share one severity line and carry the finding marker, never the reconcile marker" FAIL
@@ -791,8 +806,8 @@ if grep -qF '**Collapsing.**' "$WORKFLOW_MD" \
    && grep -qF 'Never collapse a P1 finding, the verdict, or the uncovered-files list.' "$WORKFLOW_MD" \
    && grep -qF '**Angle brackets.**' "$WORKFLOW_MD" \
    && grep -qF '`under <ttl>h`' "$WORKFLOW_MD" \
-   && grep -qF '**Body-only findings.**' "$SKILL_MD" \
-   && grep -qF '`· no inline comment`' "$SKILL_MD" \
+   && grep -qF '**Body-only findings.**' "$SKILL_TEXT" \
+   && grep -qF '`· no inline comment`' "$SKILL_TEXT" \
    && grep -qF 'at 700 words or fewer' "$WORKFLOW_MD"; then
   check "P17h collapse, angle-bracket, body-only, and visible-length rules are documented" PASS
 else
@@ -808,6 +823,7 @@ else
   check "P17i the coverage counts table is the only table in the templates (body table rows: $BODY_TABLE_ROWS)" FAIL
 fi
 
+rm -f "$SKILL_TEXT"
 echo "----"
 echo "test-pr-team-review-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

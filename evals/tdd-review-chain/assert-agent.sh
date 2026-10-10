@@ -18,7 +18,7 @@ grep -qF 'Implementation and fixes always remain in this main thread' "$SKILL" \
   && grep -qF 'neutral workers return read-only packets' "$SKILL" \
   && check "Workflow workers are analysis-only" PASS \
   || check "Workflow worker boundary drifted" FAIL
-grep -qF "subagent_type='zensu:code-reviewer'" "$SKILL" \
+grep -qF "subagent_type='zensu:code-reviewer'" "$ROOT/skills/tdd/references/review-chain.md" \
   && check "reviewer remains the explicit post-implementation child" PASS \
   || check "reviewer dispatch contract drifted" FAIL
 

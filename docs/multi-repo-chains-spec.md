@@ -100,7 +100,7 @@ immutable project root`, and `:592-594` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
-**Claims are repo-root-relative.** `skills/tdd/SKILL.md:175, :178` requires every logged
+**Claims are repo-root-relative.** `skills/tdd/references/execution.md:9, :12` requires every logged
 `WIRED — files:` / `IMPL completed — files:` list to be relative to
 `git rev-parse --show-toplevel`. Across two roots `src/foo.ts` is ambiguous.
 
@@ -420,7 +420,7 @@ dropped: a dropped root is a root nothing audits.
 | Consumer | Change | Site |
 |---|---|---|
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:884` |
-| Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
+| Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1441-1443`, `:2266-2268` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:629`, `:606` |
@@ -495,11 +495,11 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 
 ### 7.1 Why it is mode-independent
 
-`skills/tdd/SKILL.md:188` lists the whole review chain — fan-out, judge second
+`skills/tdd/references/modes.md:7` lists the whole review chain — fan-out, judge second
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
-Cross-Layer Value Flow Audit cannot run in vanilla (`:191`, `:194`), and
+Cross-Layer Value Flow Audit cannot run in vanilla (`:10`, `:13`), and
 the new stage does not inherit it.
 
 ### 7.2 The capability lease
@@ -557,12 +557,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/SKILL.md:402`) and runs in vanilla
-(`skills/tdd/SKILL.md:195`). What part (b) DOES inherit from §7.1's argument is
+Drift Audit does the same (`skills/tdd/references/audit.md:61`) and runs in vanilla
+(`skills/tdd/references/modes.md:14`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/SKILL.md:408`), which is a test vanilla cannot be made to produce.
+(`skills/tdd/references/audit.md:67`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/SKILL.md:410`), AND reword the finding
+level as step 6c already is (`skills/tdd/references/audit.md:69`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no
