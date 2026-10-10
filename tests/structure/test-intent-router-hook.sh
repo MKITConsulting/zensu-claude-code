@@ -230,6 +230,41 @@ else
 fi
 rm -rf "$P21"
 
+C22_DATA="$(mktemp -d -t router-ledger-XXXXXX)"
+C22_SID="router-ledger-$$"
+c22_fire() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$C22_SID" "$1" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C22_DATA" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
+}
+c22_ctx() {
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||"")}catch(_){process.stdout.write("BADJSON")}})'
+}
+C22_FIRST="$(c22_fire "plan the product roadmap for next quarter" | classify)"
+C22_SHORT="$(c22_fire "plan the product roadmap for next quarter" | c22_ctx)"
+node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"compact",session_id:process.argv[1]}))' "$C22_SID" \
+  | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C22_DATA" bash "$PLUGIN_DIR/hooks/session-start-prompt-ledger.sh" >/dev/null 2>&1
+C22_AFTER="$(c22_fire "plan the product roadmap for next quarter" | classify)"
+C22_BAD=""
+[ "$C22_FIRST" = "UserPromptSubmit|main|triage|planmode" ] || C22_BAD="$C22_BAD [first prompt: $C22_FIRST]"
+case "$C22_SHORT" in
+  "Zensu planning notice (the full notice given earlier in this context still applies)"*) ;;
+  *) C22_BAD="$C22_BAD [second prompt is not the short line: $(printf '%s' "$C22_SHORT" | head -c 60)]" ;;
+esac
+for C22_NEEDLE in "three project-context triage questions" "instead of guessing them, before reading any file or launching a search" \
+  "asking is read-only and allowed in Plan mode" "/zensu:bootstrap" "/zensu:ghost-scan" \
+  "the hybrid sequence" "never delegating mutations to a child or running Zensu CLI mutations freelance" "/zensu:pilot" \
+  "merely mentions such a word ignores this notice"; do
+  printf '%s' "$C22_SHORT" | grep -qF -- "$C22_NEEDLE" || C22_BAD="$C22_BAD [short line missing: $C22_NEEDLE]"
+done
+[ "${#C22_SHORT}" -le 1200 ] || C22_BAD="$C22_BAD [short line is ${#C22_SHORT} characters]"
+[ "$C22_AFTER" = "UserPromptSubmit|main|triage|planmode" ] || C22_BAD="$C22_BAD [after a compact SessionStart: $C22_AFTER]"
+rm -rf "$C22_DATA"
+if [ -z "$C22_BAD" ]; then
+  check "C22 with a session id the first keyword prompt of a context generation gets the full notice, later ones a short line with the triage, its Plan-mode permission, the routing and the dismiss clause, and a compact SessionStart brings the full notice back" PASS
+else
+  check "C22 router ledger path broken:$C22_BAD" FAIL
+fi
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

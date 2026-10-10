@@ -78,6 +78,7 @@
     "test-pr-team-review-skill.sh",
     "test-pre-edit-hook-mirror.sh",
     "test-pretool-config-prompts.sh",
+    "test-prompt-ledger.sh",
     "test-promptfoo-config-refs.sh",
     "test-promptfoo-local-only.sh",
     "test-readme-hook-count-sync.sh",

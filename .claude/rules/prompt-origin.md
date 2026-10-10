@@ -56,18 +56,18 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 | Hook | Typed, slash with arguments | Task notification, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | full reminder | silent | route field + one standing-authorization sentence, at most about 400 characters |
-| `user-prompt-intent-router.sh` | keyword screen | silent | silent |
-| `user-prompt-zen-mode.sh` | directive | directive | directive |
-| `user-prompt-best-solution-first.sh` | directive | directive | directive |
+| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
+| `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
+| `user-prompt-zen-mode.sh` | directive once per context generation and anchor variant, then a short body | same | same |
+| `user-prompt-best-solution-first.sh` | one-line reminder | one-line reminder | one-line reminder |
 | `user-prompt-context-nudge.sh` | once per band | once per band | once per band |
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
 
-Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
-CI event is user-visible, so its shape and its option set still matter. The reminder's CI note is
-emitted by `printf` through `emit_route_context`, never as a third `cat <<'JSON'` block, because the
+`.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
+CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided
+line and its short line are emitted by `printf` through `emit_route_context`, never as a third `cat <<'JSON'` block, because the
 parity helper in `tests/structure/test-tdd-vanilla-mode.sh` refuses a third block and `R13` in
-`tests/structure/test-delivery-route.sh` counts two. Both exits sit before the two heredocs.
+`tests/structure/test-delivery-route.sh` counts two. All of these exits sit before the two heredocs.
 
 The router drops, before the keyword match, every whitespace token containing `/` or `\` (paths,
 URLs, `owner/repo`), every `zensu:<name>` skill name, and the operand of `--repo` or `--repo=`.
@@ -80,8 +80,10 @@ entries in `hooks/hooks.json` and fails when a registered hook has no declared b
 names an unregistered hook. **Adding a `UserPromptSubmit` hook therefore owes a `budget()` row**,
 with a minimum for each kind it must answer and a maximum for each kind. It drives every hook on a
 typed request, a task notification whose path contains `-zensu-zensu-claude-code-`, a
-system-reminder plus `<bash-input>` prompt and a CI-monitor event, and holds each hook and each
-sum under its ceiling. The reminder renders the helper command with two absolute paths, so the
+system-reminder plus `<bash-input>` prompt and a CI-monitor event, each kind in a fresh session and
+twice: the first prompt of the session and a repeat, with a ceiling per hook and per sum for each.
+`U9` resets the ledger with a `compact` `SessionStart` and requires the first-prompt figures again,
+and `U10` requires the decided line for a configured `tdd` or `direct` route. The reminder renders the helper command with two absolute paths, so the
 suite replaces that command with a fixed placeholder before it measures; without that, the same
 tree measured 5,699 and 5,775 characters at two install depths.
 

@@ -24,7 +24,10 @@ The rule lives in the hook, the skill, the operator doc row and EVERY
 of them — the count is deliberately not written out here, because the eval roster is DERIVED
 from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch:
 `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
-authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
+authoritative copy, sent in full once per context generation and anchor variant and followed by
+a short body that keeps the field, both markers and, in the armed variant only, the trust clause,
+because the none swap removes that span as it does in the full text, see
+`.claude/rules/prompt-ledger.md`), `skills/zen-mode/SKILL.md` rule 6,
 `docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
 `evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
 Z19b pins the directive carriers against each other, Z19c pins the extraction regex
@@ -762,9 +765,10 @@ nothing returns a `permissionDecision` — so the `patch` verdict is unchanged; 
 enumeration was short. Two things read like a breaking change here and are not, which is why
 the walk is written down rather than left to be re-derived: the runtime digest DOES move,
 because `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale — but
-`readContextInternal` measures the RECORDED root — and the directive is re-emitted from the
-executing tree on every prompt, so nothing persisted crosses the upgrade. The only
-per-session artefact zen-mode owns is the `{"active":true|false}` marker, whose shape is
-untouched. Choosing `minor` would be actively harmful rather than merely wasteful: while the
+`readContextInternal` measures the RECORDED root — and every prompt's directive, full or short, is
+emitted from the executing tree, so nothing persisted crosses the upgrade. Besides the
+`{"active":true|false}` marker, whose shape is untouched, zen-mode owns only its `zen-none` and
+`zen-armed` prompt-ledger entries, which are tagged with the executing plugin root, so an upgrade
+sends the full text again. Choosing `minor` would be actively harmful rather than merely wasteful: while the
 plugin is at major `0` the minor is the breaking axis, so it would refuse every in-flight
 session until the user ran `/zensu:adopt-session --confirm`.

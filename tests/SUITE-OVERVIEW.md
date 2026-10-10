@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (165 = 158 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 158 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 165). The figures here have drifted ELEVEN times, ten of them upward, and every
+reconciled to that manifest (166 = 159 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 159 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 166). The figures here have drifted ELEVEN times, ten of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -50,7 +50,7 @@ moved the figure. The eleventh is the merge shape again: `test-user-prompt-budge
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
 merging `main` into it made 156.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 155 against 158 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 156 against 159 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -90,8 +90,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **165** — 158 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **158 structure suites + 5 offline evals = 163 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 165 − 158 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **166** — 159 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **159 structure suites + 5 offline evals = 164 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 166 − 159 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -103,8 +103,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 165 structure suites + 5 offline evals | none |
-| `--ci` | 158 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 166 structure suites + 5 offline evals | none |
+| `--ci` | 159 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -285,15 +285,16 @@ developer's real sessions.
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
 listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
-### Prompt routing & payloads (8)
+### Prompt routing & payloads (9)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
-`user-prompt-budget` · `zensu-plm-arg-guidance`
+`prompt-ledger` · `user-prompt-budget` · `zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
-CI-event prompts, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
+CI-event prompts, for the first prompt of a context generation and for every later one, the
+per-session delivery ledger behind that split and the `SessionStart` reset that clears it, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
 a distinct receipt for each failure mode).
 
 ### VCS / forge integration (7)

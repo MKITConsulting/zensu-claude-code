@@ -4065,9 +4065,11 @@ case "$(run_report "$RC_GONE" "$SBOX/good-cfg.json" "$STATE_PROJECT")" in
 RC_OFFCFG="$SBOX/cfg-bsf-off.json"
 printf '{"hooks":{"bestSolutionFirst":false}}\n' > "$RC_OFFCFG"
 RC_OFF_OUT="$(run_report "$SBOX/plug" "$RC_OFFCFG" "$STATE_PROJECT")"
-case "$RC_OFF_OUT" in *'best-solution-first block is intact'*'hooks.bestSolutionFirst is false'*)
-  check "P5e a switched-off carrier is distinguished from a broken one" PASS ;;
-  *) check "P5e switched-off carrier row (got: $RC_OFF_OUT)" FAIL ;; esac
+RC_OFF_MAIN="$(printf '%s\n' "$RC_OFF_OUT" | grep -F 'rule carriers: best-solution-first block is intact')"
+RC_OFF_REM="$(printf '%s\n' "$RC_OFF_OUT" | grep -F 'rule carriers: best-solution-first-reminder block is intact')"
+case "$RC_OFF_MAIN|$RC_OFF_REM" in *'hooks.bestSolutionFirst is false — the main thread does not receive it at session start, every subagent still does'*'|'*'hooks.bestSolutionFirst is false — the main thread does not receive it on any prompt'*)
+  check "P5e a switched-off carrier is distinguished from a broken one, on the block row, which says subagents still receive the block, and on the reminder row" PASS ;;
+  *) check "P5e switched-off carrier rows (got: $RC_OFF_OUT)" FAIL ;; esac
 case "$RC_OFF_OUT" in *'evidence-discipline block is intact'*)
   check "P5f the unswitchable carrier carries no flag clause" PASS ;;
   *) check "P5f unswitchable carrier row changed under a foreign flag" FAIL ;; esac
@@ -4085,6 +4087,27 @@ case "$RC_NOMOD_OUT" in *'rule-block-v1.js could not be loaded'*'was NOT checked
 case "$RC_NOMOD_OUT" in *'block is intact'*)
   check "P5h a missing module wrongly still claimed a carrier was intact" FAIL ;;
   *) check "P5h a missing module claims nothing about carrier health" PASS ;; esac
+
+RC_REM="$SBOX/plug-reminder"
+cp -R "$SBOX/plug" "$RC_REM"
+RC_GREEN_OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$RC_GREEN_OUT" in *'rule carriers: best-solution-first-reminder block is intact'*)
+  check "P5i the per-prompt reminder block is checked as its own carrier and reports intact" PASS ;;
+  *) check "P5i reminder carrier row missing from the green fixture (got: $RC_GREEN_OUT)" FAIL ;; esac
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const L = fs.readFileSync(p, "utf8").split("\n");
+  const i = L.indexOf("<!-- zensu:best-solution-first-reminder -->");
+  if (i < 0) process.exit(1);
+  L.splice(i + 2, 0, "a re-wrapped paragraph");
+  fs.writeFileSync(p, L.join("\n"));
+' "$RC_REM/docs/best-solution-first.md" 2>/dev/null \
+  && RC_REM_OUT="$(run_report "$RC_REM" "$SBOX/good-cfg.json" "$STATE_PROJECT")" \
+  || RC_REM_OUT="fixture-failed"
+case "$RC_REM_OUT" in *'rule carriers: best-solution-first block is intact'*'best-solution-first-reminder is NOT injecting'*'not carry the block as exactly one line'*)
+  check "P5j a re-wrapped reminder is reported on its own row while the session-start block stays intact" PASS ;;
+  *) check "P5j re-wrapped reminder not reported on its own row (got: $RC_REM_OUT)" FAIL ;; esac
 
 # --- P1n: durable Autopilot run rows ---------------------------------------
 # Until this row existed the report carried NO Autopilot row of any kind, so a
