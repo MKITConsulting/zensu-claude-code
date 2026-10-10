@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "shiftDays": 45,
+  "entries": [
+    {
+      "file": "tests/structure/acceptance-verify-v1.test.js",
+      "test": "idle sessions are swept and the current and fresh ones are kept",
+      "dependency": "file-mtime",
+      "reason": "sweepIdleSessions compares the kernel-set mtime of the fresh session directory, written moments earlier on the real clock, with Date.now(); shifted 45 days ahead, that directory reads as idle past the 14-day idleSessionMs and is swept."
+    }
+  ]
+}
