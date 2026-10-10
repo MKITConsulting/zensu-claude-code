@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { pathToFileURL } = require('node:url');
 const YAML = require('yaml');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -136,7 +137,7 @@ test('NODE_OPTIONS in the form the runner writes carries the shift into grandchi
   assertShifted(JSON.parse(result.stdout), 45);
 });
 
-test('the runner appends its preload to NODE_OPTIONS, drops the nested-run marker and names the variable the preload reads', () => {
+test('the runner appends its preload to NODE_OPTIONS, drops the nested-run marker, loads its reporter by file URL and names the variable the preload reads', () => {
   const env = runner.childEnvironment({ NODE_OPTIONS: '--max-old-space-size=4096', KEPT: 'yes', NODE_TEST_CONTEXT: 'child-v8' }, 45);
   assert.equal(env.NODE_OPTIONS, `--max-old-space-size=4096 --require ${JSON.stringify(PRELOAD)}`);
   assert.equal(env[VARIABLE], '45');
@@ -144,6 +145,10 @@ test('the runner appends its preload to NODE_OPTIONS, drops the nested-run marke
   assert.equal(Object.prototype.hasOwnProperty.call(env, 'NODE_TEST_CONTEXT'), false);
   assert.equal(runner.childEnvironment({ NODE_OPTIONS: '  ' }, 7).NODE_OPTIONS, `--require ${JSON.stringify(PRELOAD)}`);
   assert.equal(runner.SHIFT_VARIABLE, VARIABLE);
+  const args = runner.nodeTestArguments(['/a.test.js'], '/events.jsonl');
+  assert.equal(args[1], `--test-reporter=${pathToFileURL(path.join(ROOT, 'tests', 'lib', 'clock-shift-reporter.cjs')).href}`);
+  assert.match(args[1], /^--test-reporter=file:\/\//);
+  assert.deepEqual(args.slice(2), ['--test-reporter-destination=/events.jsonl', '--test-reporter=spec', '--test-reporter-destination=stdout', '/a.test.js']);
   assert.ok(fs.readFileSync(PRELOAD, 'utf8').includes(`'${VARIABLE}'`));
 });
 

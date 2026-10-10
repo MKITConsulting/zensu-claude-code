@@ -5,6 +5,7 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const ROOT = path.resolve(__dirname, '..');
 const PRELOAD = path.join(__dirname, 'lib', 'clock-shift.cjs');
@@ -80,7 +81,7 @@ function loadAllowlist(file) {
 
 function canonical(file) {
   try {
-    return fs.realpathSync(file);
+    return fs.realpathSync.native(file);
   } catch {
     return path.resolve(file);
   }
@@ -163,6 +164,17 @@ function childEnvironment(environment, shiftDays) {
   return child;
 }
 
+function nodeTestArguments(files, events) {
+  return [
+    '--test',
+    `--test-reporter=${pathToFileURL(REPORTER).href}`,
+    `--test-reporter-destination=${events}`,
+    '--test-reporter=spec',
+    '--test-reporter-destination=stdout',
+    ...files,
+  ];
+}
+
 function parseArgs(argv) {
   const options = { allowlist: DEFAULT_ALLOWLIST, root: ROOT, summary: null, files: [] };
   for (let index = 0; index < argv.length; index += 1) {
@@ -214,14 +226,11 @@ function run(options) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-clock-shift-'));
   try {
     const events = path.join(scratch, 'events.jsonl');
-    const child = childProcess.spawnSync(process.execPath, [
-      '--test',
-      `--test-reporter=${REPORTER}`,
-      `--test-reporter-destination=${events}`,
-      '--test-reporter=spec',
-      '--test-reporter-destination=stdout',
-      ...files,
-    ], { cwd: root, env: childEnvironment(process.env, allowlist.shiftDays), stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = childProcess.spawnSync(process.execPath, nodeTestArguments(files, events), {
+      cwd: root,
+      env: childEnvironment(process.env, allowlist.shiftDays),
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
     if (child.error) throw new ClockShiftError(`node --test could not start: ${child.error.message}`);
     if (!fs.existsSync(events)) throw new ClockShiftError(`node --test exited ${child.status} without writing its results`);
     const collected = collectOutcomes(fs.readFileSync(events, 'utf8').split('\n'), root, files);
@@ -274,6 +283,7 @@ module.exports = {
   judge,
   loadAllowlist,
   main,
+  nodeTestArguments,
   parseArgs,
   validateAllowlist,
 };
