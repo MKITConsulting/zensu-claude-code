@@ -346,6 +346,20 @@ REMEDY_LOCKSTEP="$(
       if (gate.split(childGate).length - 1 !== 1) faults.push("the gate spells the child close " + (gate.split(childGate).length - 1) + " times, want the constant alone");
       if (shell.split(childShell[1]).length - 1 !== 1) faults.push("the shell spells the child close " + (shell.split(childShell[1]).length - 1) + " times, want the constant alone");
     }
+    const bindShell = shell.match(/^ZENSU_BIND_CHILD_CLOSE=\x27([^\x27]*)\x27$/m);
+    const bindGate = constant("BIND_CHILD_CLOSE");
+    if (!bindShell || bindGate === null) faults.push("bind child close not parsed on both sides");
+    else {
+      if (bindGate !== bindShell[1]) faults.push("bind child close differs between the gate and the shell");
+      if (gate.split(bindGate).length - 1 !== 1) faults.push("the gate spells the bind child close " + (gate.split(bindGate).length - 1) + " times, want the constant alone");
+      if (shell.split(bindShell[1]).length - 1 !== 1) faults.push("the shell spells the bind child close " + (shell.split(bindShell[1]).length - 1) + " times, want the constant alone");
+      if (/\/zensu:|--confirm|--restore-root/.test(bindGate)) faults.push("the bind child close names a command");
+    }
+    const bindSites = gate.split("\n").filter((line) => /^\s*denyBind\(`\$\{cause\} \$\{BIND_CHILD_CLOSE\}`\);$/.test(line)).length;
+    if (bindSites !== 1) faults.push("bind child close deny sites in the gate=" + bindSites + " want 1 (baseline missing)");
+    if (!/^\s*if \(callerIsMain\) \{\n\s*denyBind\(`\$\{cause\} Run \/zensu:adopt-session to see the diagnosis, and \/zensu:adopt-session --confirm to rebuild the document\./m.test(gate)) faults.push("the baseline rebuild remedy is not the main-thread arm of a callerIsMain split");
+    const shellBindUses = shell.split("$ZENSU_BIND_CHILD_CLOSE").length - 1;
+    if (shellBindUses !== 3) faults.push("the shell renders the bind child close " + shellBindUses + " times, want 3 (narrowed, default, orphaned-project-root)");
 
     // The AUDIENCE, at source level: every deny that hands out the ADOPTION command
     // sits under the MAIN guard, and every child close follows that guard directly.
@@ -5591,7 +5605,12 @@ AUTO_SCOPE_WRAPPERS="$TMP/auto-scope-wrappers.out"
     && zensu_emit_hook_session_deny incompatible-runtime 0.17.0 0.18.0 not-completed main \
     && zensu_emit_hook_session_deny narrowed record-unreadable child \
     && zensu_emit_hook_session_deny '' plugin-data-mismatch main \
-    && zensu_emit_hook_session_deny damaged-runtime record-unreadable main ) >"$AUTO_SCOPE_OUT" 2>/dev/null
+    && zensu_emit_hook_session_deny damaged-runtime record-unreadable main \
+    && zensu_emit_hook_session_deny narrowed '' child \
+    && zensu_emit_hook_session_deny '' '' child \
+    && zensu_emit_hook_session_deny '' plugin-data-mismatch child \
+    && zensu_emit_hook_session_deny orphaned-project-root /tmp/zensu-auto20-gone child \
+    && zensu_emit_hook_session_deny orphaned-project-root /tmp/zensu-auto20-gone main ) >"$AUTO_SCOPE_OUT" 2>/dev/null
 ( source "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session.sh" || exit 1
   for _scope_token in not-completed 'BAD"X'; do
     printf 'attempt\t%s\n' "$(zensu_session_adoption_attempt "$_scope_token")"
@@ -5602,13 +5621,14 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   const fs = require("node:fs");
   const lines = fs.readFileSync(process.env.OUT_FILE, "utf8").split("\n").filter((line) => line !== "");
   const faults = [];
-  if (lines.length !== 9) faults.push("emissions=" + lines.length + " want 9");
+  if (lines.length !== 14) faults.push("emissions=" + lines.length + " want 14");
   const reasons = lines.map((line, index) => {
     try { return String(JSON.parse(line).hookSpecificOutput.permissionDecisionReason || ""); }
     catch (_error) { faults.push("emission " + index + " is not JSON"); return ""; }
   });
-  const [main, child, screened, prunedChild, prunedMain, lineageMain, narrowedChild, genericMain, damaged] =
-    reasons.concat(new Array(9).fill("")).slice(0, 9);
+  const [main, child, screened, prunedChild, prunedMain, lineageMain, narrowedChild, genericMain, damaged,
+    narrowedBare, genericBare, genericChild, orphanChild, orphanMain] =
+    reasons.concat(new Array(14).fill("")).slice(0, 14);
   const COMMANDS = ["--confirm", "/zensu:adopt-session", "hooks.sessionAutoAdopt"];
   const CLOSE = "report this to the main thread rather than retrying.";
   const want = (label, text, needle) => { if (!text.includes(needle)) faults.push(label + " lacks: " + needle.slice(0, 50)); };
@@ -5657,6 +5677,37 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   want("damaged runtime", damaged, "a required Zensu runtime library is missing or unreadable");
   forbid("damaged runtime", damaged, "tried to adopt the record automatically");
 
+  const BIND_CLOSE = "The diagnosis and the repair are reserved for the main thread, so neither is available here — " + CLOSE;
+  const MAIN_ONLY = ["/zensu:doctor", "fresh Claude Code session", "stays reachable", "--restore-root", "still work"];
+  const childOnly = (label, text) => {
+    commandFree(label, text);
+    for (const needle of MAIN_ONLY) forbid(label, text, needle);
+    if (text.split(CLOSE).length - 1 !== 1) faults.push(label + " does not carry exactly one close");
+  };
+  for (const [label, text] of [["narrowed child", narrowedChild], ["narrowed bare child", narrowedBare],
+    ["generic bare child", genericBare], ["generic child", genericChild], ["orphan child", orphanChild]]) {
+    childOnly(label, text);
+  }
+  want("narrowed bare child", narrowedBare, "This is neither relaxable state");
+  if (!narrowedBare.endsWith(BIND_CLOSE)) faults.push("narrowed bare child does not end on the bind close");
+  forbid("narrowed bare child", narrowedBare, "tried to adopt the record automatically");
+  want("generic bare child", genericBare, "so every stateful Zensu tool fails closed");
+  want("generic bare child", genericBare, "The cause is one of three: this session has no record at all");
+  if (!genericBare.endsWith(BIND_CLOSE)) faults.push("generic bare child does not end on the bind close");
+  want("generic child", genericChild, "it was REFUSED: plugin-data-mismatch. The repair writes the immutable record");
+  forbid("generic child", genericChild, "The record belongs to a different plugin data store");
+  forbid("generic child", genericChild, BIND_CLOSE);
+  if (!genericChild.endsWith(CLOSE)) faults.push("generic child does not end on the child close");
+  want("orphan child", orphanChild, "the project root it records no longer exists");
+  forbid("orphan child", orphanChild, "/tmp/zensu-auto20-gone");
+  if (!orphanChild.endsWith(BIND_CLOSE)) faults.push("orphan child does not end on the bind close");
+  want("orphan main", orphanMain, "/zensu:adopt-session --restore-root");
+  want("orphan main", orphanMain, "Other shell commands and the read-only diagnostics still work");
+  want("orphan main", orphanMain, "records is: \"/tmp/zensu-auto20-gone\"");
+  forbid("orphan main", orphanMain, CLOSE);
+  want("generic main", genericMain, "Run /zensu:doctor");
+  want("generic main", genericMain, "Then start a fresh Claude Code session");
+
   const wrappers = fs.readFileSync(process.env.WRAP_FILE, "utf8").split("\n").filter((line) => line !== "")
     .map((line) => line.split("\t"));
   if (wrappers.length !== 6) faults.push("wrapper lines=" + wrappers.length + " want 6");
@@ -5671,7 +5722,7 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   process.stdout.write(faults.length ? faults.join("; ") : "ok");
 ' 2>/dev/null)" || AUTO_SCOPE_VERDICT=threw
 if [ "$AUTO_SCOPE_VERDICT" = ok ]; then
-  check "AUTO-20 every deny template no fixture reaches emits one valid JSON object: a lost race reads incomplete and its child form names a retry rather than the reserved close, the pruned and generic child forms carry cause, verb, token and close and no command, an incomplete token selects the retry wording in both named scopes, a damaged runtime grows no adoption sentence, and the wrappers screen a hostile token" PASS
+  check "AUTO-20 every deny template no fixture reaches emits one valid JSON object: a lost race reads incomplete and its child form names a retry rather than the reserved close, the pruned and generic child forms carry cause, verb, token and close and no command, an incomplete token selects the retry wording in both named scopes, a damaged runtime grows no adoption sentence, the wrappers screen a hostile token, and every child form of the narrowed, generic and orphaned-root scopes keeps its cause, names no main-thread remedy and ends on exactly one close" PASS
 else
   check "AUTO-20 the deny templates no fixture reaches ($AUTO_SCOPE_VERDICT)" FAIL
   head -c 400 "$AUTO_SCOPE_OUT" 2>/dev/null; printf '\n'
@@ -6897,8 +6948,8 @@ fi
 # the version pair alone: the kept record's name is the session selector confined
 # contexts withhold, and a lease clause can name a command that writes the record.
 # The user still gets the whole notice, as the deny's systemMessage. The baseline arm
-# names --confirm to every principal on its own (a separate, deferred finding), so
-# the command is asserted absent from the DISCLOSURE, which is what this row owns.
+# withholds its commands from every principal but the main thread, so the command is
+# asserted absent from the whole reason as well as from the DISCLOSURE.
 AUTO_BASE_KID_SESSION='versioned-upgrade-auto-baseline-gone-child'
 AUTO_BASE_KID_KEY="$(auto_key "$AUTO_BASE_KID_SESSION")"
 AUTO_BASE_KID_RECORD="$ADOPT_RECORDS_DIR/$AUTO_BASE_KID_KEY.json"
@@ -6920,6 +6971,9 @@ if auto_session_start "$AUTO_BASE_KID_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
         && [ "$AUTO_BASE_KID_DISCLOSURE" != "$AUTO_BASE_KID_REASON" ] \
         && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF '.superseded-' \
         && ! printf '%s' "$AUTO_BASE_KID_DISCLOSURE" | grep -qF -- '--confirm' \
+        && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF '/zensu:adopt-session' \
+        && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF 'fresh Claude Code session' \
+        && printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF 'neither is available here — report this to the main thread rather than retrying.' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'this tool call was still denied, for the reason its deny names.' \
         && ! printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'nothing else to do' \
