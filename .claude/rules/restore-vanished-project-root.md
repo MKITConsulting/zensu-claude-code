@@ -452,7 +452,12 @@ same class as the reader's own `UNSAFE_PATH_CHARACTERS`, which every value reach
 `printf` has already passed, while what the reader does NOT reject is `"` or `\`, both
 legal in a POSIX directory name. Reusing `ZENSU_SAFE_VERSION_RE` is the opposite trap: it
 forbids `/`, so every real path would degrade to `(unreadable)`. The bound is therefore
-`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own.
+`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own. It admits one Windows
+form too: a value that opens with a drive letter, a colon and either separator has its
+backslashes rendered as forward slashes before any test, because a Windows host records
+every root that way and the POSIX-only class degraded each of them to `(unreadable)`. A
+backslash anywhere else still degrades the value; `R8p12` and its two controls pin both
+halves and the injection refusal after the mapping.
 
 **EVERY arm of this emitter tests its constants for EMPTINESS first, and that — not the
 export block — is what makes the bound a guarantee.** `[[ x =~ $EMPTY ]]` answers

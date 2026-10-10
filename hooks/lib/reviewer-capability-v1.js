@@ -215,6 +215,38 @@ const MUTATING_FILE_TOOLS = new Set([
   'apply_patch',
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
+const HOST_PROFILE_TOOLS = new Set([
+  'Read',
+  'Grep',
+  'Glob',
+  'Edit',
+  'Write',
+  'MultiEdit',
+  'NotebookEdit',
+  'apply_patch',
+  'LSP',
+  'WebFetch',
+  'WebSearch',
+  'ToolSearch',
+  'TodoWrite',
+  'TaskCreate',
+  'TaskGet',
+  'TaskList',
+  'TaskUpdate',
+  'Agent',
+  'SendMessage',
+  'AskUserQuestion',
+  'StructuredOutput',
+  'ReportFindings',
+  'SubagentHandback',
+]);
+const HOST_PROFILE_MCP_READ_TOOLS = new Set([
+  'mcp__plugin_context7_context7__resolve-library-id',
+  'mcp__plugin_context7_context7__query-docs',
+]);
+const MCP_COMMAND_SEGMENT_RE = /(^|_)(exec|execute|run|shell|terminal|command|code)(_|$)/i;
+const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', 'SubagentHandback', 'AskUserQuestion']);
+const SEARCH_EXAMPLE_LIMIT = 12;
 
 // `systemMessage` is optional and user-facing. It rides in the ONE object this run
 // writes, beside the decision, so the host's precedence is untouched.
@@ -479,7 +511,8 @@ function canonicalCandidate(projectRoot, value) {
   return path.resolve(current);
 }
 
-function pathInputs(input) {
+function pathInputs(input, toolName) {
+  if (NON_PATH_TOOLS.has(toolName)) return [];
   const values = [];
   const pending = [input];
   let visited = 0;
@@ -505,6 +538,29 @@ function pathInputs(input) {
   return values;
 }
 
+function searchRemedy(trusted, protectedRoots) {
+  let names = [];
+  try {
+    names = fs.readdirSync(trusted.projectRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name)
+      .filter((name) => {
+        const candidate = path.join(trusted.projectRoot, name);
+        return !protectedRoots.some((root) => isInside(root, candidate) || isInside(candidate, root));
+      })
+      .sort();
+  } catch {
+    names = [];
+  }
+  const rule = `To search the project, call Grep or Glob with a path that names a subdirectory of the project root ${trusted.projectRoot} other than .zensu`;
+  if (names.length === 0) {
+    return `${rule}; none qualifies here, so Read the files you need or name one file as the Grep path.`;
+  }
+  const listed = names.slice(0, SEARCH_EXAMPLE_LIMIT).join(', ');
+  const more = names.length > SEARCH_EXAMPLE_LIMIT ? ` and ${names.length - SEARCH_EXAMPLE_LIMIT} more` : '';
+  return `${rule}: ${listed}${more}. For example, pass ${path.join(trusted.projectRoot, names[0])} as the path.`;
+}
+
 function traversalAccessViolation(payload, trusted, protectedRoots, candidates) {
   if (!['Grep', 'Glob'].includes(payload.tool_name)) return null;
 
@@ -517,7 +573,7 @@ function traversalAccessViolation(payload, trusted, protectedRoots, candidates) 
   if (traversalRoots.some((candidate) => candidate && protectedRoots.some((root) => (
     isInside(root, candidate) || isInside(candidate, root)
   )))) {
-    return 'traversal root may reach protected Session Control or workflow state';
+    return `traversal root may reach protected Session Control or workflow state. ${searchRemedy(trusted, protectedRoots)}`;
   }
 
   // Grep.pattern is a content regex and may legitimately mention protected
@@ -545,7 +601,7 @@ function traversalAccessViolation(payload, trusted, protectedRoots, candidates) 
 }
 
 function protectedAccessViolation(payload, trusted) {
-  const directPaths = pathInputs(payload.tool_input);
+  const directPaths = pathInputs(payload.tool_input, payload.tool_name);
   const candidates = directPaths.map((value) => canonicalCandidate(trusted.toolCwd, value));
   const protectedRoots = [
     trusted.contextFile,
@@ -584,24 +640,30 @@ function protectedAccessViolation(payload, trusted) {
   return null;
 }
 
+function hostProfileAllowance() {
+  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
+}
+
+function hostProfileToolViolation(payload, trusted, protectedRoots) {
+  const tool = payload.tool_name;
+  const commandViolation = () => `host-profile-v1 cannot invoke command-execution tools. ${searchRemedy(trusted, protectedRoots)}`;
+  if (COMMAND_TOOLS.has(tool)) return commandViolation();
+  if (tool.startsWith('mcp__')) {
+    if (HOST_PROFILE_MCP_READ_TOOLS.has(tool)) return null;
+    const segment = tool.split('__').at(-1);
+    if (/^mcp__.*zensu/i.test(tool)) {
+      return ZENSU_MCP_READ_RE.test(segment)
+        ? null
+        : 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
+    }
+    if (MCP_COMMAND_SEGMENT_RE.test(segment)) return commandViolation();
+    return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+  }
+  if (HOST_PROFILE_TOOLS.has(tool)) return null;
+  return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+}
+
 function neutralViolation(payload, trusted) {
-  // A shell is an arbitrary-code capability. Inspecting its source text for
-  // protected words cannot establish confinement: environment enumeration,
-  // variables, substitutions, aliases, or an interpreter can reconstruct any
-  // selector/path after PreToolUse. Neutral children therefore receive no
-  // command-execution tool at all. Main remains unchanged, while exact
-  // reviewer/PLM identities are already restricted to Read/Grep/Glob above.
-  if (COMMAND_TOOLS.has(payload.tool_name)) {
-    return 'host-profile-v1 cannot invoke command-execution tools';
-  }
-
-  const zensuMcpTool = /^mcp__.*zensu/i.test(payload.tool_name)
-    ? payload.tool_name.split('__').at(-1)
-    : null;
-  if (zensuMcpTool && !ZENSU_MCP_READ_RE.test(zensuMcpTool)) {
-    return 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
-  }
-
   const protectedRoots = [
     trusted.contextFile,
     path.join(trusted.pluginData, 'session-control'),
@@ -624,7 +686,17 @@ function neutralViolation(payload, trusted) {
     path.join(trusted.pluginRoot, 'hooks', 'pre-reviewer-capability-gate.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
   ].map((value) => path.resolve(value));
-  const candidates = pathInputs(payload.tool_input)
+
+  // A shell is an arbitrary-code capability. Inspecting its source text for
+  // protected words cannot establish confinement: environment enumeration,
+  // variables, substitutions, aliases, or an interpreter can reconstruct any
+  // selector/path after PreToolUse. Neutral children therefore receive no
+  // command-execution tool at all. Main remains unchanged, while exact
+  // reviewer/PLM identities are already restricted to Read/Grep/Glob above.
+  const toolViolation = hostProfileToolViolation(payload, trusted, protectedRoots);
+  if (toolViolation) return toolViolation;
+
+  const candidates = pathInputs(payload.tool_input, payload.tool_name)
     .map((value) => canonicalCandidate(trusted.toolCwd, value));
 
   // Neutral children may write project files and external review reports, but
@@ -1022,4 +1094,8 @@ module.exports = {
   lineageCause,
   prunedCause,
   performedDisclosure,
+  HOST_PROFILE_TOOLS,
+  HOST_PROFILE_MCP_READ_TOOLS,
+  NON_PATH_TOOLS,
+  neutralViolation,
 };

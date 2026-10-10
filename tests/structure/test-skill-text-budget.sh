@@ -11,7 +11,7 @@ ALLOWLIST="$(cat <<'ALLOW'
 adopt-session 39412
 autopilot 32875
 doctor 98239
-gauntlet-loop 31765
+gauntlet-loop 31701
 ghost-scan 27978
 plan-review 32855
 self-review 33060

@@ -262,10 +262,14 @@ function readWorkflowFile(projectRoot, workflowPath, limits = LIMITS) {
   const absolute = path.join(projectRoot, ...workflowPath.split('/'));
   let descriptor;
   try {
-    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
+    const before = fs.lstatSync(absolute);
+    if (before.isSymbolicLink()) return { error: `${workflowPath} could not be read (symlink)` };
+    const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+    const flags = fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0);
     descriptor = fs.openSync(absolute, flags);
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) return { error: `${workflowPath} is not a regular file` };
+    if (stat.dev !== before.dev || stat.ino !== before.ino) return { error: `${workflowPath} could not be read (replaced)` };
     if (stat.size > limits.maxWorkflowBytes) return { error: `${workflowPath} is larger than ${limits.maxWorkflowBytes} bytes` };
     const buffer = Buffer.alloc(stat.size);
     let offset = 0;
@@ -494,10 +498,14 @@ function cacheName(repo, workflowPath) {
 function readJsonFile(filePath, maxBytes) {
   let descriptor;
   try {
-    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
+    const before = fs.lstatSync(filePath);
+    if (before.isSymbolicLink()) return null;
+    const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+    const flags = fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK || 0);
     descriptor = fs.openSync(filePath, flags);
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile() || stat.size > maxBytes) return null;
+    if (stat.dev !== before.dev || stat.ino !== before.ino) return null;
     const buffer = Buffer.alloc(stat.size);
     let offset = 0;
     while (offset < stat.size) {

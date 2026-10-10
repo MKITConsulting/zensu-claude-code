@@ -112,6 +112,12 @@ directory swapped in after the check makes `mv -f` succeed with nothing recorded
 node spawn on every write and is not taken. The cleanup trap is EXIT-only and INT, TERM and HUP
 only exit (130, 143, 129): a cleanup handler on the signals themselves returned into the write,
 which then resumed and could re-create the temp leaf through a plain redirect without O_EXCL.
+The state directory is created with `mkdir -p -m 700`, and a failed call is still accepted when it
+left a directory that is not a symlink: Git Bash on Windows creates the directory and then fails
+the mode change with `Permission denied`, so a fresh project could never record a route there.
+`hooks/lib/zensu-zen-mode.sh` and `hooks/user-prompt-zen-mode.sh` carry the same fallback. R8c3
+and Z100 in `tests/structure/test-zen-mode.sh` drive both outcomes through a `mkdir` PATH shim:
+the directory created without its mode is accepted, and a call that created nothing is refused.
 R8f/R8g/R8h and T9g/T9h/T9i drive the temp-leaf refusal and both halves of the post-condition
 (`! -f` and `-L`) through PATH shims for `mktemp` and `mv`; R8i and T9j send INT, TERM and HUP
 through another `mv` shim and require the helper to end with 130, 143 and 129 and no success line.

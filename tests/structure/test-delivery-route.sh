@@ -517,15 +517,69 @@ done
 DIR_PROJ="$(mkproj)"; need_dir "$DIR_PROJ" DIR_PROJ; DIR_SID="droute-dir"
 ( export CLAUDE_PROJECT_DIR="$DIR_PROJ"; source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$DIR_SID" ) >/dev/null 2>&1
 rm -rf "$DIR_PROJ/.zensu/state"
+R8C_FRESH=1; [ -e "$DIR_PROJ/.zensu/state" ] && R8C_FRESH=0
+ERR_R8c="$DIR_PROJ/r8c.err"
 CLAUDE_CODE_SESSION_ID="$DIR_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$DIR_PROJ/.session-control-test/plugin-data" \
-  CLAUDE_PROJECT_DIR="$DIR_PROJ" ZENSU_CONFIG="$CFG_DEFAULT" bash "$HELPER" --tdd >/dev/null 2>&1; RC_R8c=$?
+  CLAUDE_PROJECT_DIR="$DIR_PROJ" ZENSU_CONFIG="$CFG_DEFAULT" bash "$HELPER" --tdd >/dev/null 2>"$ERR_R8c"; RC_R8c=$?
+mkdir -m 700 "$DIR_PROJ/r8c-mode-probe" 2>/dev/null
 case "$(uname -s)" in
-  Darwin) DIR_MODE2="$(stat -f %Lp "$DIR_PROJ/.zensu/state" 2>/dev/null)" ;;
-  *) DIR_MODE2="$(stat -c %a "$DIR_PROJ/.zensu/state" 2>/dev/null)" ;;
+  Darwin)
+    DIR_MODE2="$(stat -f %Lp "$DIR_PROJ/.zensu/state" 2>/dev/null)"
+    PROBE_MODE="$(stat -f %Lp "$DIR_PROJ/r8c-mode-probe" 2>/dev/null)" ;;
+  *)
+    DIR_MODE2="$(stat -c %a "$DIR_PROJ/.zensu/state" 2>/dev/null)"
+    PROBE_MODE="$(stat -c %a "$DIR_PROJ/r8c-mode-probe" 2>/dev/null)" ;;
 esac
-{ [ "$RC_R8c" -eq 0 ] && [ "$DIR_MODE2" = "700" ]; } \
-  && check "R8c on a fresh project the helper creates .zensu/state with mode 700" PASS \
-  || check "R8c fresh-project write (rc=$RC_R8c mode='$DIR_MODE2')" FAIL
+if [ "$R8C_FRESH" -eq 1 ] && [ "$RC_R8c" -eq 0 ] && [ -d "$DIR_PROJ/.zensu/state" ]; then
+  check "R8c on a fresh project the helper creates .zensu/state and writes the marker" PASS
+else
+  check "R8c fresh-project write (fresh=$R8C_FRESH rc=$RC_R8c stderr='$(head -c 300 "$ERR_R8c" 2>/dev/null | tr '\n' ' ')')" FAIL
+fi
+if [ "$PROBE_MODE" != "700" ]; then
+  check "R8c2 state directory mode — this host does not keep a 700 directory mode (mkdir -m 700 reads back '$PROBE_MODE')" SKIP
+elif [ "$DIR_MODE2" = "700" ]; then
+  check "R8c2 the state directory the helper creates has mode 700" PASS
+else
+  check "R8c2 state directory mode (got '$DIR_MODE2')" FAIL
+fi
+SHIM_MKDIR_BIN="$STATE_DIR/shim-mkdir"; mkdir -p "$SHIM_MKDIR_BIN"
+REAL_MKDIR="$(command -v mkdir)"
+cat > "$SHIM_MKDIR_BIN/mkdir" <<EOF
+#!/bin/sh
+case " \$* " in
+  (*" -m 700 "*) ;;
+  (*) exec "$REAL_MKDIR" "\$@" ;;
+esac
+last=""
+for a in "\$@"; do last="\$a"; done
+if [ "\${R8C3_CREATE:-1}" = 1 ]; then "$REAL_MKDIR" -p "\$last" || exit 1; fi
+printf "mkdir: cannot change permissions of '%s': Permission denied\n" "\$last" >&2
+exit 1
+EOF
+chmod +x "$SHIM_MKDIR_BIN/mkdir"
+R8C3_BAD=""
+for r8c3_create in 1 0; do
+  R8C3_PROJ="$(mkproj)"; need_dir "$R8C3_PROJ" R8C3_PROJ
+  ( export CLAUDE_PROJECT_DIR="$R8C3_PROJ"; source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$DIR_SID" ) >/dev/null 2>&1
+  rm -rf "$R8C3_PROJ/.zensu/state"
+  [ -e "$R8C3_PROJ/.zensu/state" ] && R8C3_BAD="$R8C3_BAD [create=$r8c3_create state-not-fresh]"
+  OUT_R8C3="$(CLAUDE_CODE_SESSION_ID="$DIR_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$R8C3_PROJ/.session-control-test/plugin-data" \
+    CLAUDE_PROJECT_DIR="$R8C3_PROJ" ZENSU_CONFIG="$CFG_DEFAULT" R8C3_CREATE="$r8c3_create" PATH="$SHIM_MKDIR_BIN:$PATH" \
+    bash "$HELPER" --tdd 2>"$R8C3_PROJ/r8c3.err")"; RC_R8C3=$?
+  R8C3_STATE="$(lib zensu_delivery_route_marker_state "$R8C3_PROJ" "$(session_key "$DIR_SID")")"
+  if [ "$r8c3_create" = 1 ]; then
+    { [ "$RC_R8C3" -eq 0 ] && [ -n "$OUT_R8C3" ] && [ -d "$R8C3_PROJ/.zensu/state" ] && [ "$R8C3_STATE" = "tdd" ]; } \
+      || R8C3_BAD="$R8C3_BAD [created rc=$RC_R8C3 out='$OUT_R8C3' state='$R8C3_STATE' err='$(head -c 160 "$R8C3_PROJ/r8c3.err" | tr '\n' ' ')']"
+  else
+    { [ "$RC_R8C3" -eq 2 ] && [ -z "$OUT_R8C3" ] && [ ! -e "$R8C3_PROJ/.zensu/state" ] \
+      && grep -qF 'zensu-delivery-route.sh: cannot create state directory' "$R8C3_PROJ/r8c3.err"; } \
+      || R8C3_BAD="$R8C3_BAD [not created rc=$RC_R8C3 out='$OUT_R8C3' err='$(head -c 160 "$R8C3_PROJ/r8c3.err" | tr '\n' ' ')']"
+  fi
+  rm -rf "$R8C3_PROJ"
+done
+[ -z "$R8C3_BAD" ] \
+  && check "R8c3 a mkdir that creates the state directory but cannot set its mode, as Git Bash on Windows does, still lets the helper write the marker; one that creates nothing is still refused" PASS \
+  || check "R8c3 state directory whose mode cannot be set:$R8C3_BAD" FAIL
 DIR_MARKER="$(CLAUDE_PROJECT_DIR="$DIR_PROJ" bash -c 'source "$0"; zensu_delivery_route_marker_path "$1" "$2"' "$CONFIG_LIB" "$DIR_PROJ" "$(session_key "$DIR_SID")")"
 rm -f "$DIR_MARKER"; mkdir -p "$DIR_MARKER"
 ERR_R8d="$DIR_PROJ/r8d.err"

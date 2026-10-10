@@ -85,7 +85,8 @@ publish" — and always put "inspect only, change nothing" in the packet, becaus
 instruction is what removes intent while a grant only removes reach.
 
 **Inside the Zensu plugin an `Explore` critic cannot run commands at all.** The
-`.*` PreToolUse capability gate denies every command-execution tool to a neutral
+`.*` PreToolUse capability gate denies every command-execution tool, and every MCP
+tool outside a short read-only list, to a neutral
 `host-profile-v1` child, and `Explore` is one *while the host reports its
 `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin" states why this
 plugin cannot establish that it always does, and that bound applies here unchanged.

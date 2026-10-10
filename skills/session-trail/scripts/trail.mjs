@@ -621,7 +621,7 @@ function writeAnchor(targetWt, opts) {
 }
 
 // Rendered as its own block rather than folded into the TAKEOVER advice, because
-// it is a SECOND and independent hazard attached to the same go/no-go: the
+// it is a SECOND and independent hazard attached to the same plan confirmation: the
 // verdict measures whether a human is still typing in that window, this measures
 // whether the opt-in source-write gate would let this session write there at all.
 // Both roots are bounded like every other path in this renderer, through
@@ -2086,7 +2086,7 @@ function recordStamp(value) {
 // activity are different things. Anything else is treated as a turn in flight,
 // including a sidechain record (a subagent is running) and an assistant record
 // whose stop reason is null or absent (4 of 7320 sampled): uncertainty resolves
-// towards "still working", which costs a question rather than a wrong takeover.
+// towards "still working", which costs a disclosed line rather than a silent takeover.
 //
 // `fromOffset` is where the caller's TAIL segment begins. On a truncated read the
 // text is head+tail spliced together, so an unbounded backwards scan that found
@@ -2163,7 +2163,7 @@ function activityMs(r) {
 // so it still counts: one INSIDE the slice that in fact took a prompt enqueued in
 // the unread gap drives the slice depth to zero beside the in-slice prompt that
 // is genuinely waiting. That zero is reported as unmeasured, never as "nothing
-// is queued", so the residual costs a go/no-go rather than a hidden prompt; it
+// is queued", so the residual costs one disclosed line rather than a hidden prompt; it
 // predates the consumer set and is stated here rather than closed.
 function extractPendingQueue(text, reliable, tailOffset = 0) {
   if (reliable !== true && tailOffset > 0) {
@@ -2192,7 +2192,7 @@ function extractPendingQueue(text, reliable, tailOffset = 0) {
 // not all (430 carry none), and `dequeue` never does. `last`/`at` therefore stay on
 // the most recent enqueue even when that was the prompt removed, which can only
 // make a waiting prompt look NEWER than it is — the direction that costs one
-// question, never the one that hides a prompt — and means `last` may carry the
+// disclosed line, never the one that hides a prompt — and means `last` may carry the
 // body of a prompt that already left while an older one still waits; the skill
 // states that bound where it describes the field. The name is used in ONE place, a
 // `tailSlice` scan: there a consumer naming a prompt the slice never enqueued is
@@ -2276,7 +2276,7 @@ const ACTIVE_GRACE_MIN = 2;
 // The wording is deliberately provenance, not conclusion. This script cannot see
 // a user: `--force` is a token its caller types, so "the user authorized this" is
 // a claim it has no evidence for — and that sentence gets persisted into briefs
-// which tell the next instance never to ask again.
+// that a different instance opens and must not read as its own user's answer.
 function activityVerdict(r, force = false) {
   const v = measuredVerdict(r);
   // The flag alone is not enough: the row must BE the one a selector resolved.
@@ -2296,7 +2296,7 @@ function activityVerdict(r, force = false) {
 
 // A command that takes no selector cannot carry an authorization: the user
 // approved ONE session, and rendering that against every busy row on the machine
-// turns one go/no-go into a blanket one. The rule belongs here, at the verdict
+// turns one authorization into a blanket one. The rule belongs here, at the verdict
 // boundary, rather than in each renderer — applying it to the text path alone
 // left `list --json --force` stamping CONTESTED on every row while the visible
 // output looked correct.
@@ -2311,19 +2311,19 @@ function surveyVerdict(r) {
 // test-session-trail-skill.sh T18 asserts against the emitted set. One key is not
 // a level: `PROBABLY_FREE_UNMEASURED` replaces `PROBABLY_FREE`'s entry while
 // `isUnmeasuredProbablyFree` holds and no --force answered it, because the flow-3
-// table routes that case to the go/no-go `BUSY` costs. That predicate is the one all
+// table discloses that case in one line, as it does `BUSY`. That predicate is the one all
 // three routers ask — show's advice, the takeover brief and release's gate — and it takes
-// anything but a `queueMeasured` of true as unmeasured, so a lost field asks, never proceeds.
+// anything but a `queueMeasured` of true as unmeasured, so a lost field is disclosed, never hidden.
 const ADVICE = {
-  FREE: ['Nothing holds this worktree. Take it over.'],
-  PROBABLY_FREE: ['Proceed, but tell the user not to type in that window, and check for dev servers it may still own.'],
+  FREE: ['Nothing holds this worktree. Take it over: the plan confirmation is the one question,', 'and on yes run takeover --force, not show --force.'],
+  PROBABLY_FREE: ['Proceed, but tell the user not to type in that window, and check for dev servers it may still own.', 'Put that in one line inside the plan confirmation; on yes run takeover --force, not show --force.'],
   PROBABLY_FREE_UNMEASURED: [
-    'Its queue was not measured, so this costs the same single go/no-go BUSY does. State that to the',
-    'user in one line, and on yes re-run with --force to record the authorization and take it over.',
+    'Its queue was not measured. State that in one line inside the plan confirmation, never as a',
+    'question of its own. On yes, take it over with takeover --force, not show --force.',
   ],
   BUSY: [
-    'This is a hazard report, not a refusal. State it to the user in one line, take a single',
-    'go/no-go, and on yes re-run with --force to record the authorization and take it over.',
+    'This is a hazard report, not a refusal: state it in one line inside the plan confirmation,',
+    'never as a question of its own. On yes, take it over with takeover --force, not show --force.',
   ],
   CONTESTED: [
     'Authorized. Take it over, name the window the user must not type in, and check whether',
@@ -2345,7 +2345,7 @@ function measuredVerdict(r) {
   const wrote = turn.kind !== 'unknown' && typeof turn.activityAt === 'string' ? 'wrote its last turn record' : 'wrote to its transcript';
   const qAt = q.at ? Date.parse(q.at) : NaN;
   // An unreadable timestamp counts as fresh: a real queued prompt is a genuine
-  // hazard, and over-reporting it now costs one question, not a refusal. The same
+  // hazard, and over-reporting it now costs one disclosed line, not a refusal. The same
   // rule ages an unknown-kind record below, so it is spelled once. A stamp ahead
   // of this clock is fresh too — it does not age until the clock reaches it — and
   // is only WORDED apart, never weighed apart: `ago()` would clamp it to a false
@@ -2374,8 +2374,8 @@ function measuredVerdict(r) {
   // one ahead of the clock does not age until the clock reaches it, so that
   // disclosure stands until a later record of the same kind with a readable stamp
   // replaces it.
-  // The BUSY and FREE arms below carry none of it: a BUSY verdict already forces
-  // the go/no-go an unmeasured queue would ask for, whatever put it there, and
+  // The BUSY and FREE arms below carry none of it: a BUSY verdict already discloses
+  // the hazard an unmeasured queue would add, whatever put it there, and
   // FREE means no live process or an archived session. The depth sentence and
   // the unmeasured sentence are composed apart — the second collects every reason
   // the queue is not measured, and the first withholds its "not a waiting prompt"
@@ -3190,8 +3190,8 @@ const CARRY_OVER = [
   'RESIDUALS worth knowing before you run it, none of them closed by the checks above.',
   '--exclude-standard skips everything .gitignore\'d, so ignored-but-real files — a local env',
   'file, editor state — do NOT travel; move those by hand. Each test and its copy are two',
-  'separate steps, so a source OR a destination replaced between them is followed: run this',
-  'while nothing is writing to either tree. [ ! -L ] uses lstat, so a destination that is a',
+  'separate steps, so a source OR a destination replaced between them is followed, and the copy',
+  'is only as consistent as both trees were while it ran. [ ! -L ] uses lstat, so a destination that is a',
   'HARD LINK to a file outside the tree passes it exactly as a source hard link does. A silent',
   'run is not proof of success: the pipeline reports the loop\'s status, so a source that is',
   'not a repository produces no copies, no SKIPPED lines and status 0 — read git\'s own stderr.',
@@ -3230,22 +3230,22 @@ const TAKE_YOUR_OWN = [
 // is doing.
 const LIVE_SNAPSHOT_CAUTION = (pid) => [
   `Before the next part: pid ${pid} is still registered for that worktree, and the first`,
-  'step SNAPSHOTS it. Take the snapshot while that session is idle — a diff read mid-edit',
-  'can carry a half-written file, and applying it here lands a state neither tree ever had.',
+  'step SNAPSHOTS it as it is: a diff read mid-edit can carry a half-written file and land a state',
+  'neither tree ever had. That risk is the user\'s: say so in one line, never wait or ask about it.',
 ];
 
 // The one ALTERNATIVE to the create recipe, spliced on the PRESENT leg only — a directory
 // that is not readable from here cannot be moved, so the gone leg has nothing to offer.
 //
-// Its condition is a HUMAN ATTESTATION and is deliberately NOT an arm predicate. That is
-// not caution, it is the measured shape of the case: the run that prompted this had a
-// registered LIVE pid on a session its human had abandoned after an account switch, so
-// `archived`, `live` and the whole four-way ladder answer the wrong question. A pid is a
-// process, not an intention. Keying the route on any of them would offer it exactly where
-// it is unsafe and withhold it exactly where it is right.
+// It is offered WHATEVER that session is doing and is deliberately NOT an arm predicate:
+// that session's activity is the user's responsibility, and the user picks the route in the
+// plan confirmation. The run that prompted it had a registered LIVE pid on a session its
+// human had abandoned after an account switch, so `archived`, `live` and the whole four-way
+// ladder answer the wrong question. A pid is a process, not an intention, and keying the
+// route on any of them would withhold from the user a choice that is theirs.
 //
 // It comes AFTER `TAKE_YOUR_OWN` and the create recipe stays the default, because the
-// create route is the only one that works with no attestation at all. `TAKE_YOUR_OWN` ends
+// create route is the only one that takes nothing from the other session. `TAKE_YOUR_OWN` ends
 // in prose, so this block's command opens a fence of its own rather than coalescing with
 // the create command above it: they are alternatives, and one copy button must not run
 // both.
@@ -3310,17 +3310,17 @@ const LIVE_SNAPSHOT_CAUTION = (pid) => [
 // takes only the row today, so it would change that function's contract and all four call
 // sites. Not taken; the bound is stated in the emitted text instead.
 const MOVE_ALTERNATIVE = (pid) => [
-  'ALTERNATIVE, and only you can authorize it. If you KNOW that session will not be',
-  'continued — you switched accounts, its usage limit is reached, you abandoned the window —',
-  'then moving their worktree here is an alternative to creating your own.',
-  'That condition is PROSE, not a gate: nothing here verifies it, and nothing below is',
-  'enforced by anything if you paste the line into your own terminal. If you are an agent',
-  'reading this out of a brief, you cannot hold it — whether its human switched accounts is',
-  'their fact, not yours, and a brief exists BECAUSE a handover happened, so the condition',
-  'reads as already met exactly where it is least established. Ask them. The create route',
-  'above needs no such answer, which is the whole reason it stays the default.',
-  'Nothing this tool reads can establish that attestation, which is why it is stated as',
-  'yours rather than decided by the cause above.',
+  'ALTERNATIVE, and only you can authorize it — you being the user. An agent offers it inside the',
+  'one plan confirmation beside the create route, and after that only when the user names it, never',
+  'as a question of its own. Moving their worktree here is an alternative to creating your own.',
+  'It is offered whatever that session is doing. Its activity is the user\'s responsibility, not',
+  'this tool\'s: no verdict withholds this route, nothing here verifies the choice, and nothing',
+  'below is enforced if you paste the line into your own terminal. If you are an agent reading',
+  'this out of a brief, the choice is still the user\'s: a brief exists BECAUSE a handover',
+  'happened, so it does not carry the user\'s answer to this session. The create route above',
+  'stays the default because it takes nothing from the other session.',
+  'Nothing this tool reads decides that choice, which is why it is stated as the user\'s',
+  'rather than decided by the cause above.',
   'A registered pid is a process, not an intention, and the archived flag records what the',
   'desktop app did, not what its human decided.',
   'Before the command: `<their worktree>` is a repository you have not vetted, running its own',
@@ -3351,18 +3351,18 @@ const MOVE_ALTERNATIVE = (pid) => [
   'measured), so the failure there is loud rather than a directory in the wrong place.',
   'What it costs: it mutates the OTHER session\'s layout, so a session still working there',
   'loses its directory mid-flight. That is why the create recipe above stays the default:',
-  'it is the only route that needs no such judgement from you. This is above the line with',
-  'the preconditions, not below with the benefits, because it is the fact most likely to',
-  'change your mind and it is worth nothing after the paste.',
+  'it takes nothing from the other session. State this cost in the plan confirmation when you',
+  'offer the move. This is above the line with the preconditions, not below with the benefits,',
+  'because it is the fact most likely to change the user\'s mind and it is worth nothing after the paste.',
   ...(pid ? [
     `MEASURED when this was written: pid ${pid} was registered and alive for that worktree.`,
     'That is the case the paragraph above is about, and it is the one where a move costs',
-    'someone else their working directory mid-flight. Re-check it before you attest, because',
-    'this text may be reaching you from a brief another session wrote earlier.',
+    'someone else their working directory mid-flight; this text may come from an older brief. Re-check it',
+    'and name it in the plan confirmation, or, past that confirmation, in one line before the move runs.',
   ] : [
     'No live pid was registered for that worktree when this was written. That is what was',
     'true THEN and says nothing about now — a session can have been started there since, and',
-    'if you are reading this from a brief it may be days old. Re-check before you attest.',
+    'if you are reading this from a brief it may be days old. Re-check it before the user chooses.',
     'The word is deliberately not the one the live-process caution below uses: this arm has',
     'no such caution to give, and the absence of one is not evidence that the tree is idle.',
   ]),
@@ -3393,10 +3393,10 @@ const RELEASE_AFTER = [
   'LAST, whichever route you took: once your own worktree holds everything you still need from',
   'the old one, run session-trail\'s release command for the old session from your own worktree.',
   'It names every reason it refuses, such as a live session still working in the old worktree or',
-  'a nested repository inside it. Otherwise it ends any keep anchor this plugin still holds there,',
-  'so an archive no longer leaves that worktree on disk, and then says that the old session can',
-  'now be archived or removed. It reports uncommitted, unpushed and ignored files still in the old',
-  'worktree but does not refuse over them; an archive deletes them with the worktree.',
+  'a nested repository inside it; a busy or unmeasured old session only needs --force on the re-run.',
+  'Otherwise it ends any keep anchor this plugin still holds there, so an archive no longer leaves',
+  'that worktree on disk, and says that the old session can now be archived or removed. It reports',
+  'uncommitted, unpushed and ignored files there without refusing over them; an archive deletes them with the worktree.',
 ];
 
 // One table, four arms, two legs — and the ARM is chosen once, above the split.
@@ -3633,8 +3633,8 @@ function worktreeAdvice(r, options = {}) {
   // properties of their own block rather than of the sequence, and they stay there —
   // `LIVE_SNAPSHOT_CAUTION`'s "spliced ahead of `CARRY_OVER`" is its CONDITION, and
   // `MOVE_ALTERNATIVE`'s "comes AFTER `TAKE_YOUR_OWN`" is its FENCE rationale.
-  // What this comment owns: the CREATE route is first because it is the default and needs no
-  // judgement from the reader; the MOVE follows it as the alternative, carrying the measured
+  // What this comment owns: the CREATE route is first because it is the default and takes nothing
+  // from the other session; the MOVE follows it as the alternative, carrying the measured
   // live pid inside its own text so it never depends on a later block for that signal; the
   // live SNAPSHOT caution comes next because its first sentence introduces the carry-over
   // below it and nothing else; the carry-over recipe is last. An insertion between any two of
@@ -4517,7 +4517,7 @@ function continuationPlan(r, w, branch) {
       // commit-ish for `worktree add`.
       `              git -C ${A} worktree add -b ${briefShellArg(newBranch)} -- ${T} ${briefShellArg('refs/heads/' + branch)}`,
       '         3. carry the UNCOMMITTED work across — the branch alone carries only what',
-      '            was committed. Do NOT improvise that step: run `handoff` or `takeover`',
+      '            was committed. Do NOT improvise that step: run `handoff` or `takeover --no-record`',
       '            and use the recipe they print (`CARRY_OVER` in this script). Its safety',
       '            is in details a shorter spelling loses — the config flags that stop a',
       '            textconv, an external-diff or an fsmonitor command running while the',
@@ -4587,7 +4587,7 @@ function cmdShow(opts) {
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
   const advised = isUnmeasuredProbablyFree(v) && !v.authorized ? ADVICE.PROBABLY_FREE_UNMEASURED : ADVICE[v.level];
-  for (const advice of (advised || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
+  for (const advice of (advised || ['No advice is registered for this verdict — treat it as BUSY: one hazard line in the plan confirmation.'])) {
     print(`         ${advice}`);
   }
   // WHERE, below the verdict and above the write-anchor lines: the verdict says
@@ -4633,10 +4633,10 @@ function cmdShow(opts) {
     print('         TWO things are withheld here, not one. The uncommitted half needs a');
     print('         carry-over recipe this view does not print, and there is a second ROUTE');
     print('         besides the create line above — moving their worktree here instead,');
-    print('         which only you can authorize and which carries a cost paragraph this');
-    print('         view has no room for. Run handoff or takeover for both — those write a');
-    print('         brief you paste from. adopt prints them too, but that verb also writes a');
-    print('         machine-wide ledger edge, so it is not a read-only route to either.');
+    print('         which only the user can authorize and which carries a cost paragraph this');
+    print('         view has no room for. Run handoff or takeover for both — takeover with');
+    print('         --no-record until the user has confirmed the plan. adopt prints them too,');
+    print('         but it writes a machine-wide ledger edge, so it is not a read-only route to either.');
   }
   for (const line of writesLines(w)) print(line);
   // BELOW `writesLines`, and never inside it. The verdict suite reads that block with
@@ -4764,7 +4764,7 @@ function cmdLimited(opts) {
     for (const r of recovered) line(r);
   }
   if (!hit.length) return print('none found in this window — widen with --days 0 or --all');
-  print(`next: node ${scriptPath()} takeover <session-id>`);
+  print(`next: node ${scriptPath()} takeover <session-id> --no-record`);
 }
 
 function cmdTakeover(opts) {
@@ -4819,7 +4819,7 @@ function cmdTakeover(opts) {
   if (r.app) L.push(`- owning desktop instance: \`${briefPath(r.app.instance)}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
-    L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
+    L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so a session that opens it later re-measures and confirms its own plan with its own user before editing.`);
   }
   L.push(`- worktree: \`${briefPath(r.wt)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(writeAnchorCaution(r.wt));
@@ -4902,7 +4902,7 @@ function cmdTakeover(opts) {
   // (that would change the path bytes, which is the whole point of this helper),
   // so a crafted path would close a single-backtick span and render the rest as
   // prose inside a numbered instruction. A fence cannot be closed from mid-line.
-  L.push('1. Choose the working directory before anything else:');
+  L.push('1. Choose the working directory before anything else, and run none of the commands below before the user has confirmed the plan in step 3:');
   // Through `adviceBlock`, not a bare prefix loop: the recipe lines have to arrive
   // fenced here exactly as they do in the handoff brief, or the same array is
   // runnable in one brief and prose in the other.
@@ -4950,11 +4950,11 @@ function cmdTakeover(opts) {
   L.push(`cd -- ${briefShellArg(r.wt)}`);
   L.push('```');
   L.push('2. Re-verify before trusting anything above: this is a snapshot, and the working tree may have moved since.');
-  L.push('3. Restate the remaining work as a short plan and get the user\'s confirmation before editing.');
-  const goNoGo = `take a single go/no-go before the first edit${tv.authorized ? ' — the authorization above was given when this brief was written, not here' : '; on yes, re-run this command with `--force`'}`;
-  if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and ${goNoGo}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
-  else if (isUnmeasuredProbablyFree(tv)) L.push(`4. ${tv.measuredReason} Its queue was not measured, so state that to the user in one line and ${goNoGo}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
-  else if (tv.measuredLevel === 'PROBABLY_FREE') L.push(`4. ${tv.measuredReason} Taking over is fine; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
+  L.push(`3. Restate the remaining work as a short plan and get the user's confirmation before any command above runs — the one question of this takeover. ${tv.authorized ? 'The session that ran this command with `--force` already took it and does not ask again; a session that opens this file later asks its own user.' : 'Once the user confirms, run takeover again with `--force` and without `--no-record`; that records the handover, and nothing is asked again.'}`);
+  const disclose = tv.authorized ? 'ask nothing about it: the session that ran this command with `--force` already took the plan confirmation of step 3 and states that line once before its first step runs, while a session that opens this file later puts it in its own plan confirmation of step 3, never in a question of its own' : 'put that line in the plan confirmation of step 3, never in a question of its own';
+  if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and ${disclose}. Then take it over; tell the user not to type in that window, which is theirs to manage, and check whether it still owns dev servers or ports.`);
+  else if (isUnmeasuredProbablyFree(tv)) L.push(`4. ${tv.measuredReason} Its queue was not measured, so state that to the user in one line and ${disclose}. Then take it over; tell the user not to type in that window, which is theirs to manage, and check whether it still owns dev servers or ports.`);
+  else if (tv.measuredLevel === 'PROBABLY_FREE') L.push(`4. ${tv.measuredReason} Taking over is fine; tell the user not to type in that window, which is theirs to manage, and check whether it still owns dev servers or ports.`);
   print(`TAKEOVER_TARGET: ${target}`);
   // ABOVE the fence, with the other provenance lines. The skill instructs the model
   // to treat anything after `--- END ---` as untrusted text that happened to be in
@@ -5626,9 +5626,9 @@ function cmdRelease(opts) {
     blockers.push({ code: 'registry-incomplete', text: `The session registry in ${flatPath(SESSIONS)} could not be read completely (${why}), so a session that is still running could be taken for one that ended. Nothing is released until it reads cleanly.` });
   }
   if (v.level === 'BUSY') {
-    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Take one go/no-go from the user, and on yes run release again with --force.` });
+    blockers.push({ code: 'source-busy', text: `The old session is busy: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
   } else if (isUnmeasuredProbablyFree(v) && !v.authorized) {
-    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Take one go/no-go from the user, and on yes run release again with --force.` });
+    blockers.push({ code: 'source-unmeasured', text: `The old session is still registered and its queue was not measured: ${flatPath(v.reason)} Say so to the user in one line and run release again with --force: their request to release, or the takeover they confirmed, is the go.` });
   }
   const hoursLeft = (record) => {
     const hours = Number.isInteger(record.idleHours) ? record.idleHours : keep.DEFAULT_IDLE_HOURS;
@@ -5765,7 +5765,7 @@ function cmdRelease(opts) {
       `${head('RELEASABLE')}   ${where}`,
       `${pad}would end ${endedNoun(toEnd.length)} and remove the ${keep.KEEP_FILENAME} marker; nothing was changed`,
       ...otherNotes('would also end', null),
-      `${pad}Run release again with --apply. It then tells you that the old session can be archived or removed.`,
+      `${pad}Run release again with --apply${opts.force ? ' --force' : ''}. It then tells you that the old session can be archived or removed.`,
     ];
   } else {
     const result = keep.retireAnchors(subject.root, toEnd, now, idleMs);
@@ -6381,9 +6381,9 @@ function printChain(links, live, me, forks = []) {
     const here = me.sessionId && ep.sessionId === me.sessionId ? '   ← HERE' : '';
     // One annotation per non-confirmed tier, and NONE for `confirmed` — an ordinary
     // link must stay quiet or the marker means nothing. `provisional` is the case
-    // this rendering exists for: `takeover` writes its edge while it generates the
-    // brief, before the user has been asked to confirm, so without a marker a
-    // declined takeover reads exactly like a completed one.
+    // this rendering exists for: a plain `takeover` writes its edge before any
+    // confirmation, so without a marker a declined takeover reads exactly like a
+    // completed one.
     const tier = edge ? confidenceNote(edge) : '';
     print(`  ${String(i + 1).padStart(2)}. ${sessionTag(ep.sessionId)}   ${endpointLabel(ep).padEnd(26)} ${liveState(ep.sessionId, live).padEnd(12)}${here}`);
     if (ep.worktree) print(`      ${ep.worktree}${ep.branch ? `   ${ep.branch}` : ''}`);

@@ -39,6 +39,7 @@ export CLAUDE_PROJECT_DIR="$PROJ"
 # realpathSync.native, so every containment bound below compares against this value
 # and never "$PROJ". R0pre asserts the two really do name one directory.
 PROJ_REAL="$(cd -P -- "$PROJ" && pwd -P)" || exit 1
+PROJ_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$PROJ")" || exit 1
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
 SUITE_TMP="$(mktemp -d)" || exit 1
 cleanup() {
@@ -202,11 +203,12 @@ check "L8 an AC row under a LATER '## ' section is not counted" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/filled.md" 2>/dev/null | grep -qF 'PLAN REQUIREMENTS OK'
 check "L9 the verdict line names the outcome in one line" "$(verdict $?)"
 # CRLF must not hide the heading behind an unmatched `$`.
-sed $'s/$/\r/' "$FIX/filled.md" > "$FIX/filled-crlf.md"
+node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[2], fs.readFileSync(process.argv[1], "utf8").replace(/\n/g, "\r\n"))' \
+  "$FIX/filled.md" "$FIX/filled-crlf.md"
 # Confirm the fixture really carries CRLF before asserting anything about it: a
-# sed that treated the replacement literally would give `## Requirementsr`, and
-# L10 would then fail on a premise unrelated to the contract it names.
-grep -q $'\r$' "$FIX/filled-crlf.md"
+# writer that dropped the carriage returns would leave an LF plan, and L10 would
+# then pass without judging a CRLF plan at all.
+node -e 'process.exitCode = require("fs").readFileSync(process.argv[1]).includes("\r\n") ? 0 : 1' "$FIX/filled-crlf.md"
 check "L10pre the CRLF fixture really contains carriage returns" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/filled-crlf.md" >/dev/null 2>&1
 check "L10 a CRLF plan is judged the same as an LF plan" "$(verdict $?)"
@@ -592,7 +594,7 @@ stage() {  # stage <session> <stem> <plan-body-file|->
   fi
   mkdir -p "$(dirname "$rp")"
   printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$PROJ/.zensu/logs/${stem}.log" > "$rp"
+    "$sid" "$PROJ_HOST/.zensu/logs/${stem}.log" > "$rp"
 }
 BODIES="$(mktemp -d)" || exit 1
 cat > "$BODIES/filled.md" <<'PLAN'
@@ -818,7 +820,7 @@ bash "$LOG" --tdd-begin --session "$SID_N" >/dev/null 2>&1
 RP_N="$(receipt_for "$SID_N")"
 mkdir -p "$(dirname "$RP_N")"
 printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
-  "$SID_N" "$PROJ/.zensu/logs/never-written.log" > "$RP_N"
+  "$SID_N" "$PROJ_HOST/.zensu/logs/never-written.log" > "$RP_N"
 ERR_N="$(bash "$LOG" --tdd-complete --session "$SID_N" 2>&1 >/dev/null)"
 [ $? -eq 0 ]
 check "N1 a receipt whose log has no sibling plan does not refuse" "$(verdict $?)"
@@ -1023,7 +1025,7 @@ case "$RP_V1" in
   *) check "WS1d fixture: receipt_for did not resolve to a keyed path under a state dir ($RP_V1)" FAIL; RP_V1="" ;;
 esac
 [ -n "$RP_V1" ] && printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
-  "$SID_V1" "$PROJ/.zensu/logs/${V1_STEM}.log" > "$RP_V1"
+  "$SID_V1" "$PROJ_HOST/.zensu/logs/${V1_STEM}.log" > "$RP_V1"
 ERR_V1="$(bash "$LOG" --tdd-complete --session "$SID_V1" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_V1" | grep -qF 'PLAN REQUIREMENTS MISSING'
 check "WS1d a legacy edit-landing-v1 receipt still drives the derivation (mid-upgrade sessions stay served)" "$(verdict $?)"
@@ -1110,13 +1112,16 @@ RW_STUB_OUT="$(zensu_session_key_canonical() { return 0; }
 check "RW2e an inherited zensu_session_key_canonical never stands in for the one the library defines" "$(verdict $?)"
 # A receipt-plumbing failure is an ENVIRONMENT error (exit 2), never the claim
 # verdict (exit 1) — a caller reads exit 1 as "an edit did not land". Staged by
-# making the destination unwritable while the claim itself really landed.
+# putting a file where the destination directory belongs while the claim itself
+# really landed.
 RW_GOOD2="scv1_$(printf 'b%.0s' $(seq 64))"
-chmod 500 "$RW_PROJ/.zensu/state"
+mv "$RW_PROJ/.zensu/state" "$RW_PROJ/.zensu/state-kept"
+: > "$RW_PROJ/.zensu/state"
 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
 RW_RC_PLUMBING=$?
-chmod 700 "$RW_PROJ/.zensu/state"
+rm -f "$RW_PROJ/.zensu/state"
+mv "$RW_PROJ/.zensu/state-kept" "$RW_PROJ/.zensu/state"
 [ "$RW_RC_PLUMBING" -eq 2 ]
 check "RW3 a receipt-plumbing failure exits 2 (environment), not 1 (a claim did not land)" "$(verdict $?)"
 # Discrimination for RW3, in BOTH directions: the same fixture with a writable

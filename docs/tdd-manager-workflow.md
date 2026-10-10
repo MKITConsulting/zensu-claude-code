@@ -345,15 +345,18 @@ payload `cwd` is never an Autopilot-state selector.
 The plugin-scoped reviewers and `zensu:zensu-plm` expose only the host's `Read`,
 `Grep`, and `Glob` tools. The `PreToolUse` gate repeats that exact allowlist after
 context revalidation: no shell, Git, control, MCP, or other tool outside that
-trio is available to those identities. Other `host-profile-v1` children retain
-ordinary non-command tools granted by their agent frontmatter and the Claude
-host, including file, Agent/Task, coordination, and report-writing operations
-where the host provides them. They cannot invoke `Bash`, `shell`, `exec`,
-`exec_command`, `terminal`, or `command`: arbitrary command execution cannot be
-confined by scanning its source text for protected tokens. The plugin gate adds
-no separate Agent/Task or nesting policy; Claude's host and agent definition
-decide those capabilities, and Claude currently prevents a subagent from
-spawning another subagent.
+trio is available to those identities. Other `host-profile-v1` children keep,
+of the tools their agent frontmatter and the Claude host grant, only the gate's
+allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
+task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
+`StructuredOutput`, `ReportFindings` and `SubagentHandback`, and a short named
+list of read-only MCP tools; the capability-gate row in
+[Configuration](configuration.md) lists every name. They cannot invoke `Bash`,
+`shell`, `exec`, `exec_command`, `terminal`, `command`, or any other tool, every
+other MCP tool included: arbitrary command execution cannot be confined by
+scanning its source text for protected tokens, and an MCP server can expose
+exactly that. The plugin gate adds no separate nesting policy: a child spawned by
+a child is classified and gated by the same rules.
 
 The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
 the interactive main thread creates one private lease generation containing
@@ -378,7 +381,8 @@ terms such as `session-control` or `main-v1`; only traversal roots and path
 filters carry this restriction.
 
 For a neutral child, the gate derives the principal only from the trusted hook
-payload. It denies command execution independently of command text, blocks
+payload. It denies every tool outside its allowlist, command execution
+included, independently of command text, blocks
 actual canonical access to protected Session Control and workflow-root paths,
 blocks every file mutation below the installed-plugin/private plugin-data roots
 (including symlink, case, and hard-link aliases), and blocks mutating Zensu
@@ -592,7 +596,15 @@ applies three rules **in this order**: the project root becomes `<project>`,
 `$HOME` becomes `~`, and any residual `/Users/<seg>`, `/home/<seg>` or `/root`
 prefix becomes `<home>`. Rule 1 must precede rule 2 because the project root is
 normally nested under `$HOME`; the residual rule is what makes the guarantee
-checkable rather than best-effort. Secret **names** are deliberately NOT
+checkable rather than best-effort. Each rule also covers Claude Code's
+dash-encoded spelling of a directory, the name it uses under `~/.claude/projects/`,
+in its `claude-<uid>` temp root and in its `claude-cli-nodejs` cache, where every
+character other than an ASCII letter or digit becomes `-`
+(`-Users-<name>-IdeaProjects-x`). This developer's encoded project root and `$HOME`
+are redacted wherever they start right after a path separator; another user's
+encoded home, and a one-segment spelling such as `-root`, only directly under one of
+those three directories, so a repository's own `-home-…` or `-root…` names stay
+untouched. The project root is redacted only when it fills the whole name. Secret **names** are deliberately NOT
 redacted — a name grants no access, and this repo's own workflows carry
 `secrets.GITHUB_TOKEN` in public. Credential **values** belong to a different
 gate (`hooks/pre-write-secret-scan.sh`).
@@ -669,6 +681,12 @@ publishable, so committing these artifacts stops adding to that pile.
 through a symlink or an alias that matches no known root is not caught (the one
 alias pair handled by hand is macOS's `/private/{tmp,var}`). A git repository
 root ABOVE the project root is covered only insofar as `$HOME` covers it. The
+dash-encoded spelling is lossy, because a dash cannot tell a separator from a name
+character: a user segment the encoded `$HOME` spelling does not match ends at its
+first dash (`-Users-first-last-x` keeps `-last-x`), another user's encoded home
+outside Claude Code's three directories is not caught, and a working directory
+whose encoded name exceeds 200 characters, which Claude Code cuts and suffixes with
+a hash, keeps the part past `$HOME`. The
 PostToolUse sweep — on BOTH registered matchers — only revisits artifacts modified in the last 5 minutes
 that git does not confirm as tracked and unchanged, so plans from earlier runs are
 out of reach — this is a writer-side fix, not a history rewrite. The same rule

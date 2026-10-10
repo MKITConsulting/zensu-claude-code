@@ -94,10 +94,16 @@ while IFS= read -r RAW_CMD; do
 done <<EOF
 $SKILL_CMDS
 EOF
-if [ "$RECOGNIZED" -ge 2 ] && [ "$UNRECOGNIZED" -eq 0 ]; then
+RECOGNIZER_PLATFORM="$(node -e '
+  const supported = require(process.argv[1]).PLATFORM_SUPPORTED;
+  process.stdout.write(supported === true ? "supported" : supported === false ? "refused" : "unknown");
+' "$DOCTOR_RECOGNIZER" 2>/dev/null)"
+if [ "$RECOGNIZER_PLATFORM" = supported ] && [ "$RECOGNIZED" -ge 2 ] && [ "$UNRECOGNIZED" -eq 0 ]; then
   check "P2d1 every doctor command the skill documents is accepted by the recognizer ($RECOGNIZED forms)" PASS
+elif [ "$RECOGNIZER_PLATFORM" = refused ] && [ "$RECOGNIZED" -eq 0 ] && [ "$UNRECOGNIZED" -ge 2 ]; then
+  check "P2d1 the recognizer refuses all $UNRECOGNIZED documented doctor forms on this platform, as its PLATFORM_SUPPORTED declares" PASS
 else
-  check "P2d1 skill documents a doctor command the recognizer refuses ($RECOGNIZED ok, $UNRECOGNIZED refused)" FAIL
+  check "P2d1 skill documents a doctor command the recognizer refuses ($RECOGNIZED ok, $UNRECOGNIZED refused, platform=$RECOGNIZER_PLATFORM)" FAIL
 fi
 if grep -qF 'AskUserQuestion' "$SKILL_MD" && grep -qiF 'report-only' "$SKILL_MD"; then
   check "P2e skill gates cleanup (AskUserQuestion + report-only non-interactive)" PASS
@@ -281,6 +287,33 @@ run_report() {
   ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$pd" ZENSU_CONFIG="$cfgenv" CLAUDE_PROJECT_DIR="$project" \
     node "$REPORT" 2>/dev/null
+}
+
+node_env_value() {
+  DOCTOR_PROBE_VALUE="$1" node -e 'process.stdout.write(process.env.DOCTOR_PROBE_VALUE || "")'
+}
+
+native_marker_path() {
+  DOCTOR_PROBE_DIR="$1" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    process.stdout.write(path.join(fs.realpathSync.native(path.resolve(process.env.DOCTOR_PROBE_DIR)), "pending-review.json"));
+  '
+}
+
+node_kind() {
+  local root="$1"
+  shift
+  DOCTOR_PROBE_ROOT="$root" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    let kind = "absent";
+    try {
+      const stat = fs.lstatSync(path.join(process.env.DOCTOR_PROBE_ROOT, ...process.argv.slice(1)));
+      kind = stat.isSymbolicLink() ? "link" : stat.isFIFO() ? "fifo" : stat.isFile() ? "file" : stat.isDirectory() ? "dir" : "other";
+    } catch (_) {}
+    process.stdout.write(kind);
+  ' "$@"
 }
 
 # --- all-green fixture -----------------------------------------------------
@@ -1691,8 +1724,8 @@ OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 # use it verbatim and the "no symlinked component" claim covers the root itself.
 # On macOS `mktemp -d` yields a path under /var/folders, and /var is a symlink to
 # /private/var — so the expectation has to be the resolved spelling, not $SBOX.
-STATE_DIR_REAL="$(cd -P -- "$STATE_DIR_CANON" && pwd -P)"
-case "$OUT" in *'pending-review.json is'*'old (TTL'*"expired, safe to clear: '$STATE_DIR_REAL/pending-review.json'"*) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted" PASS ;; *) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted (got: $OUT)" FAIL ;; esac
+STATE_MARKER_REAL="$(native_marker_path "$STATE_DIR_CANON")"
+case "$OUT" in *'pending-review.json is'*'old (TTL'*"expired, safe to clear: '$STATE_MARKER_REAL'"*) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted" PASS ;; *) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted (got: $OUT)" FAIL ;; esac
 : > "$STATE_DIR_CANON/pending-review.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json present and within'*) check "P1o fresh pending-review ✅" PASS ;; *) check "P1o fresh pending-review ✅ (got: $OUT)" FAIL ;; esac
@@ -1724,15 +1757,21 @@ esac
 # The printed path is a deletion target the skill hands to `rm`. A symlinked
 # component would point that outside the project, and `statSync` follows symlinks.
 SYM_PROJECT="$SBOX/sym-project"; mkdir -p "$SYM_PROJECT/.zensu" "$SBOX/sym-real"
-ln -s "$SBOX/sym-real" "$SYM_PROJECT/.zensu/state" 2>/dev/null
+DOCTOR_LINK_TARGET="$SBOX/sym-real" DOCTOR_LINK_PATH="$SYM_PROJECT/.zensu/state" node -e '
+  try { require("fs").symlinkSync(process.env.DOCTOR_LINK_TARGET, process.env.DOCTOR_LINK_PATH, "junction"); } catch (_) {}
+'
 : > "$SBOX/sym-real/pending-review.json"
 touch -t 202001010000 "$SBOX/sym-real/pending-review.json" 2>/dev/null
-OUT_SYM="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SYM_PROJECT")"
-case "$OUT_SYM" in
-  *'expired'*'The path is withheld'*) check "P1o3 a symlinked state directory withholds the deletion target" PASS ;;
-  *'expired, safe to clear'*) check "P1o3 a symlinked state directory withholds the deletion target (offered it)" FAIL ;;
-  *) check "P1o3 a symlinked state directory withholds the deletion target (got: $OUT_SYM)" FAIL ;;
-esac
+if [ "$(node_kind "$SYM_PROJECT" .zensu state)" = link ]; then
+  OUT_SYM="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SYM_PROJECT")"
+  case "$OUT_SYM" in
+    *'expired'*'The path is withheld'*) check "P1o3 a symlinked state directory withholds the deletion target" PASS ;;
+    *'expired, safe to clear'*) check "P1o3 a symlinked state directory withholds the deletion target (offered it)" FAIL ;;
+    *) check "P1o3 a symlinked state directory withholds the deletion target (got: $OUT_SYM)" FAIL ;;
+  esac
+else
+  check "P1o3 a symlinked state directory withholds the deletion target (SKIP: this host created no directory link)" PASS
+fi
 
 # A shell-active character is now OFFERED, not withheld: the value is emitted
 # single-quoted, where every byte but the quote is literal. The earlier policy was
@@ -1742,10 +1781,10 @@ esac
 DQ_PROJECT="$SBOX/dq\$(id) project"; mkdir -p "$DQ_PROJECT/.zensu/state"
 : > "$DQ_PROJECT/.zensu/state/pending-review.json"
 touch -t 202001010000 "$DQ_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
-DQ_REAL="$(cd -P -- "$DQ_PROJECT/.zensu/state" && pwd -P)"
+DQ_MARKER_REAL="$(native_marker_path "$DQ_PROJECT/.zensu/state")"
 OUT_DQ="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$DQ_PROJECT")"
 case "$OUT_DQ" in
-  *"expired, safe to clear: '$DQ_REAL/pending-review.json'"*) check "P1o4 a shell-active character and a space are quoted, not refused" PASS ;;
+  *"expired, safe to clear: '$DQ_MARKER_REAL'"*) check "P1o4 a shell-active character and a space are quoted, not refused" PASS ;;
   *) check "P1o4 a shell-active character and a space are quoted, not refused (got: $OUT_DQ)" FAIL ;;
 esac
 # The quoting is what makes that safe, so pin the quoting itself rather than only
@@ -1758,8 +1797,9 @@ esac
 # A control byte is still refused. Quoting would make it harmless to the shell,
 # but it would corrupt the report line a model reads back.
 CTRL_DIR="$(printf '%s/ctrl\tproject' "$SBOX")"
-if mkdir -p "$CTRL_DIR/.zensu/state" 2>/dev/null; then
-  : > "$CTRL_DIR/.zensu/state/pending-review.json"
+if mkdir -p "$CTRL_DIR/.zensu/state" 2>/dev/null \
+  && : > "$CTRL_DIR/.zensu/state/pending-review.json" \
+  && [ "$(node_kind "$CTRL_DIR" .zensu state pending-review.json)" = file ]; then
   touch -t 202001010000 "$CTRL_DIR/.zensu/state/pending-review.json" 2>/dev/null
   OUT_CTRL="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$CTRL_DIR")"
   case "$OUT_CTRL" in
@@ -1768,7 +1808,7 @@ if mkdir -p "$CTRL_DIR/.zensu/state" 2>/dev/null; then
     *) check "P1o4b a control byte in the path withholds the deletion target (got: $OUT_CTRL)" FAIL ;;
   esac
 else
-  check "P1o4b a control byte in the path withholds the deletion target (SKIP: filesystem refused the name)" PASS
+  check "P1o4b a control byte in the path withholds the deletion target (SKIP: the filesystem cannot hold a name with a control byte)" PASS
 fi
 
 # The `nlink === 1` arm. A hard-linked marker is refused because the confirmed `rm`
@@ -2131,9 +2171,10 @@ case "$OUT" in *'every stateful Zensu tool fails closed'*) check "P1ad unbound s
 # must not be reported as one. Both sub-branches matter: with a path it renders
 # the parenthesised directory the user has to re-create, and with the path
 # unavailable it must still classify rather than fall back to a generic row.
+GONE_ROOT_SPELLED="$(node_env_value /gone/worktree)"
 OUT="$(run_report_binding orphaned-project-root /gone/worktree)"
 case "$OUT" in
-  *'the project root recorded for this session no longer exists (/gone/worktree)'*)
+  *"the project root recorded for this session no longer exists ($GONE_ROOT_SPELLED)"*)
     case "$OUT" in
       *'has no valid Session Control record'*)
         check "P1ad1 orphaned root binding row (also claims no record: $OUT)" FAIL ;;
@@ -2184,9 +2225,10 @@ case "$OUT" in
 esac
 # Control: an ordinary path still renders, so the bound is on the delimiter and not
 # on every value.
+PLAIN_ROOT_SPELLED="$(node_env_value /tmp/plain-worktree)"
 OUT="$(run_report_binding orphaned-project-root '/tmp/plain-worktree')"
 case "$OUT" in
-  *'no longer exists (/tmp/plain-worktree)'*)
+  *"no longer exists ($PLAIN_ROOT_SPELLED)"*)
     check "P1ad2b-control an ordinary recorded root still renders in the parenthetical" PASS ;;
   *) check "P1ad2b-control an ordinary recorded root still renders (got: $OUT)" FAIL ;;
 esac
@@ -3037,7 +3079,8 @@ absent_row_out "P1bt2 the raw parser message does not reach the report" "$CFG_OU
 case "$CFG_OUT" in *'invalid JSON in'*'(the whole file is ignored, defaults apply)'*)
   check "P1bt1a a non-capped failure KEEPS the loader verdict" PASS ;;
   *) check "P1bt1a the loader verdict was dropped from the parse class" FAIL ;; esac
-case "$CFG_OUT" in *'invalid JSON in'*"$CFG_DECOY"*)
+CFG_DECOY_SPELLED="$(node_env_value "$CFG_DECOY")"
+case "$CFG_OUT" in *'invalid JSON in'*"$CFG_DECOY_SPELLED"*)
   check "P1bt1 a malformed config file is still reported, by path" PASS ;;
   *) check "P1bt1 malformed config file no longer reported (got: $CFG_OUT)" FAIL ;; esac
 # The FR-011 retrofit widened readJson's vocabulary to include `unreadable (<code>)`, but
@@ -3048,6 +3091,7 @@ case "$CFG_OUT" in *'invalid JSON in'*"$CFG_DECOY"*)
 CFG_NOREAD="$SBOX/noread-cfg.json"
 printf '%s\n' '{"hooks":{}}' > "$CFG_NOREAD"
 chmod 000 "$CFG_NOREAD" 2>/dev/null || true
+NOREAD_OUT=""
 if [ -r "$CFG_NOREAD" ]; then
   # Running as a principal that ignores the mode bits (root, or a host without them):
   # the fixture cannot produce EACCES, so the check would be vacuous. Say so.
@@ -3406,7 +3450,7 @@ case "$(run_report "$SBOX/plug" "$SBOX/nonexistent-dir/cfg.json" "$EMPTY_PROJECT
   check "P1bg9 an absent config is still reported as absent, not as oversized" PASS ;;
   *) check "P1bg9 an absent config lost its row" FAIL ;; esac
 H_FIFO="$SBOX/home-fifo"; mkdir -p "$H_FIFO/.claude"
-if mkfifo "$H_FIFO/.claude/settings.json" 2>/dev/null && [ -p "$H_FIFO/.claude/settings.json" ]; then
+if mkfifo "$H_FIFO/.claude/settings.json" 2>/dev/null && [ "$(node_kind "$H_FIFO" .claude settings.json)" = fifo ]; then
   # BOUNDED on purpose. The mutation this pins — dropping O_NONBLOCK from the open
   # — makes the renderer block forever on a writer-less FIFO, and an unbounded
   # capture would turn that regression into a hang that costs every check below it
@@ -3503,11 +3547,12 @@ if mkfifo "$H_FIFO/.claude/settings.json" 2>/dev/null && [ -p "$H_FIFO/.claude/s
   fi
   rm -f "$CFG_FIFO"
 else
-  check "P1bg FIFO at the settings path — SKIP (mkfifo unavailable on this host)" PASS
-  check "P1bg1 FIFO at the config path — SKIP (mkfifo unavailable on this host)" PASS
-  check "P1bg2 FIFO at the config path — SKIP (mkfifo unavailable on this host)" PASS
-  check "P1bgb config FIFO wording — SKIP (mkfifo unavailable on this host)" PASS
-  check "P1bgc config FIFO wording — SKIP (mkfifo unavailable on this host)" PASS
+  rm -f "$H_FIFO/.claude/settings.json"
+  check "P1bg FIFO at the settings path — SKIP (this host makes no FIFO that node can see)" PASS
+  check "P1bg1 FIFO at the config path — SKIP (this host makes no FIFO that node can see)" PASS
+  check "P1bg2 FIFO at the config path — SKIP (this host makes no FIFO that node can see)" PASS
+  check "P1bgb config FIFO wording — SKIP (this host makes no FIFO that node can see)" PASS
+  check "P1bgc config FIFO wording — SKIP (this host makes no FIFO that node can see)" PASS
 fi
 # "NEVER writes" is the module's first contract line and nothing asserted it.
 if command -v shasum >/dev/null 2>&1; then HASHER="shasum"; elif command -v cksum >/dev/null 2>&1; then HASHER="cksum"; else HASHER=""; fi
@@ -4070,10 +4115,10 @@ AP_FOREIGN="scv1_$(printf 'c%.0s' $(seq 64))"
 # one hole the helper cannot close: nothing here proves the reader accepts a record
 # the product actually WRITES. P1nw below closes exactly that, with a real one.
 ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
-  RUN_ID="$1" RUN_STAGE="$2" RUN_OWNER="$3" RUN_WS="${4:--}" RUN_ROOT="${5:-$AP_P}" \
+  printf '%s' "${4:--}" | RUN_ID="$1" RUN_STAGE="$2" RUN_OWNER="$3" RUN_ROOT="${5:-$AP_P}" \
   node -e '
     var fs = require("fs");
-    var ws = process.env.RUN_WS;
+    var ws = fs.readFileSync(0, "utf8");
     // CANONICAL, because that is what the product stores: the worker replaces its
     // own project-root argument with `realpathSync.native(path.resolve(...))` before
     // any mode runs, so every record `begin` mints carries the canonical spelling.
@@ -5904,7 +5949,7 @@ rm -rf "$AP_REAL"
 # ACCEPTS and this report withholds — which is why the row may not blame the file
 # for it, and why "cannot read" was the wrong wording.
 rm -f "$AP_STATE"/autopilot-run-*.json
-AP_C1_WS="$(node -e 'process.stdout.write("/w/a\u2028b")')"
+AP_C1_WS="$(printf '/w/a\342\200\250b')"
 ap_run run_c1_a GATES "$AP_FOREIGN" "$AP_C1_WS"
 AP_C1_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_C1_OUT" | grep -qF 'does not render' \
@@ -7570,13 +7615,14 @@ P6_NOSUFFIX_OUT="$(
   mkdir -p "$P6_TMP/hooks/lib"
   for f in "$PLUGIN_DIR"/hooks/lib/*.js; do cp "$f" "$P6_TMP/hooks/lib/"; done
   {
-    printf 'const real = require(%s);\n' "\"$PLUGIN_DIR/hooks/lib/session-control-core-v1.js\""
+    printf 'const real = require(process.env.P6_REAL_CORE);\n'
     printf 'const clone = Object.assign({}, real);\n'
     printf 'delete clone.RESTORE_HISTORY_RACED_SUFFIX;\n'
     printf 'module.exports = clone;\n'
   } > "$P6_TMP/hooks/lib/session-control-core-v1.js"
   ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
     CLAUDE_PROJECT_DIR="$P6_PROJECT" CLAUDE_PLUGIN_ROOT="$P6_TMP" \
+    P6_REAL_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" \
     node "$P6_TMP/hooks/lib/zensu-doctor-report.js" 2>&1
   rm -rf "$P6_TMP"
 )"
@@ -7869,7 +7915,7 @@ if [ -f "$CORE_OR" ]; then
     printf 'const fs = require("fs");\n'
     printf 'const clone = Object.assign({}, real);\n'
     printf 'clone.readWorkflowState = function () {\n'
-    printf '  try { fs.appendFileSync("%s", "r\\n"); } catch (e) {}\n' "$P6_READLOG"
+    printf '  try { fs.appendFileSync(process.env.P6_READLOG, "r\\n"); } catch (e) {}\n'
     printf '  return real.readWorkflowState.apply(real, arguments);\n'
     printf '};\n'
     printf 'module.exports = clone;\n'
@@ -7879,7 +7925,7 @@ P6_ONEREAD_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC
   ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$P6_ONEREAD" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
   ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
-  node "$REPORT" 2>/dev/null)"
+  P6_READLOG="$P6_READLOG" node "$REPORT" 2>/dev/null)"
 P6_READS="$(wc -l < "$P6_READLOG" 2>/dev/null | tr -d ' ')"
 case "$P6_ONEREAD_OUT" in
   *'was RE-CREATED'*) check "P6s10-control the instrumented tree still renders the restore row" PASS ;;
@@ -7889,7 +7935,7 @@ esac
 # workflow document it finds, including this session's. That read answers a different
 # question and is deliberately left alone. The bound here is the two provenance rows,
 # which read the SAME document for the SAME reason and now share one read.
-if [ "${P6_READS:-0}" -le 2 ]; then
+if [ "${P6_READS:-0}" -ge 1 ] && [ "${P6_READS:-0}" -le 2 ]; then
   check "P6s10 the two provenance rows share one workflow-document read ($P6_READS total in the report)" PASS
 else check "P6s10 the two provenance rows share one workflow-document read ($P6_READS total in the report)" FAIL; fi
 rm -rf "$P6_ONEREAD"; rm -f "$P6_READLOG"
@@ -8587,63 +8633,77 @@ p6s_h2_report() { # $1=plugin dir  $2=project  $3=report to run (default: the tr
 # carrying ` : `, and the directory carrying the same bytes is concatenated beside them.
 # `stateProjectRoot` screens the recorded root with CONTROL_BYTE_RE only, so every
 # positional rule survives it.
-P6S_AP_FORGE="$SBOX/ap : forged"
-mkdir -p "$P6S_AP_FORGE/.zensu/state"
-rm -f "$AP_STATE"/autopilot-run-*.json
-ap_run_valid run_fold GATES "$AP_OWN" "/w/t"
-cp "$AP_STATE/autopilot-run-run_fold.json" "$P6S_AP_FORGE/.zensu/state/"
-P6S_AP_ROW="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$AP_OWN" \
-  ZDOC_SESSION_PROJECT_ROOT="$P6S_AP_FORGE" \
-  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
-  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" \
-  CLAUDE_PROJECT_DIR="$AP_P" node "$REPORT" 2>/dev/null | grep -F 'autopilot:' | head -1)"
-if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged'; then
-  check "H3-control the autopilot row renders and carries the recorded directory" PASS
-else check "H3-control the autopilot row did not render its directory" FAIL; fi
-if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged' \
-  && ! printf '%s' "$P6S_AP_ROW" | grep -qF ' : '; then
-  check "H3 the autopilot row folds the state directory" PASS
-else check "H3 the autopilot row renders the state directory raw" FAIL; fi
-rm -f "$AP_STATE"/autopilot-run-*.json
-P6S_H2_NOCORE="$SBOX/h2a : forged"
-p6s_h2_tree "$P6S_H2_NOCORE" no
-P6S_H2_ROW_A="$(p6s_row_of "$(p6s_h2_report "$P6S_H2_NOCORE" "$P6_PROJECT")" 'could not be classified')"
-if [ -n "$P6S_H2_ROW_A" ]; then
-  check "H2a-control the could-not-classify arm renders from a coreless tree" PASS
-else check "H2a-control the could-not-classify arm did not render" FAIL; fi
-if [ -n "$P6S_H2_ROW_A" ] && printf '%s' "$P6S_H2_ROW_A" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_ROW_A" | grep -qF ' : '; then
-  check "H2a the could-not-classify arm folds the plugin directory" PASS
-else check "H2a the could-not-classify arm renders the plugin directory raw" FAIL; fi
+P6S_COLON_PROBE="$SBOX/colon : probe"
+mkdir -p "$P6S_COLON_PROBE"
+if [ "$(node_kind "$SBOX" "colon : probe")" = dir ]; then
+  P6S_AP_FORGE="$SBOX/ap : forged"
+  mkdir -p "$P6S_AP_FORGE/.zensu/state"
+  rm -f "$AP_STATE"/autopilot-run-*.json
+  ap_run_valid run_fold GATES "$AP_OWN" "/w/t"
+  cp "$AP_STATE/autopilot-run-run_fold.json" "$P6S_AP_FORGE/.zensu/state/"
+  P6S_AP_ROW="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$AP_OWN" \
+    ZDOC_SESSION_PROJECT_ROOT="$P6S_AP_FORGE" \
+    ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+    ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" \
+    CLAUDE_PROJECT_DIR="$AP_P" node "$REPORT" 2>/dev/null | grep -F 'autopilot:' | head -1)"
+  if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged'; then
+    check "H3-control the autopilot row renders and carries the recorded directory" PASS
+  else check "H3-control the autopilot row did not render its directory" FAIL; fi
+  if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged' \
+    && ! printf '%s' "$P6S_AP_ROW" | grep -qF ' : '; then
+    check "H3 the autopilot row folds the state directory" PASS
+  else check "H3 the autopilot row renders the state directory raw" FAIL; fi
+  rm -f "$AP_STATE"/autopilot-run-*.json
+  P6S_H2_NOCORE="$SBOX/h2a : forged"
+  p6s_h2_tree "$P6S_H2_NOCORE" no
+  P6S_H2_ROW_A="$(p6s_row_of "$(p6s_h2_report "$P6S_H2_NOCORE" "$P6_PROJECT")" 'could not be classified')"
+  if [ -n "$P6S_H2_ROW_A" ]; then
+    check "H2a-control the could-not-classify arm renders from a coreless tree" PASS
+  else check "H2a-control the could-not-classify arm did not render" FAIL; fi
+  if [ -n "$P6S_H2_ROW_A" ] && printf '%s' "$P6S_H2_ROW_A" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_ROW_A" | grep -qF ' : '; then
+    check "H2a the could-not-classify arm folds the plugin directory" PASS
+  else check "H2a the could-not-classify arm renders the plugin directory raw" FAIL; fi
 
-P6S_H2_STRIP="$SBOX/h2b : forged"
-p6s_h2_tree "$P6S_H2_STRIP" strip
-P6S_H2_REPORT="$(p6s_h2_report "$P6S_H2_STRIP" "$P6_PROJECT")"
-P6S_H2_REBUILD="$(p6s_row_of "$P6S_H2_REPORT" 'not checked for rebuild')"
-P6S_H2_RESTORE="$(p6s_row_of "$P6S_H2_REPORT" 'restore provenance')"
-if [ -n "$P6S_H2_REBUILD" ] && [ -n "$P6S_H2_RESTORE" ]; then
-  check "H2b-control both missing-token arms render from the stripped core" PASS
-else check "H2b-control a missing-token arm did not render" FAIL; fi
-if [ -n "$P6S_H2_REBUILD" ] && printf '%s' "$P6S_H2_REBUILD" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_REBUILD" | grep -qF ' : '; then
-  check "H2b the rebuild missing-token arm folds the plugin directory" PASS
-else check "H2b the rebuild missing-token arm renders the plugin directory raw" FAIL; fi
-if [ -n "$P6S_H2_RESTORE" ] && printf '%s' "$P6S_H2_RESTORE" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_RESTORE" | grep -qF ' : '; then
-  check "H2b2 the restore missing-token arm folds the plugin directory" PASS
-else check "H2b2 the restore missing-token arm renders the plugin directory raw" FAIL; fi
+  P6S_H2_STRIP="$SBOX/h2b : forged"
+  p6s_h2_tree "$P6S_H2_STRIP" strip
+  P6S_H2_REPORT="$(p6s_h2_report "$P6S_H2_STRIP" "$P6_PROJECT")"
+  P6S_H2_REBUILD="$(p6s_row_of "$P6S_H2_REPORT" 'not checked for rebuild')"
+  P6S_H2_RESTORE="$(p6s_row_of "$P6S_H2_REPORT" 'restore provenance')"
+  if [ -n "$P6S_H2_REBUILD" ] && [ -n "$P6S_H2_RESTORE" ]; then
+    check "H2b-control both missing-token arms render from the stripped core" PASS
+  else check "H2b-control a missing-token arm did not render" FAIL; fi
+  if [ -n "$P6S_H2_REBUILD" ] && printf '%s' "$P6S_H2_REBUILD" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_REBUILD" | grep -qF ' : '; then
+    check "H2b the rebuild missing-token arm folds the plugin directory" PASS
+  else check "H2b the rebuild missing-token arm renders the plugin directory raw" FAIL; fi
+  if [ -n "$P6S_H2_RESTORE" ] && printf '%s' "$P6S_H2_RESTORE" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_RESTORE" | grep -qF ' : '; then
+    check "H2b2 the restore missing-token arm folds the plugin directory" PASS
+  else check "H2b2 the restore missing-token arm renders the plugin directory raw" FAIL; fi
 
-# H2c — the own-document rows. Their slot is a PROJECT path rather than a plugin one,
-# so it is reachable from inside the session rather than from a launch variable, which
-# is the weaker precondition of the two and the reason S4 named them.
-P6S_FORGE_PROJECT="$SBOX/h2p : forged"
-mkdir -p "$P6S_FORGE_PROJECT/.zensu/state"
-rm -f "$P6S_FORGE_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
-P6S_H2_OWN="$(p6s_h2_report "$SBOX/plug" "$P6S_FORGE_PROJECT" "$REPORT" | grep -F 'own workflow document is MISSING' | head -1)"
-if [ -n "$P6S_H2_OWN" ]; then
-  check "H2c-control the own-document MISSING row renders for a forging project root" PASS
-else check "H2c-control the own-document MISSING row did not render" FAIL; fi
-if [ -n "$P6S_H2_OWN" ] && printf '%s' "$P6S_H2_OWN" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_OWN" | grep -qF ' : '; then
-  check "H2c the own-document MISSING row folds its path" PASS
-else check "H2c the own-document MISSING row renders its path raw" FAIL; fi
+  # H2c — the own-document rows. Their slot is a PROJECT path rather than a plugin one,
+  # so it is reachable from inside the session rather than from a launch variable, which
+  # is the weaker precondition of the two and the reason S4 named them.
+  P6S_FORGE_PROJECT="$SBOX/h2p : forged"
+  mkdir -p "$P6S_FORGE_PROJECT/.zensu/state"
+  rm -f "$P6S_FORGE_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+  P6S_H2_OWN="$(p6s_h2_report "$SBOX/plug" "$P6S_FORGE_PROJECT" "$REPORT" | grep -F 'own workflow document is MISSING' | head -1)"
+  if [ -n "$P6S_H2_OWN" ]; then
+    check "H2c-control the own-document MISSING row renders for a forging project root" PASS
+  else check "H2c-control the own-document MISSING row did not render" FAIL; fi
+  if [ -n "$P6S_H2_OWN" ] && printf '%s' "$P6S_H2_OWN" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_OWN" | grep -qF ' : '; then
+    check "H2c the own-document MISSING row folds its path" PASS
+  else check "H2c the own-document MISSING row renders its path raw" FAIL; fi
+else
+  check "H3-control skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H3 skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2a-control skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2a skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2b-control skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2b skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2b2 skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2c-control skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+  check "H2c skipped: this filesystem cannot hold ' : ' in a directory name" PASS
+fi
 
 # H2-land — every H2 check asserts the ABSENCE of a forged pair, and an absence is
 # satisfied by a row that carries no path at all. That state is reachable: both path
@@ -9018,8 +9078,8 @@ fi
 # separating this case from P1tp is which log the receipt names.
 printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
 printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$SBOX/outside.log"
-printf '{"schema":"edit-landing-v2","session":"x","log":"%s","claims":1,"clean":false}\n' "$SBOX/outside.log" \
-  > "$TOPO_RECEIPT"
+node -e 'process.stdout.write(JSON.stringify({ schema: "edit-landing-v2", session: "x", log: require("path").resolve(process.argv[1]), claims: 1, clean: false }) + "\n")' \
+  "$SBOX/outside.log" > "$TOPO_RECEIPT"
 TOPO_OUT_ESC="$(run_report_topo)"
 case "$TOPO_OUT_ESC" in
   *'topology:'*'run log outside'*'missing check, not an all-clear'*)
@@ -9056,7 +9116,7 @@ esac
 # withheld clause — could be deleted with every suite green.
 TOPO_ODD="$SBOX/topo-odd\`x"
 mkdir -p "$TOPO_ODD/src"
-git init -q --template= "$TOPO_ODD" >/dev/null 2>&1
+(cd "$TOPO_ODD" && git init -q --template= .) >/dev/null 2>&1
 printf 'v1\n' > "$TOPO_ODD/src/app.ts"
 TOPO_ODD_ABS="$(cd "$TOPO_ODD" && pwd -P)"
 printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_ODD_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
@@ -9890,9 +9950,10 @@ case "$OUT_WK30" in
 esac
 WK_NESTED="$WK_WT/.worktrees/nested-clone"
 mkdir -p "$WK_NESTED" && git -C "$WK_NESTED" init -q >/dev/null 2>&1
+WK_NESTED_REL="$(node -p 'require("path").join(process.argv[1], process.argv[2])' .worktrees nested-clone)"
 OUT_WK48="$(ZDOC_WORKTREE_KEEP=off wk_report)"
 case "$OUT_WK48" in
-  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'while a nested repository sits inside it; the release pass keeps the marker until every nested repository there is moved out or removed'*'✅  worktree: a nested repository in '*'keeps the keep marker once no session anchor holds it — the first in name order is .worktrees/nested-clone (repository)'*)
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'while a nested repository sits inside it; the release pass keeps the marker until every nested repository there is moved out or removed'*'✅  worktree: a nested repository in '*'keeps the keep marker once no session anchor holds it — the first in name order is '"$WK_NESTED_REL"' (repository)'*)
     check "P1wk48 with the flag off a nested repository is named as what still holds the marker" PASS ;;
   *) check "P1wk48 with the flag off a nested repository is named as what still holds the marker (got: $(printf '%s' "$OUT_WK48" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
 esac
@@ -9902,7 +9963,7 @@ case "$OUT_WK48" in
 esac
 OUT_WK49="$(wk_report)"
 case "$OUT_WK49" in
-  *'✅  worktree: keep marker present in '*'✅  worktree: a nested repository in '*'the first in name order is .worktrees/nested-clone (repository); Claude Desktop then leaves the directory on disk'*)
+  *'✅  worktree: keep marker present in '*'✅  worktree: a nested repository in '*'the first in name order is '"$WK_NESTED_REL"' (repository); Claude Desktop then leaves the directory on disk'*)
     check "P1wk49 with the flag on a nested repository renders the hold row beside the marker row" PASS ;;
   *) check "P1wk49 with the flag on a nested repository renders the hold row beside the marker row (got: $(printf '%s' "$OUT_WK49" | grep 'worktree:' | tr '\n' '|' | cut -c1-400))" FAIL ;;
 esac

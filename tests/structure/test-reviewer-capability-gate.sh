@@ -280,10 +280,146 @@ else
 fi
 assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\",\"content\":\"session-control main-v1 ZENSU_SESSION_KEY\"}"
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
-assert_case "neutral agent keeps unrelated MCP tools" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
+assert_case "neutral agent is denied an MCP tool outside the named read-only list" deny arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
 assert_case "neutral agent keeps read-only Zensu MCP tools" allow arbitrary-custom mcp__zensu__get_feature '{"feature_id":"F-1"}'
-assert_case "neutral agent keeps browser tools of a foreign server keyed playwright" allow arbitrary-custom mcp__playwright__browser_snapshot '{}'
+assert_case "neutral agent is denied browser tools of a foreign server keyed playwright" deny arbitrary-custom mcp__playwright__browser_snapshot '{}'
 assert_case "neutral nested-agent capability stays host-governed" allow arbitrary-custom Agent '{"subagent_type":"general-purpose","prompt":"review session-control and main-v1"}'
+assert_case "neutral agent cannot run code through context-mode ctx_execute" deny general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"cat .zensu/state/*.json"}'
+assert_case "neutral agent cannot run a command through a terminal MCP server" deny general-purpose mcp__terminal__run_in_terminal '{"command":"ls .zensu/state"}'
+assert_case "neutral StructuredOutput may name a .zensu file in its result" allow general-purpose StructuredOutput '{"target_files":[".zensu/state/tdd-phase.json"],"summary":"inspected"}'
+assert_case "neutral Read under .zensu/state stays denied beside that StructuredOutput" deny general-purpose Read "{\"file_path\":\"$PROJECT/.zensu/state/tdd-phase-${SESSION_KEY}.json\"}"
+
+native_real() { node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.argv[1]))' "$1"; }
+native_join() { node -e 'process.stdout.write(require("node:path").join(process.argv[1], process.argv[2]))' "$1" "$2"; }
+NATIVE_PROJECT="$(native_real "$PROJECT")"
+NATIVE_PLUGIN="$(bash "$HOST_PATH" "$PLUGIN")"
+HOST_PROFILE_VERDICTS="$(node -e '
+  const gate = require(process.argv[1]);
+  const [projectRoot, pluginRoot, pluginData, contextFile] = process.argv.slice(2);
+  const trusted = { projectRoot, toolCwd: projectRoot, pluginRoot, pluginData, contextFile };
+  const rows = [];
+  const verdict = (ok, label, reason) => rows.push(`${ok ? "PASS" : "FAIL"}\t${label}${ok ? "" : ` (got: ${reason})`}`);
+  const judge = (tool, input) => {
+    try { return gate.neutralViolation({ tool_name: tool, tool_input: input }, trusted); }
+    catch (error) { return `threw ${error.message}`; }
+  };
+  const host = [...gate.HOST_PROFILE_TOOLS];
+  const mcp = [...gate.HOST_PROFILE_MCP_READ_TOOLS];
+  const listed = `${host.join(" ")}|${mcp.join(" ")}|${[...gate.NON_PATH_TOOLS].join(" ")}`;
+  verdict(listed === "Read Grep Glob Edit Write MultiEdit NotebookEdit apply_patch LSP WebFetch WebSearch ToolSearch TodoWrite TaskCreate TaskGet TaskList TaskUpdate Agent SendMessage AskUserQuestion StructuredOutput ReportFindings SubagentHandback|mcp__plugin_context7_context7__resolve-library-id mcp__plugin_context7_context7__query-docs|StructuredOutput ReportFindings SubagentHandback AskUserQuestion",
+    "the host-profile-v1 allowlist, its named MCP tools and its path-free tools are exactly the reviewed sets", listed);
+  for (const tool of [...host, ...mcp]) {
+    const reason = judge(tool, { path: "src", pattern: "x" });
+    verdict(reason === null, `host-profile-v1 admits allowlisted tool ${tool}`, reason);
+  }
+  const allowance = `a neutral subagent may use only ${host.join(", ")}, the MCP tools ${mcp.join(", ")}, and read-only Zensu MCP tools`;
+  for (const tool of ["Skill", "Monitor", "Task", "TaskOutput", "TaskStop", "BashOutput", "KillShell", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "REPL", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
+    const reason = judge(tool, { path: "src", command: "pwd", prompt: "x" });
+    verdict(reason === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `host-profile-v1 denies ${JSON.stringify(tool)} outside its allowlist and names the allowlist`, reason);
+  }
+  const commandLead = "host-profile-v1 cannot invoke command-execution tools. To search the project, ";
+  for (const tool of ["Bash", "shell", "exec", "exec_command", "terminal", "command", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__plugin_context-mode_context-mode__ctx_batch_execute", "mcp__terminal__run_in_terminal", "mcp__playwright__browser_run_code_unsafe", "mcp__desktop-commander__execute_command", "mcp__python__run_code"]) {
+    const reason = judge(tool, { path: "src/probe.js", code: "x", command: "pwd" });
+    verdict(typeof reason === "string" && reason.startsWith(commandLead), `host-profile-v1 gives ${tool} the command-execution deny and its search remedy`, reason);
+  }
+  for (const [label, tool, input, expected] of [
+    ["an admitted MCP tool still has its path inputs checked", "mcp__zensu__get_feature", { feature_id: "F-1", file_path: ".zensu/state/tdd-phase.json" }, "host-profile-v1 cannot access a protected Session Control path"],
+    ["a Zensu MCP mutation stays outside the read allowlist", "mcp__zensu__update_feature", { feature_id: "F-1" }, "host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist"],
+    ["an admitted path-taking tool still cannot name .zensu", "LSP", { operation: "hover", filePath: ".zensu/state/tdd-phase.json", line: 1, character: 1 }, "host-profile-v1 cannot access a protected Session Control path"],
+    ["neutral StructuredOutput may name .zensu under any path-like key", "StructuredOutput", { target_files: [".zensu/state/x"], root: ".zensu", file_path: ".zensu/state/y" }, null],
+    ["neutral ReportFindings may cite a .zensu file", "ReportFindings", { findings: [{ file: ".zensu/state/tdd-phase.json", summary: "x" }], files: [".zensu/state/x"] }, null],
+    ["neutral handback may quote a patch header into .zensu", "SubagentHandback", { message: "*** Update File: .zensu/state/tdd-phase.json\nreport" }, null],
+    ["neutral AskUserQuestion may mention a .zensu path", "AskUserQuestion", { questions: [{ question: "Inspect .zensu/state?", header: "Scope" }], root: ".zensu" }, null],
+  ]) {
+    const reason = judge(tool, input);
+    verdict(reason === expected, label, reason);
+  }
+  process.stdout.write(rows.join("\n"));
+' "$POLICY" "$NATIVE_PROJECT" "$NATIVE_PLUGIN" "$PLUGIN_DATA" "$SESSION_CONTEXT" 2>&1)"
+HOST_PROFILE_STATUS=$?
+BATCH_TAB="$(printf '\t')"
+if [ "$HOST_PROFILE_STATUS" -ne 0 ] || [ -z "$HOST_PROFILE_VERDICTS" ]; then
+  check "host-profile-v1 policy batch ran (node exited $HOST_PROFILE_STATUS: ${HOST_PROFILE_VERDICTS:-<empty>})" FAIL
+else
+  while IFS="$BATCH_TAB" read -r verdict label; do
+    check "$label" "$verdict"
+  done <<EOF
+$HOST_PROFILE_VERDICTS
+EOF
+fi
+
+SRC_EXAMPLE="$(native_join "$NATIVE_PROJECT" src)"
+DOCS_EXAMPLE="$(native_join "$NATIVE_PROJECT" docs)"
+SEARCH_LEAD="To search the project, call Grep or Glob with a path that names a subdirectory of the project root $NATIVE_PROJECT other than .zensu"
+BASH_REMEDY_REASON="$(deny_reason general-purpose Bash '{"command":"grep -r session ."}')"
+if [ "$BASH_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+  check "the neutral Bash deny names the Grep/Glob remedy and the project's searchable subdirectories" PASS
+else
+  check "the neutral Bash deny must name the Grep/Glob remedy (got: ${BASH_REMEDY_REASON:-<empty>})" FAIL
+fi
+TRAVERSAL_REMEDY_REASON="$(deny_reason general-purpose Grep '{"pattern":"phase","path":"."}')"
+if [ "$TRAVERSAL_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+  check "the neutral traversal deny names the subdirectory remedy" PASS
+else
+  check "the neutral traversal deny must name the subdirectory remedy (got: ${TRAVERSAL_REMEDY_REASON:-<empty>})" FAIL
+fi
+REVIEWER_TRAVERSAL_REASON="$(deny_reason review-aspect Glob '{"pattern":"**/*"}')"
+if [ "$REVIEWER_TRAVERSAL_REASON" = "reviewer-capability-v1 deny: reviewer-readonly-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+  check "the reviewer traversal deny names the same subdirectory remedy" PASS
+else
+  check "the reviewer traversal deny must name the subdirectory remedy (got: ${REVIEWER_TRAVERSAL_REASON:-<empty>})" FAIL
+fi
+MCP_COMMAND_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"grep -r x ."}')"
+if [ "$MCP_COMMAND_REASON" = "$BASH_REMEDY_REASON" ]; then
+  check "a command-executing MCP tool gets the same command-execution deny and remedy as Bash" PASS
+else
+  check "a command-executing MCP tool must get the command-execution deny and remedy (got: ${MCP_COMMAND_REASON:-<empty>})" FAIL
+fi
+mkdir "$PROJECT/docs"
+DEMAND_REASON="$(deny_reason general-purpose Bash '{"command":"ls"}')"
+rmdir "$PROJECT/docs"
+if [ "$DEMAND_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: docs, src. For example, pass $DOCS_EXAMPLE as the path." ]; then
+  check "the remedy lists the project's subdirectories as they exist at deny time" PASS
+else
+  check "the remedy must list the subdirectories present at deny time (got: ${DEMAND_REASON:-<empty>})" FAIL
+fi
+FLAT_PROJECT="$TMP/flat-project"
+FLAT_SESSION_ID='capability-test-flat'
+mkdir -p "$FLAT_PROJECT"
+touch "$FLAT_PROJECT/only-file.txt"
+SESSION_ID="$FLAT_SESSION_ID" PROJECT="$FLAT_PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "SessionStart",
+    source: "startup",
+    session_id: process.env.SESSION_ID,
+    cwd: process.env.PROJECT,
+  }));
+' | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+  bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null
+FLAT_REASON="$(PAYLOAD_SESSION_ID="$FLAT_SESSION_ID" PAYLOAD_CWD="$FLAT_PROJECT" deny_reason general-purpose Bash '{"command":"ls"}')"
+if [ "$FLAT_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. To search the project, call Grep or Glob with a path that names a subdirectory of the project root $(native_real "$FLAT_PROJECT") other than .zensu; none qualifies here, so Read the files you need or name one file as the Grep path." ]; then
+  check "a project root without a searchable subdirectory gets the Read fallback" PASS
+else
+  check "a project root without a searchable subdirectory must get the Read fallback (got: ${FLAT_REASON:-<empty>})" FAIL
+fi
+HOST_CONTEXT_TOOLS="$(node -e '
+  const fs = require("node:fs");
+  const core = require(process.argv[1]);
+  const gate = require(process.argv[2]);
+  const text = core.renderHostContext(JSON.parse(fs.readFileSync(process.argv[3], "utf8")));
+  const match = /admits only (.+?), plus the MCP tools (.+?) and read-only Zensu MCP tools; it denies every other tool/.exec(text);
+  if (!match) { process.stdout.write("unparsed"); process.exit(0); }
+  const host = match[1].split(/, (?:and )?/);
+  const mcp = match[2].split(" and ");
+  const same = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
+  process.stdout.write(same(host, [...gate.HOST_PROFILE_TOOLS]) && same(mcp, [...gate.HOST_PROFILE_MCP_READ_TOOLS]) ? "same" : `drift:${host.join(",")}|${mcp.join(",")}`);
+' "$PLUGIN/hooks/lib/session-control-core-v1.js" "$POLICY" "$SESSION_CONTEXT" 2>/dev/null)"
+if [ "$HOST_CONTEXT_TOOLS" = same ]; then
+  check "the neutral SubagentStart context names exactly the tools the gate admits" PASS
+else
+  check "the neutral SubagentStart context must name exactly the admitted tools (got: ${HOST_CONTEXT_TOOLS:-<empty>})" FAIL
+fi
 assert_case "missing agent_type with an agent_id is neutral" allow ? Read '{"file_path":"x"}'
 assert_case "non-host reviewer alias is neutral, not reviewer" allow zensu-review-domain Write '{"file_path":"x"}'
 assert_case "runtime reviewer path is neutral, not reviewer" allow /root/zensu_code_reviewer Write '{"file_path":"x"}'
