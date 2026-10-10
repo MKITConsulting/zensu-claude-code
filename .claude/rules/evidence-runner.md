@@ -115,7 +115,10 @@ the `cd` target resolves only in a drive spelling (`C:/…`); an MSYS spelling s
 `/tmp/…` needs the mount table, which the native runner never reads, so it keeps the
 project-root fingerprint. F18 and F19 in `test-full-suite-gate.sh` therefore pass the worktree
 through `zensu-host-path.sh`, and the unit tests compare directories through
-`fs.realpathSync.native`, because git answers `C:/…` where `fs.realpathSync` answers `C:\…`.
+`fs.realpathSync.native`, because git answers `C:/…` where `fs.realpathSync` answers `C:\…`. The two
+cases that check where a run executes print `process.cwd()` through node rather than `pwd -P`,
+which Git Bash answers as `/c/…`, and the unit file's `sh()` hands its commands to bash on stdin,
+because `execSync` runs them through `cmd.exe` on Windows.
 
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure

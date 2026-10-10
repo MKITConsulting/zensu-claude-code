@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (159 = 152 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 152 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 159). The figures here have drifted NINE times, eight of them upward, and every
+reconciled to that manifest (163 = 156 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 156 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 163). The figures here have drifted ELEVEN times, ten of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -24,12 +24,14 @@ next such merge was landing the 147th, then 154 = 147 + 7 while the merge of `ma
 the review-convergence branch was landing the 148th, then 155 = 148 + 7 while the merge of
 `main` into the restore-project-root branch was landing the 149th, and then 153 = 146 + 7 on the
 evidence-runner branch after it retired three witness suites and added two, leaving 145, and
-then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries. Each
+then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
+159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
+while the merge of the two was landing the 156th. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
 section-4 header-numeral paragraph below names — so every re-derivation since closes the
-clauses together with the headline. SIX of the nine drifts arrived the same way, through a
+clauses together with the headline. SEVEN of the eleven drifts arrived the same way, through a
 merge of two branches that each re-derived its own count and neither of which could see the
 other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
 manifest from 143 to 144 in its own branch, so merging them is what made 145;
@@ -42,9 +44,13 @@ so merging `main` into it made 148; and `test-restore-project-root.sh` took its 
 the reverse case: a branch that removed suites without re-deriving, whose merge with `main` at
 149 lands on 148. The ninth came through three suites that reached `main` one squash-merge at a
 time — `test-stop-enforcer-reviewer-denial-note.sh`, `test-workflow-dispatch-inputs.sh` and
-`test-acceptance-gate.sh` — while the figure moved only with the first.
+`test-acceptance-gate.sh` — while the figure moved only with the first. The tenth came the same
+way: `test-full-suite-ci.sh` and `test-session-reanchor.sh` each joined its §3 group and neither
+moved the figure. The eleventh is the merge shape again: `test-user-prompt-budget.sh` took its
+own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
+merging `main` into it made 156.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 149 against 152 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 153 against 156 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -62,9 +68,9 @@ document exists to prevent. Recorded rather than quietly reconciled: an audited 
 disagrees with its own table is the failure shape, and an earlier revision of this very
 paragraph said "two files" while naming one, which is the same failure one level down.
 
-**Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
-at this commit, not an invariant: the next suite added without touching §3 silently breaks
-it again, and no test will say so. Re-derive rather than trust when the numbers matter.
+**Nothing machine-checks the §1/§3 reconciliation.** It is a hand audit performed at this
+commit, not an invariant: the next suite added without touching §3 silently breaks it again,
+and no test will say so. Re-derive rather than trust when the numbers matter.
 
 **Windows coverage of `test-artifact-redaction.sh` is deliberately
 STRUCTURAL-ONLY.** The suite is in `ciStructureTests`, so POSIX `run-all.sh --ci`
@@ -84,8 +90,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **162** — 155 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **155 structure suites + 5 offline evals = 160 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 162 − 155 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **164** — 157 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **157 structure suites + 5 offline evals = 162 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 164 − 157 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -97,8 +103,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 162 structure suites + 5 offline evals | none |
-| `--ci` | 155 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 164 structure suites + 5 offline evals | none |
+| `--ci` | 157 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -252,11 +258,11 @@ and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
-### Skill contracts (20)
+### Skill contracts (21)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `gauntlet-loop-skill` · `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
 `pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
-`session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
+`session-trail-verdict` · `setup-skill` · `skill-overlays` · `skill-text-budget` · `templates` ·
 `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
@@ -269,14 +275,20 @@ taking a session over, which its structural sibling can only pin as vocabulary. 
 loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
 developer's real sessions.
 
-### Prompt routing & payloads (7)
+`skill-text-budget` is the one suite in this group that reads EVERY skill: it bounds each
+`SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
+listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
+
+### Prompt routing & payloads (8)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
-`zensu-plm-arg-guidance`
+`user-prompt-budget` · `zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
-context-occupancy nudge, the intent router, and how the PostToolUse(ExitPlanMode)
-delegate reads the approved plan (with a distinct receipt for each failure mode).
+context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
+and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
+CI-event prompts, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
+a distinct receipt for each failure mode).
 
 ### VCS / forge integration (7)
 `valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
@@ -365,6 +377,13 @@ binary; these guard the local harness contract.
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
 
+`R13` in `test-restore-project-root.sh` compares every row's `Blocks` cell with the
+`^test(` registrations of its file through `unit_overview_check` in
+`tests/structure/lib-unit-summary.sh`; every driver that sources that library and drives a
+file with a row calls the same helper beside the floor it reads from that cell through
+`unit_overview_declared`, so a stale cell fails as
+`tests/SUITE-OVERVIEW.md:<line>: <file> declares N, registers M; edit that Blocks cell`.
+
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
@@ -395,7 +414,7 @@ that suite's failure.
 | `workflow-dispatch-inputs.test.js` | 24 | `test-workflow-dispatch-inputs.sh` | dispatcher-controlled values reach `run:` scripts only through `env:` or a runner variable: no `run:` block in any workflow template-expands an `inputs`, `env` or `needs` reference, or a `github` reference other than a dotted `sha`, `event_name`, `repository` or `server_url`, in any letter case (with a synthetic document proving the scan flags dotted, index and whole-context forms and no trusted one), every release step reading `SKIP_REASON`, `SKIP_TEST_GATE` or `VERSION_TYPE` maps it from that input, and prepare and publish carry one identical skip-request validation. EXECUTED through an emulated expression renderer: that validation against hostile, empty, whitespace-only, multi-line and edge-padded reasons; the release commit step in a throwaway repository followed by the publish plan's own decision block, for an ordinary release and a skipped one; that block's push default, which runs the gate unless the trailer reads `skipped`, its dispatch branches, the trailer outranking a dispatched reason with a notice only when the reasons differ, and a trailer without a reason, refused on push and left to the dispatch on a publish retry; the plan's `gate` and `gate_reason` outputs as one line each, a hostile reason included; both evidence steps, which record `passed` only after the suite job succeeded and `skipped` only when it was skipped with a reason, and refuse every contradicting combination; the main-only guard against a hostile ref; and the version computation |
 | `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
-| `verify-feature-transcript-check.test.js` | 24 | `test-promptfoo-verify-feature.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs the helper flag echoed back and no navigation toward the network-only origin |
+| `verify-feature-transcript-check.test.js` | 26 | `test-promptfoo-verify-feature.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module, the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs a passing `network-only` preflight before the helper call, the helper flag echoed back in the spelling the skill documents, every required operation in a session whose config that flagged call wrote last, and no navigation toward the network-only origin |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
@@ -422,16 +441,14 @@ grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
 `prompt-listing-v1.test.js` are different and the distinction is worth keeping — the
 session-trail takeover-destination change added the first and the queued-prompt withdrawal
 change the second, and both were left rowless deliberately, because nothing grades a row's
-PRESENCE here, so a row would be one more hand-maintained copy of a count nothing checks. Say
-it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for seven rows by two suites —
-`test-zen-mode.sh` Z78 for the two zen-anchor rows, and `test-verify-consent.sh`'s `run_unit` for
-the floor, consent, free-port, browser-config and cli-version rows.
-What no suite checks is the reconciliation above and the absence of a row. Both unit files ARE
+PRESENCE here. Say it that way rather than "these files are graded by no suite", which is
+false: `R13` in `test-restore-project-root.sh` grades every row's `Blocks` numeral against
+the `test(` registrations of its file, and `R13b` in the same suite grades this paragraph's
+file and row counts. What no suite checks is which files lack a row. Both unit files ARE
 driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
 rowless here, not ungraded there. The reconciliation and the missing rows are recorded
-rather than silently absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
-same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
-went stale on its next merge.
+rather than silently absorbed. The inventory row above no longer carries a unit-file numeral
+at all: it was a hand-maintained count nothing graded, and it went stale on its next merge.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`. It is driven by
@@ -440,8 +457,8 @@ other structure suite, so it runs on EVERY host under `--ci` — not only on the
 profiles. That driver is what closed the gap the suite's own header describes ("On Linux
 and macOS the whole suite was therefore green by omission"); this sentence still said
 "Windows only" for a round after it landed. Its hand-maintained registered-case floor is
-**141**, enforced by the driver and required rather than skipped when the shared summary
-parse is unavailable.
+`SC_FLOOR` in that driver, enforced there and required rather than skipped when the shared
+summary parse is unavailable; the file has no row in the table above, so no cell repeats it.
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
 ~8 autopilot / chain structure suites.
 

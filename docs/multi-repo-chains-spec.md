@@ -94,13 +94,13 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:573` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:629` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:536-538` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:592-594` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
-**Claims are repo-root-relative.** `skills/tdd/SKILL.md:182, :185` requires every logged
+**Claims are repo-root-relative.** `skills/tdd/SKILL.md:175, :178` requires every logged
 `WIRED — files:` / `IMPL completed — files:` list to be relative to
 `git rev-parse --show-toplevel`. Across two roots `src/foo.ts` is ambiguous.
 
@@ -362,7 +362,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:256`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:288`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -423,7 +423,7 @@ dropped: a dropped root is a root nothing audits.
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1441-1443`, `:2266-2268` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:573`, `:550` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:629`, `:606` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -442,7 +442,7 @@ no uncommitted changes for a session with a dirty tree in two other repositories
 That is the same silent-green failure as §2, relocated into the handover path.
 
 The fix costs no schema, and it adds no write of its own. `trail.mjs`'s only write
-channel of its own is the lineage ledger (`skills/session-trail/SKILL.md:77`), and its
+channel of its own is the lineage ledger (`skills/session-trail/references/commands.md:46`), and its
 `release --apply` verb also ends keep anchors through the worktree-keep module — it had
 no write at all when this paragraph was first written, so state what the FIX costs
 rather than what the script lacks. It may read the anchor's workflow document,
@@ -466,7 +466,7 @@ Two properties stay as they are, deliberately:
   who trusts that list.
 - **Discovery stays anchor-scoped.** `list` keeps only transcript directories
   whose name starts with the slug of the repo's main checkout
-  (`skills/session-trail/SKILL.md:315`), so from a code root's repository the
+  (`skills/session-trail/references/limits.md:12`), so from a code root's repository the
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
@@ -495,11 +495,11 @@ A cheaper first move exists and is not blocked on any of it — see §7.4.
 
 ### 7.1 Why it is mode-independent
 
-`skills/tdd/SKILL.md:195` lists the whole review chain — fan-out, judge second
+`skills/tdd/SKILL.md:188` lists the whole review chain — fan-out, judge second
 pass, Finding Verification Gate, the consuming reviewer, the self-review terminus
 — among what runs exactly as written in vanilla. A reviewer reports a finding; it
 does not demand a Characterization test. That demand is precisely why the
-Cross-Layer Value Flow Audit cannot run in vanilla (`:198`, `:201`), and
+Cross-Layer Value Flow Audit cannot run in vanilla (`:191`, `:194`), and
 the new stage does not inherit it.
 
 ### 7.2 The capability lease
@@ -528,7 +528,7 @@ one capability grant instead of two and delete the open question below. It is no
 chosen here only because it moves the read cost onto the main thread; it should be
 weighed again before stage 3 is built.
 
-The Grep/Glob pattern rule at `reviewer-capability-v1.js:536-538` needs a
+The Grep/Glob pattern rule at `reviewer-capability-v1.js:592-594` needs a
 decision this document does not make: a cross-root reviewer needs to search more
 than one tree, and the present rule forbids an absolute pattern. Either the tool
 call carries an explicit root selector, or the pattern rule learns the same leased
@@ -557,12 +557,12 @@ while part (b) only scans the diff.
 
 Part (b) is skipped for one reason only — it lives inside the same step as part
 (a). Marking Phase 6 NOT complete is not itself disqualifying: the Precondition
-Drift Audit does the same (`skills/tdd/SKILL.md:409`) and runs in vanilla
-(`skills/tdd/SKILL.md:202`). What part (b) DOES inherit from §7.1's argument is
+Drift Audit does the same (`skills/tdd/SKILL.md:402`) and runs in vanilla
+(`skills/tdd/SKILL.md:195`). What part (b) DOES inherit from §7.1's argument is
 its remedy: its finding text asks for a paired characterization
-(`skills/tdd/SKILL.md:415`), which is a test vanilla cannot be made to produce.
+(`skills/tdd/SKILL.md:408`), which is a test vanilla cannot be made to produce.
 So making it vanilla-safe needs two edits, not one — downgrade it to warning
-level as step 6c already is (`skills/tdd/SKILL.md:417`), AND reword the finding
+level as step 6c already is (`skills/tdd/SKILL.md:410`), AND reword the finding
 so it reports the unpaired literal without demanding the pairing.
 
 That change needs no chain shape, no `reviewRearm` change, no widened lease and no

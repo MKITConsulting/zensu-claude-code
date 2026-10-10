@@ -52,12 +52,18 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # ── P1 the model-free grader ─────────────────────────────────────────
+P1_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
 if node --test "$UNIT" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_registered_floor "$WORK/unit.out" 28; then
+  && unit_cases_registered_floor "$WORK/unit.out" "$P1_FLOOR"; then
   check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 28 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= ${P1_FLOOR:-<no overview row>} registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
+fi
+if P1_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "P1-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($P1_FLOOR)" PASS
+else
+  check "P1-overview $P1_OVERVIEW" FAIL
 fi
 
 mkdir -p "$WORK/repo/src"

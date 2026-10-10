@@ -77,8 +77,9 @@ unpinned; see the section below.
 
 **The gate's ANCHOR contract is restated in NINE carriers outside the parser, and
 nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
-/ `continuationPlan` in `skills/session-trail/scripts/trail.mjs`, flow 3, the step-4
-placement paragraph and the Limits bullet in `skills/session-trail/SKILL.md`, and
+/ `continuationPlan` in `skills/session-trail/scripts/trail.mjs`, flow 3 and its step-4
+placement paragraph in `skills/session-trail/references/takeover.md`, the Limits bullet in
+`skills/session-trail/references/limits.md`, and
 BOTH paragraphs of `docs/gates.md` §"Source-Write Gate" — the cross-worktree one and
 the continuation one beside it, which states the rule again in its own words. They do NOT carry
 the same content, and the difference is what decides where an edit is owed. All of
@@ -144,7 +145,7 @@ directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
 four. The environment variables are named by `writeAnchor`'s header,
 `writesLines`'
 emitted text, `continuationPlan`'s own `weak-channel-no-target` line (which spells
-`CLAUDE_PROJECT_DIR` to a user) and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+`CLAUDE_PROJECT_DIR` to a user) and flow 3 in `skills/session-trail/references/takeover.md`. The rule letters are named by `writeAnchor`'s
 header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
 (C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
 into a brief a stranger reads. The Limits bullet withholds only those two things: it
@@ -362,7 +363,7 @@ escape prefix. On the unbound path the hook appends its binding paragraph after 
 the deny contains the note without ending on it. Four of the hook's own denies — the no-anchor deny, the two unbound parser failures and the
 empty recorded root — carry the same sentence through its `OPT_IN_NOTE` shell variable, a
 hand-copy that W5b holds equal to the parser's exported constant; the bound parser-failure
-deny names `hooks.bashWriteGate` in a remedy of its own, which W218 pins. `skills/session-trail` (SKILL.md flow 3 and the emitted `MOVE_ALTERNATIVE`) ASSERTS
+deny names `hooks.bashWriteGate` in a remedy of its own, which W218 pins. `skills/session-trail` (`references/takeover.md` and the emitted `MOVE_ALTERNATIVE`) ASSERTS
 that shape — the refusal names the config key and no escape. W32, W33, W87 and W121 in
 `tests/structure/test-bash-source-write-gate.sh` pin the note's words and the prefix's
 absence on the parser side; `T35b` and `WT8v12`/`WT8v12b` pin each skill carrier's own

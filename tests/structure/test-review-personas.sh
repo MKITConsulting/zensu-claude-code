@@ -15,7 +15,7 @@ set -u
 # exports, the tdd SKILL.md 2b discovery + one-batch step-3 fan-out with
 # not-registered / discovery-unavailable handling, the README persona
 # contract (registration, name shape, trust boundary, output grammar, cap
-# policy), the review-aspect.md note, and the 433-line skill cap.
+# policy), and the review-aspect.md note.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/persona-activation.js"
@@ -62,12 +62,6 @@ if grep -qiE 'read-only' "$TDD_MD" && grep -qiE 'ID prefix|id-prefix' "$TDD_MD";
   check "P3d personas are read-only with ID-prefixed findings" PASS
 else
   check "P3d personas are read-only with ID-prefixed findings" FAIL
-fi
-LINES="$(wc -l < "$TDD_MD" | tr -d '[:space:]')"
-if [ "$LINES" -le 433 ]; then
-  check "P3e tdd skill stays under the 433-line cap (actual: $LINES)" PASS
-else
-  check "P3e tdd skill stays under the 433-line cap (actual: $LINES)" FAIL
 fi
 if grep -qF '.claude/agents/zensu-review-' "$REVIEW_DOC" && grep -qF 'activation:' "$REVIEW_DOC"; then
   check "P3f docs/review-chain.md documents discovery path + activation field" PASS

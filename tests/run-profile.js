@@ -333,6 +333,19 @@ function loadAndValidateManifest(rootInput) {
   });
 }
 
+async function removeSandbox(sandboxRoot) {
+  const attempts = process.platform === 'win32' ? 20 : 1;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.promises.rm(sandboxRoot, { recursive: true, force: true, maxRetries: 0 });
+      return;
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      await delay(100 * attempt);
+    }
+  }
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -886,7 +899,9 @@ async function runProfile({
   // security-bound filenames containing multiple SHA-256 values below this
   // root; a descriptive prefix can exhaust Git/Win32 path headroom before the
   // contract under test is reached.
-  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_SANDBOX_PREFIX));
+  const sandboxRoot = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_SANDBOX_PREFIX)),
+  );
   const suiteEnvironment = buildSuiteEnvironment(environment, sandboxRoot, platform);
   const bashExecutable = resolveExecutable('bash', environment, platform);
   const started = process.hrtime.bigint();
@@ -999,12 +1014,7 @@ async function runProfile({
       signalEmitter.removeListener(signalName, handler);
     }
     if (!report.suites.some((suite) => suite.cleanup.status === 'failed')) {
-      await fs.promises.rm(sandboxRoot, {
-        recursive: true,
-        force: true,
-        maxRetries: process.platform === 'win32' ? 20 : 0,
-        retryDelay: process.platform === 'win32' ? 100 : 0,
-      });
+      await removeSandbox(sandboxRoot);
     }
   }
   return {

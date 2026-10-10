@@ -61,14 +61,14 @@ LEDGER_OUT="$(cd "$ROOT" && node --test "$LEDGER_UNIT" 2>&1)"
 LEDGER_RC=$?
 [ "$LEDGER_RC" -eq 0 ] && check "R1 review-ledger unit suite passes ($(unit_cases_report_text "$LEDGER_OUT"))" PASS \
                        || check "R1 review-ledger unit suite passes" FAIL
-unit_cases_registered_floor_text "$LEDGER_OUT" 42 \
-  && check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS)" PASS \
-  || check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS)" FAIL
-CELL="$(sed -n 's/^| `review-ledger-v1.test.js` | \([0-9][0-9]*\) |.*/\1/p' "$OVERVIEW_MD" | head -1)"
-if [ -n "$CELL" ] && [ "$CELL" = "$UNIT_CASES_TESTS" ]; then
-  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=$CELL)" PASS
+LEDGER_FLOOR="$(unit_overview_declared "${LEDGER_UNIT##*/}")"
+unit_cases_registered_floor_text "$LEDGER_OUT" "$LEDGER_FLOOR" \
+  && check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least $LEDGER_FLOOR)" PASS \
+  || check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least ${LEDGER_FLOOR:-<no overview row>})" FAIL
+if R1B_OVERVIEW="$(unit_overview_check "$LEDGER_UNIT")"; then
+  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=$LEDGER_FLOOR)" PASS
 else
-  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=${CELL:-<none>} registered=$UNIT_CASES_TESTS)" FAIL
+  check "R1b $R1B_OVERVIEW" FAIL
 fi
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/zensu-rcv-XXXXXX")"
@@ -221,9 +221,6 @@ check "R21c the tdd skill gives a judge covers line no id of its own" "$(grep_ok
 check "R21b the tdd skill prescribes the round claim prefix" "$(grep_ok "$TDD_MD" "log this round's \`R{N}-<step> IMPL completed — files:\` claims")"
 check "R22 the tdd skill hands the ledger to the judge" "$(grep_ok "$TDD_MD" 'plus `findings_ledger` when the post-review directive')"
 check "R23 the tdd skill keeps the ledger out of the finding list" "$(grep_ok "$TDD_MD" 'The ledger is history for the judge only')"
-lines="$(wc -l < "$TDD_MD" | tr -d ' ')"
-[ "$lines" -le 433 ] && check "R24 the tdd skill stays within its line cap ($lines)" PASS \
-                     || check "R24 the tdd skill stays within its line cap ($lines, cap 433)" FAIL
 check "R25 self-review takes ledger entries as candidates" "$(grep_ok "$SELF_REVIEW_MD" 'every `deferred` entry rated IMPORTANT or CRITICAL, is a candidate')"
 check "R25a self-review re-reads a candidate before it becomes a must-fix" "$(grep_ok "$SELF_REVIEW_MD" 'keep it only when that code still shows what its summary describes')"
 check "R25b self-review reads the chain's own run log" "$(grep_ok "$SELF_REVIEW_MD" 'never a log resolved by recency')"

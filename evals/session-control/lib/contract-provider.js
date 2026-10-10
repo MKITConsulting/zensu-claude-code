@@ -105,6 +105,12 @@ function assertAllowed(result, label) {
   }
 }
 
+const SEARCH_REMEDY_LEAD = 'To search the project, call Grep or Glob with a path that names a subdirectory of the project root ';
+
+function remediedReason(reason, base) {
+  return typeof reason === 'string' && reason.startsWith(`${base}. ${SEARCH_REMEDY_LEAD}`);
+}
+
 function assertDenied(result, label, reasonFragment) {
   const output = parseHookOutput(result, label);
   const decision = output.hookSpecificOutput?.permissionDecision;
@@ -361,7 +367,7 @@ function provePrincipalAndPreToolContracts(options) {
           tool_name: toolName,
           tool_input: toolInput,
         }, environment), `${agentType} ${label}`, 'traversal root may reach protected Session Control or workflow state');
-        if (traversalDenied.hookSpecificOutput.permissionDecisionReason !== exactTraversalReason) {
+        if (!remediedReason(traversalDenied.hookSpecificOutput.permissionDecisionReason, exactTraversalReason)) {
           throw new Error(`${agentType} ${label} denial was not exact`);
         }
       }
@@ -503,43 +509,43 @@ function provePrincipalAndPreToolContracts(options) {
         tool_name: toolName,
         tool_input: toolInput,
       }, environment), `general-purpose ${label}`, 'command-execution tools');
-      if (denied.hookSpecificOutput.permissionDecisionReason !== exactCommandReason) {
+      if (!remediedReason(denied.hookSpecificOutput.permissionDecisionReason, exactCommandReason)) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
 
-    for (const [label, cwd, toolName, toolInput, exactReason] of [
+    for (const [label, cwd, toolName, toolInput, exactReason, remedied] of [
       [
         'project-root Grep ancestor', projectRoot, 'Grep', { pattern: 'phase', path: projectRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'project-root Glob ancestor', projectRoot, 'Glob', { pattern: '**/*', path: projectRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'implicit project cwd Grep ancestor', projectRoot, 'Grep', { pattern: 'phase' },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'implicit project cwd Glob ancestor', projectRoot, 'Glob', { pattern: '**/*' },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'plugin-data ancestor Grep', externalCwd, 'Grep', { pattern: 'session', path: pluginData },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'executed-plugin ancestor Glob', externalCwd, 'Glob', { pattern: '**/*', path: pluginRoot },
-        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state',
+        'reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state', true,
       ],
       [
         'escaping Grep glob', externalCwd, 'Grep', { pattern: 'phase', path: externalCwd, glob: '../project/.zensu/**' },
-        'reviewer-capability-v1 deny: host-profile-v1 Grep pattern may escape into protected state',
+        'reviewer-capability-v1 deny: host-profile-v1 Grep pattern may escape into protected state', false,
       ],
       [
         'escaping Glob pattern', externalCwd, 'Glob', { pattern: '../project/.zensu/**', path: externalCwd },
-        'reviewer-capability-v1 deny: host-profile-v1 Glob pattern may escape into protected state',
+        'reviewer-capability-v1 deny: host-profile-v1 Glob pattern may escape into protected state', false,
       ],
     ]) {
       const denied = assertDenied(invokeRuntime(gate, {
@@ -551,7 +557,8 @@ function provePrincipalAndPreToolContracts(options) {
         tool_name: toolName,
         tool_input: toolInput,
       }, environment), `general-purpose ${label}`, exactReason.replace(/^reviewer-capability-v1 deny: /, ''));
-      if (denied.hookSpecificOutput.permissionDecisionReason !== exactReason) {
+      const reason = denied.hookSpecificOutput.permissionDecisionReason;
+      if (remedied ? !remediedReason(reason, exactReason) : reason !== exactReason) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }

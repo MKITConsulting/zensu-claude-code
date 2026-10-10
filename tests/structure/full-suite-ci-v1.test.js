@@ -11,6 +11,7 @@ const LIB_DIR = path.join(__dirname, '..', '..', 'hooks', 'lib');
 const contract = require(path.join(LIB_DIR, 'ci-contract-v1.js'));
 const policy = require(path.join(LIB_DIR, 'full-suite-policy-v1.js'));
 const evr = require(path.join(LIB_DIR, 'evidence-run-v1.js'));
+const { writeGhStub } = require(path.join(__dirname, 'fixtures', 'gh-api-stub.js'));
 
 const SESSION = `scv1_${'c'.repeat(64)}`;
 const REPO = 'acme/app';
@@ -87,24 +88,12 @@ function ghShim(map) {
   const fixture = path.join(directory, 'fixture.json');
   const calls = path.join(directory, 'calls.log');
   fs.writeFileSync(fixture, JSON.stringify(map));
-  const script = path.join(directory, 'gh');
-  fs.writeFileSync(script, [
-    `#!${process.execPath}`,
-    "const fs = require('fs');",
-    `const map = JSON.parse(fs.readFileSync(${JSON.stringify(fixture)}, 'utf8'));`,
-    'const endpoint = process.argv[3];',
-    `fs.appendFileSync(${JSON.stringify(calls)}, endpoint + '\\n');`,
-    "if (!Object.prototype.hasOwnProperty.call(map, endpoint)) { process.stderr.write('HTTP 404: Not Found\\n'); process.exit(1); }",
-    'const value = map[endpoint];',
-    "if (value && value.__fail) { process.stderr.write(value.__fail + '\\n'); process.exit(1); }",
-    'process.stdout.write(JSON.stringify(value));',
-    '',
-  ].join('\n'), { mode: 0o755 });
-  return { ghPath: script, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
+  const stub = writeGhStub(directory, fixture, calls);
+  return { ghPath: stub.ghPath, env: stub.env, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
 }
 
 function verifyOptions(root, data, gh, extra = {}) {
-  return { projectRoot: root, pluginData: data, workflow: 'ci.yml', job: null, localCommand: 'npm test', env: CLEAN_ENV, mode: 'refresh', now: NOW, ghPath: gh.ghPath, ...extra };
+  return { projectRoot: root, pluginData: data, workflow: 'ci.yml', job: null, localCommand: 'npm test', env: { ...CLEAN_ENV, ...gh.env }, mode: 'refresh', now: NOW, ghPath: gh.ghPath, ...extra };
 }
 
 test('the workflow scan reads the pull_request trigger, its filters and the job conditions', () => {

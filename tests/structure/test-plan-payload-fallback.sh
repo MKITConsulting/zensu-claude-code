@@ -887,13 +887,19 @@ PLAN_UNIT="$PLUGIN_DIR/tests/structure/plan-payload-v1.test.js"
 . "$(dirname "$0")/lib-unit-summary.sh"
 
 PLAN_UNIT_OUT="$TMP/plan-unit.out"
+PLAN_UNIT_FLOOR="$(unit_overview_declared "${PLAN_UNIT##*/}")"
 if [ -f "$PLAN_LIB" ] && [ -f "$PLAN_UNIT" ] \
   && ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" node --test "$PLAN_UNIT" > "$PLAN_UNIT_OUT" 2>&1 \
-  && unit_cases_registered_floor "$PLAN_UNIT_OUT" 20; then
+  && unit_cases_registered_floor "$PLAN_UNIT_OUT" "$PLAN_UNIT_FLOOR"; then
   check "F11b the plan-payload module unit suite passes ($(unit_cases_report "$PLAN_UNIT_OUT"))" PASS
 else
-  check "F11b the plan-payload module unit suite failed, is missing, or registered fewer than 20 cases ($(unit_cases_report "$PLAN_UNIT_OUT"))" FAIL
+  check "F11b the plan-payload module unit suite failed, is missing, or registered fewer than ${PLAN_UNIT_FLOOR:-<no overview row>} cases ($(unit_cases_report "$PLAN_UNIT_OUT"))" FAIL
   [ -f "$PLAN_UNIT_OUT" ] && grep -B2 -A 20 '^not ok' "$PLAN_UNIT_OUT" | head -40
+fi
+if F11B_OVERVIEW="$(unit_overview_check "$PLAN_UNIT")"; then
+  check "F11b-overview the SUITE-OVERVIEW Blocks cell matches what ${PLAN_UNIT##*/} registers ($PLAN_UNIT_FLOOR)" PASS
+else
+  check "F11b-overview $F11B_OVERVIEW" FAIL
 fi
 
 # --- F11b-tool the tool-name guard, pinned behaviorally. A payload from another

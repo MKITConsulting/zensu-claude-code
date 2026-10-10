@@ -40,7 +40,7 @@ const expected = [
   ['evals/session-control/run-self-check.sh', [], ['--ci'], true],
   ['evals/tdd-review-chain/run-self-check.sh', [], [], false],
   ['evals/reset-review-limit/run-self-check.sh', [], ['--ci'], true],
-  ['evals/tdd-manager-pretool/run-eval.sh', ['--self-check'], ['--self-check'], false],
+  ['evals/tdd-manager-pretool/run-eval.sh', ['--self-check'], ['--self-check', '--skip-nested'], false],
 ];
 const actual = value.ciOfflineSuites.map(
   ({ path, args, ciArgs, needsNodeDeps }) => [path, args, ciArgs, needsNodeDeps],

@@ -69,9 +69,8 @@ shrank silently is indistinguishable from one that was never spawned, which is t
 repository treats as worse than the cost it removes.
 
 **Coupled sites that move together:** the two libs and their exports; `skills/tdd/SKILL.md`
-step 3 (activation) and step 10 (delta scoping) — both edited INSIDE existing long lines because
-`P3e` in `tests/structure/test-review-personas.sh` caps that file at **433 lines** and it is AT
-the cap; BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
+step 3 (activation) and step 10 (delta scoping) — the file may not grow (§"Skill Text Budget"),
+so an edit there trades text for text; BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
 contract (`P3b` in `test-finding-verification.sh` counts `step 4c Finding Verification Gate`
 exactly twice, so a one-sided edit there fails in a suite named for something else); the two
 config keys in `config.example.json`; and the operator accounts in `docs/configuration.md`,

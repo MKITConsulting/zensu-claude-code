@@ -66,7 +66,7 @@
 // which closes the one alias that shows up on every macOS run (`/var/folders/…`
 // against `/private/var/folders/…`).
 //
-// Substitution is bounded on BOTH sides in EVERY rule, not a bare substring
+// Substitution is bounded on BOTH sides in EVERY plain rule, not a bare substring
 // replace: a match must start where a path can start and end where a segment
 // can no longer continue. Without the right bound a home of `/h` rewrites the
 // word `/hello` and `/homework` becomes `<home>work`; without the left bound
@@ -291,6 +291,17 @@ const RESIDUAL_RULES = [
     + '(?:' + SEP_ANY + SEGMENT + '|' + BOUNDARY + ')', 'g'),
   new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_ANY + RESIDUAL_ROOT_PREFIX + BOUNDARY, 'g'),
 ];
+const ENCODED_AFTER_SEPARATOR = '(?<=[\\\\/])';
+const ENCODED_HOST_DIRS = ['projects', 'claude-[0-9]+', 'claude-cli-nodejs(?:' + SEP_ANY + 'Cache)?'];
+const ENCODED_AFTER_HOST_DIR = '(?<=(?:^|[^A-Za-z0-9_.\\-])(?:' + ENCODED_HOST_DIRS.join('|') + ')' + SEP_ANY + ')';
+const ENCODED_NAME_END = '(?![A-Za-z0-9\\-]*(?:_|\\.[A-Za-z0-9_\\-]))';
+const ENCODED_BOUNDARY = '(?![A-Za-z0-9])' + ENCODED_NAME_END;
+const ENCODED_SEGMENT_END = '(?![A-Za-z0-9_\\-])' + ENCODED_NAME_END;
+const ENCODED_RESIDUAL_RULES = [
+  new RegExp(ENCODED_AFTER_HOST_DIR + '(?:[A-Za-z]-)?-(?:' + RESIDUAL_HOME_PREFIXES.join('|') + ')-[A-Za-z0-9]+'
+    + ENCODED_BOUNDARY, 'g'),
+  new RegExp(ENCODED_AFTER_HOST_DIR + '-' + RESIDUAL_ROOT_PREFIX + ENCODED_BOUNDARY, 'g'),
+];
 
 // Windows has no O_NOFOLLOW, and the OR-zero coercion form is the one
 // tests/structure/test-windows-portability-guards.sh forbids, because it hides
@@ -387,6 +398,31 @@ function replaceSpellings(text, spellings, placeholder) {
   return out;
 }
 
+function encodedSpellingList(spellings) {
+  const encoded = new Set();
+  for (const spelling of spellings) {
+    const name = spelling.replace(/[^A-Za-z0-9]/g, '-');
+    encoded.add(name);
+    if (/^[A-Za-z]--/.test(name)) {
+      encoded.add(name[0].toUpperCase() + name.slice(1));
+      encoded.add(name[0].toLowerCase() + name.slice(1));
+    }
+  }
+  return [...encoded].filter((s) => s.length >= 2 && /[A-Za-z0-9]/.test(s)).sort((a, b) => b.length - a.length);
+}
+
+function encodedAnchor(spelling) {
+  return spelling.split('-').filter(Boolean).length >= 2 ? ENCODED_AFTER_SEPARATOR : ENCODED_AFTER_HOST_DIR;
+}
+
+function replaceEncodedSpellings(text, spellings, placeholder, end) {
+  let out = text;
+  for (const spelling of spellings) {
+    out = out.replace(new RegExp(encodedAnchor(spelling) + escapeRegExp(spelling) + end, 'g'), placeholder);
+  }
+  return out;
+}
+
 // A text can only be changed by a root spelling it CONTAINS or by one of the
 // three literal residual prefixes. Both are plain substring questions, and a
 // substring scan is what the regex engine would do first anyway — minus the
@@ -424,11 +460,16 @@ function redact(text, options = {}) {
   if (typeof text !== 'string' || text === '') return text;
   const projectSpellings = rootSpellingList(options.projectRoot);
   const homeSpellings = rootSpellingList(options.home);
-  if (!redactionPossible(text, projectSpellings, homeSpellings)) return text;
+  const encodedProject = encodedSpellingList(projectSpellings);
+  const encodedHome = encodedSpellingList(homeSpellings);
+  if (!redactionPossible(text, [...projectSpellings, ...encodedProject], [...homeSpellings, ...encodedHome])) return text;
   let out = text;
   out = replaceSpellings(out, projectSpellings, PROJECT_PLACEHOLDER);
   out = replaceSpellings(out, homeSpellings, HOME_PLACEHOLDER);
   for (const rule of RESIDUAL_RULES) out = out.replace(rule, RESIDUAL_PLACEHOLDER);
+  out = replaceEncodedSpellings(out, encodedProject, PROJECT_PLACEHOLDER, ENCODED_SEGMENT_END);
+  out = replaceEncodedSpellings(out, encodedHome, HOME_PLACEHOLDER, ENCODED_BOUNDARY);
+  for (const rule of ENCODED_RESIDUAL_RULES) out = out.replace(rule, RESIDUAL_PLACEHOLDER);
   return out;
 }
 

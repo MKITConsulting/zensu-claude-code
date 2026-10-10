@@ -82,12 +82,14 @@ never run in GitHub Actions.
   both restrict it to `Read`, `Grep`, and `Glob`, the gate adding only the
   host's `SubagentHandback` report tool; it receives neither `main-v1`
   nor Session Control selectors.
-- Every other neutral `host-profile-v1` child is denied all shell/command tool
-  aliases before command contents are considered. This is a capability rule,
-  not a token denylist: `env`, expansion, obfuscated protected paths/helpers,
-  and nested interpreters cannot regain command execution. Non-command host
-  tools remain available subject to the child definition and the remaining
-  protected-path and mutating-Zensu checks.
+- Every other neutral `host-profile-v1` child is denied every tool outside the
+  capability gate's allowlist — all shell/command tool aliases and every MCP
+  tool outside its named read-only list — before command contents are
+  considered. This is a capability rule, not a token denylist: `env`,
+  expansion, obfuscated protected paths/helpers, nested interpreters and
+  command-executing MCP servers cannot regain command execution. Allowlisted
+  host tools remain available subject to the child definition and the
+  remaining protected-path and mutating-Zensu checks.
 - Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
   subtree. The gate denies both protected roots and ancestors that could
   recursively expose them, uses canonical `cwd` when a traversal path is

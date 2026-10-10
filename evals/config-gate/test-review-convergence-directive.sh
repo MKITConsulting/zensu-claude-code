@@ -61,20 +61,24 @@ clause_of() {
   printf '%s' "${rest%%CONVERGENCE UNAVAILABLE — <reason>*}"
 }
 
-render_rounds on-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"autoFixMaxRounds":5}}'
-render_rounds on-default '{"hooks":{"autoFix":true,"autoFixSeverity":"important","autoFixMaxRounds":5}}'
-render_rounds off-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
-render_rounds off-default '{"hooks":{"autoFix":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
-render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":5}}'
-render_rounds summary-off '{"hooks":{"autoFix":true,"selfReview":false,"reviewConvergence":false,"autoFixMaxRounds":5}}'
-render_rounds max-rounds '{"hooks":{"autoFix":true,"autoFixMaxRounds":1}}'
-render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}'
-render_rounds repro-off '{"hooks":{"autoFix":true,"criticalReproduction":false}}'
-render_rounds repro-fv-off '{"hooks":{"autoFix":true,"findingVerification":false}}'
-render_rounds one-round '{"hooks":{"autoFix":true}}' 3
-render_rounds full-panel '{"hooks":{"autoFix":true,"reviewPanel":"full"}}'
-render_rounds sev-all '{"hooks":{"autoFix":true,"autoFixSeverity":"all","autoFixMaxRounds":5}}'
-render_rounds sev-crit-legacy '{"hooks":{"autoFix":true,"autoFixSeverity":"critical","autoFixIncludeSuggestions":true}}'
+render_rounds on-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"autoFixMaxRounds":5}}' &
+render_rounds on-default '{"hooks":{"autoFix":true,"autoFixSeverity":"important","autoFixMaxRounds":5}}' &
+render_rounds off-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"reviewConvergence":false,"autoFixMaxRounds":5}}' &
+render_rounds off-default '{"hooks":{"autoFix":true,"reviewConvergence":false,"autoFixMaxRounds":5}}' &
+wait
+render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":5}}' &
+render_rounds summary-off '{"hooks":{"autoFix":true,"selfReview":false,"reviewConvergence":false,"autoFixMaxRounds":5}}' &
+render_rounds max-rounds '{"hooks":{"autoFix":true,"autoFixMaxRounds":1}}' &
+render_rounds max-rounds-off '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":1}}' &
+wait
+render_rounds repro-off '{"hooks":{"autoFix":true,"criticalReproduction":false}}' &
+render_rounds repro-fv-off '{"hooks":{"autoFix":true,"findingVerification":false}}' &
+render_rounds one-round '{"hooks":{"autoFix":true}}' 3 &
+render_rounds full-panel '{"hooks":{"autoFix":true,"reviewPanel":"full"}}' &
+wait
+render_rounds sev-all '{"hooks":{"autoFix":true,"autoFixSeverity":"all","autoFixMaxRounds":5}}' &
+render_rounds sev-crit-legacy '{"hooks":{"autoFix":true,"autoFixSeverity":"critical","autoFixIncludeSuggestions":true}}' &
+wait
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL

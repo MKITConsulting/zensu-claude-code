@@ -1,16 +1,9 @@
 ---
 name: tdd-mode
 description: >
-  [Zensu] Switch this session's implementation discipline between strict RED→GREEN
-  TDD and vanilla, without editing any config file. Records a session-scoped choice
-  that outranks both `hooks.tddImplementation` and any caller's own default — so
-  every `/zensu:tdd` run in the session, the fix chains of `/zensu:pr-fix-findings`
-  included, follows the switch. The choice governs the next chain armed by `--tdd-begin`; a running
-  chain keeps the mode it froze. Use when the user says "with TDD", "strict TDD",
-  "run everything with red-green tests", "TDD on", "no TDD for now", "TDD off",
-  "switch TDD mode", "back to the default", or invokes /zensu:tdd-mode. To change
-  the mode permanently for a project, set `hooks.tddImplementation` via
-  /zensu:setup instead.
+  [Zensu] Switch this session between strict RED→GREEN TDD and vanilla
+  implementation. Use when the user says "with TDD", "strict TDD", "TDD off" or
+  "back to the default", or /zensu:tdd-mode.
 ---
 
 # /zensu:tdd-mode

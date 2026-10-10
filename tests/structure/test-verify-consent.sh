@@ -24,11 +24,14 @@ SESSION="zensu-verify-vc"
 CLI="playwright-cli -s=$SESSION"
 NL=$'\n'
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 check() {
   local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  case "$cond" in
+    PASS) echo "  PASS  $label"; PASS=$((PASS+1)) ;;
+    SKIP) echo "  SKIP  $label"; SKIP=$((SKIP+1)) ;;
+    *) echo "  FAIL  $label"; FAIL=$((FAIL+1)) ;;
+  esac
 }
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
@@ -99,33 +102,33 @@ fi
 # The floor is EQUAL to what the file registers, and the SUITE-OVERVIEW cell is compared against
 # the same number, because a hand-maintained floor one below the real count hides a deleted case —
 # which is exactly what the V6 floor did.
-run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
-  local out rc registered cell
+run_unit() { # $1 label  $2 file
+  local out rc registered floor overview
+  floor="$(unit_overview_declared "${2##*/}")"
   out="$(node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
   [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  if unit_cases_registered_floor_text "$out" "$3"; then
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" PASS
+  if unit_cases_registered_floor_text "$out" "$floor"; then
+    check "$1-floor at least $floor unit cases registered ($(unit_cases_report_text "$out"))" PASS
   else
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" FAIL
+    check "$1-floor at least ${floor:-<no overview row>} unit cases registered ($(unit_cases_report_text "$out"))" FAIL
   fi
   registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-  if [ -n "$registered" ] && [ "$3" = "$registered" ]; then
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=$registered)" PASS
+  if [ -n "$registered" ] && [ "$floor" = "$registered" ]; then
+    check "$1-exact the floor equals what the file registers (floor=$floor registered=$registered)" PASS
   else
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=${registered:-<none>})" FAIL
+    check "$1-exact the floor equals what the file registers (floor=${floor:-<no overview row>} registered=${registered:-<none>})" FAIL
   fi
-  cell="$(sed -n "s/^| \`$4\` | \([0-9][0-9]*\) |.*/\1/p" "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
-  if [ -n "$registered" ] && [ "$cell" = "$registered" ]; then
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=$cell)" PASS
+  if overview="$(unit_overview_check "$2")"; then
+    check "$1-overview the SUITE-OVERVIEW Blocks cell equals the file's test() registrations (cell=$floor)" PASS
   else
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
+    check "$1-overview $overview" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 20 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 115 "verify-consent-v1.test.js"
-run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 20 "verify-browser-config.test.js"
-run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR"
+run_unit "V7 consent" "$UNIT_CONSENT"
+run_unit "V7b free-port" "$UNIT_PORT"
+run_unit "V7c browser-config" "$UNIT_CONFIG"
+run_unit "V7d cli-version" "$UNIT_VERSION"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \
@@ -201,13 +204,14 @@ new_project() {
 }
 
 bash_payload() {
-  node -e '
-    const [event, command, sid, cwd, extra] = process.argv.slice(1);
+  printf '%s' "$2" | node -e '
+    const [event, sid, cwd, extra] = process.argv.slice(1);
+    const command = require("fs").readFileSync(0, "utf8");
     const body = { hook_event_name: event, tool_name: "Bash", tool_input: { command }, session_id: sid, cwd };
     if (event === "PostToolUse") body.tool_response = { stdout: "", stderr: "", interrupted: false };
     if (extra) Object.assign(body, JSON.parse(extra));
     process.stdout.write(JSON.stringify(body));
-  ' "$1" "$2" "$3" "$4" "${5:-}"
+  ' "$1" "$3" "$4" "${5:-}"
 }
 
 pre_verdict() {
@@ -239,12 +243,13 @@ pre_reason() {
 post_run() { bash_payload PostToolUse "$1" "$2" "$3" "${4:-}" | bash "$POST_HOOK" 2>&1 >/dev/null; }
 
 memory_has() {
-  node -e '
-    const [file, origin, route, decidedBy] = process.argv.slice(1);
-    const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
+  printf '%s\n%s\n%s' "$1" "$2" "$3" | node -e '
+    const fs = require("fs");
+    const [origin, route, decidedBy] = fs.readFileSync(0, "utf8").split("\n");
+    const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const hits = doc.records.filter((r) => r.origin === origin && r.route === route && r.decidedBy === decidedBy);
     process.exit(doc.version === 1 && hits.length === 1 ? 0 : 1);
-  ' "$MEMORY" "$1" "$2" "$3" 2>/dev/null
+  ' "$MEMORY" 2>/dev/null
 }
 
 memory_count() {
@@ -467,7 +472,8 @@ BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
 remember_tmp "$NONODE_BIN"
 for _vc_tool in cat sed tr dirname; do
-  ln -s "$(command -v "$_vc_tool")" "$NONODE_BIN/$_vc_tool"
+  printf '#!%s\nexec %q "$@"\n' "$BASH_BIN" "$(command -v "$_vc_tool")" > "$NONODE_BIN/$_vc_tool"
+  chmod 755 "$NONODE_BIN/$_vc_tool"
 done
 if env PATH="$NONODE_BIN" "$BASH_BIN" -c 'command -v node' >/dev/null 2>&1; then
   check "H17a-control the stripped PATH hides node" FAIL
@@ -679,7 +685,8 @@ mkdir -p "$RUN_DIR"
 HELPER_OUT="$(config_helper --run-dir "$RUN_DIR" --mode local --origin 'http://127.0.0.1:4310' 2>/dev/null)"
 RUN_SESSION="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^session=//p')"
 RUN_CONFIG="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^config=//p')"
-if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ "$RUN_CONFIG" = "$RUN_DIR/playwright-cli.json" ] && [ -f "$RUN_CONFIG" ] \
+RUN_CONFIG_EXPECTED="$(node -e 'const fs = require("fs"); const path = require("path"); process.stdout.write(path.join(fs.realpathSync.native(process.argv[1]), "playwright-cli.json"))' "$RUN_DIR" 2>/dev/null)"
+if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ -n "$RUN_CONFIG_EXPECTED" ] && [ "$RUN_CONFIG" = "$RUN_CONFIG_EXPECTED" ] && [ -f "$RUN_CONFIG" ] \
   && printf '%s\n' "$HELPER_OUT" | grep -qx 'mode=consent'; then
   check "H11-control the run-config helper wrote the config, named the session and reported consent mode" PASS
 else
@@ -763,11 +770,38 @@ esac
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" = "NONE" ] \
   && check "H13f-control a target of the same policy still passes without a prompt" PASS \
   || check "H13f-control a target of the same policy still passes without a prompt" FAIL
+NETWORK_ONLY_RUN_DIR="$PROJ/run-network-only"
+mkdir -p "$NETWORK_ONLY_RUN_DIR"
+NETWORK_ONLY_HELPER_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" config_helper --run-dir "$NETWORK_ONLY_RUN_DIR" --mode local --origin 'http://127.0.0.1:4300' --network-only-origin 'http://127.0.0.1:4390' 2>/dev/null)"
+NETWORK_ONLY_SESSION="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^session=//p')"
+NETWORK_ONLY_CONFIG="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^config=//p')"
+NETWORK_ONLY_OPEN="playwright-cli -s=$NETWORK_ONLY_SESSION open --config='$NETWORK_ONLY_CONFIG' http://127.0.0.1:4300/network-only-open"
+network_only_records() {
+  node -e '
+    try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records.filter((r) => r.origin === process.argv[2]).length)); }
+    catch (_) { process.stdout.write("none"); }
+  ' "$MEMORY" "$1" 2>/dev/null
+}
 NETWORK_ONLY_COUNT_BEFORE="$(memory_count)"
-ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$CLI goto http://127.0.0.1:4390/" "$SID" "$PROJ" >/dev/null
-[ "$(memory_count)" = "$NETWORK_ONLY_COUNT_BEFORE" ] \
-  && check "H13g the recorder writes no consent record for a network-only origin" PASS \
-  || check "H13g the recorder writes no consent record for a network-only origin" FAIL
+if [ -n "$NETWORK_ONLY_SESSION" ] && [ -n "$NETWORK_ONLY_CONFIG" ] && [ -f "$NETWORK_ONLY_CONFIG" ] \
+  && printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | grep -qxF 'network-only-origin=http://127.0.0.1:4390' \
+  && grep -qF '"http://127.0.0.1:4390"' "$NETWORK_ONLY_CONFIG" \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$NETWORK_ONLY_OPEN" "$SID" "$PROJ")" = "NONE" ]; then
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$NETWORK_ONLY_OPEN" "$SID" "$PROJ" >/dev/null
+  NETWORK_ONLY_COUNT_AFTER="$(memory_count)"
+  case "$NETWORK_ONLY_COUNT_BEFORE:$NETWORK_ONLY_COUNT_AFTER" in
+    (*[!0-9:]*|:*|*:) NETWORK_ONLY_GREW=0 ;;
+    (*) [ "$NETWORK_ONLY_COUNT_AFTER" -eq "$((NETWORK_ONLY_COUNT_BEFORE + 1))" ] && NETWORK_ONLY_GREW=1 || NETWORK_ONLY_GREW=0 ;;
+  esac
+  if [ "$NETWORK_ONLY_GREW" -eq 1 ] && memory_has "http://127.0.0.1:4300" "/network-only-open" "policy-mode" \
+    && [ "$(network_only_records 'http://127.0.0.1:4390')" = "0" ]; then
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin" PASS
+  else
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (records: $NETWORK_ONLY_COUNT_BEFORE->$NETWORK_ONLY_COUNT_AFTER, network-only: $(network_only_records 'http://127.0.0.1:4390'))" FAIL
+  fi
+else
+  check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (the helper wrote no such run config, or the gate did not admit its open)" FAIL
+fi
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://*.example.com"]}' pre_reason "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ")" in
   *'policy origin must name its host exactly'*) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" PASS ;;
   *) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" FAIL ;;
@@ -779,7 +813,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \
@@ -840,12 +874,16 @@ mkdir -p "$SYMMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
 cp "$PREFILTER_LIB" "$SYMMOD_ROOT/hooks/lib/"
 ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
-SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
-case "$SYMMOD_DENY" in
-  *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
-    check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
-  *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
-esac
+if [ -L "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+  SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
+  case "$SYMMOD_DENY" in
+    *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+      check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
+    *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
+  esac
+else
+  check "V31f a plugin root whose decision module is a symlink denies — this host made no symlink, so ln -s copied the module" SKIP
+fi
 BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
 mkdir -p "$BADMOD_ROOT/hooks/lib"
@@ -1393,5 +1431,9 @@ else
 fi
 
 echo "----"
-echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+if [ "$SKIP" -gt 0 ]; then
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
+else
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+fi
 [ "$FAIL" -eq 0 ]

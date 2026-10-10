@@ -30,35 +30,26 @@ MODE="${1:-all}"
 OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/zensu-windows-ci-contract-XXXXXX")"
 trap 'rm -f "$OUT_FILE"' EXIT INT TERM HUP
 
-# Floors are the counts each mode registers today, measured rather than guessed:
-# lifecycle 23, metadata 42, all 65. They are TOTALS — a case that starts skipping
-# itself must lower the floor deliberately, in the commit that introduces the skip.
 case "$MODE" in
   metadata)
-    FLOOR=42
-    node --test \
+    set -- \
       "$ROOT/tests/structure/deferred-review-claim-cases.test.js" \
       "$ROOT/tests/structure/windows-observation.test.js" \
       "$ROOT/tests/structure/windows-profile-contract.test.js" \
       "$ROOT/tests/structure/windows-ci-contract.test.js" \
-      "$ROOT/tests/structure/windows-safety-shard.test.js" 2>&1 | tee "$OUT_FILE"
-    RC=${PIPESTATUS[0]}
+      "$ROOT/tests/structure/windows-safety-shard.test.js"
     ;;
   lifecycle)
-    FLOOR=23
-    node --test "$ROOT/tests/structure/profile-runner.test.js" 2>&1 | tee "$OUT_FILE"
-    RC=${PIPESTATUS[0]}
+    set -- "$ROOT/tests/structure/profile-runner.test.js"
     ;;
   all)
-    FLOOR=65
-    node --test \
+    set -- \
       "$ROOT/tests/structure/profile-runner.test.js" \
       "$ROOT/tests/structure/deferred-review-claim-cases.test.js" \
       "$ROOT/tests/structure/windows-observation.test.js" \
       "$ROOT/tests/structure/windows-profile-contract.test.js" \
       "$ROOT/tests/structure/windows-ci-contract.test.js" \
-      "$ROOT/tests/structure/windows-safety-shard.test.js" 2>&1 | tee "$OUT_FILE"
-    RC=${PIPESTATUS[0]}
+      "$ROOT/tests/structure/windows-safety-shard.test.js"
     ;;
   *)
     echo 'usage: test-windows-ci-contract.sh [all|metadata|lifecycle]' >&2
@@ -66,7 +57,23 @@ case "$MODE" in
     ;;
 esac
 
+node --test "$@" 2>&1 | tee "$OUT_FILE"
+RC=${PIPESTATUS[0]}
+
 [ "$RC" -eq 0 ] || exit "$RC"
+
+FLOOR=0
+OVERVIEW_DRIFT=0
+for UNIT in "$@"; do
+  DECLARED="$(unit_overview_declared "${UNIT##*/}")"
+  if OVERVIEW="$(unit_overview_check "$UNIT")"; then
+    FLOOR=$((FLOOR + DECLARED))
+  else
+    printf 'test-windows-ci-contract: %s\n' "$OVERVIEW" >&2
+    OVERVIEW_DRIFT=1
+  fi
+done
+[ "$OVERVIEW_DRIFT" -eq 0 ] || exit 1
 
 if ! unit_cases_registered_floor "$OUT_FILE" "$FLOOR"; then
   # Two different faults, distinguished so a triage is not guesswork: a parsed

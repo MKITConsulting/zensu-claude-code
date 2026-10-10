@@ -808,9 +808,19 @@ FRESH_SID="tddmode-fresh-$$"
 ) >/dev/null 2>&1
 FRESH_MODE="$(ls -ld "$FRESH_PROJ/.zensu/state" 2>/dev/null | cut -c1-10)"
 FRESH_TMP="$(find "$FRESH_PROJ/.zensu/state" -maxdepth 1 -name '*.tmp.*' 2>/dev/null | grep -c . || true)"
-{ [ "$TMP_LEFT" = "0" ] && [ "$FRESH_TMP" = "0" ] && [ "$FRESH_MODE" = "drwx------" ]; } \
-  && check "T28 the writer leaves no temp file behind and creates the state dir 0700" PASS \
-  || check "T28 temp/mode (suite_leftovers=$TMP_LEFT fresh_leftovers=$FRESH_TMP mode='$FRESH_MODE')" FAIL
+node -e 'require("fs").mkdirSync(process.argv[1], { mode: 0o700 })' "$FRESH_PROJ/mode-probe" 2>/dev/null
+FRESH_PROBE_MODE="$(ls -ld "$FRESH_PROJ/mode-probe" 2>/dev/null | cut -c1-10)"
+{ [ "$TMP_LEFT" = "0" ] && [ "$FRESH_TMP" = "0" ]; } \
+  && check "T28 the writer leaves no temp file behind" PASS \
+  || check "T28 temp leftovers (suite_leftovers=$TMP_LEFT fresh_leftovers=$FRESH_TMP)" FAIL
+if [ "$FRESH_PROBE_MODE" != "drwx------" ]; then
+  SKIP_PRIVILEGE=$((SKIP_PRIVILEGE+1))
+  check "T28b state directory mode — this host does not keep a 700 directory mode (a 0700 mkdir reads back '$FRESH_PROBE_MODE')" SKIP
+elif [ "$FRESH_MODE" = "drwx------" ]; then
+  check "T28b the state directory is created 0700" PASS
+else
+  check "T28b state directory mode (got '$FRESH_MODE')" FAIL
+fi
 rm -rf "$FRESH_PROJ"
 
 # T29 the config getters see the BOUND project, not an ambient CLAUDE_PROJECT_DIR.

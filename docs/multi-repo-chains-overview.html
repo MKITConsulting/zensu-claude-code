@@ -423,7 +423,7 @@
           <td>Enumerate the union. Claims carry a root label instead of being merely repo-relative,
           otherwise <code>src/foo.ts</code> is ambiguous. Exactly <strong>one</strong> merged
           receipt, written beside the anchor's workflow document.</td>
-          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:182</td>
+          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:175</td>
         </tr>
         <tr>
           <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
@@ -451,7 +451,7 @@
           inside the immutable project root” — and forbids absolute Grep patterns and
           <code>..</code>. Without an exception no reviewer can read the satellites even when the
           packet names them.</td>
-          <td class="where mono">reviewer-capability-v1.js:573<br>reviewer-capability-v1.js:536-538</td>
+          <td class="where mono">reviewer-capability-v1.js:629<br>reviewer-capability-v1.js:592-594</td>
         </tr>
       </tbody>
     </table>
@@ -533,7 +533,7 @@
     <strong>Why this stage is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
-    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:195</span>). The decisive difference
+    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:188</span>). The decisive difference
     from the mechanical audit: a reviewer <em>reports</em> a finding, it does not <em>demand</em> a
     characterization test. That demand is precisely why the Cross-Layer audit cannot run in
     vanilla.</p>
@@ -569,7 +569,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/tdd/SKILL.md:415 · skills/tdd/SKILL.md:417</p>
+    <p class="src">skills/tdd/SKILL.md:408 · skills/tdd/SKILL.md:410</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
@@ -598,7 +598,7 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">skills/session-trail/SKILL.md:315</p>
+      <p class="src">skills/session-trail/references/limits.md:12</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>

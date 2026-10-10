@@ -1,16 +1,9 @@
 ---
 name: tdd
 description: >
-  [Zensu] Execute a feature specification with strict Red/Green Test-Driven Development in the MAIN
-  thread — you write the tests, run them, implement, and verify yourself (not delegated to
-  a subagent), enforced by a PreToolUse phase-gate armed via --tdd-begin and a
-  full-suite gate at the chain terminus. After implementation a guaranteed review chain fans out five read-only
-  zensu:review-aspect subagents, merges findings, and consolidates through a single
-  zensu:code-reviewer spawn whose findings you fix in-thread until PASS or max rounds. When
-  the resolved mode is vanilla it runs vanilla mode (no RED-to-GREEN ceremony, tests at
-  your discretion) but keeps the evidence audits and the full review chain. Invoked after a
-  plan is approved (the plan-approval hook asks), by /zensu:implement, or the slash command
-  /zensu:tdd with a feature specification. Provide WHAT to build, not HOW.
+  [Zensu] Implement a specification in the main thread under the Zensu workflow,
+  with evidence audits and a review chain. Use when an approved plan takes the
+  Zensu workflow, or via /zensu:tdd.
 ---
 
 # /zensu:tdd
