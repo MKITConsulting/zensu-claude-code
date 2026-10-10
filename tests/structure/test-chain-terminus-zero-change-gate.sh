@@ -288,6 +288,30 @@ if [ "$RC11D" -eq 1 ] && [ "$CRD11D" = "false" ] && grep -qF "reports 1 changed 
 else
   check "G11d config injection on --code-review-done (rc=$RC11D codeReviewDone=$CRD11D err='$(cat "$ERR11D" 2>/dev/null)')" FAIL
 fi
+if [ -z "$(GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  git -C "$GIT_PROJ" ls-files --others --exclude-standard 2>/dev/null)" ]; then
+  check "G11-control an excludes file injected through GIT_CONFIG_PARAMETERS empties an unscrubbed untracked listing" PASS
+else
+  check "G11-control an excludes file injected through GIT_CONFIG_PARAMETERS empties an unscrubbed untracked listing" FAIL
+fi
+ERR11E="$STATE_DIR/g11e.err"
+GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  bash "$LOG" --chain-done --session "$SID11" >/dev/null 2>"$ERR11E"; RC11E=$?
+DONE11E="$(tdd_chain_done "$SF11" 2>/dev/null)"
+if [ "$RC11E" -eq 1 ] && [ "$DONE11E" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11E"; then
+  check "G11e an excludes file injected through GIT_CONFIG_PARAMETERS does not hide an untracked file from --chain-done" PASS
+else
+  check "G11e GIT_CONFIG_PARAMETERS on --chain-done (rc=$RC11E chainDone=$DONE11E err='$(cat "$ERR11E" 2>/dev/null)')" FAIL
+fi
+ERR11F="$STATE_DIR/g11f.err"
+GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  bash "$LOG" --code-review-done --session "$SID11" >/dev/null 2>"$ERR11F"; RC11F=$?
+CRD11F="$(tdd_code_review_done "$SF11" 2>/dev/null)"
+if [ "$RC11F" -eq 1 ] && [ "$CRD11F" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11F"; then
+  check "G11f an excludes file injected through GIT_CONFIG_PARAMETERS does not hide an untracked file from --code-review-done" PASS
+else
+  check "G11f GIT_CONFIG_PARAMETERS on --code-review-done (rc=$RC11F codeReviewDone=$CRD11F err='$(cat "$ERR11F" 2>/dev/null)')" FAIL
+fi
 rm -f "$GIT_PROJ/untracked.txt"
 
 cp "$GIT_PROJ/.git/index" "$STATE_DIR/index.bak"

@@ -190,9 +190,10 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   scope calls here and `_zensu_unqualified_change_count`, which the `--chain-done` zero-change
   terminus and the unqualified `--code-review-done` mark share. `Z6` in
   `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition and the three
-  scope calls; `G11`–`G13` in `tests/structure/test-chain-terminus-zero-change-gate.sh` drive
-  both injection channels against the two unqualified verbs and fail on a bare `git -C` anywhere
-  in the file.
+  scope calls. In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an
+  inherited `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
+  `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` a failed listing, and `G13`
+  fails on a bare `git -C` outside comments and `_tc_git` calls.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of
