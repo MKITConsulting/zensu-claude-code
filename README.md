@@ -22,7 +22,7 @@ Any language, any stack. Nothing to configure, and no account needed to start.
   take and remembers a Zensu-workflow answer for the rest of the session —
   or never, when the project sets `hooks.defaultDeliveryRoute`.
   You stay in the loop once, not every turn.
-- **A review that cannot be skipped.** Five specialist reviewers run in
+- **A review that cannot be skipped.** Specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
 - **Findings you can trust.** Every finding is graded against the real source
@@ -150,7 +150,7 @@ is included as [`config.example.json`](config.example.json).
 ## Works without a Zensu account
 
 The implementation workflow and the review chain need no CLI, no login, and no
-network: `/zensu:tdd`, the five-aspect review with its auto-fix loop, and the
+network: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and the
 progress log under `.zensu/logs/` all run locally.
 
 Installing and authenticating the CLI adds the tracking layer on top — feature

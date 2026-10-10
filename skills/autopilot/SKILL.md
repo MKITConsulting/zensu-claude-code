@@ -338,8 +338,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
 1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs and the exact
    `AUTOPILOT-RUN: <RUN_ID>` line as the feature
-   specification. Let the built-in 5-perspective review chain (conventions, bugs,
-   architecture, tests, security) run and address what it raises. Stay in the worktree.
+   specification. Let the built-in review chain run and address what it raises.
+   Stay in the worktree.
    (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass

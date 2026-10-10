@@ -192,13 +192,16 @@ deferred:
 
 ```js
 // Orchestrator-driven: after all implementation agents have joined, run ONE
-// review pass over the combined diff — 5 read-only aspects → merge → judge
-// (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
-const ASPECTS = ['conventions', 'bugs', 'architecture', 'tests', 'security']
+// review pass over the combined diff — the configured panel's read-only aspects → merge
+// → judge (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
+const PANEL = /* `full` or `lean`, from zensu_review_panel in hooks/lib/zensu-config.sh */
+const ASPECTS = PANEL === 'full'
+  ? ['conventions', 'bugs', 'architecture', 'tests', 'security']
+  : ['correctness', 'design', 'security']
 const changed = /* `git diff --name-only HEAD`, comma-joined */
 const aspects = await parallel(ASPECTS.map(a => () =>
   agent(`Perspective: ${a}. Files changed: [${changed}]`, { agentType: 'zensu:review-aspect' })))
-let merged = /* dedupe + sort the five findings lists in-script */
+let merged = /* dedupe + sort the findings lists in-script */
 const judge = await agent(`Judge pass. Files changed: [${changed}]\n${merged}`, { agentType: 'zensu:review-judge' })
 merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
 // Finding Verification Gate (hooks.findingVerification, default on): grade every merged
