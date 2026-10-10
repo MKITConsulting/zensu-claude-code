@@ -42,6 +42,7 @@
     "test-drift-assertion-or-logic.sh",
     "test-drift-audit-regex.sh",
     "test-edit-landing-audit.sh",
+    "test-eval-harness-units.sh",
     "test-evidence-discipline.sh",
     "test-evidence-run.sh",
     "test-file-exists-replacement.sh",
