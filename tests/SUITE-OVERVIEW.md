@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (163 = 156 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 156 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 163). The figures here have drifted ELEVEN times, ten of them upward, and every
+reconciled to that manifest (164 = 157 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 157 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 164). The figures here have drifted ELEVEN times, ten of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -50,7 +50,7 @@ moved the figure. The eleventh is the merge shape again: `test-user-prompt-budge
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
 merging `main` into it made 156.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 153 against 156 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 154 against 157 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -92,7 +92,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **164** — 157 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **157 structure suites + 5 offline evals = 162 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 164 − 157 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **9** (`windows-shard-1`…`-9`, 44 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -374,8 +374,11 @@ binary; these guard the local harness contract.
 
 ## 4. `node --test` unit suites
 
-Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
-that suite's failure.
+Each is driven by a parent shell suite under `run-all.sh`, so a JS failure surfaces as that
+suite's failure. Separately, `scheduled.yml` runs every file here directly through
+`node tests/run-clock-shift.js` with `Date` shifted forward (§8), including the files whose
+only drivers are the local-only Promptfoo suites; those are deterministic units that spawn
+node alone, never the Promptfoo binary or a model.
 
 `R13` in `test-restore-project-root.sh` compares every row's `Blocks` cell with the
 `^test(` registrations of its file through `unit_overview_check` in
@@ -389,7 +392,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 80 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
-| `clock-shift-v1.test.js` | 17 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the allowlist validator, the runner's verdict (allowed, unexpected, stale and unexercised results) end to end against synthetic unit files, that every shipped allowlist entry names a top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
+| `clock-shift-v1.test.js` | 19 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, `Date.now` stays assignable so a stub still wins, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the runner's child environment and its reporter loaded by file URL, the allowlist validator, the outcome merge across same-named top-level tests, the runner's verdict end to end against synthetic unit files (allowed, unexpected, stale, an allowlisted name that two tests share, and a skipped or failing todo test through the real reporter), that every shipped allowlist entry names exactly one top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
@@ -540,7 +543,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 | `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 9 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice**, each as parallel `--shard=I/N` legs — once in `prepare-suite` against the bundled release commit, once in `publish-suite` against the exact `github.sha`; plus runtime-digest and clean-tree evidence in `prepare` and `publish` |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
-| `scheduled.yml` | `node tests/run-clock-shift.js` — scheduled daily + manual, Ubuntu only; runs every `tests/structure/*.test.js` with `Date` moved forward by the allowlist's `shiftDays` through the `tests/lib/clock-shift.cjs` preload (passed on in `NODE_OPTIONS`, so spawned node CLIs see the same clock), and fails on any top-level test failure outside `tests/profiles/clock-shift-allowlist.v1.json` and on any stale entry there. It catches a fixed-date fixture that the code under test reads on the real clock before the date arrives, which `ci.yml` cannot: it runs only on pull requests and pushes to `main` |
+| `scheduled.yml` | `node tests/run-clock-shift.js` — scheduled daily + manual, Ubuntu only; runs every `tests/structure/*.test.js` with `Date` moved forward by the allowlist's `shiftDays` through the `tests/lib/clock-shift.cjs` preload (passed on in `NODE_OPTIONS`, so spawned node CLIs see the same clock), and fails on any top-level test failure outside `tests/profiles/clock-shift-allowlist.v1.json`, on an allowlisted name that more than one top-level test carries, and on any stale entry there. It catches a fixed-date fixture that the code under test reads on the real clock before the date arrives, which `ci.yml` cannot: it runs only on pull requests and pushes to `main` |
 
 The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo profiles are
 **never** invoked by GitHub Actions — local-only by design, machine-enforced by
@@ -553,10 +556,10 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 - The shifted-clock pass in `scheduled.yml` moves `Date` in node processes only, and only
   for `tests/structure/*.test.js`: the shell suites, `tests/session-control/`, child
   processes that are not node (`git`, `date`), file mtimes and any node child whose
-  environment drops `NODE_OPTIONS` stay on the real clock. A test that compares a file
-  mtime, a git date or a lease age with `Date.now()` therefore fails under the shift by
-  design; the allowlist names each such test with its dependency (`file-mtime`,
-  `git-date` or `lease-staleness`).
+  environment drops `NODE_OPTIONS` or `ZENSU_TEST_CLOCK_SHIFT_DAYS` stay on the real clock.
+  A test that compares a file mtime, a git date or a lease age with `Date.now()` therefore
+  fails under the shift by design; the allowlist names each such test with its dependency
+  (`file-mtime`, `git-date` or `lease-staleness`).
 - 4 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
 - The 2 offline eval self-checks whose `ciOfflineSuites` entry sets `needsNodeDeps`

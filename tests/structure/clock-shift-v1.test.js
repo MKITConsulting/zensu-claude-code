@@ -24,7 +24,13 @@ const TOLERANCE_MS = 1000;
 const PROBE = [
   'const real = () => performance.timeOrigin + performance.now();',
   'class Later extends Date {}',
+  'const shiftedNow = Date.now;',
+  'Date.now = () => 42;',
+  'const stubbed = Date.now();',
+  'Date.now = shiftedNow;',
   'process.stdout.write(JSON.stringify({',
+  '  stubbed,',
+  '  restored: Date.now() - real(),',
   '  now: Date.now() - real(),',
   '  constructed: new Date().getTime() - real(),',
   '  called: Date.parse(Date()) - real(),',
@@ -66,6 +72,8 @@ function assertUnshifted(out) {
   near(out.now, 0);
   near(out.constructed, 0);
   near(out.called, 0, 2 * TOLERANCE_MS);
+  assert.equal(out.stubbed, 42);
+  near(out.restored, 0);
   assert.equal(out.installed, false);
 }
 
@@ -75,6 +83,8 @@ function assertShifted(out, days) {
   near(out.constructed, shiftMs);
   near(out.called, shiftMs, 2 * TOLERANCE_MS);
   near(out.subclass, shiftMs);
+  assert.equal(out.stubbed, 42);
+  near(out.restored, shiftMs);
   assert.equal(out.installed, true);
 }
 
@@ -206,24 +216,30 @@ test('outcomes are keyed by file and top-level test, and a crashed file by the f
     eventLine(root, 'a.test.js', 'passes', 'pass'),
     eventLine(root, 'a.test.js', 'twice', 'pass'),
     eventLine(root, 'a.test.js', 'twice', 'fail', 'second run failed'),
+    eventLine(root, 'a.test.js', 'fails first', 'fail', 'first copy failed'),
+    eventLine(root, 'a.test.js', 'fails first', 'pass'),
     eventLine(root, 'a.test.js', 'skipped', 'skip'),
+    eventLine(root, 'a.test.js', 'passes then skips', 'pass'),
+    eventLine(root, 'a.test.js', 'passes then skips', 'skip'),
     eventLine(root, 'b.test.js', path.join(root, 'b.test.js'), 'fail', 'test failed'),
     '',
   ];
   const collected = runner.collectOutcomes(lines, root, files);
   assert.deepEqual([...collected.seenFiles].sort(), ['a.test.js', 'b.test.js']);
-  assert.deepEqual([...collected.results.values()].map((result) => [result.file, result.test, result.outcome]), [
-    ['a.test.js', 'passes', 'pass'],
-    ['a.test.js', 'twice', 'fail'],
-    ['a.test.js', 'skipped', 'skip'],
-    ['b.test.js', null, 'fail'],
+  assert.deepEqual([...collected.results.values()].map((result) => [result.file, result.test, result.outcome, result.count, result.message]), [
+    ['a.test.js', 'passes', 'pass', 1, null],
+    ['a.test.js', 'twice', 'fail', 2, 'second run failed'],
+    ['a.test.js', 'fails first', 'fail', 2, 'first copy failed'],
+    ['a.test.js', 'skipped', 'skip', 1, null],
+    ['a.test.js', 'passes then skips', 'pass', 2, null],
+    ['b.test.js', null, 'fail', 1, 'test failed'],
   ]);
   assert.throws(() => runner.collectOutcomes([eventLine(root, 'c.test.js', 'x', 'pass')], root, files), /outside this run/);
 });
 
 function collectedOf(results, seenFiles) {
   return {
-    results: new Map(results.map((result) => [JSON.stringify([result.file, result.test]), { message: null, ...result }])),
+    results: new Map(results.map((result) => [JSON.stringify([result.file, result.test]), { message: null, count: 1, ...result }])),
     seenFiles: new Set(seenFiles),
   };
 }
@@ -234,17 +250,20 @@ test('the verdict separates allowed, unexpected, stale and unexercised results',
     entry({ file: 'a.test.js', test: 'now passes' }),
     entry({ file: 'a.test.js', test: 'renamed away' }),
     entry({ file: 'a.test.js', test: 'skipped here' }),
+    entry({ file: 'a.test.js', test: 'shared name' }),
   ]);
   const collected = collectedOf([
     { file: 'a.test.js', test: 'allowed failure', outcome: 'fail' },
     { file: 'a.test.js', test: 'now passes', outcome: 'pass' },
     { file: 'a.test.js', test: 'skipped here', outcome: 'skip' },
+    { file: 'a.test.js', test: 'shared name', outcome: 'fail', count: 2, message: 'one copy failed' },
     { file: 'a.test.js', test: 'new failure', outcome: 'fail', message: 'boom' },
     { file: 'b.test.js', test: null, outcome: 'fail', message: 'test failed' },
   ], ['a.test.js', 'b.test.js']);
   const verdict = runner.judge(list, collected, ['a.test.js', 'b.test.js', 'c.test.js'], false);
   assert.deepEqual(verdict.allowed, [{ file: 'a.test.js', test: 'allowed failure', dependency: 'file-mtime' }]);
   assert.deepEqual(verdict.unexpected, [
+    { file: 'a.test.js', test: 'shared name', message: '2 top-level tests share this allowlisted name, so the entry cannot tell them apart' },
     { file: 'a.test.js', test: 'new failure', message: 'boom' },
     { file: 'b.test.js', test: null, message: 'test failed' },
     { file: 'c.test.js', test: null, message: 'the file reported no test result' },
@@ -276,10 +295,34 @@ const CLOCK_FILE = [
   '',
 ].join('\n');
 
+const TWINS_FILE = [
+  "const test = require('node:test');",
+  "const assert = require('node:assert/strict');",
+  'const real = () => performance.timeOrigin + performance.now();',
+  "test('reads the real clock', () => {",
+  "  assert.ok(Math.abs(Date.now() - real()) < 60000, 'Date is shifted');",
+  '});',
+  "test('reads the real clock', () => {",
+  "  assert.ok(Math.abs(new Date().getTime() - real()) < 60000, 'the copy reads a shifted Date');",
+  '});',
+  '',
+].join('\n');
+
+const MARKED_FILE = [
+  "const test = require('node:test');",
+  "test('skipped on every clock', { skip: 'not run here' }, () => {});",
+  "test('known gap', { todo: 'tracked elsewhere' }, () => {",
+  "  throw new Error('todo failure');",
+  '});',
+  '',
+].join('\n');
+
 function sandbox() {
   const root = tempDir('runner');
   fs.writeFileSync(path.join(root, 'clock.test.js'), CLOCK_FILE);
   fs.writeFileSync(path.join(root, 'crash.test.js'), "require('node:test');\nthrow new Error('load failure');\n");
+  fs.writeFileSync(path.join(root, 'twins.test.js'), TWINS_FILE);
+  fs.writeFileSync(path.join(root, 'marked.test.js'), MARKED_FILE);
   return root;
 }
 
@@ -332,6 +375,30 @@ test('the runner fails on an entry whose test passes or no longer exists', () =>
   assert.match(result.stdout, /^clock-shift: STALE clock\.test\.js > ignores the clock — it passes under the shifted clock; remove or correct its allowlist entry$/m);
 });
 
+test('an allowlisted name that two top-level tests share fails the run instead of hiding the second failure', () => {
+  const root = sandbox();
+  const result = runRunner(root, [entry({ file: 'twins.test.js', test: 'reads the real clock' })], ['twins.test.js']);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.deepEqual(result.summary.allowed, []);
+  assert.deepEqual(result.summary.unexpected, [{
+    file: 'twins.test.js',
+    test: 'reads the real clock',
+    message: '2 top-level tests share this allowlisted name, so the entry cannot tell them apart',
+  }]);
+  assert.match(result.stdout, /^clock-shift: FAILED twins\.test\.js > reads the real clock — 2 top-level tests share this allowlisted name/m);
+});
+
+test('the runner reports a skipped allowlisted test as unexercised and never counts a failing todo test', () => {
+  const root = sandbox();
+  const result = runRunner(root, [entry({ file: 'marked.test.js', test: 'skipped on every clock' })], ['marked.test.js']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(result.summary.unexercised, [{ file: 'marked.test.js', test: 'skipped on every clock', outcome: 'skip' }]);
+  assert.deepEqual(result.summary.unexpected, []);
+  assert.deepEqual(result.summary.stale, []);
+  assert.match(result.stdout, /^clock-shift: UNEXERCISED marked\.test\.js > skipped on every clock \(skip\)$/m);
+  assert.doesNotMatch(result.stdout, /^clock-shift: FAILED/m);
+});
+
 test('the runner refuses a malformed allowlist, an unknown option and a file outside its root', () => {
   const root = sandbox();
   const malformed = runRunner(root, [entry({ dependency: 'wall-clock' })], ['clock.test.js']);
@@ -363,14 +430,15 @@ function topLevelTests(source) {
   return names;
 }
 
-test('every shipped allowlist entry names a top-level test its file registers', () => {
+test('every shipped allowlist entry names exactly one top-level test its file registers', () => {
   const shipped = runner.loadAllowlist(ALLOWLIST);
   assert.equal(shipped.shiftDays, 45);
   for (const item of shipped.entries) {
     const file = path.join(ROOT, item.file);
     assert.ok(fs.existsSync(file), `${item.file} does not exist`);
     assert.ok(item.file.startsWith('tests/structure/'), `${item.file} is not a tests/structure unit file`);
-    assert.ok(topLevelTests(fs.readFileSync(file, 'utf8')).includes(item.test), `${item.file} registers no top-level test named ${JSON.stringify(item.test)}`);
+    const registered = topLevelTests(fs.readFileSync(file, 'utf8')).filter((name) => name === item.test).length;
+    assert.equal(registered, 1, `${item.file} registers ${registered} top-level tests named ${JSON.stringify(item.test)}, not exactly one`);
   }
   assert.deepEqual(topLevelTests("test('it\\'s \\u0041', () => {});\ntest(\"two\", () => {});\n  test('nested', () => {});\n"), ["it's A", 'two']);
 });

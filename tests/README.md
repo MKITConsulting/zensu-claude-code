@@ -97,7 +97,8 @@ through the `tests/lib/clock-shift.cjs` preload in `NODE_OPTIONS`, so the node C
 test spawns read the same shifted clock. A fixed-date fixture that the code under test
 reads on the real clock then fails there weeks before the date turns every branch red,
 which pull-request CI cannot see. The run fails on a top-level test failure outside the
-allowlist and on an allowlist entry whose test passes or no longer exists. The same
+allowlist, on an allowlisted name that more than one top-level test carries, and on an
+allowlist entry whose test passes or no longer exists. The same
 command takes unit files as arguments for a local check, for example
 `node tests/run-clock-shift.js tests/structure/full-suite-ci-v1.test.js`.
 

@@ -115,8 +115,11 @@ function collectOutcomes(lines, root, files) {
     if (fileLevel && event.outcome !== 'fail') continue;
     const key = keyOf(file, test);
     const previous = results.get(key);
+    const count = previous ? previous.count + 1 : 1;
     if (!previous || RANK[event.outcome] > RANK[previous.outcome]) {
-      results.set(key, { file, test, outcome: event.outcome, message: event.message || null });
+      results.set(key, { file, test, outcome: event.outcome, message: event.message || null, count });
+    } else {
+      previous.count = count;
     }
   }
   return { results, seenFiles };
@@ -131,8 +134,12 @@ function judge(allowlist, collected, runFiles, partial) {
   for (const result of collected.results.values()) {
     if (result.outcome !== 'fail') continue;
     const entry = result.test === null ? undefined : entries.get(keyOf(result.file, result.test));
-    if (entry) allowed.push({ file: result.file, test: result.test, dependency: entry.dependency });
-    else unexpected.push({ file: result.file, test: result.test, message: result.message });
+    if (entry && result.count === 1) {
+      allowed.push({ file: result.file, test: result.test, dependency: entry.dependency });
+    } else {
+      const message = entry ? `${result.count} top-level tests share this allowlisted name, so the entry cannot tell them apart` : result.message;
+      unexpected.push({ file: result.file, test: result.test, message });
+    }
   }
   for (const file of runFiles) {
     if (!collected.seenFiles.has(file)) unexpected.push({ file, test: null, message: 'the file reported no test result' });

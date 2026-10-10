@@ -26,11 +26,9 @@ function install(shiftMs) {
     construct(target, args, newTarget) {
       return Reflect.construct(target, args.length === 0 ? [now()] : args, newTarget === ShiftedDate ? target : newTarget);
     },
-    get(target, property, receiver) {
-      return property === 'now' ? now : Reflect.get(target, property, receiver);
-    },
   });
   Object.defineProperty(globalThis, MARK, { value: shiftMs });
+  Object.defineProperty(RealDate, 'now', { value: now, writable: true, enumerable: false, configurable: true });
   RealDate.prototype.constructor = ShiftedDate;
   globalThis.Date = ShiftedDate;
 }
