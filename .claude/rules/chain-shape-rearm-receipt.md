@@ -66,10 +66,13 @@ in `hooks/lib/session-control-core-v1.js` rejects the ENTIRE workflow document w
 set does not match, which fails every hook closed — strictly worse than a wedged chain. A
 receipt-key change must therefore land THERE FIRST, in the same commit as the module and the
 writer. A ninth site hardcodes the key NAME only: `_tdd_mark_unclaimed_review_critical`
-refuses the unqualified no-ticket terminus while `reviewRearm` is present. That conjunct
-narrows the terminus only WHILE a chain is wedged — `--chain-recover` drops the receipt and
-the terminus becomes reachable again, by design. Renaming the field without updating the
-conjunct removes even that narrowing.
+refuses the unqualified no-ticket terminus while `reviewRearm` is present. The rearm writer
+only ever stamps a bound document, and that critical refuses every bound document on its own,
+so the conjunct only stops a receipt planted on a standalone one; renaming the field without
+updating the conjunct removes even that. The bound no-ticket arm of
+`_tdd_finish_autopilot_chain_critical` spells the same never-reviewed slot as that critical
+(`reviewTicket === ''`, consumed, round `0`), so a change to what counts as that slot lands in
+both.
 
 Two more sites hardcode the provenance literals rather than importing them: `zensu-log.sh --phase`,
 and `_tdd_reserved_provenance` — the one body `tdd_write_phase` and `_tdd_write_phase_critical` both
@@ -96,15 +99,19 @@ receipt predicate; `tests/structure/test-chain-recover.sh` pins the end-to-end b
 **Two invariants the recovery must never break**, both learned the hard way in review:
 
 1. `recoverable` requires `reviewTicketConsumed === true`, and the repair NEVER WRITES the
-   ticket slot. Writing `reviewTicketConsumed = true` on a document that has it `false` would
-   complete the precondition of the *unqualified* no-ticket terminus
-   (`_tdd_mark_unclaimed_review_critical`), letting `--code-review-done` close a chain with no
-   reviewer, no ticket and no round — so the repair REFUSES such a document (`ticket-slot`)
-   instead of normalizing it. A retained CONSUMED ticket is allowed, because `reviewTicket !== ''`
-   keeps that terminus shut on its own. The invariant is "the repair never writes a value that
-   was a missing precondition of a terminus" — NOT "the repair never makes a terminus
-   reachable": dropping the receipt deliberately returns a wedged chain to exactly the
-   permissiveness of any freshly armed chain, including that terminus.
+   ticket slot. The repair only touches a bound generation, and writing
+   `reviewTicketConsumed = true` on a document that has it `false` would complete the
+   precondition of the bound no-ticket arm of `_tdd_finish_autopilot_chain_critical`, letting a
+   bound `--chain-done` close the generation with no reviewer, no ticket and no round — so the
+   repair REFUSES such a document (`ticket-slot`) instead of normalizing it. A retained CONSUMED
+   ticket is allowed, because `reviewTicket !== ''` keeps that arm shut on its own. The
+   unqualified standalone forms in `_tdd_mark_unclaimed_review_critical` refuse a bound document
+   outright, and on a standalone one they close only a tree that reports no changed file or
+   that git cannot evaluate. The
+   invariant is "the repair never writes a value that was a missing precondition of a terminus"
+   — NOT "the repair never makes a terminus reachable": dropping the receipt deliberately
+   returns a wedged chain to exactly the permissiveness of any freshly armed chain, including
+   that arm.
 2. The bypass ledger records gate escapes ONLY, so everything rendered under "Gates bypassed"
    is true. The repair records its provenance as a workflow `history` entry inside its own
    transaction — never as a ledger entry.

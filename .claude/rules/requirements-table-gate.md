@@ -47,7 +47,7 @@ one filled row would satisfy the gate — and a receipt is an ordinary file the 
 write. Every comparison canonicalizes both sides (`realpath` / `cd … && pwd -P`): on macOS a
 temp root is spelled `/var/…` by the caller and `/private/var/…` by the kernel, and a raw
 string compare there rejects the session's own plan. Four things must therefore move
-together: the stem convention in `skills/tdd/SKILL.md` Phase 2, the receipt's `log` field and
+together: the stem convention in Phase 2 of `skills/tdd/references/planning.md`, the receipt's `log` field and
 its JSON ENCODING in `hooks/lib/zensu-edit-landing.sh`, the substitution in `zensu-log.sh`,
 `templates/tdd-plan.md` — whose `{acceptance criterion — machine-checkable}` / `{functional requirement}` cells are exactly what the placeholder-stripping rule keys on, so changing that placeholder syntax makes the gate misjudge — and `{plan_file}`'s definition beside `{log_file}` in Principle 3 — which Phase 2 step 1 now
 WRITES, so producer and consumer share one spelling. The receipt's `log` is JSON-ENCODED and
@@ -111,10 +111,12 @@ written against the decoded message finds nothing.
 **The `## Requirements` shape has SEVEN readers, not two**, and all five beside this library
 and `/zensu:converge` are model-executed and PRESENCE-ONLY, so every one of them accepts a
 placeholder-only table this library refuses: `skills/self-review/SKILL.md` twice (the per-AC
-table in the chain-end summary, and the converge offer it renders), and `skills/tdd/SKILL.md`
+table in the chain-end summary, and the converge offer it renders), and the tdd skill
 three times (Phase 6 step 6c's "If the plan has no `## Requirements` table (legacy plan), skip
-silently"; the step-10 converge offer, which this thread renders when `hooks.selfReview` is
-disabled; and the vanilla-mode statement that the table and the `Covers` mapping stay binding).
+silently" in `skills/tdd/references/audit.md`; the step-10 converge offer in
+`references/review-chain.md`, which this thread renders when `hooks.selfReview` is disabled; and
+the vanilla-mode statement in `references/modes.md` that the table and the `Covers` mapping stay
+binding).
 A change to what counts as a usable table has to reach all seven. An EIGHTH reader is
 mechanical and shares this library's own parser: `--list` prints every recognized row with its
 state (`active`, `deprecated`, `placeholder`), and `hooks/lib/acceptance-verify-v1.js` takes its
@@ -169,7 +171,7 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   stem, so an explicit `--plan` keeps only its plans-directory bound: a stale plan from an
   earlier session in the same project satisfies it. Disclosed on stderr, not silent, and the
   same switch already carries its own ledger entry.
-- **The git-environment scrub is scoped to this verb, and its sibling is not scrubbed.**
+- **The git-environment scrub is a denylist, so its numeral is a witness, not the contract.**
   `--tdd-complete`'s three scope `git` calls run through a subshell that unsets the FIFTEEN
   `GIT_*` variables `_tc_git` lists — discovery and config-injection levers alike, not just the
   three this paragraph used to name. **Read the numeral as a WITNESS to the last audit, never as
@@ -185,11 +187,15 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   lists directly, so a one-sided addition fails loudly. State what that pin CANNOT see: two
   lists that agree and are both short, which is exactly the state fourteen was. `X10`/`X17` and
   their controls cover that instead, one behavioural injection probe per config channel, so a
-  third channel needs a third probe rather than a bigger numeral; the `--chain-done` zero-change terminus in the same file
-  still calls bare `git`, so a one-token prefix there still drives its change count to zero. The
-  wrapper is defined INSIDE the `--tdd-complete` case arm, which makes the asymmetry structural
-  rather than a one-line follow-up: sharing it means hoisting the definition above the verb
-  dispatch. Knowingly left as is.
+  third channel needs a third probe rather than a bigger numeral. `_tc_git` sits at file scope,
+  above the verb dispatch, and every change count in `zensu-log.sh` runs through it: the three
+  scope calls here and `_zensu_unqualified_change_count`, which the `--chain-done` zero-change
+  terminus and the unqualified `--code-review-done` mark share. `Z6` in
+  `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition and the three
+  scope calls. In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an
+  inherited `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
+  `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` a failed listing, and `G13`
+  fails on a bare `git -C` outside comments and `_tc_git` calls.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of

@@ -401,7 +401,8 @@ else
 fi
 
 echo "=== E10: a /zensu:tdd chain in the new anchor, driven from the start directory ==="
-SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 SKILL_SR="$PLUGIN_DIR/skills/self-review/SKILL.md"
 SKILL_VF="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
 span_in() {
@@ -421,7 +422,8 @@ skill_span() { span_in "$SKILL_TDD" "$@"; }
 spans_agree() {
   node -e '
     const text = require("fs").readFileSync(process.argv[1], "utf8");
-    const spans = (text.match(/`[^`\n]*`/g) || []).map((s) => s.slice(1, -1))
+    const spans = (text.match(/`[^`\n]*`/g) || [])
+      .map((s) => s.slice(1, -1).split("${CLAUDE_PLUGIN_ROOT}").join("{plugin_root}").split("${CLAUDE_PLUGIN_DATA}").join("{plugin_data}"))
       .filter((s) => s.includes(process.argv[2]) && s.endsWith(process.argv[3]));
     process.stdout.write(spans.length >= 2 && spans.every((s) => s === spans[0]) ? String(spans.length) : "0");
   ' "$SKILL_TDD" "$1" "$2" 2>/dev/null
@@ -461,11 +463,13 @@ render() {
   c="${c//\{session_id\}/$SID}"
   c="${c//\{title\}/re-anchor end to end}"
   c="${c//\{N\}/1}"
+  c="${c//\{plugin_root\}/$PLUGIN_DIR}"
+  c="${c//\{plugin_data\}/$DATA}"
   printf '%s' "$c"
 }
 unrendered() {
   case "$1" in
-    (*'{log_file}'*|*'{plan_file}'*|*'{project_root}'*|*'{SESSION_TS}'*|*'{slug}'*|*'{session_id}'*|*'{title}'*|*'{N}'*|*'{full_test_cmd}'*|*'<command>'*) return 0 ;;
+    (*'{log_file}'*|*'{plugin_root}'*|*'{plugin_data}'*|*'{plan_file}'*|*'{project_root}'*|*'{SESSION_TS}'*|*'{slug}'*|*'{session_id}'*|*'{title}'*|*'{N}'*|*'{full_test_cmd}'*|*'<command>'*) return 0 ;;
     (*) return 1 ;;
   esac
 }
@@ -680,5 +684,6 @@ else
   check "E10q the re-anchor report and outcome withhold the chain promise for exactly the roots --project-root refuses:$E10Q_BAD" FAIL
 fi
 
+rm -f "$SKILL_TDD"
 echo "session-reanchor: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

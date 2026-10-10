@@ -20,8 +20,8 @@ control/agent tool. The first all-tool `PreToolUse` hook is the fail-closed
 enforcement point: it revalidates the immutable Session Control context on every
 tool call, recognizes Claude Code's plugin-scoped `zensu:code-reviewer`,
 `zensu:review-aspect`, `zensu:review-judge`, `zensu:plan-review-worker`, and
-`zensu:pr-review-worker` identities (plus exact bare
-`--agents` fixtures), then repeats the exact three-tool reviewer allowlist. The
+`zensu:pr-review-worker` identities (plus the exact bare `--agents` names of
+the three reviewers), then repeats the exact three-tool reviewer allowlist. The
 plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. The three
 reviewers and the PLM may additionally call the host's `SubagentHandback` report
 tool, with exactly one string `message` field, because Claude Code in `auto`

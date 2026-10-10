@@ -1,16 +1,16 @@
 #!/bin/bash
-# Pins the ZERO-file-change gate on the unqualified standalone chain terminus
-# (zensu-log.sh --chain-done without --claimed-review-ticket):
+# Pins the ZERO-file-change gate on the unqualified --chain-done terminus and the
+# unqualified --code-review-done mark (both without --claimed-review-ticket):
 #   G1 clean worktree                -> terminus allowed (the sanctioned escape)
 #   G2 modified tracked file          -> refused, chainDone stays false
 #   G3 untracked non-ignored file     -> refused (git ls-files --others)
 #   G4 ignored-only change            -> allowed (--exclude-standard)
 #   G5 --claimed-review-ticket form   -> gate never fires (terminus is ticket-bound)
-#   G6 --code-review-done             -> gate never fires (not the terminus)
+#   G6 --code-review-done (unqualified) -> refused on a changed tree, codeReviewDone stays false
 #   G7 non-git project root           -> allowed (claim not evaluable)
 #   G8 git repo without a HEAD commit -> allowed (claim not evaluable)
-# The unqualified form can only ever bind a chain in which no review ticket was
-# consumed, so it is the one command that could close a chain over unreviewed
+# The unqualified forms can only ever bind a chain in which no review ticket was
+# consumed, so they are the commands that could close a chain over unreviewed
 # changes. Complements test-stop-enforcer-escapes.sh (release paths) and
 # test-stop-enforcer-self-review-routing.sh (block + routing).
 set -u
@@ -18,6 +18,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 TDD_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -58,6 +59,9 @@ arm() {
 }
 
 GATE_PHRASE="refusing the unqualified standalone terminus"
+REVIEW_GATE_PHRASE="refusing the unqualified review-convergence mark"
+LISTING_PHRASE="git could not list this worktree"
+READABLE_HINT="the chain state is readable"
 
 export CLAUDE_PROJECT_DIR="$GIT_PROJ"
 
@@ -95,13 +99,22 @@ if grep -qF -- "--claimed-review-ticket" "$ERR2" && grep -qF "/zensu:tdd" "$ERR2
 else
   check "G2b refusal continuations (err='$(cat "$ERR2" 2>/dev/null)')" FAIL
 fi
+if grep -qF "holds no consumed review ticket" "$ERR2" && grep -qF "Do not commit, stash or revert" "$ERR2" \
+  && ! grep -qF "ever consumed" "$ERR2"; then
+  check "G2c refusal states the ticket state and warns against hiding the changes" PASS
+else
+  check "G2c refusal wording (err='$(cat "$ERR2" 2>/dev/null)')" FAIL
+fi
 
-# --- G6 --code-review-done is not the terminus: gate must not fire ---
+# --- G6 --code-review-done (unqualified) is refused on a changed tree ---
 ERR6="$STATE_DIR/g6.err"
 bash "$LOG" --code-review-done --session "$SID2" >/dev/null 2>"$ERR6"; RC6=$?
 CRD6="$(tdd_code_review_done "$(tdd_state_file "$SID2")" 2>/dev/null)"
-if [ "$RC6" -eq 0 ] && [ "$CRD6" = "true" ] && ! grep -qF "$GATE_PHRASE" "$ERR6"; then
-  check "G6 --code-review-done unaffected by the terminus gate" PASS
+if [ "$RC6" -eq 1 ] && [ "$CRD6" = "false" ] \
+  && grep -qF "$REVIEW_GATE_PHRASE" "$ERR6" && grep -qF "reports 1 changed file(s)" "$ERR6" \
+  && grep -qF -- "--review-ticket" "$ERR6" && grep -qF "Do not commit, stash or revert" "$ERR6" \
+  && ! grep -qF "$GATE_PHRASE" "$ERR6" && ! grep -qF "$READABLE_HINT" "$ERR6"; then
+  check "G6 --code-review-done (unqualified) refused on a changed tree, codeReviewDone stays false" PASS
 else
   check "G6 --code-review-done (rc=$RC6 codeReviewDone=$CRD6 err='$(cat "$ERR6" 2>/dev/null)')" FAIL
 fi
@@ -145,6 +158,190 @@ else
   check "G4 ignored-only change (rc=$RC4 chainDone=$DONE4 err='$(cat "$ERR4" 2>/dev/null)')" FAIL
 fi
 
+SID9="review-mark-clean"
+arm "$SID9"
+ERR9="$STATE_DIR/g9.err"
+bash "$LOG" --code-review-done --session "$SID9" >/dev/null 2>"$ERR9"; RC9=$?
+CRD9="$(tdd_code_review_done "$(tdd_state_file "$SID9")" 2>/dev/null)"
+if [ "$RC9" -eq 0 ] && [ "$CRD9" = "true" ] && [ ! -s "$ERR9" ]; then
+  check "G9 clean worktree -> unqualified --code-review-done marks the review" PASS
+else
+  check "G9 clean worktree --code-review-done (rc=$RC9 codeReviewDone=$CRD9 err='$(cat "$ERR9" 2>/dev/null)')" FAIL
+fi
+printf 'changed\n' > "$GIT_PROJ/tracked.txt"
+ERR9C="$STATE_DIR/g9c.err"
+bash "$LOG" --chain-done --session "$SID9" >/dev/null 2>"$ERR9C"; RC9C=$?
+DONE9C="$(tdd_chain_done "$(tdd_state_file "$SID9")" 2>/dev/null)"
+if [ "$RC9C" -eq 1 ] && [ "$DONE9C" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR9C" \
+  && grep -qF "reports 1 changed file(s)" "$ERR9C"; then
+  check "G9c a review mark taken on a clean tree does not open the terminus on a changed one" PASS
+else
+  check "G9c terminus after a clean-tree mark (rc=$RC9C chainDone=$DONE9C err='$(cat "$ERR9C" 2>/dev/null)')" FAIL
+fi
+git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
+
+SID10="review-ticket-consumed"
+arm "$SID10"
+TICKET10="$(bash "$LOG" --review-ticket --session "$SID10" 2>/dev/null)"
+CTX10="$(SID_VALUE="$SID10" TICKET="$TICKET10" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    },
+    session_id: process.env.SID_VALUE
+  }));
+')"
+( cd "$GIT_PROJ" && printf '%s' "$CTX10" | bash "$POSTREV" >/dev/null 2>&1 )
+SF10="$(tdd_state_file "$SID10")"
+if [ -n "$TICKET10" ] && node -e '
+  const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(s.reviewTicket === process.argv[2] && s.reviewTicketConsumed === true ? 0 : 1);
+' "$SF10" "$TICKET10" 2>/dev/null; then
+  check "G10-pre the fixture chain holds a consumed review ticket" PASS
+else
+  check "G10-pre consumed review ticket (ticket='$TICKET10')" FAIL
+fi
+printf 'changed\n' > "$GIT_PROJ/tracked.txt"
+ERR10A="$STATE_DIR/g10a.err"
+bash "$LOG" --chain-done --session "$SID10" >/dev/null 2>"$ERR10A"; RC10A=$?
+DONE10A="$(tdd_chain_done "$SF10" 2>/dev/null)"
+if [ "$RC10A" -eq 1 ] && [ "$DONE10A" = "false" ] && grep -qF "$READABLE_HINT" "$ERR10A" \
+  && ! grep -qF "$GATE_PHRASE" "$ERR10A"; then
+  check "G10a a reviewed chain refuses the unqualified terminus with the state hint, not the zero-change text" PASS
+else
+  check "G10a reviewed chain --chain-done (rc=$RC10A chainDone=$DONE10A err='$(cat "$ERR10A" 2>/dev/null)')" FAIL
+fi
+ERR10B="$STATE_DIR/g10b.err"
+bash "$LOG" --code-review-done --session "$SID10" >/dev/null 2>"$ERR10B"; RC10B=$?
+CRD10B="$(tdd_code_review_done "$SF10" 2>/dev/null)"
+if [ "$RC10B" -eq 1 ] && [ "$CRD10B" = "false" ] && grep -qF "$READABLE_HINT" "$ERR10B" \
+  && ! grep -qF "$REVIEW_GATE_PHRASE" "$ERR10B"; then
+  check "G10b a reviewed chain refuses the unqualified review mark with the state hint, not the zero-change text" PASS
+else
+  check "G10b reviewed chain --code-review-done (rc=$RC10B codeReviewDone=$CRD10B err='$(cat "$ERR10B" 2>/dev/null)')" FAIL
+fi
+ERR10C="$STATE_DIR/g10c.err"
+bash "$LOG" --code-review-done --session "$SID10" --claimed-review-ticket "$TICKET10" \
+  >/dev/null 2>"$ERR10C"; RC10C=$?
+CRD10C="$(tdd_code_review_done "$SF10" 2>/dev/null)"
+if [ "$RC10C" -eq 0 ] && [ "$CRD10C" = "true" ]; then
+  check "G10c the ticket-bound --code-review-done still converges on a changed tree" PASS
+else
+  check "G10c ticket-bound --code-review-done (rc=$RC10C codeReviewDone=$CRD10C err='$(cat "$ERR10C" 2>/dev/null)')" FAIL
+fi
+git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
+
+SID11="unqualified-env-prefix"
+arm "$SID11"
+SF11="$(tdd_state_file "$SID11")"
+printf 'changed\n' > "$GIT_PROJ/tracked.txt"
+if ! GIT_DIR="$BARE_PROJ/.git" git -C "$GIT_PROJ" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+  check "G11-control an inherited GIT_DIR hides HEAD from an unscrubbed git" PASS
+else
+  check "G11-control an inherited GIT_DIR hides HEAD from an unscrubbed git" FAIL
+fi
+ERR11A="$STATE_DIR/g11a.err"
+GIT_DIR="$BARE_PROJ/.git" bash "$LOG" --chain-done --session "$SID11" >/dev/null 2>"$ERR11A"; RC11A=$?
+DONE11A="$(tdd_chain_done "$SF11" 2>/dev/null)"
+if [ "$RC11A" -eq 1 ] && [ "$DONE11A" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR11A" \
+  && grep -qF "reports 1 changed file(s)" "$ERR11A"; then
+  check "G11a an inherited GIT_DIR does not zero the --chain-done count" PASS
+else
+  check "G11a GIT_DIR prefix on --chain-done (rc=$RC11A chainDone=$DONE11A err='$(cat "$ERR11A" 2>/dev/null)')" FAIL
+fi
+ERR11B="$STATE_DIR/g11b.err"
+GIT_DIR="$BARE_PROJ/.git" bash "$LOG" --code-review-done --session "$SID11" >/dev/null 2>"$ERR11B"; RC11B=$?
+CRD11B="$(tdd_code_review_done "$SF11" 2>/dev/null)"
+if [ "$RC11B" -eq 1 ] && [ "$CRD11B" = "false" ] && grep -qF "$REVIEW_GATE_PHRASE" "$ERR11B" \
+  && grep -qF "reports 1 changed file(s)" "$ERR11B"; then
+  check "G11b an inherited GIT_DIR does not zero the --code-review-done count" PASS
+else
+  check "G11b GIT_DIR prefix on --code-review-done (rc=$RC11B codeReviewDone=$CRD11B err='$(cat "$ERR11B" 2>/dev/null)')" FAIL
+fi
+git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
+printf 'new\n' > "$GIT_PROJ/untracked.txt"
+printf '*\n' > "$STATE_DIR/exclude-all"
+if [ -z "$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0="$STATE_DIR/exclude-all" \
+  git -C "$GIT_PROJ" ls-files --others --exclude-standard 2>/dev/null)" ]; then
+  check "G11-control an injected core.excludesFile empties an unscrubbed untracked listing" PASS
+else
+  check "G11-control an injected core.excludesFile empties an unscrubbed untracked listing" FAIL
+fi
+ERR11C="$STATE_DIR/g11c.err"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0="$STATE_DIR/exclude-all" \
+  bash "$LOG" --chain-done --session "$SID11" >/dev/null 2>"$ERR11C"; RC11C=$?
+DONE11C="$(tdd_chain_done "$SF11" 2>/dev/null)"
+if [ "$RC11C" -eq 1 ] && [ "$DONE11C" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11C"; then
+  check "G11c an injected excludes file does not hide an untracked file from --chain-done" PASS
+else
+  check "G11c config injection on --chain-done (rc=$RC11C chainDone=$DONE11C err='$(cat "$ERR11C" 2>/dev/null)')" FAIL
+fi
+ERR11D="$STATE_DIR/g11d.err"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile GIT_CONFIG_VALUE_0="$STATE_DIR/exclude-all" \
+  bash "$LOG" --code-review-done --session "$SID11" >/dev/null 2>"$ERR11D"; RC11D=$?
+CRD11D="$(tdd_code_review_done "$SF11" 2>/dev/null)"
+if [ "$RC11D" -eq 1 ] && [ "$CRD11D" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11D"; then
+  check "G11d an injected excludes file does not hide an untracked file from --code-review-done" PASS
+else
+  check "G11d config injection on --code-review-done (rc=$RC11D codeReviewDone=$CRD11D err='$(cat "$ERR11D" 2>/dev/null)')" FAIL
+fi
+if [ -z "$(GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  git -C "$GIT_PROJ" ls-files --others --exclude-standard 2>/dev/null)" ]; then
+  check "G11-control an excludes file injected through GIT_CONFIG_PARAMETERS empties an unscrubbed untracked listing" PASS
+else
+  check "G11-control an excludes file injected through GIT_CONFIG_PARAMETERS empties an unscrubbed untracked listing" FAIL
+fi
+ERR11E="$STATE_DIR/g11e.err"
+GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  bash "$LOG" --chain-done --session "$SID11" >/dev/null 2>"$ERR11E"; RC11E=$?
+DONE11E="$(tdd_chain_done "$SF11" 2>/dev/null)"
+if [ "$RC11E" -eq 1 ] && [ "$DONE11E" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11E"; then
+  check "G11e an excludes file injected through GIT_CONFIG_PARAMETERS does not hide an untracked file from --chain-done" PASS
+else
+  check "G11e GIT_CONFIG_PARAMETERS on --chain-done (rc=$RC11E chainDone=$DONE11E err='$(cat "$ERR11E" 2>/dev/null)')" FAIL
+fi
+ERR11F="$STATE_DIR/g11f.err"
+GIT_CONFIG_PARAMETERS="'core.excludesFile=$STATE_DIR/exclude-all'" \
+  bash "$LOG" --code-review-done --session "$SID11" >/dev/null 2>"$ERR11F"; RC11F=$?
+CRD11F="$(tdd_code_review_done "$SF11" 2>/dev/null)"
+if [ "$RC11F" -eq 1 ] && [ "$CRD11F" = "false" ] && grep -qF "reports 1 changed file(s)" "$ERR11F"; then
+  check "G11f an excludes file injected through GIT_CONFIG_PARAMETERS does not hide an untracked file from --code-review-done" PASS
+else
+  check "G11f GIT_CONFIG_PARAMETERS on --code-review-done (rc=$RC11F codeReviewDone=$CRD11F err='$(cat "$ERR11F" 2>/dev/null)')" FAIL
+fi
+rm -f "$GIT_PROJ/untracked.txt"
+
+cp "$GIT_PROJ/.git/index" "$STATE_DIR/index.bak"
+printf 'garbage' > "$GIT_PROJ/.git/index"
+if ! git -C "$GIT_PROJ" diff --name-only HEAD >/dev/null 2>&1 \
+  && git -C "$GIT_PROJ" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+  check "G12-control a corrupt index fails the listing while HEAD still resolves" PASS
+else
+  check "G12-control a corrupt index fails the listing while HEAD still resolves" FAIL
+fi
+ERR12A="$STATE_DIR/g12a.err"
+bash "$LOG" --chain-done --session "$SID11" >/dev/null 2>"$ERR12A"; RC12A=$?
+DONE12A="$(tdd_chain_done "$SF11" 2>/dev/null)"
+if [ "$RC12A" -eq 1 ] && [ "$DONE12A" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR12A" \
+  && grep -qF "$LISTING_PHRASE" "$ERR12A" && ! grep -qF "changed file(s)" "$ERR12A"; then
+  check "G12a a failed change listing refuses the unqualified terminus" PASS
+else
+  check "G12a failed listing on --chain-done (rc=$RC12A chainDone=$DONE12A err='$(cat "$ERR12A" 2>/dev/null)')" FAIL
+fi
+ERR12B="$STATE_DIR/g12b.err"
+bash "$LOG" --code-review-done --session "$SID11" >/dev/null 2>"$ERR12B"; RC12B=$?
+CRD12B="$(tdd_code_review_done "$SF11" 2>/dev/null)"
+if [ "$RC12B" -eq 1 ] && [ "$CRD12B" = "false" ] && grep -qF "$REVIEW_GATE_PHRASE" "$ERR12B" \
+  && grep -qF "$LISTING_PHRASE" "$ERR12B" && ! grep -qF "changed file(s)" "$ERR12B"; then
+  check "G12b a failed change listing refuses the unqualified review mark" PASS
+else
+  check "G12b failed listing on --code-review-done (rc=$RC12B codeReviewDone=$CRD12B err='$(cat "$ERR12B" 2>/dev/null)')" FAIL
+fi
+cp "$STATE_DIR/index.bak" "$GIT_PROJ/.git/index"
+
 # --- G7 non-git project root: claim not evaluable, legacy behaviour ---
 export CLAUDE_PROJECT_DIR="$PLAIN_PROJ"
 SID7="terminus-no-repo"
@@ -156,6 +353,16 @@ if [ "$RC7" -eq 0 ] && [ "$DONE7" = "true" ]; then
   check "G7 non-git project root -> terminus allowed (not evaluable)" PASS
 else
   check "G7 non-git root (rc=$RC7 chainDone=$DONE7 err='$(cat "$ERR7" 2>/dev/null)')" FAIL
+fi
+SID9A="review-mark-no-repo"
+arm "$SID9A"
+ERR9A="$STATE_DIR/g9a.err"
+bash "$LOG" --code-review-done --session "$SID9A" >/dev/null 2>"$ERR9A"; RC9A=$?
+CRD9A="$(tdd_code_review_done "$(tdd_state_file "$SID9A")" 2>/dev/null)"
+if [ "$RC9A" -eq 0 ] && [ "$CRD9A" = "true" ]; then
+  check "G9a non-git project root -> unqualified --code-review-done allowed (not evaluable)" PASS
+else
+  check "G9a non-git root --code-review-done (rc=$RC9A codeReviewDone=$CRD9A err='$(cat "$ERR9A" 2>/dev/null)')" FAIL
 fi
 
 # --- G8 git repo without a HEAD commit: claim not evaluable ---
@@ -169,6 +376,52 @@ if [ "$RC8" -eq 0 ] && [ "$DONE8" = "true" ]; then
   check "G8 git repo without HEAD -> terminus allowed (not evaluable)" PASS
 else
   check "G8 no-HEAD repo (rc=$RC8 chainDone=$DONE8 err='$(cat "$ERR8" 2>/dev/null)')" FAIL
+fi
+SID9B="review-mark-no-head"
+arm "$SID9B"
+SF9B="$(tdd_state_file "$SID9B")"
+ERR9B="$STATE_DIR/g9b.err"
+bash "$LOG" --code-review-done --session "$SID9B" >/dev/null 2>"$ERR9B"; RC9B=$?
+CRD9B="$(tdd_code_review_done "$SF9B" 2>/dev/null)"
+if [ "$RC9B" -eq 0 ] && [ "$CRD9B" = "true" ]; then
+  check "G9b git repo without HEAD -> unqualified --code-review-done allowed (not evaluable)" PASS
+else
+  check "G9b no-HEAD repo --code-review-done (rc=$RC9B codeReviewDone=$CRD9B err='$(cat "$ERR9B" 2>/dev/null)')" FAIL
+fi
+
+BARE_GIT_LOG="$(grep -nE '(^|[^[:alnum:]_])git[[:space:]]+-C' "$LOG" | grep -v '_tc_git' | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+HELPER_BODY="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
+if [ -z "$BARE_GIT_LOG" ] \
+  && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
+  && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard' \
+  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 2 ]; then
+  check "G13 both unqualified verbs count through one scrubbed helper and no bare git -C remains" PASS
+else
+  check "G13 shared scrubbed helper (bare='$BARE_GIT_LOG')" FAIL
+fi
+
+KEY9B="$(zensu_resolve_session_id "$SID9B" 2>/dev/null)"
+G13B_RCS=""
+tdd_mark_unclaimed_review "$KEY9B" chainDone >/dev/null 2>&1; G13B_RCS="$G13B_RCS $?"
+tdd_mark_unclaimed_review "$KEY9B" codeReviewDone >/dev/null 2>&1; G13B_RCS="$G13B_RCS $?"
+tdd_mark_unclaimed_review "$KEY9B" chainDone 01 >/dev/null 2>&1; G13B_RCS="$G13B_RCS $?"
+tdd_mark_unclaimed_review "$KEY9B" codeReviewDone 1x >/dev/null 2>&1; G13B_RCS="$G13B_RCS $?"
+tdd_mark_unclaimed_review "$KEY9B" selfReviewFixed 0 >/dev/null 2>&1; G13B_RCS="$G13B_RCS $?"
+tdd_mark_unclaimed_review "$KEY9B" chainDone 3 >/dev/null 2>&1
+G13B_REFUSED=$?
+DONE13B="$(tdd_chain_done "$SF9B" 2>/dev/null)"
+if [ -n "$KEY9B" ] && [ "$G13B_RCS" = " 1 1 1 1 1" ] && [ "$G13B_REFUSED" -eq 4 ] && [ "$DONE13B" = "false" ]; then
+  check "G13b the library refuses a missing or malformed count and returns 4 for a changed tree" PASS
+else
+  check "G13b library count contract (key='$KEY9B' rcs='$G13B_RCS' refused=$G13B_REFUSED chainDone=$DONE13B)" FAIL
+fi
+tdd_mark_unclaimed_review "$KEY9B" chainDone unknown >/dev/null 2>&1
+G13C_RC=$?
+DONE13C="$(tdd_chain_done "$SF9B" 2>/dev/null)"
+if [ "$G13C_RC" -eq 0 ] && [ "$DONE13C" = "true" ]; then
+  check "G13c the library still closes the chain for an unknown count (control for G13b)" PASS
+else
+  check "G13c library unknown count (rc=$G13C_RC chainDone=$DONE13C)" FAIL
 fi
 
 echo "----"
