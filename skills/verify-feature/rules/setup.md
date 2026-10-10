@@ -124,8 +124,10 @@ when the recipe declares `validate.networkOnly` with that same application origi
 nothing for an origin those rules reject. Prove each target with
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy remote "<origin>" declared-safe`
 and each network-only origin with the same command and the operand `network-only`, the rendered
-JSON assigned on each command only. The remote preflight resolves every hostname and refuses a
-non-public answer, so it needs network access.
+JSON assigned on each command only. Each target proof must print `policy` with exit `0`; `consent`
+with exit `0` means the rendered JSON does not name that origin as a target, so fix the JSON before
+handing it over. The remote preflight resolves every hostname and refuses a non-public answer, so
+it needs network access.
 Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
 job's `env`, or the `env` block of `~/.claude/settings.json`, which pre-approves its targets for
 every session of that user) and that the project-level settings files are not the place, because
