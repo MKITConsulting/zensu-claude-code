@@ -186,6 +186,14 @@ shell pattern refuses rather than matching everything.
 **Audience.** `_zensu_deny_audience` answers `main` or `child`. A child keeps the cause, the
 verb and the token and ends on `ZENSU_ADOPTION_CHILD_CLOSE`, the twin of the gate's
 `ADOPTION_CHILD_CLOSE`; the `adoption-incomplete` child form ends on its own retry sentence.
+The (default), `narrowed` and `orphaned-project-root` scopes take the audience as `$3`, and
+their child form drops `/zensu:doctor`, the fresh-session step and `--restore-root`; when no
+adoption sentence closed it, it ends on `ZENSU_BIND_CHILD_CLOSE`, the twin of the gate's
+`BIND_CHILD_CLOSE`, which the baseline-missing child deny ends on. The seam pin holds that pair
+equal and counts its render sites; `AUTO-20` emits every one of those child forms. The router
+derives the audience for its orphan arm and its fallback too, so `pre-bash-zensu-gate.sh` and
+the narrowed call of `pre-write-secret-scan.sh` need no argument, while the two non-main
+branches of the secret-scan and source-write gates pass `child` explicitly.
 An unknown principal gets `main`: a child shown the main wording still cannot run the
 command, while the main thread shown the child wording loses its one in-place remedy. The
 seam pin matches the gate's MAIN guard as the whole line and requires each child close to

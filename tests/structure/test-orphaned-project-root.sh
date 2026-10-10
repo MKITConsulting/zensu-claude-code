@@ -586,6 +586,53 @@ if [ -z "$NON_MAIN_LEAK" ]; then
 else
   check "O28 non-MAIN principals reached a shell via:$NON_MAIN_LEAK" FAIL
 fi
+gate_reason() {
+  local hook_path="$1" payload="$2" data="$3"
+  printf '%s' "$payload" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$data" \
+      CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$GATE_ON_CFG" \
+      ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
+      bash "$hook_path" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s.trim()).hookSpecificOutput.permissionDecisionReason||""))}catch(_){process.stdout.write("UNPARSEABLE")}});'
+}
+BIND_CLOSE='neither is available here — report this to the main thread rather than retrying.'
+NON_MAIN_TEXT=""
+for gate_path in "$BASH_GATE" "$PLUGIN_DIR/hooks/pre-write-secret-scan.sh"; do
+  for principal in zensu:code-reviewer general-purpose; do
+    reason="$(gate_reason "$gate_path" \
+      "$(bash_payload "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh" "orphan-gone" "$principal")" \
+      "$GONE_DATA")"
+    case "$reason" in
+      (*"/zensu:doctor"*|*"fresh Claude Code session"*|*"/zensu:adopt-session"*)
+        NON_MAIN_TEXT="$NON_MAIN_TEXT $(basename "$gate_path"):$principal:main-remedy" ;;
+      (*"so every stateful Zensu tool fails closed"*"$BIND_CLOSE") ;;
+      (*) NON_MAIN_TEXT="$NON_MAIN_TEXT $(basename "$gate_path"):$principal:shape" ;;
+    esac
+  done
+done
+if [ -z "$NON_MAIN_TEXT" ]; then
+  check "O28b the non-MAIN deny of both Bash gates names the cause and reports to the main thread, never a main-thread remedy" PASS
+else
+  check "O28b non-MAIN deny wording:$NON_MAIN_TEXT" FAIL
+fi
+ZENSU_GATE="$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh"
+ORPHAN_MAIN_REASON="$(gate_reason "$ZENSU_GATE" "$(bash_payload "zensu features list" "orphan-gone")" "$GONE_DATA")"
+ORPHAN_KID_REASON="$(gate_reason "$ZENSU_GATE" "$(bash_payload "zensu features list" "orphan-gone" general-purpose)" "$GONE_DATA")"
+case "$ORPHAN_MAIN_REASON" in
+  (*"project root it records no longer exists"*"/zensu:adopt-session --restore-root"*"records is: \"$GONE_ROOT\"") ORPHAN_MAIN_OK=yes ;;
+  (*) ORPHAN_MAIN_OK=no ;;
+esac
+case "$ORPHAN_KID_REASON" in
+  (*"--restore-root"*|*"/zensu:"*|*"still work"*|*"$GONE_ROOT"*) ORPHAN_KID_OK=no ;;
+  (*"project root it records no longer exists"*"$BIND_CLOSE") ORPHAN_KID_OK=yes ;;
+  (*) ORPHAN_KID_OK=no ;;
+esac
+if [ "$ORPHAN_MAIN_OK" = yes ] && [ "$ORPHAN_KID_OK" = yes ]; then
+  check "O28c the zensu CLI gate's orphaned-root deny names the restore to the main thread only, and a neutral child gets the cause and the report-to-main close" PASS
+else
+  check "O28c the zensu CLI gate's orphaned-root deny by audience (main=$ORPHAN_MAIN_OK child=$ORPHAN_KID_OK)" FAIL
+  printf '  main: %s\n  child: %s\n' "${ORPHAN_MAIN_REASON:0:300}" "${ORPHAN_KID_REASON:0:300}"
+fi
 
 # --- O29 the REAL environment: CLAUDE_PROJECT_DIR is the deleted directory ---
 # Every assertion above ran with a live $GATE_PROJECT, which cannot happen in

@@ -78,7 +78,10 @@ disables the gate for a deliberate one-off — honored both as a session env and
 (`ZENSU_MCP_GATE=off zensu …`). The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
-meaningless. A structure test (`tests/structure/test-skill-workflow-markers.sh`)
+meaningless. A subagent's mutation is denied even while a window is open, because a child never
+borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
+report the operation to the main thread, which runs it through the matching skill. A structure
+test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
 `--workflow-end` markers, so a new skill cannot silently regress the contract.
 
@@ -689,10 +692,12 @@ cause is ordinary: a git worktree deleted and re-created loses the document, bec
 `.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
 minting a new one.
 
-- **The deny names the cause and the command** — `/zensu:adopt-session` for the diagnosis and
-  `/zensu:adopt-session --confirm` to rebuild — instead of the generic `immutable context
-  revalidation failed`, which is accurate and names no way out. Both commands stay reachable,
-  because the Bash recognizer admits them in every bind failure.
+- **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`
+  for the diagnosis and `/zensu:adopt-session --confirm` to rebuild — instead of the generic
+  `immutable context revalidation failed`, which is accurate and names no way out. Both
+  commands stay reachable on macOS and Linux, because the Bash recognizer admits them in every
+  bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
+  child gets the cause and is told to report it to the main thread rather than retry.
 - **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
   unreadable keeps the generic wording: something is at that path, and offering a rebuild
   there would tell the user to build over the evidence.
