@@ -237,6 +237,42 @@ rather than the recorded one. That is the same limit the tamper-evidence sentenc
 
 Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 
+## Hook Output Size Limit
+
+The host delivers a hook's `additionalContext` to the model inline only up to **10,000
+characters**. Above that it saves the text to
+`<session dir>/tool-results/hook-<id>-additionalContext.txt` and hands the model a
+`<persisted-output>` wrapper instead: `Output too large (…KB)`, the file path, and a preview of
+the first **2,000 characters**. When the last newline inside that window falls after character
+1,000, the preview stops at that newline instead.
+
+Measured on 2026-10-06 against Claude Code 2.1.288, the build the desktop app bundles: one
+headless session ran three `UserPromptSubmit` hooks emitting 6,144, 8,192 and 10,240
+characters. The first two arrived inline. The third arrived as the wrapper with a
+2,000-character preview, and the saved file held all 10,240. The binary agrees: its threshold
+constant is `1e4`, compared as `length <= 10000` on the JavaScript string, so the unit is
+UTF-16 code units, not bytes. The same function receives the `additionalContext` of every
+hook event; the binary also routes `systemMessage` and plain stdout through it, which was
+read from the code and not measured.
+
+Two rules follow for hook authors:
+
+- **Stay well below the limit.** Text rendered into a directive at run time, such as a
+  `printf %q` command carrying the plugin data root, changes length from machine to
+  machine. `hooks/plan-approved-delegate.sh` keeps a ceiling of 9,000 characters for that
+  reason. `D44` in `tests/structure/test-plan-approved-delegate.sh` drives both heredocs
+  with the longest route field, counts the rendered record command at a fixed 300
+  characters so that the checkout path cannot move the result, and fails above the ceiling. Until that check landed, the directive
+  carried 12,453 (strict) and 12,966 (vanilla) characters before rendering and reached the
+  model only as its preview.
+- **Put what the model acts on first.** If a directive does cross the limit, its preview is
+  all the model sees, and a directive that forbids tool calls before a question leaves an
+  obedient model no way to read the saved file. `D44` therefore also requires the route
+  field and the four option labels inside the preview.
+
+The figure belongs to one host build, and an upgrade can move it. Re-measure before relying
+on it. What the suite enforces is the 9,000-character ceiling, never the host's number.
+
 ## Typical Workflows
 
 ### New Product (Planning → Implementation → Release)

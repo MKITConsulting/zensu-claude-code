@@ -282,7 +282,8 @@ is the drift the rule exists to prevent.
   four different mechanisms, and only one of them silences the anchor.
 - `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
   REGISTRATION count, so adding or removing a case in either zen unit file makes that
-  table stale — silently, since nothing compares them. Its section 1 row for
+  table stale, which `Z78` in `tests/structure/test-zen-mode.sh` and `R13` in
+  `tests/structure/test-restore-project-root.sh` both report. Its section 1 row for
   `tests/structure/*.test.js` deliberately reads "(count deliberately omitted)", so adding a
   unit FILE owes nothing there. An earlier wording here claimed that row carried a total and
   that the file named itself its single owner; neither statement is in that file, and a

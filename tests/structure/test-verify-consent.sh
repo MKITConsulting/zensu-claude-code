@@ -99,33 +99,33 @@ fi
 # The floor is EQUAL to what the file registers, and the SUITE-OVERVIEW cell is compared against
 # the same number, because a hand-maintained floor one below the real count hides a deleted case —
 # which is exactly what the V6 floor did.
-run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
-  local out rc registered cell
+run_unit() { # $1 label  $2 file
+  local out rc registered floor overview
+  floor="$(unit_overview_declared "${2##*/}")"
   out="$(node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
   [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  if unit_cases_registered_floor_text "$out" "$3"; then
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" PASS
+  if unit_cases_registered_floor_text "$out" "$floor"; then
+    check "$1-floor at least $floor unit cases registered ($(unit_cases_report_text "$out"))" PASS
   else
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" FAIL
+    check "$1-floor at least ${floor:-<no overview row>} unit cases registered ($(unit_cases_report_text "$out"))" FAIL
   fi
   registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-  if [ -n "$registered" ] && [ "$3" = "$registered" ]; then
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=$registered)" PASS
+  if [ -n "$registered" ] && [ "$floor" = "$registered" ]; then
+    check "$1-exact the floor equals what the file registers (floor=$floor registered=$registered)" PASS
   else
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=${registered:-<none>})" FAIL
+    check "$1-exact the floor equals what the file registers (floor=${floor:-<no overview row>} registered=${registered:-<none>})" FAIL
   fi
-  cell="$(sed -n "s/^| \`$4\` | \([0-9][0-9]*\) |.*/\1/p" "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
-  if [ -n "$registered" ] && [ "$cell" = "$registered" ]; then
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=$cell)" PASS
+  if overview="$(unit_overview_check "$2")"; then
+    check "$1-overview the SUITE-OVERVIEW Blocks cell equals the file's test() registrations (cell=$floor)" PASS
   else
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
+    check "$1-overview $overview" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 20 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 115 "verify-consent-v1.test.js"
-run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 20 "verify-browser-config.test.js"
-run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR"
+run_unit "V7 consent" "$UNIT_CONSENT"
+run_unit "V7b free-port" "$UNIT_PORT"
+run_unit "V7c browser-config" "$UNIT_CONFIG"
+run_unit "V7d cli-version" "$UNIT_VERSION"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \

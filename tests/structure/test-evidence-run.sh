@@ -46,10 +46,16 @@ else
   sed -n '1,60p' "$WORK/unit.out"
 fi
 
-if unit_cases_meet_floor "$WORK/unit.out" 40; then
-  check "E1a the unit suite registered at least 40 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
+if unit_cases_registered_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
+  check "E1a the unit suite registered at least $UNIT_FLOOR cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "E1a the unit suite registered at least 40 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "E1a the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+fi
+if E1A_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "E1a-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
+else
+  check "E1a-overview $E1A_OVERVIEW" FAIL
 fi
 
 if node -e '

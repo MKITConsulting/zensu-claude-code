@@ -65,9 +65,9 @@ document exists to prevent. Recorded rather than quietly reconciled: an audited 
 disagrees with its own table is the failure shape, and an earlier revision of this very
 paragraph said "two files" while naming one, which is the same failure one level down.
 
-**Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
-at this commit, not an invariant: the next suite added without touching §3 silently breaks
-it again, and no test will say so. Re-derive rather than trust when the numbers matter.
+**Nothing machine-checks the §1/§3 reconciliation.** It is a hand audit performed at this
+commit, not an invariant: the next suite added without touching §3 silently breaks it again,
+and no test will say so. Re-derive rather than trust when the numbers matter.
 
 **Windows coverage of `test-artifact-redaction.sh` is deliberately
 STRUCTURAL-ONLY.** The suite is in `ciStructureTests`, so POSIX `run-all.sh --ci`
@@ -371,6 +371,13 @@ binary; these guard the local harness contract.
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
 
+`R13` in `test-restore-project-root.sh` compares every row's `Blocks` cell with the
+`^test(` registrations of its file through `unit_overview_check` in
+`tests/structure/lib-unit-summary.sh`; every driver that sources that library and drives a
+file with a row calls the same helper beside the floor it reads from that cell through
+`unit_overview_declared`, so a stale cell fails as
+`tests/SUITE-OVERVIEW.md:<line>: <file> declares N, registers M; edit that Blocks cell`.
+
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
@@ -427,16 +434,14 @@ grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
 `prompt-listing-v1.test.js` are different and the distinction is worth keeping — the
 session-trail takeover-destination change added the first and the queued-prompt withdrawal
 change the second, and both were left rowless deliberately, because nothing grades a row's
-PRESENCE here, so a row would be one more hand-maintained copy of a count nothing checks. Say
-it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for seven rows by two suites —
-`test-zen-mode.sh` Z78 for the two zen-anchor rows, and `test-verify-consent.sh`'s `run_unit` for
-the floor, consent, free-port, browser-config and cli-version rows.
-What no suite checks is the reconciliation above and the absence of a row. Both unit files ARE
+PRESENCE here. Say it that way rather than "these files are graded by no suite", which is
+false: `R13` in `test-restore-project-root.sh` grades every row's `Blocks` numeral against
+the `test(` registrations of its file, and `R13b` in the same suite grades this paragraph's
+file and row counts. What no suite checks is which files lack a row. Both unit files ARE
 driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
 rowless here, not ungraded there. The reconciliation and the missing rows are recorded
-rather than silently absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
-same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
-went stale on its next merge.
+rather than silently absorbed. The inventory row above no longer carries a unit-file numeral
+at all: it was a hand-maintained count nothing graded, and it went stale on its next merge.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`. It is driven by
@@ -445,8 +450,8 @@ other structure suite, so it runs on EVERY host under `--ci` — not only on the
 profiles. That driver is what closed the gap the suite's own header describes ("On Linux
 and macOS the whole suite was therefore green by omission"); this sentence still said
 "Windows only" for a round after it landed. Its hand-maintained registered-case floor is
-**141**, enforced by the driver and required rather than skipped when the shared summary
-parse is unavailable.
+`SC_FLOOR` in that driver, enforced there and required rather than skipped when the shared
+summary parse is unavailable; the file has no row in the table above, so no cell repeats it.
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
 ~8 autopilot / chain structure suites.
 

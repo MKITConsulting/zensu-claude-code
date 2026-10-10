@@ -21,7 +21,7 @@
 #     refusal of the temp leaf and both halves of the post-rename post-condition, are
 #     driven by PATH shims for `mktemp` and `mv` that stage the swap at the point the
 #     race would strike (R8j, R8f, R8g, R8h); what a shim cannot show is the race itself.
-#   - test-plan-approved-delegate.sh's D13 keeps the full (B)/(C)/tail contract; R12
+#   - test-plan-approved-delegate.sh's D13 keeps the full (B)/(C)/question-block contract; R12
 #     re-checks only the three invariants the new text could have broken.
 set -u
 
@@ -737,7 +737,7 @@ rm -f "$MARKER_P"
   && [ "$(last_field "$CTX_STRICT")" = "ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)" ] \
   && [ "$(last_field "$CTX_STRICT_TDD")" = "ZENSU DELIVERY ROUTE: tdd (session marker)" ] \
   && printf '%s' "$CTX_STRICT_TDD" | grep -qF 'strict TDD flow'; } \
-  && check "R12a the plan directive ends with the resolved field in all three states; the strict branch is driven with a marker AND with a config default" PASS \
+  && check "R12a the plan directive carries the resolved field in all three states; the strict branch is driven with a marker AND with a config default" PASS \
   || check "R12a field (ask='$(last_field "$CTX_ASK")' tdd='$(last_field "$CTX_TDD")' direct='$(last_field "$CTX_DIRECT")' strict='$(last_field "$CTX_STRICT")' strict-tdd='$(last_field "$CTX_STRICT_TDD")')" FAIL
 EXAMPLE_VANILLA="'Executing via /zensu:tdd (vanilla mode, route: session marker)'"
 EXAMPLE_STRICT="'Executing via /zensu:tdd (route: session marker)'"
@@ -804,24 +804,24 @@ grep -qF -- '__ZENSU_ROUTE_COMMAND__ --direct' "$PLANHOOK" && R12H_BAD="$R12H_BA
   && check "R12c the strict and vanilla branches are still distinct" PASS \
   || check "R12c branch discrimination" FAIL
 # The three D13 invariants the new text could have broken: the (C) slice names
-# /zensu:autopilot exactly once and dispatches nothing, and the tail (from the ask
-# sentence to the end) carries none of the unattended-run vocabulary beyond its two
-# sanctioned strings. The rendered record command is replaced by a token first: its
+# /zensu:autopilot exactly once and dispatches nothing, and the question block (from
+# the ask sentence to the fast paths) carries none of the unattended-run vocabulary
+# beyond its two sanctioned strings. The rendered record command is replaced by a token first: its
 # machine paths are data, and a path segment such as `ci` would trip the scan.
 R12D="$(printf '%s' "$CTX_ASK" | REC_CMD="$REC_CMD" node -e '
   let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
     s=s.split(process.env.REC_CMD).join("<record-command>");
-    const ib=s.indexOf("(B) the user"), ic=s.indexOf("(C) you are running non-interactively"), ie=s.indexOf("In EVERY OTHER case");
-    if(!(ib>=0&&ic>ib&&ie>ic)){console.log("SLICE_FAILED");return;}
-    const c=s.slice(ic,ie), t=s.slice(ie);
+    const iq=s.indexOf("Unless (S) or a fast path below decides"), ia=s.indexOf("Fast-paths that need NO question"), ib=s.indexOf("(B) the user"), ic=s.indexOf("(C) you are running non-interactively");
+    if(!(iq>=0&&ia>iq&&ib>ia&&ic>ib)){console.log("SLICE_FAILED");return;}
+    const c=s.slice(ic), t=s.slice(iq,ia);
     const cAuto=(c.match(/\/zensu:autopilot/g)||[]).length, cSkill=/skill=/.test(c);
     const tr=t.split("which clause (C) makes unreachable non-interactively").join("").split("builds the feature unattended through to a reviewed, live-validated pull request").join("");
     const bad=/non-interactiv|Auto Mode|headless|unattended|no human|automated run|\bCI\b/i.test(tr);
     const tAuto=(t.match(/\/zensu:autopilot/g)||[]).length, tSkill=(t.match(/skill=.zensu:autopilot./g)||[]).length;
-    console.log([cAuto===1?"c-auto-ok":"c-auto-"+cAuto, cSkill?"c-dispatch":"c-ok", bad?"tail-vocab":"tail-ok", tAuto===2?"t-auto-ok":"t-auto-"+tAuto, tSkill===1?"t-skill-ok":"t-skill-"+tSkill].join(" "));
+    console.log([cAuto===1?"c-auto-ok":"c-auto-"+cAuto, cSkill?"c-dispatch":"c-ok", bad?"q-vocab":"q-ok", tAuto===2?"t-auto-ok":"t-auto-"+tAuto, tSkill===1?"t-skill-ok":"t-skill-"+tSkill].join(" "));
   });')"
-[ "$R12D" = "c-auto-ok c-ok tail-ok t-auto-ok t-skill-ok" ] \
-  && check "R12d the (C) slice and the tail keep their D13 invariants" PASS \
+[ "$R12D" = "c-auto-ok c-ok q-ok t-auto-ok t-skill-ok" ] \
+  && check "R12d the (C) slice and the question block keep their D13 invariants" PASS \
   || check "R12d D13 invariants: $R12D" FAIL
 # R12f the record command RUNS: cut from the directive the plan hook emits for a
 # session whose data root carries a space, run the way the model's Bash tool runs it
@@ -1078,7 +1078,7 @@ Never delete the marker file by hand.
 Both questions share this one marker, so a Zensu-workflow answer to either one decides both for the rest of the session.
 A direct answer is never recorded: it decides only the request or plan it answers, and implementing directly becomes this session's route only through `--direct` below or `hooks.defaultDeliveryRoute`.
 `/zensu:autopilot` and `/zensu:pilot` stay reachable by naming them in the approval message, and `--auto` below hands the decision back to `hooks.defaultDeliveryRoute`, so the question returns only where no default is configured.
-Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that ends the directive both hooks emit, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
+Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that opens the plan directive and ends the reminder, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
 The SessionStart banner names a configured default only; it never reads the session marker.
 The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the route.
 SENTENCES
@@ -1130,7 +1130,7 @@ for r17d_stale in 'README.md:workflow-or-direct' 'docs/configuration.md:After an
 done
 r17d docs/configuration.md 'A configured `hooks.defaultDeliveryRoute` (`tdd` or `direct`) is disclosed ABOVE that gate'
 r17d docs/configuration.md 'names a route already recorded by `/zensu:delivery-route`'
-r17d docs/configuration.md 'The standalone directive ends with a `ZENSU DELIVERY ROUTE:` field'
+r17d docs/configuration.md 'The standalone directive opens with a `ZENSU DELIVERY ROUTE:` field'
 r17d docs/configuration.md 'the `/zensu:delivery-route` marker, then `hooks.defaultDeliveryRoute`, rendered as the `ZENSU DELIVERY ROUTE:` field'
 r17d docs/configuration.md 'Coarser than `defaultDeliveryRoute` below'
 r17d docs/configuration.md 'the plan-approval half applies only while `autoTdd` is on'

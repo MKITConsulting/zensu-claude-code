@@ -47,6 +47,7 @@ REPORT_JS="$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"
 # The ADOPT report, which owns RESTORE_REMEDY. Never require REPORT_JS: that
 # renderer has no require.main guard and runs the whole doctor on import.
 ADOPT_REPORT="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js"
+. "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -68,18 +69,22 @@ expect_eq() {
 # that a unit driver at the tail is the first thing a timeout drops.
 #
 # The floor is asserted because `node --test` exits 0 for a file that registers zero
-# cases, so a rename or a lost require would otherwise pass silently. RAISE IT with the
-# file: it stood at 33 against 48 registered cases for a release, which is a floor that
-# still catches a lost require and no longer catches anything else. R13 backstops the
+# cases, so a rename or a lost require would otherwise pass silently. R13 backstops the
 # declared-versus-registered pair in tests/SUITE-OVERVIEW.md, so the two move together.
-R0_UNIT="$(node --test "$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js" 2>&1)"
+R0_FILE="$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js"
+R0_FLOOR="$(unit_overview_declared "${R0_FILE##*/}")"
+R0_UNIT="$(node --test "$R0_FILE" 2>&1)"
 R0_RC=$?
-R0_PASS="$(printf '%s' "$R0_UNIT" | awk '/^. pass /{print $3}' | tail -1)"
-if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 62 ]; then
-  check "R0  restore-root-render-cases.test.js: $R0_PASS cases" PASS
+if [ "$R0_RC" -eq 0 ] && unit_cases_registered_floor_text "$R0_UNIT" "$R0_FLOOR"; then
+  check "R0  restore-root-render-cases.test.js: $(unit_cases_report_text "$R0_UNIT")" PASS
 else
-  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 62)" FAIL
+  check "R0  restore-root-render-cases.test.js: rc=$R0_RC $(unit_cases_report_text "$R0_UNIT") (floor ${R0_FLOOR:-<no overview row>})" FAIL
   printf '%s\n' "$R0_UNIT" | tail -20
+fi
+if R0_OVERVIEW="$(unit_overview_check "$R0_FILE")"; then
+  check "R0-overview the SUITE-OVERVIEW Blocks cell matches what ${R0_FILE##*/} registers ($R0_FLOOR)" PASS
+else
+  check "R0-overview $R0_OVERVIEW" FAIL
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -564,8 +569,10 @@ else check "R6m2 docs/session-control.md no longer asserts the retracted claim o
 # R13c — ONE population, ONE table, TWO greps. R13B_ROWS and R13_ROWS derive the unit-file
 # row set through different character classes, so an underscore-named unit file would be
 # graded by R13 and uncounted by R13b — silently, which is the failure R13b exists to catch.
-R13C_A="$(grep -o "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$0" | sort -u | tr '\n' ' ')"
-if [ "$(printf '%s' "$R13C_A" | tr ' ' '\n' | grep -c .)" = "1" ]; then
+R13C_LIB="$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+R13C_A="$(grep -ho "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$0" "$R13C_LIB" | sort -u | tr '\n' ' ')"
+if [ "$(printf '%s' "$R13C_A" | tr ' ' '\n' | grep -c .)" = "1" ] \
+  && grep -q "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$R13C_LIB"; then
   check "R13c both unit-file row derivations share one character class" PASS
 else check "R13c the unit-file row derivations use different character classes: $R13C_A" FAIL; fi
 R13B_ROWS="$(grep -cE '^\| `[a-z0-9._-]+\.test\.js` \|' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | tr -d ' ')"
@@ -1274,41 +1281,78 @@ else check "R12k2 the port roster points at the renderer that shipped" FAIL; fi
 # numeral beside a growing file does. The check DERIVES both sides: the declared
 # number from the table row, the real one from the file.
 R13_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
-r13_declared() { grep -F "| \`$1\` |" "$R13_OVERVIEW" | head -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}'; }
-r13_registered() { grep -c '^test(' "$PLUGIN_DIR/tests/structure/$1"; }
 # The file list is DERIVED from the table, never hand-enumerated here. It named two
 # rows while the table declares a count for many more, so every other row's numeral was
 # held by nothing — and a hand-maintained list inside a check written against
 # hand-maintained numerals is the same defect one level up. A row whose file is absent
 # from tests/structure/ is skipped rather than reported: several driven files live
 # elsewhere in the tree and this check owns neither their location nor their count.
-R13_ROWS="$(grep -E '^\| `[a-z0-9._-]+\.test\.js` \| [0-9]+ \|' "$R13_OVERVIEW" \
-  | awk -F'|' '{gsub(/ |`/,"",$2); print $2}')"
-R13_DRIFT=""
+R13_ROWS="$(unit_overview_rows | awk '{ print $2 }')"
+R13_DRIFT=0
 R13_SEEN=0
 for r13_file in $R13_ROWS; do
   [ -f "$PLUGIN_DIR/tests/structure/$r13_file" ] || continue
   R13_SEEN=$((R13_SEEN + 1))
-  r13_want="$(r13_registered "$r13_file")"
-  r13_have="$(r13_declared "$r13_file")"
-  if [ -z "$r13_have" ]; then
-    R13_DRIFT="$R13_DRIFT $r13_file(no-row)"
-  elif [ "$r13_have" != "$r13_want" ]; then
-    R13_DRIFT="$R13_DRIFT $r13_file(declared=$r13_have registered=$r13_want)"
+  if ! r13_drift="$(unit_overview_check "$PLUGIN_DIR/tests/structure/$r13_file")"; then
+    R13_DRIFT=$((R13_DRIFT + 1))
+    check "R13 $r13_drift" FAIL
   fi
 done
 # The control proves both halves of the derivation resolve; without it a broken awk
 # field or a renamed file would make every comparison vacuously agree on empty. The
 # row FLOOR is the half that matters now the list is derived: a table whose format
 # changed yields an empty list, and an empty loop reports no drift.
-if [ "$(r13_registered restore-root-render-cases.test.js)" -gt 0 ] \
-  && [ -n "$(r13_declared restore-root-render-cases.test.js)" ] \
-  && [ "$R13_SEEN" -ge 10 ]; then
-  check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" PASS
-else check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" FAIL; fi
-if [ -z "$R13_DRIFT" ]; then
+R13_PROBE="$STATE_DIR/r13-probe"
+mkdir -p "$R13_PROBE"
+R13_PROBE_DECLARED="$(unit_overview_declared restore-root-render-cases.test.js)"
+R13_PROBE_LINE="$(grep -nF '| `restore-root-render-cases.test.js` |' "$R13_OVERVIEW" | head -1 | cut -d: -f1)"
+r13_i=0
+while [ "$r13_i" -le "${R13_PROBE_DECLARED:-0}" ]; do
+  printf "test('probe %s', () => {});\n" "$r13_i"
+  r13_i=$((r13_i + 1))
+done > "$R13_PROBE/restore-root-render-cases.test.js"
+R13_PROBE_GOT="$(unit_overview_check "$R13_PROBE/restore-root-render-cases.test.js")"
+R13_PROBE_RC=$?
+R13_PROBE_WANT="tests/SUITE-OVERVIEW.md:$R13_PROBE_LINE: restore-root-render-cases.test.js declares $R13_PROBE_DECLARED, registers $((R13_PROBE_DECLARED + 1)); edit that Blocks cell"
+if [ "$R13_SEEN" -ge 10 ] && [ -n "$R13_PROBE_DECLARED" ] && [ -n "$R13_PROBE_LINE" ] \
+  && [ "$R13_PROBE_RC" -ne 0 ] && [ "$R13_PROBE_GOT" = "$R13_PROBE_WANT" ]; then
+  check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared; a drifted copy is reported at line $R13_PROBE_LINE)" PASS
+else check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared; drifted copy rc=$R13_PROBE_RC: $R13_PROBE_GOT)" FAIL; fi
+: > "$R13_PROBE/r13-unlisted.test.js"
+if R13_UNLISTED="$(unit_overview_check "$R13_PROBE/r13-unlisted.test.js")"; then
+  check "R13-control2 a unit file without a row is reported, not passed (rc=0)" FAIL
+elif [ "$R13_UNLISTED" = "tests/SUITE-OVERVIEW.md: r13-unlisted.test.js has no §4 row; add one with its Blocks cell" ]; then
+  check "R13-control2 a unit file without a row is reported, not passed" PASS
+else check "R13-control2 a unit file without a row is reported, not passed (got: $R13_UNLISTED)" FAIL; fi
+R13_FLOOR_OUT="$R13_PROBE/r13-floor.out"
+printf '# tests 5\n# pass 5\n' > "$R13_FLOOR_OUT"
+R13_FLOOR_BAD=""
+r13_floor_probe() {
+  local label="$1" err rc
+  shift
+  err="$("$@" 2>&1 >/dev/null)"
+  rc=$?
+  [ "$rc" -eq 2 ] && [ -z "$err" ] || R13_FLOOR_BAD="$R13_FLOOR_BAD $label(rc=$rc${err:+ with stderr})"
+}
+r13_floor_probe meet-empty unit_cases_meet_floor "$R13_FLOOR_OUT" ""
+r13_floor_probe meet-word unit_cases_meet_floor "$R13_FLOOR_OUT" x1
+r13_floor_probe meet-pass-word unit_cases_meet_floor "$R13_FLOOR_OUT" 1 x1
+r13_floor_probe meet-total-empty unit_cases_meet_floor "$R13_FLOOR_OUT" "" 1
+r13_floor_probe meet-total-word unit_cases_meet_floor "$R13_FLOOR_OUT" x1 1
+r13_floor_probe registered-empty unit_cases_registered_floor "$R13_FLOOR_OUT" ""
+r13_floor_probe registered-word unit_cases_registered_floor "$R13_FLOOR_OUT" x1
+r13_floor_probe meet-text-empty unit_cases_meet_floor_text "$(cat "$R13_FLOOR_OUT")" ""
+r13_floor_probe registered-text-word unit_cases_registered_floor_text "$(cat "$R13_FLOOR_OUT")" x1
+unit_cases_registered_floor "$R13_FLOOR_OUT" 5 && unit_cases_meet_floor "$R13_FLOOR_OUT" 5 4 \
+  || R13_FLOOR_BAD="$R13_FLOOR_BAD numeric-floor-refused"
+unit_cases_registered_floor "$R13_FLOOR_OUT" 6
+[ "$?" -eq 1 ] || R13_FLOOR_BAD="$R13_FLOOR_BAD floor-above-count-not-refused"
+if [ -z "$R13_FLOOR_BAD" ]; then
+  check "R13-control3 the floor helpers refuse a floor that is not a number with rc=2 and no shell error" PASS
+else check "R13-control3 the floor helpers refuse a floor that is not a number with rc=2 and no shell error:$R13_FLOOR_BAD" FAIL; fi
+if [ "$R13_DRIFT" -eq 0 ]; then
   check "R13 the suite overview declares the counts these files register ($R13_SEEN rows)" PASS
-else check "R13 the suite overview count drift:$R13_DRIFT" FAIL; fi
+fi
 
 R8_AT_MAX="/$(printf 'a%.0s' $(seq 1 1023))"
 # The source pin above grades the format string; this grades the DECODED reason, the
