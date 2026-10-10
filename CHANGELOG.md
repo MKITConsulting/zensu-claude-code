@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-06
+
+### Added
+
+- **review**: Fix only critical findings in the loop by default (#381)
+
+### Changed
+
+- **release**: Run the release gate as parallel shards (#382)
+- **ci**: Re-budget the Windows lifecycle contract cap (#379)
+
 ### Upgrade notes
 
 - **review loop**: the `/zensu:tdd` auto-fix loop now fixes only CRITICAL findings by default

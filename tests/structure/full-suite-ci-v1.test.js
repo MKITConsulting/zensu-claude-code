@@ -11,6 +11,7 @@ const LIB_DIR = path.join(__dirname, '..', '..', 'hooks', 'lib');
 const contract = require(path.join(LIB_DIR, 'ci-contract-v1.js'));
 const policy = require(path.join(LIB_DIR, 'full-suite-policy-v1.js'));
 const evr = require(path.join(LIB_DIR, 'evidence-run-v1.js'));
+const { writeGhStub } = require(path.join(__dirname, 'fixtures', 'gh-api-stub.js'));
 
 const SESSION = `scv1_${'c'.repeat(64)}`;
 const REPO = 'acme/app';
@@ -68,11 +69,11 @@ function job(name, conclusion, commands = []) {
   return { name, conclusion, steps: [{ name: 'Set up job' }, { name: 'Run actions/checkout@v4' }, ...commands.map((command) => ({ name: `Run ${command}` }))] };
 }
 
-function responses(overrides = {}) {
+function responses(overrides = {}, at = NOW) {
   const base = {
     [`repos/${REPO}`]: { default_branch: 'main', fork: false },
     [`repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&status=completed&per_page=20`]: {
-      workflow_runs: [run(2, NOW - 2 * HOUR), run(1, NOW - 5 * HOUR, 'failure')],
+      workflow_runs: [run(2, at - 2 * HOUR), run(1, at - 5 * HOUR, 'failure')],
     },
     [`repos/${REPO}/actions/runs/2/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'success', ['npm test'])] },
     [`repos/${REPO}/actions/runs/1/jobs?per_page=100`]: { jobs: [job('lint', 'success', ['npm run lint']), job('test', 'failure', ['npm test'])] },
@@ -87,24 +88,12 @@ function ghShim(map) {
   const fixture = path.join(directory, 'fixture.json');
   const calls = path.join(directory, 'calls.log');
   fs.writeFileSync(fixture, JSON.stringify(map));
-  const script = path.join(directory, 'gh');
-  fs.writeFileSync(script, [
-    `#!${process.execPath}`,
-    "const fs = require('fs');",
-    `const map = JSON.parse(fs.readFileSync(${JSON.stringify(fixture)}, 'utf8'));`,
-    'const endpoint = process.argv[3];',
-    `fs.appendFileSync(${JSON.stringify(calls)}, endpoint + '\\n');`,
-    "if (!Object.prototype.hasOwnProperty.call(map, endpoint)) { process.stderr.write('HTTP 404: Not Found\\n'); process.exit(1); }",
-    'const value = map[endpoint];',
-    "if (value && value.__fail) { process.stderr.write(value.__fail + '\\n'); process.exit(1); }",
-    'process.stdout.write(JSON.stringify(value));',
-    '',
-  ].join('\n'), { mode: 0o755 });
-  return { ghPath: script, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
+  const stub = writeGhStub(directory, fixture, calls);
+  return { ghPath: stub.ghPath, env: stub.env, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []) };
 }
 
 function verifyOptions(root, data, gh, extra = {}) {
-  return { projectRoot: root, pluginData: data, workflow: 'ci.yml', job: null, localCommand: 'npm test', env: CLEAN_ENV, mode: 'refresh', now: NOW, ghPath: gh.ghPath, ...extra };
+  return { projectRoot: root, pluginData: data, workflow: 'ci.yml', job: null, localCommand: 'npm test', env: { ...CLEAN_ENV, ...gh.env }, mode: 'refresh', now: NOW, ghPath: gh.ghPath, ...extra };
 }
 
 test('the workflow scan reads the pull_request trigger, its filters and the job conditions', () => {
@@ -314,11 +303,11 @@ function policyInputs(root, data, extra = {}) {
   return { projectRoot: root, pluginData: data, sessionKey: SESSION, markerState: 'none', config: {}, env: CLEAN_ENV, now: NOW + HOUR, ...extra };
 }
 
-function verifiedProject() {
+function verifiedProject(at = NOW) {
   const root = project();
   const data = tempDir('data');
-  const gh = ghShim(responses());
-  assert.equal(contract.discover(verifyOptions(root, data, gh)).verified, true);
+  const gh = ghShim(responses({}, at));
+  assert.equal(contract.discover(verifyOptions(root, data, gh, { now: at })).verified, true);
   return { root, data, gh };
 }
 
@@ -527,7 +516,7 @@ test('a chain that chose CI but closes locally names the reason at the terminus'
 });
 
 test('the effective CLI answers ci only for a verified clone choice with a ci snapshot', () => {
-  const { root, data } = verifiedProject();
+  const { root, data } = verifiedProject(Date.now());
   const transport = tempDir('transport');
   fs.writeFileSync(path.join(transport, 'ci-config.json'), '{}');
   fs.writeFileSync(path.join(transport, 'marker-state'), 'ci');

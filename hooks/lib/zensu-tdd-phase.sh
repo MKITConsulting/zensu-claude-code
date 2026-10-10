@@ -1954,7 +1954,7 @@ tdd_mark_review_converged() {
 }
 
 _tdd_mark_unclaimed_review_critical() {
-  local state_file="$1" session_id="$2" key="$3" tmp native_state_file native_tmp
+  local state_file="$1" session_id="$2" key="$3" change_count="${4:-}" tmp native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
   native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
@@ -1985,6 +1985,10 @@ _tdd_mark_unclaimed_review_critical() {
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
+  case "$key:$change_count" in
+    (chainDone:0|chainDone:unknown|codeReviewDone:0|codeReviewDone:unknown|selfReviewFixed:) ;;
+    (*) rm -f "$tmp" 2>/dev/null; return 4 ;;
+  esac
   _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
     || { rm -f "$tmp"; return 1; }
 }
@@ -1993,14 +1997,23 @@ _tdd_mark_unclaimed_review_critical() {
 # ticket was issued/consumed, every terminus must carry that ticket; an
 # unqualified stale command is then rejected instead of closing a new chain.
 tdd_mark_unclaimed_review() {
-  local session_id="${1:-}" key="${2:-}" state_file state_dir
+  local session_id="${1:-}" key="${2:-}" change_count="${3:-}" state_file state_dir
   [ -n "$session_id" ] || return 1
-  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  case "$key" in
+    codeReviewDone|chainDone)
+      case "$change_count" in
+        unknown|unavailable) ;;
+        ''|*[!0-9]*|0?*) return 1 ;;
+      esac
+      ;;
+    selfReviewFixed) [ -z "$change_count" ] || return 1 ;;
+    *) return 1 ;;
+  esac
   state_file="$(tdd_state_file "$session_id")"
   state_dir="$(dirname "$state_file")"
   _tdd_path_safe "$state_file" regular "$state_dir" || return 1
   _tdd_locked_run "$state_file" _tdd_mark_unclaimed_review_critical \
-    "$state_file" "$session_id" "$key"
+    "$state_file" "$session_id" "$key" "$change_count"
 }
 
 _tdd_ensure_self_review_ticket_critical() {
@@ -2819,8 +2832,8 @@ ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this se
 # changed worktree, never wall time. Not addressed here; a turn counter is a
 # workflow-state field and therefore a MINOR release under §"Runtime Lineage".
 #
-# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/SKILL.md`
-# Phase 6, before any hook directive exists, and that carrier deliberately does not
+# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/references/review-chain.md`
+# (Phase 6 step 10), before any hook directive exists, and that carrier deliberately does not
 # repeat this text — the skill body is in context only because the workflow was
 # invoked, and a third unpinned copy is the drift class CLAUDE.md warns about. So a
 # session that withholds the very first fan-out learns this only after one blocked

@@ -86,6 +86,28 @@ zensu_render_terminus_bypasses() {
   return 0
 }
 
+_tc_git() { (
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR \
+        GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+        GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
+        GIT_NAMESPACE GIT_PREFIX GIT_CONFIG GIT_CONFIG_GLOBAL \
+        GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+  git "$@"
+); }
+
+_zensu_unqualified_change_count() {
+  local root="${1:-}" tracked untracked
+  if [ -z "$root" ] || ! command -v git >/dev/null 2>&1 \
+    || [ "$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ] \
+    || ! _tc_git -C "$root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    printf 'unknown'
+    return 0
+  fi
+  tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
+  untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
+  printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
+}
+
 _zensu_evr_prepare() {
   local label="$1"
   if ! command -v node >/dev/null 2>&1; then
@@ -1452,7 +1474,7 @@ case "${1:-}" in
         # same session can write `ZENSU_REQUIREMENTS_GATE=off`, which is documented,
         # named in the refusal text it just read, and costs it only a ledger line.
         # The list is also a DENYLIST over an open-ended namespace: every variable
-        # git grows needs an entry here and nothing would notice a gap. It covers
+        # git grows needs an entry in `_tc_git` and nothing would notice a gap. It covers
         # discovery (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
         # `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`), the object
         # database (`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
@@ -1467,22 +1489,10 @@ case "${1:-}" in
         # "the single lever" while a second channel stood open. `core.excludesFile`
         # alone empties `ls-files --others --exclude-standard`.
         #
-        # The identical unscrubbed shape still ships for the `--chain-done`
-        # zero-change terminus below; that one is knowingly left alone rather than
-        # changed in passing, and it is the higher-consequence half — that terminus
-        # consumes no review ticket.
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
         # cannot be resolved the `if` below is false, the count stays 0, and every
         # consumer conjoins on it — disarming both gates AND suppressing both ledger
         # records, which is precisely the outcome this wrapper exists to prevent.
-        _tc_git() { (
-          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR \
-                GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
-                GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
-                GIT_NAMESPACE GIT_PREFIX GIT_CONFIG GIT_CONFIG_GLOBAL \
-                GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
-          git "$@"
-        ); }
         if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
           # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
           # fallback would append a SECOND line and turn the count into "0\n0" — which
@@ -1883,7 +1893,7 @@ case "${1:-}" in
         # the plan's `## Requirements` table. Without a usable one it takes its
         # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
         # the ONLY edge into OPEN_PR, then passes on an audit that examined
-        # nothing. Prose asked for the table (skills/tdd/SKILL.md Phase 2 step 1b)
+        # nothing. Prose asked for the table (skills/tdd/references/planning.md Phase 2 step 1b)
         # and the only check was the warning-level step 6c, which skips silently
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a
@@ -2309,23 +2319,19 @@ case "${1:-}" in
               [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
               [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
             else
-              chain_change_count="unknown"
-              if command -v git >/dev/null 2>&1 \
-                && [ "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] \
-                && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-                chain_change_count="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
-                  git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null
-                } | awk 'NF{n++} END{print n+0}')"
-                case "$chain_change_count" in ''|*[!0-9]*) chain_change_count="unknown" ;; esac
-              fi
-              if [ "$chain_change_count" != "unknown" ] && [ "$chain_change_count" != "0" ]; then
-                echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. No review ticket was ever consumed in this chain, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain." >&2
-                exit 1
-              fi
-              tdd_mark_unclaimed_review "$session_val" chainDone || {
+              chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+              tdd_mark_unclaimed_review "$session_val" chainDone "$chain_change_count" || {
                 chain_done_rc=$?
-                zensu_state_failure_hint --chain-done "$session_val"
-                exit "$chain_done_rc"
+                [ "$chain_done_rc" -eq 4 ] || {
+                  zensu_state_failure_hint --chain-done "$session_val"
+                  exit "$chain_done_rc"
+                }
+                if [ "$chain_change_count" = "unavailable" ]; then
+                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but git could not list this worktree's changes against HEAD, so that claim cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or review the changes through the zensu:code-reviewer chain and close with --claimed-review-ticket." >&2
+                else
+                  echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. This chain holds no consumed review ticket, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                fi
+                exit 1
               }
             fi
           fi
@@ -2388,7 +2394,20 @@ case "${1:-}" in
         if [ "$claimed_ticket_seen" = "true" ]; then
           tdd_mark_review_converged "$session_val" "$claimed_ticket_val" codeReviewDone
         else
-          tdd_mark_unclaimed_review "$session_val" codeReviewDone
+          review_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+          tdd_mark_unclaimed_review "$session_val" codeReviewDone "$review_change_count" || {
+            review_done_rc=$?
+            [ "$review_done_rc" -eq 4 ] || {
+              zensu_state_failure_hint --code-review-done "$session_val"
+              exit "$review_done_rc"
+            }
+            if [ "$review_change_count" = "unavailable" ]; then
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. Run git diff --name-only HEAD in the project root to see the git error and resolve it, or resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+            else
+              echo "zensu-log.sh --code-review-done: refusing the unqualified review-convergence mark. This chain holds no consumed review ticket, so the unqualified form is accepted only while the worktree reports no changed file — but it reports ${review_change_count} changed file(s). Resume the /zensu:tdd Phase 6 review sequence where it left off: issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+            fi
+            exit 1
+          }
         fi
         ;;
       --self-review-fixed)
@@ -2755,8 +2774,8 @@ case "$cmd" in
             let here;
             let rootReal;
             try {
-              here = fs.realpathSync(process.cwd());
-              rootReal = fs.realpathSync(target.projectRoot);
+              here = fs.realpathSync.native(process.cwd());
+              rootReal = fs.realpathSync.native(target.projectRoot);
             } catch (_) {
               refuse("project-root-unusable");
               return;

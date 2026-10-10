@@ -1,14 +1,9 @@
 ---
 name: self-review
 description: >
-  [Zensu] Terminal self-reflection stage of the post-implementation review chain. After the
-  zensu:code-reviewer chain converges (PASS, suggestions-only, or max-rounds), re-read this
-  session's own work as a senior engineer, take at most ONE fix round (under the
-  still-active TDD phase-gate) if a must-fix surfaces, then render the final
-  Positive/Improvements/Risks report and close the chain via --chain-done. It never re-runs
-  the code-reviewer. Invoked AUTOMATICALLY as the chain's terminal gate (the post-review
-  hand-off and the Stop chain-enforcer force it) — normally not run by hand, and never a
-  substitute for the zensu:code-reviewer agent.
+  [Zensu] Terminal stage of the review chain: re-read the session's work, take
+  at most one fix round, and close the chain. Use when the chain hand-off or the
+  Stop enforcer invokes it.
 ---
 
 # /zensu:self-review
@@ -263,9 +258,9 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   carry it into `## Open` and claim NO test verdict. The runner's own summary line
   is this run's verdict. Then
   invoke the `/zensu:tdd` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
-  when that procedure is not already in your context (this stage is often forced
-  cold), `Read` it from `${CLAUDE_PLUGIN_ROOT}/skills/tdd/SKILL.md` rather than
-  improvising it; re-invoking the `/zensu:tdd` skill is forbidden below —
+  when that procedure is not in your context, `Read` it from
+  `${CLAUDE_PLUGIN_ROOT}/skills/tdd/references/audit.md`, whose `{plugin_root}` is
+  `${CLAUDE_PLUGIN_ROOT}`; re-invoking the `/zensu:tdd` skill is forbidden below —
   writing its mandatory start marker as `EDIT LANDING AUDIT STARTED — round
   self-review` (a label disjoint from `phase6` and `fix-{N}`, so its
   round-scoped window covers exactly this round's claims). Re-derive the inputs here — this stage can be forced cold by the

@@ -49,9 +49,9 @@
 //
 // THE SET IS DERIVED, NEVER SPELLED. It is claude-principal-v1.js's own
 // REVIEWER_TYPES plus EVIDENCE_WORKER_TYPES — the same classifier the SubagentStart
-// hook uses to inject `reviewer-readonly-v1` — so adding a confined agent there
-// reaches this grant with no edit here, and CLAUDE.md's standing instruction to grep
-// before renaming `zensu:code-reviewer` keeps holding.
+// hook uses to inject `reviewer-readonly-v1` and `evidence-worker-v1` — so adding a
+// confined agent there reaches this grant with no edit here, and CLAUDE.md's standing
+// instruction to grep before renaming `zensu:code-reviewer` keeps holding.
 //
 // ONE NARROWING IS DELIBERATE: only the PLUGIN-SCOPED `zensu:` spellings are
 // granted. REVIEWER_TYPES also carries the bare names (`code-reviewer`, …) so that

@@ -178,7 +178,7 @@
           "args": [
             "lifecycle"
           ],
-          "timeoutMs": 420000
+          "timeoutMs": 100000
         }
       ]
     },

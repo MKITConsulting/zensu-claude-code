@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOWS = path.join(ROOT, '.github', 'workflows');
 const RELEASE = YAML.parse(fs.readFileSync(path.join(WORKFLOWS, 'release.yml'), 'utf8'));
 const EXPRESSION = /\$\{\{([\s\S]*?)\}\}/g;
-const CONTEXT_REFERENCE = /(?<![\w.-])(inputs|env|github)(?![\w-])(?:\s*\.\s*([A-Za-z_][\w-]*))?/gi;
+const CONTEXT_REFERENCE = /(?<![\w.-])(inputs|env|github|needs)(?![\w-])(?:\s*\.\s*([A-Za-z_][\w-]*))?/gi;
 const TRUSTED_GITHUB_MEMBERS = new Set(['sha', 'event_name', 'repository', 'server_url']);
 const INPUT_VARIABLES = {
   SKIP_REASON: '${{ inputs.skip_reason }}',
@@ -21,7 +21,10 @@ const INPUT_VARIABLES = {
 };
 const VALIDATE = 'Validate test-gate skip request';
 const PUBLISH_GATE = 'Deterministic exact-main-SHA gate';
+const PUBLISH_PLAN_GATE = 'Decide the exact-main-SHA gate';
 const PUBLISH_DECISION = 'COMMIT_MSG="$(git log -1 --format=%B HEAD)"';
+const PREPARE_EVIDENCE = 'if [ "$SKIP_TEST_GATE" = "true" ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${SKIP_REASON//[[:space:]]/}" ]; then';
+const PUBLISH_EVIDENCE = 'if [ "$GATE_DECISION" = skipped ] && [ "$SUITE_RESULT" = skipped ] && [ -n "${GATE_REASON//[[:space:]]/}" ]; then';
 const RELEASE_SUBJECT = 'chore(release): bump version to 9.9.9';
 const EXPECTED_SHA = 'f'.repeat(40);
 const HOSTILE = 'it\'s "quoted" `touch backtick-ran` $(touch dollar-ran) ${HOME} $HOME;  exit 7\t* \\ 100%';
@@ -148,7 +151,16 @@ function committed(base, ...paragraphs) {
 }
 
 function publishDecision(repo, context) {
-  return decide(stepNamed('publish', PUBLISH_GATE), PUBLISH_DECISION, context, repo);
+  return decide(stepNamed('publish-plan', PUBLISH_PLAN_GATE), PUBLISH_DECISION, context, repo);
+}
+
+function publishEvidence(cwd, gate, reason, suiteResult) {
+  return decide(stepNamed('publish', PUBLISH_GATE), PUBLISH_EVIDENCE, {
+    'needs.publish-plan.outputs.gate': gate,
+    'needs.publish-plan.outputs.gate_reason': reason,
+    'needs.publish-suite.result': suiteResult,
+    'github.sha': EXPECTED_SHA,
+  }, cwd);
 }
 
 function releaseCandidate(base) {
@@ -165,7 +177,7 @@ function releaseCandidate(base) {
 }
 
 function createReleaseCommit({ repo, output }, skipTestGate, skipReason) {
-  return runStep(stepNamed('prepare', 'Create release commit'), {
+  return runStep(stepNamed('prepare-commit', 'Create release commit'), {
     'inputs.skip_test_gate': skipTestGate,
     'inputs.skip_reason': skipReason,
     'steps.ver.outputs.version': '9.9.9',
@@ -173,11 +185,15 @@ function createReleaseCommit({ repo, output }, skipTestGate, skipReason) {
   }, repo, { GITHUB_OUTPUT: output });
 }
 
-function evidenceDecision(cwd, skipTestGate, skipReason) {
+function evidenceDecision(cwd, skipTestGate, skipReason, suiteResult) {
   return decide(
     stepNamed('prepare', 'Record deterministic exact-commit runtime evidence'),
-    'if [ "$SKIP_TEST_GATE" = "true" ]; then',
-    { 'inputs.skip_test_gate': skipTestGate, 'inputs.skip_reason': skipReason },
+    PREPARE_EVIDENCE,
+    {
+      'inputs.skip_test_gate': skipTestGate,
+      'inputs.skip_reason': skipReason,
+      'needs.prepare-suite.result': suiteResult,
+    },
     cwd,
     { EXPECTED_SHA },
   );
@@ -189,7 +205,7 @@ function executed(cwd) {
 
 function validate(reason) {
   return withDir((cwd) => {
-    const result = runStep(stepNamed('prepare', VALIDATE), { 'inputs.skip_reason': reason }, cwd);
+    const result = runStep(stepNamed('prepare-commit', VALIDATE), { 'inputs.skip_reason': reason }, cwd);
     return { ...result, executed: executed(cwd) };
   });
 }
@@ -230,6 +246,11 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ GitHub.head_ref }}',
     '${{ github.repository_owner }}',
     '${{ github.sha || github.head_ref }}',
+    '${{ needs.publish-plan.outputs.gate_reason }}',
+    "${{ needs['publish-plan'].outputs.gate }}",
+    '${{ needs.prepare-suite.result }}',
+    '${{ toJSON(needs) }}',
+    '${{ NEEDS.prepare-commit.outputs.sha }}',
   ];
   const trusted = [
     '${{ github.sha }}',
@@ -238,8 +259,10 @@ test('the run-block scan flags every dispatcher-controlled expression family and
     '${{ github.server_url }}',
     '${{ GITHUB.SHA }}',
     '${{ steps.github.outputs.sha }}',
-    '${{ needs.env.outputs.value }}',
-    '${{ needs.build-github.outputs.inputs }}',
+    '${{ steps.env.outputs.value }}',
+    '${{ steps.needs.outputs.value }}',
+    '${{ steps.build-github.outputs.inputs }}',
+    '${{ steps.build-needs.outputs.sha }}',
     "${{ github.event_name == 'workflow_dispatch' }}",
     '${{ steps.ver.outputs.version }}',
     '${{ runner.temp }}',
@@ -269,27 +292,27 @@ test('every release step that reads a dispatch input variable maps it from that 
   }
   assert.deepStrictEqual(readers, {
     SKIP_REASON: [
-      'prepare/Validate test-gate skip request',
-      'prepare/Create release commit',
+      'prepare-commit/Validate test-gate skip request',
+      'prepare-commit/Create release commit',
       'prepare/Record deterministic exact-commit runtime evidence',
-      'publish/Validate test-gate skip request',
-      'publish/Deterministic exact-main-SHA gate',
+      'publish-plan/Validate test-gate skip request',
+      'publish-plan/Decide the exact-main-SHA gate',
     ],
     SKIP_TEST_GATE: [
-      'prepare/Create release commit',
+      'prepare-commit/Create release commit',
       'prepare/Record deterministic exact-commit runtime evidence',
-      'publish/Deterministic exact-main-SHA gate',
+      'publish-plan/Decide the exact-main-SHA gate',
     ],
-    VERSION_TYPE: ['prepare/Compute next version'],
+    VERSION_TYPE: ['prepare-commit/Compute next version'],
   });
 });
 
 test('prepare and publish validate a skip request identically before consuming the reason', () => {
-  const prepare = stepNamed('prepare', VALIDATE);
-  assert.deepStrictEqual(stepNamed('publish', VALIDATE), prepare);
+  const prepare = stepNamed('prepare-commit', VALIDATE);
+  assert.deepStrictEqual(stepNamed('publish-plan', VALIDATE), prepare);
   assert.strictEqual(prepare.if, '${{ inputs.skip_test_gate }}');
-  assert.ok(stepIndex('prepare', VALIDATE) < stepIndex('prepare', 'Create release commit'));
-  assert.ok(stepIndex('publish', VALIDATE) < stepIndex('publish', PUBLISH_GATE));
+  assert.ok(stepIndex('prepare-commit', VALIDATE) < stepIndex('prepare-commit', 'Create release commit'));
+  assert.ok(stepIndex('publish-plan', VALIDATE) < stepIndex('publish-plan', PUBLISH_PLAN_GATE));
 });
 
 test('a hostile single-line skip reason is accepted verbatim and never executed', () => {
@@ -476,7 +499,7 @@ test('a publish dispatch over a release trailer without a reason lets the dispat
 
 test('the prepare evidence step records a hostile reason verbatim when the gate is skipped', () => {
   withDir((cwd) => {
-    const result = evidenceDecision(cwd, 'true', HOSTILE);
+    const result = evidenceDecision(cwd, 'true', HOSTILE, 'skipped');
     assert.strictEqual(result.status, 0, result.stdout + result.stderr);
     assert.deepStrictEqual(outcome(result), {
       gate: 'skipped',
@@ -487,18 +510,102 @@ test('the prepare evidence step records a hostile reason verbatim when the gate 
   });
 });
 
-test('the prepare evidence step runs the suite when the gate is not skipped', () => {
+test('the prepare evidence step records passed only after every suite shard succeeded', () => {
   withDir((cwd) => {
-    fs.mkdirSync(path.join(cwd, 'tests'));
-    fs.writeFileSync(path.join(cwd, 'tests', 'run-all.sh'), 'printf \'suite ran with %s\\n\' "$*"\n');
-    const result = evidenceDecision(cwd, 'false', '');
+    const result = evidenceDecision(cwd, 'false', '', 'success');
     assert.strictEqual(result.status, 0, result.stdout + result.stderr);
-    assert.deepStrictEqual(outcome(result), { gate: 'passed', reason: '', annotations: ['suite ran with --ci'] });
+    assert.deepStrictEqual(outcome(result), { gate: 'passed', reason: '', annotations: [] });
   });
 });
 
+test('the prepare evidence step refuses a gate the suite result contradicts', () => {
+  for (const [skipTestGate, reason, suiteResult] of [
+    ['false', HOSTILE, 'failure'],
+    ['false', HOSTILE, 'cancelled'],
+    ['false', HOSTILE, 'skipped'],
+    ['false', HOSTILE, ''],
+    ['true', HOSTILE, 'success'],
+    ['true', HOSTILE, 'failure'],
+    ['true', '', 'skipped'],
+    ['true', ' \t ', 'skipped'],
+  ]) {
+    withDir((cwd) => {
+      const result = evidenceDecision(cwd, skipTestGate, reason, suiteResult);
+      assert.strictEqual(result.status, 1, `${skipTestGate}/${suiteResult}: ${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /^::error::the release suite result \(.*\) does not match the gate decision/m);
+      assert.doesNotMatch(result.stdout, /::warning::/);
+      assert.deepStrictEqual(executed(cwd), []);
+    });
+  }
+});
+
+test('the publish evidence step records passed only after every suite shard succeeded', () => {
+  withDir((cwd) => {
+    const result = publishEvidence(cwd, 'run', '', 'success');
+    assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+    assert.deepStrictEqual(outcome(result), { gate: 'passed', reason: '', annotations: [] });
+  });
+});
+
+test('the publish evidence step records the planned reason verbatim when the gate is skipped', () => {
+  withDir((cwd) => {
+    const result = publishEvidence(cwd, 'skipped', HOSTILE, 'skipped');
+    assert.strictEqual(result.status, 0, result.stdout + result.stderr);
+    assert.deepStrictEqual(outcome(result), {
+      gate: 'skipped',
+      reason: HOSTILE,
+      annotations: [`::warning::Deterministic publish gate SKIPPED — the suite did not run against ${EXPECTED_SHA}. Reason: ${HOSTILE}`],
+    });
+    assert.deepStrictEqual(executed(cwd), []);
+  });
+});
+
+test('the publish evidence step refuses a gate the suite result contradicts', () => {
+  for (const [gate, reason, suiteResult] of [
+    ['run', '', 'failure'],
+    ['run', '', 'cancelled'],
+    ['run', '', 'skipped'],
+    ['skipped', HOSTILE, 'success'],
+    ['skipped', HOSTILE, 'failure'],
+    ['skipped', '', 'skipped'],
+    ['skipped', ' \t ', 'skipped'],
+    ['passed', '', 'success'],
+    ['', '', 'success'],
+  ]) {
+    withDir((cwd) => {
+      const result = publishEvidence(cwd, gate, reason, suiteResult);
+      assert.strictEqual(result.status, 1, `${gate}/${suiteResult}: ${result.stdout}${result.stderr}`);
+      assert.match(result.stdout, /^::error::the publish suite result \(.*\) does not match the planned gate/m);
+      assert.doesNotMatch(result.stdout, /::warning::/);
+      assert.deepStrictEqual(executed(cwd), []);
+    });
+  }
+});
+
+test('the publish plan hands the gate and its reason on as one output line each', () => {
+  for (const [paragraphs, expected] of [
+    [[], 'gate=run\ngate_reason=\n'],
+    [['Release-Test-Gate: skipped', `Release-Test-Gate-Reason: ${HOSTILE}`], `gate=skipped\ngate_reason=${HOSTILE}\n`],
+  ]) {
+    withDir((base) => {
+      const repo = committed(base, RELEASE_SUBJECT, ...paragraphs);
+      const output = path.join(base, 'github-output');
+      fs.writeFileSync(output, '');
+      const result = runStep(stepNamed('publish-plan', PUBLISH_PLAN_GATE), {
+        'github.sha': git(repo, 'rev-parse', 'HEAD').trim(),
+        'github.event_name': 'push',
+        'inputs.skip_test_gate': '',
+        'inputs.skip_reason': '',
+      }, repo, { GITHUB_OUTPUT: output });
+      assert.strictEqual(result.status, 0, JSON.stringify(paragraphs) + result.stdout + result.stderr);
+      assert.strictEqual(fs.readFileSync(output, 'utf8'), expected);
+      assert.deepStrictEqual(executed(repo), []);
+    });
+  }
+});
+
 test('the publish main-only guard compares the runner ref without expanding it', () => {
-  const guard = stepNamed('publish', 'Reject a publish dispatch outside main');
+  const guard = stepNamed('publish-plan', 'Reject a publish dispatch outside main');
   withDir((cwd) => {
     const main = runStep(guard, {}, cwd, { GITHUB_REF: 'refs/heads/main' });
     assert.strictEqual(main.status, 0, main.stdout + main.stderr);
@@ -518,7 +625,7 @@ test('the version computation still resolves version_type', () => {
     git(repo, 'tag', 'v1.10.0');
     for (const [type, version] of [['major', '2.0.0'], ['minor', '1.11.0'], ['patch', '1.10.1']]) {
       fs.writeFileSync(output, '');
-      const result = runStep(stepNamed('prepare', 'Compute next version'), {
+      const result = runStep(stepNamed('prepare-commit', 'Compute next version'), {
         'inputs.version_type': type,
       }, repo, { GITHUB_OUTPUT: output });
       assert.strictEqual(result.status, 0, result.stdout + result.stderr);

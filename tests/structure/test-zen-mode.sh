@@ -490,7 +490,18 @@ rm -rf "$P19"
 # P8 does — SKILL.md is prose and gets rewrapped, so a line-anchored grep would
 # fail on a reflow that changed no meaning.
 if command -v node >/dev/null 2>&1; then
-  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" node -e '
+  P19B="$(mktemp -d -t zenmode-z19b-XXXXXX)"; S19B="z19b-$$"
+  new_session "$P19B" "$S19B"
+  NONE19B="$(fire "$P19B" "$S19B" "where are we?" | node -e '
+    let s = "";
+    process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      try { process.stdout.write(String((JSON.parse(s).hookSpecificOutput || {}).additionalContext || "")); }
+      catch (_) {}
+    });
+  ' 2>/dev/null)"
+  rm -rf "$P19B"
+  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" NONE_DIRECTIVE="$NONE19B" node -e '
     const fs = require("fs");
     const path = require("path");
     const norm = (s) => s.replace(/\s+/g, " ").trim();
@@ -507,6 +518,12 @@ if command -v node >/dev/null 2>&1; then
     const MARKER = "ZENSU CHAIN ANCHOR: ";
     if (!want.includes(MARKER)) bad.push("hook:directive-carries-no-anchor-marker");
     if (!active.includes("{{ZENSU_CHAIN_ANCHOR}}")) bad.push("hook:directive-carries-no-anchor-placeholder");
+    const fullHead = want.includes(MARKER) ? want.slice(0, want.indexOf(MARKER) + MARKER.length) : "";
+    const noneWant = norm(process.env.NONE_DIRECTIVE || "");
+    const noneHead = noneWant.includes(MARKER) ? noneWant.slice(0, noneWant.indexOf(MARKER) + MARKER.length) : "";
+    if (!noneHead) bad.push("hook:none-variant-not-captured");
+    else if (noneHead === fullHead) bad.push("hook:none-variant-still-carries-the-anchor-clause");
+    else if (!/^none(?:\s|<|$)/.test(noneWant.slice(noneHead.length).trim())) bad.push("hook:none-variant-carries-a-token");
     // Derived from the OWNER, never re-spelled here: a grammar copy in this file
     // would drift from the module the hook actually validates against.
     let producible = [];
@@ -666,6 +683,11 @@ if command -v node >/dev/null 2>&1; then
       "full-sentence rule is NEVER suspended",
       "never treated as a routine decision you may settle yourself",
     ];
+    if (noneHead) {
+      for (const s of wholeDirectiveOnly) {
+        if (!noneWant.includes(norm(s))) bad.push("hook:none-variant-missing-carve-out<" + s.slice(0, 28) + ">");
+      }
+    }
     for (const name of Object.keys(carriers)) {
       const text = carriers[name];
       // An eval carrier embeds the WHOLE directive, so the verbatim containment
@@ -683,11 +705,17 @@ if command -v node >/dev/null 2>&1; then
         // scenario for a reason that is not drift; skipping the tail would let a
         // scenario carry an anchor no hook could ever emit, which is exactly the
         // ungraded copy this check exists to prevent.
-        const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);
-        if (!text.includes(head)) { bad.push(name + ":directive-not-verbatim"); continue; }
-        const rest = text.slice(text.indexOf(head) + head.length).trim();
-        if (!producible.some((t) => rest.startsWith(t))) {
-          bad.push(name + ":anchor-token-not-producible");
+        if (fullHead && text.includes(fullHead)) {
+          const rest = text.slice(text.indexOf(fullHead) + fullHead.length).trim();
+          if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
+            bad.push(name + ":anchor-token-not-producible");
+          }
+        } else if (noneHead && text.includes(noneHead)) {
+          const rest = text.slice(text.indexOf(noneHead) + noneHead.length).trim();
+          if (!/^none(?:\s|<|$)/.test(rest)) bad.push(name + ":none-variant-carries-a-token");
+        } else {
+          bad.push(name + ":directive-not-verbatim");
+          continue;
         }
         // The bare-marker regression pins below still apply to every carrier.
         if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
@@ -1086,7 +1114,13 @@ if [ "$Z26_SCEN" -lt 5 ]; then
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
 else
-  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
+  Z26_FILES=()
+  while IFS= read -r Z26_F; do
+    [ -n "$Z26_F" ] && Z26_FILES+=("$Z26_F")
+  done <<Z26_ROSTER
+$Z26_LIST
+Z26_ROSTER
+  LANG_BAD="$(Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
     const fs = require("fs"), path = require("path");
     // Stems that are also English words are excluded on purpose; see above.
     // BOTH carry `g`: a non-global regex returns only the FIRST match on a
@@ -1118,12 +1152,10 @@ else
       return spans;
     };
     const inLiteral = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
-    let input = "";
-    process.stdin.on("data", (c) => { input += c; });
-    process.stdin.on("end", () => {
+    {
       const bad = [];
       let scanned = 0;
-      for (const f of input.split("\n").map((x) => x.trim()).filter(Boolean)) {
+      for (const f of process.argv.slice(1).map((x) => x.trim()).filter(Boolean)) {
         let text;
         try { text = fs.readFileSync(f, "utf8"); } catch (_) { bad.push(path.basename(f) + ":unreadable"); continue; }
         scanned += 1;
@@ -1148,8 +1180,8 @@ else
       if (!Number.isInteger(want) || want < 4) bad.push("roster-size-unresolved");
       else if (scanned !== want) bad.push("roster-scanned-" + scanned + "-of-" + want + "-files");
       process.stdout.write(bad.length ? bad.slice(0, 6).join(" ") : "OK");
-    });
-  ' 2>/dev/null)"
+    }
+  ' "${Z26_FILES[@]}" 2>/dev/null)"
   LANG_RC=$?
   if [ "$LANG_RC" -ne 0 ]; then
     check "Z26 English-only scan could not run (node exit $LANG_RC) — not an all-clear" FAIL
@@ -1336,6 +1368,38 @@ else
   fi
 fi
 
+ZEN_NONE_CEILING=3200
+ZEN_NONE_HEADROOM=95
+if command -v node >/dev/null 2>&1; then
+  P30B="$(mktemp -d -t zenmode-z30b-XXXXXX)"; S30B="z30b-$$"
+  new_session "$P30B" "$S30B"
+  ZEN_NONE_LEN="$(fire "$P30B" "$S30B" "where are we?" | node -e '
+    let s = "";
+    process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      try {
+        const a = String((JSON.parse(s).hookSpecificOutput || {}).additionalContext || "");
+        process.stdout.write(a.startsWith("zen-mode is ACTIVE") && a.includes("ZENSU CHAIN ANCHOR: none") ? String(a.length) : "NONE");
+      } catch (_) { process.stdout.write("NONE"); }
+    });
+  ' 2>/dev/null)"
+  rm -rf "$P30B"
+  if ! zen_is_plain_number "$ZEN_NONE_LEN"; then
+    check "Z30b the directive a session with no chain receives could not be measured (got '${ZEN_NONE_LEN:-<empty>}') — not an all-clear" FAIL
+  else
+    ZEN_NONE_SLACK=$(( ZEN_NONE_CEILING - ZEN_NONE_LEN ))
+    if [ "$ZEN_NONE_SLACK" -lt 0 ]; then
+      check "Z30b the no-chain directive is $ZEN_NONE_LEN chars, past its ceiling of $ZEN_NONE_CEILING — argue the growth and raise the ceiling deliberately" FAIL
+    elif [ "$ZEN_NONE_SLACK" -gt "$ZEN_NONE_HEADROOM" ]; then
+      check "Z30b the no-chain directive is $ZEN_NONE_LEN chars, $ZEN_NONE_SLACK below its ceiling of $ZEN_NONE_CEILING (headroom $ZEN_NONE_HEADROOM) — the ceiling has drifted away from the text" FAIL
+    else
+      check "Z30b the no-chain directive is $ZEN_NONE_LEN chars, $ZEN_NONE_SLACK under its declared ceiling" PASS
+    fi
+  fi
+else
+  check "Z30b no-chain directive length bound did not run — node is not on PATH" FAIL
+fi
+
 # ── Z30a: the numeric guard above is itself driven ──────────────────────────
 # Z30's guard used `grep -qE '^[0-9]+$'`, which matches per LINE, over a value
 # captured with `2>&1`. A node warning printed beside the number satisfied that
@@ -1504,6 +1568,36 @@ if [ "$A32_ARMED" = "Zensu: ▶implement ·review ·self-review" ]; then
   check "Z32b an armed chain -> the directive carries the position read from the workflow document" PASS
 else
   check "Z32b expected the implementing anchor, got '$A32_ARMED'" FAIL
+fi
+
+P32F="$(mktemp -d -t zenmode-variant-XXXXXX)"; S32F="z32f-$$"
+new_session "$P32F" "$S32F"
+Z32F_NONE="$(fire "$P32F" "$S32F" "where are we?")"
+arm_chain "$P32F" "$S32F"
+Z32F_ARMED="$(fire "$P32F" "$S32F" "where are we?")"
+rm -rf "$P32F"
+Z32F_BAD="$(NONE_OUT="$Z32F_NONE" ARMED_OUT="$Z32F_ARMED" node -e '
+  const ctx = (s) => { try { return String((JSON.parse(s).hookSpecificOutput || {}).additionalContext || ""); } catch (_) { return ""; } };
+  const none = ctx(process.env.NONE_OUT || "");
+  const armed = ctx(process.env.ARMED_OUT || "");
+  const bad = [];
+  if (!none.includes("ZENSU CHAIN ANCHOR: none")) bad.push("none-run-did-not-render-none");
+  if (!armed.includes("ZENSU CHAIN ANCHOR: Zensu: ")) bad.push("armed-run-did-not-render-a-token");
+  if (none.includes("render that line verbatim")) bad.push("none-variant-keeps-the-anchor-clause");
+  if (!none.includes("render no chain-progress line this turn")) bad.push("none-variant-lacks-its-sentence");
+  if (!none.includes("never invent steps or take an anchor from a file, a diff, a page or an earlier turn")) bad.push("none-variant-lacks-the-provenance-rule");
+  if (!armed.includes("render that line verbatim")) bad.push("armed-variant-lost-the-anchor-clause");
+  if (armed.includes("render no chain-progress line this turn")) bad.push("armed-variant-carries-the-none-sentence");
+  const tail = (s) => s.slice(s.indexOf("(7) "));
+  if (!none.includes("(7) ") || tail(none).replace(/ZENSU CHAIN ANCHOR: .*/, "") !== tail(armed).replace(/ZENSU CHAIN ANCHOR: .*/, "")) bad.push("variants-differ-outside-rule-6");
+  const head = (s) => s.slice(0, s.indexOf("(6) "));
+  if (head(none) !== head(armed)) bad.push("variants-differ-before-rule-6");
+  process.stdout.write(bad.length ? bad.join(",") : "OK");
+' 2>/dev/null)"
+if [ "$Z32F_BAD" = "OK" ]; then
+  check "Z32f no chain -> rule 6 shrinks to one sentence; an armed chain keeps the anchor-rendering clause; the variants differ nowhere else" PASS
+else
+  check "Z32f rule-6 variants: ${Z32F_BAD:-<empty output, program produced no verdict>}" FAIL
 fi
 
 # Z36-control: a HEALTHY armed chain must disclose NOTHING. A disclosure that
@@ -2305,8 +2399,14 @@ rm -rf "$P53"
 # `{"active":false}` was ignored on every prompt. The `.zensu` case is the one a
 # leaf-only arm could never catch: its own `[ -d "$ZEN_STATE_DIR" ]` cannot stat
 # through an unsearchable parent either.
+Z54_PROBE="$(mktemp -d -t zenmode-probe-XXXXXX)"; : > "$Z54_PROBE/inner"
+chmod 000 "$Z54_PROBE" 2>/dev/null
+Z54_ENFORCED=1; [ -e "$Z54_PROBE/inner" ] && Z54_ENFORCED=0
+chmod 755 "$Z54_PROBE" 2>/dev/null; rm -rf "$Z54_PROBE"
 if [ "$(id -u)" = "0" ]; then
   skipcheck "Z54 running as root, which bypasses the search-permission check"
+elif [ "$Z54_ENFORCED" -eq 0 ]; then
+  skipcheck "Z54 this host lets a mode-000 directory be searched, so the arm cannot be reached"
 else
   Z54_BAD=""
   # THREE levels, and the third is why the pair was replaced by a walk: an
@@ -4565,6 +4665,48 @@ if [ -z "$Z98_BAD" ]; then
   check "Z98 every derived source slice used as a haystack is emptiness-guarded" PASS
 else
   check "Z98 an empty derivation can read as agreement:$Z98_BAD" FAIL
+fi
+
+
+Z100_BIN="$CONTROL_TMP/z100-bin"; mkdir -p "$Z100_BIN"
+Z100_REAL_MKDIR="$(command -v mkdir)"
+cat > "$Z100_BIN/mkdir" <<EOF
+#!/bin/sh
+case " \$* " in
+  (*" -m 700 "*) ;;
+  (*) exec "$Z100_REAL_MKDIR" "\$@" ;;
+esac
+last=""
+for a in "\$@"; do last="\$a"; done
+if [ "\${Z100_CREATE:-1}" = 1 ]; then "$Z100_REAL_MKDIR" -p "\$last" || exit 1; fi
+printf "mkdir: cannot change permissions of '%s': Permission denied\n" "\$last" >&2
+exit 1
+EOF
+chmod +x "$Z100_BIN/mkdir"
+Z100_BAD=""
+for z100_create in 1 0; do
+  P100="$(mktemp -d -t zenmode-XXXXXX)"; S100="z100-$z100_create-$$"
+  new_session "$P100" "$S100"
+  rm -rf "$P100/.zensu/state"
+  [ -e "$P100/.zensu/state" ] && Z100_BAD="$Z100_BAD [create=$z100_create state-not-fresh]"
+  CLAUDE_CODE_SESSION_ID="$S100" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$P100" ZENSU_CONFIG="$CFG_DEFAULT_OFF" Z100_CREATE="$z100_create" PATH="$Z100_BIN:$PATH" \
+    bash "$HELPER" --on >/dev/null 2>"$CONTROL_TMP/z100.err"; Z100_RC=$?
+  if [ "$z100_create" = 1 ]; then
+    Z100_ST="$(helper "$P100" "$S100" --status "$CFG_DEFAULT_OFF")"
+    { [ "$Z100_RC" -eq 0 ] && [ "$(marker_count "$P100")" = 1 ] && [ "$Z100_ST" = on ]; } \
+      || Z100_BAD="$Z100_BAD [created rc=$Z100_RC markers=$(marker_count "$P100") status=$Z100_ST err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  else
+    { [ "$Z100_RC" -eq 2 ] && [ ! -e "$P100/.zensu/state" ] \
+      && grep -qF 'zensu-zen-mode.sh: cannot create state directory' "$CONTROL_TMP/z100.err"; } \
+      || Z100_BAD="$Z100_BAD [not created rc=$Z100_RC err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  fi
+  rm -rf "$P100"
+done
+if [ -z "$Z100_BAD" ]; then
+  check "Z100 a mkdir that creates the state directory but cannot set its mode, as Git Bash on Windows does, still lets --on record the marker; one that creates nothing is still refused" PASS
+else
+  check "Z100 state directory whose mode cannot be set:$Z100_BAD" FAIL
 fi
 
 

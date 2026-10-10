@@ -1,26 +1,9 @@
 ---
 name: wargame
 description: >
-  [Zensu] Wargame a hard mission before a cheaper executor runs it — produce an
-  executable-blind battle plan: every move with its expected observation, its
-  likely failure + counter-move, forks with triggers, RECON NEEDED flags, abort
-  conditions, verification runs, and a red-team pass, graded against an 8-point
-  standard. Also handles /goal contracts: prove a property exhaustively, name
-  invariants to break, hold a live-schema/no-mock evidence bar, and converge on
-  parity. For code and feature missions the convergence loop REUSES the Zensu
-  review chain (five zensu:review-aspect agents + zensu:code-reviewer) instead
-  of spawning ad-hoc verifiers. Use whenever the user wants to plan or "wargame"
-  something so a cheaper/mid-tier model can run it blind, or says /wargame,
-  /goal, "battle plan", "make it executable-blind", "plan this so Sonnet can
-  execute", "prove every mutation", "audit ownership/invariants", or picks one
-  of the 10 prepared domains: rebuild a marketing website, write conversion copy,
-  set up local/private AI, optimize tax, sharpen a high-ticket offer, improve a
-  chatbot system prompt, hunt real bugs in a repo, build a 12-month financial
-  model, competitive positioning, or turn a manual process into an automation
-  blueprint. Strongest on existing products/repos/sites where recon has real
-  substrate to survey. Works for the templates AND any generic mission. Trigger
-  even when the user doesn't say "wargame" but clearly wants a hard task mapped
-  move-by-move with failures and verification before execution.
+  [Zensu] Plan a hard mission move by move, with failures, counter-moves and
+  verification, so a cheaper model can run it blind. Use when the user wants a
+  battle plan or a /goal contract, or via /zensu:wargame.
 ---
 
 # /zensu:wargame

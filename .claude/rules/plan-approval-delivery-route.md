@@ -20,6 +20,19 @@ the question without asking, and a direct, autopilot or pilot answer is never re
 session marker, the `hooks.defaultDeliveryRoute` key and the resolution ladder that decide it
 are in `.claude/rules/session-delivery-route.md`.
 
+**Layout and size budget.** The directive opens with the `ZENSU DELIVERY ROUTE:` field, then `(S)`,
+then the question with its four labels, the option descriptions, the ranking rule, the dispatch arms
+and the RECORD sentence, and only then the fast paths `(A)`-`(C)`. The host persists any
+`additionalContext` above 10,000 characters and shows the model a 2,000-character preview
+(`docs/architecture.md` §"Hook Output Size Limit"); at 12.5-13 KB the preview stopped inside `(B)`,
+so a model obeying the no-Read rule asked without the mandated options. `D44` in
+`tests/structure/test-plan-approved-delegate.sh` holds both heredocs under 9,000 characters with the
+longest route field and the record command counted at 300 characters, and requires the field and the four labels inside the preview; `D35` requires the
+field to open the directive. `(A)`, `(B)` and `(C)` name "the Zensu workflow" in both modes, so the
+only mode-dependent text is `(S)`'s status-line example, option (2) and the workflow arm's status line.
+Rationale this file carries gets at most one sentence in the directive: put the rest here, not in the
+heredocs. Version `patch`: the hook still emits only `additionalContext`.
+
 **The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
 `<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
 TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
@@ -56,8 +69,10 @@ EXACTLY ONE `/zensu:autopilot` mention, the prohibition and override clauses, an
 spelling; requires (C) to carry pilot's own rationale, which the never-clause needle cannot see;
 requires (B) to carry the refusal guard, the open-set marker and the multi-word rule,
 AND to state the refusal BEFORE the preference arms (an offset comparison, not a presence one —
-without it, moving the refusal below the autopilot arm passes every check); and requires the
-remainder after both clauses to tie no non-interactive run to a route. NO slice carries an emptiness arm: the composite index guard at the top makes all three
+without it, moving the refusal below the autopilot arm passes every check); requires the
+question block, which precedes the fast paths, to carry only the option label, the status line and one
+dispatch of `/zensu:autopilot` and no unattended-run wording beyond its two sanctioned strings; and requires
+nothing outside `(B)`, `(C)` and that block to name an unattended run or dispatch any route. NO slice carries an emptiness arm: the composite index guard at the top makes every slice
 non-empty by construction and reports `SLICE_FAILED` when it cannot. **State the residual rather than the count:** no conjunct binds the counted
 (C) occurrence TO the prohibition sentence, so a (C) clause that both defaults to the route and
 forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
@@ -79,9 +94,10 @@ one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the
 `tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
 now carries the route literals and is what makes a one-sided edit fail, plus `P1b`-`P1b7`, which
 compare mode-INDEPENDENT spans byte-for-byte because presence alone cannot see an
-option ADDED to one branch — `P1b`/`P1b2` the option list, `P1b3`/`P1b4` the two dispatch arms, and
-`P1b5`/`P1b6`/`P1b7` the SAFETY clauses (the `(C) OVERRIDES (B)` sentence, the refusal-first block,
-and the `(B)`-internal non-interactive removal guard). The safety half was unpinned until a
+option ADDED to one branch — `P1b`/`P1b2` the question with its four labels, the option list and the
+ranking rule, `P1b3`/`P1b4` the dispatch arms and the RECORD sentence, and `P1b5`/`P1b6`/`P1b7` the SAFETY
+clauses (the whole `(C)` clause, the refusal-first block through the LAST arm, and `(A)` with the `(B)`
+source scoping and its non-interactive removal guard). The safety half was unpinned until a
 mutation probe measured it: on a ONE-SIDED reword of heredoc 1, `P1b` through `P1b4` all reported
 PASS while `P1b5` and `P1b7` failed, and a separate reword of the refusal block failed `P1b6`.
 Then `D9pre` and `D9`-`D33` in
@@ -232,10 +248,9 @@ rather than test-detected. Not done here because it re-authors `P1`/`P1b`/`P1b2`
 "exactly TWO `cat <<'JSON'` blocks" contract and turns the byte-for-byte pins tautological — a real
 control traded for a structural guarantee, which is a decision to take deliberately rather than
 mid-chain. **The pin-coverage claim above is SCOPED, because an earlier revision overstated it:**
-the span comparisons reach the option list, the two dispatch arms and — since the PR #295 review
-round — the three safety clauses (`P1b5`-`P1b7`); everything
-else in a multi-kilobyte directive is covered by presence needles plus `D13`, so the pins are far
-from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
+the span comparisons reach every mode-independent span from the question to the end of `(C)`; the
+field block, `(S)`'s status-line example, option (2) and the workflow arm's status line are
+mode-dependent and covered by presence needles plus `D13`, so the pins are far from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
 `P1`/`P1b`/`P1b2` anyway, or at a fourth one-sided defect in the duplicated span.
 
 **The TRIGGER was evaluated in the PR #295 review round and deliberately NOT fired.** That round
@@ -296,4 +311,4 @@ ExitPlanMode SUCCESS, that README already records `claude -p --permission-mode p
 and firing no hook, and whether any other headless permission mode can produce an APPROVED
 ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` alone, which grades
 the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
-escalation is a spelling list, not a property, in BOTH the `(B)` and the tail slice.
+escalation is a spelling list, not a property, in BOTH the `(B)` slice and the question block.

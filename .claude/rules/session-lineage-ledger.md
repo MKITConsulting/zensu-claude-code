@@ -50,7 +50,7 @@ default repo-scoped `lineage` render nothing where the work lives — an empty a
 indistinguishable from "no handover happened".
 
 **Sites that move with the schema:** the module, `trail.mjs`'s wrappers, the `v1`
-segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
+segment quoted in the data-source table of `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
 and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
 
 **THREE couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
@@ -101,7 +101,7 @@ reason: `COMMANDS` drives the routing AND the usage string, `COMMAND_FLAGS` must
 a row for every one of its keys, and `refuseForeignFlags` fails closed on a missing row
 rather than defaulting to `[]`. The unknown-command refusal stays FIRST, so a typo is
 reported as a typo. Two entries are DELIBERATE accept-and-ignore, not oversights:
-`--force` on `list` and `limited`, which SKILL.md documents as a survey rule —
+`--force` on `list` and `limited`, which `references/commands.md` documents as a survey rule —
 `instances` emits no verdict and so refuses it. `L56h` derives both key sets from
 source and compares them, so an eleventh command cannot be added to one alone;
 `test-session-trail-skill.sh`'s `T16` and its `json-mode-order` guard read `COMMANDS`
@@ -173,7 +173,7 @@ deleted with every control green.
 **Sites that move with the ENDPOINT field set**, which is separate and was got wrong
 once: `makeEndpoint` owns the shape and `ENDPOINT_KEYS` is derived from it rather than
 hand-listed, but three PROSE copies are not derived — the persisted-field sentence in
-`skills/session-trail/SKILL.md` and its two `--json` disclosure paragraphs. Those are
+`skills/session-trail/references/disclosure.md` and its two `--json` disclosure paragraphs. Those are
 a PRIVACY claim a reader decides from, so an over-list is as wrong as an under-list;
 `test-session-trail-skill.sh` T26 pins both directions, scoped to the ledger lines
 because the data-sources table legitimately documents `cwd` and `title` for three
@@ -193,9 +193,9 @@ not `pre-edit-tdd-reminder.sh`, not the Bash source-write gate. It is the only
 persistence in this skill the user never approves a Write for, its target is whatever
 `--config-dir`/`CLAUDE_CONFIG_DIR` names, and what it persists includes both
 endpoints' absolute worktree path and branch. `--no-record` is the opt-out, and
-`lineage --forget <session> --apply` is the only way a landed record leaves. Flow 3
-step 0 in `skills/session-trail/SKILL.md` states this where the decision is taken;
-keep it there, not only in that file's Safety section.
+`lineage --forget <session> --apply` is the only way a landed record leaves. Step 0
+in `skills/session-trail/references/takeover.md` states this where the decision is taken;
+keep it there, not only in the Safety section of `skills/session-trail/SKILL.md`.
 
 **The v-partition is now REPORTED, not read.** `ledgerPaths` still partitions the
 store by `v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges `schemaVersion`
@@ -270,7 +270,7 @@ before it.
   bounded retry, not a lock. Two windows can still interleave; the window is narrowed,
   not closed.
 - **A window label written before incarnation keying stops resolving.** The key is now
-  `<pid>@<start>` (§ the `label` row in SKILL.md), so a bare-pid key no longer matches
+  `<pid>@<start>` (§ the `label` row in `references/commands.md`), so a bare-pid key no longer matches
   anything. That is the safe direction — the alternative is the label resurfacing on
   an unrelated window that inherited the number — and `label --remove <pid>` clears the
   old form, which is the only thing that can still name it.

@@ -276,8 +276,12 @@ mkdir -p "$WT3/elsewhere"
 ln -s "$WT3/elsewhere" "$WT3/.zensu"
 SID3="wtkeep-symlink-$$"
 mint "$SID3" "$WT3"
-SYM_OUT="$(payload SessionStart "$SID3" "$WT3" startup | run_hook "$HOOK_START" "$NO_CONFIG" 2>/dev/null)"; SYM_RC=$?
-[ "$SYM_RC" -eq 0 ] && [ -z "$SYM_OUT" ] && [ ! -e "$WT3/.worktree-keep" ] && [ -z "$(ls -A "$WT3/elsewhere")" ] && check "K16 a symlinked .zensu is refused: no anchor, no marker, nothing behind the link" PASS || check "K16 a symlinked .zensu is refused: no anchor, no marker, nothing behind the link" FAIL
+if [ -L "$WT3/.zensu" ]; then
+  SYM_OUT="$(payload SessionStart "$SID3" "$WT3" startup | run_hook "$HOOK_START" "$NO_CONFIG" 2>/dev/null)"; SYM_RC=$?
+  [ "$SYM_RC" -eq 0 ] && [ -z "$SYM_OUT" ] && [ ! -e "$WT3/.worktree-keep" ] && [ -z "$(ls -A "$WT3/elsewhere")" ] && check "K16 a symlinked .zensu is refused: no anchor, no marker, nothing behind the link" PASS || check "K16 a symlinked .zensu is refused: no anchor, no marker, nothing behind the link" FAIL
+else
+  check "K16 skipped: this host made no symlink, so ln -s copied the directory" PASS
+fi
 
 SID4="wtkeep-unbound-$$"
 KEY4="$(node -e 'const c=require(process.argv[1]+"/hooks/lib/session-control-core-v1.js");process.stdout.write(c.sessionKey(process.argv[2]))' "$PLUGIN_DIR" "$SID4" 2>/dev/null)"

@@ -57,10 +57,16 @@ else
   check "A0b the unit suite passes (node --test acceptance-verify-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_meet_floor "$WORK/unit.out" 25; then
-  check "A0c the unit suite registered at least 25 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
+if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
+  check "A0c the unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "A0c the unit suite registered at least 25 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "A0c the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+fi
+if A0C_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "A0c-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
+else
+  check "A0c-overview $A0C_OVERVIEW" FAIL
 fi
 
 if [ "$(grep -cF '_zensu_acceptance_gate "$session_val" 1 "$(_zensu_autopilot_validate_option "$done_run")" || exit 1' "$LOG")" = "1" ] \
@@ -77,7 +83,8 @@ else
   check "A0e the escape is ledgered and the record store is in both protected-root lists" FAIL
 fi
 
-TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 SELF_REVIEW_SKILL="$PLUGIN_DIR/skills/self-review/SKILL.md"
 VERIFY_SKILL="$PLUGIN_DIR/skills/verify-feature/SKILL.md"
 PLAN_TEMPLATE="$PLUGIN_DIR/templates/tdd-plan.md"
@@ -757,4 +764,5 @@ else
   ERR
 fi
 
+rm -f "$TDD_SKILL"
 finish

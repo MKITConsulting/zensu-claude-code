@@ -203,7 +203,7 @@ decides the anchor only for a **fresh** source — `--fork-session`, or a sessio
 pruned — and there it matters: compare the `WORKTREE` and `CWD` rows and start in `WORKTREE` if they
 differ, or the forked session anchors *inside* the worktree and, while the gate is enabled, still
 cannot commit at its root.
-Flow 3 of `skills/session-trail/SKILL.md` carries the routing rule and is the authority.
+Flow 3 of the session-trail skill, in `skills/session-trail/references/takeover.md`, carries the routing rule and is the authority.
 
 ## Secret Scan
 
@@ -244,7 +244,8 @@ instruction that cannot succeed until its cap releases the guard.
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
   `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
-  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names, and then filtered
+  `reviewer-readonly-v1` and `evidence-worker-v1` — restricted to the plugin-scoped `zensu:`
+  names, and then filtered
   again at decision time: `confinedByFrontmatter` reads each candidate's `agents/<stem>.md`
   and keeps only those whose `tools:` line is exactly `Read`/`Grep`/`Glob`, so a member added
   to those sets for principal reasons cannot acquire a classifier-free spawn by name alone.
@@ -255,10 +256,13 @@ instruction that cannot succeed until its cap releases the guard.
   tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
   report tool, admitted only with one string `message` field (see
   [Session Control](session-control.md)) — and confines its reads to the project
-  root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
+  root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
+  instead: the read trio on leased paths only, and no report tool.
+  It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
-  backstop this grant has.
+  backstop this grant has; for the two evidence workers that backstop is the lease's
+  `toolViolation`.
 - **The grant covers the CALL, not only the identity.** Only `tool_name` and
   `tool_input.subagent_type` are examined; every other input field travels unexamined,
   including `prompt` and `isolation: "worktree"` — and that last one is a host-performed
@@ -493,7 +497,9 @@ session is prose, not a boundary.
 **The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
 `app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
-query or fragment in a navigation are all refused. Consent mode admits **loopback origins only**:
+query or fragment in a navigation are all refused. The one exception in local mode is a
+network-only origin a local policy declares (below), which may be a public `https://` origin, its
+hostname resolved and pinned like a remote target's. Consent mode admits **loopback origins only**:
 a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with `[::1]`
 and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it, and the
 gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
@@ -519,8 +525,10 @@ The decision, the prompt text and the memory rules live in `hooks/lib/verify-con
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
 run-config helper uses too, so there is one floor, not two.
 
-**With a parent policy present the gate asks nothing.** It admits only the policy's target
-origins, every route on them, and a remote hostname only when the run config pins it; a
+**With a parent policy present the gate asks nothing.** It navigates only the policy's target
+origins, every route on them, admits the policy's network-only origins (below) in the run config
+at `open` while it denies every navigation command that names one, and accepts a remote hostname
+only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
 formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
 contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
@@ -536,8 +544,9 @@ host, and plans no consent record for it; `open <url>`, `goto` and `tab-new` aim
 with `NETWORK_ONLY_NAVIGATION`, a final reason. A remote policy accepts only non-loopback HTTPS
 there; a local policy accepts a loopback origin or a pinned public HTTPS one. Consent mode has no
 such class, so the run-config helper refuses `--network-only-origin` without a policy. A page can
-still navigate itself onto a network-only origin, because the browser knows one class of allowed
-origin: the `Page URL` check ends that scenario.
+still navigate itself onto a network-only origin, by a link, a form, a script or a server
+redirect, because the browser knows one class of allowed origin: the `Page URL` check ends that
+scenario. The residuals below name what else reaches such an origin unjudged.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
@@ -611,6 +620,15 @@ through Bash.
 - **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
   it again when it starts the browser, so a file swapped in between is followed. The run
   directory sits under the project, where the session can write.
+- **The gate judges a URL only where a command names one.** It reads the URL of `open`, `goto`
+  and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` name none, so where they land
+  is never judged. The browser also follows a server redirect to another origin, a network-only
+  one included, and a page-initiated navigation onto a network-only origin, and a click can open a
+  popup tab on such an origin. The skill's `Page URL` check, its `tab-list` before every
+  `tab-select` and its rule to close such a tab with `tab-close` answer these, and they are prose,
+  not a boundary. A frame a target page embeds from a network-only origin renders inside that
+  page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
+  that page's content, like data the page fetched.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,

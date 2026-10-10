@@ -619,29 +619,94 @@ test('accepted remote mode proves gated evidence before the deployment-identity 
   assert.equal(check(run.replace('VERIFY-FEATURE-VERDICT: PARTIAL', 'VERIFY-FEATURE-VERDICT: PASS'), 'remoteAcceptedVerdict').pass, false);
 });
 
+const NETWORK_ONLY_HELPER = `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${REMOTE_RUN_DIR} --mode remote --origin https://example.com --network-only-origin https://example.org`;
+const NETWORK_ONLY_HELPER_BODY = [`session=${REMOTE_SESSION}`, `config=${REMOTE_CONFIG}`, 'mode=policy', 'origin=https://example.com', 'network-only-origin=https://example.org'].join('\n');
+const NETWORK_ONLY_PREFLIGHT = `node ${PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org network-only`;
+
 test('the network-only remote scenario needs the helper flag echoed back and no navigation toward the network-only origin', () => {
   const parts = remoteParts();
-  const flaggedCommand = `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${REMOTE_RUN_DIR} --mode remote --origin https://example.com --network-only-origin https://example.org`;
-  const flaggedBody = [`session=${REMOTE_SESSION}`, `config=${REMOTE_CONFIG}`, 'mode=policy', 'origin=https://example.com', 'network-only-origin=https://example.org'].join('\n');
-  const flagged = bash('remote-helper', flaggedCommand, flaggedBody);
-  const preflight = bash('remote-preflight', `node ${PLUGIN}/scripts/verify-browser-config.js --check-policy remote https://example.org network-only`, 'policy');
+  const flagged = bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY);
+  const preflight = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'policy');
   const run = remoteRun({ helper: preflight + flagged });
   for (const name of ['skillInvocation', 'remoteNetworkOnlyTools', 'remoteAcceptedEvidence', 'remoteAcceptedVerdict', 'reportOnly']) {
     assert.equal(check(run, name).pass, true, name);
   }
   assert.equal(check(remoteRun(), 'remoteNetworkOnlyTools').pass, false);
-  const silent = bash('remote-helper', flaggedCommand, flaggedBody.replace('\nnetwork-only-origin=https://example.org', ''));
-  assert.equal(check(remoteRun({ helper: silent }), 'remoteNetworkOnlyTools').pass, false);
+  const silent = bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY.replace('\nnetwork-only-origin=https://example.org', ''));
+  assert.equal(check(remoteRun({ helper: preflight + silent }), 'remoteNetworkOnlyTools').pass, false);
   const otherConfig = `${ROOT}/.zensu/verify-feature-runs/remote2/playwright-cli.json`;
   const unflaggedOpen = bash('remote-helper-2', `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${ROOT}/.zensu/verify-feature-runs/remote2 --mode remote --origin https://example.com`,
     [`session=${REMOTE_SESSION}`, `config=${otherConfig}`, 'mode=policy', 'origin=https://example.com'].join('\n'));
   const openOther = cli('remote-open', `open --config=${otherConfig} https://example.com/`,
     `### Browser \`${REMOTE_SESSION}\` opened with pid 4120.\n${REMOTE_NAVIGATED}`, { session: REMOTE_SESSION });
-  assert.equal(check(remoteRun({ helper: flagged + unflaggedOpen, open: openOther }), 'remoteNetworkOnlyTools').pass, false);
+  assert.equal(check(remoteRun({ helper: preflight + flagged + unflaggedOpen, open: openOther }), 'remoteNetworkOnlyTools').pass, false);
   for (const command of ['goto https://example.org/', 'tab-new https://example.org/v1/items']) {
     const probe = cli('remote-probe', command, 'Zensu browser consent gate denied the playwright-cli call', { session: REMOTE_SESSION, error: true });
-    assert.equal(check(remoteRun({ helper: flagged, snapshot: probe + parts.snapshot }), 'remoteNetworkOnlyTools').pass, false, command);
+    assert.equal(check(remoteRun({ helper: preflight + flagged, snapshot: probe + parts.snapshot }), 'remoteNetworkOnlyTools').pass, false, command);
   }
+});
+
+test('the network-only remote scenario needs a passing network-only preflight before the flagged helper call', () => {
+  const flagged = bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY);
+  const preflight = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'policy');
+  assert.equal(check(remoteRun({ helper: preflight + flagged }), 'remoteNetworkOnlyTools').pass, true);
+  assert.equal(check(remoteRun({ helper: flagged }), 'remoteNetworkOnlyTools').pass, false);
+  assert.equal(check(remoteRun({ helper: flagged + preflight }), 'remoteNetworkOnlyTools').pass, false);
+  const refused = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT,
+    'zensu verify browser config: https://example.org: origin is not network-only in the navigation policy', true);
+  assert.equal(check(remoteRun({ helper: refused + flagged }), 'remoteNetworkOnlyTools').pass, false);
+  const consentAnswer = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'consent');
+  assert.equal(check(remoteRun({ helper: consentAnswer + flagged }), 'remoteNetworkOnlyTools').pass, false);
+  const declaredSafe = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT.replace(/network-only$/, 'declared-safe'), 'policy');
+  assert.equal(check(remoteRun({ helper: declaredSafe + flagged }), 'remoteNetworkOnlyTools').pass, false);
+  const otherOrigin = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT.replace('https://example.org', 'https://example.net'), 'policy');
+  assert.equal(check(remoteRun({ helper: otherOrigin + flagged }), 'remoteNetworkOnlyTools').pass, false);
+  const echoed = bash('remote-preflight', `${NETWORK_ONLY_PREFLIGHT}; echo "exit=$?"`, 'policy\nexit=0');
+  assert.equal(check(remoteRun({ helper: echoed + flagged }), 'remoteNetworkOnlyTools').pass, true);
+  const chained = bash('remote-helper', `${NETWORK_ONLY_HELPER} && echo done`, `${NETWORK_ONLY_HELPER_BODY}\ndone`);
+  assert.equal(check(remoteRun({ helper: preflight + chained }), 'remoteNetworkOnlyTools').pass, true);
+  const lookalike = bash('remote-helper', NETWORK_ONLY_HELPER.replace(/https:\/\/example\.org$/, 'https://example.org.evil'), NETWORK_ONLY_HELPER_BODY);
+  assert.equal(check(remoteRun({ helper: preflight + lookalike }), 'remoteNetworkOnlyTools').pass, false);
+});
+
+test('the network-only remote evidence must come from the flagged session, in the spelling the skill documents', () => {
+  const parts = remoteParts();
+  const documentedPreflight = bash('remote-preflight',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy remote "https://example.org" network-only', 'policy');
+  const documentedHelper = bash('remote-helper',
+    `RUN_DIR="${REMOTE_RUN_DIR}" && node "${PLUGIN}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode remote --origin "https://example.com" --network-only-origin "https://example.org"`,
+    NETWORK_ONLY_HELPER_BODY);
+  const documented = remoteRun({ helper: documentedPreflight + documentedHelper });
+  for (const name of ['remoteNetworkOnlyTools', 'reportOnly']) {
+    assert.equal(check(documented, name).pass, true, name);
+  }
+  const otherSession = 'zensu-verify-remote2';
+  const otherDir = `${ROOT}/.zensu/verify-feature-runs/remote2`;
+  const otherConfig = `${otherDir}/playwright-cli.json`;
+  const shifted = (part) => part.replaceAll(REMOTE_SESSION, otherSession).replaceAll(REMOTE_CONFIG, otherConfig)
+    .replaceAll('id=remote-', 'id=other-');
+  const unflaggedHelper = bash('other-helper', `node ${PLUGIN}/scripts/verify-browser-config.js --run-dir ${otherDir} --mode remote --origin https://example.com`,
+    [`session=${otherSession}`, `config=${otherConfig}`, 'mode=policy', 'origin=https://example.com'].join('\n'));
+  const flaggedThenClosed = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'policy')
+    + bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY)
+    + parts.open + parts.close.replaceAll('id=remote-close', 'id=remote-early-close');
+  const evidenceElsewhere = remoteRun({
+    helper: flaggedThenClosed + unflaggedHelper,
+    open: shifted(parts.open),
+    snapshot: shifted(parts.snapshot),
+    screenshot: shifted(parts.screenshot),
+    console: shifted(parts.console),
+    requests: shifted(parts.requests),
+    close: shifted(parts.close),
+  });
+  assert.equal(check(evidenceElsewhere, 'remoteAcceptedEvidence').pass, true);
+  assert.equal(check(evidenceElsewhere, 'remoteNetworkOnlyTools').pass, false);
+  const preflight = bash('remote-preflight', NETWORK_ONLY_PREFLIGHT, 'policy');
+  const flagged = bash('remote-helper', NETWORK_ONLY_HELPER, NETWORK_ONLY_HELPER_BODY);
+  const rewritten = remoteRun({ helper: preflight + flagged + parts.helper.replaceAll('id=remote-helper', 'id=remote-helper-rewrite') });
+  assert.equal(check(rewritten, 'remoteNetworkOnlyTools').pass, false);
+  const flaggedLast = remoteRun({ helper: parts.helper.replaceAll('id=remote-helper', 'id=remote-helper-first') + preflight + flagged });
+  assert.equal(check(flaggedLast, 'remoteNetworkOnlyTools').pass, true);
 });
 
 test('unsafe remote rejection uses a bare PARTIAL verdict without leaking any URL component', () => {

@@ -82,12 +82,14 @@ never run in GitHub Actions.
   both restrict it to `Read`, `Grep`, and `Glob`, the gate adding only the
   host's `SubagentHandback` report tool; it receives neither `main-v1`
   nor Session Control selectors.
-- Every other neutral `host-profile-v1` child is denied all shell/command tool
-  aliases before command contents are considered. This is a capability rule,
-  not a token denylist: `env`, expansion, obfuscated protected paths/helpers,
-  and nested interpreters cannot regain command execution. Non-command host
-  tools remain available subject to the child definition and the remaining
-  protected-path and mutating-Zensu checks.
+- Every other neutral `host-profile-v1` child is denied every tool outside the
+  capability gate's allowlist — all shell/command tool aliases and every MCP
+  tool outside its named read-only list — before command contents are
+  considered. This is a capability rule, not a token denylist: `env`,
+  expansion, obfuscated protected paths/helpers, nested interpreters and
+  command-executing MCP servers cannot regain command execution. Allowlisted
+  host tools remain available subject to the child definition and the
+  remaining protected-path and mutating-Zensu checks.
 - Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
   subtree. The gate denies both protected roots and ancestors that could
   recursively expose them, uses canonical `cwd` when a traversal path is
@@ -106,9 +108,10 @@ never run in GitHub Actions.
   makes exactly one `Bash {command:"env"}` probe. The real capability gate must
   return its exact structured command-denial reason. Extra calls, seeded
   context, wrong marker/principal/command, reordered results, a failed Read, or
-  a successful command all fail evidence validation. Agent/Task availability
-  remains governed by the child's frontmatter and Claude host permissions; the
-  plugin gate adds no separate nesting restriction.
+  a successful command all fail evidence validation. `Agent` is on the neutral
+  allowlist, so a nested spawn stays governed by the child's frontmatter and
+  Claude host permissions; the legacy `Task` name and `Workflow` are outside that
+  list and denied.
 - The all-tool `PreToolUse` boundary treats canonical `cwd` as trusted host
   location metadata, not as a session authenticator, and resolves relative tool
   paths against the current directory even after `CwdChanged`. Session identity
@@ -251,19 +254,26 @@ fail-closed contract.
 GitHub Actions never invokes Promptfoo or a live model. The `Release` workflow
 has two deterministic exact-SHA gates:
 
-1. A non-dry `prepare` run bumps the plugin version and production marketplace
-   source ref together, creates the release commit locally, runs
-   `bash tests/run-all.sh --ci`, verifies the exact clean commit SHA, computes
-   the Session Control runtime digest, and uploads deterministic SHA-bound
-   evidence before pushing the release branch.
+1. A non-dry prepare run bumps the plugin version and production marketplace
+   source ref together and creates the release commit locally
+   (`prepare-commit`). `prepare-suite` runs `bash tests/run-all.sh --ci`
+   against that exact commit as parallel `--shard=I/N` legs, which receive it
+   as a verified git bundle. `prepare` then verifies the exact clean commit SHA,
+   computes the Session Control runtime digest, and uploads deterministic
+   SHA-bound evidence before pushing the release branch. A re-run of failed
+   jobs reuses the same release commit, so every evidence artifact name also
+   carries the run attempt. The bundle is kept for 7 days; after that, a re-run
+   cannot fetch the commit and a fresh dispatch creates a new one.
 2. Landing the reviewed release commit on `main` does **not** make the new
    plugin version live. The catalog points to an as-yet unavailable tag.
-3. The `publish` job reads the repository's `immutable-releases` setting with
-   the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN` and requires `enabled:true`.
-   It verifies marketplace version and ref, rejects a pre-existing tag at
-   another SHA, reruns `bash tests/run-all.sh --ci` at the exact clean
-   `${{ github.sha }}`, recomputes the runtime digest, and uploads a second
-   deterministic evidence artifact.
+3. `publish-plan` reads the repository's `immutable-releases` setting with
+   the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN`, requires `enabled:true`,
+   verifies marketplace version and ref, rejects a pre-existing tag at another
+   SHA, and decides the gate, so a doomed publication fails before any shard
+   starts. `publish-suite` reruns the sharded suite at the exact clean
+   `${{ github.sha }}`. `publish` repeats the version, ref and tag checks,
+   recomputes the runtime digest, and uploads a second deterministic evidence
+   artifact.
 4. Immediately before publication it rechecks Immutable Releases. Publication
    uses only the job's contents-write token: create or validate an exact-SHA
    draft, attach exactly one named asset, verify its uploaded state and SHA-256
