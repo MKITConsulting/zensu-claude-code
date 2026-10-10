@@ -56,10 +56,15 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_registered_floor "$WORK/unit.out" 19; then
-  check "X0c the unit suite registered at least 19 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_registered_floor "$WORK/unit.out" 31; then
+  check "X0c the unit suite registered at least 31 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 19 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 31 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+fi
+if UNIT_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "X0d the SUITE-OVERVIEW Blocks cell matches what external-review-v1.test.js registers" PASS
+else
+  check "X0d $UNIT_OVERVIEW" FAIL
 fi
 
 REG="$(node -e '
@@ -125,6 +130,9 @@ launch_payload() {
       tool_response: "Started workflow run wf_abc12345-run in the background",
     };
     if (process.env.EXTRA === "subagent") { payload.agent_id = "a1"; payload.agent_type = "general-purpose"; }
+    if (process.env.EXTRA === "run") {
+      payload.tool_response = { status: "async_launched", taskId: process.env.RUN_TASK, runId: "wf_abc12345-run", transcriptDir: process.env.RUN_DIR };
+    }
     process.stdout.write(JSON.stringify(payload));
   '
 }
@@ -200,15 +208,59 @@ else
   check "X6 none (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
 fi
 
+TREE_LINE="$(bash "$LOG" --external-review --tree --root "$PROJ" </dev/null 2>"$WORK/tree.err")"; RC=$?
+TREE_ID="$(printf '%s\n' "$TREE_LINE" | sed -n 's/^EXTERNAL REVIEW — tree=\([0-9a-f][0-9a-f]*\)$/\1/p')"
+if [ "$RC" -eq 0 ] && [ "${#TREE_ID}" -ge 40 ]; then
+  check "X7a --external-review --tree prints the tree id of the working tree" PASS
+else
+  check "X7a tree (rc=$RC out=$TREE_LINE err=$(cat "$WORK/tree.err"))" FAIL
+fi
+
+RUN_TASK="wabc1234"
+RUN_DIR="$WORK/runs/projects/session/subagents/workflows/wf_abc12345-run"
+RUN_OUTPUT="$WORK/runs/tasks/$RUN_TASK.output"
+mkdir -p "$RUN_DIR" "$WORK/runs/tasks"
+RUN_TREE="$TREE_ID" RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const labels = ["find:correctness", "refute:correctness#1"];
+  const journal = [{ type: "launched" }];
+  labels.forEach((label, index) => {
+    journal.push({ type: "started", key: `k${index}`, agentId: `a${index}`, label, phase: "Find" });
+    journal.push({ type: "result", key: `k${index}`, agentId: `a${index}`, result: {} });
+  });
+  fs.writeFileSync(path.join(process.env.RUN_DIR, "journal.jsonl"), `${journal.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  const finding = {
+    id: "correctness-1", lens: "correctness", title: "Off-by-one in the loader", severity: "IMPORTANT", file: "src/a.js", line: 1,
+    evidence: "two", failure_scenario: "the last entry is skipped", fix: "compare with <=", confidence: 90, duplicates: [],
+    verification: { status: "upheld", reason: "the refuter could not refute it", votes: [{ verifier: "refute", outcome: "real", severity: "IMPORTANT", reasoning: "src/a.js:1" }] },
+  };
+  const result = {
+    schema: "zensu-review-result/v1", tree: process.env.RUN_TREE, lenses: ["correctness"], ceiling: 10,
+    agents: { started: 2, finished: 2, failed: 0 }, dropped: [], findings: [finding],
+  };
+  fs.writeFileSync(process.env.RUN_OUTPUT, JSON.stringify({ summary: "done", agentCount: 2, logs: [], result, workflowProgress: [], totalTokens: 2, totalToolCalls: 2 }));
+'
+
 sleep 1
-launch_payload "$VERB_RAW" | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
+RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n')"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=no-result launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
+  && printf '%s' "$OUT" | grep -qE " task=$RUN_TASK fresh$" \
+  && ! printf '%s' "$OUT" | grep -qF ' begin nonce='; then
+  check "X7 a launch after the last change is not imported without its workflow result" PASS
+else
+  check "X7 no result (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
+fi
+
+OUT="$(verb $'src/a.js\n.zensu/state/x.json\n' --result "$RUN_OUTPUT")"; RC=$?
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* tree=match runtime=journal agents=2/2 findings=1 dropped=0$' \
+  && printf '%s' "$OUT" | grep -qE '^EXT-1 IMPORTANT "src/a\.js:1" lens=correctness id=correctness-1 verification=upheld confidence=90$' \
   && printf '%s' "$OUT" | grep -qE '^script xr1_[0-9]{13}_[0-9a-f]{12} begin nonce=[0-9a-f]{16} ' \
   && printf '%s' "$OUT" | grep -qF 'phase("Review")'; then
-  check "X7 a launch after the last change answers ok, excludes .zensu and prints the recorded script" PASS
+  check "X7b the launch's template result on the current tree is imported with every finding and the recorded script" PASS
 else
-  check "X7 ok (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
+  check "X7b ok (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
 fi
 
 sleep 1
@@ -230,10 +282,12 @@ fi
 
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review 2>"$WORK/usage.err")"; RC=$?
 OUT2="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ" --bogus 2>/dev/null)"; RC2=$?
-if [ "$RC" -eq 2 ] && grep -qF -- '--root <repository top level> is required' "$WORK/usage.err" && [ "$RC2" -eq 2 ]; then
-  check "X10 a missing --root and an unknown argument are usage errors (exit 2)" PASS
+OUT3="$(bash "$LOG" --external-review --tree --root "$PROJ" --result "$RUN_OUTPUT" </dev/null 2>"$WORK/usage3.err")"; RC3=$?
+if [ "$RC" -eq 2 ] && grep -qF -- '--root <repository top level> is required' "$WORK/usage.err" && [ "$RC2" -eq 2 ] \
+  && [ "$RC3" -eq 2 ] && grep -qF -- '--tree takes only --root' "$WORK/usage3.err"; then
+  check "X10 a missing --root, an unknown argument and --tree with a result are usage errors (exit 2)" PASS
 else
-  check "X10 usage (rc=$RC rc2=$RC2)" FAIL
+  check "X10 usage (rc=$RC rc2=$RC2 rc3=$RC3)" FAIL
 fi
 
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ/src" 2>/dev/null)"; RC=$?

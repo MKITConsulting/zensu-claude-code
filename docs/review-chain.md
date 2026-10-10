@@ -58,26 +58,67 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
 - **Launch record.** A `PostToolUse` hook on the `Workflow` tool
   (`hooks/post-workflow-launch.sh`) records every workflow the main thread launched: the
   time, the workflow name, a digest and a bounded copy of the script (64 KiB), the arguments
-  (8 KiB) and the run id when the tool result names one. Records live in the plugin's
+  (8 KiB), and the run id, the task id and the run's transcript directory when the tool result
+  names them. Records live in the plugin's
   private data store under `external-review/v1/`, one file per launch at mode `0600`, at
   most 64 per session; idle sessions are swept after 14 days and wait counters after 24 hours. `PostToolUse` runs only
   after a tool call succeeded, so a launch a permission rule or hook refused leaves no
   record, and a subagent's launch is never recorded. The hook prints nothing and exits 0 on
   every fault.
+- **The review template.** A workflow review is imported only when it ran
+  `templates/workflows/zensu-review-v1.js`, the plugin's own review script. A real review on
+  a private repository showed why: its model-authored script launched 116 agents and
+  reported 22 of its 34 findings as rejected although no verifier had voted on them, because
+  it counted a dead verifier as a no. The main thread reads the template and passes it
+  unchanged as the Workflow `script`. Its `args` carry the tree id that
+  `zensu-log.sh --external-review --tree --root <top>` prints, the lenses (the active panel's
+  perspectives plus `tests`), the changed files, a diff file outside the repository (a file
+  inside it would change the tree the result must name), an agent ceiling (default 10), a
+  per-lens cap (default 8), the known deferred findings, and the evidence-discipline and
+  severity-rubric blocks, because a workflow script has no file access. The template runs one
+  read-only finder per lens, deduplicates across lenses in plain code (the same file within
+  three lines and similar titles; it keeps the higher severity and lists the merged ids), and
+  spawns at most one refuter per CRITICAL or IMPORTANT finding, CRITICAL first, within the
+  ceiling. A SUGGESTION gets no verifier. It never filters a failed agent out: a failed finder
+  lists its lens as `finder-failed`, a failed refuter leaves its finding `unverified`, and a
+  finding over the cap, the ceiling or the token budget stays in the result as `unverified`
+  with its reason and is counted under `dropped`. It has no synthesis agent, because the
+  chain's merge and judge do that work. It always returns `zensu-review-result/v1`: the tree,
+  the lenses, the ceiling, the agent counts, the `dropped` list and every finding with its
+  verification state (`upheld`, `refuted` or `unverified`) and votes.
 - **Import on the first review.** In `/zensu:tdd` Phase 6.10 step 3, with `hooks.reviewJudge`
   on, the main thread pipes the review's change set into
-  `zensu-log.sh --external-review --root <top>`. It answers `status=ok` only when a recorded
-  launch is newer than the change time (the later of modification and status-change time) of
-  every changed file that still exists and of the nearest existing parent of every changed
-  path that no longer does (the plugin's own `.zensu` files excluded). When several launches
-  are that fresh it answers `status=unavailable reason=ambiguous-launch`, and the main thread
-  re-runs it with `--launch <id>` for the workflow whose result it holds. With
-  `hooks.reviewJudge` off it answers `status=off`, because only the judge names the gaps.
-  Every other answer (`none`, `stale`, `off`, `unavailable`) leaves the panel exactly as
-  before. On `ok` the main thread skips the aspect panel, logs
-  `PANEL SKIPPED — external review <name> imported`, and merges the workflow's findings as
-  `EXT-<n>`, where a severity may be raised but never lowered and a finding without a file
-  anchor keeps the anchor `-` and is deferred to `## Open`, because nothing can grade it.
+  `zensu-log.sh --external-review --root <top> --result <output-file>`, where the output file
+  is the one the workflow's completion notification names. It answers `status=ok` only when
+  four things hold. First, a recorded launch is newer than the change time (the later of
+  modification and status-change time) of every changed file that still exists and of the
+  nearest existing parent of every changed path that no longer does (the plugin's own
+  `.zensu` files excluded). Second, the result parses as `zensu-review-result/v1`. Third, the
+  output file is the one the launch's task id names. Fourth, the result names the current
+  tree. A result of any other shape, an ad-hoc workflow's included, answers
+  `status=unavailable reason=foreign-shape`, so such a review costs a second review instead of
+  passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
+  can be computed, the change-time check decides alone and the line says `tree=unverified`.
+  The import then compares the result's agent counts with the run journal the workflow
+  runtime wrote (`journal.jsonl` in the launch's transcript directory, where only the outcome
+  of each label's latest start counts), or with the task output's own progress list when the
+  journal cannot be read. A failed, lost or miscounted agent, a failed finder, a launch whose
+  task id was not recorded, or a runtime record that cannot be read answers
+  `status=degraded`. A degraded result is still imported, because its findings are real data:
+  the line `EXTERNAL REVIEW DEGRADED — <failed> of <started> agents failed; <reasons>` goes
+  into the run log and the CHAIN-END SUMMARY, and each `finder-failed` lens gets one targeted
+  `zensu:review-aspect`, or a `REVIEW GAP` line when the lens is no panel perspective. When
+  several launches are fresh, the import selects the one whose task id names the output file;
+  otherwise it answers `status=unavailable reason=ambiguous-launch` until `--launch <id>`
+  names one. With `hooks.reviewJudge` off it answers `status=off`, because only the judge
+  names the gaps. Every other answer (`none`, `stale`, `off`, `unavailable`) leaves the panel
+  exactly as before. On `ok` or `degraded` the main thread skips the aspect panel, logs
+  `PANEL SKIPPED — external review <name> imported`, and merges every printed finding as
+  `EXT-<n>`. None is dropped and none is labelled rejected: a refuted or unverified finding is
+  merged with its verification state and the refuter's reasoning in its evidence, and the
+  Finding Verification Gate grades every one. A severity may be raised but never lowered, and
+  a finding without a file anchor keeps the anchor `-` and is deferred to `## Open`, because
+  nothing can grade it.
 - **The judge names the gaps.** On the import path `zensu:review-judge` always runs. It
   receives the recorded script as data, reads every changed file fresh, and ends its report
   with a `## Gaps` section naming each file and panel perspective the external review did not
@@ -105,10 +146,12 @@ timestamps can make an older review look fresh, and a changed directory entry (a
 is judged by the directory's own times; the judge's fresh reads remain the backstop. The
 running statuses the wait accepts (`running`, `pending`, `queued`, `in_progress`, `starting`,
 `started`, `active`) were not captured from a live host, and any other status gets no wait,
-so the guard blocks. The record proves only that a workflow
-launched after the last change, not what it reviewed: the main thread must hold the
-workflow's finished result before it imports, and the recorded script is the judge's only
-evidence of the review's scope.
+so the guard blocks. The launch result fields the record keeps (the run id, the task id and
+the transcript directory), the run journal and the task output follow what real workflow
+runs wrote to disk, not a documented format, and a missing field degrades the import instead
+of passing it. The output file is named by the main thread, so the binding to the launch's
+task id, the tree check and the journal comparison are what make a substituted file fail;
+like every plugin store, the files can still be forged by a deliberate shell write.
 
 #### Custom review personas (repo-local)
 

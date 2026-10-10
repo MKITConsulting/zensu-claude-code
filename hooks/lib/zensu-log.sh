@@ -387,11 +387,15 @@ case "${1:-}" in
   --external-review)
     _xr_root=""
     _xr_launch=""
+    _xr_result=""
+    _xr_mode="check"
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
         --root) _xr_root="${2:-}"; shift 2 || break ;;
         --launch) _xr_launch="${2:-}"; shift 2 || break ;;
+        --result) _xr_result="${2:-}"; shift 2 || break ;;
+        --tree) _xr_mode="tree"; shift ;;
         *) echo "zensu-log.sh --external-review: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
@@ -399,30 +403,43 @@ case "${1:-}" in
       echo "zensu-log.sh --external-review: --root <repository top level> is required" >&2
       exit 2
     fi
-    if [ -t 0 ]; then
+    if [ "$_xr_mode" = "tree" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
+      echo "zensu-log.sh --external-review: --tree takes only --root" >&2
+      exit 2
+    fi
+    if [ "$_xr_mode" = "check" ] && [ -t 0 ]; then
       echo "zensu-log.sh --external-review: pipe the Phase 6 step-2 change set on stdin, one repository-relative path per line" >&2
       exit 2
     fi
+    _xr_none="status=unavailable"
+    [ "$_xr_mode" = "tree" ] && _xr_none="tree=unavailable"
     if ! command -v node >/dev/null 2>&1; then
-      echo "EXTERNAL REVIEW — status=unavailable reason=node"
+      echo "EXTERNAL REVIEW — $_xr_none reason=node"
       exit 0
     fi
     _xr_lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — status=unavailable reason=plugin-lib"; exit 0; }
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-lib"; exit 0; }
     _xr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — status=unavailable reason=plugin-data"; exit 0; }
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-data"; exit 0; }
     _xr_root_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_xr_root" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — status=unavailable reason=root"; exit 0; }
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=root"; exit 0; }
     _xr_project="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — status=unavailable reason=project-root"; exit 0; }
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=project-root"; exit 0; }
+    _xr_result_native=""
+    if [ -n "$_xr_result" ]; then
+      _xr_result_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$(dirname -- "$_xr_result")" 2>/dev/null)" \
+        || { echo "EXTERNAL REVIEW — status=unavailable reason=result-path"; exit 0; }
+      _xr_result_native="$_xr_result_dir/$(basename -- "$_xr_result")"
+    fi
     _xr_enabled=1
     zensu_hook_enabled externalReviewImport || _xr_enabled=0
     _xr_judge=1
     zensu_hook_enabled reviewJudge || _xr_judge=0
-    _xr_excl="$(zensu_msys_env_exclusions ZENSU_XR_LIB ZENSU_XR_PLUGIN_DATA ZENSU_XR_PROJECT_ROOT ZENSU_XR_ROOT)" \
+    _xr_excl="$(zensu_msys_env_exclusions ZENSU_XR_LIB ZENSU_XR_PLUGIN_DATA ZENSU_XR_PROJECT_ROOT ZENSU_XR_ROOT ZENSU_XR_RESULT)" \
       || _xr_excl="${MSYS2_ENV_CONV_EXCL:-}"
     MSYS2_ENV_CONV_EXCL="$_xr_excl" \
     ZENSU_XR_LIB="$_xr_lib/external-review-v1.js" \
+    ZENSU_XR_MODE="$_xr_mode" \
     ZENSU_XR_ENABLED="$_xr_enabled" \
     ZENSU_XR_JUDGE="$_xr_judge" \
     ZENSU_XR_PLUGIN_DATA="$_xr_data" \
@@ -430,7 +447,8 @@ case "${1:-}" in
     ZENSU_XR_PROJECT_ROOT="$_xr_project" \
     ZENSU_XR_ROOT="$_xr_root_native" \
     ZENSU_XR_LAUNCH="$_xr_launch" \
-      node -e 'let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write("EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main(["check"]);'
+    ZENSU_XR_RESULT="$_xr_result_native" \
+      node -e 'const tree = process.env.ZENSU_XR_MODE === "tree"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(tree ? "EXTERNAL REVIEW — tree=unavailable reason=module\n" : "EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main([tree ? "tree" : "check"]);'
     exit $?
     ;;
   --acceptance-record|--acceptance-status)

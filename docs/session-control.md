@@ -194,12 +194,16 @@ workflow's agents cannot run `zensu-log.sh`, and a review round counts only when
 thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main thread,
 **once over the aggregate diff**:
 
-- **The workflow reviewed the change (an Ultracode review, for example).** Let it finish.
-  Phase 6.10 step 3 of `/zensu:tdd` then imports it: `zensu-log.sh --external-review`
-  confirms from the Workflow launch record that the review started after the newest change,
-  the workflow's findings join the merge as `EXT-<n>`, and the judge names the files and
-  perspectives it left uncovered, each of which gets one targeted `zensu:review-aspect`. The
-  Finding Verification Gate, the ticket and the consume-mode reviewer run as usual. See
+- **The workflow reviewed the change (an Ultracode review, for example).** Run the review
+  through the plugin's template `templates/workflows/zensu-review-v1.js` and let it finish.
+  Phase 6.10 step 3 of `/zensu:tdd` then imports it: `zensu-log.sh --external-review` confirms
+  from the Workflow launch record that the review started after the newest change, that its
+  result has the template's shape, came from that launch and names the current tree, and
+  compares its agent counts with the run journal. The workflow's findings join the merge as
+  `EXT-<n>`, and the judge names the files and perspectives it left uncovered, each of which
+  gets one targeted `zensu:review-aspect`. The Finding Verification Gate, the ticket and the
+  consume-mode reviewer run as usual. A workflow that did not run the template is not
+  imported, so the panel reviews the change. See
   [Ultracode and external reviews](review-chain.md#ultracode-and-external-reviews).
 - **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
   after it finished. Once implementation is marked complete, a `Stop` that falls while the
