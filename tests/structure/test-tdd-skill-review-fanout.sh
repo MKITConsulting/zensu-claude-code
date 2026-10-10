@@ -8,7 +8,8 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SKILL_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 REVIEWER_MD="$PLUGIN_DIR/agents/code-reviewer.md"
 
 PASS=0; FAIL=0
@@ -129,6 +130,7 @@ fi
 grep -qiE 'skip phases 1-4|skip phases 1.{1,4}4|jump (straight )?to phase 5|skip.{0,30}(build|test)' "$REVIEWER_MD" \
   && check "F11 consume mode skips Phases 1-4 (no build/test re-run)" PASS || check "F11 consume skips 1-4" FAIL
 
+rm -f "$SKILL_MD"
 echo "----"
 echo "test-tdd-skill-review-fanout: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

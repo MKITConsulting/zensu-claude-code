@@ -247,7 +247,8 @@ instruction that cannot succeed until its cap releases the guard.
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
   `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
-  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names, and then filtered
+  `reviewer-readonly-v1` and `evidence-worker-v1` — restricted to the plugin-scoped `zensu:`
+  names, and then filtered
   again at decision time: `confinedByFrontmatter` reads each candidate's `agents/<stem>.md`
   and keeps only those whose `tools:` line is exactly `Read`/`Grep`/`Glob`, so a member added
   to those sets for principal reasons cannot acquire a classifier-free spawn by name alone.
@@ -258,10 +259,13 @@ instruction that cannot succeed until its cap releases the guard.
   tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
   report tool, admitted only with one string `message` field (see
   [Session Control](session-control.md)) — and confines its reads to the project
-  root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
+  root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
+  instead: the read trio on leased paths only, and no report tool.
+  It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
-  backstop this grant has.
+  backstop this grant has; for the two evidence workers that backstop is the lease's
+  `toolViolation`.
 - **The grant covers the CALL, not only the identity.** Only `tool_name` and
   `tool_input.subagent_type` are examined; every other input field travels unexamined,
   including `prompt` and `isolation: "worktree"` — and that last one is a host-performed

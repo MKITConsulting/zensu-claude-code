@@ -5,7 +5,8 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SKILL_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+SKILL_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 
 PASS=0; FAIL=0
 check() {
@@ -40,6 +41,7 @@ else
   check "H5 exact-once bound reviewer/self-review envelope" FAIL
 fi
 
+rm -f "$SKILL_MD"
 echo "----"
 echo "test-tdd-skill-self-review-handoff: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

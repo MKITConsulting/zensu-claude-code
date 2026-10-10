@@ -88,16 +88,19 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   caller supplies `ZDOC_BINDING`. **It DIAGNOSES
   only.** An armed chain cannot be moved to a new session key, so the remedy is to
   re-arm with `/zensu:tdd`; `/zensu:adopt-session` does not apply, because it
-  repairs a lineage break and not a changed session id. The
-  five
-  exact plugin-scoped reviewer identities receive
-  `reviewer-readonly-v1`; the plugin-scoped `zensu:zensu-plm` and every other
-  unknown or custom agent receive neutral `host-profile-v1`. This also applies
+  repairs a lineage break and not a changed session id. The three exact
+  reviewer identities `zensu:code-reviewer`, `zensu:review-aspect` and
+  `zensu:review-judge` (and their bare names) receive `reviewer-readonly-v1`;
+  the two evidence workers `zensu:plan-review-worker` and
+  `zensu:pr-review-worker` receive `evidence-worker-v1`; the plugin-scoped
+  `zensu:zensu-plm` and every other unknown or custom agent receive neutral
+  `host-profile-v1`. This also applies
   when Claude reports `agent_type` directly on `SessionStart` for a top-level
   `claude --agent` session; only a host payload with neither agent field is the
   interactive `main-v1` principal. The PLM and
   reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
-  report tool in the next item; ordinary
+  report tool in the next item, and the evidence workers to
+  `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
   host-profile children keep only the tools on the capability gate's allowlist
   (see **Security boundary** below) that Claude and their agent definitions grant, and
   every shell/command tool is denied because command text cannot be safely
@@ -192,13 +195,16 @@ deferred:
 
 ```js
 // Orchestrator-driven: after all implementation agents have joined, run ONE
-// review pass over the combined diff — 5 read-only aspects → merge → judge
-// (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
-const ASPECTS = ['conventions', 'bugs', 'architecture', 'tests', 'security']
+// review pass over the combined diff — the configured panel's read-only aspects → merge
+// → judge (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
+const PANEL = /* `full` or `lean`, from zensu_review_panel in hooks/lib/zensu-config.sh */
+const ASPECTS = PANEL === 'full'
+  ? ['conventions', 'bugs', 'architecture', 'tests', 'security']
+  : ['correctness', 'design', 'security']
 const changed = /* `git diff --name-only HEAD`, comma-joined */
 const aspects = await parallel(ASPECTS.map(a => () =>
   agent(`Perspective: ${a}. Files changed: [${changed}]`, { agentType: 'zensu:review-aspect' })))
-let merged = /* dedupe + sort the five findings lists in-script */
+let merged = /* dedupe + sort the findings lists in-script */
 const judge = await agent(`Judge pass. Files changed: [${changed}]\n${merged}`, { agentType: 'zensu:review-judge' })
 merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
 // Finding Verification Gate (hooks.findingVerification, default on): grade every merged
@@ -211,8 +217,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${merged}`, { agentType: 'zensu:code-reviewer' })
 ```
 
-If you cannot review in-script, a worker records a project-scoped marker
-(`zensu-log.sh --pending-review --files "<changed>"`); the **next interactive `Stop`** in
+If you cannot review in-script, the interactive main thread records a project-scoped marker
+after the Workflow returns (`zensu-log.sh --pending-review --files "<changed>"`), because a
+Workflow worker can run no command; the **next interactive `Stop`** in
 that project adopts it and runs the full chain once, then clears it. The orchestrator clears
 it itself with `zensu-log.sh --pending-review-done` when it reviewed in-script. Review is
 per-implementation over the aggregate diff — **never per spawned worker**.

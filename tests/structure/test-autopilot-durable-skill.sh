@@ -2,7 +2,9 @@
 # Pin the prompt-level half of the durable outer/inner orchestration contract.
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-AUTO="$ROOT/skills/autopilot/SKILL.md"; TDD="$ROOT/skills/tdd/SKILL.md"
+AUTO="$ROOT/skills/autopilot/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+TDD="$(skill_text_file "$ROOT/skills/tdd")"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 has() { grep -qF -- "$2" "$1"; }
@@ -144,4 +146,5 @@ else
   check "D16 an ExitPlanMode ordering statement or part of its standalone fall-through consequence is missing" FAIL
 fi
 
+rm -f "$TDD"
 echo "----"; echo "test-autopilot-durable-skill: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

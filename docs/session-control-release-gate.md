@@ -108,9 +108,10 @@ never run in GitHub Actions.
   makes exactly one `Bash {command:"env"}` probe. The real capability gate must
   return its exact structured command-denial reason. Extra calls, seeded
   context, wrong marker/principal/command, reordered results, a failed Read, or
-  a successful command all fail evidence validation. Agent/Task availability
-  remains governed by the child's frontmatter and Claude host permissions; the
-  plugin gate adds no separate nesting restriction.
+  a successful command all fail evidence validation. `Agent` is on the neutral
+  allowlist, so a nested spawn stays governed by the child's frontmatter and
+  Claude host permissions; the legacy `Task` name and `Workflow` are outside that
+  list and denied.
 - The all-tool `PreToolUse` boundary treats canonical `cwd` as trusted host
   location metadata, not as a session authenticator, and resolves relative tool
   paths against the current directory even after `CwdChanged`. Session identity

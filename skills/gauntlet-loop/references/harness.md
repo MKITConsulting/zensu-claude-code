@@ -106,14 +106,14 @@ shipped. See "Inside the Zensu plugin" there for the normative statement. The
 short version is the packet protocol, not the shell: no subagent here holds one, so
 that cannot be what separates them from an `Explore` critic. The reviewer types
 hard-refuse any spawn that is not a complete `REVIEW PACKET v1`, and
-`zensu:review-aspect` accepts only its five fixed perspectives, so none of them can
+`zensu:review-aspect` accepts only seven fixed perspectives, so none of them can
 be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 
 The packet handed to a critic contains the goal, the frozen bar, house rules,
-the candidate, the reference, redacted gate output and the NON-SHELL half of the
-inspection recipe — every shell-borne step travels only as the lead's redacted
-output, because a critic here holds no shell to re-run it with. It
-contains no builder transcript, no rationale, no "we tried X because Y", and no
+the candidate, the reference, redacted gate output and the lead's capture of every
+inspection-recipe step, as redacted output or as files the critic can `Read`,
+because a critic here holds no shell, browser, preview or simulator tool to take a
+step itself. It contains no builder transcript, no rationale, no "we tried X because Y", and no
 hint about which way the lead is leaning.
 
 ## Blinding an A/B comparison
@@ -151,9 +151,9 @@ Never grade a summary. The tools that make real inspection cheap:
   every round is comparable.
 - **Files, images, PDFs, notebooks:** `Read`.
 
-Inside the Zensu plugin every one of these that needs a shell is **lead-only** — a
-subagent's command tools are denied outright. Run them yourself and
-put the redacted output in the packet: the redaction rule in
+Inside the Zensu plugin every one of these except `Read` is **lead-only** — a
+subagent's command, browser, preview and simulator tools are all denied. Run them
+yourself and put the redacted output in the packet: the redaction rule in
 [SKILL.md](../SKILL.md) is unconditional and the packet is one of the paths it
 covers, because a packet is delivered to a fresh agent and a builder that receives
 one can write.
