@@ -191,11 +191,13 @@ else
   check "a policy target authorizes its origin without a route list, and a legacy route list that omits / is ignored (got '$PLANNED_ORIGIN' / '$LEGACY_ORIGIN')" FAIL
 fi
 MALFORMED_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173","evidenceMode":"declared-safe","routes":"/"}]}'
-if ! env PATH="$STUBS:$PATH" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$MALFORMED_POLICY" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" >/dev/null 2>&1; then
-  check "a policy target whose legacy routes value is not a list is refused" PASS
-else
-  check "a policy target whose legacy routes value is not a list is refused" FAIL
-fi
+MALFORMED_ERR="$(env PATH="$STUBS:$PATH" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$MALFORMED_POLICY" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" 2>&1 >/dev/null)"
+MALFORMED_RC=$?
+case "$MALFORMED_RC:$MALFORMED_ERR" in
+  0:*) check "a policy target whose legacy routes value is not a list is refused" FAIL ;;
+  *'navigation policy in the launch environment is invalid'*) check "a policy target whose legacy routes value is not a list is refused" PASS ;;
+  *) check "a policy target whose legacy routes value is not a list is refused (got '$MALFORMED_ERR')" FAIL ;;
+esac
 if [ "$LOOPBACK_AVAILABLE" = 1 ]; then
 ARGV_DIR="$TMP/argv"
 mkdir -p "$ARGV_DIR"
@@ -325,6 +327,17 @@ else
   [ "$POLICY_ORIGIN" = 'http://127.0.0.1:45173' ] && [ ! -e "$CONSENT_RUN/zensu-planned-origin" ] \
     && check "with a parent policy present the policy origin still wins and nothing is persisted" PASS \
     || check "with a parent policy present the policy origin still wins and nothing is persisted" FAIL
+  REMOTE_POLICY='{"version":1,"mode":"remote","targets":[{"origin":"https://app.example.com","evidenceMode":"declared-safe"}]}'
+  REMOTE_POLICY_ORIGIN="$(env "${CONSENT_ENV[@]}" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$REMOTE_POLICY" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
+  case "$REMOTE_POLICY_ORIGIN" in
+    http://127.0.0.1:*[!0-9]*|http://127.0.0.1:) REMOTE_POLICY_PLANNED=0 ;;
+    http://127.0.0.1:*) [ "$(cat "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null)" = "$REMOTE_POLICY_ORIGIN" ] && REMOTE_POLICY_PLANNED=1 || REMOTE_POLICY_PLANNED=0 ;;
+    *) REMOTE_POLICY_PLANNED=0 ;;
+  esac
+  [ "$REMOTE_POLICY_PLANNED" = 1 ] \
+    && check "a valid policy without one 127.0.0.1 target falls back to the persisted consent origin" PASS \
+    || check "a valid policy without one 127.0.0.1 target falls back to the persisted consent origin (got '$REMOTE_POLICY_ORIGIN')" FAIL
+  rm -f "$CONSENT_RUN/zensu-planned-origin"
 fi
 
 MISSING_CONTAINER="$RUN_PARENT/run-missing-container"

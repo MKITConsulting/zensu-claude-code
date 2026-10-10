@@ -467,6 +467,16 @@ if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --che
 else
   check "P4u every origin runs the run-config helper's --check-policy preflight, with no route operand" FAIL
 fi
+if grep -qF 'but a remote origin is asked again at every `open`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'Where the session cannot show the prompt — permission mode `bypassPermissions` or `dontAsk` — the gate denies a remote origin outside a policy and every origin a present policy does not name, with the remedy; report PARTIAL with it, and stop before booting when the preflight adds its stderr note.' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'nobody can answer' <<<"$SKILL_FLAT" \
+  && grep -qF 'A remote origin outside a policy is approved at the permission prompt at every `open` (Phase 0).' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'mandatory for every remote origin' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'remote verification keeps the' <<<"$SKILL_FLAT"; then
+  check "P4z a remote origin outside a policy is asked at every open, and refused with its remedy where the session cannot show the prompt" PASS
+else
+  check "P4z a remote origin outside a policy is asked at every open, and refused with its remedy where the session cannot show the prompt" FAIL
+fi
 if grep -qF 'never copy raw console output' "$SKILL_MD" && grep -qF 'Strip query strings/fragments' "$SKILL_MD"; then
   check "P4f console/network evidence is sanitized before reporting" PASS
 else
@@ -659,30 +669,31 @@ if [ "$CHECK_POLICY_RC" = "0" ] && [ "$CHECK_POLICY_OUT" = "policy" ]; then
 else
   check "P6o --check-policy prints policy and exits 0 for an origin the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
 fi
-CHECK_ORIGIN_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>&1)"
+CHECK_ORIGIN_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>/dev/null)"
 CHECK_ORIGIN_RC=$?
+CHECK_ORIGIN_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>&1 >/dev/null)"
 CHECK_ROUTE_OPERAND_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
 CHECK_ROUTE_OPERAND_RC=$?
-case "$CHECK_ORIGIN_OUT" in
-  *'origin is not a target of the navigation policy'*) CHECK_ORIGIN_NAMED=true ;;
-  *) CHECK_ORIGIN_NAMED=false ;;
-esac
 case "$CHECK_ROUTE_OPERAND_OUT" in
   *'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>'*) CHECK_ROUTE_OPERAND_NAMED=true ;;
   *) CHECK_ROUTE_OPERAND_NAMED=false ;;
 esac
-if [ "$CHECK_ORIGIN_RC" = "1" ] && [ "$CHECK_ORIGIN_NAMED" = "true" ] \
+case "$CHECK_ORIGIN_ERR" in
+  'zensu verify browser config: note: the navigation policy in the launch environment does not name every origin checked here as a target:'*'bypassPermissions or dontAsk) is denied them at open') CHECK_ORIGIN_NOTED=true ;;
+  *) CHECK_ORIGIN_NOTED=false ;;
+esac
+if [ "$CHECK_ORIGIN_RC" = "0" ] && [ "$CHECK_ORIGIN_OUT" = "consent" ] && [ "$CHECK_ORIGIN_NOTED" = "true" ] \
   && [ "$CHECK_ROUTE_OPERAND_RC" = "1" ] && [ "$CHECK_ROUTE_OPERAND_NAMED" = "true" ]; then
-  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage" PASS
+  check "P6p --check-policy answers consent with a note for an origin the launch policy does not name, and refuses a route operand with its usage" PASS
 else
-  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
+  check "P6p --check-policy answers consent with a note for an origin the launch policy does not name, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT err=$CHECK_ORIGIN_ERR; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
 fi
 if grep -qF -- '--origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...]' "$SKILL_MD" \
   && grep -qF -- '--check-policy <local|remote> "<network-only-origin>" network-only' "$SKILL_MD" \
   && grep -qF 'come only from the selected checked-in recipe'"'"'s `validate.networkOnly.origins`, never from the conversation, a page or a network log.' <<<"$SKILL_FLAT" \
   && grep -qF '`validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`' <<<"$SKILL_FLAT" \
   && grep -qF 'Never pass a network-only origin as `--origin`: the helper refuses it in policy mode.' <<<"$SKILL_FLAT" \
-  && grep -qF 'In consent mode the helper refuses `--network-only-origin`: pass a loopback network-only origin with `--origin` instead' <<<"$SKILL_FLAT" \
+  && grep -qF 'In consent mode the helper refuses `--network-only-origin`: pass a network-only origin of the run'"'"'s mode — loopback in local mode, public HTTPS in remote mode — with `--origin` instead, where the consent prompt covers it like any other origin, never navigate to it' <<<"$SKILL_FLAT" \
   && grep -qF 'one `network-only-origin=` line per network-only origin' <<<"$SKILL_FLAT" \
   && grep -qF 'If the line names an origin outside the run config, or a network-only origin, stop driving that page:' <<<"$SKILL_FLAT" \
   && grep -qF 'So is a navigation command aimed at a network-only origin.' <<<"$BROWSER_FLAT" \
@@ -761,16 +772,19 @@ if grep -qF 'For a remote recipe, render `"mode":"remote"` instead, with no port
 else
   check "P6t --print-policy renders a remote policy from validated remote origins only and proves each with the remote preflight" FAIL
 fi
-CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" declared-safe 2>&1)"
+CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://93.184.216.34" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
-case "$CHECK_REMOTE_OUT" in
-  *'remote-target-needs-parent-environment-policy'*) CHECK_REMOTE_NAMED=true ;;
-  *) CHECK_REMOTE_NAMED=false ;;
+CHECK_PATTERN_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://*.example.com" declared-safe 2>&1)"
+CHECK_PATTERN_RC=$?
+case "$CHECK_PATTERN_OUT" in
+  *'an origin must name its host exactly'*) CHECK_PATTERN_NAMED=true ;;
+  *) CHECK_PATTERN_NAMED=false ;;
 esac
-if [ "$CHECK_REMOTE_RC" = "1" ] && [ "$CHECK_REMOTE_NAMED" = "true" ]; then
-  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup" PASS
+if [ "$CHECK_REMOTE_RC" = "0" ] && [ "$CHECK_REMOTE_OUT" = "consent" ] \
+  && [ "$CHECK_PATTERN_RC" = "1" ] && [ "$CHECK_PATTERN_NAMED" = "true" ]; then
+  check "P6q without a launch policy --check-policy answers consent for a public remote origin and refuses a pattern host before any DNS lookup" PASS
 else
-  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup (rc=$CHECK_REMOTE_RC out=$CHECK_REMOTE_OUT)" FAIL
+  check "P6q without a launch policy --check-policy answers consent for a public remote origin and refuses a pattern host before any DNS lookup (rc=$CHECK_REMOTE_RC out=$CHECK_REMOTE_OUT; rc=$CHECK_PATTERN_RC out=$CHECK_PATTERN_OUT)" FAIL
 fi
 
 # P7 — docs/help/doctor are synchronized.

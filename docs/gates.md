@@ -417,8 +417,9 @@ mere mention included, is denied. A known wrapper, a package launcher, a CLI pat
 environment assignment is refused only on a `zensu-verify` session.
 The pair exists so that `/zensu:verify-feature` can run without
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
-is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
-before launch, and a restart per change — and the desktop app has no shell prefix at all.
+costs every user a shell prefix, a port fixed before launch, and a restart per change — and the
+desktop app has no shell prefix at all, so there it can come only from the `env` block of
+`~/.claude/settings.json`, which applies it to every session.
 
 **Why a Bash gate.** `/zensu:verify-feature` used to drive a bundled Playwright MCP server
 behind a capability broker. Claude Code started that server once per session, and each start
@@ -502,25 +503,38 @@ session is prose, not a boundary.
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
 query or fragment in a navigation are all refused. The one exception in local mode is a
 network-only origin a local policy declares (below), which may be a public `https://` origin, its
-hostname resolved and pinned like a remote target's. Consent mode admits **loopback origins only**:
-a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with `[::1]`
-and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it, and the
-gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
-helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
-gate then requires, because an origin approved mid-session could not be pinned. The browser
+hostname resolved and pinned like a remote target's. A local run admits **loopback origins
+only**: a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with
+`[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it,
+and the gate refuses a run config that pins `localhost` to an address. A remote origin, whether a
+policy target or one the human approves at the prompt, is HTTPS with its host named exactly: the
+run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
+the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
+an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
 itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
 fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. In neither mode
-does anything enforce routes: the evidence boundary is the origin, which the human approves in
-consent mode and the launch policy names in policy mode, and an approved origin covers every page
-on it, at any path.
+line after every navigating call and stops a scenario that left the approved set. Nothing
+enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+approves at the prompt, and an approved origin covers every page on it, at any path.
 
-**Consent and memory.** With no parent policy the PreToolUse hook returns
-`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
-first call that reaches each new loopback origin. Consent is per ORIGIN: once an origin is
-approved, every route on it passes silently for the rest of the session, which is what the
-prompt says; the prompt names no route, and no recipe input reaches it. The PostToolUse hook
+**Consent and memory.** For an origin no policy names, the PreToolUse hook returns
+`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — once per
+`open` for all of its new origins, and for a `goto` or `tab-new` to an origin not yet approved.
+Consent is per ORIGIN; the prompt names no route, and no recipe input reaches it. A loopback
+origin, once approved, passes silently for the rest of the session. A remote origin is asked at
+every `open`: `judgeCall` stamps its run-config entry `asked`, so the consent memory is never
+consulted for it there and a record written into the memory cannot skip that prompt, while a
+`goto` or `tab-new` to a remote origin already recorded passes, bounded by the run config the
+browser was opened with. The prompt says which of the two applies. The hook reads
+`permission_mode` from the hook payload, and only `default`, `acceptEdits`, `auto` and `plan`
+count as able to show the prompt. Under `bypassPermissions`, `dontAsk`, or a mode that is missing
+or unknown, it denies a remote origin outside a policy with
+`remote-target-needs-parent-environment-policy` and a remedy that names both the desktop and the
+CLI spelling; a loopback origin asks as before. Measured on Claude Code 2.1.293 in the desktop
+app's Auto mode: the gate's `ask` reached the user, and the transcript recorded the answer with
+`permissionDecision.source: user_temporary`, while the classifier's approvals in the same session
+read `reasonType: classifier`. The PostToolUse hook
 records an executed call as `(origin, route, decidedBy, at)` in
 `<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
@@ -528,16 +542,24 @@ The decision, the prompt text and the memory rules live in `hooks/lib/verify-con
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
 run-config helper uses too, so there is one floor, not two.
 
-**With a parent policy present the gate asks nothing.** It navigates only the policy's target
-origins, every route on them, admits the policy's network-only origins (below) in the run config
-at `open` while it denies every navigation command that names one, and accepts a remote hostname
-only when the run config pins it; a
+**With a parent policy present** its target origins pass without a prompt in every permission
+mode, every route on them; the policy's network-only origins (below) are admitted in the run
+config at `open` while every navigation command that names one is denied, and a remote hostname
+is accepted only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
-formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
-contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
-policy names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` —
-because the browser turns an allowed origin into a URL glob and would read `*` or `{a,b}` as a
-pattern.
+formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. Any other origin
+is asked as above where the session can show the prompt. Where it cannot, an origin of the
+policy's own kind is denied with `origin is not a target of the navigation policy`, and one of the
+other kind — a loopback origin under a remote policy, a remote one under a local policy — with
+`origin is not of the kind the navigation policy names`, whose remedy does not tell the user to add
+an origin the policy could not hold; so there the policy stays the whole allowlist. The
+`--check-policy` preflight cannot see the permission mode: it prints `consent` for such an origin
+and notes on stderr that a session which cannot show the prompt is denied it at `open`. A policy
+that fails its contract denies every `zensu-verify` navigation in every
+mode, with the broken rule named. Every origin in the policy, and every remote origin of a run
+config or a navigation, names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`,
+`.`, `-` and `_` — because the browser turns an allowed origin into a URL glob and would read `*`
+or `{a,b}` as a pattern, so one Yes can never approve a wildcard.
 
 **Network-only origins.** A policy may also list, in `networkOnlyOrigins`, up to 8 origins the
 pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint.
@@ -612,17 +634,23 @@ through Bash.
   run-config helper's follow the host's own matcher rule as read out of the Claude Code 2.1.280
   binary, and report a matcher the host may read two ways as undetermined, never as missing.
 - **The consent memory is a file in a directory the session can write** through a Bash
-  redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
-  other loopback services.
+  redirect, so a forged record skips the prompt for a loopback origin, and the floor bounds the
+  damage to other loopback services. A forged record never skips the prompt of a remote origin at
+  `open`; it does skip the one of a `goto` or `tab-new`, which the run config the browser was
+  launched with bounds. Where a prompt can be shown, a forged loopback record now skips it under
+  a policy too.
 - **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
   browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
   Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
   Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
   check green. `*.localhost` stays refused although the same Chromium code resolves it to
   loopback too.
-- **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
-  it again when it starts the browser, so a file swapped in between is followed. The run
-  directory sits under the project, where the session can write.
+- **The run config is read three times.** The gate reads it when it judges `open`, the CLI
+  reads it again when it starts the browser, and the recorder reads it a third time, so a file
+  swapped in between is followed, can admit an origin the human never approved, and can make the
+  report's `Consent` block wrong. With a forged consent record beside it, a remote origin such a
+  swapped config admits is reached by a `goto` or `tab-new` that is never asked. The run directory
+  sits under the project, where the session can write.
 - **The gate judges a URL only where a command names one.** It reads the URL of `open`, `goto`
   and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` name none, so where they land
   is never judged. The browser also follows a server redirect to another origin, a network-only
@@ -676,9 +704,34 @@ through Bash.
   knows them — the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
   a command, and the global `cli.config.json` — so a new environment or config channel of a
   later CLI is unjudged.
-- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
-  run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
-  prompt.
+- **The permission mode is the host's report, and the gate cannot tell a person from a
+  program.** Auto mode was measured once, on Claude Code 2.1.293 in the desktop app: the gate's
+  `ask` reached the user. How the host resolves a hook `ask` in a headless `-p` run, with or
+  without `--permission-prompt-tool`, in an SDK host with a `canUseTool` callback, and under
+  bypass permissions or `dontAsk` was not measured. Under the last two the gate itself denies a
+  remote origin outside a policy and, while a policy is present, every origin it does not name;
+  without a policy it still asks for a loopback origin there. A run in the default, Accept edits,
+  Plan or Auto mode whose prompts a program answers counts as able to answer, and that program
+  decides every origin the policy does not name, so an unattended run that relies on the policy
+  as its whole allowlist belongs in `dontAsk` or bypass permissions. The live eval runs in policy
+  mode precisely so it never depends on a prompt.
+- **"Asked again at every browser start" assumes that no stored choice answers a later hook
+  `ask`.** Claude Code's hook documentation says an `ask` forces a permission prompt; whether a
+  persistent choice in the host dialog or a `Bash(playwright-cli:*)` allow rule satisfies a later
+  hook `ask` was not measured.
+- **The model can still grant itself a policy.** Under bypass permissions a session can write
+  the `env` block of `~/.claude/settings.json`, and in Auto mode only the classifier judges that
+  write. The next session starts with it; whether the host also applies an edited block to the
+  running session was not measured. Pinning the launch-time policy in the Session Control record
+  would be a schema change and is left to a separate change.
+- **A session that cannot show the prompt may boot a whole runtime before it is refused.** The preflight
+  and the monorepo controller cannot see the permission mode, so under bypass permissions or
+  `dontAsk` a policy that does not name the run's origin is answered `consent` with a stderr
+  note, the runtime starts, and `open` is denied. The skill stops before booting when it sees
+  that note in such a session; nothing enforces it.
+- **A deployed app's API or identity origin has no network-only role without a policy.** It is
+  passed as one more `--origin`, asked in the same prompt and never navigated to by the skill,
+  but the gate would admit a navigation to it.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.

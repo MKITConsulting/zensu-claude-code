@@ -370,6 +370,11 @@ case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no navigatio
 VF_NORECIPE="$(verify_row consent-no-recipe "")"
 case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime recipe'*'/zensu:verify-feature --setup'*'--attach=<loopback-origin>'*) check "P1vc consent-without-recipe warns and names setup and attach" PASS ;; *) check "P1vc consent-without-recipe warns and names setup and attach" FAIL ;; esac
 case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
+case "$VF_POLICY$VF_CONSENT$VF_NORECIPE" in
+  *'without a prompt in every permission mode'*'asked at the permission prompt where one can be shown'*'once per session for each new loopback origin'*'at every browser start for a remote HTTPS origin'*'under bypass permissions or dontAsk a remote origin needs the policy'*'a remote run needs no recipe'*)
+    check "P1vc4 the policy, consent and no-recipe rows state the prompt per permission mode and that a remote run needs no recipe" PASS ;;
+  *) check "P1vc4 the policy, consent and no-recipe rows state the prompt per permission mode and that a remote run needs no recipe" FAIL ;;
+esac
 VF_UNCHECKED="$(verify_row consent-recipe-unchecked "")"
 case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not checked'*'missing check rather than a missing recipe'*) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" PASS ;; *) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" FAIL ;; esac
 case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac

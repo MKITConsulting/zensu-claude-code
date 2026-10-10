@@ -10,10 +10,10 @@ const FLOOR_REASONS = Object.freeze({
   REMOTE_NOT_PUBLIC: 'remote address is not globally routable',
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
   NETWORK_ONLY_HTTPS: 'a network-only origin outside loopback requires HTTPS',
-  HOSTNAME_PATTERN: 'policy origin must name its host exactly: an IP literal, or a hostname of a-z, 0-9, ".", "-" and "_" only, never a wildcard or pattern',
+  HOSTNAME_PATTERN: 'an origin must name its host exactly: an IP literal, or a hostname of a-z, 0-9, ".", "-" and "_" only, never a wildcard or pattern',
 });
 
-const CONSENT_REMOTE_REASON = 'consent mode admits loopback origins only (127.0.0.0/8, [::1] or localhost); a remote target needs the parent-environment navigation policy';
+const CONSENT_REMOTE_REASON = 'a remote origin outside a navigation policy is approved at the permission prompt, which this session cannot show because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto), or relaunch Claude Code with the origin as a target of the parent-environment navigation policy ZENSU_VERIFY_NAVIGATION_POLICY_V1';
 
 const LOCALHOST_NAME = 'localhost';
 
@@ -107,6 +107,12 @@ function isLocalHost(hostname) {
   return isLoopbackHost(hostname) || normalizeHostname(hostname) === LOCALHOST_NAME;
 }
 
+const HOSTNAME_RE = /^[a-z0-9._-]+$/;
+
+function isExactHost(hostname) {
+  return net.isIP(hostname) !== 0 || HOSTNAME_RE.test(hostname);
+}
+
 async function resolveRemoteHost(hostname, resolver) {
   const normalized = normalizeHostname(hostname);
   if (net.isIP(normalized)) {
@@ -157,6 +163,7 @@ function classifyOrigin(rawUrl, navigation = true) {
     return { ...target, mode: 'remote', hostname };
   }
   if (!secure) return { ok: false, reason: FLOOR_REASONS.LOCAL_LOOPBACK_ONLY, origin: target.origin };
+  if (!isExactHost(hostname)) return { ok: false, reason: FLOOR_REASONS.HOSTNAME_PATTERN, origin: target.origin };
   return { ...target, mode: 'remote', hostname };
 }
 
@@ -165,7 +172,6 @@ const NETWORK_ONLY_POLICY_KEYS = Object.freeze(['mode', 'networkOnlyOrigins', 't
 const MAX_NETWORK_ONLY_ORIGINS = 8;
 const NETWORK_ONLY_LIST_FAULT = `policy networkOnlyOrigins must be a list of 1 to ${MAX_NETWORK_ONLY_ORIGINS} origins`;
 const NETWORK_ONLY_OVERLAP_FAULT = 'policy origin must not be both a target and network-only';
-const HOSTNAME_RE = /^[a-z0-9._-]+$/;
 
 // The TOP-LEVEL guards of a navigation policy. It answers '' for a policy whose contract
 // holds and a short reason otherwise, so a caller renders the reason it was given rather than
@@ -215,7 +221,7 @@ function policyFloorFault(entry, mode, networkOnly) {
   } else if (net.isIP(hostname) && !isPublicAddress(hostname)) {
     return FLOOR_REASONS.REMOTE_NOT_PUBLIC;
   }
-  if (!net.isIP(hostname) && !HOSTNAME_RE.test(hostname)) return FLOOR_REASONS.HOSTNAME_PATTERN;
+  if (!isExactHost(hostname)) return FLOOR_REASONS.HOSTNAME_PATTERN;
   return '';
 }
 
@@ -286,6 +292,7 @@ module.exports = {
   expandIpv6,
   inIpv4Range,
   ipv4Number,
+  isExactHost,
   isLocalHost,
   isLoopbackHost,
   isPublicAddress,

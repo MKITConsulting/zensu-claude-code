@@ -200,22 +200,23 @@ consent_origin() {
 }
 
 parent_origin() {
+  local planned
   if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
     consent_origin
     return
   fi
-  env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
-    const value = JSON.parse(process.env.POLICY || "null");
-    if (!value || value.version !== 1 || value.mode !== "local" || !Array.isArray(value.targets)
-        || value.targets.length !== 1) process.exit(2);
-    const target = value.targets[0];
-    if (!target || target.evidenceMode !== "declared-safe"
-        || (target.routes !== undefined && !Array.isArray(target.routes))) process.exit(2);
-    const url = new URL(target.origin);
-    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port
-        || url.pathname !== "/" || url.search || url.hash || url.username || url.password) process.exit(2);
-    process.stdout.write(url.origin);
-  ' 2>/dev/null || fail "an exact parent-authorized 127.0.0.1 origin is required before startup"
+  planned="$(cd -P -- "$PLUGIN_ROOT/hooks/lib" && env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
+    const parsed = require("./verify-navigation-floor-v1.js").parsePolicyTargets(process.env.POLICY || "");
+    if (!parsed.ok) process.exit(2);
+    const targets = [...parsed.targets.values()];
+    const url = parsed.mode === "local" && targets.length === 1 ? new URL(targets[0].origin) : null;
+    process.stdout.write(url && url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port ? url.origin : "consent");
+  ' 2>/dev/null)" || fail "the navigation policy in the launch environment is invalid, so no frontend origin is planned"
+  case "$planned" in
+    consent) consent_origin ;;
+    http://127.0.0.1:*) printf '%s' "$planned" ;;
+    *) fail "the navigation policy in the launch environment is invalid, so no frontend origin is planned" ;;
+  esac
 }
 
 case "$ACTION" in

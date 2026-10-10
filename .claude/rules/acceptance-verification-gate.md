@@ -125,7 +125,10 @@ and `--tdd-complete` loads a new module. No workflow-state field and no strict k
   because `acceptance-verify-v1.js` compares records with `computeTree(projectRoot)`. An edit in
   that worktree after the run leaves the record current. The full-suite gate follows the nested
   work tree for `full` and `scoped` runs (`.claude/rules/evidence-runner.md`).
-- **Consent prompts in auto or headless mode are unverified host behaviour**, as in
-  §"Browser Consent Gate"; unattended browser verification belongs in policy mode.
+- **Consent prompts need a person**, as in §"Browser Consent Gate": Auto mode was measured to
+  reach the user, and bypass permissions and `dontAsk` deny a remote origin outside a policy. How
+  a headless or SDK run resolves the prompt is unmeasured, and the gate cannot tell a person from a
+  program that answers it, so unattended browser verification belongs in `dontAsk` or bypass
+  permissions with a policy that names every origin it needs.
 - **Windows is unverified**: neither suite is in `tests/profiles/windows-ci.v1.json`.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included.
