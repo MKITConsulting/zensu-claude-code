@@ -68,8 +68,8 @@ the unit file passes a clean environment. `gh` is a PATH shim that answers canne
 suite drives real chains to `deferred-ci`, through a mid-chain switch in both directions, and
 through the helper's repo and session verbs.
 
-**Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and its section
-"Full Suite in CI (mode-gated deltas)" (the file may not grow, §"Skill Text Budget"); the CI fix-round
+**Coupled sites that move together:** `skills/tdd/SKILL.md` Phase 0 step 2 and the section
+"Full Suite in CI (mode-gated deltas)" in `skills/tdd/references/modes.md`; the CI fix-round
 paragraph and the legend in `skills/self-review/SKILL.md`; `CLOSE_PASS_SUITE_CI`,
 `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP`, `FULL_SUITE_ROUND_NOTE` and the `deferred-ci` legend
 entry in `hooks/post-review-tdd-delegate.sh`, where `test-post-review-tdd-scope.sh` counts

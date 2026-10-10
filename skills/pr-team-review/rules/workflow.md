@@ -128,7 +128,7 @@ Anything not `VERIFIED` is annotated `[Unverified — do not fix]`, demoted from
 
 ## Phase D — Synthesis + Publish
 
-The body template and the inline-comment template are in `SKILL.md` Phase D. These rules
+The body template and the inline-comment template are in `references/publish.md`. These rules
 decide what goes into them.
 
 **Finding IDs.** Number the findings `F1`…`Fn` after the Finding Verification Gate and the
@@ -158,7 +158,7 @@ first. It names what was degraded and what the reader should treat with care. Wh
 so, for example `Submitted as an approval because --verdict=APPROVE was passed.`
 
 **Metric line.** Directly below the banner, print all three severity counts, zeros included,
-so the line reads the same on every review. Its template is in `SKILL.md` Phase D: `<k>` is
+so the line reads the same on every review. Its template is in `references/publish.md`: `<k>` is
 the length of `comments[]`, `<r>` is `ROLE_COUNT`, and the head link shows the short SHA in
 backticks.
 
@@ -184,7 +184,7 @@ branch moves on:
 **Theme groups.** Group the suggestions under 2-6 bold theme labels such as
 `**Crash and race safety**`. Order the groups by their most convergent finding, and the
 findings inside a group by path, then line. Each suggestion is one line: the bold ID, the
-claim in plain words, and one permalink. A body-only suggestion (see `SKILL.md` Phase D)
+claim in plain words, and one permalink. A body-only suggestion (see `references/publish.md`)
 ends with `· no inline comment` and is followed by a collapsed block with its explanation.
 
 **Collapsing.** Always visible: the banner(s), the metric line, the blocking findings, the

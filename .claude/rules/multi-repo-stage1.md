@@ -175,7 +175,7 @@ capability change to a session an older runtime is serving.
 `docs/tdd-manager-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
 `docs/configuration.md`, the two-refusal lead-in of `docs/gates.md`, the topology bullets
 plus the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
-and step 10.1 in `skills/tdd/SKILL.md`, and ALL THREE multi-repo documents —
+in `skills/tdd/references/audit.md` and step 10.1 in `references/review-chain.md`, and ALL THREE multi-repo documents —
 `docs/multi-repo-chains-spec.md` (its status line, the two §2 paragraphs stage 1
 superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which

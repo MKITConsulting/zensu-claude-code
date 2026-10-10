@@ -1470,17 +1470,15 @@ fi
 
 # ── R54: the SHIPPED Phase 2 recipe is executed, not re-typed ────────
 # R28 asserts a hand-typed variant of the Phase 2 create command, so a flag that
-# drifts in `skills/tdd/SKILL.md` — the file every run actually reads — is
+# drifts in `skills/tdd/references/planning.md` — the file every run actually reads — is
 # invisible to the suite while R28 stays green against the copy in the test. This
 # arm extracts the line from the shipped skill, substitutes only the documented
 # `{curly}` placeholders, and runs it. It is deliberately anchored on the flag
 # spelling rather than a line number, so a moved section does not silently make
 # the extraction match nothing: an empty extraction FAILS here.
 #
-# The residue guard names the four placeholders by hand rather than matching a
-# generic `{word}`: the recipe legitimately contains `${CLAUDE_PLUGIN_ROOT}` and
-# `${CLAUDE_PLUGIN_DATA}`, which a generic pattern reads as unsubstituted.
-RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/tdd/SKILL.md")"
+# The residue guard names the six placeholders this recipe carries.
+RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/tdd/references/planning.md")"
 RECIPE_CMD="${RECIPE_RAW#2. \`}"
 RECIPE_CMD="${RECIPE_CMD%\`}"
 RECIPE_PROJ="$WORK/recipe-proj"
@@ -1491,8 +1489,10 @@ RECIPE_CMD="${RECIPE_CMD//\{log_file\}/$RECIPE_LOG_SPELL}"
 RECIPE_CMD="${RECIPE_CMD//\{project_root\}/$RECIPE_PROJ}"
 RECIPE_CMD="${RECIPE_CMD//\{title\}/Recipe extraction}"
 RECIPE_CMD="${RECIPE_CMD//\{N\}/3}"
+RECIPE_CMD="${RECIPE_CMD//\{plugin_root\}/$PLUGIN_DIR}"
+RECIPE_CMD="${RECIPE_CMD//\{plugin_data\}/${ZENSU_TEST_PLUGIN_DATA:-$WORK/plugin-data}}"
 if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
-  && ! printf '%s' "$RECIPE_CMD" | grep -qE '\{log_file\}|\{project_root\}|\{title\}|\{N\}'; then
+  && ! printf '%s' "$RECIPE_CMD" | grep -qE '\{log_file\}|\{project_root\}|\{title\}|\{N\}|\{plugin_root\}|\{plugin_data\}'; then
   ( cd "$WORK" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
       CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
       CLAUDE_PLUGIN_DATA="${ZENSU_TEST_PLUGIN_DATA:-$WORK/plugin-data}" \
@@ -1507,7 +1507,7 @@ if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
     check "R54 the shipped Phase 2 recipe, extracted and run from outside the project with CLAUDE_PROJECT_DIR unset, creates the run log under {project_root} (rc=$RC54)" FAIL
   fi
 else
-  check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/SKILL.md" FAIL
+  check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/references/planning.md" FAIL
 fi
 
 # ── R29: the module refuses a shape it used to accept silently ───────

@@ -190,14 +190,17 @@ feature record reformatted, not documentation. Never publish it.
 **Batch (parallel authoring fan-out — model on `/zensu:ghost-scan` Phase 2b):**
 
 1. Spawn authoring agents in ONE parallel batch with the `Agent` tool,
-   `subagent_type: Explore` (read-only — they cannot mutate Zensu or write repo
-   files, so every mutation stays in the main thread under the workflow marker).
+   `subagent_type: Explore` (read-only — they cannot mutate Zensu, write repo
+   files or run a command, so every mutation and every `zensu` call stays in the
+   main thread under the workflow marker).
 2. Each agent authors exactly ONE feature's doc. It receives: the feature id,
-   title, the target `doc_type`(s) + audience, and this instruction — run
-   `zensu doc gen-context <id> --doc-type <type>` (a read, ungated), **Read the
-   real source files it names**, author code-grounded Markdown per
-   `docs/documentation-guide.md`, and return `{feature_id, doc_type, title,
-   audience, markdown}`. It performs NO Zensu writes.
+   title, the target `doc_type`(s) + audience, and, inline in its brief, that
+   feature's Phase 2 context map (linked source paths, symbols, posture). The
+   agent cannot run `zensu doc gen-context`; only the main thread runs it, in
+   Phase 2. Its instruction: **Read the real source files the map names**,
+   author code-grounded Markdown per `docs/documentation-guide.md`, and return
+   `{feature_id, doc_type, title, audience, markdown}`.
+   It performs NO Zensu writes.
 3. **Cap concurrency (~8–12 agents) and wave through large batches.** A
    256-feature product is many waves — `log` wave progress and never silently cap:
    a trimmed batch must read as "capped on purpose," not "covered everything."
@@ -299,12 +302,12 @@ never published green.
 | `zensu features list` | 1 | Load the batch feature set (scope by product; filter component/status client-side; pages at 20) |
 | `zensu journeys suggest` | 1 | Full feature catalog when the list envelope's `total` exceeds one page |
 | `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only, no `--json` flag) |
-| `zensu doc gen-context` | 2, 3 | Aggregated authoring context map (paths + posture, not source) |
+| `zensu doc gen-context` | 2 | Aggregated authoring context map (paths + posture, not source); only the main thread runs it, and Phase 3 reads its output |
 | `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
 
 ## Agents & Skills Used
 
 | Component | Type | Phase | Purpose |
 |---|---|---|---|
-| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads source + gen-context, returns markdown, never mutates |
+| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and runs no command |
 | `docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |

@@ -14,7 +14,8 @@ set -u
 # tests.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
@@ -187,6 +188,7 @@ else
   check "P8c cover rules/drivers.md tolerates the PR-body Status marker prefix" FAIL
 fi
 
+rm -f "$TDD_MD"
 echo "----"
 echo "test-plan-requirement-ids: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

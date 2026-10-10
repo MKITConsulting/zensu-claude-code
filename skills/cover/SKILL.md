@@ -112,8 +112,10 @@ For each plan item, in the project's own idiom:
      → write it as `xfail`/skip, record the bug, and move on. **Report-only — never patch
      production here.**
 
-Independent items across layers may fan out via parallel workflows where the probe says it is
-safe (a shared test DB or fixed port serializes them).
+Only test **authoring** (step 1) may fan out: parallel workflows or agents may write the tests
+of independent items across layers. A worker can run no command, so the main thread runs every
+authored test, the RED/GREEN triage and any executed mutation check itself, and runs them one
+at a time where the probe reports a shared test DB or a fixed port.
 
 ### Phase 3 — Quality gate + review chain
 
