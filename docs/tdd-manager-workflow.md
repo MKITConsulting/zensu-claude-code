@@ -110,7 +110,7 @@ flowchart TD
     P5 --> P6[Phase 6: Audit and Final Report<br/>full suite · build · coverage · drift audit · mtime · live acceptance]
     P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook guarantees it]
     Review --> Findings{Critical or<br/>Important findings?}
-    Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 1 round by default]
+    Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 2 rounds by default]
     AutoFix --> Review
     Findings -->|None or max rounds| SelfRev["/zensu:self-review<br/>terminal · ≤ 1 fix round · re-verifies acceptance"]
     SelfRev --> Done([Final Report])
