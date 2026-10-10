@@ -75,7 +75,7 @@ The /zensu:tdd workflow will:
 - Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
-At the end of the workflow (Phase 6) it marks implementation complete, fans out five parallel `zensu:review-aspect` agents, optionally runs `zensu:review-judge` (default on), and passes the merge to one consume-mode `zensu:code-reviewer`. The `Stop` hook (`stop-chain-enforcer.sh`) enforces the review chain for up to `autoFixMaxRounds + 3` blocked Stops, and `post-review-tdd-delegate.sh` routes findings back for in-thread fixing until PASS or max rounds before terminal self-review.
+At the end of the workflow (Phase 6) it marks implementation complete, fans out one `zensu:review-aspect` agent per perspective of the configured panel in parallel (three by default, five with `hooks.reviewPanel: full`), optionally runs `zensu:review-judge` (default on; on the lean panel for the first review only), and passes the merge to one consume-mode `zensu:code-reviewer`. The `Stop` hook (`stop-chain-enforcer.sh`) enforces the review chain for up to `autoFixMaxRounds + 3` blocked Stops, and `post-review-tdd-delegate.sh` routes findings back for in-thread fixing until PASS or max rounds before terminal self-review.
 
 **For trivial changes** (single-line fix, config change, migration-only): Skip the /zensu:tdd skill and implement directly, then continue with Step 4.
 
@@ -186,7 +186,7 @@ Present a completion summary:
 | Component | Type | Step | Purpose |
 |-----------|------|------|---------|
 | `/zensu:tdd` | skill (main thread) | Step 3 | Vanilla implementation by default (phase-gated strict RED-GREEN when configured), Stop-enforced review chain |
-| `zensu:code-reviewer` | subagent | Step 3 (Phase 6) | 5-perspective code review + auto-fix routing |
+| `zensu:code-reviewer` | subagent | Step 3 (Phase 6) | Consume-mode consolidation of the merged `zensu:review-aspect` panel + auto-fix routing |
 
 ## Next step
 

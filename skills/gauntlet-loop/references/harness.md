@@ -106,7 +106,7 @@ shipped. See "Inside the Zensu plugin" there for the normative statement. The
 short version is the packet protocol, not the shell: no subagent here holds one, so
 that cannot be what separates them from an `Explore` critic. The reviewer types
 hard-refuse any spawn that is not a complete `REVIEW PACKET v1`, and
-`zensu:review-aspect` accepts only its five fixed perspectives, so none of them can
+`zensu:review-aspect` accepts only seven fixed perspectives, so none of them can
 be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 
 The packet handed to a critic contains the goal, the frozen bar, house rules,

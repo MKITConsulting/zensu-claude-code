@@ -151,7 +151,7 @@ is included as [`config.example.json`](config.example.json).
 ## Works without a Zensu account
 
 The implementation workflow and the review chain need no CLI, no login, and no
-network: `/zensu:tdd`, the five-aspect review with its auto-fix loop, and the
+network: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and the
 progress log under `.zensu/logs/` all run locally.
 
 Installing and authenticating the CLI adds the tracking layer on top — feature
