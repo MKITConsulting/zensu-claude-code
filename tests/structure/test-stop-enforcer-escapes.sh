@@ -90,6 +90,11 @@ if [ "$DEC3" = "allow" ] && grep -qi "did not converge" "$ERR3"; then
 else
   check "E3 budget cap (dec=$DEC3 err='$(cat "$ERR3" 2>/dev/null)')" FAIL
 fi
+if grep -qF 'review chain did not converge after 8 blocked Stops, the Stop cap for this whole chain' "$ERR3"; then
+  check "E3b the release notice counts the 8 Stops the cap blocks, not the releasing ninth" PASS
+else
+  check "E3b release notice count (err='$(cat "$ERR3" 2>/dev/null)')" FAIL
+fi
 
 # --- E4 control: blocks within budget still block ---
 SID4="esc-budget-ok"

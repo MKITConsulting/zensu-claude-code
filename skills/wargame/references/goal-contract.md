@@ -55,7 +55,7 @@ When the findings are about real code — an ownership audit, a bug hunt, a corr
 2. **Merge in the main thread**, then optionally run `zensu:code-reviewer` for a consolidated pass.
 3. **Measure parity** against the merged set: parity holds when the perspectives agree on every finding AND a round surfaces nothing new. A new or contradicted finding = not converged → fold it in, re-point the aspects at the changed scope, run another round.
 
-This keeps one verification machine across Zensu, lands findings in the review chain's format, and reuses the same lenses `/zensu:tdd` trusts. The five perspectives are code lenses — that is exactly why they fit code/audit missions and why the non-code path below exists.
+This keeps one verification machine across Zensu, lands findings in the review chain's format, and reuses the lenses of `/zensu:tdd`'s full review panel (`hooks.reviewPanel: full`). The five perspectives are code lenses — that is exactly why they fit code/audit missions and why the non-code path below exists.
 
 ### Non-code missions → diverse ad-hoc verifiers
 

@@ -500,7 +500,11 @@ check "Z5 the change set is measured on the session-bound root" "$(verdict $?)"
 # The DEFINITION alone proves nothing — reverting only the call sites to bare
 # `git -C` would leave a definition-only pin green while restoring the defect. Pin
 # that all three scope calls go through the wrapper, and that none is bare.
-awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE'
+DEF_LN="$(grep -nF '_tc_git() { (' "$LOG" | cut -d: -f1)"
+[ "$(printf '%s\n' "$DEF_LN" | grep -c .)" -eq 1 ] && grep -qxF '_tc_git() { (' "$LOG" \
+  && [ -n "$ARM_LN" ] && [ "$DEF_LN" -lt "$ARM_LN" ] \
+  && awk -v s="$DEF_LN" 'NR >= s { print } NR > s && index($0, "git \"$@\"") { exit }' "$LOG" \
+    | grep -qF 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE'
 Z6DEF=$?
 [ "$(awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -c '_tc_git -C "\$_tc_root"')" -eq 3 ]
 Z6USE=$?

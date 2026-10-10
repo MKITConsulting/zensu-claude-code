@@ -290,11 +290,21 @@ paths pass each other's check.
 line before returning false, because rc=6 is otherwise indistinguishable from "no run held the
 tree at all" and a guard that stands down invisibly is the shape this repository treats as
 worse than the wedge it removes. It is not a bypass-ledger entry and must not become one: no
-user-supplied switch was escaped. **The premise under that argument is UNVERIFIED and is
-recorded as such:** nothing measured in this work establishes that this host surfaces
-Stop-hook stderr to the user on a non-blocking exit 0. If it does not, the relaxation has no
-observable at all and the disclosure argument above buys nothing — so verify it before
-leaning on it, and do not restate the claim as though it were established. S7g captures that stderr separately and requires it — the
+user-supplied switch was escaped. **The premise under that argument does NOT hold on Claude
+Code 2.1.295, so the line is a transcript record, not a disclosure.** Read from the
+desktop-bundled 2.1.295 binary rather than executed: an exit-0 Stop hook's stderr lands in a
+`hook_success` attachment whose `content` stays empty; the terminal renderer draws nothing for
+`hook_success`; the model-message builder drops it for every event except SessionStart,
+UserPromptSubmit and UserPromptExpansion; and the Stop summary's `hookErrors`, the only list
+behind the `Stop hook error occurred` notice, takes blocking reasons, non-zero-exit stderr and
+execution errors, so exit-0 stderr only sets `hasOutput`. Measured on this machine: in a
+2.1.266 session the bound inner cap's `moved to audited BLOCKED` stderr line exists only as
+`attachment.stderr` of two Stop `hook_success` records in the session JSONL. The desktop app
+starts its sessions without `--include-hook-events`, and its own renderer is unmeasured. The
+bound covers every exit-0 stderr line of the Stop hook, the cap-release notices included. A
+Stop hook reaches the user through a JSON `systemMessage`, which the host files as
+`hook_system_message` and the terminal renders as `<hook> says: <text>`; moving this line
+there is the fix and is not taken here. S7g captures that stderr separately and requires it — the
 hook fixtures cannot, because `invoke()` discards stderr, so without a direct capture the line
 could be deleted with every check green. **Accepted cost, named because it is not obvious:**
 the line is UNRATED and the state that produces it is a steady state, not an event — an
