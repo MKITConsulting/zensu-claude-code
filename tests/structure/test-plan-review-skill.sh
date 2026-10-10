@@ -282,6 +282,14 @@ else
   check "P10g workers receive no team, task, messaging, or file-mutation instruction" FAIL
 fi
 
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+CONTROL_HITS="$(skill_text_control_assignments "$SKILL_DIR" "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js")"; CONTROL_RC=$?
+if [ "$CONTROL_RC" -eq 0 ] && [ -z "$CONTROL_HITS" ]; then
+  check "P10h no skill text assigns a Session Control input the Bash gate refuses to rebind" PASS
+else
+  check "P10h skill text assigns a Session Control input the Bash gate refuses (rc=$CONTROL_RC): $(printf '%s' "$CONTROL_HITS" | tr '\n' ';')" FAIL
+fi
+
 # P11 — repo-custom reviewer seats: plan-review also ingests .claude/agents/zensu-review-*.md
 # personas, discovered from the trusted working checkout (git toplevel), cast additively.
 # Under Session Control v1 they spawn as confined zensu:plan-review-worker (injected focus),

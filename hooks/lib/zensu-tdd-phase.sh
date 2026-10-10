@@ -2819,8 +2819,8 @@ ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this se
 # changed worktree, never wall time. Not addressed here; a turn counter is a
 # workflow-state field and therefore a MINOR release under §"Runtime Lineage".
 #
-# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/SKILL.md`
-# Phase 6, before any hook directive exists, and that carrier deliberately does not
+# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/references/review-chain.md`
+# (Phase 6 step 10), before any hook directive exists, and that carrier deliberately does not
 # repeat this text — the skill body is in context only because the workflow was
 # invoked, and a third unpinned copy is the drift class CLAUDE.md warns about. So a
 # session that withholds the very first fan-out learns this only after one blocked

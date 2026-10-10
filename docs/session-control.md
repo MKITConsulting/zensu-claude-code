@@ -211,8 +211,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${merged}`, { agentType: 'zensu:code-reviewer' })
 ```
 
-If you cannot review in-script, a worker records a project-scoped marker
-(`zensu-log.sh --pending-review --files "<changed>"`); the **next interactive `Stop`** in
+If you cannot review in-script, the interactive main thread records a project-scoped marker
+after the Workflow returns (`zensu-log.sh --pending-review --files "<changed>"`), because a
+Workflow worker can run no command; the **next interactive `Stop`** in
 that project adopts it and runs the full chain once, then clears it. The orchestrator clears
 it itself with `zensu-log.sh --pending-review-done` when it reviewed in-script. Review is
 per-implementation over the aggregate diff — **never per spawned worker**.

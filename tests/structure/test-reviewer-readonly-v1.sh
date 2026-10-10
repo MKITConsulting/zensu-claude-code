@@ -21,7 +21,8 @@ contains() {
 }
 
 HOOKS="$ROOT/hooks/hooks.json"
-TDD="$ROOT/skills/tdd/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+TDD="$(skill_text_file "$ROOT/skills/tdd")"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 
 node -e '
@@ -87,5 +88,6 @@ for field in changed_files implementation_summary requirements_baseline diff_sum
 done
 contains "TDD handoff pins reviewer policy" "$TDD" 'policy: reviewer-readonly-v1'
 
+rm -f "$TDD"
 printf '%s\n' '----' "test-reviewer-readonly-v1: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

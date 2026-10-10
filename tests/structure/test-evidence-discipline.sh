@@ -697,8 +697,9 @@ fi
 # spawn custom seats AS the confined plugin workers, which C1 already pins.
 # /zensu:tdd is the one path that spawns a custom persona under its own
 # subagent_type, so the block has to be injected into the spawn prompt there.
-TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
-PRTR_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
+PRTR_SKILL="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"
 PLANREV_SKILL="$PLUGIN_DIR/skills/plan-review/SKILL.md"
 
 if [ -f "$TDD_SKILL" ] \
@@ -754,4 +755,5 @@ case "$REGISTERED" in
   *)     check "M1 not registered in promptfoo-local-only.v1.json" FAIL ;;
 esac
 
+rm -f "$TDD_SKILL" "$PRTR_SKILL"
 finish
