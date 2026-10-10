@@ -47,8 +47,8 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1406`) and runs every `git` call with the discovery and
-config-injection variables unset (`:89`, `:1451-1453`). The `--chain-done`
+(`hooks/lib/zensu-log.sh:1456`) and runs every `git` call with the discovery and
+config-injection variables unset (`:89`, `:1501-1503`). The `--chain-done`
 zero-change terminus counts through the same scrubbed wrapper (`:106-107`), on the
 `CLAUDE_PROJECT_DIR` that `zensu-log.sh` re-exports from `zensu_resolve_project_dir()`
 before any verb runs, so the `.` fallback never applies there. Which root the ambient
@@ -60,7 +60,7 @@ when it is unset, is an open question (§11).
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:884`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1395`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1445`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -93,7 +93,7 @@ at all, and `pre-write-secret-scan.sh:85` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:630` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:631` refuses any
 reviewer path input outside the root with `file access must remain inside the
 immutable project root`, and `:592-594` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
@@ -421,8 +421,8 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:884` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1451-1453`, `:106-107` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:630`, `:607` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1501-1503`, `:106-107` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:631`, `:607` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -796,7 +796,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1373`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1423`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.
