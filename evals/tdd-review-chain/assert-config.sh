@@ -22,8 +22,8 @@ node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const commands=(j.hooks?.Stop||[]).flatMap(x=>x.hooks||[]).map(x=>x.command||"");
   process.exit(commands.length===1 && /stop-chain-enforcer\.sh/.test(commands[0]) ? 0 : 1);
-' "$HOOKS" && check "Stop hook owns the main-thread chain guarantee" PASS \
-  || check "Stop-hook chain guarantee wiring drifted" FAIL
+' "$HOOKS" && check "Stop hook owns the main-thread chain backstop" PASS \
+  || check "Stop-hook chain backstop wiring drifted" FAIL
 
 [ -x "$ROOT/hooks/post-review-tdd-delegate.sh" ] \
   && check "post-review main-thread delegate is executable" PASS \

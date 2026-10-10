@@ -22,9 +22,10 @@ Any language, any stack. Nothing to configure, and no account needed to start.
   take and remembers a Zensu-workflow answer for the rest of the session —
   or never, when the project sets `hooks.defaultDeliveryRoute`.
   You stay in the loop once, not every turn.
-- **A review that cannot be skipped.** Specialist reviewers run in
-  parallel, an independent judge checks their blind spots, and a Stop hook makes
-  sure the chain actually finished before the turn ends.
+- **A review the turn waits for.** Specialist reviewers run in parallel and an
+  independent judge checks their blind spots. Once the implementation is marked
+  complete, a Stop hook keeps the turn from ending until the review chain
+  closes. The hold is bounded; when it lets go, it writes a notice saying why.
 - **Findings you can trust.** Every finding is graded against the real source
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or

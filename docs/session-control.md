@@ -88,16 +88,19 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   caller supplies `ZDOC_BINDING`. **It DIAGNOSES
   only.** An armed chain cannot be moved to a new session key, so the remedy is to
   re-arm with `/zensu:tdd`; `/zensu:adopt-session` does not apply, because it
-  repairs a lineage break and not a changed session id. The
-  five
-  exact plugin-scoped reviewer identities receive
-  `reviewer-readonly-v1`; the plugin-scoped `zensu:zensu-plm` and every other
-  unknown or custom agent receive neutral `host-profile-v1`. This also applies
+  repairs a lineage break and not a changed session id. The three exact
+  reviewer identities `zensu:code-reviewer`, `zensu:review-aspect` and
+  `zensu:review-judge` (and their bare names) receive `reviewer-readonly-v1`;
+  the two evidence workers `zensu:plan-review-worker` and
+  `zensu:pr-review-worker` receive `evidence-worker-v1`; the plugin-scoped
+  `zensu:zensu-plm` and every other unknown or custom agent receive neutral
+  `host-profile-v1`. This also applies
   when Claude reports `agent_type` directly on `SessionStart` for a top-level
   `claude --agent` session; only a host payload with neither agent field is the
   interactive `main-v1` principal. The PLM and
   reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
-  report tool in the next item; ordinary
+  report tool in the next item, and the evidence workers to
+  `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
   host-profile children keep only the tools on the capability gate's allowlist
   (see **Security boundary** below) that Claude and their agent definitions grant, and
   every shell/command tool is denied because command text cannot be safely
