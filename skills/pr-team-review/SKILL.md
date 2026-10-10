@@ -105,7 +105,7 @@ synthesis portion of Phase D, and continues with the guard and the reconcile cal
 Close the private lease if Phase C did not already close it, and require the helper to report the captured lease id:
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" \
   bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-review-evidence.sh" close --lease-id "<captured-lease-id>"
 ```
 
