@@ -117,7 +117,7 @@ if [ -n "${ARGV_DIR:-}" ]; then
   printf '%s\n' "$@" >"$ARGV_DIR/go.argv"
   pwd -P >"$ARGV_DIR/go.cwd"
   env | grep -E '^(DB_PASSWORD|JWT_SECRET)=' | cut -d= -f1 | LC_ALL=C sort >"$ARGV_DIR/go.secret-names"
-  env | grep -E '^(TRUSTED_PROXY_CIDRS|SERVER_HOST|SERVER_PORT|DB_HOST|DB_PORT|DB_USER|DB_NAME|DB_SSLMODE|REGISTRATION_ENABLED|EMAIL_ALLOW_NOOP|NOTIFICATION_ALLOW_NOOP|APP_BASE_URL|ZENSU_VERIFY_RUNTIME_LEASE)=' \
+  env | grep -E '^(TRUSTED_PROXY_CIDRS|SERVER_HOST|SERVER_PORT|DB_HOST|DB_PORT|DB_USER|DB_NAME|DB_SSLMODE|REGISTRATION_ENABLED|EMAIL_ALLOW_NOOP|NOTIFICATION_ALLOW_NOOP|APP_BASE_URL|ZENSU_STORAGE_PROVIDER|ZENSU_STORAGE_BASE_PATH|ZENSU_VERIFY_RUNTIME_LEASE)=' \
     | LC_ALL=C sort >"$ARGV_DIR/go.env.tmp"
   mv "$ARGV_DIR/go.env.tmp" "$ARGV_DIR/go.env"
 fi
@@ -241,15 +241,22 @@ EXPECTED_GO_ENV="$(printf '%s\n' \
   "APP_BASE_URL=http://127.0.0.1:45173" "DB_HOST=localhost" "DB_NAME=zensu" "DB_PORT=${STATE_PG_PORT}" \
   "DB_SSLMODE=disable" "DB_USER=zensu" "EMAIL_ALLOW_NOOP=true" "NOTIFICATION_ALLOW_NOOP=true" \
   "REGISTRATION_ENABLED=true" "SERVER_HOST=127.0.0.1" "SERVER_PORT=${STATE_BACKEND_PORT}" \
-  "TRUSTED_PROXY_CIDRS=none" | LC_ALL=C sort)"
+  "TRUSTED_PROXY_CIDRS=none" "ZENSU_STORAGE_BASE_PATH=$(cd "$RUN_DIR" && pwd -P)/blobs" \
+  "ZENSU_STORAGE_PROVIDER=filesystem" | LC_ALL=C sort)"
 GO_ENV="$(cat "$ARGV_DIR/go.env" 2>/dev/null)"
 if [ "$(cat "$ARGV_DIR/go.argv" 2>/dev/null)" = "$(printf '%s\n' run ./cmd/zensu)" ] \
   && [ "$(cat "$ARGV_DIR/go.cwd" 2>/dev/null)" = "$(cd "$WORKTREE/backend" && pwd -P)" ] \
   && [ "$GO_ENV" = "$EXPECTED_GO_ENV" ] \
   && [ "$(cat "$ARGV_DIR/go.secret-names" 2>/dev/null)" = "$(printf '%s\n' DB_PASSWORD JWT_SECRET)" ]; then
-  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease" PASS
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none, its filesystem blob store in the run directory and the exact loopback, database and noop environment, without the runtime lease" PASS
 else
-  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none and the exact loopback, database and noop environment, without the runtime lease (got '$(printf '%s' "$GO_ENV" | tr '\n' ' ')')" FAIL
+  check "the backend runs go run ./cmd/zensu with TRUSTED_PROXY_CIDRS=none, its filesystem blob store in the run directory and the exact loopback, database and noop environment, without the runtime lease (got '$(printf '%s' "$GO_ENV" | tr '\n' ' ')')" FAIL
+fi
+BLOB_MODE="$(stat -c '%a' "$RUN_DIR/blobs" 2>/dev/null || stat -f '%Lp' "$RUN_DIR/blobs" 2>/dev/null)"
+if [ -d "$RUN_DIR/blobs" ] && [ ! -L "$RUN_DIR/blobs" ] && [ "$BLOB_MODE" = 700 ]; then
+  check "up creates the backend blob store as a private directory inside the run directory" PASS
+else
+  check "up creates the backend blob store as a private directory inside the run directory (mode '$BLOB_MODE')" FAIL
 fi
 
 DOWN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" 2>&1)"
@@ -356,6 +363,22 @@ if [ "$MISSING_UP_RC" = 0 ] && [ "$MISSING_DOWN_RC" = 0 ] \
   check "missing owned container does not prevent independent supervisor teardown" PASS
 else
   check "missing container still tears down both supervisors (up=$MISSING_UP_RC down=$MISSING_DOWN_RC)" FAIL
+fi
+
+REUSED="$RUN_PARENT/run-reused-blobs"
+mkdir -p "$REUSED/blobs"
+REUSED_DOCKER="$TMP/docker-reused-blobs"
+mkdir -p "$REUSED_DOCKER"
+: >"$REUSED_DOCKER/events"
+REUSED_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$REUSED_DOCKER" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
+env "${REUSED_ENV[@]}" bash "$CONTROLLER" up "$REUSED" "$WORKTREE" >/dev/null 2>&1
+REUSED_UP_RC=$?
+env "${REUSED_ENV[@]}" bash "$CONTROLLER" down "$REUSED" "$WORKTREE" >/dev/null 2>&1
+REUSED_DOWN_RC=$?
+if [ "$REUSED_UP_RC" = 0 ] && [ "$REUSED_DOWN_RC" = 0 ] && [ -d "$REUSED/blobs" ] && [ ! -L "$REUSED/blobs" ]; then
+  check "up reuses the blob directory an earlier up of the same run directory left" PASS
+else
+  check "up reuses the blob directory an earlier up of the same run directory left (up=$REUSED_UP_RC down=$REUSED_DOWN_RC)" FAIL
 fi
 
 STALE="$RUN_PARENT/run-stale-endpoints"
@@ -477,6 +500,29 @@ else
   check "a symlinked secrets name is refused exclusively and its target is never written (rc=$SECRET_LINK_RC named=$SECRET_LINK_NAMED)" FAIL
 fi
 rm -f "$SECRET_LINK/zensu-runtime.secrets" "$SECRET_LINK_TARGET"
+
+BLOB_LINK="$RUN_PARENT/run-blob-link"
+mkdir -p "$BLOB_LINK"
+BLOB_LINK_TARGET="$TMP/blob-link-target"
+mkdir -p "$BLOB_LINK_TARGET"
+ln -s "$BLOB_LINK_TARGET" "$BLOB_LINK/blobs"
+BLOB_LINK_DOCKER="$TMP/docker-blob-link"
+mkdir -p "$BLOB_LINK_DOCKER"
+: >"$BLOB_LINK_DOCKER/events"
+BLOB_LINK_OUT="$(env "${COMMON_ENV[@]}" DOCKER_STATE="$BLOB_LINK_DOCKER" bash "$CONTROLLER" up "$BLOB_LINK" "$WORKTREE" 2>&1)"
+BLOB_LINK_RC=$?
+case "$BLOB_LINK_OUT" in
+  *'blob directory is unsafe'*) BLOB_LINK_NAMED=1 ;;
+  *) BLOB_LINK_NAMED=0 ;;
+esac
+if [ "$BLOB_LINK_RC" != 0 ] && [ "$BLOB_LINK_NAMED" = 1 ] && [ ! -e "$BLOB_LINK/zensu-runtime.secrets" ] \
+  && [ ! -e "$BLOB_LINK_DOCKER/name" ] && [ -z "$(ls -A "$BLOB_LINK_TARGET")" ]; then
+  check "a symlinked blob directory is refused before any resource starts and its target stays empty" PASS
+else
+  check "a symlinked blob directory is refused before any resource starts and its target stays empty (rc=$BLOB_LINK_RC named=$BLOB_LINK_NAMED)" FAIL
+fi
+env "${COMMON_ENV[@]}" DOCKER_STATE="$BLOB_LINK_DOCKER" bash "$CONTROLLER" down "$BLOB_LINK" "$WORKTREE" >/dev/null 2>&1
+rm -f "$BLOB_LINK/blobs"
 
 PARTIAL="$RUN_PARENT/run-partial"
 mkdir -p "$PARTIAL"

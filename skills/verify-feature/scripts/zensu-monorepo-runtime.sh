@@ -26,6 +26,7 @@ BACKEND_READY="$RUN_DIR/backend-supervisor.ready"
 FRONTEND_READY="$RUN_DIR/frontend-supervisor.ready"
 LOG_BACKEND="$RUN_DIR/backend.log"
 LOG_FRONTEND="$RUN_DIR/frontend.log"
+BLOB_DIR="$RUN_DIR/blobs"
 
 for marker in backend/cmd/zensu backend/Makefile frontend/package.json frontend/pnpm-lock.yaml; do
   [ -e "$WORKTREE/$marker" ] || fail "required repository marker is missing"
@@ -230,6 +231,8 @@ case "$ACTION" in
     for command in docker go pnpm curl lsof cksum openssl git node make; do
       command -v "$command" >/dev/null 2>&1 || fail "$command is required"
     done
+    [ -d "$BLOB_DIR" ] && [ ! -L "$BLOB_DIR" ] || mkdir -m 700 "$BLOB_DIR" 2>/dev/null \
+      || fail "blob directory is unsafe"
 
     ORIGIN="$(parent_origin)"
     FRONTEND_PORT="${ORIGIN##*:}"
@@ -303,6 +306,7 @@ case "$ACTION" in
       DB_HOST=localhost DB_PORT="$PG_PORT" DB_USER=zensu DB_PASSWORD="$DB_PASSWORD" \
       DB_NAME=zensu DB_SSLMODE=disable REGISTRATION_ENABLED=true EMAIL_ALLOW_NOOP=true \
       NOTIFICATION_ALLOW_NOOP=true TRUSTED_PROXY_CIDRS=none JWT_SECRET="$JWT_SECRET" APP_BASE_URL="$ORIGIN" \
+      ZENSU_STORAGE_PROVIDER=filesystem ZENSU_STORAGE_BASE_PATH="$BLOB_DIR" \
       nohup node "$SUPERVISOR" start "$BACKEND_READY" "$LOG_BACKEND" \
       "$WORKTREE/backend" go run ./cmd/zensu </dev/null >/dev/null 2>&1 &
     BACKEND_SUPERVISOR_PID=$!

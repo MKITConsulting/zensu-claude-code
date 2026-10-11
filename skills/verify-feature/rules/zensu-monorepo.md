@@ -100,6 +100,17 @@ environment the controller hands each service.
   `WARN` that the trust set is empty; that is expected here. When the monorepo makes another
   variable required, add it to the backend environment in the controller and to the expected
   environment in that suite in the same change.
+- **Backend blob store.** The backend's filesystem blob store defaults to the relative path
+  `./data/blobs` (`ZENSU_STORAGE_BASE_PATH` in `backend/internal/config/config.go`), which
+  resolves against `backend/`, so every blob a run writes would stay in the worktree as an
+  untracked `backend/data/blobs/` tree after `down`. The controller passes
+  `ZENSU_STORAGE_PROVIDER=filesystem` and `ZENSU_STORAGE_BASE_PATH=<run dir>/blobs`, so every
+  blob lands in the run directory, which the parent skill removes; a provider or path set in
+  `backend/.env` or in the calling shell cannot move it out. Before it starts anything, `up`
+  creates that directory with mode `0700`, reuses the one an earlier `up` of the same run
+  directory left, and refuses a symlink or any other file in its place. When the monorepo adds
+  another setting whose default is a path relative to `backend/`, point it into the run
+  directory the same way.
 - **Frontend flags.** The frontend starts as `pnpm dev --host 127.0.0.1 --port <port>
   --strictPort`. Never put a literal `--` between the script name and the flags: npm strips it,
   but pnpm forwards it, and Vite then ignores every flag after it. Vite falls back to
@@ -138,8 +149,10 @@ Execute the previously registered `down` command byte-for-byte on success, failu
 cancellation, or timeout. It authenticates to the fixed run-local supervisor endpoints with the
 private lease, stops their complete child process groups, verifies the unique PostgreSQL
 container name and lease-hash label, and then removes internal secret/state files. Mutable JSON
-alone can never authorize a signal or container removal. The parent skill removes the unique run
-directory. Never use `pkill`, kill by a broad command pattern, or remove another worktree's resource.
+alone can never authorize a signal or container removal. `down` leaves the backend's blob store
+in the run directory, like the logs; the parent skill removes the unique run directory with
+everything in it. Never use `pkill`, kill by a broad command pattern, or remove another
+worktree's resource.
 
 `down` is idempotent, and a rerun after a failed teardown converges:
 
