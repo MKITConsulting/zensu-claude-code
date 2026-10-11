@@ -75,7 +75,8 @@ that skill's declared tools — so `/zensu:implement` cannot forge a `set_securi
 it never declared — and `--workflow-end` closes it again. The `--tools` list stays tool-name-keyed;
 the gate maps each CLI command back to its canonical tool name to check membership. `ZENSU_MCP_GATE=off`
 disables the gate for a deliberate one-off — honored both as a session env and as an **inline prefix**
-(`ZENSU_MCP_GATE=off zensu …`). The gate is scoped to its threat model (a low-context agent writing to the
+(`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
+ignores it on a subagent's command. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
@@ -298,7 +299,7 @@ plus `pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` — answered *all
 inside the store, in every chain state (no chain armed, a vanilla chain armed, and a strict chain
 at `RED_WRITE`). None of them performs a containment check. The main-thread qualifier is
 load-bearing: `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a
-write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
+file-tool write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
 main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel the measurement found
 open. It is a hook of its own rather than a
 branch inside the phase gate because that hook returns early while no chain is armed, which is
@@ -1058,8 +1059,11 @@ reads the newest record, never a claim in the run log.
 - **Bypass** with `ZENSU_FULL_SUITE_GATE=off`. The escape is recorded in the bypass ledger only
   where the gate applies: never for a wrong ticket and never outside a work tree.
 - **What it does not prove.** Records live in the plugin's private data directory, which the
-  reviewer and neutral subagents cannot read and Edit/Write cannot reach. A Bash redirect from
-  the main thread can still write one, which is the documented residual of every plugin store.
+  file tools of the reviewer and of a neutral subagent cannot read, the subagent shell guard
+  denies by name, and Edit/Write cannot reach. A Bash redirect from
+  the main thread can still write one, which is the documented residual of every plugin store,
+  and so can a deliberately obfuscated subagent command, because the shell guard prevents
+  accidents and is not a sandbox.
   The gate stops a chain from closing on a missing, red or stale run by accident; it does not
   stop a model that forges a record on purpose. It measures only the tree the suite ran in: a
   suite reached through anything but the cwd or a leading literal `cd` (a manifest path,
@@ -1139,7 +1143,8 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   honestly. An observed verdict proves only that a command the model chose exited as recorded on
   this tree: the command is not bound to the criterion, and one run may back several criteria.
   Records live in the same kind of private store as the full-suite records, so a Bash redirect
-  from the main thread can forge one. The gate stops a chain from closing on a criterion that
+  from the main thread can forge one, and so can a deliberately obfuscated subagent command,
+  because the shell guard prevents accidents and is not a sandbox. The gate stops a chain from closing on a criterion that
   nobody verified, or one verified before a later edit; it does not stop a model that forges a
   record on purpose.
 

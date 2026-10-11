@@ -32,9 +32,13 @@ reviewers and the PLM may also call `StructuredOutput`, through which a workflow
 agent returns the result its script asked for; it carries data to that script and
 nothing else. Every other
 neutral `host-profile-v1` child keeps only the capability gate's allowlist of host
-tools and named read-only MCP tools (listed in [Configuration](configuration.md)),
-so it cannot invoke `Bash`, `shell`, `exec`, `exec_command`, `terminal`, `command`,
-or any other MCP tool, the command-executing ones included.
+tools and named read-only MCP tools (listed in [Configuration](configuration.md))
+and, under the conditions below, `Bash`. It cannot invoke `shell`, `exec`,
+`exec_command`, `terminal`, `command`, `Monitor`, or any other MCP tool, the
+command-executing ones included. It runs `Bash` only when it reports an
+`agent_type`, is neither a read-only Zensu agent nor a `zensu-review-*` persona,
+and `hooks.subagentShell` is not `false`; every such command is checked by an
+accident guard that prevents accidents and is not a sandbox.
 
 The two review-worker identities add a private evidence lease on top of that
 three-tool profile. The interactive main thread creates one immutable generation

@@ -146,6 +146,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)** — the four-route question after a plan is approved: `.claude/rules/plan-approval-delivery-route.md`
 - **Session Delivery Route (`/zensu:delivery-route` + `hooks.defaultDeliveryRoute`)** — the session marker and config key that remember a Zensu-workflow answer or an explicit `--direct` for the session, or answer the route question without asking: `.claude/rules/session-delivery-route.md`
 - **Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)** — diagnosing a reviewer spawn the host refused: `.claude/rules/host-refused-reviewer-spawn.md`
+- **Subagent Shell Guard (`hooks/lib/subagent-shell-guard-v1.js`)** — the guarded `Bash` grant for named neutral subagents, its accident guard and its documented gaps: `.claude/rules/subagent-shell-guard.md`
 - **Reviewer-Spawn Grant (`hooks/pre-agent-reviewer-allow.sh` + `reviewer-spawn-allow-v1.js`)** — the PreToolUse allow for the plugin's own read-only reviewers: `.claude/rules/reviewer-spawn-grant.md`
 - **Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)** — the sentence that answers a host rule against unrequested spawns: `.claude/rules/review-spawn-scope-sentence.md`
 - **Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)** — the two hooks that inject a rule from a docs marker block: `.claude/rules/marker-block-carriers.md`

@@ -143,10 +143,10 @@ fan-out of read-only analysis lenses, then consolidate in this main thread. This
 is the house pattern already used by `/zensu:plan-review` and `/zensu:tdd` Phase 6.
 
 1. **Spawn the lenses in ONE parallel batch.** Use the `Agent` tool with
-   `subagent_type: Explore` (read-only — the lenses cannot mutate the repo or the
-   scan). Each agent gets: the repo path, the Phase 2 seed candidates, the existing
-   features (dedup), the existing journeys (dedup, from Phase 1), its single lens
-   focus, and the per-lens output schema below. This is the one sanctioned parallel
+   `subagent_type: Explore`. Each agent gets: the repo path, the Phase 2 seed
+   candidates, the existing features and journeys (dedup, from Phase 1), its single
+   lens focus, and the per-lens output schema below. A lens may run `Bash`; its
+   guard is no sandbox, so tell it to change nothing. This is the one sanctioned parallel
    batch of the workflow; everything else stays sequential.
 2. **Adaptive lens count (cap 12).** Scale the roster to repo size so small repos
    stay cheap and large repos get full coverage:

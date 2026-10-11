@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **subagent shell**: a neutral subagent that reports an `agent_type` (`Explore`,
+  `general-purpose`, and a workflow agent when it reports one, which no live run has measured
+  yet) may now run `Bash` behind an accident guard, so a workflow's workers can build and run
+  tests themselves. `Bash` is the only tool this adds: `Monitor`, the five other shell tool names
+  and every command-executing MCP tool stay outside the capability gate's allowlist. A subagent
+  that reports no `agent_type`, a `zensu-review-*` persona and a read-only Zensu agent hold no
+  shell. The guard parses the command as shell and refuses one that names the plugin's private
+  data, the installed plugin, the session record, a Zensu config file or a `.zensu` directory, or
+  that runs a Zensu session or workflow helper, reads or sets a Session Control selector variable,
+  prints the environment, runs a destructive git operation or `claude plugin`, removes or moves
+  the project root, starts a background shell or asks to leave the host sandbox. It prevents
+  accidents and is not a sandbox. Because it refuses the Zensu helpers, a worker still cannot
+  record Zensu workflow state. A neutral subagent can no longer edit a Zensu config layer, and a
+  subagent can no longer pass a `zensu` CLI mutation through the inline `ZENSU_MCP_GATE=off`
+  prefix. `"subagentShell": false` in any config layer restores the previous deny of `Bash`, and
+  so does a config layer that cannot be read.
+
 ## [0.26.0] - 2026-10-12
 
 ### Added
