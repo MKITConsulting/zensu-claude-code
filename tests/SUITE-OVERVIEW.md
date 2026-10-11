@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (165 = 158 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 158 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 165). The figures here have drifted ELEVEN times, ten of them upward, and every
+reconciled to that manifest (166 = 159 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 159 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 166). The figures here have drifted TWELVE times, eleven of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -26,7 +26,8 @@ the review-convergence branch was landing the 148th, then 155 = 148 + 7 while th
 evidence-runner branch after it retired three witness suites and added two, leaving 145, and
 then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
 159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
-while the merge of the two was landing the 156th. Each
+while the merge of the two was landing the 156th, and then 165 = 158 + 7 while the external
+review import was landing the 159th. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
@@ -48,9 +49,11 @@ time — `test-stop-enforcer-reviewer-denial-note.sh`, `test-workflow-dispatch-i
 way: `test-full-suite-ci.sh` and `test-session-reanchor.sh` each joined its §3 group and neither
 moved the figure. The eleventh is the merge shape again: `test-user-prompt-budget.sh` took its
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
-merging `main` into it made 156.
+merging `main` into it made 156. The twelfth is the tenth's shape without the group:
+`test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
+moved.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 155 against 158 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 156 against 159 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -90,8 +93,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **165** — 158 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **158 structure suites + 5 offline evals = 163 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 165 − 158 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **166** — 159 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **159 structure suites + 5 offline evals = 164 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 166 − 159 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -103,8 +106,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 165 structure suites + 5 offline evals | none |
-| `--ci` | 158 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 166 structure suites + 5 offline evals | none |
+| `--ci` | 159 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -171,9 +174,9 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/references/review-chain.md`.
 
-### Review chain & findings (29)
+### Review chain & findings (30)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
-`deferred-review-fallback` · `finding-verification` ·
+`deferred-review-fallback` · `external-review-hook` · `finding-verification` ·
 `pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
@@ -401,6 +404,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
 | `clock-shift-v1.test.js` | 19 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, `Date.now` stays assignable so a stub still wins, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the runner's child environment and its reporter loaded by file URL, the allowlist validator, the outcome merge across same-named top-level tests, the runner's verdict end to end against synthetic unit files (allowed, unexpected, stale, an allowlisted name that two tests share, and a skipped or failing todo test through the real reporter), that every shipped allowlist entry names exactly one top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
+| `external-review-v1.test.js` | 36 | `test-external-review-hook.sh` (X0b) | external review import: the Workflow launch record (main thread only, the skipped payloads, the script, script-path and named sources, the digest over the whole script, the task id and transcript directory of the launch result, the bounds, retention and idle sweep), the freshness check against changed-file change times and the parents of deleted paths with its `.zensu` exclusion and every `unavailable` reason, the template digest on the launch and on the run record, the result read from the run record and never from the named output file (an unfinished, unreadable, linked, oversized, unparseable or mismatching record), the `zensu-review-result/v1` shape gate, the run arguments that must name every changed file, the binding of a result to its launch and to the current tree (a mocked and a real git tree), the runtime cross-check through the run journal or the run record's progress, a restarted label judged by its latest start, and every `degraded` reason, a finder-failed gap, ambiguous launches and selection by the result's task id or the launch id, future-dated records, the store permission, symlink and script-path refusals, the nonce that fences the imported findings and the `-` anchor of a file-level finding, the tree mode with the import or the judge off, the Stop guard's bounded workflow wait with its running-status allowlist and stale-counter sweep, and the review template run in a sandbox (dedup, per-lens cap counted after it, malformed entries, agent ceiling, budget and the refuter window, failed finders and refuters, quoted finder text in refuter prompts, argument checks, a pure-literal `meta`) |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
@@ -440,8 +444,8 @@ file with a row calls the same helper beside the floor it reads from that cell t
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (46
-files) against this table's 41 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (47
+files) against this table's 42 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR

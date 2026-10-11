@@ -27,7 +27,10 @@ reviewers and the PLM may additionally call the host's `SubagentHandback` report
 tool, with exactly one string `message` field, because Claude Code in `auto`
 mode delivers a subagent's report only through that call; the two workers do
 not, since their result is read from `SubagentStop` (see
-[Session Control](session-control.md)). Every other
+[Session Control](session-control.md)). Inside a Claude Code workflow the same
+reviewers and the PLM may also call `StructuredOutput`, through which a workflow
+agent returns the result its script asked for; it carries data to that script and
+nothing else. Every other
 neutral `host-profile-v1` child keeps only the capability gate's allowlist of host
 tools and named read-only MCP tools (listed in [Configuration](configuration.md)),
 so it cannot invoke `Bash`, `shell`, `exec`, `exec_command`, `terminal`, `command`,
@@ -48,6 +51,122 @@ success and failure. Repository instructions, diffs, source text, overlays, and
 refinement context remain untrusted data and cannot widen this contract.
 
 > **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
+
+#### Ultracode and external reviews
+
+Claude Code's workflows (the `Workflow` tool) can review a change on their own, for example
+when Ultracode is on. Zensu never starts, steers or interrupts a workflow, and no part of it
+reads an Ultracode or effort setting. It reacts to what demonstrably ran:
+
+- **Launch record.** A `PostToolUse` hook on the `Workflow` tool
+  (`hooks/post-workflow-launch.sh`) records every workflow the main thread launched: the
+  time, the workflow name, a digest and a bounded copy of the script (64 KiB), the arguments
+  (8 KiB), and the run id, the task id and the run's transcript directory when the tool result
+  names them. Records live in the plugin's
+  private data store under `external-review/v1/`, one file per launch at mode `0600`, at
+  most 64 per session; idle sessions are swept after 14 days and wait counters after 24 hours. `PostToolUse` runs only
+  after a tool call succeeded, so a launch a permission rule or hook refused leaves no
+  record, and a subagent's launch is never recorded. The hook prints nothing and exits 0 on
+  every fault.
+- **The review template.** A workflow review is imported only when it ran
+  `templates/workflows/zensu-review-v1.js`, the plugin's own review script. A real review on
+  a private repository showed why: its model-authored script launched 116 agents and
+  reported 22 of its 34 findings as rejected although no verifier had voted on them, because
+  it counted a dead verifier as a no. The main thread launches the template file through the
+  Workflow `scriptPath`, and the import answers `unavailable reason=foreign-script` for a
+  launch whose script is not that file byte for byte, so a copied or edited script is never
+  imported. Its `args` carry the tree id that
+  `zensu-log.sh --external-review --tree --root <top>` prints, the lenses (the active panel's
+  perspectives plus `tests`), the changed files, the REVIEW PACKET v1 the panel would receive,
+  an agent ceiling (default 10), a per-lens cap (default 8) and the known deferred findings.
+  Its finders and refuters run as `zensu:review-aspect`, so the capability gate confines them
+  to `reviewer-readonly-v1` exactly like the panel: they read the project and return their
+  result through the workflow's `StructuredOutput` tool, and every other tool is denied. A
+  refuter is the same agent in its verify mode, with a `VERIFY FINDING` block after the packet
+  whose values are JSON-quoted. The template runs one finder per lens, deduplicates across
+  lenses in plain code (the same file within
+  three lines and similar titles; it keeps the higher severity and lists the merged ids), and
+  spawns at most one refuter per CRITICAL or IMPORTANT finding, CRITICAL first, within the
+  ceiling. A SUGGESTION gets no verifier. It never filters a failed agent out: a failed finder
+  lists its lens as `finder-failed`, a failed refuter leaves its finding `unverified`, and a
+  finding over the cap, the ceiling or the token budget stays in the result as `unverified`
+  with its reason and is counted under `dropped`. Under a token target it starts refuters four
+  at a time and checks the budget before each one, CRITICAL first. It has no synthesis agent, because the
+  chain's merge and judge do that work. It always returns `zensu-review-result/v1`: the tree,
+  the lenses, the ceiling, the agent counts, the `dropped` list and every finding with its
+  verification state (`upheld`, `refuted` or `unverified`) and votes.
+- **Import on the first review.** In `/zensu:tdd` Phase 6.10 step 3, with `hooks.reviewJudge`
+  on, the main thread pipes the review's change set into
+  `zensu-log.sh --external-review --root <top> --result <output-file>`, where the output file
+  is the one the workflow's completion notification names. The file name only selects the
+  launch: the result is read from the run record the workflow runtime wrote for the launch's
+  run id, beside its transcript directory, never from a file the main thread names. It answers
+  `status=ok` only when five things hold. First, a recorded launch is newer than the change
+  time (the later of modification and status-change time) of every changed file that still
+  exists and of the nearest existing parent of every changed path that no longer does (the
+  plugin's own `.zensu` files excluded). Second, the run completed, and the script it ran is
+  the shipped template byte for byte. Third, the result parses as `zensu-review-result/v1`.
+  Fourth, the result names the current tree. Fifth, the run's `changedFiles` argument names
+  every changed path. A result of any other shape, an ad-hoc workflow's included, answers
+  `status=unavailable reason=foreign-shape`, so such a review costs a second review instead of
+  passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
+  can be computed, the change-time check decides alone and the line says `tree=unverified`. A
+  run that has not completed answers `status=unavailable reason=run-not-completed`, and a run
+  whose arguments left a changed path out `reason=files-not-reviewed`. The first line names
+  the lenses the run reviewed (`lenses=`), which the judge receives. The import then compares
+  the result's agent counts with the run journal the workflow runtime wrote (`journal.jsonl`
+  in the launch's transcript directory, where only the outcome of each label's latest start
+  counts), or with the run record's own progress list when the journal cannot be read. A
+  failed, lost or miscounted agent, a failed finder, or a runtime record that cannot be read
+  answers `status=degraded`. A degraded result is still imported, because its findings are real data:
+  the line `EXTERNAL REVIEW DEGRADED — <failed> of <started> agents failed; <reasons>` goes
+  into the run log and the CHAIN-END SUMMARY, and each `finder-failed` lens gets one targeted
+  `zensu:review-aspect`, or a `REVIEW GAP` line when the lens is no panel perspective. When
+  several launches are fresh, the import selects the one whose task id names the output file;
+  otherwise it answers `status=unavailable reason=ambiguous-launch` until `--launch <id>`
+  names one. With `hooks.reviewJudge` off it answers `status=off`, because only the judge
+  names the gaps. Every other answer (`none`, `stale`, `off`, `unavailable`) leaves the panel
+  exactly as before. On `ok` or `degraded` the main thread skips the aspect panel, logs
+  `PANEL SKIPPED — external review <name> imported`, and merges every printed finding as
+  `EXT-<n>`. None is dropped and none is labelled rejected: a refuted or unverified finding is
+  merged with its verification state and the refuter's reasoning in its evidence, and the
+  Finding Verification Gate grades every one. A severity may be raised but never lowered, and
+  a finding without a `file:line` anchor keeps the anchor `-` and is deferred to `## Open`,
+  because nothing can grade it.
+- **The judge names the gaps.** On the import path `zensu:review-judge` always runs. It
+  receives the lenses the run reviewed as data, reads every changed file fresh, and ends its report
+  with a `## Gaps` section naming each file and panel perspective the external review did not
+  cover. Each gap line gets exactly one targeted `zensu:review-aspect` over the gap files. A
+  judge that fails, or answers without a parseable `## Gaps` section, means no coverage check
+  ran: the main thread logs `REVIEW GAP UNAVAILABLE` and spawns the full panel.
+- **Everything after the merge is unchanged.** The Finding Verification Gate, the review
+  ticket, the counted consume-mode round, the fix loop, the self-review terminus and the
+  full-suite and acceptance gates run as for a panel review. A re-review never imports.
+- **The Stop guard waits for a running workflow.** When the review chain still awaits its
+  first review and the Stop input's `background_tasks` lists a workflow whose status reads as
+  running, the guard releases that `Stop` without charging the review budget and says so on
+  stderr, at most three times in a row: after the third release every `Stop` blocks until one
+  sees no running workflow, which restarts the count, and arming a new chain with
+  `--tdd-begin` restarts it too. A session that owns a live Autopilot run, a chain
+  that adopted or holds a deferred review, a fix round, a converged chain, an Autopilot-bound
+  chain and a refused reviewer spawn never wait.
+
+`hooks.externalReviewImport` (default `true`) switches the record, the import and the wait
+off; the chain then reviews exactly as before.
+
+**Residuals.** A thin external review is backstopped by the judge, not by the full panel.
+Freshness compares the launch time with file change times, so a filesystem with coarse
+timestamps can make an older review look fresh, and a changed directory entry (a submodule)
+is judged by the directory's own times; the judge's fresh reads remain the backstop. The
+running statuses the wait accepts (`running`, `pending`, `queued`, `in_progress`,
+`in-progress`, `starting`, `started`, `active`) were not captured from a live host, and any
+other status gets no wait, so the guard blocks. The launch result fields the record keeps (the
+run id, the task id and the transcript directory), the run record and the run journal follow
+what real workflow runs wrote to disk, not a documented format, and a missing field makes the
+import unavailable or degraded instead of passing it. The import never reads a file the main
+thread names, but the run record and the journal sit in the session's own project directory,
+which the main thread can write: a deliberate write there can still forge a result, as for
+every plugin store, and a count that disagrees with the journal only degrades the import.
 
 #### Custom review personas (repo-local)
 

@@ -60,7 +60,7 @@ complete REVIEW PACKET v1. Do not re-run the panel's perspectives, build, or tes
 Deduplicate and sort the supplied findings, then render the report below.
 Preserve supplied finding text; do not invent evidence.
 
-Skip Phases 1-4 in consume mode. The supplied merge may include `JUDGE-*` deltas, `[Panel-FP-neutralized — do not fix]` annotations, and `[Unverified — do not fix]` annotations from the main thread's Finding Verification Gate; keep all of them visible and never restore a neutralized or unverified finding to fix routing.
+Skip Phases 1-4 in consume mode. The supplied merge may include `JUDGE-*` deltas, `EXT-<n>` findings imported from an external review workflow, `[Panel-FP-neutralized — do not fix]` annotations, and `[Unverified — do not fix]` annotations from the main thread's Finding Verification Gate; keep all of them visible and never restore a neutralized or unverified finding to fix routing.
 
 The merge may also carry `[Deferred — do not fix]` annotations from the main thread's convergence classification and `[NOT FIXED] <id>` or `[STILL OPEN] <id> covers <panel-id>` findings from the judge. Keep all of them visible, and never restore a deferred finding to fix routing.
 
