@@ -15,6 +15,7 @@ const TREE_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 const LINE_WINDOW = 3
 const TITLE_SIMILARITY = 0.5
 const REFUTER_RESERVE = 20000
+const REFUTER_WINDOW = 4
 const MAX_LENSES = 16
 const MAX_CHANGED_FILES = 2000
 const MAX_DEFERRED = 200
@@ -357,13 +358,21 @@ for (const finding of kept) {
 }
 
 if (selected.length > 0) phase('Refute')
-const refuterRuns = await parallel(selected.map((finding) => () => (budgetLow(REFUTER_RESERVE)
-  ? Promise.resolve({ state: 'skipped' })
-  : run(refuterPrompt(input, finding), {
-    label: `refute:${finding.lens}#${finding.n}`,
-    phase: 'Refute',
-    schema: VERDICT_SCHEMA,
-  }))))
+const refuterRuns = []
+const queue = selected.map((finding, index) => ({ finding, index }))
+const budgeted = Boolean(budget) && typeof budget.total === 'number'
+await parallel(Array.from({ length: budgeted ? Math.min(REFUTER_WINDOW, queue.length) : queue.length }, () => async () => {
+  while (queue.length > 0) {
+    const { finding, index } = queue.shift()
+    refuterRuns[index] = budgetLow(REFUTER_RESERVE)
+      ? { state: 'skipped' }
+      : await run(refuterPrompt(input, finding), {
+        label: `refute:${finding.lens}#${finding.n}`,
+        phase: 'Refute',
+        schema: VERDICT_SCHEMA,
+      })
+  }
+}))
 
 selected.forEach((finding, index) => {
   const outcome = refuterRuns[index] || { state: 'failed' }

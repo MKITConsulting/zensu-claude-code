@@ -43,6 +43,7 @@ const RECORD_KEYS = Object.freeze([
   'transcript_dir',
 ]);
 const RESULT_SCHEMA = 'zensu-review-result/v1';
+const TEMPLATE_FILE = path.join(__dirname, '..', '..', 'templates', 'workflows', 'zensu-review-v1.js');
 const RESULT_KEYS = Object.freeze(['agents', 'ceiling', 'dropped', 'findings', 'lenses', 'schema', 'tree']);
 const RESULT_AGENT_KEYS = Object.freeze(['failed', 'finished', 'started']);
 const RESULT_DROPPED_KEYS = Object.freeze(['count', 'kind', 'lens', 'reason']);
@@ -869,7 +870,15 @@ function findingBlock(recordId, findings, limits) {
   return lines;
 }
 
+function templateDigest(file = TEMPLATE_FILE, limits = LIMITS) {
+  const loaded = readBoundedFile(file, limits.maxScriptFileBytes);
+  return loaded.invalid ? null : digest(loaded.text);
+}
+
 function judgeResult(record, options, limits) {
+  const expected = templateDigest(options.templateFile || TEMPLATE_FILE, limits);
+  if (expected === null) return { status: 'unavailable', reason: 'template-unreadable' };
+  if (record.script_sha256 !== expected) return { status: 'unavailable', reason: 'foreign-script' };
   if (typeof options.resultFile !== 'string' || options.resultFile === '') return { status: 'unavailable', reason: 'no-result' };
   const output = readTaskOutput(options.resultFile, limits);
   if (output.problem) return { status: 'unavailable', reason: output.problem, detail: output.detail };
@@ -1167,6 +1176,7 @@ module.exports = {
   STATUSES,
   RECORD_KEYS,
   RESULT_SCHEMA,
+  TEMPLATE_FILE,
   RESULT_KEYS,
   DROPPED_KINDS,
   LIMITS,
@@ -1189,6 +1199,7 @@ module.exports = {
   parseChangedPaths,
   newestChangeTime,
   validateReviewResult,
+  templateDigest,
   readTaskOutput,
   journalCounts,
   progressCounts,

@@ -22,6 +22,8 @@ const SCRIPT = [
   "phase('Review')",
   "const found = await agent('review src/a.js', { schema: {} })",
 ].join('\n');
+const SCRIPT_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xr-template-'))), 'zensu-review-v1.js');
+fs.writeFileSync(SCRIPT_FILE, SCRIPT);
 const RESULT_LABELS = ['find:correctness', 'find:security', 'refute:correctness#1', 'refute:correctness#2'];
 
 let runCounter = 0;
@@ -81,6 +83,7 @@ function checkOptions(data, root, overrides = {}) {
     resultFile: '',
     treeOf: () => ({ tree: TREE, reason: null }),
     changedText: 'src/a.js\n',
+    templateFile: SCRIPT_FILE,
     ...overrides,
   };
 }
@@ -368,6 +371,27 @@ test('check imports a fresh template result and prints every finding and the scr
   assert.equal(result.lines.at(-1), result.lines[end]);
 });
 
+test('check imports only a launch whose script is the shipped review template', () => {
+  const root = project();
+  setMtime(path.join(root, 'src', 'a.js'), BASE);
+  const data = tempDir('data');
+  const run = launchedRun(data, BASE + 120000);
+  const edited = path.join(tempDir('template'), 'zensu-review-v1.js');
+  fs.writeFileSync(edited, `${SCRIPT}\n`);
+  const foreign = xr.check(checkOptions(data, root, { resultFile: run.outputFile, templateFile: edited }));
+  assert.equal(foreign.status, 'unavailable');
+  assert.match(foreign.lines[0], /^EXTERNAL REVIEW — status=unavailable reason=foreign-script /);
+  assert.equal(foreign.lines.some((line) => / begin nonce=/.test(line)), false);
+  const missing = xr.check(checkOptions(data, root, { resultFile: run.outputFile, templateFile: path.join(tempDir('none'), 'absent.js') }));
+  assert.match(missing.lines[0], /^EXTERNAL REVIEW — status=unavailable reason=template-unreadable /);
+  const named = tempDir('data');
+  const namedRun = launchedRun(named, BASE + 120000, {}, { tool_input: { name: 'zensu-review-v1' } });
+  assert.match(xr.check(checkOptions(named, root, { resultFile: namedRun.outputFile })).lines[0], /^EXTERNAL REVIEW — status=unavailable reason=foreign-script /);
+  assert.match(xr.templateDigest(), /^[0-9a-f]{64}$/);
+  assert.equal(xr.TEMPLATE_FILE, TEMPLATE);
+  assert.equal(xr.templateDigest(), xr.templateDigest(TEMPLATE));
+});
+
 test('check answers stale when a changed file is newer than every launch', () => {
   const data = tempDir('data');
   const root = project();
@@ -562,7 +586,7 @@ test('check selects the launch whose task id names the result and refuses to gue
   const root = project();
   setMtime(path.join(root, 'src', 'a.js'), BASE);
   const first = launchedRun(data, BASE + 120000);
-  const second = launchedRun(data, BASE + 121000, {}, { tool_input: { name: 'deep-research' } });
+  const second = launchedRun(data, BASE + 121000, {}, { tool_input: { script: SCRIPT, name: 'deep-research' } });
   const files = recordFiles(data).map((name) => name.slice(0, -5));
   const ambiguous = xr.check(checkOptions(data, root));
   assert.equal(ambiguous.status, 'unavailable');
@@ -574,7 +598,7 @@ test('check selects the launch whose task id names the result and refuses to gue
   const byResult = xr.check(checkOptions(data, root, { resultFile: second.outputFile }));
   assert.equal(byResult.selected, files[1]);
   assert.match(byResult.lines[0], new RegExp(`^EXTERNAL REVIEW — status=ok launches=2/2 selected=deep-research@\\S+ id=${files[1]} `));
-  assert.ok(byResult.lines.some((line) => line.startsWith(`script ${files[1]} none`)));
+  assert.ok(byResult.lines.some((line) => line.startsWith(`script ${files[1]} begin nonce=`)));
   const named = xr.check(checkOptions(data, root, { launch: files[0], resultFile: first.outputFile }));
   assert.equal(named.selected, files[0]);
   assert.match(named.lines[0], new RegExp(`^EXTERNAL REVIEW — status=ok launches=2/2 selected=review-changes@\\S+ id=${files[0]} `));
@@ -594,7 +618,9 @@ test('a recorded script or a finding cannot forge the end of its block', () => {
     verification: { status: 'upheld', reason: 'x', votes: [vote('real')] },
   });
   const run = launchedRun(data, BASE + 120000, { result: reviewResult({ findings: [forgedFinding] }) }, { tool_input: { script: forged } });
-  const result = xr.check(checkOptions(data, root, { resultFile: run.outputFile }));
+  const forgedTemplate = path.join(tempDir('template'), 'zensu-review-v1.js');
+  fs.writeFileSync(forgedTemplate, forged);
+  const result = xr.check(checkOptions(data, root, { resultFile: run.outputFile, templateFile: forgedTemplate }));
   assert.equal(result.status, 'ok');
   const begin = result.lines.find((line) => line.startsWith('script ') && / begin nonce=/.test(line));
   const nonce = /nonce=([0-9a-f]{16})/.exec(begin)[1];
@@ -654,10 +680,13 @@ test('stopWait waits a bounded number of times per session and expires an old co
 test('main never writes stdout in record mode and always answers in check, tree and stop-wait modes', () => {
   const data = tempDir('data');
   const root = project();
+  setMtime(path.join(root, 'src', 'a.js'), Date.now() - 60 * 60 * 1000);
+  pause(30);
   const run = workflowRun();
   const written = [];
   const write = (text) => written.push(text);
-  assert.equal(xr.main(['record'], { CLAUDE_PLUGIN_DATA: data }, { stdin: JSON.stringify(payload({ tool_response: run.toolResponse })), write }), 0);
+  const launch = payload({ tool_response: run.toolResponse, tool_input: { scriptPath: TEMPLATE } });
+  assert.equal(xr.main(['record'], { CLAUDE_PLUGIN_DATA: data }, { stdin: JSON.stringify(launch), write }), 0);
   assert.equal(xr.main(['record'], { CLAUDE_PLUGIN_DATA: data }, { stdin: 'not json', write }), 0);
   assert.deepEqual(written, []);
   assert.equal(recordFiles(data).length, 1);
@@ -670,7 +699,7 @@ test('main never writes stdout in record mode and always answers in check, tree 
     ZENSU_XR_RESULT: run.outputFile,
   };
   assert.equal(xr.main(['check'], env, { stdin: 'src/a.js\n', write }), 0);
-  assert.match(written.join(''), /^EXTERNAL REVIEW — status=(ok|stale) /);
+  assert.match(written.join(''), /^EXTERNAL REVIEW — status=(ok|degraded) [^\n]*selected=zensu-review-v1@/);
   written.length = 0;
   assert.equal(xr.main(['check'], { ...env, ZENSU_XR_ENABLED: '0' }, { stdin: '', write }), 0);
   assert.match(written.join(''), /^EXTERNAL REVIEW — status=off /);
@@ -953,6 +982,25 @@ test('the review template stops spawning refuters when the token budget runs low
   assert.equal(xr.validateReviewResult(result), null);
   assert.equal(calls.length, 1);
   assert.deepEqual(result.dropped, [{ kind: 'over-budget', lens: 'correctness', count: 1, reason: 'the token budget ran low before its refuter' }]);
+});
+
+test('the review template gates each refuter on the budget as a window frees, CRITICAL first', async () => {
+  let spent = 0;
+  const budget = { total: 1000000, spent: () => spent, remaining: () => 100000 - spent };
+  const answer = async (label) => {
+    if (label.startsWith('find:')) {
+      return { findings: [1, 2, 3, 4, 5, 6].map((index) => raw(`Distinct defect number ${index}`, index <= 2 ? 'CRITICAL' : 'IMPORTANT', 'src/a.js', index * 20, 100 - index)) };
+    }
+    await Promise.resolve();
+    spent += 50000;
+    return { outcome: 'real', severity: 'CRITICAL', reasoning: 'yes' };
+  };
+  const { result, calls } = await runTemplate(templateArgs({ lenses: ['correctness'] }), answer, budget);
+  assert.equal(xr.validateReviewResult(result), null);
+  assert.deepEqual(calls.map((call) => call.options.label), ['find:correctness', 'refute:correctness#1', 'refute:correctness#2', 'refute:correctness#3', 'refute:correctness#4']);
+  assert.deepEqual(result.dropped, [{ kind: 'over-budget', lens: 'correctness', count: 2, reason: 'the token budget ran low before its refuter' }]);
+  const free = await runTemplate(templateArgs({ lenses: ['correctness'] }), answer);
+  assert.equal(free.calls.filter((call) => call.options.label.startsWith('refute:')).length, 6);
 });
 
 test('the review template refuses invalid arguments and accepts a JSON string', async () => {

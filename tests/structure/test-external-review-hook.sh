@@ -56,10 +56,10 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_registered_floor "$WORK/unit.out" 31; then
-  check "X0c the unit suite registered at least 31 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_registered_floor "$WORK/unit.out" 33; then
+  check "X0c the unit suite registered at least 33 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 31 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 33 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
 fi
 if UNIT_OVERVIEW="$(unit_overview_check "$UNIT")"; then
   check "X0d the SUITE-OVERVIEW Blocks cell matches what external-review-v1.test.js registers" PASS
@@ -131,6 +131,7 @@ launch_payload() {
     };
     if (process.env.EXTRA === "subagent") { payload.agent_id = "a1"; payload.agent_type = "general-purpose"; }
     if (process.env.EXTRA === "run") {
+      payload.tool_input = { scriptPath: process.env.TEMPLATE_PATH };
       payload.tool_response = { status: "async_launched", taskId: process.env.RUN_TASK, runId: "wf_abc12345-run", transcriptDir: process.env.RUN_DIR };
     }
     process.stdout.write(JSON.stringify(payload));
@@ -243,9 +244,9 @@ RUN_TREE="$TREE_ID" RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
 '
 
 sleep 1
-RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
+TEMPLATE_PATH="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js" RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n')"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=no-result launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=no-result launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
   && printf '%s' "$OUT" | grep -qE " task=$RUN_TASK fresh$" \
   && ! printf '%s' "$OUT" | grep -qF ' begin nonce='; then
   check "X7 a launch after the last change is not imported without its workflow result" PASS
@@ -254,10 +255,10 @@ else
 fi
 
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n' --result "$RUN_OUTPUT")"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=review-changes@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* tree=match runtime=journal agents=2/2 findings=1 dropped=0$' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* tree=match runtime=journal agents=2/2 findings=1 dropped=0$' \
   && printf '%s' "$OUT" | grep -qE '^EXT-1 IMPORTANT "src/a\.js:1" lens=correctness id=correctness-1 verification=upheld confidence=90$' \
   && printf '%s' "$OUT" | grep -qE '^script xr1_[0-9]{13}_[0-9a-f]{12} begin nonce=[0-9a-f]{16} ' \
-  && printf '%s' "$OUT" | grep -qF 'phase("Review")'; then
+  && printf '%s' "$OUT" | grep -qF "phase('Refute')"; then
   check "X7b the launch's template result on the current tree is imported with every finding and the recorded script" PASS
 else
   check "X7b ok (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
