@@ -188,6 +188,14 @@ classify() {
   '
 }
 marker_count() { find "$1/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' 2>/dev/null | grep -c . || true; }
+zen_ctx() {
+  node -e '
+    let s=""; process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      try{ process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||""); }
+      catch(_){ process.stdout.write("BADJSON"); }
+    });'
+}
 
 # Z9 helper round-trip under an explicit zenModeDefault:false: off -> on -> off.
 # --off must RECORD the choice (marker still present, resolving to off), never
@@ -500,8 +508,9 @@ if command -v node >/dev/null 2>&1; then
       catch (_) {}
     });
   ' 2>/dev/null)"
+  SHORT19B="$(fire "$P19B" "$S19B" "where are we?" | zen_ctx)"
   rm -rf "$P19B"
-  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" NONE_DIRECTIVE="$NONE19B" node -e '
+  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" NONE_DIRECTIVE="$NONE19B" NONE_SHORT_DIRECTIVE="$SHORT19B" node -e '
     const fs = require("fs");
     const path = require("path");
     const norm = (s) => s.replace(/\s+/g, " ").trim();
@@ -510,6 +519,7 @@ if command -v node >/dev/null 2>&1; then
       .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
     const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
     if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
+    const shortActive = blocks.filter((s) => s.startsWith("zen-mode is ACTIVE"))[1];
     const want = norm(active);
     const bad = [];
     // The one dynamic field in the directive, and the two halves that make the
@@ -524,6 +534,15 @@ if command -v node >/dev/null 2>&1; then
     if (!noneHead) bad.push("hook:none-variant-not-captured");
     else if (noneHead === fullHead) bad.push("hook:none-variant-still-carries-the-anchor-clause");
     else if (!/^none(?:\s|<|$)/.test(noneWant.slice(noneHead.length).trim())) bad.push("hook:none-variant-carries-a-token");
+    const shortWant = shortActive ? norm(shortActive) : "";
+    if (!shortWant.includes(MARKER)) bad.push("hook:short-directive-carries-no-anchor-marker");
+    const shortHead = shortWant.includes(MARKER) ? shortWant.slice(0, shortWant.indexOf(MARKER) + MARKER.length) : "";
+    const shortNoneWant = norm(process.env.NONE_SHORT_DIRECTIVE || "");
+    const shortNoneHead = shortNoneWant.includes(MARKER) ? shortNoneWant.slice(0, shortNoneWant.indexOf(MARKER) + MARKER.length) : "";
+    if (!shortNoneHead) bad.push("hook:short-none-variant-not-captured");
+    else if (shortNoneHead === noneHead) bad.push("hook:second-prompt-carries-the-same-none-directive-as-the-first");
+    else if (shortNoneHead === shortHead) bad.push("hook:short-none-variant-still-carries-the-anchor-clause");
+    else if (!/^none(?:\s|<|$)/.test(shortNoneWant.slice(shortNoneHead.length).trim())) bad.push("hook:short-none-variant-carries-a-token");
     // Derived from the OWNER, never re-spelled here: a grammar copy in this file
     // would drift from the module the hook actually validates against.
     let producible = [];
@@ -564,7 +583,7 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 5) bad.push("eval-dir:expected-at-least-5-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 8) bad.push("eval-dir:expected-at-least-8-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
@@ -592,7 +611,7 @@ if command -v node >/dev/null 2>&1; then
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
     // for a new scenario, exactly as `Z29_FLOOR` and `Z31_FLOOR` work.
-    if (registered < 5) {
+    if (registered < 8) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -688,6 +707,13 @@ if command -v node >/dev/null 2>&1; then
         if (!noneWant.includes(norm(s))) bad.push("hook:none-variant-missing-carve-out<" + s.slice(0, 28) + ">");
       }
     }
+    const variants = [
+      { name: "full", head: fullHead, none: false, short: false },
+      { name: "full-none", head: noneHead, none: true, short: false },
+      { name: "short", head: shortHead, none: false, short: true },
+      { name: "short-none", head: shortNoneHead, none: true, short: true },
+    ];
+    const carried = new Set();
     for (const name of Object.keys(carriers)) {
       const text = carriers[name];
       // An eval carrier embeds the WHOLE directive, so the verbatim containment
@@ -705,17 +731,21 @@ if command -v node >/dev/null 2>&1; then
         // scenario for a reason that is not drift; skipping the tail would let a
         // scenario carry an anchor no hook could ever emit, which is exactly the
         // ungraded copy this check exists to prevent.
-        if (fullHead && text.includes(fullHead)) {
-          const rest = text.slice(text.indexOf(fullHead) + fullHead.length).trim();
-          if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
-            bad.push(name + ":anchor-token-not-producible");
-          }
-        } else if (noneHead && text.includes(noneHead)) {
-          const rest = text.slice(text.indexOf(noneHead) + noneHead.length).trim();
-          if (!/^none(?:\s|<|$)/.test(rest)) bad.push(name + ":none-variant-carries-a-token");
-        } else {
+        const v = variants.find((x) => x.head && text.includes(x.head));
+        if (!v) {
           bad.push(name + ":directive-not-verbatim");
           continue;
+        }
+        if (v.short !== name.startsWith("eval:short-")) {
+          bad.push(name + ":carries-the-" + v.name + "-directive");
+          continue;
+        }
+        carried.add(v.name);
+        const rest = text.slice(text.indexOf(v.head) + v.head.length).trim();
+        if (v.none) {
+          if (!/^none(?:\s|<|$)/.test(rest)) bad.push(name + ":none-variant-carries-a-token");
+        } else if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
+          bad.push(name + ":anchor-token-not-producible");
         }
         // The bare-marker regression pins below still apply to every carrier.
         if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
@@ -736,6 +766,7 @@ if command -v node >/dev/null 2>&1; then
       if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
       if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
     }
+    for (const x of variants) if (!carried.has(x.name)) bad.push("eval-dir:no-scenario-carries-the-" + x.name + "-directive");
     // The SKILL carrier is judged by the `shared` literals ALONE, and that list
     // deliberately holds no step name — so the worked example there was a second
     // copy of the module vocabulary that nothing compared against the owner.
@@ -1109,7 +1140,7 @@ done
 # made to remove. The derived half is counted HERE, where the roster is built,
 # and the expected TOTAL is passed in, so both halves are covered by one
 # equality rather than by a constant that only ever described one of them.
-if [ "$Z26_SCEN" -lt 5 ]; then
+if [ "$Z26_SCEN" -lt 8 ]; then
   check "Z26 the derived half of the English-only roster matched only $Z26_SCEN scenario file(s) — the glob has moved" FAIL
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
@@ -1472,7 +1503,7 @@ else
   # admitted the deletion of every case that actually executes a grader — the
   # vector tests and the both-directions test — while staying green. Raise this
   # number in the same commit that adds a case.
-  Z29_FLOOR=11
+  Z29_FLOOR=12
   # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
   # FLOOR` could never fail independently — skips are non-negative, so the first
   # conjunct held whenever the second did — and it defeated the stated intent:
@@ -4710,14 +4741,6 @@ else
 fi
 
 
-zen_ctx() {
-  node -e '
-    let s=""; process.stdin.on("data",c=>s+=c);
-    process.stdin.on("end",()=>{
-      try{ process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||""); }
-      catch(_){ process.stdout.write("BADJSON"); }
-    });'
-}
 zen_compact() { # <project> <session_id>
   node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"compact",session_id:process.argv[1],cwd:process.argv[2]}))' "$2" "$1" \
     | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \

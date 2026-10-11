@@ -130,12 +130,14 @@ exists, and every record whose key directory is gone. It emits nothing.
 - **A mid-turn auto-compaction** leaves the rest of that turn without the reminder, router and
   zen texts until the next prompt. That gap existed before; best-solution-first is now back at
   once through its `SessionStart` leg.
-- **Fade is unmeasured, and no eval can measure it yet.** The hooks were written on the premise
-  that a rule given once fades. The short lines carry the per-turn obligations, but no eval sees
-  them: the zen-mode scenarios embed the full contract and send one prompt each, and the
-  plan-approval eval sends one typed prompt per session, so neither ever produces a short or
-  decided line. Measuring fade needs scenarios that embed the short shapes, or a multi-turn
-  driver. Until one exists, a release ships the short shapes without eval evidence.
+- **Fade is unmeasured, and only the zen-mode short body has an eval.** The hooks were written
+  on the premise that a rule given once fades. Three `short-` scenarios in
+  `evals/zen-mode-reaction/` embed the zen-mode short body with no full contract before it, which
+  is the worst case of fade, in both anchor variants. The reminder's short and decided lines and
+  the router's short line have no scenario: the plan-approval eval sends one typed prompt per
+  session, so it never produces either. Measuring fade itself still needs a multi-turn driver.
+  Every promptfoo suite is local-only, so a release carries eval evidence for the short shapes
+  only when someone ran it.
 
 ## Version
 

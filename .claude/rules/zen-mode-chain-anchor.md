@@ -29,7 +29,8 @@ a short body that keeps the field, both markers and, in the armed variant only, 
 because the none swap removes that span as it does in the full text, see
 `.claude/rules/prompt-ledger.md`), `skills/zen-mode/SKILL.md` rule 6,
 `docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
-`evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
+`evals/zen-mode-reaction/scenarios/*.yaml`, which embed a whole directive verbatim: the full contract,
+or in a `short-` scenario the short body.
 Z19b pins the directive carriers against each other, Z19c pins the extraction regex
 across the two zen suites, Z19d pins the operator row.
 
@@ -515,7 +516,11 @@ headroom, because a ceiling that has drifted away from its text has stopped bein
 embeds the none variant, because that is what a session with no chain receives, and every other
 scenario embeds the static literal with a token other than `none`. `Z19b` and P8 capture the
 none variant by firing the hook rather than re-spelling the replacement, so a change to the
-emission moves the comparison with it.
+emission moves the comparison with it. A `short-` scenario embeds the short body in the same two
+variants, and both checks require the file name and the embedded body to agree: they read the armed
+short body from the hook source and capture its none variant by firing the hook a second time in the
+same session. `zen-anchor-assertions.test.js` requires each `short-` scenario to carry the graders and
+the anchor of its full-contract twin unchanged.
 
 **Known gap, accepted:** the per-turn totals in `docs/architecture.md` are hand-derived. The
 measurement that holds them is `tests/structure/test-user-prompt-budget.sh`
