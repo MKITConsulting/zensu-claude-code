@@ -71,8 +71,34 @@ only ever stamps a bound document, and that critical refuses every bound documen
 so the conjunct only stops a receipt planted on a standalone one; renaming the field without
 updating the conjunct removes even that. The bound no-ticket arm of
 `_tdd_finish_autopilot_chain_critical` spells the same never-reviewed slot as that critical
-(`reviewTicket === ''`, consumed, round `0`), so a change to what counts as that slot lands in
-both.
+(`reviewTicket === ''`, consumed, round `0`), and so do two more sites: the legacy arm of
+`_tdd_ensure_self_review_ticket_critical`, which mints a self-review ticket into that slot, and
+the reopen in `_tdd_mark_review_converged_critical`, which writes the slot back. A change to
+what counts as that slot lands in all four. The reopen also hardcodes the key NAME `reviewRearm`
+and the Autopilot link fields, because it refuses any document that carries one.
+
+**The minted self-review ticket carries its provenance in its value.** The legacy arm mints
+`zc_` plus 32 hex digits, `--review-ticket` keeps `rt_`, and `_tdd_zero_change_ticket` in
+`hooks/lib/zensu-tdd-phase.sh` is the one predicate that recognizes the mint; the mint asserts
+it on its own output, so the two spellings cannot drift apart without every mint failing. The
+ticket-bound standalone `--chain-done` counts the changes for a `zc_` ticket through
+`_zensu_unqualified_change_count`, ahead of the full-suite and acceptance gates, and passes the
+count into `tdd_mark_review_converged`. Inside the lock a `zc_` ticket closes the chain only for
+a count of `0` or `unknown`, refuses without a count, and for any other count (`unavailable`
+included) writes the never-reviewed slot back with `codeReviewDone` and `selfReviewFixed` false
+and returns 4, so the chain lands on `ready-for-review` and the Stop hook routes the review.
+`stopBlockCount` is kept, so a chain that flips between a clean and a changed tree still meets
+its Stop cap. A reviewer-consumed ticket is never counted. The reopen is standalone-only: on a
+bound document, or one with `reviewRearm`, it refuses, because there the empty slot is the
+precondition of the bound no-ticket arm. No production writer leaves a bound chain at
+`codeReviewDone` with an empty slot, so the mint never runs for one, and the bound terminus,
+which does not go through `tdd_mark_review_converged`, takes no count. On a standalone document it returns the chain to the
+permissiveness of a freshly completed chain, whose no-ticket forms count the same tree. A prefix
+is a value, not a field: no reader restricts a ticket beyond `[A-Za-z0-9_-]{1,96}`, so this is a
+`patch` under `.claude/rules/runtime-lineage.md`. Bounds: committed changes are not
+counted, and a ticket minted before this shipped carries `rt_` and closes uncounted. Pins:
+`G9d`–`G9j`, `G10d`, `G12c`, `G13`, `G13d` and `G13e` in
+`tests/structure/test-chain-terminus-zero-change-gate.sh`.
 
 Two more sites hardcode the provenance literals rather than importing them: `zensu-log.sh --phase`,
 and `_tdd_reserved_provenance` — the one body `tdd_write_phase` and `_tdd_write_phase_critical` both
@@ -107,7 +133,8 @@ receipt predicate; `tests/structure/test-chain-recover.sh` pins the end-to-end b
    ticket is allowed, because `reviewTicket !== ''` keeps that arm shut on its own. The
    unqualified standalone forms in `_tdd_mark_unclaimed_review_critical` refuse a bound document
    outright, and on a standalone one they close only a tree that reports no changed file or
-   that git cannot evaluate. The
+   that git cannot evaluate; the ticket-bound terminus holds a minted `zc_` ticket to the same
+   count. The
    invariant is "the repair never writes a value that was a missing precondition of a terminus"
    — NOT "the repair never makes a terminus reachable": dropping the receipt deliberately
    returns a wedged chain to exactly the permissiveness of any freshly armed chain, including

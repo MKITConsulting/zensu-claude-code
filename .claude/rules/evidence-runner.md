@@ -125,9 +125,10 @@ repository or work tree, or a host without git, skips the gate. Every other git 
 is `unavailable` and blocks under `required`: a `safe.directory` refusal also exits 128,
 and reading it as "not a repository" would open the gate on a real repository.
 `_zensu_unqualified_change_count` in `hooks/lib/zensu-log.sh` copies this split in shell, under
-`LC_ALL=C`, for the unqualified `--chain-done` and `--code-review-done`, and `G14d` in
-`tests/structure/test-chain-terminus-zero-change-gate.sh` asks `workTree` about the inputs that
-suite drives through those verbs. A change to the split here moves that copy too.
+`LC_ALL=C`, for the unqualified `--chain-done` and `--code-review-done` and for the count a
+minted `zc_` ticket takes, and `G14d` in `tests/structure/test-chain-terminus-zero-change-gate.sh`
+asks `workTree` about the inputs that suite drives through the unqualified verbs. A change to the
+split here moves that copy too.
 
 **The gate sits at `--chain-done` only**: the ticket-bound standalone terminus and a
 bound chain with outcome `pass`. `--tdd-complete` is deliberately not gated, because
@@ -141,7 +142,11 @@ recovery surfaces. Exempt: the unqualified zero-change terminus, silently
 pre-check through `tdd_claimed_review_ticket`, then the verdict, the escape record, the
 transition, the pass line and the bypass line. The pre-check makes a wrong ticket fail
 on the ticket check rather than on a suite message, and keeps an escape on a wrong
-ticket out of the ledger (`test-full-suite-gate.sh` F9).
+ticket out of the ledger (`test-full-suite-gate.sh` F9). A self-review ticket the Stop hook
+minted (`zc_`) adds the change count right after the short-circuit: on a changed tree or a
+failed listing the verdict never runs and the transition refuses and reopens the review
+(`.claude/rules/chain-shape-rearm-receipt.md`), so a chain no reviewer saw is never sent to run
+a suite it cannot close on.
 
 **`ZENSU_FULL_SUITE_GATE=off` is recorded only where the gate applies**, never outside
 a work tree (F14). The bypass allowlist keeps `ZENSU_TEST_WITNESS` as a retired name,
