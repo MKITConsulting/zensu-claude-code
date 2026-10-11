@@ -201,6 +201,151 @@ RC8=$?
 { [ "$RC8" -ne 0 ] && printf '%s' "$OUT8" | grep -qE 'PENDING PREDICATE|UNVERIFIED'; }
 check "G1 outside git the verdict stays pending/unverified — never a silent landed" "$(verdict $?)"
 
+echo "== A git refusal is a fault, never a verdict about claims =="
+GF="$WORK/refused"
+new_repo "$GF"
+printf 'v1\n' > "$GF/a.txt"
+printf 'v1\n' > "$GF/b.txt"
+G "$GF" add -A >/dev/null 2>&1; G "$GF" commit -qm base >/dev/null 2>&1
+printf 'v2\n' > "$GF/a.txt"
+printf 'S1 IMPL completed — files: a.txt\nS2 WIRED\n' > "$GF/run.log"
+GF_HOME="$WORK/gf-home"
+GF_SAFE_HOME="$WORK/gf-safe-home"
+mkdir -p "$GF_HOME" "$GF_SAFE_HOME"
+printf '[safe]\n\tdirectory = *\n' > "$GF_SAFE_HOME/.gitconfig"
+foreign_owner() {
+  HOME="$GF_HOME" XDG_CONFIG_HOME="$GF_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+foreign_owner_excepted() {
+  HOME="$GF_SAFE_HOME" XDG_CONFIG_HOME="$GF_SAFE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+GF_ERR="$(foreign_owner env LC_ALL=C git -C "$GF" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"; GF_ERR_RC=$?
+{ [ "$GF_ERR_RC" -ne 0 ] && printf '%s\n' "$GF_ERR" | grep -qF 'dubious ownership' \
+  && ! printf '%s\n' "$GF_ERR" | grep -qiF 'not a git repository'; }
+check "G2-control real git refuses the fixture repository as owned by another user" "$(verdict $?)"
+[ "$(foreign_owner_excepted git -C "$GF" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]
+check "G2-control a safe.directory exception in the same HOME clears the refusal" "$(verdict $?)"
+GF_KEY="scv1_$(printf 'f%.0s' $(seq 1 64))"
+GF_RECEIPT="$GF/.zensu/state/edit-landing-${GF_KEY}.json"
+mkdir -p "$GF/.zensu/state"
+printf '{"schema":"edit-landing-v2","session":"x","log":"run.log","claims":1,"clean":true}\n' > "$GF_RECEIPT"
+GF_OUT="$(foreign_owner bash "$LIB" --log "$GF/run.log" --project "$GF" --session "$GF_KEY" 2>&1)"; GF_RC=$?
+[ "$GF_RC" -eq 2 ]
+check "G2 a safe.directory refusal exits 2, the fault code, never the claims verdict 1 (rc=$GF_RC)" "$(verdict $?)"
+printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT — git rev-parse --is-inside-work-tree exited 128' | grep -qF 'dubious ownership'
+check "G2a the fault line names the git command, its exit status and git's own refusal" "$(verdict $?)"
+! printf '%s\n' "$GF_OUT" | grep -qE '^(EDIT LANDED|EDIT NOT LANDED|PENDING PREDICATE|UNVERIFIED|EDIT LANDING AUDIT —)'
+check "G2b no claim verdict and no tally line reach the output, not even the bare WIRED one" "$(verdict $?)"
+[ ! -e "$GF_RECEIPT" ]
+check "G2c no receipt stands for the run: the earlier clean receipt was removed" "$(verdict $?)"
+printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'the earlier receipt at '
+check "G2d the fault line names the receipt it removed" "$(verdict $?)"
+GF_X_OUT="$(foreign_owner_excepted bash "$LIB" --log "$GF/run.log" --project "$GF" --session "$GF_KEY" 2>&1)"; GF_X_RC=$?
+{ [ "$GF_X_RC" -eq 1 ] && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
+  && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDING AUDIT — claims=2' && [ -f "$GF_RECEIPT" ]; }
+check "G2e under a safe.directory exception the same run grades its claims and writes its receipt" "$(verdict $?)"
+GF_SIB="$WORK/refused-sibling"
+new_repo "$GF_SIB"
+mkdir -p "$GF_SIB/src"
+printf 'v1\n' > "$GF_SIB/src/app.ts"
+GF_SIB_ABS="$(cd "$GF_SIB" && pwd -P)"
+printf 'S1 IMPL completed — files: a.txt, %s/src/app.ts\n' "$GF_SIB_ABS" > "$GF/inv.log"
+GF_INV="$(foreign_owner bash "$LIB" --inventory --log "$GF/inv.log" --project "$GF" 2>"$WORK/gf-inv.err")"; GF_INV_RC=$?
+{ [ "$GF_INV_RC" -eq 2 ] && grep -qF 'did not complete' "$WORK/gf-inv.err" && grep -qF 'dubious ownership' "$WORK/gf-inv.err"; }
+check "G3 --inventory under the refusal exits 2 and names the refusal" "$(verdict $?)"
+printf '%s\n' "$GF_INV" | grep -qxF 'claimed-files=2'
+check "G3a it still prints the full claim count, which --tdd-complete arms on as a lower bound" "$(verdict $?)"
+! printf '%s\n' "$GF_INV" | grep -q '^foreign-root'
+check "G3b it prints no foreign-root line against an anchor git would not name" "$(verdict $?)"
+GF_INV_X="$(foreign_owner_excepted bash "$LIB" --inventory --log "$GF/inv.log" --project "$GF" 2>&1)"; GF_INV_X_RC=$?
+{ [ "$GF_INV_X_RC" -eq 0 ] && printf '%s\n' "$GF_INV_X" | grep -qF "foreign-root$(printf '\t')${GF_SIB_ABS}"; }
+check "G3-control under the exception the same inventory completes and names the sibling root" "$(verdict $?)"
+GL_LOCALE=""
+for GL_CANDIDATE in de_DE.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 it_IT.UTF-8 pt_BR.UTF-8; do
+  GL_MSG="$(env LC_ALL="$GL_CANDIDATE" LANG="$GL_CANDIDATE" git -C "$NG" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+  case "$GL_MSG" in
+    (""|*"ot a git repository"*) ;;
+    (*) GL_LOCALE="$GL_CANDIDATE"; break ;;
+  esac
+done
+if [ -n "$GL_LOCALE" ]; then
+  GL_OUT="$(env LC_ALL="$GL_LOCALE" LANG="$GL_LOCALE" bash "$LIB" --log "$NG/run.log" --project "$NG" --receipt - 2>&1)"; GL_RC=$?
+  GL_CASE="git answered in $GL_LOCALE"
+else
+  GL_OUT="$(bash "$LIB" --log "$NG/run.log" --project "$NG" --receipt - 2>&1)"; GL_RC=$?
+  GL_CASE="no candidate locale localized git here, so this run does not discriminate"
+fi
+{ [ "$GL_RC" -eq 1 ] && printf '%s' "$GL_OUT" | grep -qF 'cannot be checked outside a git work tree' \
+  && ! printf '%s' "$GL_OUT" | grep -qF 'AUDIT FAULT'; }
+check "G4 a localized git still reads a root outside git as outside, never as a fault ($GL_CASE)" "$(verdict $?)"
+if [ -n "$GL_LOCALE" ]; then
+  MUT_LOCALE="$WORK/lib-no-locale-pin.sh"
+  sed 's/LC_ALL=C _el_git/_el_git/' "$LIB" > "$MUT_LOCALE"
+  GL_MUT_OUT="$(env LC_ALL="$GL_LOCALE" LANG="$GL_LOCALE" bash "$MUT_LOCALE" --log "$NG/run.log" --project "$NG" --receipt - 2>&1)"; GL_MUT_RC=$?
+  { ! grep -qF 'LC_ALL=C _el_git' "$MUT_LOCALE" && [ "$GL_MUT_RC" -eq 2 ] && printf '%s' "$GL_MUT_OUT" | grep -qF 'AUDIT FAULT'; }
+  check "G4-control without the C locale pin the same localized run turns into a fault" "$(verdict $?)"
+else
+  check "G4-control SKIPPED — no candidate locale localized git here" PASS
+fi
+BR="$WORK/bare"
+git init -q --bare --template= "$BR" >/dev/null 2>&1
+printf 'x\n' > "$BR/c.txt"
+printf 'S1 IMPL completed — files: c.txt\n' > "$BR/run.log"
+[ "$(git -C "$BR" rev-parse --is-inside-work-tree 2>/dev/null)" = "false" ]
+check "G5-control git answers false, not an error, for a bare repository" "$(verdict $?)"
+BR_OUT="$(run_audit --log "$BR/run.log" --project "$BR" --receipt -)"; BR_RC=$?
+{ [ "$BR_RC" -eq 1 ] && printf '%s' "$BR_OUT" | grep -qF 'UNVERIFIED — S1: c.txt cannot be checked outside a git work tree'; }
+check "G5 a root git reports as outside a work tree is graded as outside git, not against an empty change set" "$(verdict $?)"
+GS_BIN="$WORK/gs-bin"
+mkdir -p "$GS_BIN"
+cat > "$GS_BIN/git" <<'STUB'
+#!/bin/bash
+seen=""
+for arg in "$@"; do
+  case "$arg" in
+    (rev-parse) seen="${seen}r" ;;
+    (--verify) seen="${seen}v" ;;
+    (HEAD) seen="${seen}h" ;;
+    (diff) seen="${seen}d" ;;
+  esac
+done
+case "${GS_FAIL:-}:$seen" in
+  (head:rvh) echo "fatal: stub git refuses to resolve HEAD" >&2; exit 128 ;;
+  (diff:dh) echo "fatal: stub git refuses to list the changes" >&2; exit 128 ;;
+esac
+exec "$GS_REAL_GIT" "$@"
+STUB
+chmod +x "$GS_BIN/git"
+GS_REAL_GIT="$(command -v git)"; export GS_REAL_GIT
+printf 'S1 IMPL completed — files: b.txt\n' > "$GF/unchanged.log"
+GS_HEAD_IN="$(GS_FAIL=head "$GS_BIN/git" -C "$GF" rev-parse --is-inside-work-tree 2>/dev/null)"
+GS_FAIL=head "$GS_BIN/git" -C "$GF" rev-parse --verify --quiet HEAD >/dev/null 2>&1; GS_HEAD_PROBE=$?
+{ [ "$GS_HEAD_IN" = "true" ] && [ "$GS_HEAD_PROBE" -eq 128 ] && git -C "$GF" rev-parse --verify --quiet HEAD >/dev/null 2>&1; }
+check "G6-control the stub git fails only the HEAD probe, with a git error rather than a missing revision" "$(verdict $?)"
+GS_PLAIN_OUT="$(run_audit --log "$GF/unchanged.log" --project "$GF" --receipt -)"
+printf '%s' "$GS_PLAIN_OUT" | grep -qF 'EDIT NOT LANDED — S1: claimed b.txt'
+check "G6-control without the stub the unchanged tracked file is NOT LANDED" "$(verdict $?)"
+GS_HEAD_OUT="$(GS_FAIL=head PATH="$GS_BIN:$PATH" bash "$LIB" --log "$GF/unchanged.log" --project "$GF" --receipt - 2>&1)"; GS_HEAD_RC=$?
+{ [ "$GS_HEAD_RC" -eq 2 ] \
+  && printf '%s\n' "$GS_HEAD_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'git rev-parse --verify --quiet HEAD exited 128' \
+  && ! printf '%s' "$GS_HEAD_OUT" | grep -qF 'EDIT LANDED'; }
+check "G6 a HEAD probe git aborts is a fault, never the unborn-HEAD index that lands every tracked claim" "$(verdict $?)"
+GS_FAIL=diff "$GS_BIN/git" -C "$GF" diff --name-only HEAD -- >/dev/null 2>&1; GS_DIFF_PROBE=$?
+{ [ "$GS_DIFF_PROBE" -eq 128 ] && "$GS_BIN/git" -C "$GF" diff --name-only HEAD -- >/dev/null 2>&1; }
+check "G7-control the stub git fails the HEAD listing only when told to" "$(verdict $?)"
+GS_DIFF_OUT="$(GS_FAIL=diff PATH="$GS_BIN:$PATH" bash "$LIB" --log "$GF/run.log" --project "$GF" --receipt - 2>&1)"; GS_DIFF_RC=$?
+{ [ "$GS_DIFF_RC" -eq 2 ] \
+  && printf '%s\n' "$GS_DIFF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'git diff --name-only HEAD -- exited 128' \
+  && ! printf '%s' "$GS_DIFF_OUT" | grep -qF 'EDIT NOT LANDED'; }
+check "G7 a listing git fails is a fault, never EDIT NOT LANDED for an edit that landed" "$(verdict $?)"
+GB_BLOB="$(G "$GF" rev-parse HEAD:a.txt 2>/dev/null)"
+GB_OUT="$(run_audit --log "$GF/run.log" --project "$GF" --baseline "$GB_BLOB" --receipt -)"; GB_RC=$?
+{ [ -n "$GB_BLOB" ] && [ "$GB_RC" -eq 1 ] && printf '%s' "$GB_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
+  && ! printf '%s' "$GB_OUT" | grep -qF 'AUDIT FAULT'; }
+check "G8 a --baseline naming no commit is skipped as before, never turned into a fault" "$(verdict $?)"
+
 echo "== Multi-root: a claim outside the audited root is named, never silently graded =="
 # Stage 1 of docs/multi-repo-chains-spec.md: one audit run grades ONE root. A claim
 # that resolves into a sibling repository used to read as "could not be resolved",
@@ -631,7 +776,7 @@ check "S3 the audit declares it runs in both modes" "$(verdict $?)"
 # reaction — which is how `(no work tree)` reached zero occurrences under skills/
 # and docs/ while `(foreign root)` had one.
 for marker in 'EDIT NOT LANDED' 'PENDING PREDICATE' 'UNVERIFIED' \
-              'UNVERIFIED (foreign root)' 'UNVERIFIED (no work tree)'; do
+              'UNVERIFIED (foreign root)' 'UNVERIFIED (no work tree)' 'EDIT LANDING AUDIT FAULT'; do
   printf '%s' "$BLOCK" | grep -qF "$marker"
   check "S4 the skill tells the model how to react to $marker" "$(verdict $?)"
 done
@@ -935,18 +1080,15 @@ check "X20c the same run names the fault rather than printing a short clean list
 # carries a control that fails if its own scan matches nothing.
 # The CLAIMS append is a `while … done >> file` compound, so a redirect that
 # cannot be opened does give the compound a non-zero status — there it is
-# checkable and must be checked. The four git appends are not: a shell redirect
-# carries no status of its own and `git` answering nothing is ordinary, so a
-# `||` there would refuse healthy runs while still saying nothing about a failed
-# write. The union's write is checked where a status exists — the sort, plus the
-# file's own presence — and this pin holds that split rather than pretending the
-# two shapes are one.
+# checkable and must be checked.
 grep -qE '^[[:space:]]*done >> "\$CLAIMS_FILE" \|\| die' "$LIB"
 check "X21 the claims-file append refuses rather than dropping a claim" "$(verdict $?)"
 [ "$(grep -cE '>>[[:space:]]*"\$(UNION_FILE|CLAIMS_FILE)"' "$LIB")" -gt 0 ]
 check "X21-control the append scan found append sites at all" "$(verdict $?)"
 grep -qF 'the change union file went missing' "$LIB"
 check "X21c the union's presence is asserted after it is built" "$(verdict $?)"
+grep -vE '^[[:space:]]*#' "$LIB" | grep -qF 'the change union could not be written'
+check "X21d the union append refuses rather than dropping a listing" "$(verdict $?)"
 # Scoped to the sort LINE. A top-level alternation here matched any line in the
 # file carrying `|| die`, so the check passed while the sort's status was still
 # discarded — a control that answers about the wrong line is not a control.

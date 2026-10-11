@@ -302,6 +302,64 @@ same predicate inside the subshell that already sources the library, and `P1mp` 
 strict key set, hook, matcher, config key or attestation moves; the audit refuses strictly more
 operands, and only where the core cannot answer.
 
+**A git failure is a FAULT, never a verdict about claims, and `_el_git` stays the only git
+channel.** The audit draws the split `_zensu_unqualified_change_count` in `zensu-log.sh` and
+`workTree` in `evidence-run-v1.js` draw: `rev-parse --is-inside-work-tree` printing `true` is a
+work tree; a host without `git`, the probe printing `false` (a bare repository, a root inside
+`.git`) or failing with git's own `not a git repository` is outside git and grades as before
+(`UNVERIFIED` / `PENDING PREDICATE`); every other failure is a fault. `git_fault` re-runs the
+failed command under `LC_ALL=C` through `_el_git` and keeps git's first message line, because a
+localized git otherwise turns a root outside git into a fault. The rule covers every later git
+call on the grading path too: `--show-toplevel`; a HEAD probe exiting anything but 0, or 1 for an
+unborn branch; a `--baseline` probe that does the same (it is peeled with `^{commit}`, so a
+baseline naming no commit stays a skipped hint and never reaches a failing `diff`); and any
+listing that exits non-zero. `union_add` captures each listing before it appends, so git's status
+and the write's status are no longer one status, and a failed append dies with its own message.
+Each one is a fault because reading it any other way grades claims: a refusal read as "not a git
+work tree" grades every claim `UNVERIFIED` or `PENDING PREDICATE`, an aborted HEAD probe read as
+an unborn branch grades every TRACKED claim `EDIT LANDED` through `ls-files --cached` (a silent
+green), and a failed listing grades a landed edit `EDIT NOT LANDED`. **Decided per surface:**
+
+- **Output.** One `EDIT LANDING AUDIT FAULT — <git command> exited <status> on the audited root
+  <root>: <git's message>.` line, every value screened, and nothing from grading: no claim
+  verdict, the bare-`WIRED` one included, and no `EDIT LANDING AUDIT —` tally, because both read
+  as an audit that ran. The head opens with `EDIT LANDING AUDIT `, which the extractor already
+  skips, so step 5b b) copies it into the run log without it being re-read as a claim.
+- **Exit status 2.** Exit 1 stays a verdict about claims; a git fault is the environment class 2
+  already carries.
+- **No receipt, and the earlier one is removed.** A fault writes nothing that could read as a
+  graded audit, and it REMOVES the file at the destination it would have written, an explicit
+  `--receipt` included: an earlier round's `clean: true` receipt would otherwise stand in for an
+  audit that could not run once git recovers. A removal that fails is `RECEIPT REFUSED`, and the
+  old file then still stands. `--tdd-complete` refuses on its own count while the fault lasts and
+  with "no edit-landing receipt" after git recovers, and both send the author to fix git or re-run
+  the audit.
+- **`--inventory` exits 2 and still prints `claimed-files=`.** Absolute claims are classified
+  against `REPO_CANON`, which git's `--show-toplevel` decides, so a fault prints no `foreign-root`
+  line and names the fault on stderr. Counting needs no git, and `--tdd-complete` arms on that
+  figure as a lower bound; it never reaches the inventory on such a fault anyway, because its
+  shared count answers `unavailable` first.
+- **The doctor's topology row needed no code change.** `claimInventory` discards any non-zero
+  answer and renders `NOT checked against the anchor — the inventory command did not complete`,
+  a missing check. An inventory that graded against `PROJECT_ABS` instead of git's top level
+  would leave the row silent for an anchor-only log, a clean topology the refusal never showed.
+  Like every other inventory fault, the row does not name git as the cause.
+
+Pins: `G2`–`G8` in `tests/structure/test-edit-landing-audit.sh` drive a real dubious-ownership
+refusal (`GIT_TEST_ASSUME_DIFFERENT_OWNER=1`, a HOME and `XDG_CONFIG_HOME` without git config,
+`GIT_CONFIG_NOSYSTEM=1`) and its `safe.directory` control, the inventory under both, a localized
+git with a mutant that drops the locale pin, a bare repository, a stub `git` that aborts only the
+HEAD probe or only the listing, and a `--baseline` naming a blob; `X21d` pins the checked append,
+`S4` the step 5b reaction, and `P1tp12` in `tests/structure/test-doctor.sh` the doctor row under
+the same refusal. Bounds: git's own answer decides, so a worktree whose administrative directory
+was removed reads `not a git repository` and grades as outside git; a corrupt branch ref makes the
+HEAD probe exit 1 like an unborn branch; `check-ignore` is not classified, because it runs per
+claim and a claim spelled outside the repository is what makes it exit 128; Windows is
+unmeasured, and the suite runs there only on the weekly Windows Safety structure shard.
+**Version: `patch`**: no schema field, strict key set, hook, matcher, config key or attestation
+moves; the receipt keeps its shape and is absent in one more state, and `--inventory` gains an
+exit-2 cause under its existing "did not complete" contract.
+
 
 **Known gaps, accepted and named:**
 
@@ -399,8 +457,9 @@ operands, and only where the core cannot answer.
   estimating" in a later round.
 - **The subprocess in the renderer is a named cost, not a settled design.** `claimInventory`
   is the only `spawnSync` anywhere in `hooks/lib`, in a renderer whose pattern for every other
-  dependency is a lazy guarded `require`, and it carries the audit library's two
-  `git rev-parse` calls onto the doctor's path behind a 5 s timeout — SCRUBBED, both through
+  dependency is a lazy guarded `require`, and it carries the audit library's
+  `git rev-parse` calls onto the doctor's path behind a 5 s timeout — the work-tree probe and
+  `--show-toplevel`, plus `git_fault`'s re-read of a failed one — SCRUBBED, all through
   `_el_git`, which is what this bullet used to get wrong while the same section said the
   opposite thirty lines above it. The residual is the subprocess and its deadline, never an
   unscrubbed environment. Rejecting a second JS copy

@@ -57,9 +57,9 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:89`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:884`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:90`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:241-266`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:931`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
 (`hooks/lib/zensu-log.sh:1475`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
@@ -419,7 +419,7 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:884` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:931` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1524`, `:118-119` |

@@ -95,9 +95,10 @@ git aborts, a failed listing) refuses with exit 1 before either gate runs, and t
 `git diff --name-only HEAD` as the way to see git's error. Read as zero, such a failure would take
 this gate and its ledger record out of scope, and leave the receipt gate and its record armed
 only by a logged claim. Two alternatives were rejected. Arming both gates on `unavailable`: the
-edit-landing audit reads the same refusal as a root outside git (`IN_GIT` stays 0), grades every
-claim `UNVERIFIED` or `PENDING PREDICATE` and writes `clean: false`, so the receipt refusal
-would name the wrong cause and prescribe landing edits. Refusing whatever the
+edit-landing audit reports the same refusal as `EDIT LANDING AUDIT FAULT`, exits 2, writes no
+receipt and removes an earlier one (`.claude/rules/multi-repo-stage1.md`), so the receipt gate
+would refuse with "no edit-landing receipt" and name the audit, not git, as the thing to run.
+Refusing whatever the
 switches say: with both gates off the count decides only the two ledger records, and a ledger
 record must not change a completion decision. So with BOTH `ZENSU_EDIT_LANDING_GATE=off` and
 `ZENSU_REQUIREMENTS_GATE=off` the verb completes and records both escapes, reading the
