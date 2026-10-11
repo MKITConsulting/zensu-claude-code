@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow the main thread launches in the plugin's private data store. When the change is
   reviewed by a workflow that runs the plugin's template `templates/workflows/zensu-review-v1.js`
   (under Ultracode, for example), the first `/zensu:tdd` review imports its findings instead of
-  running the aspect panel: the result is read from the workflow's own run record, must be the
+  running the aspect panel. The template's finders and refuters run as `zensu:review-aspect`,
+  confined to the read-only reviewer profile like the panel; the capability gate now lets the
+  read-only reviewers and the planning agent return a workflow result through
+  `StructuredOutput`. The result is read from the workflow's own run record, must be the
   template's `zensu-review-result/v1` from a launch after the last edit whose arguments named
   every changed file, and must name the current tree, and its agent counts are checked against
   the workflow's run journal. A failed or missing agent marks the import

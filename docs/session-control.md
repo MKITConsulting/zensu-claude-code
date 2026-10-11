@@ -120,8 +120,12 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   reviewed by the auto-mode classifier, so the gate does not police the content
   — a report may quote a protected path — and applies no path rule to it. For
   the same reason it is decided before the working directory is resolved, so a
-  reviewer whose `cwd` vanished can still report that. `SendMessage`, case
-  variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
+  reviewer whose `cwd` vanished can still report that. `StructuredOutput` is
+  admitted for the same two profiles in the same place: a Claude Code workflow gives
+  an agent it spawns with a result schema that tool and hands its input to the
+  workflow script, so a confined reviewer can deliver a workflow result. Its input is
+  the script's own schema, so no field set is checked, and it resolves no path.
+  `SendMessage`, case variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
   exactly `Read, Grep, Glob`: the host injects the tool, and the reviewer-spawn
   grant admits only agents whose `tools:` line is that exact trio. The two
   evidence workers do NOT receive it: `review-evidence-lease-v1.js` reads their

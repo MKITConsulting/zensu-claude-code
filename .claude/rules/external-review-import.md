@@ -65,7 +65,13 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, so the skill
   never launches a template whose result could not be imported.
 - The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
-  through the Workflow `scriptPath`. It owns the `zensu-review-result/v1` shape, and
+  through the Workflow `scriptPath`. Its finders and refuters run as `zensu:review-aspect` (a
+  refuter in the agent's verify mode, with a `VERIFY FINDING` block whose values are
+  JSON-quoted), so the reviewer capability gate confines them like the panel and admits only
+  their `StructuredOutput` result beside the read trio. `args.packet` carries the step-2c
+  REVIEW PACKET v1, which must name its eight fields and every `changedFiles` entry, and a lens
+  outside the agent's seven perspectives makes the template throw. It owns the
+  `zensu-review-result/v1` shape, and
   `validateReviewResult` checks that shape with an exact key set at every level. Before
   anything else, `judgeResult` compares the launch record's `script_sha256` with the digest of
   `TEMPLATE_FILE` and answers `unavailable reason=foreign-script` on a mismatch, or
@@ -150,7 +156,9 @@ of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.m
 The result shape is spelled twice: the object the template returns and the `RESULT_*_KEYS`,
 `DROPPED_KINDS`, `VERIFICATION_STATUSES` and `VOTE_OUTCOMES` the module validates. The unit file
 runs the template in a sandbox and validates its output with the module, so a one-sided edit
-fails there. The template's `args` are built in step 3 of `skills/tdd/references/review-chain.md`
+fails there. The template's agent type and prompts move with the structured-result and
+`## Verify mode` paragraphs of `agents/review-aspect.md` and with `WORKFLOW_RESULT_TOOL` in
+`reviewer-capability-v1.js`. The template's `args` are built in step 3 of `skills/tdd/references/review-chain.md`
 and described in `docs/review-chain.md`; a renamed argument moves all three. The `degraded`
 status lives in `STATUSES`, step 3's `On ok or degraded` and the docs. The output file reaches
 the module as `ZENSU_XR_RESULT`, which is in the MSYS exclusions, and `zensu-host-path.sh`
@@ -178,12 +186,9 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
 - The run record and the journal sit in the session's project directory, which the main
   thread can write: a deliberate write there can still forge a result, as for every plugin
   store, and a count that disagrees with the journal only degrades the import.
-- The finders and refuters are neutral workflow agents (`host-profile-v1`): their read-only
-  contract is in their prompt, not in the reviewer capability gate, which still denies them
-  every command tool. Measured on 2026-10-11: a `zensu:review-aspect` agent inside a workflow is
-  offered `StructuredOutput`, the gate denies that tool to `reviewer-readonly-v1`, and the run
-  fails, so confining them needs a gate change. The judge's fresh reads and the Finding
-  Verification Gate are the backstop.
+- The confinement of the template's agents rests on `StructuredOutput` doing nothing but
+  hand data to the workflow script: a host that gave that tool a side effect would widen every
+  reviewer inside a workflow (`.claude/rules/reviewer-capability-gate.md`).
 - The wait counter is per session. It resets when a Stop sees no running workflow, when
   `--tdd-begin` arms a new chain and after 24 hours; a chain armed some other way, such as a
   deferred-review adoption, inherits the count, but such a chain never waits.

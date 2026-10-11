@@ -743,6 +743,7 @@ function neutralViolation(payload, trusted) {
 }
 
 const HOST_HANDBACK_TOOL = 'SubagentHandback';
+const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 
 function handbackViolation(payload, profile) {
@@ -755,7 +756,7 @@ function handbackViolation(payload, profile) {
 
 function readOnlyViolation(payload, trusted, profile) {
   if (!REVIEWER_READ_TOOLS.has(payload.tool_name)) {
-    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} to deliver the final report`;
+    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} or ${WORKFLOW_RESULT_TOOL} to deliver the final report`;
   }
   const violation = protectedAccessViolation(payload, trusted);
   return violation ? `${profile} ${violation}` : null;
@@ -1053,6 +1054,7 @@ function judgePrincipal(payload, bound, principal) {
   if (payload.tool_name === HOST_HANDBACK_TOOL && HANDBACK_PROFILES.has(profile)) {
     return handbackViolation(payload, profile) || null;
   }
+  if (payload.tool_name === WORKFLOW_RESULT_TOOL && HANDBACK_PROFILES.has(profile)) return null;
   try {
     trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
   } catch (error) {

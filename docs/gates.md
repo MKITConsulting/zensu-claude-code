@@ -257,7 +257,8 @@ instruction that cannot succeed until its cap releases the guard.
 - **What bounds the CHILD is in this tree, not an assumption about the host.**
   `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
   tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
-  report tool, admitted only with one string `message` field (see
+  report tool, admitted only with one string `message` field, and the workflow result tool
+  `StructuredOutput` (see
   [Session Control](session-control.md)) — and confines its reads to the project
   root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
   instead: the read trio on leased paths only, and no report tool.
@@ -895,8 +896,8 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
   them to report to the main thread rather than retry. A reviewer and a PLM subagent can do
-  that: their `SubagentHandback` report resolves no path and is decided before the `cwd` is
-  examined. A neutral child's handback still passes that resolution and is denied with the
+  that: their `SubagentHandback` report and their `StructuredOutput` result resolve no path
+  and are decided before the `cwd` is examined. A neutral child's handback still passes that resolution and is denied with the
   rest.
 
 Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the

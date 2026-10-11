@@ -27,7 +27,10 @@ reviewers and the PLM may additionally call the host's `SubagentHandback` report
 tool, with exactly one string `message` field, because Claude Code in `auto`
 mode delivers a subagent's report only through that call; the two workers do
 not, since their result is read from `SubagentStop` (see
-[Session Control](session-control.md)). Every other
+[Session Control](session-control.md)). Inside a Claude Code workflow the same
+reviewers and the PLM may also call `StructuredOutput`, through which a workflow
+agent returns the result its script asked for; it carries data to that script and
+nothing else. Every other
 neutral `host-profile-v1` child keeps only the capability gate's allowlist of host
 tools and named read-only MCP tools (listed in [Configuration](configuration.md)),
 so it cannot invoke `Bash`, `shell`, `exec`, `exec_command`, `terminal`, `command`,
@@ -74,11 +77,14 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   launch whose script is not that file byte for byte, so a copied or edited script is never
   imported. Its `args` carry the tree id that
   `zensu-log.sh --external-review --tree --root <top>` prints, the lenses (the active panel's
-  perspectives plus `tests`), the changed files, a diff file outside the repository (a file
-  inside it would change the tree the result must name), an agent ceiling (default 10), a
-  per-lens cap (default 8), the known deferred findings, and the evidence-discipline and
-  severity-rubric blocks, because a workflow script has no file access. The template runs one
-  read-only finder per lens, deduplicates across lenses in plain code (the same file within
+  perspectives plus `tests`), the changed files, the REVIEW PACKET v1 the panel would receive,
+  an agent ceiling (default 10), a per-lens cap (default 8) and the known deferred findings.
+  Its finders and refuters run as `zensu:review-aspect`, so the capability gate confines them
+  to `reviewer-readonly-v1` exactly like the panel: they read the project and return their
+  result through the workflow's `StructuredOutput` tool, and every other tool is denied. A
+  refuter is the same agent in its verify mode, with a `VERIFY FINDING` block after the packet
+  whose values are JSON-quoted. The template runs one finder per lens, deduplicates across
+  lenses in plain code (the same file within
   three lines and similar titles; it keeps the higher severity and lists the merged ids), and
   spawns at most one refuter per CRITICAL or IMPORTANT finding, CRITICAL first, within the
   ceiling. A SUGGESTION gets no verifier. It never filters a failed agent out: a failed finder
