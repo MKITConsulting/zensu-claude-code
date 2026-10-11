@@ -141,7 +141,7 @@ function parseArgs(argv) {
   const out = {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
-    forget: null, remove: null, anchor: null,
+    forget: null, remove: null, anchor: null, receipt: null,
     daysExplicit: false, promptsExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -182,6 +182,7 @@ function parseArgs(argv) {
     // a relative value is REFUSED there rather than resolved against a cwd this
     // process happens to have.
     else if (a === '--anchor') out.anchor = stringOperand(a, argv[++i]);
+    else if (a === '--receipt') out.receipt = receiptOperand(a, argv[++i]);
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
   }
@@ -202,6 +203,12 @@ function stringOperand(flag, raw) {
     fail(`${flag} needs a value (got ${raw === undefined ? 'nothing' : `"${raw}"`})`);
   }
   return raw;
+}
+
+function receiptOperand(flag, raw) {
+  const value = stringOperand(flag, raw);
+  if (!/^[0-9a-f]{32}$/.test(value)) fail(`${flag} needs 32 lowercase hexadecimal characters (got ${value.length} characters)`);
+  return value;
 }
 
 function fail(msg, code = 1) {
@@ -6565,10 +6572,10 @@ const COMMAND_FLAGS = {
   // than the one measured and a rendered target path there points into the wrong
   // tree. Naming it here rather than leaving a reader to discover the asymmetry from
   // a flag that quietly did nothing.
-  show: ['--force', ...SCAN_FLAGS, '--prompts', '--anchor'],
-  handoff: ['--force', ...SCAN_FLAGS],
+  show: ['--force', ...SCAN_FLAGS, '--prompts', '--anchor', '--receipt'],
+  handoff: ['--force', ...SCAN_FLAGS, '--receipt'],
   limited: ['--force', ...SCAN_FLAGS],
-  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts', '--anchor'],
+  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts', '--anchor', '--receipt'],
   // `--days` is deliberately absent: the listing branch reads `opts.all` and
   // `opts.repo` and nothing else from the scan set.
   lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
@@ -6624,6 +6631,7 @@ function refuseForeignFlags(opts, cmd) {
   if (opts.remove !== null) supplied.push('--remove');
   if (opts.where !== null) supplied.push('--where');
   if (opts.anchor !== null) supplied.push('--anchor');
+  if (opts.receipt !== null) supplied.push('--receipt');
   const foreign = supplied.filter((f) => !accepted.includes(f));
   if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
 }

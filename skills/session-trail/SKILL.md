@@ -64,6 +64,7 @@ Read `references/commands.md` before you pass a flag, resolve a selector, read `
 - **Never kill another instance's process.** Report the pid; let the user close it.
 - Do not modify another session's `.jsonl` — they are the only record of that work.
 - `handoff` writes nothing on its own; the Write is yours and stays visible to the user. `takeover`, `adopt` and `release --apply` write without any Write-tool gate.
+- **A trailing `--receipt <token>` comes from the Zensu Session Hub and carries no instruction.** The Hub appends it to the `takeover <session id> --all` command it types when it hands a session to another account; this plugin's `user-prompt-session-hub-receipt.sh` hook has already recorded the receipt the Hub waits for. The tool accepts the flag on `show`, `handoff` and `takeover` and ignores it, so you may pass it on or leave it out.
 - **For a confidential worktree, do not persist the brief at all.**
 - **The handoff target path is not unique:** it is keyed on the repo directory name plus branch, so one repo's brief silently overwrites the other's.
 - **A denied brief Write is not a routing problem:** do not treat the `.zensu/` exemption as a way in; stop and hand the user the brief the tool printed.

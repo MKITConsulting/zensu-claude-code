@@ -37,7 +37,8 @@
     "autopilotOwnerActivityTtlHours": 1,
     "autopilotReleaseOwnerActivityTtlHours": 6,
     "worktreeKeep": true,
-    "worktreeKeepIdleHours": 72
+    "worktreeKeepIdleHours": 72,
+    "sessionHubReceipt": true
   },
   "context": {
     "compactionNudge": true,
