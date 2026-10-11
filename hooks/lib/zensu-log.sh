@@ -96,13 +96,25 @@ _tc_git() { (
 ); }
 
 _zensu_unqualified_change_count() {
-  local root="${1:-}" tracked untracked
-  if [ -z "$root" ] || ! command -v git >/dev/null 2>&1 \
-    || [ "$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ] \
-    || ! _tc_git -C "$root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-    printf 'unknown'
+  local root="${1:-}" inside inside_err tracked untracked
+  [ -n "$root" ] || { printf 'unavailable'; return 0; }
+  command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+  if inside="$(_tc_git -C "$root" rev-parse --is-inside-work-tree 2>/dev/null)"; then
+    [ "$inside" = "true" ] || { printf 'unknown'; return 0; }
+  else
+    inside_err="$(LC_ALL=C _tc_git -C "$root" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+    case "$inside_err" in
+      (*[Nn]"ot a git repository"*) printf 'unknown' ;;
+      (*) printf 'unavailable' ;;
+    esac
     return 0
   fi
+  _tc_git -C "$root" rev-parse --verify --quiet HEAD >/dev/null 2>&1
+  case "$?" in
+    (0) ;;
+    (1) printf 'unknown'; return 0 ;;
+    (*) printf 'unavailable'; return 0 ;;
+  esac
   tracked="$(_tc_git -C "$root" diff --name-only HEAD 2>/dev/null)" || { printf 'unavailable'; return 0; }
   untracked="$(_tc_git -C "$root" ls-files --others --exclude-standard 2>/dev/null)" || { printf 'unavailable'; return 0; }
   printf '%s\n%s\n' "$tracked" "$untracked" | awk 'length($0) > 0 && !seen[$0]++ { n++ } END { print n + 0 }'
