@@ -193,9 +193,9 @@ candidate execution is unsupported; its hermetic fake remains solely for local
 deterministic coverage.
 See [Session Control release gate](session-control-release-gate.md).
 
-**Getting a guaranteed review for a Workflow-triggered run.** A worker's `Stop` no-ops, a
-workflow's agents cannot run `zensu-log.sh`, and a review round counts only when the main
-thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main thread,
+**Reviewing a Workflow-triggered run.** A worker's `Stop` no-ops, a workflow's agents cannot
+run `zensu-log.sh`, and a review round counts only when the main thread spawns
+`zensu:code-reviewer`. The review chain therefore runs in the main thread,
 **once over the aggregate diff**:
 
 - **The workflow reviewed the change (an Ultracode review, for example).** On the first review,
@@ -219,9 +219,23 @@ thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main
   workflow still runs is released up to three times in a row before the first review, so the chain
   waits for the workflow instead of starting a review beside it; a fix round never waits.
 - **No chain is armed in this session.** The main thread records a project-scoped marker
-  with `zensu-log.sh --pending-review --files "<changed>"`; the **next interactive `Stop`**
-  in that project adopts it and runs the full chain once, then clears it.
-  `zensu-log.sh --pending-review-done` clears it when the review already ran.
+  with `zensu-log.sh --pending-review --files "<changed>"`, and a later interactive `Stop` in
+  that project adopts it. Adoption turns the marker into a claim (see below); the review
+  builds its REVIEW PACKET v1 by the step 10.2c rule for a review that did not run Phase 6 and
+  runs under the same `autoFixMaxRounds + 3` Stop cap as any other chain. Completing it
+  releases the claim, and the cap or `zensu-log.sh --tdd-reset` cancels it. A `Stop` does not
+  adopt the marker when:
+  - the Stop guard is off (`ZENSU_CHAIN=off` or `hooks.chainEnforcer: false`);
+  - its session has an unfinished chain or an active Autopilot run of its own, or another
+    session holds a live claim in the project; the marker then stays queued;
+  - the marker is older than `hooks.pendingReviewTtlHours` (default 6, `0` disables this
+    age-out); the `Stop` then deletes it unreviewed;
+  - a nonterminal Autopilot run of another session holds this working tree; the `Stop` is then
+    denied, outside the Stop cap, until that run ends, the marker ages out or it is cleared
+    (the `stop-chain-enforcer.sh` row of the hook table in [configuration](configuration.md)
+    has the full rule).
+
+  `zensu-log.sh --pending-review-done` clears the marker when the review already ran.
 
 Review is per-implementation over the aggregate diff — **never per spawned worker**.
 
@@ -319,7 +333,7 @@ The **missing workflow document** above has no column here for the same kind of 
 | `post-browser-navigation-consent.sh` | `Bash` | exits before its bind when the command carries no `playwright-cli` marker; for a `zensu-verify` call it writes nothing (no project root to anchor the memory) and exits 0 with a stderr note | same | same |
 | `pre-bash-zensu-gate.sh` | `Bash` | already exits before its bind when the command runs no `zensu` CLI binary, so it never contributed | same | adopts on the first bind; denies a `zensu` mutation only on a refusal, naming it |
 | `plan-approved-delegate.sh` | ExitPlanMode | still emits `PLAN_GATE_BLOCKED code=RUNTIME_UNAVAILABLE`, whose text asserts a durable Autopilot artifact exists — untrue in this state. Advisory `additionalContext`; tracked as a follow-up | same | same |
-| `stop-chain-enforcer.sh` | Stop | **releases** — with no record there is no workflow document, so no review chain and no Autopilot run exist to enforce and nothing is waived. Blocking would leave the user with tools but no way to end a turn | **releases** — same argument, reached from the opposite direction; the stderr names the dead path and both remedies (`/zensu:adopt-session --restore-root --confirm`, which re-creates that directory AND rebuilds the workflow document the removal took with it, or start a new session) and advertises no bypass | **adopts on the bind** — an adoptable record binds and the chain is enforced as in a healthy session; what follows is reached only when that adoption was REFUSED or did not complete, and every message names the refusal and its remedy. **Releases for a declared-incompatible lineage, and for a pruned minting installation** — the binding that resolves the project root is what failed, so the chain cannot be read from here at all; the guarantee is DEFERRED, not waived (the recorded root still exists, so a document under it stays reachable once the session re-binds, and the next Stop after an adoption enforces it again — the arm establishes that the ANCHOR resolved and claims nothing about the document's contents, which no probe on that path opens) **only while the recorded project root still exists** — when that root is also gone the document is not reachable from this record, the release says so instead, and no later Stop can enforce that chain while the directory is missing; and when the probe cannot answer, a third release claims NOTHING about the workflow document either way — and `/zensu:doctor`'s plain lineage row adds the same Edit/Write limit in that case, since it cannot rule out a vanished root either; the stderr names both versions, the refusal token and `/zensu:adopt-session --confirm` as the manual retry. Every OTHER disagreement still blocks, naming the states separately; `ZENSU_CHAIN=off` / `hooks.chainEnforcer=false` release the guard explicitly without proving completion |
+| `stop-chain-enforcer.sh` | Stop | **releases** — with no record there is no workflow document, so no review chain and no Autopilot run exist to enforce and nothing is waived. Blocking would leave the user with tools but no way to end a turn | **releases** — same argument, reached from the opposite direction; the stderr names the dead path and both remedies (`/zensu:adopt-session --restore-root --confirm`, which re-creates that directory AND rebuilds the workflow document the removal took with it, or start a new session) and advertises no bypass | **adopts on the bind** — an adoptable record binds and the chain is enforced as in a healthy session; what follows is reached only when that adoption was REFUSED or did not complete, and every message names the refusal and its remedy. **Releases for a declared-incompatible lineage, and for a pruned minting installation** — the binding that resolves the project root is what failed, so the chain cannot be read from here at all; enforcement is DEFERRED until an adoption succeeds, and a refusal that persists, such as `executing-runtime-older` or `workflow-schema-mismatch`, keeps it released (the recorded root still exists, so a document under it stays reachable once the session re-binds, and the next Stop after an adoption enforces it again — the arm establishes that the ANCHOR resolved and claims nothing about the document's contents, which no probe on that path opens) **only while the recorded project root still exists** — when that root is also gone the document is not reachable from this record, the release says so instead, and no later Stop can enforce that chain while the directory is missing; and when the probe cannot answer, a third release claims NOTHING about the workflow document either way — and `/zensu:doctor`'s plain lineage row adds the same Edit/Write limit in that case, since it cannot rule out a vanished root either; the stderr names both versions, the refusal token and `/zensu:adopt-session --confirm` as the manual retry. Every OTHER disagreement still blocks, naming the states separately; `ZENSU_CHAIN=off` / `hooks.chainEnforcer=false` release the guard explicitly without proving completion |
 
 **Every remedy these denies name is addressed to the main thread alone.** `/zensu:doctor`, `/zensu:adopt-session` and its `--restore-root` and `--confirm` forms are admitted for the interactive thread only, so a reviewer, an evidence worker or a neutral child that reaches one of these denies is told the cause and to report it to the main thread rather than retry, and is never handed a command it cannot run. The shell emitter picks that wording through its audience argument (`main` or `child`); the `.*` capability gate splits on the principal itself.
 

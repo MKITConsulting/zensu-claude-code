@@ -76,14 +76,14 @@ stop_adoption_refusal() {
 zensu_stop_guard_opted_out() {
   local config_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
   if [ "${ZENSU_CHAIN:-}" = "off" ]; then
-    echo "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+    echo "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived." >&2
     return 0
   fi
   if [ -r "$config_lib" ]; then
     # shellcheck disable=SC1090
     source "$config_lib"
     if ! zensu_hook_enabled chainEnforcer; then
-      echo "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+      echo "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guard could not be evaluated either — no completion was proven, only the guard was waived." >&2
       return 0
     fi
   fi
@@ -364,7 +364,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       EXECUTING_VERSION="(unreadable)"
     fi
     stop_adoption_refusal
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so a workflow document under it stays REACHABLE once the session re-binds; this arm establishes that the anchor resolved and claims nothing about the document's contents, which no probe on this path opened. What failed is the session binding, and this hook declines to read a chain it cannot bind. The guarantee is therefore DEFERRED, not unavailable: no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so a workflow document under it stays REACHABLE once the session re-binds; this arm establishes that the anchor resolved and claims nothing about the document's contents, which no probe on this path opened. What failed is the session binding, and this hook declines to read a chain it cannot bind, so no completion was proven, only an unprovable guard released. Zensu tried to adopt the record automatically at this Stop and ${ADOPTION_ATTEMPT}: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}; ${ADOPTION_TAIL}. Once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
   # The Stop counterpart of the `adoption-incomplete` deny scope. A bind that lost

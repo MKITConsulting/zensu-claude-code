@@ -49,7 +49,7 @@ There are two cohort backends. Pick by mission type:
 
 When the findings are about real code — an ownership audit, a bug hunt, a correctness/security proof over a repo or a `ZEN-XXX` feature — do **not** invent ad-hoc verifiers. The plugin already ships a battle-tested cohort with a merge step:
 
-1. **Fan out `zensu:review-aspect` ×5** in one parallel batch — one per perspective of the full panel (`conventions`, `bugs`, `architecture`, `tests`, `security`). Each spawn prompt MUST carry a complete `REVIEW PACKET v1` (every field `/zensu:tdd` step 10.2c lists, `none` where an audit has nothing to report) and name the perspective and the files under scrutiny, e.g.:
+1. **Fan out `zensu:review-aspect` ×5** in one parallel batch — one per perspective of the full panel (`conventions`, `bugs`, `architecture`, `tests`, `security`). Each spawn prompt MUST carry a complete `REVIEW PACKET v1` (every field `/zensu:tdd` step 10.2c lists, with `not run — <reason>` in each Phase 6 field this mission did not produce, as 10.2c defines for a review that did not run Phase 6) and name the perspective and the files under scrutiny, e.g.:
    `Perspective: security. Files changed: [internal/orders/write.go, db/schema.sql]`
    Point them at the files your findings cite. Each is read-only and returns findings for its one lens.
 2. **Merge in the main thread**, then optionally run `zensu:code-reviewer` with the same packet for a consolidated pass.
