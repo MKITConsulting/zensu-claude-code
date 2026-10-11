@@ -189,13 +189,16 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   their controls cover that instead, one behavioural injection probe per config channel, so a
   third channel needs a third probe rather than a bigger numeral. `_tc_git` sits at file scope,
   above the verb dispatch, and every change count in `zensu-log.sh` runs through it: the three
-  scope calls here and `_zensu_unqualified_change_count`, which the `--chain-done` zero-change
-  terminus and the unqualified `--code-review-done` mark share. `Z6` in
+  scope calls here and `_zensu_unqualified_change_count`, which three callers share — the
+  `--chain-done` zero-change terminus, the unqualified `--code-review-done` mark, and the
+  ticket-bound `--chain-done` when its ticket is one the Stop hook minted for a chain no reviewer
+  saw (prefix `zc_`, see `.claude/rules/chain-shape-rearm-receipt.md`). `Z6` in
   `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition and the three
   scope calls. In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an
   inherited `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
-  `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` a failed listing, and `G13`
-  fails on a bare `git -C` outside comments and `_tc_git` calls.
+  `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` and `G12c` a failed listing, and
+  `G13` fails on a bare `git -C` outside comments and `_tc_git` calls and requires exactly three
+  call sites of the helper.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of

@@ -137,7 +137,11 @@ recovery surfaces. Exempt: the unqualified zero-change terminus, silently
 pre-check through `tdd_claimed_review_ticket`, then the verdict, the escape record, the
 transition, the pass line and the bypass line. The pre-check makes a wrong ticket fail
 on the ticket check rather than on a suite message, and keeps an escape on a wrong
-ticket out of the ledger (`test-full-suite-gate.sh` F9).
+ticket out of the ledger (`test-full-suite-gate.sh` F9). A self-review ticket the Stop hook
+minted (`zc_`) adds the change count right after the short-circuit: on a changed tree or a
+failed listing the verdict never runs and the transition refuses and reopens the review
+(`.claude/rules/chain-shape-rearm-receipt.md`), so a chain no reviewer saw is never sent to run
+a suite it cannot close on.
 
 **`ZENSU_FULL_SUITE_GATE=off` is recorded only where the gate applies**, never outside
 a work tree (F14). The bypass allowlist keeps `ZENSU_TEST_WITNESS` as a retired name,
