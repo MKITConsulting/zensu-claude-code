@@ -199,6 +199,40 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` and `G12c` a failed listing, and
   `G13` fails on a bare `git -C` outside comments and `_tc_git` calls and requires exactly three
   call sites of the helper.
+- **The shared count reads only three git answers as "not evaluable".**
+  `_zensu_unqualified_change_count` prints `unknown`, which all three of its callers accept, for
+  a host without `git`, for a root git reports as outside a work tree (`rev-parse
+  --is-inside-work-tree` printing `false`, or failing with git's own `not a git repository`),
+  and for a HEAD that names no commit (`rev-parse --verify --quiet HEAD` exiting 1). Every other
+  git failure prints `unavailable`, which all three refuse with their listing text: a
+  `safe.directory` "dubious ownership" refusal (exit 128), a root that no longer exists
+  (`cannot change to`), a HEAD probe that git aborts, and a failed listing. An empty root prints
+  `unavailable` too; no caller passes one, because the bind exits 2 first. The split is the one
+  `workTree` in `hooks/lib/evidence-run-v1.js` draws between `not-applicable` and `unavailable`
+  for the full-suite gate. It is copied rather than called, because `_tc_git` stays this file's
+  only git entry point. The error text is matched under `LC_ALL=C`, as the runner does: a
+  localized git otherwise turns a root outside git into `unavailable` (observed with git 2.51
+  under `LANG=de_DE.UTF-8`). In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G14`
+  drives a real dubious-ownership refusal through `GIT_TEST_ASSUME_DIFFERENT_OWNER`, which
+  `_tc_git` keeps, in a HOME without git config and with `GIT_CONFIG_NOSYSTEM=1`. Its controls
+  show that real git refuses the fixture and that a `safe.directory` exception in such a HOME
+  clears the refusal, and `G14c` closes the same chain under that exception. `G14d` asks the
+  runner's `workTree` about the same refusal and the same root outside git that `G14a`, `G14b`
+  and `G7` drive through the verbs, so the two copies are held to the same answers on those
+  inputs. `G15` fails only the HEAD probe through a stub `git` on PATH. An unreadable
+  `packed-refs` does the same with real git (exit 128 while the work-tree probe still answers
+  `true`), but a suite running as root reads the file anyway, and `chmod 000` under Git Bash is
+  unverified, so that fixture would not discriminate everywhere this suite runs. `G16` runs the
+  terminus on a root outside git under the first candidate locale that localizes git's message;
+  its label says when no candidate did, and the check then does not discriminate. `G14` to `G16`
+  drive the two unqualified verbs; the minted-ticket terminus reads the same helper, and `G12c`
+  pins its `unavailable` arm.
+  Bounds: git's own answer decides, so a linked worktree whose administrative directory was
+  removed reads `not a git repository` and passes, as it does for the full-suite gate, and a
+  corrupt branch ref makes the HEAD probe exit 1 exactly like an unborn branch. `--tdd-complete`
+  does not share this classification: its scope probe still reads every failure of
+  `rev-parse --verify --quiet HEAD` as zero changes, so a refusal there takes the requirements
+  gate out of scope and leaves the receipt gate armed only by a logged claim.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of
