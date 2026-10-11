@@ -19,6 +19,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 TDD_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -62,6 +63,8 @@ GATE_PHRASE="refusing the unqualified standalone terminus"
 REVIEW_GATE_PHRASE="refusing the unqualified review-convergence mark"
 LISTING_PHRASE="git could not list this worktree"
 READABLE_HINT="the chain state is readable"
+MINTED_GATE_PHRASE="refusing to close a chain that no reviewer saw"
+REOPEN_PHRASE="The chain's review is reopened"
 
 export CLAUDE_PROJECT_DIR="$GIT_PROJ"
 
@@ -180,6 +183,92 @@ else
 fi
 git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
 
+SID14="minted-ticket-changed"
+arm "$SID14"
+SF14="$(tdd_state_file "$SID14")"
+bash "$LOG" --code-review-done --session "$SID14" >/dev/null 2>&1
+STOP14="$(SID_VALUE="$SID14" node -e '
+  process.stdout.write(JSON.stringify({ hook_event_name: "Stop", session_id: process.env.SID_VALUE }));
+' | bash "$STOP" 2>/dev/null)"
+REASON14="$(printf '%s' "$STOP14" | node -e '
+  let s = ""; process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s);
+      if (j.decision === "block" && typeof j.reason === "string") process.stdout.write(j.reason);
+    } catch (_) {}
+  });
+' 2>/dev/null)"
+ZC14="$(bash "$LOG" --current-review-ticket --session "$SID14" 2>/dev/null)"
+case "$ZC14" in (zc_?*) ZC14_SHAPE=zc ;; (*) ZC14_SHAPE=other ;; esac
+if [ "$ZC14_SHAPE" = "zc" ] && printf '%s' "$REASON14" | grep -qF "SELF-REVIEW-TICKET: $ZC14" \
+  && printf '%s' "$REASON14" | grep -qF "skill='zensu:self-review'" \
+  && printf '%s' "$REASON14" | grep -qF "No reviewer ran in this chain" \
+  && ! printf '%s' "$REASON14" | grep -qF "The code-reviewer chain has converged"; then
+  check "G9d the Stop hook mints a zc_ self-review ticket for a clean-tree mark and says no reviewer ran" PASS
+else
+  check "G9d minted self-review ticket (ticket='$ZC14' reason='$REASON14')" FAIL
+fi
+printf 'changed\n' > "$GIT_PROJ/tracked.txt"
+ERR14="$STATE_DIR/g9e.err"
+bash "$LOG" --chain-done --session "$SID14" --claimed-review-ticket "$ZC14" >/dev/null 2>"$ERR14"; RC14=$?
+DONE14="$(tdd_chain_done "$SF14" 2>/dev/null)"
+if [ "$RC14" -eq 1 ] && [ "$DONE14" = "false" ] && grep -qF "$MINTED_GATE_PHRASE" "$ERR14" \
+  && grep -qF "reports 1 changed file(s)" "$ERR14" && grep -qF "$REOPEN_PHRASE" "$ERR14" \
+  && grep -qF -- "--review-ticket" "$ERR14" && grep -qF "Do not commit, stash or revert" "$ERR14" \
+  && ! grep -qF "FULL SUITE" "$ERR14" && ! grep -qF "ACCEPTANCE" "$ERR14" \
+  && ! grep -qF "$READABLE_HINT" "$ERR14"; then
+  check "G9e the minted ticket cannot close the chain over a changed tree, and the count runs ahead of the suite gates" PASS
+else
+  check "G9e minted-ticket terminus on a changed tree (rc=$RC14 chainDone=$DONE14 err='$(cat "$ERR14" 2>/dev/null)')" FAIL
+fi
+CRD14="$(tdd_code_review_done "$SF14" 2>/dev/null)"
+SRF14="$(tdd_self_review_fixed "$SF14" 2>/dev/null)"
+bash "$LOG" --current-review-ticket --session "$SID14" >/dev/null 2>&1; CUR14_RC=$?
+SHAPE14="$(bash "$LOG" --chain-status --session "$SID14" 2>/dev/null | node -e '
+  let s = ""; process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => { try { process.stdout.write(String(JSON.parse(s).shape)); } catch (_) {} });
+' 2>/dev/null)"
+if [ "$CRD14" = "false" ] && [ "$SRF14" = "false" ] && [ "$CUR14_RC" -ne 0 ] \
+  && [ "$SHAPE14" = "ready-for-review" ]; then
+  check "G9f the refusal reopens the review: the mark and the minted ticket are withdrawn together" PASS
+else
+  check "G9f reopened review (codeReviewDone=$CRD14 selfReviewFixed=$SRF14 current-ticket-rc=$CUR14_RC shape=$SHAPE14)" FAIL
+fi
+ERR14G="$STATE_DIR/g9g.err"
+bash "$LOG" --chain-done --session "$SID14" --claimed-review-ticket "$ZC14" >/dev/null 2>"$ERR14G"; RC14G=$?
+DONE14G="$(tdd_chain_done "$SF14" 2>/dev/null)"
+CRD14G="$(tdd_code_review_done "$SF14" 2>/dev/null)"
+if [ "$RC14G" -eq 1 ] && [ "$DONE14G" = "false" ] && [ "$CRD14G" = "false" ] \
+  && grep -qF "$READABLE_HINT" "$ERR14G" && ! grep -qF "$MINTED_GATE_PHRASE" "$ERR14G"; then
+  check "G9g the withdrawn ticket is stale: a retry gets the state hint and changes nothing" PASS
+else
+  check "G9g stale minted ticket (rc=$RC14G chainDone=$DONE14G codeReviewDone=$CRD14G err='$(cat "$ERR14G" 2>/dev/null)')" FAIL
+fi
+RT14="$(bash "$LOG" --review-ticket --session "$SID14" 2>/dev/null)"
+case "$RT14" in
+  (rt_?*) check "G9h the reopened chain takes a reviewer ticket, which keeps the rt_ prefix" PASS ;;
+  (*) check "G9h reviewer ticket on the reopened chain (ticket='$RT14')" FAIL ;;
+esac
+git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
+
+SID15="minted-ticket-clean"
+arm "$SID15"
+SF15="$(tdd_state_file "$SID15")"
+bash "$LOG" --code-review-done --session "$SID15" >/dev/null 2>&1
+ZC15="$(tdd_ensure_self_review_ticket "$(zensu_resolve_session_id "$SID15" 2>/dev/null)" 2>/dev/null)"
+ERR15="$STATE_DIR/g9i.err"
+ZENSU_FULL_SUITE_GATE=off ZENSU_ACCEPTANCE_GATE=off \
+  bash "$LOG" --chain-done --session "$SID15" --claimed-review-ticket "$ZC15" >/dev/null 2>"$ERR15"; RC15=$?
+DONE15="$(tdd_chain_done "$SF15" 2>/dev/null)"
+case "$ZC15" in (zc_?*) ZC15_SHAPE=zc ;; (*) ZC15_SHAPE=other ;; esac
+if [ "$ZC15_SHAPE" = "zc" ] && [ "$RC15" -eq 0 ] && [ "$DONE15" = "true" ] \
+  && ! grep -qF "$MINTED_GATE_PHRASE" "$ERR15"; then
+  check "G9i a minted ticket still closes the chain while the tree reports no change (control for G9e)" PASS
+else
+  check "G9i minted ticket on a clean tree (ticket='$ZC15' rc=$RC15 chainDone=$DONE15 err='$(cat "$ERR15" 2>/dev/null)')" FAIL
+fi
+
 SID10="review-ticket-consumed"
 arm "$SID10"
 TICKET10="$(bash "$LOG" --review-ticket --session "$SID10" 2>/dev/null)"
@@ -231,6 +320,17 @@ if [ "$RC10C" -eq 0 ] && [ "$CRD10C" = "true" ]; then
   check "G10c the ticket-bound --code-review-done still converges on a changed tree" PASS
 else
   check "G10c ticket-bound --code-review-done (rc=$RC10C codeReviewDone=$CRD10C err='$(cat "$ERR10C" 2>/dev/null)')" FAIL
+fi
+ERR10D="$STATE_DIR/g10d.err"
+ZENSU_FULL_SUITE_GATE=off ZENSU_ACCEPTANCE_GATE=off \
+  bash "$LOG" --chain-done --session "$SID10" --claimed-review-ticket "$TICKET10" >/dev/null 2>"$ERR10D"; RC10D=$?
+DONE10D="$(tdd_chain_done "$SF10" 2>/dev/null)"
+case "$TICKET10" in (rt_?*) TICKET10_SHAPE=rt ;; (*) TICKET10_SHAPE=other ;; esac
+if [ "$TICKET10_SHAPE" = "rt" ] && [ "$RC10D" -eq 0 ] && [ "$DONE10D" = "true" ] \
+  && ! grep -qF "$MINTED_GATE_PHRASE" "$ERR10D"; then
+  check "G10d a ticket a reviewer consumed still closes the chain on a changed tree (control for G9e)" PASS
+else
+  check "G10d reviewed terminus on a changed tree (ticket='$TICKET10' rc=$RC10D chainDone=$DONE10D err='$(cat "$ERR10D" 2>/dev/null)')" FAIL
 fi
 git -C "$GIT_PROJ" checkout -- tracked.txt >/dev/null 2>&1
 
@@ -341,6 +441,24 @@ else
   check "G12b failed listing on --code-review-done (rc=$RC12B codeReviewDone=$CRD12B err='$(cat "$ERR12B" 2>/dev/null)')" FAIL
 fi
 cp "$STATE_DIR/index.bak" "$GIT_PROJ/.git/index"
+SID12C="minted-ticket-unlisted"
+arm "$SID12C"
+SF12C="$(tdd_state_file "$SID12C")"
+bash "$LOG" --code-review-done --session "$SID12C" >/dev/null 2>&1
+ZC12C="$(tdd_ensure_self_review_ticket "$(zensu_resolve_session_id "$SID12C" 2>/dev/null)" 2>/dev/null)"
+printf 'garbage' > "$GIT_PROJ/.git/index"
+ERR12C="$STATE_DIR/g12c.err"
+bash "$LOG" --chain-done --session "$SID12C" --claimed-review-ticket "$ZC12C" >/dev/null 2>"$ERR12C"; RC12C=$?
+cp "$STATE_DIR/index.bak" "$GIT_PROJ/.git/index"
+DONE12C="$(tdd_chain_done "$SF12C" 2>/dev/null)"
+CRD12C="$(tdd_code_review_done "$SF12C" 2>/dev/null)"
+if [ -n "$ZC12C" ] && [ "$RC12C" -eq 1 ] && [ "$DONE12C" = "false" ] && [ "$CRD12C" = "false" ] \
+  && grep -qF "$MINTED_GATE_PHRASE" "$ERR12C" && grep -qF "$LISTING_PHRASE" "$ERR12C" \
+  && grep -qF "$REOPEN_PHRASE" "$ERR12C" && ! grep -qF "changed file(s)" "$ERR12C"; then
+  check "G12c a failed change listing refuses the minted ticket and reopens the review" PASS
+else
+  check "G12c failed listing on the minted-ticket terminus (ticket='$ZC12C' rc=$RC12C chainDone=$DONE12C codeReviewDone=$CRD12C err='$(cat "$ERR12C" 2>/dev/null)')" FAIL
+fi
 
 # --- G7 non-git project root: claim not evaluable, legacy behaviour ---
 export CLAUDE_PROJECT_DIR="$PLAIN_PROJ"
@@ -363,6 +481,15 @@ if [ "$RC9A" -eq 0 ] && [ "$CRD9A" = "true" ]; then
   check "G9a non-git project root -> unqualified --code-review-done allowed (not evaluable)" PASS
 else
   check "G9a non-git root --code-review-done (rc=$RC9A codeReviewDone=$CRD9A err='$(cat "$ERR9A" 2>/dev/null)')" FAIL
+fi
+ZC9A="$(tdd_ensure_self_review_ticket "$(zensu_resolve_session_id "$SID9A" 2>/dev/null)" 2>/dev/null)"
+ERR9J="$STATE_DIR/g9j.err"
+bash "$LOG" --chain-done --session "$SID9A" --claimed-review-ticket "$ZC9A" >/dev/null 2>"$ERR9J"; RC9J=$?
+DONE9J="$(tdd_chain_done "$(tdd_state_file "$SID9A")" 2>/dev/null)"
+if [ -n "$ZC9A" ] && [ "$RC9J" -eq 0 ] && [ "$DONE9J" = "true" ]; then
+  check "G9j non-git project root -> a minted ticket closes the chain (not evaluable)" PASS
+else
+  check "G9j non-git root minted ticket (ticket='$ZC9A' rc=$RC9J chainDone=$DONE9J err='$(cat "$ERR9J" 2>/dev/null)')" FAIL
 fi
 
 # --- G8 git repo without a HEAD commit: claim not evaluable ---
@@ -394,8 +521,8 @@ HELPER_BODY="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
 if [ -z "$BARE_GIT_LOG" ] \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard' \
-  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 2 ]; then
-  check "G13 both unqualified verbs count through one scrubbed helper and no bare git -C remains" PASS
+  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 3 ]; then
+  check "G13 both unqualified verbs and the minted-ticket terminus count through one scrubbed helper and no bare git -C remains" PASS
 else
   check "G13 shared scrubbed helper (bare='$BARE_GIT_LOG')" FAIL
 fi
@@ -422,6 +549,35 @@ if [ "$G13C_RC" -eq 0 ] && [ "$DONE13C" = "true" ]; then
   check "G13c the library still closes the chain for an unknown count (control for G13b)" PASS
 else
   check "G13c library unknown count (rc=$G13C_RC chainDone=$DONE13C)" FAIL
+fi
+
+SID13D="minted-ticket-library"
+arm "$SID13D"
+SF13D="$(tdd_state_file "$SID13D")"
+KEY13D="$(zensu_resolve_session_id "$SID13D" 2>/dev/null)"
+bash "$LOG" --code-review-done --session "$SID13D" >/dev/null 2>&1
+ZC13D="$(tdd_ensure_self_review_ticket "$KEY13D" 2>/dev/null)"
+G13D_RCS=""
+tdd_mark_review_converged "$KEY13D" "$ZC13D" chainDone >/dev/null 2>&1; G13D_RCS="$G13D_RCS $?"
+tdd_mark_review_converged "$KEY13D" "$ZC13D" chainDone 01 >/dev/null 2>&1; G13D_RCS="$G13D_RCS $?"
+tdd_mark_review_converged "$KEY13D" "$ZC13D" chainDone 2x >/dev/null 2>&1; G13D_RCS="$G13D_RCS $?"
+tdd_mark_review_converged "$KEY13D" "$ZC13D" selfReviewFixed 0 >/dev/null 2>&1; G13D_RCS="$G13D_RCS $?"
+DONE13D="$(tdd_chain_done "$SF13D" 2>/dev/null)"
+SRF13D="$(tdd_self_review_fixed "$SF13D" 2>/dev/null)"
+CUR13D="$(bash "$LOG" --current-review-ticket --session "$SID13D" 2>/dev/null)"
+if [ -n "$KEY13D" ] && [ -n "$ZC13D" ] && [ "$G13D_RCS" = " 1 1 1 1" ] && [ "$DONE13D" = "false" ] \
+  && [ "$SRF13D" = "false" ] && [ "$CUR13D" = "$ZC13D" ]; then
+  check "G13d the library refuses a minted ticket's terminus without a well-formed count and changes nothing" PASS
+else
+  check "G13d library minted-ticket contract (key='$KEY13D' ticket='$ZC13D' rcs='$G13D_RCS' chainDone=$DONE13D selfReviewFixed=$SRF13D current='$CUR13D')" FAIL
+fi
+tdd_mark_review_converged "$KEY13D" "$ZC13D" chainDone unknown >/dev/null 2>&1
+G13E_RC=$?
+DONE13E="$(tdd_chain_done "$SF13D" 2>/dev/null)"
+if [ "$G13E_RC" -eq 0 ] && [ "$DONE13E" = "true" ]; then
+  check "G13e the library closes a minted ticket's chain for an unknown count (control for G13d)" PASS
+else
+  check "G13e library minted ticket with an unknown count (rc=$G13E_RC chainDone=$DONE13E)" FAIL
 fi
 
 echo "----"

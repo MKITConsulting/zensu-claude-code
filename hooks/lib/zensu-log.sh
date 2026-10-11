@@ -2255,16 +2255,32 @@ case "${1:-}" in
             if [ "$claimed_ticket_seen" = "true" ]; then
               _fsg_lines=""
               _avg_lines=""
-              if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
-                chain_gate_rc=0
-                _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
-                _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
-                [ "$chain_gate_rc" -eq 0 ] || exit 1
+              chain_change_count=""
+              if _tdd_zero_change_ticket "$claimed_ticket_val"; then
+                chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
               fi
-              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || {
+              case "$chain_change_count" in
+                (''|0|unknown)
+                  if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+                    chain_gate_rc=0
+                    _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
+                    _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
+                    [ "$chain_gate_rc" -eq 0 ] || exit 1
+                  fi
+                  ;;
+              esac
+              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone "$chain_change_count" || {
                 chain_done_rc=$?
-                zensu_state_failure_hint --chain-done "$session_val"
-                exit "$chain_done_rc"
+                [ "$chain_done_rc" -eq 4 ] || {
+                  zensu_state_failure_hint --chain-done "$session_val"
+                  exit "$chain_done_rc"
+                }
+                if [ "$chain_change_count" = "unavailable" ]; then
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+                else
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                fi
+                exit 1
               }
               [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
               [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
