@@ -52,9 +52,16 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   unchanged.
 - `tree` — `zensu-log.sh --external-review --tree --root <top>` prints `tree=<id>` from the same
   `computeTree` the import compares, or `tree=unavailable reason=<reason>`.
-- The template — `templates/workflows/zensu-review-v1.js`, which the main thread reads and passes
-  unchanged as the Workflow `script`. It owns the `zensu-review-result/v1` shape, and
-  `validateReviewResult` checks that shape with an exact key set at every level.
+- The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
+  through the Workflow `scriptPath`. It owns the `zensu-review-result/v1` shape, and
+  `validateReviewResult` checks that shape with an exact key set at every level. Before
+  anything else, `judgeResult` compares the launch record's `script_sha256` with the digest of
+  `TEMPLATE_FILE` and answers `unavailable reason=foreign-script` on a mismatch, or
+  `template-unreadable` when the file cannot be read: a model-written script can emit the same
+  shape and still filter or relabel findings, so the shape alone does not prove the template
+  ran. Under a token target the template starts refuters `REFUTER_WINDOW` (4) at a time and
+  checks the budget before each one, because a check made when every refuter starts sees the
+  budget before any of them spent it.
 - `stop-wait` — the Stop hook's `external_review_workflow_wait`. It releases a standalone
   chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at

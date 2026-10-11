@@ -69,8 +69,10 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   `templates/workflows/zensu-review-v1.js`, the plugin's own review script. A real review on
   a private repository showed why: its model-authored script launched 116 agents and
   reported 22 of its 34 findings as rejected although no verifier had voted on them, because
-  it counted a dead verifier as a no. The main thread reads the template and passes it
-  unchanged as the Workflow `script`. Its `args` carry the tree id that
+  it counted a dead verifier as a no. The main thread launches the template file through the
+  Workflow `scriptPath`, and the import answers `unavailable reason=foreign-script` for a
+  launch whose script is not that file byte for byte, so a copied or edited script is never
+  imported. Its `args` carry the tree id that
   `zensu-log.sh --external-review --tree --root <top>` prints, the lenses (the active panel's
   perspectives plus `tests`), the changed files, a diff file outside the repository (a file
   inside it would change the tree the result must name), an agent ceiling (default 10), a
@@ -82,7 +84,8 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   ceiling. A SUGGESTION gets no verifier. It never filters a failed agent out: a failed finder
   lists its lens as `finder-failed`, a failed refuter leaves its finding `unverified`, and a
   finding over the cap, the ceiling or the token budget stays in the result as `unverified`
-  with its reason and is counted under `dropped`. It has no synthesis agent, because the
+  with its reason and is counted under `dropped`. Under a token target it starts refuters four
+  at a time and checks the budget before each one, CRITICAL first. It has no synthesis agent, because the
   chain's merge and judge do that work. It always returns `zensu-review-result/v1`: the tree,
   the lenses, the ceiling, the agent counts, the `dropped` list and every finding with its
   verification state (`upheld`, `refuted` or `unverified`) and votes.
