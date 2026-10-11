@@ -397,14 +397,14 @@ second row for an id already listed — plus the `FINDINGS LEDGER PARTIAL` or
 or `FULL SUITE UNRESOLVED` line, and one row per advisory `FULL SUITE —` line that
 did not pass, carrying that line verbatim under this escaping rule, applied in this order: first write every `\`
 as `\\`, then every `|` as `\|`. An unescaped pipe splits the row and the
-renderer drops the cells past the third, which is exactly the verdict clause the
-row exists to surface; doing it in the other order turns an already-escaped `\|`
+renderer drops the cells past the third, the very verdict clause the row
+exists to surface; the other order turns an already-escaped `\|`
 inside a shell command back into a delimiter. The same rule applies to every
 carried line in this report — the `Full suite`, `Acceptance` and `Edit landing`
 verdict cells in `## What I built`. Add one row per advisory `ACCEPTANCE —` line that did
-not pass, carrying it verbatim under the same rule. Write the single line `Nothing open.` only when that table has
-no rows at all — a carried line is always a row, so `Nothing open.` can never stand
-above one.
+not pass and one per `EXTERNAL REVIEW DEGRADED — …` line, each verbatim under the same rule.
+Write the single line `Nothing open.` only when that table has
+no rows at all, because a carried line is always a row.
 
 Always render the bypass-ledger audit line next, in both cases — whether or not
 the table has rows: run
