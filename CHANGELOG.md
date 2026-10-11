@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Under a policy in a session that can show the prompt, a recorded loopback origin now skips its
   prompt, as it always did without one. A run config whose remote hostname carries no resolver
   pin, and any origin whose host is a pattern such as `https://*.example.com`, is refused.
+- **external review import**: a new `PostToolUse` hook on the `Workflow` tool records each
+  workflow the main thread launches in the plugin's private data store. When the change is
+  reviewed by a workflow that runs the plugin's template `templates/workflows/zensu-review-v1.js`
+  (under Ultracode, for example), the first `/zensu:tdd` review imports its findings instead of
+  running the aspect panel. The template's finders and refuters run as `zensu:review-aspect`,
+  confined to the read-only reviewer profile like the panel; the capability gate now lets the
+  read-only reviewers and the planning agent return a workflow result through
+  `StructuredOutput`. The result is read from the workflow's own run record, must be the
+  template's `zensu-review-result/v1` from a launch after the last edit whose arguments named
+  every changed file, and must name the current tree, and its agent counts are checked against
+  the workflow's run journal. A failed or missing agent marks the import
+  degraded instead of hiding it, and a lens whose finder failed gets its own
+  `zensu:review-aspect`. Any other workflow's result is not imported, so the panel runs as
+  before. The judge always runs on an import and names the files and perspectives it left
+  uncovered, and only those get a targeted `zensu:review-aspect`. Before the first review, the
+  Stop guard releases up to three Stops in a row while a workflow still runs, then blocks until
+  it ends. The import needs the judge, so `"reviewJudge": false` turns it off as well;
+  `"externalReviewImport": false` restores the previous behavior.
 
 ## [0.25.0] - 2026-10-06
 

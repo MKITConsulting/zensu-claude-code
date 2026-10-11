@@ -454,6 +454,15 @@ assert_case "PLM handback with a path field is denied" deny zensu:zensu-plm Suba
 assert_case "reviewer handback without a message is denied" deny zensu:review-aspect SubagentHandback '{}'
 assert_case "reviewer handback with a structured message is denied" deny zensu:review-judge SubagentHandback '{"message":{"text":"report"}}'
 assert_case "reviewer handback with a list message is denied" deny zensu:review-judge SubagentHandback '{"message":["report"]}'
+WORKFLOW_RESULT='{"findings":[{"title":"x","file":".zensu/state/tdd-phase.json","line":1}]}'
+assert_case "scoped aspect reviewer may return a workflow result through StructuredOutput" allow zensu:review-aspect StructuredOutput "$WORKFLOW_RESULT"
+assert_case "scoped judge reviewer may return a workflow result through StructuredOutput" allow zensu:review-judge StructuredOutput '{"outcome":"real"}'
+assert_case "bare reviewer fixture may return a workflow result through StructuredOutput" allow review-aspect StructuredOutput '{}'
+assert_case "scoped PLM may return a workflow result through StructuredOutput" allow zensu:zensu-plm StructuredOutput '{"answer":"x"}'
+PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer workflow result resolves no path, so a vanished cwd cannot block it" allow zensu:review-aspect StructuredOutput '{"findings":[]}'
+assert_case "evidence worker stays on the bare read trio without StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
+assert_case "reviewer cannot invoke a case variant of StructuredOutput" deny zensu:review-aspect structuredoutput '{}'
+assert_case "reviewer cannot invoke an MCP tool named like StructuredOutput" deny zensu:review-aspect mcp__evil__StructuredOutput '{}'
 assert_case "reviewer cannot invoke a case variant of SubagentHandback" deny zensu:code-reviewer subagenthandback "$HANDBACK_REPORT"
 assert_case "reviewer cannot invoke a padded SubagentHandback name" deny zensu:code-reviewer ' SubagentHandback' "$HANDBACK_REPORT"
 assert_case "reviewer cannot invoke an MCP tool named like SubagentHandback" deny zensu:code-reviewer mcp__evil__SubagentHandback "$HANDBACK_REPORT"
@@ -463,20 +472,20 @@ assert_case "evidence worker stays on the bare read trio without SubagentHandbac
 assert_case "plan evidence worker stays on the bare read trio without SubagentHandback" deny zensu:plan-review-worker SubagentHandback "$HANDBACK_REPORT"
 assert_case "neutral child keeps SubagentHandback under host governance" allow general-purpose SubagentHandback "$HANDBACK_REPORT"
 
-HANDBACK_TAIL='only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report'
+HANDBACK_TAIL='only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report'
 REVIEWER_TOOL_REASON="$(deny_reason zensu:review-aspect Bash '{"command":"pwd"}')"
 case "$REVIEWER_TOOL_REASON" in
   "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Bash; $HANDBACK_TAIL")
-    check "reviewer deny names SubagentHandback as the report channel" PASS ;;
+    check "reviewer deny names SubagentHandback and StructuredOutput as the report channels" PASS ;;
   *)
-    check "reviewer deny must name SubagentHandback as the report channel (got: ${REVIEWER_TOOL_REASON:-<empty>})" FAIL ;;
+    check "reviewer deny must name SubagentHandback and StructuredOutput as the report channels (got: ${REVIEWER_TOOL_REASON:-<empty>})" FAIL ;;
 esac
 PLM_TOOL_REASON="$(deny_reason zensu:zensu-plm Write '{"file_path":"x"}')"
 case "$PLM_TOOL_REASON" in
   "reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; $HANDBACK_TAIL")
-    check "PLM deny names SubagentHandback as the report channel" PASS ;;
+    check "PLM deny names SubagentHandback and StructuredOutput as the report channels" PASS ;;
   *)
-    check "PLM deny must name SubagentHandback as the report channel (got: ${PLM_TOOL_REASON:-<empty>})" FAIL ;;
+    check "PLM deny must name SubagentHandback and StructuredOutput as the report channels (got: ${PLM_TOOL_REASON:-<empty>})" FAIL ;;
 esac
 HANDBACK_SHAPE_REASON="$(deny_reason zensu:code-reviewer SubagentHandback '{"message":"report","to":"main"}')"
 case "$HANDBACK_SHAPE_REASON" in
@@ -499,7 +508,7 @@ HOST_NON_READ_TOOLS=(
   WebFetch WebSearch LSP ListMcpResourcesTool ReadMcpResourceTool ReadMcpResourceDirTool
   TodoWrite TaskCreate TaskGet TaskList TaskUpdate TaskOutput TaskStop
   Skill ToolSearch AskUserQuestion EnterPlanMode ExitPlanMode EnterWorktree ExitWorktree
-  SendMessage SendUserMessage ListAgents TeamCreate TeamDelete StructuredOutput
+  SendMessage SendUserMessage ListAgents TeamCreate TeamDelete
   CronCreate CronDelete CronList ScheduleWakeup RemoteTrigger PushNotification
   Artifact ArtifactCheck ArtifactComments ArtifactData SendUserFile ReportFindings DesignSync
   ListPlugins ListSkills SearchPlugins SearchSkills SuggestSkills SuggestPluginInstall
