@@ -113,6 +113,8 @@ gate_env() {
     -u ZENSU_SESSION_CONTEXT \
     -u ZENSU_RUNTIME_DIGEST \
     -u ZENSU_PROJECT_ROOT \
+    ZENSU_CONFIG="${GATE_ZENSU_CONFIG:-$TMP/absent-zensu-config.json}" \
+    ${GATE_HOME:+"HOME=$GATE_HOME"} \
     CLAUDE_PLUGIN_ROOT="$1" \
     CLAUDE_PLUGIN_DATA="$2" \
     bash "$GATE" 2>/dev/null
@@ -226,12 +228,12 @@ if [ "$PLUGIN_CASE_ALIAS" != "$PLUGIN" ] && [ -e "$PLUGIN_CASE_ALIAS" ]; then
 else
   check "case-variant plugin-root alias is exercised only on a case-insensitive filesystem" PASS
 fi
-assert_case "neutral agent cannot invoke Bash even for git status" deny arbitrary-custom Bash '{"command":"git status --short"}'
-assert_case "neutral agent cannot invoke Bash in an external review worktree" deny arbitrary-custom Bash "{\"command\":\"git -C $OTHER diff --stat\"}"
+assert_case "named neutral agent may run git status" allow arbitrary-custom Bash '{"command":"git status --short"}'
+assert_case "named neutral agent may run git in an external review worktree" allow arbitrary-custom Bash "{\"command\":\"git -C $OTHER diff --stat\"}"
 assert_case "neutral agent cannot enumerate the inherited shell environment" deny arbitrary-custom Bash '{"command":"env"}'
-assert_case "neutral agent cannot obfuscate a workflow-root path" deny arbitrary-custom Bash '{"command":"d=.zen; ls \"$d\"su/state"}'
-assert_case "neutral agent cannot obfuscate a helper name" deny arbitrary-custom Bash '{"command":"n=zensu-log; printf %s \"$n.sh\""}'
-assert_case "neutral agent cannot invoke an interpreter shell" deny arbitrary-custom Bash '{"command":"sh -c true"}'
+assert_case "the shell guard does not see an obfuscated workflow-root path (documented gap)" allow arbitrary-custom Bash '{"command":"d=.zen; ls \"$d\"su/state"}'
+assert_case "the shell guard does not see an obfuscated helper name (documented gap)" allow arbitrary-custom Bash '{"command":"n=zensu-log; printf %s \"$n.sh\""}'
+assert_case "named neutral agent may run an interpreter shell" allow arbitrary-custom Bash '{"command":"sh -c true"}'
 assert_case "neutral agent cannot invoke shell tool aliases" deny arbitrary-custom shell '{"command":"pwd"}'
 assert_case "neutral agent cannot invoke exec tool aliases" deny arbitrary-custom exec '{"cmd":"pwd"}'
 assert_case "neutral agent cannot invoke exec_command tool aliases" deny arbitrary-custom exec_command '{"cmd":"pwd"}'
@@ -242,32 +244,31 @@ assert_case "neutral agent keeps external report writes" allow arbitrary-custom 
 # The two agent types skills/gauntlet-loop/SKILL.md names by hand. Every other
 # command-tool row above uses the synthetic type "arbitrary-custom", which proves
 # the fallthrough but never these two spellings — so the skill's claim that an
-# Explore critic and a general-purpose builder hold no shell rested on reading
+# Explore critic and a general-purpose builder hold a guarded shell rested on reading
 # classifySubagent rather than on driving it. These drive it.
-assert_case "Explore critic cannot invoke a shell" deny Explore Bash '{"command":"pwd"}'
-assert_case "general-purpose builder cannot invoke a shell" deny general-purpose Bash '{"command":"pwd"}'
+assert_case "Explore critic may run a shell command" allow Explore Bash '{"command":"pwd"}'
+assert_case "general-purpose builder may run a shell command" allow general-purpose Bash '{"command":"pwd"}'
 # The premise the two rows above depend on: a payload with NEITHER subagent field
 # is the interactive main thread and is unrestricted. Whether the host reports
 # agent_type for a given spawn shape is a host property this repo cannot verify,
 # so pin the boundary rather than claiming the host's behaviour.
 assert_case "a payload with no agent_type is main-v1 and keeps its shell" allow - Bash '{"command":"pwd"}'
 assert_case "general-purpose builder keeps project writes" allow general-purpose Write "{\"file_path\":\"$PROJECT/note.md\"}"
-# The three rows above assert a VERDICT, and decision() collapses every deny to the
-# same token. Adding Explore to REVIEWER_TYPES would keep them green while the
-# skill's `host-profile-v1` claim went false, because a reviewer is denied a shell
-# too. Assert the REASON for one of them, which names the principal.
+# The rows above assert a VERDICT, and decision() collapses every deny to the
+# same token. A reviewer and host-profile-v1 are both denied a command alias, so
+# assert the REASON for one, which names the principal.
 # Runs through the SAME gate_env decision() uses, so this reason and the verdict rows
 # above can never disagree because of the environment they were invoked under.
-EXPLORE_REASON="$(deny_reason Explore Bash '{"command":"pwd"}')"
+EXPLORE_REASON="$(deny_reason Explore shell '{"command":"pwd"}')"
 case "$EXPLORE_REASON" in
   *"host-profile-v1 cannot invoke command-execution tools"*)
-    check "Explore is denied AS host-profile-v1, not merely denied" PASS ;;
+    check "Explore is denied a command alias AS host-profile-v1, not merely denied" PASS ;;
   *)
     check "Explore deny reason must name host-profile-v1 (got: ${EXPLORE_REASON:-<empty>})" FAIL ;;
 esac
 
 # The deny REASON string, not just the verdict. skills/gauntlet-loop/SKILL.md tells
-# the model that no builder or critic subagent can run a shell, and
+# the model which command tools a builder or critic subagent is denied, and
 # tests/structure/test-gauntlet-loop-skill.sh G8 greps this exact literal out of the
 # module to prove the skill is not describing a gate that stopped existing. Without
 # an owner here, rewording the message would break that unrelated suite with no
@@ -318,10 +319,13 @@ HOST_PROFILE_VERDICTS="$(node -e '
     verdict(reason === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `host-profile-v1 denies ${JSON.stringify(tool)} outside its allowlist and names the allowlist`, reason);
   }
   const commandLead = "host-profile-v1 cannot invoke command-execution tools. To search the project, ";
-  for (const tool of ["Bash", "shell", "exec", "exec_command", "terminal", "command", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__plugin_context-mode_context-mode__ctx_batch_execute", "mcp__terminal__run_in_terminal", "mcp__playwright__browser_run_code_unsafe", "mcp__desktop-commander__execute_command", "mcp__python__run_code"]) {
+  for (const tool of ["shell", "exec", "exec_command", "terminal", "command", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__plugin_context-mode_context-mode__ctx_batch_execute", "mcp__terminal__run_in_terminal", "mcp__playwright__browser_run_code_unsafe", "mcp__desktop-commander__execute_command", "mcp__python__run_code"]) {
     const reason = judge(tool, { path: "src/probe.js", code: "x", command: "pwd" });
     verdict(typeof reason === "string" && reason.startsWith(commandLead), `host-profile-v1 gives ${tool} the command-execution deny and its search remedy`, reason);
   }
+  const grantLead = "host-profile-v1 cannot invoke command-execution tools: the subagent reports no usable agent_type, so the shell grant cannot tell it from a read-only reviewer. To search the project, ";
+  const unnamedBash = judge("Bash", { command: "pwd" });
+  verdict(typeof unnamedBash === "string" && unnamedBash.startsWith(grantLead) && unnamedBash.endsWith(" Report the need to the main thread instead."), "host-profile-v1 refuses Bash to a child without agent_type with the grant cause, the search remedy and the main-thread close", unnamedBash);
   for (const [label, tool, input, expected] of [
     ["an admitted MCP tool still has its path inputs checked", "mcp__zensu__get_feature", { feature_id: "F-1", file_path: ".zensu/state/tdd-phase.json" }, "host-profile-v1 cannot access a protected Session Control path"],
     ["a Zensu MCP mutation stays outside the read allowlist", "mcp__zensu__update_feature", { feature_id: "F-1" }, "host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist"],
@@ -351,11 +355,17 @@ fi
 SRC_EXAMPLE="$(native_join "$NATIVE_PROJECT" src)"
 DOCS_EXAMPLE="$(native_join "$NATIVE_PROJECT" docs)"
 SEARCH_LEAD="To search the project, call Grep or Glob with a path that names a subdirectory of the project root $NATIVE_PROJECT other than .zensu"
-BASH_REMEDY_REASON="$(deny_reason general-purpose Bash '{"command":"grep -r session ."}')"
-if [ "$BASH_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
-  check "the neutral Bash deny names the Grep/Glob remedy and the project's searchable subdirectories" PASS
+COMMAND_REMEDY_REASON="$(deny_reason general-purpose shell '{"command":"grep -r session ."}')"
+if [ "$COMMAND_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
+  check "the neutral command-tool deny names the Grep/Glob remedy and the project's searchable subdirectories" PASS
 else
-  check "the neutral Bash deny must name the Grep/Glob remedy (got: ${BASH_REMEDY_REASON:-<empty>})" FAIL
+  check "the neutral command-tool deny must name the Grep/Glob remedy (got: ${COMMAND_REMEDY_REASON:-<empty>})" FAIL
+fi
+UNNAMED_REMEDY_REASON="$(deny_reason ? Bash '{"command":"grep -r session ."}')"
+if [ "$UNNAMED_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: the subagent reports no usable agent_type, so the shell grant cannot tell it from a read-only reviewer. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path. Report the need to the main thread instead." ]; then
+  check "the refused shell grant names its cause, the Grep/Glob remedy and the main-thread close" PASS
+else
+  check "the refused shell grant must name its cause and the remedy (got: ${UNNAMED_REMEDY_REASON:-<empty>})" FAIL
 fi
 TRAVERSAL_REMEDY_REASON="$(deny_reason general-purpose Grep '{"pattern":"phase","path":"."}')"
 if [ "$TRAVERSAL_REMEDY_REASON" = "reviewer-capability-v1 deny: host-profile-v1 traversal root may reach protected Session Control or workflow state. $SEARCH_LEAD: src. For example, pass $SRC_EXAMPLE as the path." ]; then
@@ -370,13 +380,13 @@ else
   check "the reviewer traversal deny must name the subdirectory remedy (got: ${REVIEWER_TRAVERSAL_REASON:-<empty>})" FAIL
 fi
 MCP_COMMAND_REASON="$(deny_reason general-purpose mcp__plugin_context-mode_context-mode__ctx_execute '{"language":"shell","code":"grep -r x ."}')"
-if [ "$MCP_COMMAND_REASON" = "$BASH_REMEDY_REASON" ]; then
-  check "a command-executing MCP tool gets the same command-execution deny and remedy as Bash" PASS
+if [ "$MCP_COMMAND_REASON" = "$COMMAND_REMEDY_REASON" ]; then
+  check "a command-executing MCP tool gets the same command-execution deny and remedy as a shell alias" PASS
 else
   check "a command-executing MCP tool must get the command-execution deny and remedy (got: ${MCP_COMMAND_REASON:-<empty>})" FAIL
 fi
 mkdir "$PROJECT/docs"
-DEMAND_REASON="$(deny_reason general-purpose Bash '{"command":"ls"}')"
+DEMAND_REASON="$(deny_reason general-purpose shell '{"command":"ls"}')"
 rmdir "$PROJECT/docs"
 if [ "$DEMAND_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. $SEARCH_LEAD: docs, src. For example, pass $DOCS_EXAMPLE as the path." ]; then
   check "the remedy lists the project's subdirectories as they exist at deny time" PASS
@@ -397,7 +407,7 @@ SESSION_ID="$FLAT_SESSION_ID" PROJECT="$FLAT_PROJECT" node -e '
 ' | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
   env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
   bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null
-FLAT_REASON="$(PAYLOAD_SESSION_ID="$FLAT_SESSION_ID" PAYLOAD_CWD="$FLAT_PROJECT" deny_reason general-purpose Bash '{"command":"ls"}')"
+FLAT_REASON="$(PAYLOAD_SESSION_ID="$FLAT_SESSION_ID" PAYLOAD_CWD="$FLAT_PROJECT" deny_reason general-purpose shell '{"command":"ls"}')"
 if [ "$FLAT_REASON" = "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools. To search the project, call Grep or Glob with a path that names a subdirectory of the project root $(native_real "$FLAT_PROJECT") other than .zensu; none qualifies here, so Read the files you need or name one file as the Grep path." ]; then
   check "a project root without a searchable subdirectory gets the Read fallback" PASS
 else
@@ -574,6 +584,108 @@ assert_case "neutral agent cannot read the host session selector" deny arbitrary
 assert_case "neutral agent cannot invoke the model-session binder function" deny arbitrary-custom Bash '{"command":"zensu_bind_model_session"}'
 assert_case "neutral agent cannot source the model-session binder" deny arbitrary-custom Bash '{"command":"source hooks/lib/zensu-session.sh"}'
 assert_case "neutral agent cannot invoke the private binder CLI" deny arbitrary-custom Bash '{"command":"node hooks/lib/claude-hook-session-v1.js model-bind"}'
+SHELL_OFF_CONFIG="$TMP/shell-off-config.json"
+SHELL_BAD_CONFIG="$TMP/shell-bad-config.json"
+printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$SHELL_OFF_CONFIG"
+printf '%s\n' '{"hooks":' > "$SHELL_BAD_CONFIG"
+assert_case "a subagent without agent_type gets no shell" deny ? Bash '{"command":"pwd"}'
+assert_case "a zensu-review-* persona gets no shell" deny zensu-review-domain Bash '{"command":"git status"}'
+GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false withdraws the subagent shell" deny general-purpose Bash '{"command":"pwd"}'
+GATE_ZENSU_CONFIG="$SHELL_BAD_CONFIG" assert_case "an unreadable config layer withdraws the subagent shell" deny general-purpose Bash '{"command":"pwd"}'
+GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "hooks.subagentShell false leaves the main thread its shell" allow - Bash '{"command":"pwd"}'
+SHELL_OFF_REASON="$(GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" deny_reason general-purpose Bash '{"command":"pwd"}')"
+case "$SHELL_OFF_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell"*)
+    check "the withdrawn grant keeps the command-tool deny literal and names the flag" PASS ;;
+  *)
+    check "the withdrawn grant must name hooks.subagentShell (got: ${SHELL_OFF_REASON:-<empty>})" FAIL ;;
+esac
+UNNAMED_SHELL_REASON="$(deny_reason ? Bash '{"command":"pwd"}')"
+case "$UNNAMED_SHELL_REASON" in
+  *"no usable agent_type"*) check "an unnamed child is refused the grant for its missing agent_type" PASS ;;
+  *) check "an unnamed child's deny must name the missing agent_type (got: ${UNNAMED_SHELL_REASON:-<empty>})" FAIL ;;
+esac
+assert_case "the shell guard denies a .zensu path" deny general-purpose Bash '{"command":"ls .zensu/state"}'
+assert_case "the shell guard denies the private plugin data" deny general-purpose Bash "{\"command\":\"ls $PLUGIN_DATA\"}"
+assert_case "the shell guard denies the session record" deny general-purpose Bash "{\"command\":\"cat $SESSION_CONTEXT\"}"
+assert_case "the shell guard denies a Zensu workflow helper" deny general-purpose Bash '{"command":"bash hooks/lib/zensu-log.sh --chain-done"}'
+assert_case "the shell guard keeps a read of a helper's source" allow general-purpose Bash '{"command":"grep -n tdd hooks/lib/zensu-log.sh"}'
+assert_case "the shell guard denies a selector assignment" deny general-purpose Bash '{"command":"ZENSU_CONFIG=/tmp/x make test"}'
+assert_case "the shell guard denies an environment dump" deny general-purpose Bash '{"command":"export -p"}'
+assert_case "the shell guard denies git clean" deny general-purpose Bash '{"command":"git clean -fdx"}'
+assert_case "the shell guard denies git stash" deny general-purpose Bash '{"command":"git stash -u"}'
+assert_case "the shell guard keeps git stash list" allow general-purpose Bash '{"command":"git stash list"}'
+assert_case "the shell guard denies git reset --hard" deny general-purpose Bash '{"command":"git reset --hard HEAD~1"}'
+assert_case "the shell guard denies git checkout of the whole tree" deny general-purpose Bash '{"command":"git checkout -- ."}'
+assert_case "the shell guard denies git worktree remove" deny general-purpose Bash '{"command":"git worktree remove ../other"}'
+assert_case "the shell guard denies claude plugin management" deny general-purpose Bash '{"command":"claude plugin update zensu@zensu"}'
+assert_case "the shell guard denies removing the project root" deny general-purpose Bash "{\"command\":\"rm -rf $PROJECT\"}"
+assert_case "the shell guard denies removing the working directory" deny general-purpose Bash '{"command":"rm -rf ."}'
+assert_case "the shell guard keeps removing a build directory" allow general-purpose Bash '{"command":"rm -rf build"}'
+assert_case "the shell guard denies a background shell" deny general-purpose Bash '{"command":"sleep 5","run_in_background":true}'
+assert_case "the shell guard scans every string field" deny general-purpose Bash '{"command":"pwd","description":"inspect .zensu/state"}'
+GATE_HOME="$TMP" assert_case "the shell guard expands ~ before matching protected paths" deny general-purpose Bash '{"command":"ls ~/plugin-data/session-control"}'
+GATE_HOME="$TMP" assert_case "the shell guard expands \$HOME before matching protected paths" deny general-purpose Bash '{"command":"ls \"$HOME/plugin-data\""}'
+assert_case "a Monitor command is not part of the shell grant" deny general-purpose Monitor '{"command":"tail -f build.log"}'
+assert_case "a Monitor stream stays outside the allowlist" deny ? Monitor '{"ws":"wss://example.test/feed"}'
+MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
+case "$MONITOR_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*)
+    check "a named neutral agent's Monitor command gets the allowlist deny, not the shell guard" PASS ;;
+  *)
+    check "a Monitor command must get the allowlist deny (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
+esac
+GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
+GUARD_REASON="$(deny_reason general-purpose Bash '{"command":"git clean -fdx"}')"
+case "$GUARD_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 shell guard: the command runs a git operation that removes or reverts work (git clean). $GUARD_TAIL")
+    check "the guard deny names the rule and says it is not a sandbox" PASS ;;
+  *)
+    check "the guard deny must name the rule and the accident-only bound (got: ${GUARD_REASON:-<empty>})" FAIL ;;
+esac
+case "$SHELL_OFF_REASON" in
+  *". Report the need to the main thread instead.")
+    check "the withdrawn grant ends by sending the need to the main thread" PASS ;;
+  *)
+    check "the withdrawn grant must end with the main-thread tail (got: ${SHELL_OFF_REASON:-<empty>})" FAIL ;;
+esac
+assert_case "the shell guard keeps a quoted commit subject whole" allow general-purpose Bash '{"command":"git commit -m \"feat(export): add CSV export\""}'
+assert_case "the shell guard denies a redirected environment dump" deny general-purpose Bash '{"command":"env > env.txt"}'
+assert_case "the shell guard follows cd before judging a removal" deny general-purpose Bash '{"command":"cd .. && rm -rf project"}'
+CONFIG_HOME="$TMP/config-home"
+mkdir -p "$CONFIG_HOME/.zensu"
+printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$CONFIG_HOME/.zensu/config.json"
+GATE_HOME="$CONFIG_HOME" assert_case "a subagent cannot edit the global config layer that decides its shell" deny general-purpose Edit "{\"file_path\":\"$CONFIG_HOME/.zensu/config.json\",\"old_string\":\"false\",\"new_string\":\"true\"}"
+GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" assert_case "a subagent cannot rewrite the explicit ZENSU_CONFIG file" deny general-purpose Write "{\"file_path\":\"$SHELL_OFF_CONFIG\",\"content\":\"{}\"}"
+GATE_HOME="$CONFIG_HOME" assert_case "a subagent may still read the global config layer" allow general-purpose Read "{\"file_path\":\"$CONFIG_HOME/.zensu/config.json\"}"
+GATE_HOME="$CONFIG_HOME" assert_case "the main thread may edit the global config layer" allow - Edit "{\"file_path\":\"$CONFIG_HOME/.zensu/config.json\",\"old_string\":\"false\",\"new_string\":\"true\"}"
+CONFIG_REASON="$(GATE_HOME="$CONFIG_HOME" deny_reason general-purpose Write "{\"file_path\":\"$CONFIG_HOME/.zensu/config.json\",\"content\":\"{}\"}")"
+case "$CONFIG_REASON" in
+  *"cannot change a Zensu configuration layer"*) check "the config-layer deny names the layer rule" PASS ;;
+  *) check "the config-layer deny must name the layer rule (got: ${CONFIG_REASON:-<empty>})" FAIL ;;
+esac
+CD_PARENT_REASON="$(deny_reason general-purpose Bash '{"command":"cd .. && rm -rf project"}')"
+case "$CD_PARENT_REASON" in
+  *"the command removes or moves the project root or one of its parents."*)
+    check "the removal after cd .. is judged as a project-root removal" PASS ;;
+  *)
+    check "the removal after cd .. must be judged as a project-root removal (got: ${CD_PARENT_REASON:-<empty>})" FAIL ;;
+esac
+LINK_HOME="$TMP/link-home"
+LINK_TARGET="$TMP/link-target/zensu.json"
+mkdir -p "$LINK_HOME/.zensu" "$TMP/link-target"
+printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$LINK_TARGET"
+if ln -s "$LINK_TARGET" "$LINK_HOME/.zensu/config.json" 2>/dev/null && [ -L "$LINK_HOME/.zensu/config.json" ]; then
+  GATE_HOME="$LINK_HOME" assert_case "a subagent cannot edit a symlinked global config layer" deny general-purpose Edit "{\"file_path\":\"$LINK_HOME/.zensu/config.json\",\"old_string\":\"false\",\"new_string\":\"true\"}"
+  GATE_HOME="$LINK_HOME" assert_case "a subagent cannot edit the target of a symlinked config layer" deny general-purpose Edit "{\"file_path\":\"$LINK_TARGET\",\"old_string\":\"false\",\"new_string\":\"true\"}"
+else
+  printf '  SKIP  %s\n' "this runner cannot create a symbolic link, so the symlinked config layer is unverified here"
+fi
+if [ "$(uname -s)" = Darwin ]; then
+  GATE_HOME="$TMP/case-home" assert_case "a subagent cannot create a case-variant spelling of an absent config layer" deny general-purpose Write "{\"file_path\":\"$TMP/case-home/.ZENSU/config.json\",\"content\":\"{}\"}"
+fi
+PAYLOAD_CWD="$OTHER" GATE_ZENSU_CONFIG=relative-zensu.json assert_case "a relative ZENSU_CONFIG is protected against the subagent's working directory too" deny general-purpose Write "{\"file_path\":\"$OTHER/relative-zensu.json\",\"content\":\"{}\"}"
+GATE_ZENSU_CONFIG=relative-zensu.json assert_case "a relative ZENSU_CONFIG is protected against the project root" deny general-purpose Write "{\"file_path\":\"$PROJECT/relative-zensu.json\",\"content\":\"{}\"}"
 assert_case "neutral agent cannot read the private binder implementation" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/lib/claude-hook-session-v1.js\"}"
 assert_case "neutral agent cannot read the model-session shell implementation" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/lib/zensu-session.sh\"}"
 assert_case "neutral content cannot impersonate the trusted payload principal" allow arbitrary-custom Write '{"file_path":"notes.txt","content":"principal=main-v1"}'
@@ -886,6 +998,14 @@ else
   done <<EOF
 $HOST_VERDICTS
 EOF
+fi
+
+GUARD_UNIT="$PLUGIN/tests/structure/subagent-shell-guard-v1.test.js"
+if node --test "$GUARD_UNIT" >"$TMP/guard-unit.out" 2>&1; then
+  check "the shell guard unit suite passes (node --test subagent-shell-guard-v1.test.js)" PASS
+else
+  sed 's/^/    /' "$TMP/guard-unit.out" | tail -40
+  check "the shell guard unit suite passes (node --test subagent-shell-guard-v1.test.js)" FAIL
 fi
 
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"

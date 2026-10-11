@@ -237,6 +237,8 @@ run "B33 mutation + --help (a read) -> ALLOW"      "zensu security classify f1 -
 run "B33b mutation + -h (a read) -> ALLOW"         "zensu features create -h"                                   '' ALLOW
 run "B34 inline ZENSU_MCP_GATE=off -> ALLOW"       "ZENSU_MCP_GATE=off zensu security classify f1"              '' ALLOW
 run "B34b inline gate value not 'off' -> DENY"     "ZENSU_MCP_GATE=on zensu security classify f1"               '' DENY
+run "B34c subagent inline ZENSU_MCP_GATE=off -> DENY" "ZENSU_MCP_GATE=off zensu security classify f1"           general-purpose DENY
+run "B34d subagent inline off keeps reads"         "ZENSU_MCP_GATE=off zensu features get f1"                   general-purpose ALLOW
 run "B35 --api-url localhost -> ALLOW"             "zensu --api-url http://localhost:8090 security classify f1" '' ALLOW
 run "B35b inline ZENSU_API_URL 127.0.0.1 -> ALLOW" "ZENSU_API_URL=http://127.0.0.1:8090 zensu security classify f1" '' ALLOW
 run "B35c --api-url prod still -> DENY"            "zensu --api-url https://api.zensu.dev security classify f1" '' DENY
@@ -253,6 +255,15 @@ if printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE=off' && printf '%s' "$REAS
   check "B37 deny reason advertises inline-off + localhost escapes" PASS
 else
   check "B37 deny reason narrowed-escape wording" FAIL
+fi
+REASON_S="$(payload 'ZENSU_MCP_GATE=off zensu security classify f1' general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retry this command, with or without a prefix.' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_API_URL' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'never a route for a subagent'; then
+  check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
+else
+  check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
 fi
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"

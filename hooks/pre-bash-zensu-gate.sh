@@ -11,8 +11,8 @@
 #
 # Scoped to its actual threat model — a low-context agent writing to the real
 # tracked product — so it deliberately does NOT fire on: reads and `--help`/`-h`
-# (how an agent *gains* the context the gate wants), an explicit per-command
-# `ZENSU_MCP_GATE=off` prefix, or a write whose target backend
+# (how an agent *gains* the context the gate wants), the explicit per-command
+# `ZENSU_MCP_GATE=off` prefix of a main-thread command, or a write whose target backend
 # (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
 # where the dedup/journey/classification conventions are meaningless.
 #
@@ -49,10 +49,11 @@ command -v node >/dev/null 2>&1 || exit 0
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
 INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
-  let cmd = "";
+  let cmd = "", sub = false;
   try {
     const j = JSON.parse(process.env.PAYLOAD || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
+    sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
   } catch (_) { process.exit(0); }
   if (!cmd || cmd.indexOf("zensu") === -1) process.exit(0);
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
@@ -88,7 +89,7 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
     }
     if (base !== "zensu") continue;                                                // command basename must be zensu
     const rest = toks.slice(i + 1);
-    if (envp.ZENSU_MCP_GATE === "off") {                                           // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
+    if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
       if (out.indexOf("__bypass__\tZENSU_MCP_GATE") < 0) out.push("__bypass__\tZENSU_MCP_GATE");
       continue;
     }
