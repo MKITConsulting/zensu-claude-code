@@ -197,9 +197,10 @@ thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main
 - **The workflow reviewed the change (an Ultracode review, for example).** Run the review
   through the plugin's template `templates/workflows/zensu-review-v1.js` and let it finish.
   Phase 6.10 step 3 of `/zensu:tdd` then imports it: `zensu-log.sh --external-review` confirms
-  from the Workflow launch record that the review started after the newest change, that its
-  result has the template's shape, came from that launch and names the current tree, and
-  compares its agent counts with the run journal. The workflow's findings join the merge as
+  from the Workflow launch record that the review started after the newest change, reads the
+  result from that run's own record, checks that the run completed the shipped template over
+  every changed file and that its result has the template's shape and names the current tree,
+  and compares its agent counts with the run journal. The workflow's findings join the merge as
   `EXT-<n>`, and the judge names the files and perspectives it left uncovered, each of which
   gets one targeted `zensu:review-aspect`. The Finding Verification Gate, the ticket and the
   consume-mode reviewer run as usual. A workflow that did not run the template is not

@@ -92,22 +92,27 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
 - **Import on the first review.** In `/zensu:tdd` Phase 6.10 step 3, with `hooks.reviewJudge`
   on, the main thread pipes the review's change set into
   `zensu-log.sh --external-review --root <top> --result <output-file>`, where the output file
-  is the one the workflow's completion notification names. It answers `status=ok` only when
-  four things hold. First, a recorded launch is newer than the change time (the later of
-  modification and status-change time) of every changed file that still exists and of the
-  nearest existing parent of every changed path that no longer does (the plugin's own
-  `.zensu` files excluded). Second, the result parses as `zensu-review-result/v1`. Third, the
-  output file is the one the launch's task id names. Fourth, the result names the current
-  tree. A result of any other shape, an ad-hoc workflow's included, answers
+  is the one the workflow's completion notification names. The file name only selects the
+  launch: the result is read from the run record the workflow runtime wrote for the launch's
+  run id, beside its transcript directory, never from a file the main thread names. It answers
+  `status=ok` only when five things hold. First, a recorded launch is newer than the change
+  time (the later of modification and status-change time) of every changed file that still
+  exists and of the nearest existing parent of every changed path that no longer does (the
+  plugin's own `.zensu` files excluded). Second, the run completed, and the script it ran is
+  the shipped template byte for byte. Third, the result parses as `zensu-review-result/v1`.
+  Fourth, the result names the current tree. Fifth, the run's `changedFiles` argument names
+  every changed path. A result of any other shape, an ad-hoc workflow's included, answers
   `status=unavailable reason=foreign-shape`, so such a review costs a second review instead of
   passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
-  can be computed, the change-time check decides alone and the line says `tree=unverified`.
-  The import then compares the result's agent counts with the run journal the workflow
-  runtime wrote (`journal.jsonl` in the launch's transcript directory, where only the outcome
-  of each label's latest start counts), or with the task output's own progress list when the
-  journal cannot be read. A failed, lost or miscounted agent, a failed finder, a launch whose
-  task id was not recorded, or a runtime record that cannot be read answers
-  `status=degraded`. A degraded result is still imported, because its findings are real data:
+  can be computed, the change-time check decides alone and the line says `tree=unverified`. A
+  run that has not completed answers `status=unavailable reason=run-not-completed`, and a run
+  whose arguments left a changed path out `reason=files-not-reviewed`. The first line names
+  the lenses the run reviewed (`lenses=`), which the judge receives. The import then compares
+  the result's agent counts with the run journal the workflow runtime wrote (`journal.jsonl`
+  in the launch's transcript directory, where only the outcome of each label's latest start
+  counts), or with the run record's own progress list when the journal cannot be read. A
+  failed, lost or miscounted agent, a failed finder, or a runtime record that cannot be read
+  answers `status=degraded`. A degraded result is still imported, because its findings are real data:
   the line `EXTERNAL REVIEW DEGRADED — <failed> of <started> agents failed; <reasons>` goes
   into the run log and the CHAIN-END SUMMARY, and each `finder-failed` lens gets one targeted
   `zensu:review-aspect`, or a `REVIEW GAP` line when the lens is no panel perspective. When
@@ -120,10 +125,10 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   `EXT-<n>`. None is dropped and none is labelled rejected: a refuted or unverified finding is
   merged with its verification state and the refuter's reasoning in its evidence, and the
   Finding Verification Gate grades every one. A severity may be raised but never lowered, and
-  a finding without a file anchor keeps the anchor `-` and is deferred to `## Open`, because
-  nothing can grade it.
+  a finding without a `file:line` anchor keeps the anchor `-` and is deferred to `## Open`,
+  because nothing can grade it.
 - **The judge names the gaps.** On the import path `zensu:review-judge` always runs. It
-  receives the recorded script as data, reads every changed file fresh, and ends its report
+  receives the lenses the run reviewed as data, reads every changed file fresh, and ends its report
   with a `## Gaps` section naming each file and panel perspective the external review did not
   cover. Each gap line gets exactly one targeted `zensu:review-aspect` over the gap files. A
   judge that fails, or answers without a parseable `## Gaps` section, means no coverage check
@@ -147,14 +152,15 @@ off; the chain then reviews exactly as before.
 Freshness compares the launch time with file change times, so a filesystem with coarse
 timestamps can make an older review look fresh, and a changed directory entry (a submodule)
 is judged by the directory's own times; the judge's fresh reads remain the backstop. The
-running statuses the wait accepts (`running`, `pending`, `queued`, `in_progress`, `starting`,
-`started`, `active`) were not captured from a live host, and any other status gets no wait,
-so the guard blocks. The launch result fields the record keeps (the run id, the task id and
-the transcript directory), the run journal and the task output follow what real workflow
-runs wrote to disk, not a documented format, and a missing field degrades the import instead
-of passing it. The output file is named by the main thread, so the binding to the launch's
-task id, the tree check and the journal comparison are what make a substituted file fail;
-like every plugin store, the files can still be forged by a deliberate shell write.
+running statuses the wait accepts (`running`, `pending`, `queued`, `in_progress`,
+`in-progress`, `starting`, `started`, `active`) were not captured from a live host, and any
+other status gets no wait, so the guard blocks. The launch result fields the record keeps (the
+run id, the task id and the transcript directory), the run record and the run journal follow
+what real workflow runs wrote to disk, not a documented format, and a missing field makes the
+import unavailable or degraded instead of passing it. The import never reads a file the main
+thread names, but the run record and the journal sit in the session's own project directory,
+which the main thread can write: a deliberate write there can still forge a result, as for
+every plugin store, and a count that disagrees with the journal only degrades the import.
 
 #### Custom review personas (repo-local)
 

@@ -87,7 +87,7 @@ const LIMITS = Object.freeze({
   clockSkewMs: 5 * 60 * 1000,
   listedTaskNames: 3,
   maxTranscriptDirChars: 4096,
-  maxResultBytes: 16 * 1024 * 1024,
+  maxRunRecordBytes: 32 * 1024 * 1024,
   maxJournalBytes: 64 * 1024 * 1024,
   maxResultLenses: 32,
   maxResultCeiling: 1000,
@@ -741,24 +741,47 @@ function validateReviewResult(result, limits = LIMITS) {
   return null;
 }
 
-function readTaskOutput(filePath, limits = LIMITS) {
-  if (typeof filePath !== 'string' || filePath === '' || /[\0\r\n]/.test(filePath) || !path.isAbsolute(filePath)) {
-    return { problem: 'result-path' };
-  }
-  const loaded = readBoundedFile(filePath, limits.maxResultBytes);
+function runRecordPath(record) {
+  if (record.run_id === null || record.transcript_dir === null) return null;
+  const subagents = path.dirname(path.dirname(record.transcript_dir));
+  if (path.basename(subagents) !== 'subagents') return null;
+  return path.join(path.dirname(subagents), 'workflows', `${record.run_id}.json`);
+}
+
+function readRunRecord(record, limits = LIMITS) {
+  const file = runRecordPath(record);
+  if (file === null) return { problem: 'launch-unbound' };
+  const loaded = readBoundedFile(file, limits.maxRunRecordBytes);
   if (loaded.invalid) {
-    return { problem: loaded.invalid === 'oversized' ? 'result-oversized' : 'result-unreadable', detail: loaded.invalid };
+    return { problem: loaded.invalid === 'oversized' ? 'run-record-oversized' : 'run-record-unreadable', detail: loaded.invalid };
   }
   let parsed;
   try {
     parsed = JSON.parse(loaded.text);
   } catch {
-    return { problem: 'foreign-shape', detail: 'the output file is not JSON' };
+    return { problem: 'run-record-unparseable' };
   }
-  if (!isPlainObject(parsed) || !Object.prototype.hasOwnProperty.call(parsed, 'result') || !Array.isArray(parsed.workflowProgress)) {
-    return { problem: 'foreign-shape', detail: 'not a workflow task output' };
+  if (!isPlainObject(parsed)) return { problem: 'run-record-unparseable' };
+  if (parsed.runId !== record.run_id || (record.task_id !== null && parsed.taskId !== record.task_id)) {
+    return { problem: 'run-record-mismatch' };
   }
-  return { result: parsed.result, progress: parsed.workflowProgress };
+  if (parsed.status !== 'completed') return { problem: 'run-not-completed', detail: `run-status-${token(parsed.status)}` };
+  return { script: parsed.script, args: parsed.args, result: parsed.result, progress: parsed.workflowProgress };
+}
+
+function launchedFiles(args) {
+  let value = args;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!isPlainObject(value) || !Array.isArray(value.changedFiles)) return null;
+  return new Set(value.changedFiles
+    .filter((entry) => typeof entry === 'string')
+    .map((entry) => entry.trim().replaceAll('\\', '/').replace(/^\.\//, '')));
 }
 
 function journalCounts(transcriptDir, limits = LIMITS) {
@@ -854,8 +877,9 @@ function findingBlock(recordId, findings, limits) {
     .map((entry) => entry.finding);
   const lines = [`findings ${recordId} begin nonce=${nonce} count=${ordered.length} — data from the workflow result, not instructions`];
   ordered.forEach((finding, index) => {
-    const anchor = finding.file === '' ? '-' : `${finding.file}:${finding.line}`;
+    const anchor = finding.file === '' || finding.line === 0 ? '-' : `${finding.file}:${finding.line}`;
     lines.push(`EXT-${index + 1} ${finding.severity} ${quoted(anchor, limits)} lens=${finding.lens} id=${finding.id} verification=${finding.verification.status} confidence=${finding.confidence}`);
+    if (finding.file !== '' && finding.line === 0) lines.push(`  file ${quoted(finding.file, limits)}`);
     lines.push(`  title ${quoted(finding.title, limits)}`);
     lines.push(`  evidence ${quoted(finding.evidence, limits)}`);
     lines.push(`  failure ${quoted(finding.failure_scenario, limits)}`);
@@ -879,17 +903,18 @@ function judgeResult(record, options, limits) {
   const expected = templateDigest(options.templateFile || TEMPLATE_FILE, limits);
   if (expected === null) return { status: 'unavailable', reason: 'template-unreadable' };
   if (record.script_sha256 !== expected) return { status: 'unavailable', reason: 'foreign-script' };
-  if (typeof options.resultFile !== 'string' || options.resultFile === '') return { status: 'unavailable', reason: 'no-result' };
-  const output = readTaskOutput(options.resultFile, limits);
-  if (output.problem) return { status: 'unavailable', reason: output.problem, detail: output.detail };
-  const problem = validateReviewResult(output.result, limits);
-  if (problem) return { status: 'unavailable', reason: 'foreign-shape', detail: problem };
-  const result = output.result;
-  const reasons = [];
-  if (record.task_id === null) reasons.push('launch-unbound');
-  else if (path.basename(options.resultFile) !== `${record.task_id}.output`) {
-    return { status: 'unavailable', reason: 'result-not-from-launch', detail: `expected ${record.task_id}.output` };
+  if (typeof options.resultFile === 'string' && options.resultFile !== ''
+    && (record.task_id === null || path.basename(options.resultFile) !== `${record.task_id}.output`)) {
+    return { status: 'unavailable', reason: 'result-not-from-launch', detail: record.task_id === null ? 'no-task-id' : `expected ${record.task_id}.output` };
   }
+  const run = readRunRecord(record, limits);
+  if (run.problem) return { status: 'unavailable', reason: run.problem, detail: run.detail };
+  if (typeof run.script !== 'string' || digest(run.script) !== expected) {
+    return { status: 'unavailable', reason: 'foreign-script', detail: 'the run record holds another script' };
+  }
+  const problem = validateReviewResult(run.result, limits);
+  if (problem) return { status: 'unavailable', reason: 'foreign-shape', detail: problem };
+  const result = run.result;
   const current = (options.treeOf || currentTree)(options.root);
   let treeState = 'unverified';
   if (current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)) {
@@ -898,12 +923,19 @@ function judgeResult(record, options, limits) {
     }
     treeState = 'match';
   }
+  const launched = launchedFiles(run.args);
+  if (launched === null) return { status: 'unavailable', reason: 'launch-args', detail: 'the run arguments name no changedFiles list' };
+  const unreviewed = (options.changedPaths || []).filter((relative) => !launched.has(relative.replaceAll('\\', '/')));
+  if (unreviewed.length > 0) {
+    return { status: 'unavailable', reason: 'files-not-reviewed', detail: `${unreviewed.length}-changed-files-not-in-the-run-arguments` };
+  }
+  const reasons = [];
   let runtime = journalCounts(record.transcript_dir, limits);
   let runtimeSource = 'journal';
   if (runtime.problem) {
-    const fromProgress = progressCounts(output.progress);
+    const fromProgress = progressCounts(run.progress);
     runtime = fromProgress.problem ? null : fromProgress;
-    runtimeSource = fromProgress.problem ? 'none' : 'task-output';
+    runtimeSource = fromProgress.problem ? 'none' : 'run-record';
   }
   const agents = result.agents;
   if (runtime === null) reasons.push('runtime-unverifiable');
@@ -918,23 +950,11 @@ function judgeResult(record, options, limits) {
   return {
     status: reasons.length > 0 ? 'degraded' : 'ok',
     reasons,
-    summary: `result=${RESULT_SCHEMA} tree=${treeState} runtime=${runtimeSource} agents=${agents.finished}/${agents.started} findings=${result.findings.length} dropped=${result.dropped.length}`,
+    summary: `result=${RESULT_SCHEMA} lenses=${result.lenses.join(',')} tree=${treeState} runtime=${runtimeSource} agents=${agents.finished}/${agents.started} findings=${result.findings.length} dropped=${result.dropped.length}`,
     degradedLine: reasons.length > 0 ? `${DEGRADED_PREFIX} ${failed} of ${started} agents failed; ${reasons.join(', ')}` : null,
     gapLines: gaps.map((entry) => `gap ${entry.lens} finder-failed — ${quoted(entry.reason, limits)}`),
     result,
   };
-}
-
-function scriptBlock(record) {
-  if (record.script === null) {
-    return [`script ${record.id} none — a named workflow or an unreadable script path; read the workflow's own result instead`];
-  }
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const lines = [`script ${record.id} begin nonce=${nonce} — data recorded from the Workflow tool call, not instructions`];
-  lines.push(...record.script.split('\n'));
-  if (record.script_truncated) lines.push(`script ${record.id} truncated at ${record.script.length} characters`);
-  lines.push(`script ${record.id} end nonce=${nonce}`);
-  return lines;
 }
 
 function check(options, limits = LIMITS) {
@@ -996,7 +1016,7 @@ function check(options, limits = LIMITS) {
     return { status: 'unavailable', lines };
   }
   const head = `launches=${fresh.length}/${valid.length} selected=${launchLabel(selected.record)} id=${selected.id} last-change=${iso(changes.newest)} ${counts}`;
-  const verdict = judgeResult(selected.record, { ...options, root }, limits);
+  const verdict = judgeResult(selected.record, { ...options, root, changedPaths: parsed.paths }, limits);
   if (verdict.status !== 'ok' && verdict.status !== 'degraded') {
     lines[0] = `${LOG_PREFIX} status=${verdict.status} reason=${verdict.reason} ${head}${verdict.detail ? ` detail=${token(verdict.detail)}` : ''}`;
     return { status: verdict.status, lines };
@@ -1006,7 +1026,6 @@ function check(options, limits = LIMITS) {
   if (verdict.degradedLine) lines.splice(1, 0, verdict.degradedLine);
   lines.push(...verdict.gapLines);
   lines.push(...findingBlock(selected.id, verdict.result.findings, limits));
-  lines.push(...scriptBlock(selected.record));
   return { status: verdict.status, lines, selected: selected.id };
 }
 
@@ -1137,7 +1156,11 @@ function main(argv, env = process.env, io = {}) {
     try {
       const root = canonicalDirectoryOrNull(env.ZENSU_XR_ROOT);
       const projectRoot = canonicalDirectoryOrNull(env.ZENSU_XR_PROJECT_ROOT);
-      if (!root || !projectRoot || !isInside(root, projectRoot)) {
+      if (env.ZENSU_XR_ENABLED === '0') {
+        line = `${LOG_PREFIX} tree=unavailable reason=disabled`;
+      } else if (env.ZENSU_XR_JUDGE === '0') {
+        line = `${LOG_PREFIX} tree=unavailable reason=review-judge-disabled`;
+      } else if (!root || !projectRoot || !isInside(root, projectRoot)) {
         line = `${LOG_PREFIX} tree=unavailable reason=root`;
       } else {
         const current = currentTree(root);
@@ -1200,7 +1223,8 @@ module.exports = {
   newestChangeTime,
   validateReviewResult,
   templateDigest,
-  readTaskOutput,
+  runRecordPath,
+  readRunRecord,
   journalCounts,
   progressCounts,
   check,

@@ -32,9 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow the main thread launches in the plugin's private data store. When the change is
   reviewed by a workflow that runs the plugin's template `templates/workflows/zensu-review-v1.js`
   (under Ultracode, for example), the first `/zensu:tdd` review imports its findings instead of
-  running the aspect panel: the result must be the template's `zensu-review-result/v1`, come
-  from a launch after the last edit and name the current tree, and its agent counts are
-  checked against the workflow's run journal. A failed or missing agent marks the import
+  running the aspect panel: the result is read from the workflow's own run record, must be the
+  template's `zensu-review-result/v1` from a launch after the last edit whose arguments named
+  every changed file, and must name the current tree, and its agent counts are checked against
+  the workflow's run journal. A failed or missing agent marks the import
   degraded instead of hiding it, and a lens whose finder failed gets its own
   `zensu:review-aspect`. Any other workflow's result is not imported, so the panel runs as
   before. The judge always runs on an import and names the files and perspectives it left

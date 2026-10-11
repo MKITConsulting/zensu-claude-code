@@ -26,32 +26,44 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   (`classifyPreToolPayload`), one file per launch under `records/<scv1-key>/`, temp file then
   rename at `0600`, newest 64 per session, idle sessions swept after 14 days. It prints
   nothing and exits 0 on every fault, so it can never return a decision.
-- `check` — `zensu-log.sh --external-review --root <top> --result <output-file>`, strict bind,
-  change set on stdin. Freshness comes first: a launch must be newer than the change time
-  (`max(mtime, ctime)`) of every existing changed path and of the nearest existing parent of
+- `check` — `zensu-log.sh --external-review --root <top> [--result <output-file>] [--launch <id>]`,
+  strict bind, change set on stdin. Freshness comes first: a launch must be newer than the change
+  time (`max(mtime, ctime)`) of every existing changed path and of the nearest existing parent of
   every missing one; `.zensu` paths are excluded and counted. Several fresh launches select the
   one whose `task_id` names the output file, else answer `unavailable reason=ambiguous-launch`
-  until `--launch <id>` names one. Then `judgeResult` gates the result: no `--result` answers
-  `unavailable reason=no-result`; a file that is not a task output (a `result` key and a
-  `workflowProgress` array) or a `result` that `validateReviewResult` rejects answers
-  `unavailable reason=foreign-shape`; an output file not named `<task_id>.output` answers
-  `unavailable reason=result-not-from-launch`; a `tree` other than the one `computeTree` of
-  `evidence-run-v1.js` computes now answers `stale reason=tree`, and with no computable tree the
-  freshness check decides alone and the line says `tree=unverified`. The agent counts are
-  compared with `journal.jsonl` in the recorded `transcript_dir` (per label, the outcome of its
-  latest `started` record; no `result` or `failed` record means lost) or, when that is
-  unreadable, with the task output's `workflowProgress`. A mismatch, a failed or lost agent, a
-  `finder-failed` entry, a launch without a `task_id` or no readable runtime record answers
-  `degraded`, which prints `EXTERNAL REVIEW DEGRADED — …` as its second line and one
-  `gap <lens> finder-failed` line per failed finder, and still imports. `ok` and `degraded`
-  print every finding in a `findings <id> begin`/`end` block and then the script block; both
-  are fenced by a per-call random nonce, and every finding value is JSON-quoted, so no value
-  can start a line of its own. `hooks.reviewJudge` off answers `off reason=review-judge-disabled`,
-  a record dated beyond `clockSkewMs` is skipped, every fault answers `unavailable`, a module
-  that fails to load included, and every answer but `ok` and `degraded` leaves the panel path
-  unchanged.
+  until `--launch <id>` names one. Then `judgeResult` gates the run. A recorded
+  `script_sha256` that is not the digest of `TEMPLATE_FILE` answers `foreign-script`
+  (`template-unreadable` when that file cannot be read), and an output file not named
+  `<task_id>.output` answers `result-not-from-launch`. The result is read from the run record
+  `<session>/workflows/<run_id>.json`, which `runRecordPath` derives from the recorded
+  `transcript_dir` (`<session>/subagents/workflows/<run_id>`), never from the output file: no
+  run id or transcript directory answers `launch-unbound`; an unreadable (a link included),
+  oversized, unparseable or mismatching record (`runId`, and `taskId` when one was recorded)
+  answers `run-record-unreadable`, `run-record-oversized`, `run-record-unparseable` or
+  `run-record-mismatch`; a `status` other than `completed` answers `run-not-completed`; a
+  recorded `script` other than the template answers `foreign-script`; a `result` that
+  `validateReviewResult` rejects answers `foreign-shape`; a `tree` other than the one
+  `computeTree` of `evidence-run-v1.js` computes now answers `stale reason=tree`, and with no
+  computable tree the freshness check decides alone and the line says `tree=unverified`; run
+  `args` without a `changedFiles` list answer `launch-args`, and a changed path that list
+  lacks answers `files-not-reviewed`. All of these but `stale` are `unavailable`. The agent
+  counts are compared with `journal.jsonl` in the recorded `transcript_dir` (per label, the
+  outcome of its latest `started` record; no `result` or `failed` record means lost) or, when
+  that is unreadable, with the run record's `workflowProgress` (per label, the highest
+  `attempt`). A mismatch, a failed or lost agent, a `finder-failed` entry or no readable
+  runtime record answers `degraded`, which prints `EXTERNAL REVIEW DEGRADED — …` as its second
+  line and one `gap <lens> finder-failed` line per failed finder, and still imports. `ok` and
+  `degraded` name the reviewed lenses on the first line (`lenses=`) and print every finding in
+  a `findings <id> begin`/`end` block fenced by a per-call random nonce; every finding value is
+  JSON-quoted, so no value can start a line of its own, and a finding that names a file but no
+  line prints the anchor `-` and a `file` line. `hooks.reviewJudge` off answers
+  `off reason=review-judge-disabled`, a record dated beyond `clockSkewMs` is skipped, every
+  fault answers `unavailable`, a module that fails to load included, and every answer but `ok`
+  and `degraded` leaves the panel path unchanged.
 - `tree` — `zensu-log.sh --external-review --tree --root <top>` prints `tree=<id>` from the same
-  `computeTree` the import compares, or `tree=unavailable reason=<reason>`.
+  `computeTree` the import compares, or `tree=unavailable reason=<reason>`. With the import or
+  the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, so the skill
+  never launches a template whose result could not be imported.
 - The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
   through the Workflow `scriptPath`. It owns the `zensu-review-result/v1` shape, and
   `validateReviewResult` checks that shape with an exact key set at every level. Before
@@ -61,7 +73,9 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   shape and still filter or relabel findings, so the shape alone does not prove the template
   ran. Under a token target the template starts refuters `REFUTER_WINDOW` (4) at a time and
   checks the budget before each one, because a check made when every refuter starts sees the
-  budget before any of them spent it.
+  budget before any of them spent it. It counts `over-cap` entries after the cross-lens dedup,
+  because a capped finding that absorbs another lens's in-cap duplicate is refuted, and the
+  refuter prompt JSON-quotes every value a finder wrote.
 - `stop-wait` — the Stop hook's `external_review_workflow_wait`. It releases a standalone
   chain's Stop at review round 0 while `background_tasks` lists a `workflow` entry whose status
   is in `RUNNING_TASK_STATUSES`, before the inner budget increment, after `outer_finish`, at
@@ -96,9 +110,15 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
 - Only a template result is imported. A model-authored review script counted dead verifiers
   as rejections and reported 22 of 34 findings as rejected with no vote cast, so the shape
   gate fails to the panel: an ad-hoc workflow costs a second review, never a silent pass.
-- The main thread names the output file, and the module does not search for it: the task
-  output lives in the host's temporary directory, whose layout is not documented. The file is
-  bound by name to the recorded task id.
+- The result is read from the run record, never from the output file the main thread names.
+  The launch response carries no output path, a named file is whatever the main thread wrote,
+  and the run record also holds the script that ran and the arguments it ran with, so the import
+  checks the executed script and the reviewed files against what the runtime wrote. The output
+  file name only selects the launch.
+- A run whose `changedFiles` argument leaves out a changed path answers `unavailable`, not
+  `degraded`: it did not review this change, so the panel runs.
+- No script block is printed. Only the template can be imported, so the block always repeated
+  the same file; the judge receives the reviewed lenses instead.
 - The run journal, not the result, is the runtime truth for the agent counts, and per label
   only the latest start counts, because a resumed run starts a label again.
 - The tree binding reuses `computeTree` of `evidence-run-v1.js`, the fingerprint the full-suite
@@ -115,10 +135,16 @@ the Stop hook's prefilter miss and `zensu-log.sh --tdd-begin` call through
 `--tdd-begin`, `X20`-`X23` the round, Autopilot and deferred-review exclusions, and `X24` the
 bound-chain exclusion by running the shipped function with stubbed collaborators. The resume reason names the panel and the import path (`X12`). The store is in both
 protected-root lists of `reviewer-capability-v1.js` (`X1a`). The Phase 6.10 text lives in
-`skills/tdd/SKILL.md` steps 3, 4, 4b, 4c and 5 plus the `Subagent / Claude Code Workflow
-safety` and `Work sequentially` bullets; the file is at its 433-line cap, so edits fold into
-existing lines; step 4c defers an `EXT-<n>` finding kept with the anchor `-` to `## Open`
-instead of neutralizing or routing it (`X26`). `agents/review-judge.md` carries the `external_review` input and `## Gaps`
+`skills/tdd/references/review-chain.md` steps 3, 4, 4b, 4c and 5, plus the `Subagent / Claude
+Code Workflow safety` and `Work sequentially` bullets of `skills/tdd/SKILL.md`, whose body
+`tests/structure/test-skill-text-budget.sh` bounds; step 4c defers an `EXT-<n>` finding kept
+with the anchor `-` to `## Open` instead of neutralizing or routing it (`X26`).
+`EXTERNAL REVIEW DEGRADED —` is carried into the CHAIN-END SUMMARY by
+`COMBINED_SUMMARY_DIRECTIVE` in `hooks/post-review-tdd-delegate.sh`, `skills/self-review/SKILL.md`
+§"Final report" and `docs/tdd-manager-workflow.md`; both literal loops of
+`evals/config-gate/test-post-review-combined-summary.sh` require it. The run-record layout is
+spelled in `runRecordPath` and `transcriptDirMatches`, the unit file's `workflowRun` and the
+shell suite's `write_run_record`. `agents/review-judge.md` carries the `external_review` input and `## Gaps`
 (`P2m`), `agents/code-reviewer.md` names `EXT-<n>`. Operator rows: the hook, flag and Stop rows
 of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.md`.
 The result shape is spelled twice: the object the template returns and the `RESULT_*_KEYS`,
@@ -140,21 +166,32 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
   (`taskId`, `runId`, `transcriptDir`) were read from the `toolUseResult` of real launches in
   session transcripts, on the assumption that the hook receives the same object, and a text
   form is parsed as a fallback. The journal record kinds (`launched`, `started`, `result`,
-  `failed`) and the task output keys were measured over 413 run journals and the surviving task
-  outputs on one machine on 2026-10-10, not taken from documentation. A missing field degrades
-  to no record, no wait or a degraded import, never to a block or a silent pass.
+  `failed`) were measured over 413 run journals on one machine on 2026-10-10, and the run record
+  keys (`runId`, `taskId`, `status`, `script`, `args`, `result`, `workflowProgress`) were read
+  from real run records on 2026-10-11, among them a template run launched through `scriptPath`
+  whose recorded `script` had the template file's digest; none is documented. A missing field
+  degrades to no record, no wait, or an unavailable or degraded import, never to a block or a
+  silent pass.
 - Freshness compares launch time with change times. A filesystem with coarse timestamps can
   make an older review look fresh, and a changed directory entry (a submodule) is judged by
   the directory's own times; the judge is the backstop.
-- The output file is named by the main thread. The name binding, the tree check and the
-  journal comparison make a substituted or unfinished result fail; a deliberate shell write
-  can still forge the files, as for every plugin store.
+- The run record and the journal sit in the session's project directory, which the main
+  thread can write: a deliberate write there can still forge a result, as for every plugin
+  store, and a count that disagrees with the journal only degrades the import.
+- The finders and refuters are neutral workflow agents (`host-profile-v1`): their read-only
+  contract is in their prompt, not in the reviewer capability gate, which still denies them
+  every command tool. Measured on 2026-10-11: a `zensu:review-aspect` agent inside a workflow is
+  offered `StructuredOutput`, the gate denies that tool to `reviewer-readonly-v1`, and the run
+  fails, so confining them needs a gate change. The judge's fresh reads and the Finding
+  Verification Gate are the backstop.
 - The wait counter is per session. It resets when a Stop sees no running workflow, when
   `--tdd-begin` arms a new chain and after 24 hours; a chain armed some other way, such as a
   deferred-review adoption, inherits the count, but such a chain never waits.
 - The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB).
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard.
 
-**Version: `patch`.** No context-record or workflow-state field, no strict key set, no hook
-removed or re-matched; the added hook returns no decision and no output, and the new key is
+**Version: `patch`.** No context-record or workflow-state field, no hook removed or
+re-matched, and the added hook returns no decision and no output. `RECORD_KEYS` and the
+`RESULT_*_KEYS` are strict key sets, but both ship for the first time here, so no released
+reader or writer predates them; a later change to either is a `minor`. The new config key is
 read permissively.

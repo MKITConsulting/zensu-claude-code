@@ -56,10 +56,10 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_registered_floor "$WORK/unit.out" 33; then
-  check "X0c the unit suite registered at least 33 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_registered_floor "$WORK/unit.out" 36; then
+  check "X0c the unit suite registered at least 36 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 33 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 36 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
 fi
 if UNIT_OVERVIEW="$(unit_overview_check "$UNIT")"; then
   check "X0d the SUITE-OVERVIEW Blocks cell matches what external-review-v1.test.js registers" PASS
@@ -99,7 +99,7 @@ fi
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
 SKILL_FILE="$(skill_text_file "$PLUGIN_DIR/skills/tdd")" || SKILL_FILE="$WORK/missing-skill-text"
 if grep -qF 'and an `EXT-<n>` finding the merge kept with the anchor `-` is never neutralized either, because a missing anchor is not a hallucinated one; nothing can grade it, so retitle it `[Deferred — do not fix]` with its original severity in its text, set it to SUGGESTION so no severity mode routes it, ledger it with the anchor `-`' "$SKILL_FILE" \
-  && grep -qF 'keep a finding without a file anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
+  && grep -qF 'keep a finding without a `file:line` anchor in the merged list with the anchor `-`' "$SKILL_FILE"; then
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" PASS
 else
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" FAIL
@@ -219,9 +219,31 @@ fi
 
 RUN_TASK="wabc1234"
 RUN_DIR="$WORK/runs/projects/session/subagents/workflows/wf_abc12345-run"
+RUN_RECORD="$WORK/runs/projects/session/workflows/wf_abc12345-run.json"
 RUN_OUTPUT="$WORK/runs/tasks/$RUN_TASK.output"
-mkdir -p "$RUN_DIR" "$WORK/runs/tasks"
-RUN_TREE="$TREE_ID" RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
+mkdir -p "$RUN_DIR" "$WORK/runs/tasks" "$(dirname "$RUN_RECORD")"
+write_run_record() {
+  RUN_STATUS="$1" RUN_TREE="$TREE_ID" RUN_TASK="$RUN_TASK" RUN_RECORD="$RUN_RECORD" TEMPLATE_PATH="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js" node -e '
+    const fs = require("fs");
+    const finding = {
+      id: "correctness-1", lens: "correctness", title: "Off-by-one in the loader", severity: "IMPORTANT", file: "src/a.js", line: 1,
+      evidence: "two", failure_scenario: "the last entry is skipped", fix: "compare with <=", confidence: 90, duplicates: [],
+      verification: { status: "upheld", reason: "the refuter could not refute it", votes: [{ verifier: "refute", outcome: "real", severity: "IMPORTANT", reasoning: "src/a.js:1" }] },
+    };
+    const result = {
+      schema: "zensu-review-result/v1", tree: process.env.RUN_TREE, lenses: ["correctness"], ceiling: 10,
+      agents: { started: 2, finished: 2, failed: 0 }, dropped: [], findings: [finding],
+    };
+    const done = process.env.RUN_STATUS === "completed";
+    fs.writeFileSync(process.env.RUN_RECORD, JSON.stringify({
+      runId: "wf_abc12345-run", taskId: process.env.RUN_TASK, status: process.env.RUN_STATUS,
+      script: fs.readFileSync(process.env.TEMPLATE_PATH, "utf8"), scriptPath: process.env.TEMPLATE_PATH,
+      args: { tree: process.env.RUN_TREE, lenses: ["correctness"], changedFiles: ["src/a.js"] },
+      result: done ? result : null, workflowProgress: [],
+    }));
+  '
+}
+RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
   const fs = require("fs");
   const path = require("path");
   const labels = ["find:correctness", "refute:correctness#1"];
@@ -231,45 +253,51 @@ RUN_TREE="$TREE_ID" RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
     journal.push({ type: "result", key: `k${index}`, agentId: `a${index}`, result: {} });
   });
   fs.writeFileSync(path.join(process.env.RUN_DIR, "journal.jsonl"), `${journal.map((line) => JSON.stringify(line)).join("\n")}\n`);
-  const finding = {
-    id: "correctness-1", lens: "correctness", title: "Off-by-one in the loader", severity: "IMPORTANT", file: "src/a.js", line: 1,
-    evidence: "two", failure_scenario: "the last entry is skipped", fix: "compare with <=", confidence: 90, duplicates: [],
-    verification: { status: "upheld", reason: "the refuter could not refute it", votes: [{ verifier: "refute", outcome: "real", severity: "IMPORTANT", reasoning: "src/a.js:1" }] },
-  };
-  const result = {
-    schema: "zensu-review-result/v1", tree: process.env.RUN_TREE, lenses: ["correctness"], ceiling: 10,
-    agents: { started: 2, finished: 2, failed: 0 }, dropped: [], findings: [finding],
-  };
-  fs.writeFileSync(process.env.RUN_OUTPUT, JSON.stringify({ summary: "done", agentCount: 2, logs: [], result, workflowProgress: [], totalTokens: 2, totalToolCalls: 2 }));
+  fs.writeFileSync(process.env.RUN_OUTPUT, JSON.stringify({ summary: "done", result: null, workflowProgress: [] }));
 '
+write_run_record running
 
 sleep 1
 TEMPLATE_PATH="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js" RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n')"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=no-result launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 ' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=run-not-completed launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* detail=run-status-running$' \
   && printf '%s' "$OUT" | grep -qE " task=$RUN_TASK fresh$" \
   && ! printf '%s' "$OUT" | grep -qF ' begin nonce='; then
-  check "X7 a launch after the last change is not imported without its workflow result" PASS
+  check "X7 a launch after the last change is not imported while its run has not completed" PASS
 else
-  check "X7 no result (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
+  check "X7 running (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
 fi
 
+write_run_record completed
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n' --result "$RUN_OUTPUT")"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* tree=match runtime=journal agents=2/2 findings=1 dropped=0$' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=ok launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* lenses=correctness tree=match runtime=journal agents=2/2 findings=1 dropped=0$' \
   && printf '%s' "$OUT" | grep -qE '^EXT-1 IMPORTANT "src/a\.js:1" lens=correctness id=correctness-1 verification=upheld confidence=90$' \
-  && printf '%s' "$OUT" | grep -qE '^script xr1_[0-9]{13}_[0-9a-f]{12} begin nonce=[0-9a-f]{16} ' \
-  && printf '%s' "$OUT" | grep -qF "phase('Refute')"; then
-  check "X7b the launch's template result on the current tree is imported with every finding and the recorded script" PASS
+  && printf '%s' "$OUT" | tail -n 1 | grep -qE '^findings xr1_[0-9]{13}_[0-9a-f]{12} end nonce=[0-9a-f]{16}$' \
+  && ! printf '%s' "$OUT" | grep -qE '^script '; then
+  check "X7b the completed run's template result on the current tree is imported from its run record with every finding" PASS
 else
   check "X7b ok (rc=$RC out=$OUT err=$(cat "$WORK/verb.err"))" FAIL
+fi
+
+FIRST_ID="$(ls "$VERB_DATA/external-review/v1/records/$ZENSU_SESSION_KEY" | sed -n 's/^\(xr1_[0-9]*_[0-9a-f]*\)\.json$/\1/p' | head -n 1)"
+launch_payload "$VERB_RAW" | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
+AMBIGUOUS="$(verb $'src/a.js\n')"
+NAMED="$(verb $'src/a.js\n' --launch "$FIRST_ID")"
+UNKNOWN="$(verb $'src/a.js\n' --launch xr1_0000000000000_000000000000)"
+if [ -n "$FIRST_ID" ] && printf '%s' "$AMBIGUOUS" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=ambiguous-launch launches=2/2 ' \
+  && printf '%s' "$NAMED" | grep -qE "^EXTERNAL REVIEW — status=ok launches=2/2 selected=zensu-review-v1@[^ ]+ id=$FIRST_ID " \
+  && [ "$UNKNOWN" = "EXTERNAL REVIEW — status=unavailable reason=launch-not-fresh" ]; then
+  check "X7c --launch selects one of several fresh launches and refuses a launch that is not fresh" PASS
+else
+  check "X7c launch selection (first=$FIRST_ID ambiguous=$AMBIGUOUS named=$NAMED unknown=$UNKNOWN)" FAIL
 fi
 
 sleep 1
 printf 'three\n' > "$PROJ/src/a.js"
 OUT="$(verb $'src/a.js\n')"; RC=$?
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=stale launches=0/1 ' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=stale launches=0/2 ' \
   && ! printf '%s' "$OUT" | grep -qF ' begin nonce='; then
-  check "X8 an edit after the launch answers stale and prints no script" PASS
+  check "X8 an edit after the launch answers stale and prints no finding" PASS
 else
   check "X8 stale (rc=$RC out=$OUT)" FAIL
 fi
@@ -281,14 +309,36 @@ else
   check "X9 off (rc=$RC out=$OUT)" FAIL
 fi
 
+JUDGE_OFF_CONFIG="$WORK/judge-off.json"
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":5,"reviewJudge":false}}' > "$JUDGE_OFF_CONFIG"
+OUT="$(printf 'src/a.js\n' | ZENSU_CONFIG="$JUDGE_OFF_CONFIG" bash "$LOG" --external-review --root "$PROJ" --launch "$FIRST_ID" 2>/dev/null)"; RC=$?
+if [ "$RC" -eq 0 ] && [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = "1" ] \
+  && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=off reason=review-judge-disabled ' \
+  && ! printf '%s' "$OUT" | grep -qE '^EXT-|begin nonce='; then
+  check "X9b hooks.reviewJudge=false in the config answers off and imports nothing" PASS
+else
+  check "X9b judge off (rc=$RC out=$OUT)" FAIL
+fi
+
+TREE_OFF="$(ZENSU_CONFIG="$OFF_CONFIG" bash "$LOG" --external-review --tree --root "$PROJ" </dev/null 2>/dev/null)"
+TREE_JUDGE_OFF="$(ZENSU_CONFIG="$JUDGE_OFF_CONFIG" bash "$LOG" --external-review --tree --root "$PROJ" </dev/null 2>/dev/null)"
+if [ "$TREE_OFF" = "EXTERNAL REVIEW — tree=unavailable reason=disabled" ] \
+  && [ "$TREE_JUDGE_OFF" = "EXTERNAL REVIEW — tree=unavailable reason=review-judge-disabled" ]; then
+  check "X9c --tree answers tree=unavailable while the import or the judge is off, so no template is launched" PASS
+else
+  check "X9c tree off (off=$TREE_OFF judge-off=$TREE_JUDGE_OFF)" FAIL
+fi
+
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review 2>"$WORK/usage.err")"; RC=$?
 OUT2="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ" --bogus 2>/dev/null)"; RC2=$?
 OUT3="$(bash "$LOG" --external-review --tree --root "$PROJ" --result "$RUN_OUTPUT" </dev/null 2>"$WORK/usage3.err")"; RC3=$?
+OUT4="$(bash "$LOG" --external-review --tree --root "$PROJ" --launch "$FIRST_ID" </dev/null 2>"$WORK/usage4.err")"; RC4=$?
 if [ "$RC" -eq 2 ] && grep -qF -- '--root <repository top level> is required' "$WORK/usage.err" && [ "$RC2" -eq 2 ] \
-  && [ "$RC3" -eq 2 ] && grep -qF -- '--tree takes only --root' "$WORK/usage3.err"; then
-  check "X10 a missing --root, an unknown argument and --tree with a result are usage errors (exit 2)" PASS
+  && [ "$RC3" -eq 2 ] && grep -qF -- '--tree takes only --root' "$WORK/usage3.err" \
+  && [ "$RC4" -eq 2 ] && grep -qF -- '--tree takes only --root' "$WORK/usage4.err"; then
+  check "X10 a missing --root, an unknown argument and --tree with a result or a launch are usage errors (exit 2)" PASS
 else
-  check "X10 usage (rc=$RC rc2=$RC2 rc3=$RC3)" FAIL
+  check "X10 usage (rc=$RC rc2=$RC2 rc3=$RC3 rc4=$RC4)" FAIL
 fi
 
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ/src" 2>/dev/null)"; RC=$?
@@ -492,11 +542,11 @@ fi
 
 WAIT_FN="$(sed -n '/^external_review_workflow_wait() {/,/^}/p' "$STOP")"
 probe_wait() {
-  BOUND="$1" MARK="$2" WAIT_FN="$WAIT_FN" PLUGIN_DIR="$PLUGIN_DIR" PROBE_DATA="$WORK/probe-data" bash -c '
+  BOUND="$1" MARK="$2" ADOPTED="${3:-false}" WAIT_FN="$WAIT_FN" PLUGIN_DIR="$PLUGIN_DIR" PROBE_DATA="$WORK/probe-data" bash -c '
     eval "$WAIT_FN"
     INPUT="{\"background_tasks\":[{\"type\":\"workflow\",\"status\":\"running\",\"name\":\"review-changes\"}]}"
     OUTER_PRESENT=false
-    DEFERRED_ADOPTED=false
+    DEFERRED_ADOPTED="$ADOPTED"
     INNER_BOUND_RUN="$BOUND"
     SESSION_ID="scv1_0000000000000000000000000000000000000000000000000000000000000000"
     STATE_FILE=/dev/null
@@ -517,11 +567,13 @@ probe_wait() {
 mkdir -p "$WORK/probe-data"
 UNBOUND_PROBE="$(probe_wait "" "$WORK/probe-unbound.mark" 2>"$WORK/probe-unbound.err")"
 BOUND_PROBE="$(probe_wait "run-xr-bound" "$WORK/probe-bound.mark" 2>"$WORK/probe-bound.err")"
+ADOPTED_PROBE="$(probe_wait "" "$WORK/probe-adopted.mark" true 2>"$WORK/probe-adopted.err")"
 if [ -n "$WAIT_FN" ] && [ "$UNBOUND_PROBE" = "released" ] && [ -e "$WORK/probe-unbound.mark" ] \
-  && [ "$BOUND_PROBE" = "kept" ] && [ ! -e "$WORK/probe-bound.mark" ]; then
-  check "X24 the shipped wait function refuses an Autopilot-bound chain before it consults the wait counter" PASS
+  && [ "$BOUND_PROBE" = "kept" ] && [ ! -e "$WORK/probe-bound.mark" ] \
+  && [ "$ADOPTED_PROBE" = "kept" ] && [ ! -e "$WORK/probe-adopted.mark" ] && [ ! -e "$WORK/probe-data/pending-review.json.claim" ]; then
+  check "X24 the shipped wait function refuses an Autopilot-bound chain and a Stop that adopted a deferred review before it consults the wait counter" PASS
 else
-  check "X24 bound chain (unbound=$UNBOUND_PROBE bound=$BOUND_PROBE err=$(cat "$WORK/probe-bound.err" "$WORK/probe-unbound.err"))" FAIL
+  check "X24 bound or adopting chain (unbound=$UNBOUND_PROBE bound=$BOUND_PROBE adopted=$ADOPTED_PROBE err=$(cat "$WORK/probe-bound.err" "$WORK/probe-unbound.err" "$WORK/probe-adopted.err"))" FAIL
 fi
 
 finish
