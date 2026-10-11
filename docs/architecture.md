@@ -184,9 +184,9 @@ the packet handed to them. The dominant term, though, is the other leg: `UserPro
 on every prompt with no de-bounce, and six hooks are registered on it. Three of them send their
 full text only once per context generation and a short line after that, through the prompt
 ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
-`tests/structure/test-user-prompt-budget.sh` drives every one of them on four prompt kinds — a
-typed request, a background-task notification, a shell input behind a system reminder, and a
-CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
+`tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a
+typed request, a background-task notification, a subagent hand-back, a shell input behind a
+system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
 each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
 `user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
 the helper command it renders, on the first typed request or slash command with arguments of a
@@ -200,8 +200,8 @@ only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its t
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
-one** (12.5 K on every turn before the ledger), and a task notification or shell input about
-3.5 K, then 1.8 K (3.8 K, then 2.1 K for a CI-monitor event). The generation also receives this
+one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
+shell input about 3.5 K, then 1.8 K (3.8 K, then 2.1 K for a CI-monitor event). The generation also receives this
 hook's 1,756-character block once at `SessionStart`, so its first turn costs about 12.8 K in all,
 slightly more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is

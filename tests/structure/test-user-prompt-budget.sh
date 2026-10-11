@@ -35,6 +35,7 @@ TYPED='add a feature flag to the checkout page and cover the pricing tier with a
 TASK=$'<task-notification>\n<task-id>bq7budget</task-id>\n<tool-use-id>toolu_01Budget</tool-use-id>\n<output-file>/private/tmp/claude-501/-Users-dev-IdeaProjects-dev-zensu-zensu-claude-code--claude-worktrees-budget/0b1fb4b7/tasks/bq7budget.output</output-file>\n<status>completed</status>\n<summary>Background command "Wait for the release run" completed (exit code 0)</summary>\n</task-notification>'
 BASH_INPUT=$'<system-reminder>\nYou are operating in a git worktree.\nWorktree path: /Users/dev/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/budget\n</system-reminder>\n\n<bash-input>gh pr checks 382 --repo MKITConsulting/zensu-claude-code</bash-input>'
 CI_EVENT=$'<ci-monitor-event>"Auto-fix pull requests" (the desktop app) is watching MKITConsulting/zensu-claude-code PR #382 and reports the following, read from the state of the pull request on GitHub. The user turned on Auto-fix: standing authorization to fix what the app reports, commit, and push to the PR branch without asking first.\n\n1 CI check failed (named below): run `gh pr checks 382 --repo MKITConsulting/zensu-claude-code` for details, then fix, commit, and push.\n</ci-monitor-event>'
+AGENT_MSG=$'Another Claude session sent a message:\n<agent-message from="a24a61949f3bb60be">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Plan the product roadmap and the feature tiers.\n</agent-message>'
 
 origin_of() {
   ( source "$ORIGIN_LIB"; zensu_prompt_origin "$1" "${2-}" )
@@ -63,8 +64,13 @@ expect_origin typed '/'
 expect_origin typed '<system-reminder>never closed'
 expect_origin typed ''
 expect_origin typed '<bash-stdout>ok</bash-stdout>'
+expect_origin agent-message "$AGENT_MSG"
+expect_origin agent-message $'<system-reminder>ctx</system-reminder>\n'"$AGENT_MSG"
+expect_origin agent-message '<agent-message from="x">report</agent-message>'
+expect_origin typed 'Another Claude session sent a message: please plan the roadmap'
+expect_origin typed 'Another Claude session sent a message:<agent-messages>x'
 if [ -z "$ORIGIN_BAD" ]; then
-  check "U2 zensu_prompt_origin classifies by leading tag after the system reminders, and unknown counts as typed" PASS
+  check "U2 zensu_prompt_origin classifies by leading tag after the system reminders, a subagent hand-back included, and unknown counts as typed" PASS
 else
   check "U2 zensu_prompt_origin misclassifies:$ORIGIN_BAD" FAIL
 fi
@@ -79,6 +85,10 @@ GOT3C="$(origin_of "$BASH_INPUT" '{"origin":{"kind":"human"},"prompt":"x"}')"
 GOT3D="$(origin_of "$CI_EVENT" '{"origin":{"kind":"peer-message"},"prompt":"x"}')"
 [ "$GOT3D" = "ci-monitor-event" ] || STRUCT_BAD="$STRUCT_BAD [unknown origin.kind falls back to tags -> $GOT3D]"
 GOT3E="$(origin_of "$TYPED" '{"prompt":"he said \"origin\" twice"}')"
+GOT3F="$(origin_of "$TYPED" '{"origin":{"kind":"peer"},"prompt":"x"}')"
+[ "$GOT3F" = "agent-message" ] || STRUCT_BAD="$STRUCT_BAD [origin.kind peer -> $GOT3F]"
+GOT3G="$(origin_of "$AGENT_MSG" '{"origin":{"kind":"human"},"prompt":"x"}')"
+[ "$GOT3G" = "typed" ] || STRUCT_BAD="$STRUCT_BAD [origin.kind human over a hand-back -> $GOT3G]"
 [ "$GOT3E" = "typed" ] || STRUCT_BAD="$STRUCT_BAD [quoted origin inside the prompt -> $GOT3E]"
 if [ -z "$STRUCT_BAD" ]; then
   check "U3 a structured origin.kind decides when the payload carries one, and the tags decide otherwise" PASS
@@ -224,10 +234,11 @@ measure_prompt() {
 }
 
 TYPED_FIRST_SEEN=""
-for KIND in typed task bash ci; do
+for KIND in typed task agent bash ci; do
   case "$KIND" in
     typed) PROMPT="$TYPED" ;;
     task) PROMPT="$TASK" ;;
+    agent) PROMPT="$AGENT_MSG" ;;
     bash) PROMPT="$BASH_INPUT" ;;
     ci) PROMPT="$CI_EVENT" ;;
   esac

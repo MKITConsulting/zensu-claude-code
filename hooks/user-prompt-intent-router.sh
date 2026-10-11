@@ -33,7 +33,7 @@ PROMPT="$(PAYLOAD="$INPUT" node -e '
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
 case "$(zensu_prompt_origin "$PROMPT" "$INPUT")" in
-  task-notification|ci-monitor-event|bash-input|slash-command) exit 0 ;;
+  task-notification|agent-message|ci-monitor-event|bash-input|slash-command) exit 0 ;;
 esac
 
 KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '

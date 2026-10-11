@@ -29,17 +29,29 @@ would read `sdk`. Transcripts record `origin.kind` (`human` for typed text, slas
 shell inputs, `task-notification` for task notifications; CI-monitor events carry none), and that
 is the one structured field the classifier reads when a payload carries it.
 
+The desktop app (Claude Code 2.1.286 to 2.1.295, 2026-10-09/10) sends the same shapes. Its
+transcript stores a task notification as the raw `<task-notification>` text with
+`origin.kind: task-notification`. The `[SYSTEM NOTIFICATION - NOT USER INPUT]` system-reminder
+the model sees around it is added when the turn is rendered for the model, from that origin
+field, so it never reaches a hook: the 2.1.295 builder passes the submitted text as `prompt` and
+still sends no origin field. A subagent hand-back is stored as the line `Another Claude session
+sent a message:` followed by an `<agent-message from="…">` block, with `origin.kind: peer`, and the
+`UserPromptSubmit` hooks fire on it. These facts come from the session transcript and from the
+2.1.295 binary; no live payload was logged for them.
+
 ## The classification
 
-`zensu_prompt_origin PROMPT [PAYLOAD]` prints one of `task-notification`, `ci-monitor-event`,
-`bash-input`, `slash-command`, `slash-command-args` or `typed`.
+`zensu_prompt_origin PROMPT [PAYLOAD]` prints one of `task-notification`, `agent-message`,
+`ci-monitor-event`, `bash-input`, `slash-command`, `slash-command-args` or `typed`.
 
-1. `origin.kind == task-notification` in the payload decides at once. `origin.kind == human`
-   forbids the two harness classes, so pasted harness text in a human prompt stays typed. Any
+1. `origin.kind == task-notification` in the payload decides at once, and so does
+   `origin.kind == peer`, which reads as `agent-message`. `origin.kind == human`
+   forbids the three harness classes, so pasted harness text in a human prompt stays typed. Any
    other kind falls through to the tags. The payload is parsed by `node` only when it contains
    the literal key `"origin"`, so today's payloads cost no process.
 2. Leading whitespace and leading `<system-reminder>` blocks are stripped.
-3. The leading tag decides: `<task-notification>`, `<ci-monitor-event>`, `<bash-input>`, a raw
+3. The leading tag decides: `<task-notification>`, `<ci-monitor-event>`, `<agent-message>` alone or
+   after the `Another Claude session sent a message:` line, `<bash-input>`, a raw
    `/name` or the `<command-name>` / `<command-message>` spelling. A slash command needs a name of
    letters, digits, `_`, `.`, `:` and `-` followed by whitespace or the end, so a prompt opening
    with an absolute path stays typed. Arguments are any non-space text after the name, or inside
@@ -54,7 +66,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 ## Which hook answers which kind
 
-| Hook | Typed, slash with arguments | Task notification, `!` input, bare slash | CI-monitor event |
+| Hook | Typed, slash with arguments | Task notification, subagent hand-back, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
 | `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
 | `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
@@ -79,8 +91,8 @@ URLs, `owner/repo`), every `zensu:<name>` skill name, and the operand of `--repo
 entries in `hooks/hooks.json` and fails when a registered hook has no declared budget or a budget
 names an unregistered hook. **Adding a `UserPromptSubmit` hook therefore owes a `budget()` row**,
 with a minimum for each kind it must answer and a maximum for each kind. It drives every hook on a
-typed request, a task notification whose path contains `-zensu-zensu-claude-code-`, a
-system-reminder plus `<bash-input>` prompt and a CI-monitor event, each kind in a fresh session and
+typed request, a task notification whose path contains `-zensu-zensu-claude-code-`, a subagent
+hand-back, a system-reminder plus `<bash-input>` prompt and a CI-monitor event, each kind in a fresh session and
 twice: the first prompt of the session and a repeat, with a ceiling per hook and per sum for each.
 `U9` resets the ledger with a `compact` `SessionStart` and requires the first-prompt figures again,
 and `U10` requires the decided line for a configured `tdd` or `direct` route. The reminder renders the helper command with two absolute paths, so the

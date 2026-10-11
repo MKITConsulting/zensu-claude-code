@@ -51,13 +51,13 @@ zensu_prompt_origin_slash() {
 }
 
 zensu_prompt_origin() {
-  local body="${1-}" kind head close='</system-reminder>'
+  local body="${1-}" kind head rest close='</system-reminder>' peer='Another Claude session sent a message:'
   body="${body:0:16384}"
   kind="$(zensu_prompt_origin_kind "${2-}")"
-  if [ "$kind" = "task-notification" ]; then
-    printf 'task-notification'
-    return 0
-  fi
+  case "$kind" in
+    task-notification) printf 'task-notification'; return 0 ;;
+    peer) printf 'agent-message'; return 0 ;;
+  esac
   while :; do
     body="${body#"${body%%[![:space:]]*}"}"
     case "$body" in
@@ -72,6 +72,14 @@ zensu_prompt_origin() {
     case "$body" in
       '<task-notification>'*) printf 'task-notification'; return 0 ;;
       '<ci-monitor-event>'*|'<ci-monitor-event '*) printf 'ci-monitor-event'; return 0 ;;
+      '<agent-message>'*|'<agent-message '*) printf 'agent-message'; return 0 ;;
+      "$peer"*)
+        rest="${body#"$peer"}"
+        rest="${rest#"${rest%%[![:space:]]*}"}"
+        case "$rest" in
+          '<agent-message>'*|'<agent-message '*) printf 'agent-message'; return 0 ;;
+        esac
+        ;;
     esac
   fi
   case "$body" in

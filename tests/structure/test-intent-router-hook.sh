@@ -218,13 +218,14 @@ OUT21=""
 for PROMPT21 in \
   "$(printf '<task-notification>\n<summary>Background command "plan the product roadmap" completed</summary>\n</task-notification>')" \
   "$(printf '<ci-monitor-event>watching the product roadmap PR</ci-monitor-event>')" \
+  "$(printf 'Another Claude session sent a message:\n<agent-message from="a1">\n[Subagent hand-back] Plan the product roadmap.\n</agent-message>')" \
   "$(printf '<system-reminder>\nworktree\n</system-reminder>\n<bash-input>zensu feature list</bash-input>')" \
   "/zensu:bootstrap"; do
   OUT21="${OUT21}$(payload "$PROMPT21" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P21" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
 done
 OUT21B="$(payload "/zensu:bootstrap a new product" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P21" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
 if [ -z "$OUT21" ] && [ "$OUT21B" = "UserPromptSubmit|main|triage|planmode" ]; then
-  check "C21 task notifications, CI events, shell inputs and argument-less slash commands stay silent; a slash command with arguments is screened" PASS
+  check "C21 task notifications, subagent hand-backs, CI events, shell inputs and argument-less slash commands stay silent; a slash command with arguments is screened" PASS
 else
   check "C21 origin gate (harness output='${OUT21:0:60}' slash-with-args='$OUT21B')" FAIL
 fi

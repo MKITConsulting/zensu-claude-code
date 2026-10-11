@@ -23,12 +23,14 @@ turn. The contracts are now sent in full once per **context generation**, the st
 |---|---|---|---|
 | typed | 12,489 | 11,087 | 5,253 |
 | task notification or `!` input | 4,873 | 3,471 | 1,751 |
+| subagent hand-back | 12,489 | 3,471 | 1,751 |
 | CI-monitor event | 5,237 | 3,835 | 2,115 |
 
 The first-prompt column is 1,402 lower only because best-solution-first moved its 1,756-character
 block to `SessionStart` and left a 354-character reminder on the prompt. That block now arrives
 once per generation at `SessionStart`, so the first turn of a generation costs 12,843 in all, 354
-more than one turn did before. The saving is every later prompt.
+more than one turn did before. The saving is every later prompt. A subagent hand-back was
+classified as a typed prompt before and now gets what a task notification gets.
 
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety

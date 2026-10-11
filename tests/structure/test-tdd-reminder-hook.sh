@@ -185,6 +185,7 @@ OUT14=""
 N14=0
 for PROMPT14 in \
   "$(printf '<task-notification>\n<task-id>b14</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "$(printf 'Another Claude session sent a message:\n<agent-message from="a14">\n[Subagent hand-back] Add a retry helper to the client.\n</agent-message>')" \
   "$(printf '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\n<bash-input>git status</bash-input>')" \
   "/zensu:tdd-mode"; do
   N14=$((N14 + 1))
@@ -194,7 +195,7 @@ for PROMPT14 in \
 done
 OUT14B="$(payload "/zensu:tdd add a retry helper" "s14-args" "$P14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
 if [ -z "$OUT14" ] && [ "$OUT14B" = "FIRED" ]; then
-  check "C14 task notifications, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
+  check "C14 task notifications, subagent hand-backs, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
 else
   check "C14 origin gate (harness output='${OUT14:0:60}' slash-with-args='$OUT14B')" FAIL
 fi

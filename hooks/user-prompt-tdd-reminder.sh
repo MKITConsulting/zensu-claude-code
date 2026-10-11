@@ -61,7 +61,7 @@ PROMPT="$(PAYLOAD="$INPUT" node -e '
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
 PROMPT_ORIGIN="$(zensu_prompt_origin "$PROMPT" "$INPUT")"
 case "$PROMPT_ORIGIN" in
-  task-notification|bash-input|slash-command) exit 0 ;;
+  task-notification|agent-message|bash-input|slash-command) exit 0 ;;
 esac
 
 SESSION_ID="$(PAYLOAD="$INPUT" node -e '
