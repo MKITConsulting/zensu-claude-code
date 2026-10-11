@@ -66,7 +66,8 @@ verdict about the plan, exit 2 and anything else (a missing library included) re
 gate, that a load fault must never be reported as a judged payload.
 
 **Scoping and the switch are copied from the edit-landing receipt gate**, which sits directly
-above it in the same verb: a resolvable git HEAD plus a non-empty change set. **The two SCOPES
+above it in the same verb: a non-empty change set, counted by the helper the unqualified terminus
+uses (next paragraph). **The two SCOPES
 have since diverged and "copied" is historical:** multi-repo stage 1 arms the receipt gate on a
 logged CLAIM as well (see §"Multi-Repo Stage 1"), so that gate conjoins on `_tc_armed` while this
 one still conjoins on `_tc_changes` alone. The zero-change chain this section records below as
@@ -84,6 +85,35 @@ receipt gate and its ledger record on `_tc_armed`, this gate and its ledger reco
 `_tc_changes` — because out of scope there is no decision point to short-circuit, so recording an
 escape there would name a gate that never ran. Say "their own": the two scopes diverged when
 stage 1 added the claim arm, and one shared "the scope" reads against the paragraph above.
+
+**A git failure in the scope count refuses the verb; it is never read as zero changes.** The
+count comes from `_zensu_unqualified_change_count`, the helper the unqualified terminus uses, so
+`--tdd-complete` shares its classification (Known gaps below states it in full). `unknown` (no
+`git` on PATH, a root git reports as outside a work tree, a HEAD that names no commit) maps to
+zero and leaves both gates out of scope. `unavailable` (a `safe.directory` refusal, a HEAD probe
+git aborts, a failed listing) refuses with exit 1 before either gate runs, and the refusal names
+`git diff --name-only HEAD` as the way to see git's error. Read as zero, such a failure would take
+this gate and its ledger record out of scope, and leave the receipt gate and its record armed
+only by a logged claim. Two alternatives were rejected. Arming both gates on `unavailable`: the
+edit-landing audit reports the same refusal as `EDIT LANDING AUDIT FAULT`, exits 2, writes no
+receipt and removes an earlier one (`.claude/rules/multi-repo-stage1.md`), so the receipt gate
+would refuse with "no edit-landing receipt" and name the audit, not git, as the thing to run.
+Refusing whatever the
+switches say: with both gates off the count decides only the two ledger records, and a ledger
+record must not change a completion decision. So with BOTH `ZENSU_EDIT_LANDING_GATE=off` and
+`ZENSU_REQUIREMENTS_GATE=off` the verb completes and records both escapes, reading the
+undecidable count as in scope; the evidence runner records `ZENSU_FULL_SUITE_GATE=off` on an
+`unavailable` tree the same way. One switch alone never reaches that arm, because the other gate
+still needs its scope. All three consumers test `"$_tc_changes" != 0`, so only a zero or
+`unknown` exempts, and an empty or malformed answer reads as in scope. In
+`tests/structure/test-requirements-table-gate.sh`, `RG0`–`RG3` drive a real dubious-ownership
+refusal, its `safe.directory` control, each single switch and the both-off ledger, and `Z3`,
+`Z4`, `Z6` and `G2` pin the shared call, the `!= 0` consumers and the `unknown` mapping. In
+`tests/structure/test-tdd-complete-receipt-gate.sh`, `R6`/`R6a` drive the same refusal against
+the receipt gate on a changed tree, and `W2` pins the shared call. `G13` in
+`tests/structure/test-chain-terminus-zero-change-gate.sh` counts the call sites. Version:
+`patch`, because the verb refuses more inside one installation and no schema, key set, hook,
+matcher or attestation moves.
 
 **Every root in this verb comes from `zensu_resolve_project_dir`, and there is NO divergence to
 defend against — a claim an earlier draft of this section got wrong.** `zensu-log.sh` matches
@@ -172,8 +202,8 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   earlier session in the same project satisfies it. Disclosed on stderr, not silent, and the
   same switch already carries its own ledger entry.
 - **The git-environment scrub is a denylist, so its numeral is a witness, not the contract.**
-  `--tdd-complete`'s three scope `git` calls run through a subshell that unsets the FIFTEEN
-  `GIT_*` variables `_tc_git` lists — discovery and config-injection levers alike, not just the
+  The three scope `git` calls `--tdd-complete` counts through run in a subshell that unsets the
+  FIFTEEN `GIT_*` variables `_tc_git` lists — discovery and config-injection levers alike, not just the
   three this paragraph used to name. **Read the numeral as a WITNESS to the last audit, never as
   the contract**: it has now been wrong at thirteen, at fourteen, and in both directions at once.
   Both lists stood at thirteen while neither set was a subset of the other — `_el_git` carried
@@ -188,32 +218,36 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   lists that agree and are both short, which is exactly the state fourteen was. `X10`/`X17` and
   their controls cover that instead, one behavioural injection probe per config channel, so a
   third channel needs a third probe rather than a bigger numeral. `_tc_git` sits at file scope,
-  above the verb dispatch, and every change count in `zensu-log.sh` runs through it: the three
-  scope calls here and `_zensu_unqualified_change_count`, which three callers share — the
+  above the verb dispatch, and every change count in `zensu-log.sh` runs through it inside
+  `_zensu_unqualified_change_count`, which four callers share — `--tdd-complete`, the
   `--chain-done` zero-change terminus, the unqualified `--code-review-done` mark, and the
   ticket-bound `--chain-done` when its ticket is one the Stop hook minted for a chain no reviewer
   saw (prefix `zc_`, see `.claude/rules/chain-shape-rearm-receipt.md`). `Z6` in
-  `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition and the three
-  scope calls. In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an
-  inherited `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
+  `tests/structure/test-requirements-table-gate.sh` pins the file-scope definition, the verb's
+  one call of the helper and the helper's three scope calls. In
+  `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G11` drives an inherited
+  `GIT_DIR` and an excludes file injected through `GIT_CONFIG_COUNT` and through
   `GIT_CONFIG_PARAMETERS` against both unqualified verbs, `G12` and `G12c` a failed listing, and
-  `G13` fails on a bare `git -C` outside comments and `_tc_git` calls and requires exactly three
-  call sites of the helper.
-- **The shared count reads only three git answers as "not evaluable".**
-  `_zensu_unqualified_change_count` prints `unknown`, which all three of its callers accept, for
-  a host without `git`, for a root git reports as outside a work tree (`rev-parse
+  `G13` fails on a bare `git -C` outside comments and `_tc_git` calls and requires the helper's
+  three `$CLAUDE_PROJECT_DIR` call sites plus the one `--tdd-complete` call on `_tc_root`.
+- **The shared change count reads only three git answers as "not evaluable".**
+  `_zensu_unqualified_change_count` prints `unknown`, which every caller reads as not evaluable,
+  for a host without `git`, for a root git reports as outside a work tree (`rev-parse
   --is-inside-work-tree` printing `false`, or failing with git's own `not a git repository`),
   and for a HEAD that names no commit (`rev-parse --verify --quiet HEAD` exiting 1). Every other
-  git failure prints `unavailable`, which all three refuse with their listing text: a
-  `safe.directory` "dubious ownership" refusal (exit 128), a root that no longer exists
-  (`cannot change to`), a HEAD probe that git aborts, and a failed listing. An empty root prints
-  `unavailable` too; no caller passes one, because the bind exits 2 first. The split is the one
-  `workTree` in `hooks/lib/evidence-run-v1.js` draws between `not-applicable` and `unavailable`
-  for the full-suite gate. It is copied rather than called, because `_tc_git` stays this file's
-  only git entry point. The error text is matched under `LC_ALL=C`, as the runner does: a
-  localized git otherwise turns a root outside git into `unavailable` (observed with git 2.51
-  under `LANG=de_DE.UTF-8`). In `tests/structure/test-chain-terminus-zero-change-gate.sh`, `G14`
-  drives a real dubious-ownership refusal through `GIT_TEST_ASSUME_DIFFERENT_OWNER`, which
+  git failure prints `unavailable`, which every caller refuses: the two unqualified verbs and the
+  minted-ticket terminus with their listing text, and `--tdd-complete` before either of its gates
+  runs unless both are switched off (see "A git failure in the scope count refuses the verb"
+  above). `unavailable` covers a `safe.directory` "dubious ownership" refusal (exit 128), a root
+  that no longer exists (`cannot change to`), a HEAD probe that git aborts, and a failed listing.
+  An empty root prints `unavailable` too; no caller passes one, because the bind exits 2 first
+  and `--tdd-complete` refuses an empty `_tc_root` before it counts. The split is the
+  one `workTree` in `hooks/lib/evidence-run-v1.js` draws between `not-applicable` and
+  `unavailable` for the full-suite gate. It is copied rather than called, because `_tc_git` stays
+  this file's only git entry point. The error text is matched under `LC_ALL=C`, as the runner
+  does: a localized git otherwise turns a root outside git into `unavailable` (observed with git
+  2.51 under `LANG=de_DE.UTF-8`). In `tests/structure/test-chain-terminus-zero-change-gate.sh`,
+  `G14` drives a real dubious-ownership refusal through `GIT_TEST_ASSUME_DIFFERENT_OWNER`, which
   `_tc_git` keeps, in a HOME without git config and with `GIT_CONFIG_NOSYSTEM=1`. Its controls
   show that real git refuses the fixture and that a `safe.directory` exception in such a HOME
   clears the refusal, and `G14c` closes the same chain under that exception. `G14d` asks the
@@ -229,10 +263,8 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   pins its `unavailable` arm.
   Bounds: git's own answer decides, so a linked worktree whose administrative directory was
   removed reads `not a git repository` and passes, as it does for the full-suite gate, and a
-  corrupt branch ref makes the HEAD probe exit 1 exactly like an unborn branch. `--tdd-complete`
-  does not share this classification: its scope probe still reads every failure of
-  `rev-parse --verify --quiet HEAD` as zero changes, so a refusal there takes the requirements
-  gate out of scope and leaves the receipt gate armed only by a logged claim.
+  corrupt branch ref makes the HEAD probe exit 1 exactly like an unborn branch, which every caller,
+  `--tdd-complete` included, then reads as not evaluable.
 - **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
   baseline range, so a chain that committed its work measures zero changes and this precondition
   skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of

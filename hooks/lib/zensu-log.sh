@@ -1488,7 +1488,6 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-complete: Session Control project context unavailable" >&2
           exit 1
         fi
-        _tc_changes=0
         # Armed when either gate is ON — and ALSO when either is OFF, because the
         # bypass-ledger records below conjoin on this count too: with both switches
         # off the old condition left the count at 0 and silently recorded NEITHER
@@ -1520,17 +1519,14 @@ case "${1:-}" in
         # alone empties `ls-files --others --exclude-standard`.
         #
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
-        # cannot be resolved the `if` below is false, the count stays 0, and every
-        # consumer conjoins on it — disarming both gates AND suppressing both ledger
-        # records, which is precisely the outcome this wrapper exists to prevent.
-        if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-          # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
-          # fallback would append a SECOND line and turn the count into "0\n0" — which
-          # makes the -gt comparison below abort with "integer expression expected" and
-          # silently skips the gate on exactly the empty change set it is scoping for.
-          _tc_changes="$( { _tc_git -C "$_tc_root" diff --name-only HEAD 2>/dev/null
-                            _tc_git -C "$_tc_root" ls-files --others --exclude-standard 2>/dev/null; } \
-                          | sort -u | grep -c . 2>/dev/null || true)"
+        # cannot be resolved every scope call fails, which refuses this verb on a
+        # repository git itself would read.
+        _tc_changes="$(_zensu_unqualified_change_count "$_tc_root")"
+        [ "$_tc_changes" = unknown ] && _tc_changes=0
+        if [ "$_tc_changes" = unavailable ] \
+           && ! { [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ]; }; then
+          echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — git could not list this worktree's changes against HEAD, and that count decides whether the edit-landing receipt gate and the requirements-table gate apply to this chain. Run git diff --name-only HEAD in the project root to see the git error and resolve it, then run --tdd-complete again." >&2
+          exit 1
         fi
         _tc_receipt_verdict() {
           ZENSU_TC_RECEIPT="$(_tdd_native_path "$1" 2>/dev/null || printf '%s' "$1")" node -e '
@@ -1606,7 +1602,7 @@ case "${1:-}" in
           ' 2>/dev/null || printf 'unavailable\t0\t'
         }
         _tc_armed=0
-        [ "${_tc_changes:-0}" -gt 0 ] && _tc_armed=1
+        [ "$_tc_changes" != 0 ] && _tc_armed=1
         _tc_receipt_state=""
         _tc_receipt_claims=0
         _tc_receipt_claims_bad=0
@@ -1928,7 +1924,7 @@ case "${1:-}" in
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a
         # precondition of completion.
-        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ] && [ "$_tc_changes" != 0 ]; then
           # An env escape is free but never silent: the ledger is what keeps
           # everything a chain renders under "Gates bypassed" true. Fail-open, as
           # every other recording site is — failing to record must not change the
@@ -1936,7 +1932,7 @@ case "${1:-}" in
           # no decision point to short-circuit, so there is no escape to record.
           tdd_record_bypass "$session_val" ZENSU_REQUIREMENTS_GATE >/dev/null 2>&1 || true
         fi
-        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off" ] && [ "$_tc_changes" != 0 ]; then
           _rq_plan="$plan_val"
           _rq_explicit="$seen_plan"
           _rq_reason=""

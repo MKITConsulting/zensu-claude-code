@@ -963,10 +963,19 @@ plan must carry a usable `## Requirements` table.
 - **Refusal wording is typed.** A missing or placeholder-only table refuses as a verdict about
   the plan; an unreadable path, a usage error, or a missing library refuses with "could not
   judge the plan" instead — a load fault must never be reported as a judged table.
-- **Scope.** A resolvable git HEAD plus a non-empty change set. That is NARROWER than the
-  receipt gate above it, which multi-repo stage 1 also arms on a logged claim, so a zero-change
-  chain whose work landed in another repository is gated there and not here. A chain that
-  changed nothing has no plan claim to check. **Known gap, stated rather than
+- **Scope.** A non-empty change set. That is NARROWER than the receipt gate above it, which
+  multi-repo stage 1 also arms on a logged claim, so a zero-change chain whose work landed in
+  another repository is gated there and not here. A chain that changed nothing has no plan
+  claim to check. Both preconditions take the change count from the
+  helper the unqualified `--chain-done` uses, so they share its reading of git. A host without
+  `git`, a project root git reports as outside any work tree, and a repository whose HEAD names
+  no commit yet cannot be evaluated and count as no change. Any other git failure — a
+  `safe.directory` "dubious ownership" refusal, a HEAD lookup git aborts, a listing that fails —
+  refuses `--tdd-complete` with exit 1 before either precondition runs, because a count git
+  could not produce is not zero changes; the refusal names `git diff --name-only HEAD` as the
+  way to see git's error. Only with both `ZENSU_EDIT_LANDING_GATE=off` and
+  `ZENSU_REQUIREMENTS_GATE=off` does the verb complete over such a failure, and it then records
+  both escapes in the bypass ledger. **Known gap, stated rather than
   implied:** a bound Autopilot chain that produced zero file changes therefore passes this gate
   untested, still travels its return stage into CONVERGE — the only edge into `OPEN_PR` — and
   converge then mtime-resolves the plan Phase 2 wrote anyway and takes its legacy stop. "The
