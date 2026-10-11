@@ -97,7 +97,9 @@ cannot tell a first review from a fix round's re-review, and it prescribes the f
 `zensu_review_panel` from the record's project root, plus the repo-local personas of step 10.2b,
 over the step 10.2 change set instead of a round delta, with the judge while `hooks.reviewJudge`
 is enabled. That is the fail-safe direction for the panel and the judge: a routed lean re-review
-runs `correctness` alone without the judge, while a resumed review always runs the whole panel.
+runs `correctness` alone without the judge, while a resumed review runs the whole panel unless, on
+the first review, the Phase 6.10 step 3 import the directive also names answers `ok` or `degraded`:
+the imported template review then stands in for the panel, and the judge always runs.
 Activation would also be unsafe on this path: a model that takes `git diff --name-only HEAD` as
 the change set misses untracked files, so a change whose new code lives only in untracked files
 would classify as documentation-only. The directive therefore names the step 10.2 change set and

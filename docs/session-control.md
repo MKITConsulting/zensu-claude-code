@@ -120,8 +120,12 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   reviewed by the auto-mode classifier, so the gate does not police the content
   — a report may quote a protected path — and applies no path rule to it. For
   the same reason it is decided before the working directory is resolved, so a
-  reviewer whose `cwd` vanished can still report that. `SendMessage`, case
-  variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
+  reviewer whose `cwd` vanished can still report that. `StructuredOutput` is
+  admitted for the same two profiles in the same place: a Claude Code workflow gives
+  an agent it spawns with a result schema that tool and hands its input to the
+  workflow script, so a confined reviewer can deliver a workflow result. Its input is
+  the script's own schema, so no field set is checked, and it resolves no path.
+  `SendMessage`, case variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
   exactly `Read, Grep, Glob`: the host injects the tool, and the reviewer-spawn
   grant admits only agents whose `tools:` line is that exact trio. The two
   evidence workers do NOT receive it: `review-evidence-lease-v1.js` reads their
@@ -189,40 +193,37 @@ candidate execution is unsupported; its hermetic fake remains solely for local
 deterministic coverage.
 See [Session Control release gate](session-control-release-gate.md).
 
-**Getting a guaranteed review for a Workflow-triggered run.** Because the worker `Stop`
-no-ops, run the review **once over the aggregate diff** — either in-script (recommended) or
-deferred:
+**Getting a guaranteed review for a Workflow-triggered run.** A worker's `Stop` no-ops, a
+workflow's agents cannot run `zensu-log.sh`, and a review round counts only when the main
+thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main thread,
+**once over the aggregate diff**:
 
-```js
-// Orchestrator-driven: after all implementation agents have joined, run ONE
-// review pass over the combined diff — the configured panel's read-only aspects → merge
-// → judge (when hooks.reviewJudge is enabled, the default) → verify → reviewer.
-const PANEL = /* `full` or `lean`, from zensu_review_panel in hooks/lib/zensu-config.sh */
-const ASPECTS = PANEL === 'full'
-  ? ['conventions', 'bugs', 'architecture', 'tests', 'security']
-  : ['correctness', 'design', 'security']
-const PACKET = /* the complete REVIEW PACKET v1 that /zensu:tdd step 10.2c builds over the combined diff */
-const aspects = await parallel(ASPECTS.map(a => () =>
-  agent(`${PACKET}\nPerspective: ${a}.`, { agentType: 'zensu:review-aspect' })))
-let merged = /* dedupe + sort the findings lists in-script */
-const judge = await agent(`${PACKET}\nmerged_panel_findings:\n${merged}`, { agentType: 'zensu:review-judge' })
-merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
-// Finding Verification Gate (hooks.findingVerification, default on): grade every merged
-// anchor with `node hooks/lib/finding-verify-v1.js --root <top>` (model-free, always exit 0),
-// read each surviving citation yourself, then mark whatever does not hold up
-// [Unverified — do not fix] and downgrade it to SUGGESTION. Annotate, never delete.
-merged = /* apply the verification verdicts */
-const reviewTicket = /* stdout from the top-level Skill command template:
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket */
-await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${PACKET}\n${merged}`, { agentType: 'zensu:code-reviewer' })
-```
+- **The workflow reviewed the change (an Ultracode review, for example).** On the first review,
+  while `hooks.reviewJudge` and `hooks.externalReviewImport` are on (the defaults), run the
+  review through the plugin's template `templates/workflows/zensu-review-v1.js` with the
+  complete Phase 6.10 step 2c REVIEW PACKET v1 in its `args`, and let it finish; the template
+  validates that packet and starts every finder and refuter prompt with it. Phase 6.10 step 3 of
+  `/zensu:tdd` then imports the review: `zensu-log.sh --external-review` confirms from the
+  Workflow launch record that the review started after the newest change, reads the result
+  from that run's own record, checks that the run completed the shipped template over every
+  changed file and that its result has the template's shape and names the current tree, and
+  compares its agent counts with the run journal. The workflow's findings join the merge as
+  `EXT-<n>`, the judge names the files and perspectives the workflow left uncovered, and each
+  such gap gets one targeted `zensu:review-aspect` over the packet with `changed_files`
+  narrowed to the gap's files. The Finding Verification Gate, the ticket and the consume-mode
+  reviewer run as usual, and the judge and that reviewer each receive the complete packet. A
+  workflow that did not run the template is not imported, so the panel reviews the change. See
+  [Ultracode and external reviews](review-chain.md#ultracode-and-external-reviews).
+- **The workflow only implemented.** Run the ordinary Phase 6.10 sequence in the main thread
+  after it finished. Once implementation is marked complete, a `Stop` that falls while the
+  workflow still runs is released up to three times in a row before the first review, so the chain
+  waits for the workflow instead of starting a review beside it; a fix round never waits.
+- **No chain is armed in this session.** The main thread records a project-scoped marker
+  with `zensu-log.sh --pending-review --files "<changed>"`; the **next interactive `Stop`**
+  in that project adopts it and runs the full chain once, then clears it.
+  `zensu-log.sh --pending-review-done` clears it when the review already ran.
 
-If you cannot review in-script, the interactive main thread records a project-scoped marker
-after the Workflow returns (`zensu-log.sh --pending-review --files "<changed>"`), because a
-Workflow worker can run no command; the **next interactive `Stop`** in
-that project adopts it and runs the full chain once, then clears it. The orchestrator clears
-it itself with `zensu-log.sh --pending-review-done` when it reviewed in-script. Review is
-per-implementation over the aggregate diff — **never per spawned worker**.
+Review is per-implementation over the aggregate diff — **never per spawned worker**.
 
 **Who holds an adopted review.** Adoption turns the marker into a claim
 (`pending-review.json.claim`) owned by the adopting session, and a lease decides how
