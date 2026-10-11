@@ -922,10 +922,12 @@ test('two navigations in one command are refused as not one plain call, and one 
   assert.match(decision.prompt, /approves this origin/);
 });
 
-test('consent mode refuses a remote target and every navigation the floor refuses', () => {
+test('without a reported permission mode consent mode refuses a remote target, and every navigation the floor refuses is refused', () => {
   assert.equal(denied(cli('goto https://app.example.com/')), REASONS.REMOTE_NEEDS_POLICY);
   assert.equal(denied(cli('tab-new https://93.184.216.34/')), REASONS.REMOTE_NEEDS_POLICY);
   const floorCases = [
+    ['https://*.example.com/', FLOOR_REASONS.HOSTNAME_PATTERN],
+    ['https://{a,b}.example.com/', FLOOR_REASONS.HOSTNAME_PATTERN],
     ['http://app.localhost:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://localhost.:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://10.0.0.5/', FLOOR_REASONS.REMOTE_HTTPS],
@@ -952,7 +954,7 @@ test('consent mode asks once for localhost origins, the way it asks for a loopba
   assert.match(opened.prompt, /http:\/\/localhost:4200, http:\/\/localhost:9090 \(local loopback\)/);
 });
 
-test('consent mode refuses an open whose run config names a remote origin, even toward a loopback target', (t) => {
+test('without a reported permission mode consent mode refuses an open whose run config names a remote origin, even toward a loopback target', (t) => {
   const env = isolatedEnv(t);
   const pin = ['MAP app.example.com 93.184.216.34'];
   const mixed = runConfig(t, ['http://127.0.0.1:4200', 'https://app.example.com'], pin);
@@ -970,7 +972,7 @@ test('a subagent is refused on a zensu-verify session and ignored on any other c
   assert.deepEqual(decide('playwright-cli -s=mine snapshot', { payload: SUBAGENT }), { verdict: 'none' });
 });
 
-test('policy mode admits every route of a policy target without a prompt and refuses every other origin', () => {
+test('policy mode admits every route of a policy target without a prompt and, without a reported permission mode, refuses every other origin', () => {
   for (const target of [LOCAL_TARGET, LEGACY_LOCAL_TARGET]) {
     const policy = policyOf('local', [target]);
     for (const route of ['/', '/login', '/admin', '/teams/t-81/sprints/s-7']) {
@@ -1073,6 +1075,178 @@ test('judgeOrigin keeps the navigable and the network-only role apart and has no
     { deny: REASONS.NETWORK_ONLY_NEEDS_POLICY });
   assert.deepEqual(consent.judgeOrigin('http://127.0.0.1:9090/', { navigation: false, policy: null, role: 'navigable' }),
     { origin: 'http://127.0.0.1:9090', route: '/', mode: 'local' });
+  assert.deepEqual(consent.judgeOrigin('https://app.example.com/', { navigation: true, policy: null }), { deny: REASONS.REMOTE_NEEDS_POLICY });
+  assert.deepEqual(consent.judgeOrigin('https://app.example.com/', { navigation: true, policy: null, answerable: true }),
+    { origin: 'https://app.example.com', route: '/', mode: 'remote' });
+});
+
+const HUMAN = Object.freeze({ permission_mode: 'default' });
+const APP_PIN = Object.freeze(['MAP app.example.com 93.184.216.34']);
+
+test('a person can answer the permission prompt only in default, acceptEdits, auto and plan mode', () => {
+  assert.deepEqual([...consent.ANSWERABLE_MODES], ['default', 'acceptEdits', 'auto', 'plan']);
+  for (const mode of consent.ANSWERABLE_MODES) {
+    const decision = decide(cli('goto https://app.example.com/'), { payload: { permission_mode: mode } });
+    assert.equal(decision.verdict, 'ask', mode);
+    assert.deepEqual(decision.origins, ['https://app.example.com'], mode);
+  }
+  const unanswerable = [MAIN, { permission_mode: 'bypassPermissions' }, { permission_mode: 'dontAsk' }, { permission_mode: 'bubble' },
+    { permission_mode: 'Default' }, { permission_mode: '' }, { permission_mode: 7 }, { permission_mode: null }];
+  for (const payload of unanswerable) {
+    assert.equal(denied(cli('goto https://app.example.com/'), { payload }), REASONS.REMOTE_NEEDS_POLICY, JSON.stringify(payload));
+  }
+});
+
+test('the remote refusals name both ways out: a mode with a prompt, or the launch-time policy', () => {
+  assert.match(REASONS.REMOTE_NEEDS_POLICY, /^remote-target-needs-parent-environment-policy: /);
+  for (const reason of [REASONS.REMOTE_NEEDS_POLICY, REASONS.NOT_POLICY_TARGET, REASONS.NOT_POLICY_KIND]) {
+    assert.match(reason, /Manual or Auto \(CLI: --permission-mode default or auto\)/);
+    assert.match(reason, /bypassPermissions, dontAsk or not reported/);
+  }
+  assert.match(REASONS.REMOTE_NEEDS_POLICY, /parent-environment navigation policy ZENSU_VERIFY_NAVIGATION_POLICY_V1$/);
+  assert.match(REASONS.NOT_POLICY_TARGET, /^origin is not a target of the navigation policy, /);
+  assert.match(REASONS.NOT_POLICY_TARGET, /add the origin to the policy and relaunch Claude Code$/);
+  assert.match(REASONS.NOT_POLICY_KIND, /^origin is not of the kind the navigation policy names, because a local policy names loopback origins only and a remote policy public HTTPS origins only, /);
+  assert.match(REASONS.NOT_POLICY_KIND, /relaunch Claude Code with a policy whose mode fits the origin and that names it as a target$/);
+  assert.doesNotMatch(REASONS.NOT_POLICY_KIND, /add the origin to the policy/);
+});
+
+test('loopback consent asks and remembers the same way in every permission mode', () => {
+  for (const payload of [MAIN, HUMAN, { permission_mode: 'bypassPermissions' }, { permission_mode: 'dontAsk' }]) {
+    assert.equal(decide(cli('goto http://127.0.0.1:4200/'), { payload }).verdict, 'ask', JSON.stringify(payload));
+    assert.deepEqual(decide(cli('goto http://127.0.0.1:4200/x'), { payload, records: [record('http://127.0.0.1:4200')] }),
+      { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4200', route: '/x', decidedBy: 'remembered' }] }, JSON.stringify(payload));
+  }
+});
+
+test('a remote open asks every time, also when the consent memory names its origin, in one prompt for every fresh origin', (t) => {
+  const env = isolatedEnv(t);
+  const remote = runConfig(t, ['https://app.example.com'], APP_PIN);
+  for (const records of [[], [record('https://app.example.com')]]) {
+    const decision = decide(openCommand(remote.file, 'https://app.example.com/login'), { env, payload: HUMAN, records });
+    assert.equal(decision.verdict, 'ask', JSON.stringify(records));
+    assert.deepEqual(decision.origins, ['https://app.example.com']);
+    assert.deepEqual(decision.plan, [{ origin: 'https://app.example.com', route: '/login', decidedBy: 'asked' }]);
+    assert.equal(decision.prompt,
+      consent.promptText({ origins: ['https://app.example.com'], session: SESSION, remote: ['https://app.example.com'] }));
+  }
+  const mixed = runConfig(t, ['http://127.0.0.1:4200', 'https://app.example.com'], APP_PIN);
+  const fresh = decide(openCommand(mixed.file, 'http://127.0.0.1:4200/'), { env, payload: HUMAN });
+  assert.equal(fresh.verdict, 'ask');
+  assert.deepEqual(fresh.origins, ['http://127.0.0.1:4200', 'https://app.example.com']);
+  assert.match(fresh.prompt, /http:\/\/127\.0\.0\.1:4200 \(local loopback\) and https:\/\/app\.example\.com \(remote\)/);
+  const remembered = decide(openCommand(mixed.file, 'http://127.0.0.1:4200/'),
+    { env, payload: HUMAN, records: [record('http://127.0.0.1:4200'), record('https://app.example.com')] });
+  assert.equal(remembered.verdict, 'ask');
+  assert.deepEqual(remembered.origins, ['https://app.example.com']);
+  assert.deepEqual(remembered.plan, [
+    { origin: 'http://127.0.0.1:4200', route: '/', decidedBy: 'remembered' },
+    { origin: 'https://app.example.com', route: '/', decidedBy: 'asked' },
+  ]);
+});
+
+test('a remote goto or tab-new passes once the session recorded its origin and asks before that', () => {
+  const records = [record('https://app.example.com')];
+  assert.deepEqual(decide(cli('goto https://app.example.com/admin'), { payload: HUMAN, records }),
+    { verdict: 'none', plan: [{ origin: 'https://app.example.com', route: '/admin', decidedBy: 'remembered' }] });
+  assert.deepEqual(decide(cli('tab-new https://app.example.com/'), { payload: HUMAN, records }),
+    { verdict: 'none', plan: [{ origin: 'https://app.example.com', route: '/', decidedBy: 'remembered' }] });
+  const fresh = decide(cli('goto https://other.example.com/'), { payload: HUMAN, records });
+  assert.equal(fresh.verdict, 'ask');
+  assert.match(fresh.prompt, /https:\/\/other\.example\.com \(remote\)/);
+  assert.equal(denied(cli('goto https://app.example.com/admin'), { payload: { permission_mode: 'bypassPermissions' }, records }),
+    REASONS.REMOTE_NEEDS_POLICY);
+});
+
+test('without a person at the prompt a remote open is refused before any memory is read', (t) => {
+  const env = isolatedEnv(t);
+  const remote = runConfig(t, ['https://app.example.com'], APP_PIN);
+  for (const payload of [MAIN, { permission_mode: 'bypassPermissions' }, { permission_mode: 'dontAsk' }]) {
+    assert.equal(denied(openCommand(remote.file), { env, payload, records: [record('https://app.example.com')] }),
+      REASONS.REMOTE_NEEDS_POLICY, JSON.stringify(payload));
+  }
+});
+
+test('a valid policy passes its targets in every mode, asks for other origins where a person can answer, and is the whole allowlist elsewhere', (t) => {
+  const env = isolatedEnv(t);
+  const policy = policyOf('local', [LOCAL_TARGET]);
+  for (const payload of [MAIN, HUMAN, { permission_mode: 'bypassPermissions' }]) {
+    assert.deepEqual(decide(cli('goto http://127.0.0.1:4300/x'), { policy, payload }),
+      { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/x', decidedBy: 'policy-mode' }] }, JSON.stringify(payload));
+  }
+  assert.equal(decide(cli('goto http://127.0.0.1:4301/'), { policy, payload: HUMAN }).verdict, 'ask');
+  assert.equal(decide(cli('goto https://app.example.com/'), { policy, payload: HUMAN }).verdict, 'ask');
+  const remotePolicy = policyOf('remote', [REMOTE_APP_TARGET]);
+  for (const payload of [MAIN, { permission_mode: 'bypassPermissions' }, { permission_mode: 'dontAsk' }]) {
+    assert.equal(denied(cli('goto http://127.0.0.1:4301/'), { policy, payload }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
+    assert.equal(denied(cli('goto https://app.example.com/'), { policy, payload }), `https://app.example.com: ${REASONS.NOT_POLICY_KIND}`);
+    assert.equal(denied(cli('goto https://other.example.com/'), { policy: remotePolicy, payload }),
+      `https://other.example.com: ${REASONS.NOT_POLICY_TARGET}`);
+    assert.equal(denied(cli('goto http://127.0.0.1:4200/'), { policy: remotePolicy, payload }), `http://127.0.0.1:4200: ${REASONS.NOT_POLICY_KIND}`);
+  }
+  const local = runConfig(t, ['http://127.0.0.1:4200']);
+  const opened = decide(openCommand(local.file), { env, policy: remotePolicy, payload: HUMAN });
+  assert.equal(opened.verdict, 'ask');
+  assert.deepEqual(opened.origins, ['http://127.0.0.1:4200']);
+  const both = runConfig(t, ['https://app.example.com', 'https://other.example.com'],
+    ['MAP app.example.com 93.184.216.34', 'MAP other.example.com 93.184.216.35']);
+  const partly = decide(openCommand(both.file), { env, policy: remotePolicy, payload: HUMAN, records: [record('https://other.example.com')] });
+  assert.equal(partly.verdict, 'ask');
+  assert.deepEqual(partly.origins, ['https://other.example.com']);
+  assert.deepEqual(partly.plan, [
+    { origin: 'https://app.example.com', route: '/', decidedBy: 'policy-mode' },
+    { origin: 'https://other.example.com', route: '/', decidedBy: 'asked' },
+  ]);
+  const invalid = consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' });
+  assert.equal(denied(cli('goto http://127.0.0.1:4300/'), { policy: invalid, payload: HUMAN }),
+    `${REASONS.POLICY_INVALID}: policy contains unknown or missing keys`);
+  const networkOnly = networkOnlyPolicy('remote', [REMOTE_APP_TARGET], ['https://api.example.org']);
+  assert.equal(denied(cli('goto https://api.example.org/'), { policy: networkOnly, payload: HUMAN }),
+    `https://api.example.org: ${REASONS.NETWORK_ONLY_NAVIGATION}`);
+});
+
+test('runConfigShape requires a resolver pin for every remote hostname and refuses a pattern host', (t) => {
+  const env = isolatedEnv(t);
+  const unpinned = runConfig(t, ['https://app.example.com']);
+  assert.deepEqual(consent.readRunConfig(unpinned.file),
+    { ok: false, fault: 'https://app.example.com: the run config carries no resolver pin for this remote host' });
+  assert.equal(denied(openCommand(unpinned.file), { env, payload: HUMAN }),
+    'https://app.example.com: the run config carries no resolver pin for this remote host');
+  for (const origins of [['https://93.184.216.34'], ['http://localhost:4200'], ['http://127.0.0.1:4200']]) {
+    assert.equal(consent.readRunConfig(runConfig(t, origins).file).ok, true, origins[0]);
+  }
+  const pattern = runConfig(t, ['https://*.example.com'], ['MAP *.example.com 93.184.216.34']);
+  assert.deepEqual(consent.readRunConfig(pattern.file), { ok: false, fault: `https://*.example.com: ${FLOOR_REASONS.HOSTNAME_PATTERN}` });
+  const plain = runConfig(t, ['http://app.example.com']);
+  assert.equal(consent.readRunConfig(plain.file).ok, true);
+  assert.equal(denied(openCommand(plain.file), { env, payload: HUMAN }), FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+});
+
+test('the remote prompt names the origin as parsed, never promises a session-long grant for it, and leaves the loopback prompt unchanged', () => {
+  const single = consent.promptText({ origins: ['https://app.example.com'], session: SESSION, remote: ['https://app.example.com'] });
+  assert.equal(single, [
+    `The playwright-cli browser session ${SESSION} is about to reach https://app.example.com (remote).`,
+    'Answering Yes approves this origin: the model may then open, read and interact with (click, type, submit forms on) any page on it, pages behind your own login included, and what it sees there, screenshots included, enters this conversation and the run directory.',
+    'A remote origin is asked again every time the browser is opened.',
+    'Consent is per origin, never per route.',
+    'Answer No to keep the browser away from it; the run then reports PARTIAL.',
+  ].join(' '));
+  const pair = ['https://a.example.com', 'https://b.example.com'];
+  const plural = consent.promptText({ origins: pair, session: SESSION, remote: pair });
+  assert.match(plural, /approves these origins: .* any page on them,/);
+  assert.match(plural, /away from them;/);
+  const mixed = consent.promptText({ origins: ['http://127.0.0.1:4200', 'http://127.0.0.1:4201', 'https://app.example.com'], session: SESSION,
+    remote: ['https://app.example.com'] });
+  assert.match(mixed, /The loopback origins stay approved for the rest of this Claude Code session; a remote origin is asked again every time the browser is opened\./);
+  const oneLoopback = consent.promptText({ origins: ['http://127.0.0.1:4200', 'https://app.example.com'], session: SESSION, remote: ['https://app.example.com'] });
+  assert.match(oneLoopback, /The loopback origin stays approved/);
+  for (const text of [single, plural, mixed, oneLoopback]) assert.doesNotMatch(text, /without asking again/);
+  assert.equal(consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION, remote: [] }),
+    consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION }));
+  const idn = decide(cli("goto 'https://café.example/'"), { payload: HUMAN });
+  assert.equal(idn.verdict, 'ask');
+  assert.deepEqual(idn.origins, ['https://xn--caf-dma.example']);
+  assert.match(idn.prompt, /https:\/\/xn--caf-dma\.example \(remote\)/);
 });
 
 test('a command beyond the size bound is refused only when it names a zensu-verify session', () => {
@@ -1269,6 +1443,11 @@ test('the memory path must be the session file inside the real state directory',
   assert.deepEqual(consent.memoryPathAllowed(path.join(root, '.zensu', 'state', 'verify-consent-other.json'), root), refused);
   assert.deepEqual(consent.memoryPathAllowed(path.join(root, `verify-consent-${KEY}.json`), root), refused);
   assert.deepEqual(consent.memoryPathAllowed(memory, path.join(root, 'missing')), refused);
+  assert.deepEqual(consent.memoryPathAllowed(memory.split(path.sep).join('/'), root), { ok: true, stateDir: path.join(root, '.zensu', 'state') });
+  assert.deepEqual(consent.memoryPathAllowed(`${root}/.zensu/state/../state/verify-consent-${KEY}.json`, root), refused);
+  assert.equal(consent.nativeSeparators('C:/work/repo/.zensu/state', path.win32), 'C:\\work\\repo\\.zensu\\state');
+  assert.equal(consent.nativeSeparators('C:/work/repo/.zensu/state/../state', path.win32), 'C:\\work\\repo\\.zensu\\state\\..\\state');
+  assert.equal(consent.nativeSeparators('/work/repo/.zensu/state', path.posix), '/work/repo/.zensu/state');
 });
 
 test('a symlinked state component, a symlinked memory and a hard-linked memory are refused', { skip: process.platform === 'win32' }, (t) => {
@@ -1462,6 +1641,33 @@ test('runPost records the asked, remembered and policy-mode decisions it sees', 
     { origin: 'http://127.0.0.1:4300', route: '/', decidedBy: 'policy-mode' },
   ]);
   for (const entry of read.records) assert.equal(consent.isIsoInstant(entry.at), true);
+  assert.equal(err.text(), '');
+});
+
+test('runPre and runPost read permission_mode from the hook payload and record an approved remote open as asked', (t) => {
+  const { root, memory } = project(t);
+  const env = { ...isolatedEnv(t), ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
+  const remote = runConfig(t, ['https://app.example.com'], APP_PIN);
+  const command = openCommand(remote.file, 'https://app.example.com/');
+  const asked = sink();
+  assert.equal(consent.runPre(bash(command, HUMAN), env, asked, sink()), true);
+  const output = JSON.parse(asked.text()).hookSpecificOutput;
+  assert.equal(output.permissionDecision, 'ask');
+  assert.match(output.permissionDecisionReason, /https:\/\/app\.example\.com \(remote\)/);
+  const refused = sink();
+  assert.equal(consent.runPre(bash(command), env, refused, sink()), true);
+  assert.equal(JSON.parse(refused.text()).hookSpecificOutput.permissionDecisionReason, `${DENIED}${REASONS.REMOTE_NEEDS_POLICY}`);
+  const err = sink();
+  assert.equal(consent.runPost(post(command, HUMAN), env, err).ok, true);
+  assert.equal(consent.runPost(post(cli('goto https://app.example.com/admin'), HUMAN), env, err).ok, true);
+  const read = consent.readConsentMemory(memory, root);
+  assert.deepEqual(read.records.map(({ origin, route, decidedBy }) => ({ origin, route, decidedBy })), [
+    { origin: 'https://app.example.com', route: '/', decidedBy: 'asked' },
+    { origin: 'https://app.example.com', route: '/admin', decidedBy: 'remembered' },
+  ]);
+  const again = sink();
+  assert.equal(consent.runPre(bash(command, HUMAN), env, again, sink()), true);
+  assert.equal(JSON.parse(again.text()).hookSpecificOutput.permissionDecision, 'ask');
   assert.equal(err.text(), '');
 });
 

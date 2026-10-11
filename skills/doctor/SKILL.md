@@ -426,19 +426,19 @@ classifier will refuse a spawn, not only when the whole table is green.
   ships, which the run-config helper refuses unless it is the measured one. Never install it on
   their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
-  set when Claude Code started and passes the policy contract, so it governs every browser
-  origin and the consent prompt never fires this session; the browser consent gate navigates only
-  its target origins, and every route on them, and lets pages request the policy's network-only
-  origins, if any, while no navigation command may open one. Nothing to do.
+  set when Claude Code started and passes the policy contract. Its target origins pass without a
+  prompt in every permission mode, every route on them; pages may request its network-only
+  origins, if any, but no navigation command may open one. Other origins are asked, or denied
+  under bypass permissions or dontAsk. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
   registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
-  `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
-  session that reaches a new loopback origin asks the user through the permission prompt, and
-  every further route on an approved origin then proceeds without one; remote targets still
-  need the policy.
+  `.zensu/autopilot.yaml`) is present. The permission prompt asks the user once per session for
+  each new loopback origin of a `zensu-verify` session, and at every browser start for a remote
+  HTTPS origin, which under bypass permissions or dontAsk needs the policy.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
-  recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+  recipe with the user, or `--attach=<loopback-origin>` for an application they already run. A
+  remote run needs no recipe.
 - **❌ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)** → a
   parent-environment policy IS set, but its value does not satisfy the policy contract, so the
   browser consent gate denies every `zensu-verify` navigation. The parenthesis names the rule it

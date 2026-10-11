@@ -10,7 +10,7 @@ skeletons they anchor on.
 | **zensu-plm** | Read-only planning analyst | Explains and decomposes Zensu lifecycle work. It receives neutral context but exposes only `Read`, `Grep`, and `Glob`; the matching skill performs mutations in the interactive main thread. |
 | **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from the parallel `review-aspect` panel — three perspectives by default, five with `hooks.reviewPanel: full` (no re-read, no build/test). |
 | **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns one per perspective of the panel in a single parallel batch — `correctness`, `design` and `security` by default (`hooks.reviewPanel: lean`, whose fix-round re-reviews spawn `correctness` alone), or `conventions`, `bugs`, `architecture`, `tests` and `security` with `hooks.reviewPanel: full` — then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
-| **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
+| **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only, and on any review the Stop hook resumes). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
 | **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object as its final message; only the main thread validates and materializes that result. |
 | **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
 
@@ -20,8 +20,8 @@ control/agent tool. The first all-tool `PreToolUse` hook is the fail-closed
 enforcement point: it revalidates the immutable Session Control context on every
 tool call, recognizes Claude Code's plugin-scoped `zensu:code-reviewer`,
 `zensu:review-aspect`, `zensu:review-judge`, `zensu:plan-review-worker`, and
-`zensu:pr-review-worker` identities (plus exact bare
-`--agents` fixtures), then repeats the exact three-tool reviewer allowlist. The
+`zensu:pr-review-worker` identities (plus the exact bare `--agents` names of
+the three reviewers), then repeats the exact three-tool reviewer allowlist. The
 plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. The three
 reviewers and the PLM may additionally call the host's `SubagentHandback` report
 tool, with exactly one string `message` field, because Claude Code in `auto`

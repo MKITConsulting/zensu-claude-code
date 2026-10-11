@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (163 = 156 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 156 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 163). The figures here have drifted ELEVEN times, ten of them upward, and every
+reconciled to that manifest (165 = 158 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 158 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 165). The figures here have drifted ELEVEN times, ten of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -50,7 +50,7 @@ moved the figure. The eleventh is the merge shape again: `test-user-prompt-budge
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
 merging `main` into it made 156.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 153 against 156 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 155 against 158 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -90,9 +90,9 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **163** — 156 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **156 structure suites + 5 offline evals = 161 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 163 − 156 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **165** — 158 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **158 structure suites + 5 offline evals = 163 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 165 − 158 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **9** (`windows-shard-1`…`-9`, 44 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -103,8 +103,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 163 structure suites + 5 offline evals | none |
-| `--ci` | 156 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 165 structure suites + 5 offline evals | none |
+| `--ci` | 158 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -169,7 +169,7 @@ retained), the mode precedence at the freeze point (`tdd-mode-toggle` — sessio
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
 unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
-anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
+anchors on — and the 5-agent review fan-out wiring in `skills/tdd/references/review-chain.md`.
 
 ### Review chain & findings (29)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
@@ -237,10 +237,16 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (150 checks: the Bash-matcher hook pair driven against a real Session Control session — an
+gate (220 checks: the Bash-matcher hook pair driven against a real Session Control session — an
 unrelated call left alone, a refused command, the first loopback navigation asking, the recorded
 approval and the remembered origin, the floor refusals, a subagent denied, policy mode, and the
-`open` run-config, Chromium-only and global-config refusals — the single-plain-invocation shapes
+`open` run-config, Chromium-only and global-config refusals — remote consent through the real
+hooks: a remote run config asked with the remote prompt at every `open` whatever the memory
+records and recorded `asked`, a `goto` to a recorded remote origin passing and to an unrecorded
+one asking, a remote origin denied with its remedy under `bypassPermissions`, `dontAsk` or no
+reported mode while a new loopback origin still asks there, a policy pre-approving its targets in
+every mode and leaving every other origin to the prompt where one can be shown, an invalid policy
+denying even there, and a pattern host refused by the floor — the single-plain-invocation shapes
 denied through the real pre hook (quote split, letter case, line continuation, here-string,
 co-rider, launcher, an unresolved session option), the recognized `/zensu:doctor` and adoption
 commands admitted, the recorder reading the same spellings, a differential through a
@@ -250,7 +256,7 @@ the byte-identical prefilter carrying every derived CLI marker, the escaped-slas
 reached with `sed` failing and a control proving that failing `sed` is the one the hooks run,
 both no-node arms, degraded roots
 left silent on unmarked payloads, the two doc pins on fault direction and the mention cost — the
-four unit files held at their
+five unit files held at their
 registered counts and against this document's table, the one navigation floor both the gate and
 the run-config helper require, the fail-closed load faults, the policy `rules/setup.md` renders,
 and a tree-wide census that no file outside its allowlist still names the retired MCP broker),
@@ -298,9 +304,9 @@ GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (15)
-`changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
-`file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
+### Release & repo hygiene (17)
+`changelog-unreleased-resolver-entries` · `clock-shift` · `drift-assertion-or-logic` · `drift-audit-regex` ·
+`eval-harness-units` · `file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
 `promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
 `run-all-required-offline-suites` · `run-all-sharding` · `version-sync` ·
@@ -308,9 +314,11 @@ reconciliation (~107), commentable-diff-line validation, credential handling.
 
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
 invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
-only reference existing files, that Promptfoo stays local-only, that no workflow `run:`
-block template-expands a dispatcher-controlled expression, and the runner's own contract.
-`workflow-dispatch-inputs` needs `node_modules` → `BLOCK` without `npm ci`.
+only reference existing files, that Promptfoo stays local-only while the four node unit files
+of its harness still run in CI (`eval-harness-units`), that no workflow `run:`
+block template-expands a dispatcher-controlled expression, the shifted-clock pass behind
+`scheduled.yml` (its preload, its allowlist and its runner), and the runner's own contract.
+`workflow-dispatch-inputs` and `clock-shift` need `node_modules` → `BLOCK` without `npm ci`.
 
 ### Windows & portability (5)
 `bash32-portability` · `msys-runtime-boundaries` ·
@@ -373,8 +381,11 @@ binary; these guard the local harness contract.
 
 ## 4. `node --test` unit suites
 
-Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
-that suite's failure.
+Each is driven by a parent shell suite under `run-all.sh`, so a JS failure surfaces as that
+suite's failure. Separately, `scheduled.yml` runs every file here directly through
+`node tests/run-clock-shift.js` with `Date` shifted forward (§8), including the files whose
+only drivers are the local-only Promptfoo suites; those are deterministic units that spawn
+node alone, never the Promptfoo binary or a model.
 
 `R13` in `test-restore-project-root.sh` compares every row's `Blocks` cell with the
 `^test(` registrations of its file through `unit_overview_check` in
@@ -388,6 +399,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 80 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
 | `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
+| `clock-shift-v1.test.js` | 19 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, `Date.now` stays assignable so a stub still wins, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the runner's child environment and its reporter loaded by file URL, the allowlist validator, the outcome merge across same-named top-level tests, the runner's verdict end to end against synthetic unit files (allowed, unexpected, stale, an allowlisted name that two tests share, and a skipped or failing todo test through the real reporter), that every shipped allowlist entry names exactly one top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
 | `acceptance-verify-v1.test.js` | 25 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
 | `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
 | `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
@@ -403,33 +415,33 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `session-adopt-report-v1.test.js` | 59 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, that the display rule has exactly ONE owner, and the adoption half of `main()` through its `deps` seam — the three `--confirm` failure arms (served meanwhile, refused under the lock, did not complete), the read-only preview's served, refused and adoptable answers, the provenance branches read off the core vocabulary rather than literals, and the already-served `--confirm` arm whole for every lease-sweep result — none recorded, moved, clean, refused (named as refused, never as completed) and stuck |
 | `session-auto-adopt-v1.test.js` | 44 | `test-versioned-plugin-upgrade.sh` | the automatic adoption shared by every hook binder and the manual entry point: the ladder (probe, then the crash-resume check the preview owns — a dangling link at the superseded name included — then the opt-out, which stands only for an adoptable record, adopt under the lock, sweep), every refusal and unavailable arm through injected core and sweep stubs, the closed outcome and reason vocabularies, the opt-out precedence (explicit file as one layer, else the global file and the project overlay as two; `false` is STICKY across them while the merged view still lets the project win; malformed input degrades to enabled), that `previewAdoption` never writes — a served answer from it carries no sweep, while `adoptForHook` completes a sibling's adoption with one, on the probe-time, lock-time and timed-out-then-served arms alike — the candidate files equal to those of `_ZENSU_STRICT_JS` in `zensu-config.sh`, that the manual caller may ignore the opt-out, the named-state predicate, the typed lock-timeout code and that the core MINTS it, that a refusal names the state the PROBE carried (and that the real `adoptableRecord` attaches it to every refusal but `record-unreadable`), the single JavaScript owner of the token grammar, the shared notice renderer (a refused sweep is named as refused — partial or not — the orphan and concurrent variants, the unmeasured already-served span, every value screened, the doctor pointer conditional per provenance), `supersededRecordFile` refusing an unsafe version, the observed version travelling on the request, the operator line and the kept-record screen, the `.*` gate's token screens and verb/remedy/tail selectors through its export seam, the adapter's `serveOrAdopt` through its `deps` seam (including the lease sweep of a served answer it names when the strict re-read still fails), the served-sweep line naming the served record rather than a sibling's adoption, the notice's closing on a deny and on an orphaned adoption, and that the default instance is wired to the real core and sweep |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `verify-consent-v1.test.js` | 115 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants, the CLI names it takes from the version module with the per-platform bare set, and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the shape and final refusal classes with the re-issue note only a shape denial carries, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent and the loopback-only bound, the Chromium-only `--browser` rule, the `--config` run-config shape with its refusal of a resolver pin for `localhost`, the global-config and ambient-override refusals, policy mode admitting every route of a target origin, a network-only origin admitted in the run config with no plan entry and refused for every navigation, the two policy roles of `judgeOrigin`, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, the prompt text, and the absence of any route contract of its own |
-| `verify-navigation-floor-v1.test.js` | 20 | `test-verify-consent.sh` (V6) | the one navigation floor the consent gate and the run-config helper share: the local-host predicate (loopback IPs and the exact name `localhost`), loopback and public-address classes, URL refusals, remote host resolution, route normalization, the top-level policy contract check, and `parsePolicyTargets` with its route-free target and the legacy route list it still bounds at `MAX_POLICY_ROUTES` and then drops, the optional `networkOnlyOrigins` list with its own contract cause, shape faults, floor per mode and target overlap, and the one hostname rule that refuses a wildcard or pattern host in either list |
+| `verify-consent-v1.test.js` | 125 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants, the CLI names it takes from the version module with the per-platform bare set, and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the shape and final refusal classes with the re-issue note only a shape denial carries, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent, the permission modes in which the session can show the prompt, a remote origin asked at every open whatever the memory holds and refused where the session cannot show the prompt, a policy that pre-approves its targets in every mode and stays the whole allowlist only where the session cannot show the prompt, with a reason of its own for an origin of the other kind than the policy's, the remote and mixed prompt texts, the Chromium-only `--browser` rule, the `--config` run-config shape with its refusal of a resolver pin for `localhost` and of an unpinned or pattern remote host, the global-config and ambient-override refusals, policy mode admitting every route of a target origin, a network-only origin admitted in the run config with no plan entry and refused for every navigation, the two policy roles of `judgeOrigin`, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, the prompt text, and the absence of any route contract of its own |
+| `verify-navigation-floor-v1.test.js` | 21 | `test-verify-consent.sh` (V6) | the one navigation floor the consent gate and the run-config helper share: the local-host predicate (loopback IPs and the exact name `localhost`), loopback and public-address classes, URL refusals including a wildcard or pattern remote host, remote host resolution, route normalization, the top-level policy contract check, and `parsePolicyTargets` with its route-free target and the legacy route list it still bounds at `MAX_POLICY_ROUTES` and then drops, the optional `networkOnlyOrigins` list with its own contract cause, shape faults, floor per mode and target overlap, and the one exported exact-host predicate that refuses a wildcard or pattern host in either list and in navigation (the run-config half is pinned in `verify-consent-v1.test.js`) |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
-| `verify-browser-config.test.js` | 20 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, a `localhost` origin written with no resolver pin, the public-address pins of a remote run, the policy gating of both modes, the `--network-only-origin` flag with its shared origin bound, pins, role refusals and consent-mode refusal, the per-origin `--check-policy` answer for both operands and the readiness refusal it runs first, the run-directory refusals, the readiness refusals with the cause and remedy each names, and the CLI contract |
+| `verify-browser-config.test.js` | 21 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, a `localhost` origin written with no resolver pin, the public-address pins of a remote run written for consent or for a policy, a policy that pre-approves only its targets whatever its mode, the `--network-only-origin` flag with its shared origin bound, pins, role refusals and consent-mode refusal, the per-origin `--check-policy` answer for both operands and the readiness refusal it runs first, the stderr note printed only when a present policy leaves an origin to the permission prompt, the run-directory refusals, the readiness refusals with the cause and remedy each names, and the CLI contract |
 | `playwright-cli-version-v1.test.js` | 14 | `test-verify-consent.sh` (V7d) | the installed playwright-cli version identity the doctor and the run-config helper share: the `@playwright/cli` manifest the resolved binary belongs to, read without running it; a manifest naming another package or malformed, which is never executed; the npm shim sibling, read before any directory above the shim; the bounded `--version` self-report with stdin closed and the update notifier off; the PATH walk in shell order, with an empty or relative entry read against the working directory and named as unstable; and the key-per-line CLI |
 | `release-run-step.test.js` | 11 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `workflow-dispatch-inputs.test.js` | 24 | `test-workflow-dispatch-inputs.sh` | dispatcher-controlled values reach `run:` scripts only through `env:` or a runner variable: no `run:` block in any workflow template-expands an `inputs`, `env` or `needs` reference, or a `github` reference other than a dotted `sha`, `event_name`, `repository` or `server_url`, in any letter case (with a synthetic document proving the scan flags dotted, index and whole-context forms and no trusted one), every release step reading `SKIP_REASON`, `SKIP_TEST_GATE` or `VERSION_TYPE` maps it from that input, and prepare and publish carry one identical skip-request validation. EXECUTED through an emulated expression renderer: that validation against hostile, empty, whitespace-only, multi-line and edge-padded reasons; the release commit step in a throwaway repository followed by the publish plan's own decision block, for an ordinary release and a skipped one; that block's push default, which runs the gate unless the trailer reads `skipped`, its dispatch branches, the trailer outranking a dispatched reason with a notice only when the reasons differ, and a trailer without a reason, refused on push and left to the dispatch on a publish retry; the plan's `gate` and `gate_reason` outputs as one line each, a hostile reason included; both evidence steps, which record `passed` only after the suite job succeeded and `skipped` only when it was skipped with a reason, and refuse every contradicting combination; the main-only guard against a hostile ref; and the version computation |
 | `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
-| `verify-feature-transcript-check.test.js` | 26 | `test-promptfoo-verify-feature.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module, the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs a passing `network-only` preflight before the helper call, the helper flag echoed back in the spelling the skill documents, every required operation in a session whose config that flagged call wrote last, and no navigation toward the network-only origin |
-| `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
+| `verify-feature-transcript-check.test.js` | 26 | `test-eval-harness-units.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module, the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs a passing `network-only` preflight before the helper call, the helper flag echoed back in the spelling the skill documents, every required operation in a session whose config that flagged call wrote last, and no navigation toward the network-only origin |
+| `fixture-mutation-watch.test.js` | 19 | `test-eval-harness-units.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 12 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
 | `windows-observation.test.js` | 11 | Windows safety | observation summarizer |
-| `claude-stream-render.test.js` | 6 | `test-claude-promptfoo-wrapper.sh` | stream renderer |
+| `claude-stream-render.test.js` | 6 | `test-eval-harness-units.sh` | stream renderer |
 | `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
 | `process-supervisor.test.js` | 7 | `test-zensu-runtime-controller.sh` | bounded supervisor + process-tree teardown, a stop that never fails on the EPERM macOS answers while the group holds only zombies (a macOS-only fixture keeps one there), and the distinct exit code for an endpoint no supervisor answers |
-| `owned-process.test.js` | 4 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
+| `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (45
-files) against this table's 40 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (46
+files) against this table's 41 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
@@ -538,6 +550,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 | `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 9 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice**, each as parallel `--shard=I/N` legs — once in `prepare-suite` against the bundled release commit, once in `publish-suite` against the exact `github.sha`; plus runtime-digest and clean-tree evidence in `prepare` and `publish` |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
+| `scheduled.yml` | `node tests/run-clock-shift.js` — scheduled daily + manual, Ubuntu only; runs every `tests/structure/*.test.js` with `Date` moved forward by the allowlist's `shiftDays` through the `tests/lib/clock-shift.cjs` preload (passed on in `NODE_OPTIONS`, so spawned node CLIs see the same clock), and fails on any top-level test failure outside `tests/profiles/clock-shift-allowlist.v1.json`, on an allowlisted name that more than one top-level test carries, and on any stale entry there. It catches a fixed-date fixture that the code under test reads on the real clock before the date arrives, which `ci.yml` cannot: it runs only on pull requests and pushes to `main` |
 
 The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo profiles are
 **never** invoked by GitHub Actions — local-only by design, machine-enforced by
@@ -547,6 +560,13 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 
 - `tests/session-control/run.sh` (Session Control core unit suite) is **not** in
   `run-all.sh` — only in the Windows profiles and the legacy canary.
+- The shifted-clock pass in `scheduled.yml` moves `Date` in node processes only, and only
+  for `tests/structure/*.test.js`: the shell suites, `tests/session-control/`, child
+  processes that are not node (`git`, `date`), file mtimes and any node child whose
+  environment drops `NODE_OPTIONS` or `ZENSU_TEST_CLOCK_SHIFT_DAYS` stay on the real clock.
+  A test that compares a file mtime, a git date or a lease age with `Date.now()` therefore
+  fails under the shift by design; the allowlist names each such test with its dependency
+  (`file-mtime`, `git-date` or `lease-staleness`).
 - 4 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
 - The 2 offline eval self-checks whose `ciOfflineSuites` entry sets `needsNodeDeps`

@@ -186,8 +186,8 @@ makes the change, checks that no live anchor and no marker are left, and then pr
 session can now be archived or removed. The verb refuses, and changes nothing, while:
 
 - the continuing session or another live session works inside the old worktree;
-- the old session is busy, or still registered with a queue it could not measure, until the user
-  gives one go/no-go and the verb runs again with `--force`;
+- the old session is busy, or still registered with a queue it could not measure, until the verb
+  runs again with `--force` — the user's request to release, or the takeover they confirmed, is the go;
 - the session registry cannot be read completely, so a running session could read as one that
   ended;
 - an anchor that no session it can find owns, one this build cannot validate, or one recorded for

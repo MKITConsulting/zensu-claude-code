@@ -29,6 +29,7 @@
     "test-chain-recover.sh",
     "test-chain-terminus-zero-change-gate.sh",
     "test-changelog-unreleased-resolver-entries.sh",
+    "test-clock-shift.sh",
     "test-context-nudge-hook.sh",
     "test-converge-skill.sh",
     "test-cover-skill.sh",
@@ -41,6 +42,7 @@
     "test-drift-assertion-or-logic.sh",
     "test-drift-audit-regex.sh",
     "test-edit-landing-audit.sh",
+    "test-eval-harness-units.sh",
     "test-evidence-discipline.sh",
     "test-evidence-run.sh",
     "test-file-exists-replacement.sh",
@@ -168,6 +170,7 @@
     "test-promptfoo-zen-mode.sh"
   ],
   "nodeDepsStructureTests": [
+    "test-clock-shift.sh",
     "test-promptfoo-session-upgrade.sh",
     "test-release-session-control-gate.sh",
     "test-windows-ci-contract.sh",
@@ -222,7 +225,8 @@
         "--self-check"
       ],
       "ciArgs": [
-        "--self-check"
+        "--self-check",
+        "--skip-nested"
       ],
       "needsNodeDeps": false,
       "windowsSafety": true

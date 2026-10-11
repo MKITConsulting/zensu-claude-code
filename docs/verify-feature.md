@@ -4,16 +4,21 @@
 it observed. Under `/zensu:autopilot` its preconditions are prepared for you. Run on its own,
 it has two ways to authorize the browser:
 
-- **Consent mode** (the default when nothing is configured): the first time the run's browser
-  reaches each loopback origin, Claude Code's own permission prompt asks you, in the CLI and in
-  the desktop app alike, with no environment variable and no restart. That promise holds for an
-  interactive session: how the host resolves the prompt under bypass permissions, in auto mode
-  or in a headless run is unverified, so such a run belongs in policy mode. It covers local
-  targets only. Section 0 describes it.
+- **Consent mode** (the default when nothing is configured): Claude Code's own permission
+  prompt asks you, in the CLI and in the desktop app alike, with no environment variable and no
+  restart — once per session for each loopback origin of a local run, and at every browser start
+  for each HTTPS origin of a remote run. The gate counts Manual, Accept edits, Plan and Auto mode
+  as able to show the prompt, and in Auto mode it was measured to reach you. Under bypass
+  permissions or `dontAsk` the gate denies a remote origin itself and names the remedy. Section 0
+  describes it.
 - **Policy mode**: a **navigation policy** exported by the environment that launches Claude
-  Code. It is the only channel a model cannot write, it is required for remote targets and
-  for unattended runs — bypass permissions, auto mode, a headless run — and it was the only
-  way to run the skill before consent mode existed. Sections 1 to 4 describe it.
+  Code. Its target origins pass without a prompt in every permission mode. In Manual, Accept
+  edits, Plan or Auto mode an origin the policy does not name is still asked; under bypass
+  permissions or `dontAsk` the policy is the whole allowlist. So run an unattended session — a CI
+  job, a headless `-p` run, an SDK host — under `dontAsk`, with allow rules for the calls it
+  needs, or under bypass permissions: in the other four modes whatever answers the host's
+  permission prompts, a program included, decides every origin the policy does not name.
+  Sections 1 to 4 describe it.
 
 The browser is driven by `playwright-cli`, which you install once:
 
@@ -114,8 +119,8 @@ path or an environment assignment is refused only on a `zensu-verify` session. F
   variable, substitution, glob, brace, `~` or `=` target nor on a line of its own — so a denial
   names the rule rather than guessing. Outside single quotes a `$` counts as an expansion unless
   whitespace, the end of the command or a closing double quote follows it;
-- every target origin passes the navigation floor of section 2 and, without a policy, the
-  consent prompt below.
+- every target origin passes the navigation floor of section 2 and, unless a policy names it,
+  the consent prompt below.
 
 ## 0. Consent mode
 
@@ -125,36 +130,54 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 
 - The first `playwright-cli` call of the run that reaches a new origin — opening the browser,
   `goto` or `tab-new` — opens a permission prompt naming the origin, the session and the
-  consequence: answering Yes lets the model open and read any page on that origin, screenshots
-  included, for the rest of the session. The model cannot answer that prompt. The approval covers
-  every page at any path, protected pages included once you log in yourself, so a route whose
-  identifiers change on every run needs no declaration.
-- Approved origins are remembered for the session in
-  `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
-  passes without a second prompt. The report's `Consent` block lists every record.
-- The floor holds whatever you answer: loopback origins only (`127.0.0.1`, `[::1]` or the exact
-  name `localhost`; never `app.localhost` or another hostname), no credentials, no query or
-  fragment in a navigation, and the browser sends no HTTP(S) request to an origin outside the run
-  config, except by following a server redirect (below). A WebSocket connection is not fenced by
-  the run config, which is an open gap.
-- A remote target is refused in consent mode, by the run-config helper and by the gate, because
-  the browser's DNS pins are written before it starts. Remote verification needs the policy of
-  section 4.
+  consequence: answering Yes lets the model open, read and interact with any page on that
+  origin, screenshots included. One browser start asks once for all its new origins. The model
+  cannot answer that prompt. The approval covers every page at any path, protected pages
+  included once you log in yourself, so a route whose identifiers change on every run needs no
+  declaration.
+- A loopback origin stays approved for the rest of the session. A remote origin is asked again
+  every time the browser is opened; within one browser start, a `goto` or `tab-new` to a remote
+  origin you approved passes and one to an origin you did not approve asks.
+- Approved origins are recorded for the session in
+  `.zensu/state/verify-consent-<session-key>.json`, and the report's `Consent` block lists every
+  record. Opening the browser never reads that file for a remote origin, so no record written
+  there skips its prompt.
+- The floor holds whatever you answer. A local run reaches loopback origins only (`127.0.0.1`,
+  `[::1]` or the exact name `localhost`; never `app.localhost` or another hostname). A remote run
+  reaches only HTTPS origins whose host is named exactly, never a wildcard, and whose DNS
+  answers are all public; the run-config helper pins each hostname to the address it resolved
+  before the browser starts. No credentials, no query or fragment in a navigation, and the
+  browser sends no HTTP(S) request to an origin outside the run config, except by following a
+  server redirect (below). A WebSocket connection is not fenced by the run config, which is an
+  open gap.
+- An API or identity origin of a deployed app that its pages call is passed to the run as one
+  more origin: it is asked in the same prompt as the app and never navigated to.
+- Under bypass permissions or `dontAsk`, or when the host reports no permission mode, the gate
+  denies a remote origin outside a policy, and the reason names the remedy: switch the session to
+  Manual or Auto (CLI: `--permission-mode default` or `auto`), or relaunch Claude Code with the
+  origin in the policy. Without a policy the gate asks for a loopback origin in every mode; how
+  the host resolves that prompt under bypass permissions or `dontAsk` was not measured.
 - The port does not have to be known before launch: the run reserves a free loopback port
   through `scripts/verify-free-port.js`, hands it to the recipe as `ZENSU_VERIFY_PORT`, and the
   prompt shows the resulting origin.
 
 What consent mode does not do: it does not survive hooks switched off host-side. With the hooks
 off, nothing in the plugin judges `playwright-cli` at all, and `/zensu:doctor` can report only
-that the hooks are registered, not that they run. Nor is it verified without a person at the
-prompt: how the host resolves a hook `ask` under bypass permissions, in auto mode or in a
-headless run was never observed, so run an unattended or bypass session in policy mode, which
-asks nothing. The consent memory is a file the session can
-write, so it is a control, not a proof — the floor bounds what a forged record could reach to
-other loopback services. And the browser follows a server redirect to another origin even though
+that the hooks are registered, not that they run. Nor can the gate tell a person from a
+program: it reads only the permission mode the host reports. A run in the default, Accept edits,
+Plan or Auto mode whose prompts a program answers — `claude -p` with `--permission-prompt-tool`,
+or an SDK host whose `canUseTool` callback allows — counts as able to answer, and that program
+decides every origin a policy does not name. How a headless run resolves the prompt was not
+measured. So run an unattended session under `dontAsk` or bypass permissions, with a policy that
+names every origin it needs. The consent memory is a file the session can write, so it is a
+control, not a proof: a forged record skips the prompt for a loopback origin, and the floor
+bounds what it could reach to other loopback services; for a remote origin it skips only the
+prompt of a `goto` or `tab-new`, and the browser admits only the origins of the run config it was
+launched with. And the browser follows a server redirect to another origin even though
 it refuses every other HTTP(S) request there, so the skill checks the page URL after every navigation and
-stops a scenario that left the approved set. With the policy present the gate asks nothing and
-enforces the policy exactly as in the sections below.
+stops a scenario that left the approved set. With a policy present its targets pass without a
+prompt, and every other origin is asked or, where the session cannot show the prompt, denied, as the sections
+below describe.
 
 ### Guided setup and attach mode
 
@@ -191,7 +214,7 @@ value.
 | Key | Rule |
 |---|---|
 | `version` | the integer `1` |
-| `mode` | `local` or `remote`; it must match the `--mode` the skill runs in |
+| `mode` | `local` or `remote`; a `local` policy names loopback targets, a `remote` one public HTTPS targets, and an origin of the other kind is not a target |
 | `targets` | 1 to 8 entries; each carries exactly `origin` and `evidenceMode` |
 | `origin` | scheme, host, and port only: no path, credentials, query, or fragment; unique across targets; the host is an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only, so a wildcard such as `https://*.example.com` is refused |
 | `evidenceMode` | the literal `declared-safe`; contract v1 supports no other mode |
@@ -232,15 +255,16 @@ written for it. These limits are stated rather than hidden:
 - A frame that a target page embeds from a network-only origin renders inside that page, so its
   content appears in that page's snapshot and screenshot, like data the page fetched.
 - Page code on a target can send data to every network-only origin, including what the skill
-  types into a form. The list is yours, declared in the launch environment the session cannot
-  write, bounded at 8 exact origins, and in remote mode public `https://` only, pinned to an
-  approved address, so no entry reaches a private, metadata or loopback address.
+  types into a form. The list is yours, declared in the launch environment, bounded at 8 exact
+  origins, and in remote mode public `https://` only, pinned to an approved address, so no entry
+  reaches a private, metadata or loopback address.
 - The fence covers HTTP(S) only: page code can open a WebSocket connection to any origin, listed
   or not.
 
 Consent mode has no network-only class: the helper refuses `--network-only-origin` without a
-policy. A loopback API origin is then passed as an ordinary origin and covered by the consent
-prompt, and an application that calls a non-loopback API needs a launch-time policy.
+policy. A loopback API origin of a local run, or a public HTTPS one of a remote run, is then
+passed as an ordinary origin and covered by the consent prompt; a local application that calls a
+non-loopback API needs a launch-time policy.
 `policy contains unknown or missing keys` from an older installation means it predates the key:
 it refuses such a policy rather than misreading it.
 
@@ -265,25 +289,22 @@ it runs the readiness check of the run-config helper: both consent hooks must be
 matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
 of the caller must name the measured version, and no empty or relative `PATH` entry may come
 before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
-terminal. Section 5 lists those refusals and their fixes. It prints `policy` when a
-policy approves the target, and the `declared-safe` form also prints `consent` when no policy is
-set and the target is a loopback origin; both exit `0`. The `network-only` form has no consent
-answer: without a policy it refuses. A refusal prints `zensu verify browser config: <reason>` on stderr
+terminal. Section 5 lists those refusals and their fixes. It prints `policy` when the policy
+names the target, and the `declared-safe` form prints `consent` for any other origin the floor
+admits, a remote one included; both exit `0`. Only `policy` proves that a policy approves the
+origin. The `network-only` form has no consent answer: without a policy it refuses. A refusal prints `zensu verify browser config: <reason>` on stderr
 and exits `1`. Run it from a terminal with `${CLAUDE_PLUGIN_ROOT}` replaced by the installed
 plugin directory, or let the skill run it, which reports a refusal as PARTIAL with that reason.
 The messages you will meet:
 
 | Message | Cause |
 |---|---|
-| `navigation policy mode does not match` | the policy's `mode` differs from the mode being checked |
-| `remote-target-needs-parent-environment-policy: …` | a remote target with no policy in the launch environment |
 | `local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost` | a local origin uses a hostname other than `localhost`, for example `app.localhost` or `localhost.` |
-| `<origin>: origin is not a target of the navigation policy` | the origin is not listed; a different port is enough |
 | `<origin>: origin is network-only in the navigation policy: …` | a network-only origin was checked with `declared-safe`, or passed to the helper as `--origin`; it is never a page to open |
 | `<origin>: origin is not a network-only origin of the navigation policy` | the origin checked with `network-only` is not in `networkOnlyOrigins` |
 | `a network-only origin needs the parent-environment navigation policy; …` | a network-only check or `--network-only-origin` without a policy; consent mode has no network-only class |
 | `a network-only origin outside loopback requires HTTPS` | a local policy or check names a non-loopback network-only origin over `http://` |
-| `policy origin must name its host exactly: …` | an origin in either list uses a wildcard or another pattern character in its host |
+| `an origin must name its host exactly: …` | an origin in either policy list, the checked origin or a run-config origin uses a wildcard or another pattern character in its host |
 | `usage: verify-browser-config.js --check-policy <local\|remote> <origin> <declared-safe\|network-only>` | the call carries an operand the preflight does not take, such as the route the earlier contract checked; drop it |
 | `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
 | `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
@@ -295,7 +316,8 @@ is the only check of a particular origin.
 ## 2. Local mode
 
 Local mode proves the code in the current worktree, so the application has to be started from
-that worktree on an origin the policy already names.
+that worktree. Under a policy in a session that cannot show the prompt, it must run on an origin the policy
+already names; the port rules below are for that case.
 
 - **A loopback origin.** The origin is `http://` or `https://` plus a loopback IP address
   (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) or the exact name `localhost`, and
@@ -374,8 +396,8 @@ A candidate recipe is accepted only when all of this is explicit and consistent:
 - application and authentication base URLs, fixture setup, and cleanup all refer to the same
   run-specific runtime;
 - the browser base URL is a run-specific literal or the output of a checked-in
-  `validate.baseUrlCommand`, run only after readiness, and it matches an origin in the policy
-  byte for byte.
+  `validate.baseUrlCommand`, run only after readiness, and in a session that cannot show the
+  prompt it matches an origin in the policy byte for byte.
 
 Rejected by rule: fixed-port Compose stacks, shared container or resource names, daemonized
 services nobody owns, and recipes whose teardown scope is ambiguous. A rejected candidate is
@@ -444,33 +466,38 @@ the launching shell exported.
 ## 4. Remote mode
 
 Remote mode proves code that is already deployed. It boots nothing and needs no runtime
-recipe; it needs the policy and a validated base URL.
-
-```bash
-ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://preview.example.com","evidenceMode":"declared-safe"}]}' claude
-```
+recipe; it needs a validated base URL, and you approve its origin at the permission prompt
+every time the browser opens:
 
 ```
 /zensu:verify-feature <what to verify> --mode=remote --base-url=https://preview.example.com --route=/inventory
+```
+
+A session that cannot show the prompt — bypass permissions or `dontAsk`, where an unattended run
+belongs — needs the remote policy instead, exported by the shell that launches Claude Code:
+
+```bash
+ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"origin":"https://preview.example.com","evidenceMode":"declared-safe"}]}' claude
 ```
 
 - The origin must be non-loopback `https://`. The run-config helper resolves the hostname,
   rejects any answer that is not globally routable (RFC 1918, CGNAT, link-local, ULA, and the
   rest), rejects a mix of public and non-public answers, and pins the browser to the approved
   address so a later DNS change cannot redirect it. The gate refuses to open a run config whose
-  remote hostname carries no pin.
+  remote hostname carries no pin or names a pattern instead of a host.
 - The base URL is validated in memory before anything else happens: absolute, `https://`, no
   userinfo, no query, no fragment. A signed or token-bearing preview link is rejected and
   never echoed; use a credential-free entry URL plus a visible login in the headed browser.
 - Authentication is credential-blind: you log in yourself in the browser the skill opens, and
-  every page of the policy's origin is then in scope, protected pages included, at any path.
+  every page of the approved origin is then in scope, protected pages included, at any path.
   Without a login, authenticated scenarios are skipped and the run is PARTIAL. A configured
   `auth.appOrigin` must equal the validated base URL's origin exactly.
 - An API, OIDC issuer or token endpoint on another origin is a network-only origin: list it in
-  the policy's `networkOnlyOrigins` and in the recipe's `validate.networkOnly.origins`, whose
-  `appOrigin` must equal the validated base URL's origin exactly, as `auth.appOrigin` must. Every
-  such hostname is resolved and pinned like a target's. A hosted login page you sign in on is
-  navigated, so it stays a target.
+  the recipe's `validate.networkOnly.origins`, whose `appOrigin` must equal the validated base
+  URL's origin exactly, as `auth.appOrigin` must, and under a policy also in its
+  `networkOnlyOrigins`. Without a policy the skill passes it as one more origin, asked in the
+  same prompt and never navigated to. Every such hostname is resolved and pinned like a
+  target's. A hosted login page you sign in on is navigated, so it stays a target.
 - Remote mode verifies what is deployed at that URL, not the files in your worktree. The skill
   says so before its first browser call, and the verdict stays PARTIAL unless a deployment
   identity ties that URL to the branch under test.
@@ -479,8 +506,10 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode` | fix the policy's mode, or unset it to use consent mode for a local target |
-| PARTIAL; reason starts `remote-target-needs-parent-environment-policy` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
+| PARTIAL; reason starts `remote-target-needs-parent-environment-policy` | a remote origin outside a policy in a session that cannot show the permission prompt: bypass permissions, `dontAsk`, or no permission mode reported | switch the session to Manual or Auto (CLI: `--permission-mode default` or `auto`), or relaunch Claude Code with the remote policy of section 4 |
+| PARTIAL; reason names `origin is not a target of the navigation policy` | a policy is present, the origin is of the policy's kind but not one of its targets, and the session cannot show the permission prompt | add the origin to the policy and relaunch Claude Code, or switch the session to Manual or Auto so the origin is asked |
+| PARTIAL; reason names `origin is not of the kind the navigation policy names` | a policy is present, the origin is of the other kind — a loopback origin under a remote policy, or a remote one under a local policy — and the session cannot show the permission prompt | switch the session to Manual or Auto so the origin is asked, or relaunch Claude Code with a policy whose mode fits the origin; adding the origin to the present policy makes that policy invalid |
+| `--check-policy` prints `consent` and a stderr note that the policy does not name every origin checked | a policy is present but does not name that origin; the preflight cannot see the permission mode | in Manual, Accept edits, Plan or Auto mode nothing: the origin is asked. Under bypass permissions or `dontAsk` the gate denies it at `open`, so stop before booting anything and fix the policy or the mode |
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Nothing in the recipe replaces that answer: consent is per origin, and there is no route list to declare |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback origins only` | local origin spelled with a hostname other than `localhost` | use `localhost`, `127.0.0.1` or `[::1]` consistently in the policy, the recipe, and the `baseUrlCommand` output |
@@ -494,5 +523,5 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
 | a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL rather than worked around |
 | a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
-| PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in policy mode, to the policy too) |
+| PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in a session that cannot show the prompt, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |

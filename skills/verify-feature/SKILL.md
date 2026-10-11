@@ -201,14 +201,14 @@ For a `remote` URL that passed validation, print this warning before any subsequ
 Do not imply that a remote PASS proves the worktree diff unless the deployment identity is
 confirmed.
 
-Before any browser call, resolve which of the two modes this session is in. **Policy mode** is
-a `ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claude Code, declared
-by `validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
-ordinary case for a user who has not configured anything. Run
+Before any browser call, resolve how each origin is approved. A **policy** is a
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1` set in the environment that launched Claude Code, declared
+by `validate.navigationBroker`; its targets need no prompt. Every other origin needs
+**consent**, the ordinary case for a user who has not configured anything. Run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" declared-safe`
 as a standalone preflight once for every origin the run navigates. It prints `consent` or `policy`
-and exits `0`, or exits `1` with a named reason. In policy mode the parent JSON must name each
-validated origin as a target with the `declared-safe` mode described in the config contract. A
+and exits `0`, or exits `1` with a named reason. `policy` names a target with the `declared-safe`
+mode of the config contract. A
 target covers every route on its origin: no route list is declared or checked, so pages whose
 path carries identifiers that change on every run are covered too. Contract v1 intentionally
 supports no redaction-driver mode: coverage on an origin that is not approved stops with PARTIAL.
@@ -235,27 +235,25 @@ expects, everywhere. Remote mode accepts only non-loopback HTTPS,
 rejects RFC1918, CGNAT, link-local/metadata, loopback, documentation, multicast/reserved,
 IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public and non-public DNS
 answers, and pins each hostname to an approved public address in Chromium to prevent DNS
-rebinding. **In POLICY mode** a policy that is invalid, mismatched or does not approve the
-target stops before browser use with PARTIAL; the gate navigates only its target origins, and every
-route on them. Its network-only origins serve the pages' own requests only: `open`, `goto` and
-`tab-new` aimed at one are denied, and that denial is final. **In CONSENT mode** there is no policy to be missing and
-the run continues under the paragraph below; only a REMOTE target stops with PARTIAL there,
-because remote verification keeps the policy. Never try to configure the variable from a child
-Bash call in either mode — the hooks read it from the environment Claude Code started with, and
-the gate denies an `export` or an environment assignment on a command that carries a
-`zensu-verify` call.
+rebinding. An invalid policy stops before browser use with PARTIAL. A policy's network-only
+origins serve the pages' own requests only: `open`, `goto` and `tab-new` aimed at one are
+denied, and that denial is final. Never try to configure the variable from a child Bash call —
+the hooks read it from the environment Claude Code started with, and the gate denies an
+`export` or an environment assignment on a command that carries a `zensu-verify` call.
 
-**Consent mode (no parent policy).** When the preflight prints `consent`, the FIRST
-`playwright-cli` call that reaches a new origin — `open` with the run config, `goto`, or
-`tab-new` — opens the host's own permission prompt to the user. Consent is per ORIGIN: once the
-user approves an origin, every further route on it proceeds without a prompt. Answering that
-prompt is the user's action; never answer it on their behalf, never work around a refusal, and
-treat a refused prompt as PARTIAL for that origin. The floor holds in this mode: loopback
-origins only (a loopback IP or `localhost`), no credentials, no query or fragment in a navigation, and the browser
-refuses every HTTP(S) request to an origin outside the run config; a WebSocket connection is not
-fenced by the run config, which is an open gap. A remote target is refused in consent
-mode by the helper and by the gate; remote verification keeps the parent policy. Consent mode
-remembers each approved ORIGIN for this session in
+**Consent.** For an origin the preflight answers `consent`, the FIRST `playwright-cli` call that
+reaches it — `open` with the run config, `goto`, or `tab-new` — opens the host's own permission
+prompt to the user; one `open` asks once for all its new origins. Consent is per ORIGIN: once the
+user approves an origin, every further route on it proceeds without a prompt, but a remote origin
+is asked again at every `open`. Answering that prompt is the user's action; never answer it on
+their behalf, never work around a refusal, and treat a refused prompt as PARTIAL for that origin.
+Where the session cannot show the prompt — permission mode `bypassPermissions` or `dontAsk` —
+the gate denies a remote origin outside a policy and every origin a present policy does not name,
+with the remedy; report PARTIAL with it, and stop before booting when the preflight adds its
+stderr note. The floor holds:
+no credentials, no query or fragment in a navigation, and the browser refuses every HTTP(S)
+request to an origin outside the run config; a WebSocket connection is not fenced by the run
+config, which is an open gap. The gate remembers each approved ORIGIN for this session in
 `.zensu/state/verify-consent-<session-key>.json` — a record names the route that was visited,
 but the route steers no later decision — and the report lists every record in its `Consent`
 block. **Read that file for the report and never write, edit or delete it.** A record placed
@@ -338,11 +336,10 @@ Claude's native placeholder substitution.
      run-specific runtime;
    - the browser base URL is either a run-specific literal or comes from a checked-in
      `validate.baseUrlCommand` executed only after readiness. Validate it again before
-     navigating. **In POLICY mode** its output must exactly match an origin already authorized in
-     the immutable parent-environment policy, and a command that dynamically selects a previously
-     unknown port is incompatible with that session: it requires a discovery run followed by a
-     policy-configured restart. **In CONSENT mode** a run-specific loopback port is the EXPECTED
-     shape rather than a defect — nothing is pre-authorized, and the first navigation to it asks
+     navigating. Where the session cannot show the prompt, a policy is the whole allowlist: its output
+     must exactly match a policy target, and a command that selects a previously unknown port
+     needs a discovery run followed by a policy-configured restart. Elsewhere a run-specific
+     loopback port is the EXPECTED shape rather than a defect — the first navigation to it asks
      the user through the permission prompt;
    Reject fixed-port Compose stacks, shared resource names, daemonized services without
    ownership, or recipes whose teardown scope is ambiguous. Record why the candidate was
@@ -396,10 +393,9 @@ user.
 ### Remote mode
 
 Use only the supplied/configured base URL. Do not boot or tear down remote infrastructure.
-Keep mutations minimal and use disposable records with recognizable run-specific names. The
-parent-environment policy from Phase 0 is mandatory for every remote origin; without it the
-helper and the gate refuse the target, and the run stops before `open` with PARTIAL. The
-redirect check from Phase 0 applies to every navigation.
+Keep mutations minimal and use disposable records with recognizable run-specific names. A
+remote origin outside a policy is approved at the permission prompt at every `open` (Phase 0).
+The redirect check from Phase 0 applies to every navigation.
 
 ### Browser session (both modes)
 
@@ -413,10 +409,10 @@ Pass one `--origin` per origin the matrix navigates — the application origin a
 differs, the validated authentication origin (`auth.baseUrl`) — and one `--network-only-origin`
 per validated network-only origin, and nothing else; the two kinds count together toward the
 bound of 8 origins. Never pass a network-only origin as `--origin`: the helper refuses it in
-policy mode. In consent mode the helper refuses `--network-only-origin`: pass a loopback
-network-only origin with `--origin` instead, where the consent prompt covers it like any other
-loopback origin, and report the rows that need a non-loopback one PARTIAL, because it needs the
-launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
+policy mode. In consent mode the helper refuses `--network-only-origin`: pass a network-only
+origin of the run's mode — loopback in local mode, public HTTPS in remote mode — with `--origin`
+instead, where the consent prompt covers it like any other origin, never navigate to it, and
+report the rows that need another one PARTIAL, because it needs the launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
 `mode=consent|policy`, one `origin=` line per navigable origin and one `network-only-origin=`
 line per network-only origin, or exits `1` with a named reason and writes nothing. It refuses unless
 `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
@@ -457,9 +453,9 @@ setter and hard-denies every getter/exporter.
 
 The evidence boundary is the ORIGIN, never the route. Before authenticating or navigating to
 any protected page—including an initial `open` or `goto`, which prints the page title and
-writes a snapshot of the page—its origin must be approved: in policy mode by a
-parent-environment policy target that names that origin with `evidenceMode: declared-safe`, in
-consent mode by the user's answer to the permission prompt the gate raises for that origin. An
+writes a snapshot of the page—its origin must be approved: by a parent-environment policy
+target that names that origin with `evidenceMode: declared-safe`, or by the user's answer to the
+permission prompt the gate raises for that origin. An
 approved origin covers every page on it, at any path, including routes whose identifiers change
 on every run; no route list is declared, matched or checked. A page on an origin that is not
 approved is never opened, and a refused prompt makes that origin's scenarios PARTIAL.

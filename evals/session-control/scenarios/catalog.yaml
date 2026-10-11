@@ -74,8 +74,8 @@
   vars: { scenario_id: pretool-deleted-cas-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
 - description: "C38 PLM stays neutral and read-only in frontmatter plus PreToolUse"
   vars: { scenario_id: plm-readonly-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied' }
-- description: "C39 generic review workers keep non-command host tools while every command capability is denied"
-  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:OrdinaryNonCommandToolsAllowed:AllCommandToolsDenied' }
+- description: "C39 generic review workers keep the allowlisted host tools while every command tool and every unlisted tool is denied"
+  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:CommandAndUnlistedToolsDenied' }
 - description: "C40 native skill helper binds per call, ignores ambient selectors, rejects foreign and derived session ids, and leaves CLAUDE_ENV_FILE untouched"
   vars: { scenario_id: native-helper-binding, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied' }
 - description: "C41 dedicated evidence-worker definitions expose only leased Read, Grep, and Glob and receive their exact principals"

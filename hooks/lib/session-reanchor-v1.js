@@ -93,6 +93,11 @@ function refusal(reason, detail) {
   return { ok: false, reason, detail: Array.isArray(detail) ? detail : [] };
 }
 
+function unpastableRoot(root, platform = process.platform) {
+  const spelled = String(root);
+  return UNPASTABLE_ROOT_RE.test(platform === 'win32' ? spelled.replace(/\\/g, '/') : spelled);
+}
+
 function canonicalOrNull(value) {
   if (typeof value !== 'string' || value === '' || /[\0\r\n]/.test(value)) return null;
   try {
@@ -695,7 +700,7 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += 'anchor on the new worktree, and the recorded root is outside this session from then on.\n';
   text += 'The host does not move: it keeps this session\'s start directory, and the Bash tool\n';
   text += 'returns there after a command that leaves it, so give your own commands a leading cd into\n';
-  if (UNPASTABLE_ROOT_RE.test(String(verdict.targetRoot))) {
+  if (unpastableRoot(verdict.targetRoot)) {
     text += 'the new worktree, with its path in single quotes. That path holds a double quote, a dollar\n';
     text += 'sign, a backtick or a backslash, which zensu-log.sh --project-root refuses, so /zensu:tdd,\n';
     text += '/zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot run there:\n';
@@ -748,7 +753,7 @@ function renderReanchorOutcome(outcome) {
   for (const fault of markers.faults) text += row('marker fault', safe(fault));
   text += '\nThis session is anchored at the project above from the next tool call onward. The host\n';
   text += 'still returns the Bash tool to this session\'s start directory, so give your own commands a\n';
-  if (UNPASTABLE_ROOT_RE.test(String(outcome.projectRoot))) {
+  if (unpastableRoot(outcome.projectRoot)) {
     text += 'leading cd into the project above, with its path in single quotes. That path holds a double\n';
     text += 'quote, a dollar sign, a backtick or a backslash, which zensu-log.sh --project-root refuses,\n';
     text += 'so /zensu:tdd, /zensu:self-review, /zensu:converge and /zensu:verify-feature --chain cannot\n';
@@ -818,6 +823,7 @@ module.exports = {
   worktreeIdentity,
   registeredWorktrees,
   owningWorktree,
+  unpastableRoot,
   liveRegistryDirectory,
   registryClaims,
   anchorClaims,

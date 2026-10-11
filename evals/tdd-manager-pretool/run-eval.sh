@@ -9,6 +9,8 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REPORT="$RESULTS_DIR/report-$TIMESTAMP.txt"
 
 MODE="${1:-full}"
+SKIP_NESTED="${ZENSU_PRETOOL_SKIP_NESTED:-0}"
+[ "${2:-}" = "--skip-nested" ] && SKIP_NESTED=1
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -72,7 +74,7 @@ echo "▸ Phase 1 — Backward-compat regression (existing offline suites)" | te
 # When tests/run-all.sh drives this arm it has already run both as suites of
 # their own, so re-running them here doubles the wall clock and proves nothing
 # new. The caller says so; a standalone invocation still runs the full Phase 1.
-if [ "${ZENSU_PRETOOL_SKIP_NESTED:-0}" = "1" ]; then
+if [ "$SKIP_NESTED" = "1" ]; then
   check "evals/config-gate/run-eval.sh --self-check (already run by the caller)" PASS
   check "evals/tdd-review-chain/run-eval.sh --self-check (already run by the caller)" PASS
 else
@@ -85,8 +87,8 @@ TRC_OUT=$(bounded 3600 bash "$PLUGIN_DIR/evals/tdd-review-chain/run-eval.sh" --s
 # defaults. The threshold beside it required >= 30 passes while the child today
 # has 7 checks in total, so it could not have been met even with correct parsing.
 # Both were invisible to the blocking gate: tests/run-all.sh exports
-# ZENSU_PRETOOL_SKIP_NESTED=1 and never reaches this branch, while the Windows
-# safety shard invokes this runner directly and does.
+# ZENSU_PRETOOL_SKIP_NESTED=1 and the Windows safety shard passes --skip-nested,
+# so neither reaches this branch.
 TRC_LINE=$(printf '%s\n' "$TRC_OUT" | grep -E 'self-check: [0-9]+ PASS / [0-9]+ FAIL' | tail -1)
 TRC_PASS=$(printf '%s' "$TRC_LINE" | sed -nE 's/.*self-check: ([0-9]+) PASS.*/\1/p')
 TRC_FAIL=$(printf '%s' "$TRC_LINE" | sed -nE 's/.*PASS \/ ([0-9]+) FAIL.*/\1/p')

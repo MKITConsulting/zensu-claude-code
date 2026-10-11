@@ -21,7 +21,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/valid-diff-lines.js"
 PUBLISH_MD="$PLUGIN_DIR/skills/pr-team-review/rules/github-publish.md"
 WORKFLOW_MD="$PLUGIN_DIR/skills/pr-team-review/rules/workflow.md"
-SKILL_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PUBLISH_REF="$PLUGIN_DIR/skills/pr-team-review/references/publish.md"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
 PASS=0; FAIL=0
@@ -31,7 +31,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$LIB" "$PUBLISH_MD" "$WORKFLOW_MD" "$SKILL_MD" "$REVIEW_DOC"; do
+for f in "$LIB" "$PUBLISH_MD" "$WORKFLOW_MD" "$PUBLISH_REF" "$REVIEW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -96,10 +96,10 @@ if grep -qiF 'prints nothing or exits non-zero' "$PUBLISH_MD" && grep -qiF '(or 
 else
   check "P3i empty validator output is defined as none" FAIL
 fi
-if grep -qF 'Pre-Publish Anchor Validation' "$SKILL_MD" && grep -qF 'valid-diff-lines.js' "$SKILL_MD"; then
-  check "P3j SKILL.md Phase D path anchors the mandatory gate" PASS
+if grep -qF 'Pre-Publish Anchor Validation' "$PUBLISH_REF" && grep -qF 'valid-diff-lines.js' "$PUBLISH_REF"; then
+  check "P3j the Phase D publish reference anchors the mandatory gate" PASS
 else
-  check "P3j SKILL.md Phase D path anchors the mandatory gate" FAIL
+  check "P3j the Phase D publish reference anchors the mandatory gate" FAIL
 fi
 if grep -qiF 'body-only (fold ALL inline findings)' "$PUBLISH_MD" && grep -qiF 'never loop on further fetches' "$PUBLISH_MD"; then
   check "P3k empty-diff handling has a terminal state" PASS

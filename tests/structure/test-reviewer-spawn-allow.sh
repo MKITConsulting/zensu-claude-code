@@ -23,11 +23,14 @@ mkdir -p "$PROJECT"
 NO_CONFIG="$SBOX/.no-such-config.json"
 trap 'rm -rf "$SBOX"' EXIT
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 check() {
   local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  case "$cond" in
+    PASS) echo "  PASS  $label"; PASS=$((PASS+1)) ;;
+    SKIP) echo "  SKIP  $label"; SKIP=$((SKIP+1)) ;;
+    *) echo "  FAIL  $label"; FAIL=$((FAIL+1)) ;;
+  esac
 }
 
 if [ ! -f "$HOOK" ] || [ ! -f "$MODULE" ]; then
@@ -664,7 +667,7 @@ if ln -sf "$PLUGIN_DIR/hooks/lib/reviewer-spawn-allow-v1.js" \
 else
   # ln -s exiting 0 is not evidence of a symlink on every host; refuse to report a
   # verdict the fixture never established.
-  check "A37 a symlinked decision module is refused (SKIPPED — no real symlink)" FAIL
+  check "A37 a symlinked decision module is refused — this host made no symlink, so ln -s copied the module" SKIP
 fi
 
 # A37a the same guard on the HOOK path. A symlinked hook is a broken installation, not an
@@ -686,7 +689,7 @@ if ln -sf "$PLUGIN_DIR/hooks/pre-agent-reviewer-allow.sh" \
     *) check "A37a a symlinked grant hook is never reported as an active grant" FAIL ;;
   esac
 else
-  check "A37a a symlinked grant hook is refused (SKIPPED — no real symlink)" FAIL
+  check "A37a a symlinked grant hook is refused — this host made no symlink, so ln -s copied the hook" SKIP
 fi
 
 # ── A38 the ✅ row's frontmatter claim is now BACKED, not asserted ────────────
@@ -801,5 +804,9 @@ else
 fi
 
 echo "----"
-echo "test-reviewer-spawn-allow: $PASS PASS / $FAIL FAIL"
+if [ "$SKIP" -gt 0 ]; then
+  echo "test-reviewer-spawn-allow: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
+else
+  echo "test-reviewer-spawn-allow: $PASS PASS / $FAIL FAIL"
+fi
 [ "$FAIL" -eq 0 ] || exit 1

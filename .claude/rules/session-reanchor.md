@@ -190,11 +190,16 @@ would expand a variable or run a command substitution instead of naming the dire
 ambient spelling it replaced was a parameter expansion and never re-parsed. Session Control itself
 rejects only control characters, and on Git Bash the verb prints the MSYS spelling, so a backslash
 never reaches it there. The move itself still accepts such a target, because rules (B) and (C)
-and the reviewer confinement need no pasted path; `UNPASTABLE_ROOT_RE` in `session-reanchor-v1.js`
-tests the same four characters, and for a matching target the MOVABLE report and the MOVED outcome
-withhold the promise that a chain can start there. The two predicates are a hand copy: E10p runs
-the verb and E10q both renderers over the same five roots, one per character plus a control with
-a space and a single quote, so a character added to one side and not the other fails there.
+and the reviewer confinement need no pasted path; `unpastableRoot` in `session-reanchor-v1.js`
+tests the same four characters through `UNPASTABLE_ROOT_RE`, and for a matching target the MOVABLE
+report and the MOVED outcome withhold the promise that a chain can start there. Both renderers get
+the native root, so on win32 `unpastableRoot` maps every backslash to a slash before it tests: a
+backslash there is the path separator, and the MSYS spelling the verb judges carries none. The two
+predicates are a hand copy: E10p runs the verb and E10q both renderers over the same five roots,
+one per character plus a control with a space and a single quote, so a character added to one side
+and not the other fails there. On Windows the backslash row is a nested directory, so the verb
+prints it and both renderers promise the chain, and the double-quote row is skipped when the
+filesystem cannot hold that name.
 
 **`--evidence-run` follows the anchor on its own.** `runDirectory` in `evidence-run-v1.js` keeps
 the caller's working directory when it lies in the git work tree of the bound root, and runs the
@@ -207,12 +212,13 @@ rule keeps a session recorded in a subdirectory able to run its suite from the w
 
 `test-tdd-log-path-anchor.sh` L8 fails when any `skills/*/SKILL.md` spells
 `${CLAUDE_PROJECT_DIR:-.}`, and `test-session-reanchor.sh` E10 runs the chain from the start
-directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md`,
+directory after a move with the spans it EXTRACTS from `skills/tdd/SKILL.md` and its references,
 `skills/self-review/SKILL.md` and `skills/verify-feature/SKILL.md`. Rewording the `{log_file}` or
 `{plan_file}` definition, the Phase 0, Phase 2, step 5b a) or step 10.1 command, the Phase 1 `cd`
 rule, the Phase 6 step 1 evidence run, self-review's root derivation or verify-feature's git root
 fails E10a there with the extraction named; the step 10.1 command is read from step 10 itself and
-must match the Mandatory command protocol's spelling.
+must match the Mandatory command protocol's spelling once `{plugin_root}` and `{plugin_data}` are
+read as the two plugin variables.
 
 **Version: `patch`.** No record or workflow schema field, no strict key set, no hook added,
 removed or re-matched, no config key, no attestation change; a new history VALUE, a new script,

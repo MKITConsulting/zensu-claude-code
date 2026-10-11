@@ -93,15 +93,18 @@ Bash-matcher hook pair that judges each `playwright-cli` call whose command text
 and a `zensu-verify` session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one) and
 by `scripts/verify-browser-config.js`. It is never a command the model may set during the run: a
-child-process export reaches neither the hooks nor the browser. Every selected
-application/authentication origin must be present exactly or navigation remains PARTIAL; a
-target covers every route on its origin, so no route list is declared. A policy written for an
-earlier contract may still carry a `routes` list: it is accepted when well formed and then
-ignored, so it narrows nothing. A dynamically chosen origin cannot be authorized from inside an
-already-running Claude session: launch the session with the exact origin policy first, or use a
-separate discovery run and restart with that policy. Without the variable
-`/zensu:verify-feature` runs in consent mode, which admits loopback origins only and
-asks the user once per new origin; the key is optional there and honoured when present.
+child-process export reaches neither the hooks nor the browser. A selected
+application/authentication origin the policy names passes without a prompt; any other is asked
+at the permission prompt where one can be shown, and stays PARTIAL where none can
+(`bypassPermissions`, `dontAsk`). A target covers every route on its origin, so no route list is
+declared. A policy written for an earlier contract may still carry a `routes` list: it is
+accepted when well formed and then ignored, so it narrows nothing. A dynamically chosen origin
+cannot be added to the policy from inside an already-running Claude session: where nobody can
+answer a prompt, launch the session with the exact origin policy first, or use a separate
+discovery run and restart with that policy. Without the variable `/zensu:verify-feature` runs in
+consent mode, which asks the user once per session for each new loopback origin and at every
+browser start for a public HTTPS origin of a remote run; the key is optional there and honoured
+when present.
 
 In `local` mode every target must use `http` or `https` with a loopback IP or the exact name
 `localhost`, which the browser resolves to loopback itself, and so must every network-only origin
@@ -117,12 +120,13 @@ refuses every HTTP(S) request to an origin outside the run config — a WebSocke
 not fenced by it, which is an open gap — and the gate reapplies the
 credential/query/fragment rule to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. Missing/invalid declarations, mode mismatches, unsupported evidence modes, or
-unsupported policy versions fail closed, and so does a hostname that is not exact: every origin
+every navigation. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
+versions fail closed, and so does a hostname that is not exact: every origin
 in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only,
 because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as
 a pattern. Each target approves its own origin only, so an approval never carries over to
-another origin.
+another origin. An origin the policy does not name, of either kind, is asked at the permission
+prompt where one can be shown and denied where none can.
 Contract v1 supports only `declared-safe`; content on an origin that is not approved remains
 PARTIAL before navigation.
 
@@ -146,10 +150,10 @@ contract has a second, separate class: **network-only origins**.
   either a loopback origin, as a local target, or a non-loopback HTTPS origin under that same
   remote floor with a pin, so a local application can reach a hosted API or identity provider.
 - **Consent mode has no network-only class.** Without a policy the run-config helper refuses
-  `--network-only-origin`, and a non-loopback origin stays refused. A loopback API origin is then
-  passed as an ordinary `--origin` and consented to like any other loopback origin. Trade-off: a
-  local application that calls a non-loopback API needs the launch-time policy and a restart;
-  there is no prompt path for it.
+  `--network-only-origin`. An API origin of the run's own mode — loopback in a local run, public
+  HTTPS in a remote run — is then passed as an ordinary `--origin`, consented to like any other
+  origin, and never navigated to. Trade-off: a local application that calls a non-loopback API
+  needs the launch-time policy and a restart; there is no prompt path for it.
 - **Recipe.** `validate.networkOnly` associates the origins with the selected deployment, as
   `auth.baseUrl` is associated today. `origins` lists them exactly as the policy does. In remote
   mode `appOrigin` must equal the origin derived from the validated base URL, exactly as
@@ -165,8 +169,9 @@ contract has a second, separate class: **network-only origins**.
 
 What the class adds is an exfiltration surface: page code on a navigable origin can send data —
 including text the verifier types into a form — to every declared network-only origin. That is
-accepted because the list is declared by a human in the parent environment, which the model
-cannot write, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
+accepted because the list is declared by a human in the parent environment, which the model can
+reach only through the settings `env` block under bypass permissions or past the Auto-mode
+classifier, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
 public HTTPS pinned to an approved address, so no entry reaches a private, metadata or loopback
 address. `docs/verify-feature-consent-spec.md` holds the full analysis.
 

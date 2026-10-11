@@ -185,20 +185,20 @@ survives, a recovered chain that had already reached `autoFixMaxRounds` converge
 max-rounds terminus on its very next reviewer completion — recovery restores
 reachability, never budget.
 
-**Why the ticket slot is not repaired.** A `reviewTicketConsumed: false` looks like
-harmless inconsistency, but writing `true` there completes the exact precondition of the
-*unqualified* no-ticket terminus, which would let `--code-review-done` close a chain with
-no reviewer, no ticket and no round. Recovery therefore refuses such a document
-(`ticket-slot`) rather than normalizing it — the repair must never WRITE a value that was a
-missing precondition of a terminus. A retained CONSUMED ticket is a different matter: it
-keeps that terminus closed by itself, so a `ticket-spent` chain carrying a disagreeing
-receipt is recoverable, and the repair leaves the retained ticket exactly where it is.
+**Why the ticket slot is not repaired.** Recovery only repairs a bound generation. A
+`reviewTicketConsumed: false` there looks like harmless inconsistency, but writing `true`
+completes the exact precondition of the bound no-ticket terminus, which would let a bound
+`--chain-done` close the generation with no reviewer, no ticket and no round. Recovery
+therefore refuses such a document (`ticket-slot`) rather than normalizing it — the repair
+must never WRITE a value that was a missing precondition of a terminus. A retained CONSUMED
+ticket is a different matter: it keeps that terminus closed by itself, so a `ticket-spent`
+chain carrying a disagreeing receipt is recoverable, and the repair leaves the retained
+ticket exactly where it is.
 
 Note what this invariant does NOT say. Dropping the receipt returns a wedged chain to
-exactly the permissiveness of any freshly armed chain — including the unqualified no-ticket
-terminus, which `_tdd_mark_unclaimed_review_critical` refuses while a receipt is present and
-accepts once it is gone. That is the intended outcome: the repair restores the normal state,
-it does not grant a privilege the normal state lacks. Reviewing the work is still your job.
+exactly the permissiveness of any freshly armed chain, that terminus included. That is the
+intended outcome: the repair restores the normal state, it does not grant a privilege the
+normal state lacks. Reviewing the work is still your job.
 
 The audit record shares the single transaction: the `history` entry is written in the
 same revision as the repair, so a recovery can never land without its provenance. It is

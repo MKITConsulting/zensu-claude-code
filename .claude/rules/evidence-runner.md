@@ -115,7 +115,10 @@ the `cd` target resolves only in a drive spelling (`C:/…`); an MSYS spelling s
 `/tmp/…` needs the mount table, which the native runner never reads, so it keeps the
 project-root fingerprint. F18 and F19 in `test-full-suite-gate.sh` therefore pass the worktree
 through `zensu-host-path.sh`, and the unit tests compare directories through
-`fs.realpathSync.native`, because git answers `C:/…` where `fs.realpathSync` answers `C:\…`.
+`fs.realpathSync.native`, because git answers `C:/…` where `fs.realpathSync` answers `C:\…`. The two
+cases that check where a run executes print `process.cwd()` through node rather than `pwd -P`,
+which Git Bash answers as `/c/…`, and the unit file's `sh()` hands its commands to bash on stdin,
+because `execSync` runs them through `cmd.exe` on Windows.
 
 **`not-applicable` is decided narrowly.** Only a root that git reports as outside any
 repository or work tree, or a host without git, skips the gate. Every other git failure
@@ -166,7 +169,7 @@ documented residual of every plugin store, and no seal was added.
 `FULL_SUITE_STEP`, `AFFECTED_SUITE_STEP`, `CLOSE_SUITE_STEP` and `CLOSE_SUITE_REASON` of
 `hooks/post-review-tdd-delegate.sh` (both `CLOSE_PASS` arms, `CLOSE_PASS_SUITE_CI` and both
 max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
-`skills/tdd/SKILL.md`, discipline patch 12 in `docs/tdd-manager-workflow.md`,
+`skills/tdd/references/review-chain.md`, discipline patch 12 in `docs/tdd-manager-workflow.md`,
 the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in

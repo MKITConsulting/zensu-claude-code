@@ -175,26 +175,40 @@ else
 fi
 
 if arm "fsg-running" "$PROJ"; then
-  ZENSU_EVR_LIB_PATH="$LIB" PD="$CLAUDE_PLUGIN_DATA" KEY="$ZENSU_SESSION_KEY" ROOT="$ZENSU_PROJECT_ROOT" SHELL_PID="$$" node -e '
-    const evr = require(process.env.ZENSU_EVR_LIB_PATH);
-    const locations = evr.storeLocations(process.env.PD, process.env.KEY);
-    evr.writeRecordAtomic(locations.records, {
-      schema: evr.SCHEMA, id: evr.newRecordId(Date.now()), session_key: process.env.KEY,
-      project_root: process.env.ROOT, scope: "full", command: "npm test", cwd: process.env.ROOT,
-      state: "running", pid: Number(process.env.SHELL_PID), started_at: new Date().toISOString(),
-      finished_at: null, duration_ms: null, exit_code: null, signal: null,
-      tree_start: null, tree_start_reason: "fixture", tree_end: null, tree_end_reason: null,
-      plugin_version: "fixture", log_bytes: 0, log_truncated: false,
-    });
-  '
-  chain_done; RC=$?
-  if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
-    && grep -q '^FULL SUITE — running | a full-suite run is still in progress .* | gate: required$' "$WORK/err"; then
-    check "F7 a live running record refuses without suggesting a second run" PASS
+  rm -f "$WORK/live.pid"
+  node -e 'require("fs").writeFileSync(process.argv[1], String(process.pid)); setTimeout(() => {}, 120000);' \
+    "$WORK/live.pid" &
+  LIVE_JOB=$!
+  tries=0
+  while [ ! -s "$WORK/live.pid" ] && [ "$tries" -lt 100 ]; do sleep 0.1; tries=$((tries + 1)); done
+  LIVE_PID="$(cat "$WORK/live.pid" 2>/dev/null)"
+  if [ -n "$LIVE_PID" ]; then
+    ZENSU_EVR_LIB_PATH="$LIB" PD="$CLAUDE_PLUGIN_DATA" KEY="$ZENSU_SESSION_KEY" ROOT="$ZENSU_PROJECT_ROOT" LIVE_PID="$LIVE_PID" node -e '
+      const evr = require(process.env.ZENSU_EVR_LIB_PATH);
+      const locations = evr.storeLocations(process.env.PD, process.env.KEY);
+      evr.writeRecordAtomic(locations.records, {
+        schema: evr.SCHEMA, id: evr.newRecordId(Date.now()), session_key: process.env.KEY,
+        project_root: process.env.ROOT, scope: "full", command: "npm test", cwd: process.env.ROOT,
+        state: "running", pid: Number(process.env.LIVE_PID), started_at: new Date().toISOString(),
+        finished_at: null, duration_ms: null, exit_code: null, signal: null,
+        tree_start: null, tree_start_reason: "fixture", tree_end: null, tree_end_reason: null,
+        plugin_version: "fixture", log_bytes: 0, log_truncated: false,
+      });
+    '
+    chain_done; RC=$?
+    if [ "$RC" -eq 1 ] && [ "$(done_flag)" = "false" ] \
+      && grep -q '^FULL SUITE — running | a full-suite run is still in progress .* | gate: required$' "$WORK/err"; then
+      check "F7 a live running record refuses without suggesting a second run" PASS
+    else
+      check "F7 a live running record refuses (rc=$RC)" FAIL
+      ERR
+    fi
+    node -e 'try { process.kill(Number(process.argv[1])); } catch (_) {}' "$LIVE_PID"
   else
-    check "F7 a live running record refuses (rc=$RC)" FAIL
-    ERR
+    check "F7 fixture: a live node process to own the running record" FAIL
   fi
+  kill "$LIVE_JOB" 2>/dev/null
+  wait "$LIVE_JOB" 2>/dev/null
 else
   check "F7 arm a ticket-bound chain" FAIL
 fi

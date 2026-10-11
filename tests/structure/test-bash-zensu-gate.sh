@@ -136,6 +136,19 @@ if printf '%s' "$REASON_OUT" | grep -qiF 'state-mutating' \
 else
   check "B19 deny reason content" FAIL
 fi
+SUB_REASON_OUT="$(payload 'zensu security classify f1' general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$SUB_REASON_OUT" | grep -qF '"permissionDecision":"deny"' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF 'set_security_classification' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF 'reserved for the interactive main thread' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF 'Report the operation you need to the main thread' \
+   && printf '%s' "$SUB_REASON_OUT" | grep -qF '/zensu:security-review' \
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'ZENSU_MCP_GATE' \
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'prefix the command with' \
+   && ! printf '%s' "$SUB_REASON_OUT" | grep -qF 'in the interactive main thread. For a deliberate one-off'; then
+  check "B19b subagent deny reason: reports the operation to the main thread and names no escape" PASS
+else
+  check "B19b subagent deny reason content" FAIL
+fi
 
 # B20 fail-open: empty + non-JSON + non-zensu command -> ALLOW
 OUT="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"

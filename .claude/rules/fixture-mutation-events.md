@@ -4,6 +4,7 @@ paths:
   - "scripts/fixture-manifest.js"
   - "tests/structure/fixture-mutation-watch.test.js"
   - "tests/structure/test-claude-promptfoo-wrapper.sh"
+  - "tests/structure/test-eval-harness-units.sh"
 ---
 
 # Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)
@@ -43,9 +44,11 @@ Moving together: `RUN_OWNED` (the ancestor set is DERIVED from it, never hand-li
 still see is what makes gating `.git` safe), and the registered-case floor in the shell
 driver. `tests/structure/fixture-mutation-watch.test.js` carries the four measured shapes and
 pins the single-implementation property at SOURCE level — a rule pin alone cannot catch a
-SECOND copy of the rule, which is what the bug was. The suite is local-only
-(`tests/profiles/promptfoo-local-only.v1.json`, and in the `excluded` list of
-`windows-native-structure.v1.json`), so none of this runs in GitHub Actions.
+SECOND copy of the rule, which is what the bug was. That unit file runs in GitHub Actions
+through `tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite, and so on the
+weekly Windows Safety run too. The wrapper's shell probes, P13-S6 and P13-S8 among them, do
+not: `test-claude-promptfoo-wrapper.sh` is local-only (`tests/profiles/promptfoo-local-only.v1.json`,
+and in the `excluded` list of `windows-native-structure.v1.json`).
 
 **Known gap, measured and not closed.** Under the harness that failed 8 of 8 before the fix,
 128 runs at a heavier setting produced ONE failure whose cause was not established; 224

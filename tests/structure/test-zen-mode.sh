@@ -1114,7 +1114,13 @@ if [ "$Z26_SCEN" -lt 5 ]; then
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
 else
-  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
+  Z26_FILES=()
+  while IFS= read -r Z26_F; do
+    [ -n "$Z26_F" ] && Z26_FILES+=("$Z26_F")
+  done <<Z26_ROSTER
+$Z26_LIST
+Z26_ROSTER
+  LANG_BAD="$(Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
     const fs = require("fs"), path = require("path");
     // Stems that are also English words are excluded on purpose; see above.
     // BOTH carry `g`: a non-global regex returns only the FIRST match on a
@@ -1146,12 +1152,10 @@ else
       return spans;
     };
     const inLiteral = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
-    let input = "";
-    process.stdin.on("data", (c) => { input += c; });
-    process.stdin.on("end", () => {
+    {
       const bad = [];
       let scanned = 0;
-      for (const f of input.split("\n").map((x) => x.trim()).filter(Boolean)) {
+      for (const f of process.argv.slice(1).map((x) => x.trim()).filter(Boolean)) {
         let text;
         try { text = fs.readFileSync(f, "utf8"); } catch (_) { bad.push(path.basename(f) + ":unreadable"); continue; }
         scanned += 1;
@@ -1176,8 +1180,8 @@ else
       if (!Number.isInteger(want) || want < 4) bad.push("roster-size-unresolved");
       else if (scanned !== want) bad.push("roster-scanned-" + scanned + "-of-" + want + "-files");
       process.stdout.write(bad.length ? bad.slice(0, 6).join(" ") : "OK");
-    });
-  ' 2>/dev/null)"
+    }
+  ' "${Z26_FILES[@]}" 2>/dev/null)"
   LANG_RC=$?
   if [ "$LANG_RC" -ne 0 ]; then
     check "Z26 English-only scan could not run (node exit $LANG_RC) — not an all-clear" FAIL
@@ -2395,8 +2399,14 @@ rm -rf "$P53"
 # `{"active":false}` was ignored on every prompt. The `.zensu` case is the one a
 # leaf-only arm could never catch: its own `[ -d "$ZEN_STATE_DIR" ]` cannot stat
 # through an unsearchable parent either.
+Z54_PROBE="$(mktemp -d -t zenmode-probe-XXXXXX)"; : > "$Z54_PROBE/inner"
+chmod 000 "$Z54_PROBE" 2>/dev/null
+Z54_ENFORCED=1; [ -e "$Z54_PROBE/inner" ] && Z54_ENFORCED=0
+chmod 755 "$Z54_PROBE" 2>/dev/null; rm -rf "$Z54_PROBE"
 if [ "$(id -u)" = "0" ]; then
   skipcheck "Z54 running as root, which bypasses the search-permission check"
+elif [ "$Z54_ENFORCED" -eq 0 ]; then
+  skipcheck "Z54 this host lets a mode-000 directory be searched, so the arm cannot be reached"
 else
   Z54_BAD=""
   # THREE levels, and the third is why the pair was replaced by a walk: an
@@ -4655,6 +4665,48 @@ if [ -z "$Z98_BAD" ]; then
   check "Z98 every derived source slice used as a haystack is emptiness-guarded" PASS
 else
   check "Z98 an empty derivation can read as agreement:$Z98_BAD" FAIL
+fi
+
+
+Z100_BIN="$CONTROL_TMP/z100-bin"; mkdir -p "$Z100_BIN"
+Z100_REAL_MKDIR="$(command -v mkdir)"
+cat > "$Z100_BIN/mkdir" <<EOF
+#!/bin/sh
+case " \$* " in
+  (*" -m 700 "*) ;;
+  (*) exec "$Z100_REAL_MKDIR" "\$@" ;;
+esac
+last=""
+for a in "\$@"; do last="\$a"; done
+if [ "\${Z100_CREATE:-1}" = 1 ]; then "$Z100_REAL_MKDIR" -p "\$last" || exit 1; fi
+printf "mkdir: cannot change permissions of '%s': Permission denied\n" "\$last" >&2
+exit 1
+EOF
+chmod +x "$Z100_BIN/mkdir"
+Z100_BAD=""
+for z100_create in 1 0; do
+  P100="$(mktemp -d -t zenmode-XXXXXX)"; S100="z100-$z100_create-$$"
+  new_session "$P100" "$S100"
+  rm -rf "$P100/.zensu/state"
+  [ -e "$P100/.zensu/state" ] && Z100_BAD="$Z100_BAD [create=$z100_create state-not-fresh]"
+  CLAUDE_CODE_SESSION_ID="$S100" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$P100" ZENSU_CONFIG="$CFG_DEFAULT_OFF" Z100_CREATE="$z100_create" PATH="$Z100_BIN:$PATH" \
+    bash "$HELPER" --on >/dev/null 2>"$CONTROL_TMP/z100.err"; Z100_RC=$?
+  if [ "$z100_create" = 1 ]; then
+    Z100_ST="$(helper "$P100" "$S100" --status "$CFG_DEFAULT_OFF")"
+    { [ "$Z100_RC" -eq 0 ] && [ "$(marker_count "$P100")" = 1 ] && [ "$Z100_ST" = on ]; } \
+      || Z100_BAD="$Z100_BAD [created rc=$Z100_RC markers=$(marker_count "$P100") status=$Z100_ST err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  else
+    { [ "$Z100_RC" -eq 2 ] && [ ! -e "$P100/.zensu/state" ] \
+      && grep -qF 'zensu-zen-mode.sh: cannot create state directory' "$CONTROL_TMP/z100.err"; } \
+      || Z100_BAD="$Z100_BAD [not created rc=$Z100_RC err='$(head -c 160 "$CONTROL_TMP/z100.err")']"
+  fi
+  rm -rf "$P100"
+done
+if [ -z "$Z100_BAD" ]; then
+  check "Z100 a mkdir that creates the state directory but cannot set its mode, as Git Bash on Windows does, still lets --on record the marker; one that creates nothing is still refused" PASS
+else
+  check "Z100 state directory whose mode cannot be set:$Z100_BAD" FAIL
 fi
 
 
