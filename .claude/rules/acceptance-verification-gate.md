@@ -79,7 +79,9 @@ Autopilot `pass` calls it with the bound flag and the run's `validate` option an
 `not-checked`, whose cause (`boundLine`) says whether VALIDATE verifies every criterion, the run
 was started with `--no-validate`, or the option could not be read; verify-feature's questions
 conflict with the delegated no-question rule, so the bound chain is never gated. The zero-change
-terminus stays silent (`test-chain-terminus-zero-change-gate.sh` G1). A max-rounds close with
+terminus stays silent (`test-chain-terminus-zero-change-gate.sh` G1), and so does a minted
+`zc_` self-review ticket on a changed tree, which the terminus refuses before either gate runs
+(`G9e`). A max-rounds close with
 `hooks.selfReview` off is not gated, as for the full suite: a standalone chain closes through
 `tdd_mark_review_converged` without a terminus, and a bound one runs `--chain-done --outcome
 max-rounds` with its output discarded. `MAX_ROUNDS_VERDICTS` in the post-review hook tells the

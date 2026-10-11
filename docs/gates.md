@@ -1007,7 +1007,10 @@ reads the newest record, never a claim in the run log.
   of the newest finished run has no run on its current tree.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
-  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
+  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
+  self-review ticket the Stop hook minted for a chain no reviewer saw (prefix `zc_`) does not
+  reach the gate while the worktree reports a changed file: the terminus refuses it and reopens
+  the review first. Outcome
   `max-rounds` prints `FULL SUITE — not checked` and never blocks, because the post-review hook
   drives that call with its output discarded. `--tdd-complete` is not gated: review rounds
   change the tree anyway.
@@ -1111,7 +1114,8 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   cause says whether the run's VALIDATE stage validates every criterion, whether the run was
   started with `--no-validate` so nothing was validated, or whether the option could not be read.
   Its other outcomes print nothing. The unqualified zero-change terminus is exempt and prints
-  nothing, and a wrong ticket never reaches the verdict. A max-rounds close with
+  nothing, and a wrong ticket never reaches the verdict. Neither does a minted `zc_`
+  self-review ticket on a changed tree, which the terminus refuses before either gate runs. A max-rounds close with
   `hooks.selfReview` off is never blocked by this gate or the full-suite gate: a standalone chain
   runs no terminus there, and a bound one discards the terminus output. The chain-end summary
   then shows both as not checked.
