@@ -9229,6 +9229,39 @@ case "$TOPO_OUT_NOKEY_NONE" in
   *) check "P1tp11-control an unbound session with no receipt stays silent" PASS ;;
 esac
 
+TOPO_REFUSE_HOME="$SBOX/topo-refuse-home"
+mkdir -p "$TOPO_REFUSE_HOME"
+topo_foreign_owner() {
+  HOME="$TOPO_REFUSE_HOME" XDG_CONFIG_HOME="$TOPO_REFUSE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+printf 'S1 IMPL completed — files: own.txt\n' > "$TOPO_PROJECT/.zensu/logs/run.log"
+TOPO_REFUSE_ERR="$(topo_foreign_owner env LC_ALL=C git -C "$TOPO_PROJECT" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+case "$TOPO_REFUSE_ERR" in
+  *'dubious ownership'*) check "P1tp12-control real git refuses the topology project as owned by another user" PASS ;;
+  *) check "P1tp12-control real git refuses the topology project as owned by another user (err='$TOPO_REFUSE_ERR')" FAIL ;;
+esac
+TOPO_OUT_REFUSED="$(topo_foreign_owner run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_REFUSED"; then
+  check "P1tp12 the refused-repository report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_REFUSED" in
+    *'topology:'*'NOT checked against the anchor'*'did not complete'*'missing check, not an all-clear'*)
+      check "P1tp12 a git refusal of the anchor renders a missing-check row, never a clean topology" PASS ;;
+    *) check "P1tp12 a git refusal of the anchor renders a missing-check row, never a clean topology" FAIL ;;
+  esac
+fi
+TOPO_OUT_ANCHOR_OK="$(run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_ANCHOR_OK"; then
+  check "P1tp12-control the unrefused report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_ANCHOR_OK" in
+    *'topology:'*) check "P1tp12-control without the refusal the same anchor-only claim renders no row" FAIL ;;
+    *) check "P1tp12-control without the refusal the same anchor-only claim renders no row" PASS ;;
+  esac
+fi
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+
 # P1tp4's own discriminator: the in-project log still carries the foreign claim, so
 # the ABSENT receipt is the only reason the row stays silent.
 rm -f "$TOPO_RECEIPT"
