@@ -45,6 +45,7 @@
     "test-eval-harness-units.sh",
     "test-evidence-discipline.sh",
     "test-evidence-run.sh",
+    "test-external-review-hook.sh",
     "test-file-exists-replacement.sh",
     "test-finding-verification.sh",
     "test-full-suite-ci.sh",
