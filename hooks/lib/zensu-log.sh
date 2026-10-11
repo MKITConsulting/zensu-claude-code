@@ -384,6 +384,73 @@ case "${1:-}" in
     zensu_full_suite_policy_node "zensu-log.sh --full-suite-policy" policy "$_fsp_refresh"
     exit $?
     ;;
+  --external-review)
+    _xr_root=""
+    _xr_launch=""
+    _xr_result=""
+    _xr_mode="check"
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --root) _xr_root="${2:-}"; shift 2 || break ;;
+        --launch) _xr_launch="${2:-}"; shift 2 || break ;;
+        --result) _xr_result="${2:-}"; shift 2 || break ;;
+        --tree) _xr_mode="tree"; shift ;;
+        *) echo "zensu-log.sh --external-review: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_xr_root" ]; then
+      echo "zensu-log.sh --external-review: --root <repository top level> is required" >&2
+      exit 2
+    fi
+    if [ "$_xr_mode" = "tree" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
+      echo "zensu-log.sh --external-review: --tree takes only --root" >&2
+      exit 2
+    fi
+    if [ "$_xr_mode" = "check" ] && [ -t 0 ]; then
+      echo "zensu-log.sh --external-review: pipe the Phase 6 step-2 change set on stdin, one repository-relative path per line" >&2
+      exit 2
+    fi
+    _xr_none="status=unavailable"
+    [ "$_xr_mode" = "tree" ] && _xr_none="tree=unavailable"
+    if ! command -v node >/dev/null 2>&1; then
+      echo "EXTERNAL REVIEW — $_xr_none reason=node"
+      exit 0
+    fi
+    _xr_lib="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-lib"; exit 0; }
+    _xr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-data"; exit 0; }
+    _xr_root_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_xr_root" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=root"; exit 0; }
+    _xr_project="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" 2>/dev/null)" \
+      || { echo "EXTERNAL REVIEW — $_xr_none reason=project-root"; exit 0; }
+    _xr_result_native=""
+    if [ -n "$_xr_result" ]; then
+      _xr_result_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$(dirname -- "$_xr_result")" 2>/dev/null)" \
+        || { echo "EXTERNAL REVIEW — status=unavailable reason=result-path"; exit 0; }
+      _xr_result_native="$_xr_result_dir/$(basename -- "$_xr_result")"
+    fi
+    _xr_enabled=1
+    zensu_hook_enabled externalReviewImport || _xr_enabled=0
+    _xr_judge=1
+    zensu_hook_enabled reviewJudge || _xr_judge=0
+    _xr_excl="$(zensu_msys_env_exclusions ZENSU_XR_LIB ZENSU_XR_PLUGIN_DATA ZENSU_XR_PROJECT_ROOT ZENSU_XR_ROOT ZENSU_XR_RESULT)" \
+      || _xr_excl="${MSYS2_ENV_CONV_EXCL:-}"
+    MSYS2_ENV_CONV_EXCL="$_xr_excl" \
+    ZENSU_XR_LIB="$_xr_lib/external-review-v1.js" \
+    ZENSU_XR_MODE="$_xr_mode" \
+    ZENSU_XR_ENABLED="$_xr_enabled" \
+    ZENSU_XR_JUDGE="$_xr_judge" \
+    ZENSU_XR_PLUGIN_DATA="$_xr_data" \
+    ZENSU_XR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+    ZENSU_XR_PROJECT_ROOT="$_xr_project" \
+    ZENSU_XR_ROOT="$_xr_root_native" \
+    ZENSU_XR_LAUNCH="$_xr_launch" \
+    ZENSU_XR_RESULT="$_xr_result_native" \
+      node -e 'const tree = process.env.ZENSU_XR_MODE === "tree"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(tree ? "EXTERNAL REVIEW — tree=unavailable reason=module\n" : "EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main([tree ? "tree" : "check"]);'
+    exit $?
+    ;;
   --acceptance-record|--acceptance-status)
     avr_verb="$1"
     avr_start=""
@@ -1347,6 +1414,7 @@ case "${1:-}" in
           if ! zensu_full_suite_policy_node "zensu-log.sh --tdd-begin" snapshot >/dev/null 2>&1; then
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi
+          zensu_external_review_wait_reset "$session_val"
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
@@ -2255,16 +2323,32 @@ case "${1:-}" in
             if [ "$claimed_ticket_seen" = "true" ]; then
               _fsg_lines=""
               _avg_lines=""
-              if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
-                chain_gate_rc=0
-                _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
-                _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
-                [ "$chain_gate_rc" -eq 0 ] || exit 1
+              chain_change_count=""
+              if _tdd_zero_change_ticket "$claimed_ticket_val"; then
+                chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
               fi
-              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || {
+              case "$chain_change_count" in
+                (''|0|unknown)
+                  if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+                    chain_gate_rc=0
+                    _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
+                    _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
+                    [ "$chain_gate_rc" -eq 0 ] || exit 1
+                  fi
+                  ;;
+              esac
+              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone "$chain_change_count" || {
                 chain_done_rc=$?
-                zensu_state_failure_hint --chain-done "$session_val"
-                exit "$chain_done_rc"
+                [ "$chain_done_rc" -eq 4 ] || {
+                  zensu_state_failure_hint --chain-done "$session_val"
+                  exit "$chain_done_rc"
+                }
+                if [ "$chain_change_count" = "unavailable" ]; then
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
+                else
+                  echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but the worktree reports ${chain_change_count} changed file(s). The chain's review is reopened: resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer; the post-review hook then names the ticket-bound --claimed-review-ticket form. Do not commit, stash or revert files to get past this check: a clean worktree only hides the changes from it." >&2
+                fi
+                exit 1
               }
               [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
               [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2

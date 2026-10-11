@@ -80,7 +80,8 @@ never run in GitHub Actions.
   successful `Read` of the
   wrapper-owned neutral marker. Its agent definition and the capability gate
   both restrict it to `Read`, `Grep`, and `Glob`, the gate adding only the
-  host's `SubagentHandback` report tool; it receives neither `main-v1`
+  host's `SubagentHandback` report tool and the workflow result tool
+  `StructuredOutput`; it receives neither `main-v1`
   nor Session Control selectors.
 - Every other neutral `host-profile-v1` child is denied every tool outside the
   capability gate's allowlist — all shell/command tool aliases and every MCP

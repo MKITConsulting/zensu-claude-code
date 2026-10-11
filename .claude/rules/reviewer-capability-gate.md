@@ -35,7 +35,7 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
   still run first, so every bind-failure deny still wins. `pathResolutionProfile` now also
   picks the handback profile; a new principal branch lands in both uses.
 - **The deny text names the channel.** Every other tool of the two profiles is denied with
-  `… only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report`.
+  `… only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report`.
   A deny that lists only the read trio steers a model away from the one call that delivers its
   report. The session-control eval harness pins that exact text in four files:
   `lib/contract-provider.js`, `lib/live-evidence.js`, `tests/live-evidence-negative.test.js`
@@ -47,6 +47,19 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
   three reviewer types in turn and expects the deny by name. The roster is a sample, not a
   proven inventory: a tool a later host adds is denied without a suite edit, and adding its
   name to the roster makes the sweep name it too.
+- **The workflow result tool, `StructuredOutput`.** A Claude Code workflow gives an agent it
+  spawns with a result schema the host tool `StructuredOutput` and hands that tool's input to
+  the workflow script as the agent's result; an agent that never calls it counts as failed.
+  Measured on 2026-10-11: a `zensu:review-aspect` agent spawned by a workflow with a schema was
+  offered the tool, this gate denied it as outside the read trio, and the run failed.
+  `WORKFLOW_RESULT_TOOL` is therefore admitted for the two `HANDBACK_PROFILES` beside the
+  handback, before the `cwd` is resolved. Its input is the script's own schema, so no field set
+  is checked and no path rule applies; the premise is that the tool returns data to the script
+  that spawned the agent and does nothing else. The review template
+  `templates/workflows/zensu-review-v1.js` rests on it: its finders and refuters run as
+  `zensu:review-aspect` under `reviewer-readonly-v1`. The tool left the `HOST_NON_READ_TOOLS`
+  roster; case variants and look-alike MCP names stay denied, and the evidence workers stay on
+  their lease trio. **Version: `patch`** — the gate denies strictly less.
 
 **Not in the frontmatter.** `agents/*.md` keep `tools: Read, Grep, Glob`. The host injects
 the tool itself, after the frontmatter filter. `confinedByFrontmatter` in

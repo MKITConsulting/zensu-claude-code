@@ -257,7 +257,8 @@ instruction that cannot succeed until its cap releases the guard.
 - **What bounds the CHILD is in this tree, not an assumption about the host.**
   `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
   tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
-  report tool, admitted only with one string `message` field (see
+  report tool, admitted only with one string `message` field, and the workflow result tool
+  `StructuredOutput` (see
   [Session Control](session-control.md)) — and confines its reads to the project
   root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
   instead: the read trio on leased paths only, and no report tool.
@@ -895,8 +896,8 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
   them to report to the main thread rather than retry. A reviewer and a PLM subagent can do
-  that: their `SubagentHandback` report resolves no path and is decided before the `cwd` is
-  examined. A neutral child's handback still passes that resolution and is denied with the
+  that: their `SubagentHandback` report and their `StructuredOutput` result resolve no path
+  and are decided before the `cwd` is examined. A neutral child's handback still passes that resolution and is denied with the
   rest.
 
 Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the
@@ -1007,7 +1008,10 @@ reads the newest record, never a claim in the run log.
   of the newest finished run has no run on its current tree.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
-  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
+  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
+  self-review ticket the Stop hook minted for a chain no reviewer saw (prefix `zc_`) does not
+  reach the gate while the worktree reports a changed file: the terminus refuses it and reopens
+  the review first. Outcome
   `max-rounds` prints `FULL SUITE — not checked` and never blocks, because the post-review hook
   drives that call with its output discarded. `--tdd-complete` is not gated: review rounds
   change the tree anyway.
@@ -1111,7 +1115,8 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   cause says whether the run's VALIDATE stage validates every criterion, whether the run was
   started with `--no-validate` so nothing was validated, or whether the option could not be read.
   Its other outcomes print nothing. The unqualified zero-change terminus is exempt and prints
-  nothing, and a wrong ticket never reaches the verdict. A max-rounds close with
+  nothing, and a wrong ticket never reaches the verdict. Neither does a minted `zc_`
+  self-review ticket on a changed tree, which the terminus refuses before either gate runs. A max-rounds close with
   `hooks.selfReview` off is never blocked by this gate or the full-suite gate: a standalone chain
   runs no terminus there, and a bound one discards the terminus output. The chain-end summary
   then shows both as not checked.
