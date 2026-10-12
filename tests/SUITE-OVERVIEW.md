@@ -300,8 +300,13 @@ Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
 CI-event prompts, for the first prompt of a context generation and for every later one, the
-per-session delivery ledger behind that split and the `SessionStart` reset that clears it, the receipt written only for the Session Hub's exact takeover command, the deterministic half of the local-only reaction eval for the reminder's and the router's short lines (the line each scenario grades, captured from this tree; the silence of every prompt hook under the eval config; the provider's run settings and refusals; and the graders, through their unit file), and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
+per-session delivery ledger behind that split and the `SessionStart` reset that clears it, the deterministic half of the local-only reaction eval for the reminder's and the router's short lines (the line each scenario grades, captured from this tree; the silence of every prompt hook under the eval config; the provider's run settings and refusals; and the graders, through their unit file), and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
 a distinct receipt for each failure mode).
+
+`session-hub-receipt` drives the UserPromptSubmit hook that writes one private receipt when a
+prompt is exactly the Session Hub's takeover command and stays silent for every other prompt,
+together with the session-trail handover contract that command is spelled in and the
+`--receipt` flag `trail.mjs` accepts.
 
 ### VCS / forge integration (7)
 `valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
