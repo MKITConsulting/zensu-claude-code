@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (172 = 165 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 165 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 172). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
+reconciled to that manifest (171 = 164 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 164 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 171). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -63,7 +63,7 @@ re-derived both; `test-work-order-gates.sh`, `test-work-order-takeover.sh` and
 again: `test-session-hub-receipt.sh` took `main` to 160 CI entries while the work-order branch
 independently reached 164, so merging `main` into it made 165.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 162 against 165 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 161 against 164 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -103,21 +103,21 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **172** — 165 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **165 structure suites + 5 offline evals = 170 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 172 − 165 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **171** — 164 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **164 structure suites + 5 offline evals = 169 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 171 − 164 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **9** (`windows-shard-1`…`-9`, 44 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
-| Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
+| Approx. assertions in structure layer | **~4,300** (~3,820 in the CI set) | — |
 
 ## 2. Run modes (`tests/run-all.sh`)
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 172 structure suites + 5 offline evals | none |
-| `--ci` | 165 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 171 structure suites + 5 offline evals | none |
+| `--ci` | 164 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -148,13 +148,13 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (17)
+### Session Control & workflow state (16)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` · `session-reanchor` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
-`workflow-scope` · `worktree-keep` · `zensu-runtime-controller`
+`workflow-scope` · `worktree-keep`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
@@ -459,7 +459,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `claude-stream-render.test.js` | 6 | `test-eval-harness-units.sh` | stream renderer |
 | `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
-| `process-supervisor.test.js` | 7 | `test-zensu-runtime-controller.sh` | bounded supervisor + process-tree teardown, a stop that never fails on the EPERM macOS answers while the group holds only zombies (a macOS-only fixture keeps one there), and the distinct exit code for an endpoint no supervisor answers |
+| `process-supervisor.test.js` | 7 | `test-harness-launcher.sh` (H12) | the process supervisor the work-order launcher loads: bounded supervisor + process-tree teardown, a stop that never fails on the EPERM macOS answers while the group holds only zombies (a macOS-only fixture keeps one there), and the distinct exit code for an endpoint no supervisor answers |
 | `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |

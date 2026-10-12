@@ -5,7 +5,7 @@ set -u
 # skills/doctor/SKILL.md for the wrapper invocation line, so no renderer
 # process is started and no HOME is resolved.
 # Structure test for /zensu:verify-feature.
-# Pins the public command, self-contained browser loop, isolated Zensu local adapter,
+# Pins the public command, self-contained browser loop,
 # credential-blind auth contract, evidence/verdict gates, playwright-cli command set,
 # plugin registration, and user-facing documentation. No browser or network is launched.
 
@@ -13,12 +13,10 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/verify-feature"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 BROWSER_MD="$SKILL_DIR/rules/browser-verification.md"
-ZENSU_MD="$SKILL_DIR/rules/zensu-monorepo.md"
 SETUP_MD="$SKILL_DIR/rules/setup.md"
 CONSENT_MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR_MODULE="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
 BROWSER_CONFIG="$PLUGIN_DIR/scripts/verify-browser-config.js"
-RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 HELP_MD="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
@@ -36,8 +34,8 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
-  "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
+  "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
@@ -105,7 +103,7 @@ if grep -qF 'P0/P1/P2' "$SKILL_MD" && grep -qF 'completeness-critic' "$SKILL_MD"
 else
   check "P2b matrix is diff-grounded, prioritized, and completeness-checked" FAIL
 fi
-if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'candidate was rejected' "$SKILL_MD"; then
+if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'Record why the candidate was rejected' <<<"$SKILL_FLAT"; then
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" PASS
 else
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" FAIL
@@ -384,30 +382,6 @@ if grep -qF 'A future gate may re-enable opaque state only when it admits a path
 else
   check "P4g browser state commands stay denied until a narrow gate exists" FAIL
 fi
-if grep -qF 'Use visible manual browser login' "$ZENSU_MD" \
-  && grep -qF 'never read, print, or pass' "$ZENSU_MD" \
-  && grep -qF 'If no credential-blind path' "$ZENSU_MD"; then
-  check "P4h bundled Zensu adapter never runs a storage-state login script" PASS
-else
-  check "P4h bundled Zensu adapter never runs a storage-state login script" FAIL
-fi
-if grep -qF 'ORIGIN="$(parent_origin)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'APP_BASE_URL="$ORIGIN"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'Resolve the planned application origin before starting any resource' "$ZENSU_MD" \
-  && grep -qF -- '--check-policy local "$APP_ORIGIN" declared-safe' "$ZENSU_MD" \
-  && grep -qF 'Use visible manual browser login' "$ZENSU_MD"; then
-  check "P4i local auth waits for the exact frontend origin and stays visible" PASS
-else
-  check "P4i local auth waits for the exact frontend origin and stays visible" FAIL
-fi
-if grep -qF 'Without a parent policy the gate runs in consent mode and the same three commands still' "$ZENSU_MD" \
-  && grep -qF 'prints `consent` with exit `0`' "$ZENSU_MD" \
-  && grep -qF 'consent_origin' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'node "$FREE_PORT_HELPER" --from 5173' "$RUNTIME_CONTROLLER"; then
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" PASS
-else
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" FAIL
-fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
   check "P4j autopilot example pins distinct auth/app contract to its same-origin proxy" PASS
@@ -491,54 +465,6 @@ if grep -qF 'Visible manual login' "$SKILL_MD" && grep -qF 'credential into chat
   check "P4d remote/manual login stays in the visible browser" PASS
 else
   check "P4d remote/manual login stays in the visible browser" FAIL
-fi
-
-# P5 — local adapter isolation, readiness, typed fixtures, and teardown.
-for needle in '55432 + OFFSET' '8090 + OFFSET' 'FRONTEND_PORT="${ORIGIN##*:}"' 'pgvector/pgvector:pg17' '/api/health' '--strictPort' 'docker rm -f "$CONTAINER"'; do
-  if grep -qF -- "$needle" "$RUNTIME_CONTROLLER"; then
-    check "P5 local adapter pins $needle" PASS
-  else
-    check "P5 local adapter pins $needle" FAIL
-  fi
-done
-if grep -qF 'Never use `pkill`' "$ZENSU_MD" \
-  && grep -qF 'lease-authenticated supervisors' "$ZENSU_MD" \
-  && grep -qF 'Mutable JSON' "$ZENSU_MD"; then
-  check "P5a teardown is scoped to run-owned processes/resources" PASS
-else
-  check "P5a teardown is scoped to run-owned processes/resources" FAIL
-fi
-if grep -qF 'make -C backend seed' "$ZENSU_MD" && grep -qF 'without exposing the' "$ZENSU_MD"; then
-  check "P5b fixture mutations prefer typed/repository-owned paths" PASS
-else
-  check "P5b fixture mutations prefer typed/repository-owned paths" FAIL
-fi
-if grep -qF '127.0.0.1:${PG_PORT}:5432' "$RUNTIME_CONTROLLER" && grep -qF 'SERVER_HOST=127.0.0.1' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'openssl rand -hex 24' "$RUNTIME_CONTROLLER" && grep -qF 'openssl rand -hex 32' "$RUNTIME_CONTROLLER"; then
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" PASS
-else
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" FAIL
-fi
-if grep -qF '$(seq ' "$RUNTIME_CONTROLLER"; then
-  check "P5d local adapter avoids non-portable seq dependency" FAIL
-else
-  check "P5d local adapter avoids non-portable seq dependency" PASS
-fi
-if grep -qF '[ -d "$WORKTREE/frontend/node_modules" ] || pnpm -C "$WORKTREE/frontend" install --frozen-lockfile' "$RUNTIME_CONTROLLER"; then
-  check "P5e frontend dependencies install only when node_modules is absent" PASS
-else
-  check "P5e frontend dependencies install only when node_modules is absent" FAIL
-fi
-if grep -qF 'RUN_ID="$(openssl rand -hex 6)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'CONTAINER="$(expected_container "$RUN_ID")"' "$RUNTIME_CONTROLLER"; then
-  check "P5f resource IDs include a per-run random component" PASS
-else
-  check "P5f resource IDs include a per-run random component" FAIL
-fi
-if grep -qF -- '--host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort' "$RUNTIME_CONTROLLER"; then
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" PASS
-else
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" FAIL
 fi
 
 # P6 — playwright-cli driver and plugin manifest wiring.
@@ -896,16 +822,12 @@ fi
 if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy' "$SKILL_MD" \
   && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
   && grep -qF 'supporting files loaded through `Read` do not receive' "$SKILL_MD" \
-  && grep -qF '<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
-  && grep -qF 'node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy' "$ZENSU_MD" \
+  && grep -qF 'plugin script a bundled rule names from this concrete absolute `ROOT`' "$SKILL_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
-  && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$ZENSU_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" PASS
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD"; then
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" PASS
 else
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" FAIL
 fi
 
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"

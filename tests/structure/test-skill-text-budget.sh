@@ -12,10 +12,10 @@ adopt-session 39412
 autopilot 32782
 doctor 98218
 gauntlet-loop 31693
-ghost-scan 27978
+ghost-scan 27945
 plan-review 32855
 self-review 33038
-verify-feature 40481
+verify-feature 39877
 ALLOW
 )"
 

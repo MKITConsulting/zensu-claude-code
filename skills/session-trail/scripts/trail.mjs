@@ -1105,6 +1105,15 @@ function readLabels() {
 
 // The uuid prefix stays beside the label, never instead of it: two accounts
 // sharing a label must still be distinguishable in a rendered chain.
+// The account prefix is `instanceId`, and `cmdInstances` renders its accounts
+// through this same function, because correlating a `list` row with an
+// `instances` row is the only thing an 8-character prefix is for: two spellings
+// of one id would make the field useless. `oneLine(x, 8)` was the wrong bound
+// for it: its clip yields `slice(0, n - 1) + '…'`, seven characters plus an
+// ellipsis, where `instanceId` keeps eight. `app.accountUuid` is a DIRECTORY
+// NAME read out of another application's store — the desktop store's top-level
+// directory, one per signed-in account — which is why it needs the control
+// bound at all.
 function accountLabel(key) {
   if (!key) return 'account ?';
   const l = Object.prototype.hasOwnProperty.call(readLabels().accounts, key) ? readLabels().accounts[key] : undefined;
@@ -1590,15 +1599,6 @@ function instanceId(value, width) {
     .slice(0, width);
 }
 
-// `instanceId`, the same spelling `cmdInstances` uses for the id it prints beside
-// this one — correlating those two rows is the only thing an 8-character prefix is
-// for, so a divergence makes the field useless. `oneLine(x, 8)`
-// was wrong twice over: it leaves ESC/C0/C1 in a row a reader trusts, and its clip
-// yields `slice(0, n - 1) + '…'` — seven characters plus an ellipsis — while
-// `cmdInstances` renders eight raw ones. Correlating a `list` row with an
-// `instances` row is the only thing an 8-character prefix is for, so two spellings
-// of one id made the field useless. `app.instance` is a DIRECTORY NAME read out of
-// another application's store, which is why it needs the control bound at all.
 // MEMOIZED, exactly as `ccdIndex` is, and for a reason `ccdIndex` never had to
 // state: `SKIPPED` is a module-scope counter this function increments, so a second
 // walk of the same directory counts the same unreadable file twice. `cmdShow`
@@ -4890,7 +4890,7 @@ function cmdTakeover(opts) {
   L.push('');
   L.push('## Source');
   L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${livePid(r.live)}` : ''})`);
-  if (r.app) L.push(`- owning desktop instance: \`${briefPath(r.app.instance)}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
+  if (r.app && r.app.archived) L.push('- **ARCHIVED** in the desktop app: its process was stopped and the worktree may have been cleaned up');
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
     L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so a session that opens it later re-measures and confirms its own plan with its own user before editing.`);

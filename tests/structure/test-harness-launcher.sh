@@ -284,4 +284,30 @@ else
   check "H11 a lost lease terminates the session (rc=$RC out=$(cat "$SBOX/lost.out") lost=$([ -f "$LOST_FILE" ] && echo yes))" FAIL
 fi
 
+SUPERVISOR_TEST="$PLUGIN_DIR/tests/structure/process-supervisor.test.js"
+. "$(dirname "$0")/lib-unit-summary.sh"
+LOOPBACK_AVAILABLE=0
+if node -e '
+  const net = require("node:net");
+  const server = net.createServer();
+  server.once("error", () => process.exit(1));
+  server.listen(0, "127.0.0.1", () => server.close(() => process.exit(0)));
+' >/dev/null 2>&1; then
+  LOOPBACK_AVAILABLE=1
+fi
+SUPERVISOR_FLOOR="$(unit_overview_declared "${SUPERVISOR_TEST##*/}")"
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "H12 process-supervisor unit file skipped because the managed host forbids loopback listeners" PASS
+elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
+  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" "$SUPERVISOR_FLOOR"; then
+  check "H12 the process supervisor the launcher loads authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
+else
+  check "H12 the process supervisor the launcher loads authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= ${SUPERVISOR_FLOOR:-<no overview row>} registered)" FAIL
+fi
+if SUPERVISOR_OVERVIEW="$(unit_overview_check "$SUPERVISOR_TEST")"; then
+  check "H12a the SUITE-OVERVIEW Blocks cell matches what ${SUPERVISOR_TEST##*/} registers ($SUPERVISOR_FLOOR)" PASS
+else
+  check "H12a $SUPERVISOR_OVERVIEW" FAIL
+fi
+
 finish
