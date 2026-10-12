@@ -15,7 +15,7 @@ new suite file and its manifest entry must land in the same commit, or every mod
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
 reconciled to that manifest (172 = 165 + 7, re-derived from the JSON rather than incremented:
 `ciStructureTests` holds 165 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 172). The figures here have drifted FOURTEEN times, thirteen of them upward, and every
+returns 172). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -27,8 +27,9 @@ evidence-runner branch after it retired three witness suites and added two, leav
 then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
 159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
 while the merge of the two was landing the 156th, and then 165 = 158 + 7 while the external
-review import was landing the 159th, and then 166 = 159 + 7 while the work-order runtime suite
-was landing the 160th, and then 171 = 164 + 7 while the merge of `main` into the work-order
+review import was landing the 159th, and then 166 = 159 + 7 while the Session Hub receipt was
+landing the 160th, and then 166 = 159 + 7 again on the work-order branch while its runtime suite
+was landing the 160th there, and then 171 = 164 + 7 while the merge of `main` into the work-order
 branch was landing the 165th. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
@@ -53,18 +54,18 @@ moved the figure. The eleventh is the merge shape again: `test-user-prompt-budge
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
 merging `main` into it made 156. The twelfth is the tenth's shape without the group:
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
-moved. The thirteenth is the twelfth's shape again: `test-work-order-runtime.sh` joined the
-manifest in its own commit while neither the figure nor its §3 group moved, and the commit that
-added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh`,
-`test-work-order-takeover.sh` and `test-harness-launcher.sh` each moved both in their own commit.
-The fourteenth is the merge shape again: `test-session-hub-receipt.sh` took `main` to 160 CI
-entries while the figure there still read 166 = 159 + 7 and no §3 group listed it, and the
-work-order branch independently reached 164, so merging `main` into it made 165.
+moved. The thirteenth is the twelfth's shape again: `test-session-hub-receipt.sh` joined the
+manifest while neither the figure nor its §3 group moved. The fourteenth is that shape on the
+work-order branch: `test-work-order-runtime.sh` joined the manifest in its own commit while neither
+the figure nor its §3 group moved, and the commit that added `test-work-order-implement.sh`
+re-derived both; `test-work-order-gates.sh`, `test-work-order-takeover.sh` and
+`test-harness-launcher.sh` each moved both in their own commit. The fifteenth is the merge shape
+again: `test-session-hub-receipt.sh` took `main` to 160 CI entries while the work-order branch
+independently reached 164, so merging `main` into it made 165.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 161 against 165 CI-classified suites, so FOUR CI
+asserted away: its eleven CI group headers sum to 162 against 165 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
-`test-incremental-review-rounds.sh`, `test-restore-project-root.sh` and
-`test-session-hub-receipt.sh`, re-derived BY NAME
+`test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, evidence & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
@@ -304,16 +305,21 @@ developer's real sessions.
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
 listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
-### Prompt routing & payloads (8)
+### Prompt routing & payloads (9)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
-`user-prompt-budget` · `zensu-plm-arg-guidance`
+`session-hub-receipt` · `user-prompt-budget` · `zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
 CI-event prompts, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
 a distinct receipt for each failure mode).
+
+`session-hub-receipt` drives the UserPromptSubmit hook that writes one private receipt when a
+prompt is exactly the Session Hub's takeover command and stays silent for every other prompt,
+together with the session-trail handover contract that command is spelled in and the
+`--receipt` flag `trail.mjs` accepts.
 
 ### VCS / forge integration (7)
 `valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
