@@ -1039,7 +1039,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     return { exit: EXIT.REFUSED, message: 'plan-approval-required', planApproval: true };
   }
   if (sent.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };
-  if (sent.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the implementing stage (${describeFailure(sent.failure)})` };
+  if (sent.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the implementing stage (${describeFailure(sent.failure)}); finish with --reason` };
   return { exit: EXIT.TRANSIENT, message: `Zensu did not accept the implementing stage yet (${describeFailure(sent.failure)})` };
 }
 
@@ -1132,7 +1132,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     return { exit: EXIT.ENDED, message: `work order ${context.marker.orderId} is blocked with worker_error; the session has ended`, delivered: true, cancelRun: runToCancel(context) };
   }
   if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the block could not be reported', cancelRun: runToCancel(context) };
-  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the block (${describeFailure(blocked.failure)})`, cancelRun: runToCancel(context) };
+  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the block (${describeFailure(blocked.failure)}); end the session`, cancelRun: runToCancel(context) };
   return { exit: EXIT.TRANSIENT, message: `the block is not delivered yet (${describeFailure(blocked.failure)}); run --finish again` };
 }
 
@@ -1896,7 +1896,10 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
     }
-    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})` };
+    const next = failure.code === 'content_not_allowed'
+      ? 'rewrite it as plain prose and ask again'
+      : 'continue with your default option, or finish with --reason when the work cannot go on';
+    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)}); ${next}` };
   }
   const body = outcome.json;
   const asked = isObject(body.question) ? body.question : {};
@@ -1933,7 +1936,10 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(failure)})` };
   }
-  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)})` };
+  let next = 'continue without it';
+  if (failure.code === 'followup_limit_reached') next = 'file no more follow-ups in this attempt';
+  else if (failure.code === 'content_not_allowed') next = 'rewrite it as plain prose and file it again';
+  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)}); ${next}` };
 }
 
 function planSummary(text) {
@@ -2000,7 +2006,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const artifact = sendEvent(context, args, { env, now });
   if (artifact.verdict !== VERDICTS.OK) {
     if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
-    if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)})` };
+    if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)}); finish with --reason` };
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the plan artifact yet (${describeFailure(artifact.failure)}); run --plan-approval again` };
   }
   const blocked = deliverBlocked(context, {
@@ -2015,7 +2021,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
     };
   }
   if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the approval request was not sent', cancelRun: runToCancel(context) };
-  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the approval request (${describeFailure(blocked.failure)})`, cancelRun: runToCancel(context) };
+  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the approval request (${describeFailure(blocked.failure)}); finish with --reason`, cancelRun: runToCancel(context) };
   return { exit: EXIT.TRANSIENT, message: `the approval request is not delivered yet (${describeFailure(blocked.failure)}); run --plan-approval again` };
 }
 
@@ -2170,7 +2176,7 @@ function dispatchCli(argv, env) {
     if (drained.verdict === 'ended') return emit({ exit: EXIT.ENDED, message: 'the session of this work order has ended', cancelRun: runToCancel(context) });
     if (drained.verdict === VERDICTS.LOST) return emit({ exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' });
     if (drained.verdict === 'plan-approval-required') return emit({ exit: EXIT.REFUSED, message: 'plan-approval-required', planApproval: true });
-    if (drained.verdict === VERDICTS.FINAL) return emit({ exit: EXIT.REFUSED, message: `Zensu refused a stage (${describeFailure(drained.failure)})` });
+    if (drained.verdict === VERDICTS.FINAL) return emit({ exit: EXIT.REFUSED, message: `Zensu refused a stage (${describeFailure(drained.failure)}); finish with --reason` });
     return emit({ exit: EXIT.TRANSIENT, message: `a stage is not reported yet (${describeFailure(drained.failure)})` });
   }
   if (verb === 'finish') return emit(finish(context, { env, reason: typeof options.reason === 'string' ? options.reason : null }));
