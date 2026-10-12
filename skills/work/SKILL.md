@@ -41,7 +41,7 @@ skill needs a work order id.
 | 3 | the `zensu` CLI lacks `zensu work` | stop: report the line, nothing else is possible |
 | 4 | the lease is lost | stop at once: no push, no pull request, no event; run `--finish` once and end |
 | 5 | not a work-order session, or bound to another order | stop and report |
-| 6 | the order is blocked and the session has ended | run `--finish` once, then end the session |
+| 6 | the order is blocked, or waits for a person, and the session has ended | run `--finish` once, then end the session |
 | 7 | Zensu did not answer yet | run the same command again; after three tries finish with `--reason` |
 | 8 | refused | read stderr; the line names the next step |
 
@@ -101,6 +101,31 @@ after `PR_OPENED` is in the ledger, and it never sends `ready_for_merge`; `--fin
 `--renew` renews the lease. Call it before a step that may run longer than a minute without
 another helper call, such as a long test suite.
 
+## Questions and follow-ups
+
+Ask Zensu instead of guessing, and never wait for the answer:
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --ask --category technical_choice --question "<question>" --option "<a>" --option "<b>" --default-option "<a>"
+```
+
+- `--category` is one of `clarification`, `technical_choice`, `product_decision`, `scope`, `risk`
+  and `external`. Write the question in plain prose: no command lines, no code, no secrets.
+- A question without `--blocking` names the option you continue with. Exit 0 prints it as
+  `continueWith`; continue with it at once. A person's answer arrives later as context and wins
+  where it changes the work.
+- Add `--blocking` only when the work cannot go on without the answer. Zensu then blocks the order
+  and ends the session (exit 6). A later session reads the answer. Past the order's question limit
+  Zensu treats every question that way.
+
+A follow-up idea outside the order's scope goes to Zensu, not into this work:
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --followup --title "<title>" --rationale "<why it matters>" --severity medium
+```
+
+`--severity` is `low`, `medium`, `high` or `critical`; `--path <file>` may repeat.
+
 ## Step 4 — Finish
 
 The session ends only through `--finish`:
@@ -125,4 +150,4 @@ own.
 ## Reference Files
 
 - `references/protocol.md` — the state files, the stage mapping, the error codes the helpers
-  handle, and what each verb sends to Zensu.
+  handle, what each verb sends to Zensu, and what the work-order hooks deny.

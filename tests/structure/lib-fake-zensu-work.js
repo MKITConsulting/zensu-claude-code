@@ -43,9 +43,11 @@ function errorFormat() {
 function apiFail(status, code, message) {
   const format = errorFormat();
   const suffix = format === 'bare' ? `(status ${status})` : `(status ${status}, code ${code})`;
-  process.stderr.write(`error: ${message} ${suffix}\n`);
+  const context = state && state.errorContext ? `; ${state.errorContext}` : '';
+  process.stderr.write(`error: ${message} ${suffix}${context}\n`);
+  if (state && state.errorContinuation) process.stderr.write(`${state.errorContinuation}\n`);
   if (format === 'json' && argv.includes('--json')) {
-    process.stderr.write(`${JSON.stringify({ error: { status, code, message } })}\n`);
+    process.stderr.write(`${JSON.stringify({ error: { status, code, message: `${message}${context}` } })}\n`);
   }
   process.exit(1);
 }
@@ -308,7 +310,7 @@ function applyArtifact(flags, clientEventId) {
     to_status: state.order.status,
     client_name: flags['client-name'],
     client_version: flags['client-version'],
-    detail: { kind: flags.artifact, url: flags.url || undefined, path: flags.path || undefined, sha: flags.sha || undefined, summary: flags.summary || undefined },
+    detail: { kind: flags.artifact, url: flags.url || undefined, path: (Array.isArray(flags.path) ? flags.path[flags.path.length - 1] : flags.path) || undefined, sha: flags.sha || undefined, summary: flags.summary || undefined },
   });
 }
 

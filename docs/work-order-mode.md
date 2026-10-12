@@ -28,7 +28,10 @@ its interactive planning gate, and no `zensu work` command runs.
    `--autopilot-begin --work-order <id>`, which stores the order binding in the run record. Zensu,
    not the plan-approval gate, binds the plan: `zensu-work-order.sh --bind-spec` reports `planning`
    and `implementing`, and only after Zensu accepted `implementing` records the internal event
-   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`.
+   `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. When the order needs a plan approval,
+   `--plan-approval` commits and pushes the plan file, attaches it to the order as the plan artifact
+   and asks for the approval, which ends the session. A later attempt binds the approved plan and
+   blocks the order with `worker_error` when the plan file on the branch differs from it.
 3. Every push goes through `zensu-work-order.sh --push`, which renews the lease first, pushes with
    `--force-with-lease` against the head Zensu recorded for the order and reports the new head. The
    pull request opens through `--open-pr`.
@@ -39,6 +42,28 @@ its interactive planning gate, and no `zensu work` command runs.
 
 `skills/work/references/protocol.md` lists the state files, the stage mapping and every backend
 error the helpers handle.
+
+## Questions and follow-ups
+
+The session asks Zensu, never a person. `--ask` sends a question with its options and the option
+the session continues with; a blocking question, a scope question or any question past the order's
+limit blocks the order and ends the session. `--followup` records an idea outside the order's scope
+as a follow-up. Answers that arrive while the session runs reach the model as context after its
+next tool call.
+
+## The tool hooks
+
+`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools and the
+task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
+the `zensu work` and `zensu plan` verbs a worker session must not call, and every command that
+prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`. Each denial says why and, where a helper
+verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
+and never allows anything, so the host's own permission rules still decide every call it does not
+deny.
+
+`hooks/post-work-order.sh` runs after every tool call. It renews the lease when due, sends the
+stages the Autopilot ledger reached, hands pending answers to the model, and ends the session when
+a direct `zensu work ask` blocked the order.
 
 ## The Stop hook
 
@@ -52,5 +77,5 @@ without a report.
 
 - The installed `zensu` CLI must provide `zensu work`; until a CLI release carries it, `/zensu:work`
   refuses in one line.
-- The PreToolUse and PostToolUse layers that deny prompts, raw pushes and token reads, and that
-  renew the lease on tool activity, are not part of this build step yet.
+- The gate reads command text. A command assembled at run time, such as a script the session
+  wrote and then runs, is not judged; the worker's slot sandbox, not the gate, is the boundary.

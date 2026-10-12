@@ -25,16 +25,19 @@ unknown provider cannot be fixed here: finish with `--reason`.
 Probe as Autopilot's 0.B says, with two differences:
 
 - Use a committed `.zensu/autopilot.yaml` when one exists. Never write one in work-order mode.
-- When boot or authentication would need a question, deliver without live validation: pass
-  `--validate false` to the begin step, mark every acceptance criterion `🟡 unvalidated` in the
-  pull request body, and state why in that body.
+- When boot or authentication would need a question, ask Zensu a non-blocking `technical_choice`
+  question with the default option "deliver without live validation", then pass `--validate false`
+  to the begin step, mark every acceptance criterion `🟡 unvalidated` in the pull request body, and
+  state why in that body.
 
 ## 3. Plan
 
 Write the plan to `.zensu/plans/<order-id>.md`: the spec from the order, numbered acceptance
 criteria with stable `AC-###` ids, and the resolved recipe, shaped on the Autopilot spec template.
 Settle every open question yourself with the safest reversible choice and record each choice in the
-plan under `## Decisions`. Never call `ExitPlanMode`, and never add a `zensu-autopilot` marker:
+plan under `## Decisions`. A choice a person should see goes to Zensu as a non-blocking question
+whose default option is that choice; a question the work cannot go past is a blocking one and ends
+the session. Never call `ExitPlanMode`, and never add a `zensu-autopilot` marker:
 Zensu binds the plan, not the plan gate.
 
 ## 4. Begin and bind
@@ -53,9 +56,19 @@ names another order.
 and records `ORDER_SPEC_BOUND`, which moves the run to `AWAIT_TDD`. On exit 0 continue with
 Autopilot's Phase 1 step 1, the `/zensu:tdd` run with the exact `AUTOPILOT-RUN: <RUN_ID>` line.
 
-Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first: finish
-with `--reason "The implementation plan waits for a human approval."`; the session ends there.
-Exit 6 or 4: finish once and end.
+Exit 8 with `plan-approval-required` on stderr means a person must approve the plan first. Run:
+
+```bash
+CLAUDE_PLUGIN_DATA="…" bash "$WO" --plan-approval
+```
+
+It commits `.zensu/plans/<order-id>.md` on the order branch, pushes it, attaches it to the order as
+the plan artifact with its commit and a short summary, and asks for the approval. Exit 0 ends the
+session successfully; a later attempt implements the approved plan. That attempt's `--bind-spec`
+compares the plan file on the branch with the approved commit and blocks the order with
+`worker_error` when they differ, so never edit the plan file after the approval.
+
+Exit 6 or 4 from either step: finish once and end.
 
 ## 5. Build
 

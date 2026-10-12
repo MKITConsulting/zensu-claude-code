@@ -92,12 +92,23 @@ case "$_ZENSU_WO_VERB" in
     echo "work-order: spec bound, Autopilot run $_ZENSU_WO_RUN is at AWAIT_TDD"
     exit 0
     ;;
-  finish)
-    _ZENSU_WO_CANCEL="$(WO_EMIT=cancel-run _wo_node finish "$@")"
+  finish|ask|plan-approval)
+    _ZENSU_WO_OUT="$(_wo_node "$_ZENSU_WO_VERB" "$@")"
     _ZENSU_WO_RC=$?
+    _ZENSU_WO_CANCEL="$(printf '%s' "$_ZENSU_WO_OUT" | node -e '
+      let input = "";
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => {
+        try {
+          const body = JSON.parse(input);
+          if (body && typeof body.cancelRun === "string") process.stdout.write(body.cancelRun);
+        } catch (_) {}
+      });
+    ' 2>/dev/null)"
+    if [ -n "$_ZENSU_WO_OUT" ]; then printf '%s\n' "$_ZENSU_WO_OUT"; fi
     if [ -n "$_ZENSU_WO_CANCEL" ]; then
       _wo_cancel_run "$_ZENSU_WO_CANCEL" \
-        || echo "zensu-work-order.sh --finish: the local Autopilot run $_ZENSU_WO_CANCEL could not be cancelled; run --finish again" >&2
+        || echo "zensu-work-order.sh --$_ZENSU_WO_VERB: the local Autopilot run $_ZENSU_WO_CANCEL could not be cancelled; run --finish" >&2
     fi
     exit "$_ZENSU_WO_RC"
     ;;

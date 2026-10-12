@@ -28,8 +28,7 @@ const STAGE_RANK = Object.freeze({
 const SESSION_KEY_RE = /^scv1_[a-f0-9]{64}$/;
 const ORDER_ID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const CLI_CODE_RE = /^[a-z][a-z0-9_]{0,63}$/;
-const CLI_SUFFIX_RE = /\(status (\d{3})(?:, code ([a-z][a-z0-9_]{0,63}))?\)[ \t]*$/;
-const CLI_RAW_RE = /^error: request failed \(status (\d{3})(?:, code ([a-z][a-z0-9_]{0,63}))?\):/;
+const CLI_STATUS_RE = /\(status (\d{3})(?:, code ([a-z][a-z0-9_]{0,63}))?\)/;
 const LOST_CODES = new Set([
   'stale_attempt',
   'runtime_cap',
@@ -228,8 +227,12 @@ function cliOutcome(spawned) {
   const stdout = typeof spawned.stdout === 'string' ? spawned.stdout : '';
   const stderr = typeof spawned.stderr === 'string' ? spawned.stderr : '';
   const lines = stderr.split(/\r?\n/).filter((line) => line.trim() !== '');
-  const errorLine = lines.filter((line) => line.startsWith('error:')).pop() || '';
-  const parsed = spawned.status === 0 ? { status: null, code: null } : parseCliError(lines, errorLine);
+  const firstError = lines.findIndex((line) => line.startsWith('error:'));
+  const errorLine = firstError >= 0 ? lines[firstError] : '';
+  const errorText = firstError >= 0
+    ? lines.slice(firstError).filter((line) => !line.trim().startsWith('{"error"')).join('\n')
+    : '';
+  const parsed = spawned.status === 0 ? { status: null, code: null } : parseCliError(lines, errorText);
   return {
     exitCode: spawned.status,
     stdout,
@@ -241,7 +244,7 @@ function cliOutcome(spawned) {
   };
 }
 
-function parseCliError(lines, errorLine) {
+function parseCliError(lines, errorText) {
   const last = lines.length > 0 ? lines[lines.length - 1].trim() : '';
   if (last.startsWith('{')) {
     try {
@@ -255,9 +258,7 @@ function parseCliError(lines, errorLine) {
       }
     } catch (_) {}
   }
-  const raw = CLI_RAW_RE.exec(errorLine);
-  const suffix = raw ? null : CLI_SUFFIX_RE.exec(errorLine);
-  const match = raw || suffix;
+  const match = CLI_STATUS_RE.exec(errorText);
   if (!match) return { status: null, code: null, message: '' };
   return { status: Number(match[1]), code: match[2] || null, message: '' };
 }
@@ -989,7 +990,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     const events = listOrderEvents(context, env);
     if (!events) return { exit: EXIT.TRANSIENT, message: 'the order timeline could not be read' };
     const plan = approvedPlanCommit(events, order.spec_hash);
-    const planPath = plan && PLAN_PATH_RE.test(String(plan.path || '')) ? plan.path : planFileFor(context.marker.orderId);
+    const planPath = plan && typeof plan.path === 'string' && PLAN_PATH_RE.test(plan.path) ? plan.path : planFileFor(context.marker.orderId);
     const planSha = plan && /^[0-9a-fA-F]{7,64}$/.test(String(plan.sha)) ? String(plan.sha).toLowerCase() : null;
     let approved = { ok: false, stdout: '' };
     if (planSha) {
@@ -1215,6 +1216,658 @@ function openPr(context, { env = process.env, now = Date.now, title, bodyFile, p
   return { exit: EXIT.OK, value: { url, number: Number.isSafeInteger(number) ? number : null, base, branch, head } };
 }
 
+const TOKEN_VARIABLE = 'ZENSU_SESSION_TOKEN';
+const ASK_TOOLS = new Set(['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
+const CHIP_TOOLS = new Set(['mcp__ccd_session__spawn_task']);
+const SHELL_KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', 'for', 'select', 'case', 'esac', 'function', 'coproc']);
+const SHELL_WRAPPERS = new Set(['command', 'builtin', 'exec', 'env', 'sudo', 'doas', 'nohup', 'nice', 'time', 'timeout', 'gtimeout', 'stdbuf', 'xargs']);
+const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+const VARIABLE_BUILTINS = new Set(['export', 'declare', 'typeset', 'readonly', 'local']);
+const SUDO_OPERAND_OPTIONS = new Set(['-u', '-g', '-h', '-p', '-C', '-T', '-r', '-t', '-D', '-R']);
+const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup', 'questions', 'list']);
+const HELPER_WORK_VERBS = new Set(['event', 'heartbeat']);
+const HUMAN_PLAN_VERBS = new Set(['approve', 'finalize', 'abandon', 'confirm-merge']);
+const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
+const PROCESS_ENVIRONMENT_RE = /\/proc\/[^/\s]+\/environ(?![A-Za-z0-9_])/;
+const MAX_SHELL_DEPTH = 4;
+const HOOK_RETRY_BUDGET_MS = 5000;
+
+function stripHeredocBodies(text) {
+  try {
+    return require('./bash-source-write-parse.js').stripHeredocs(text);
+  } catch (_) {
+    return text;
+  }
+}
+
+function gitOperandOptions() {
+  try {
+    return new Set(require('./bash-source-write-parse.js').GIT_OPTS_WITH_OPERAND);
+  } catch (_) {
+    return new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
+  }
+}
+
+function matchingParen(text, open) {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\\') {
+      index += 1;
+      continue;
+    }
+    if (char === "'") {
+      const end = text.indexOf("'", index + 1);
+      if (end < 0) return text.length;
+      index = end;
+      continue;
+    }
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return text.length;
+}
+
+function shellCommands(text, depth = 0) {
+  const commands = [];
+  if (depth > MAX_SHELL_DEPTH) return commands;
+  let words = [];
+  let word = null;
+  const add = (piece) => {
+    word = (word === null ? '' : word) + piece;
+  };
+  const endWord = () => {
+    if (word !== null) words.push(word);
+    word = null;
+  };
+  const endCommand = () => {
+    endWord();
+    if (words.length > 0) commands.push(words);
+    words = [];
+  };
+  const nested = (inner) => {
+    for (const command of shellCommands(inner, depth + 1)) commands.push(command);
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '\\') {
+      if (next !== '\n') add(next === undefined ? '' : next);
+      index += 1;
+      continue;
+    }
+    if (char === "'") {
+      const end = text.indexOf("'", index + 1);
+      const stop = end < 0 ? text.length : end;
+      add(text.slice(index + 1, stop));
+      index = stop;
+      continue;
+    }
+    if (char === '"') {
+      let cursor = index + 1;
+      let value = '';
+      while (cursor < text.length && text[cursor] !== '"') {
+        if (text[cursor] === '\\' && cursor + 1 < text.length) {
+          value += text[cursor + 1];
+          cursor += 2;
+          continue;
+        }
+        if (text[cursor] === '$' && text[cursor + 1] === '(') {
+          const close = matchingParen(text, cursor + 1);
+          nested(text.slice(cursor + 2, close));
+          cursor = close + 1;
+          continue;
+        }
+        if (text[cursor] === '`') {
+          const end = text.indexOf('`', cursor + 1);
+          const stop = end < 0 ? text.length : end;
+          nested(text.slice(cursor + 1, stop));
+          cursor = stop + 1;
+          continue;
+        }
+        value += text[cursor];
+        cursor += 1;
+      }
+      add(value);
+      index = cursor;
+      continue;
+    }
+    if ((char === '$' || char === '<' || char === '>') && next === '(') {
+      const close = matchingParen(text, index + 1);
+      nested(text.slice(index + 2, close));
+      add('');
+      index = close;
+      continue;
+    }
+    if (char === '$' && next === '{') {
+      const close = text.indexOf('}', index + 2);
+      const stop = close < 0 ? text.length : close;
+      add(text.slice(index, stop + 1));
+      index = stop;
+      continue;
+    }
+    if (char === '`') {
+      const end = text.indexOf('`', index + 1);
+      const stop = end < 0 ? text.length : end;
+      nested(text.slice(index + 1, stop));
+      add('');
+      index = stop;
+      continue;
+    }
+    if (char === ';' || char === '\n' || char === '|' || char === '&' || char === '(' || char === ')') {
+      endCommand();
+      continue;
+    }
+    if (char === ' ' || char === '\t' || char === '\r' || char === '<' || char === '>') {
+      endWord();
+      continue;
+    }
+    add(char);
+  }
+  endCommand();
+  return commands;
+}
+
+function commandName(word) {
+  return String(word || '').split('/').pop();
+}
+
+function leadingCommand(words) {
+  const assignments = [];
+  const unset = [];
+  let bareEnv = false;
+  let index = 0;
+  const takeAssignments = () => {
+    while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(words[index])) {
+      assignments.push(words[index].slice(0, words[index].indexOf('=')).replace(/\+$/, ''));
+      index += 1;
+    }
+  };
+  for (let guard = 0; guard < 16; guard += 1) {
+    while (index < words.length && SHELL_KEYWORDS.has(words[index])) index += 1;
+    takeAssignments();
+    if (index >= words.length) break;
+    const name = commandName(words[index]);
+    if (!SHELL_WRAPPERS.has(name)) break;
+    index += 1;
+    if (name === 'env') {
+      while (index < words.length) {
+        const option = words[index];
+        if (option === '-u' || option === '--unset') {
+          unset.push(String(words[index + 1] || ''));
+          index += 2;
+          continue;
+        }
+        if (option.startsWith('--unset=')) {
+          unset.push(option.slice('--unset='.length));
+          index += 1;
+          continue;
+        }
+        if (/^-u./.test(option)) {
+          unset.push(option.slice(2));
+          index += 1;
+          continue;
+        }
+        if (option.startsWith('-')) {
+          index += 1;
+          continue;
+        }
+        break;
+      }
+      takeAssignments();
+      if (index >= words.length) bareEnv = true;
+      continue;
+    }
+    while (index < words.length) {
+      const option = words[index];
+      if ((name === 'sudo' || name === 'doas') && SUDO_OPERAND_OPTIONS.has(option)) {
+        index += 2;
+        continue;
+      }
+      if (option.startsWith('-') || /^[0-9.]+[smhd]?$/.test(option)) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
+  }
+  return {
+    assignments,
+    unset,
+    bareEnv,
+    name: index < words.length ? commandName(words[index]) : null,
+    args: words.slice(index + 1),
+  };
+}
+
+function plainWords(args, operandOptions = new Set()) {
+  const plain = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (operandOptions.has(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) continue;
+    plain.push(word);
+  }
+  return plain;
+}
+
+function gitSubcommand(args) {
+  const operands = gitOperandOptions();
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (operands.has(word)) {
+      index += 1;
+      continue;
+    }
+    if (word.startsWith('-')) continue;
+    return word;
+  }
+  return null;
+}
+
+function bashFinding(code, detail) {
+  return { code, detail };
+}
+
+function analyzeBash(command, depth = 0) {
+  const text = String(command || '');
+  const result = { deny: null, forge: false };
+  if (!text.trim() || depth > MAX_SHELL_DEPTH) return result;
+  if (TOKEN_EXPANSION_RE.test(text)) {
+    result.deny = bashFinding('token', 'it expands the session token variable');
+    return result;
+  }
+  if (PROCESS_ENVIRONMENT_RE.test(text)) {
+    result.deny = bashFinding('token', 'it reads a process environment file');
+    return result;
+  }
+  for (const words of shellCommands(stripHeredocBodies(text))) {
+    const lead = leadingCommand(words);
+    if (lead.assignments.includes(TOKEN_VARIABLE) || lead.unset.includes(TOKEN_VARIABLE)) {
+      result.deny = bashFinding('token', 'it overrides or removes the session token variable');
+      return result;
+    }
+    if (lead.bareEnv) {
+      result.deny = bashFinding('token', 'it prints the whole environment');
+      return result;
+    }
+    const { name, args } = lead;
+    if (!name) continue;
+    if (SHELL_INTERPRETERS.has(name) || name === 'eval') {
+      const at = name === 'eval' ? -1 : args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
+      const inner = name === 'eval' ? args.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
+      if (inner) {
+        const innerResult = analyzeBash(inner, depth + 1);
+        if (innerResult.deny) return innerResult;
+        result.forge = result.forge || innerResult.forge;
+      } else if (name !== 'eval' && commandName(plainWords(args)[0]) === 'zensu-vcs.sh') {
+        result.forge = true;
+      }
+      continue;
+    }
+    if (name === 'printenv') {
+      const names = args.filter((arg) => !arg.startsWith('-'));
+      if (names.length === 0 || names.includes(TOKEN_VARIABLE)) {
+        result.deny = bashFinding('token', 'it prints the environment');
+        return result;
+      }
+      continue;
+    }
+    if (name === 'set' && args.length === 0) {
+      result.deny = bashFinding('token', 'it prints every shell variable');
+      return result;
+    }
+    if (VARIABLE_BUILTINS.has(name)) {
+      const names = args.filter((arg) => !arg.startsWith('-')).map((arg) => arg.split('=')[0]);
+      if (names.length === 0 && name !== 'local') {
+        result.deny = bashFinding('token', 'it prints every exported variable');
+        return result;
+      }
+      if (names.includes(TOKEN_VARIABLE)) {
+        result.deny = bashFinding('token', 'it overrides or prints the session token variable');
+        return result;
+      }
+      continue;
+    }
+    if (name === 'unset' && args.includes(TOKEN_VARIABLE)) {
+      result.deny = bashFinding('token', 'it removes the session token variable');
+      return result;
+    }
+    if (name === 'git') {
+      if (gitSubcommand(args) === 'push') {
+        result.deny = bashFinding('push', null);
+        return result;
+      }
+      continue;
+    }
+    if (name === 'gh' || name === 'glab') {
+      result.forge = true;
+      const [noun, verb] = plainWords(args, new Set(['-R', '--repo']));
+      const request = name === 'gh' ? 'pr' : 'mr';
+      if (noun === request && verb === 'create') {
+        result.deny = bashFinding('open-pr', null);
+        return result;
+      }
+      if (noun === request && verb === 'merge') {
+        result.deny = bashFinding('merge', null);
+        return result;
+      }
+      continue;
+    }
+    if (name === 'zensu-vcs.sh') {
+      result.forge = true;
+      continue;
+    }
+    if (name === 'zensu') {
+      const [noun, verb, third] = plainWords(args);
+      if (noun === 'auth') {
+        result.deny = bashFinding('auth', null);
+        return result;
+      }
+      if (noun === 'work' && verb) {
+        if (HELPER_WORK_VERBS.has(verb)) {
+          result.deny = bashFinding('helper-verb', `zensu work ${verb}`);
+          return result;
+        }
+        const readOnly = SESSION_WORK_VERBS.has(verb)
+          || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list');
+        if (!readOnly) {
+          const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+          result.deny = bashFinding('human-gate', `zensu work ${verb}${scoped}`);
+          return result;
+        }
+      }
+      if (noun === 'plan' && HUMAN_PLAN_VERBS.has(verb)) {
+        result.deny = bashFinding('human-gate', `zensu plan ${verb}`);
+        return result;
+      }
+    }
+  }
+  return result;
+}
+
+function gateReason(orderId, finding) {
+  const lead = `This session runs Zensu work order ${orderId} without a person.`;
+  switch (finding.code) {
+    case 'ask':
+      return `${lead} Nobody can answer a prompt or approve a plan here. Put the question to Zensu with the ask step of /zensu:work (zensu-work-order.sh --ask), which sends zensu work ask ${orderId} with a category, the question and, unless the question blocks, the option you continue with. Zensu binds the plan through zensu-work-order.sh --bind-spec, never plan mode.`;
+    case 'chip':
+      return `${lead} A task chip reaches nobody. File the follow-up with Zensu through zensu-work-order.sh --followup, which sends zensu work followup ${orderId} with a title, a rationale and a severity.`;
+    case 'push':
+      return `${lead} A raw git push is not allowed. Run zensu-work-order.sh --push: it renews the lease, pushes with a lease against the head Zensu recorded for the order and reports the new head.`;
+    case 'open-pr':
+      return `${lead} Open the pull request with zensu-work-order.sh --open-pr --title <title> --body-file <path>, which renews the lease first.`;
+    case 'merge':
+      return `${lead} A work-order session never merges. It ends with ready_for_merge, and a person merges the pull request.`;
+    case 'auth':
+      return `${lead} zensu auth is not available here: the session token is the only credential, and the helpers read it themselves.`;
+    case 'helper-verb':
+      return `${lead} ${finding.detail} is sent by the work-order helper only. Use zensu-work-order.sh --drain for stages, --finish for the outcome and --renew for the lease.`;
+    case 'human-gate':
+      return `${lead} ${finding.detail} is a decision a person or the worker makes; a work-order session may not run it.`;
+    case 'token':
+      return `${lead} The command is refused because ${finding.detail}. Never print, read, unset or override ${TOKEN_VARIABLE}; the helpers read it from the environment themselves.`;
+    case 'lease':
+      return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
+    default:
+      return `${lead} The command is not allowed in a work-order session.`;
+  }
+}
+
+function hookEnv(env) {
+  return { ...env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: String(Math.min(retrySettings(env).budgetMs, HOOK_RETRY_BUDGET_MS)) };
+}
+
+function gateDecision(context, payload, { env = process.env, now = Date.now } = {}) {
+  if (!context || context.fault || !isObject(payload)) return null;
+  const orderId = context.marker.orderId;
+  const tool = typeof payload.tool_name === 'string' ? payload.tool_name : '';
+  if (ASK_TOOLS.has(tool)) return { code: 'ask', reason: gateReason(orderId, bashFinding('ask', null)) };
+  if (CHIP_TOOLS.has(tool)) return { code: 'chip', reason: gateReason(orderId, bashFinding('chip', null)) };
+  let analysis = { deny: null, forge: false };
+  if (tool === 'Bash') {
+    analysis = analyzeBash(isObject(payload.tool_input) ? payload.tool_input.command : '');
+    if (analysis.deny) return { code: analysis.deny.code, reason: gateReason(orderId, analysis.deny) };
+  }
+  if (!safeRead(context.files.lost).value && !safeRead(context.files.ended).value) {
+    renew(context, { env: hookEnv(env), now: now() });
+  }
+  if (analysis.forge) {
+    const forge = forgeWriteVerdict(context, now());
+    if (!forge.allowed) return { code: 'lease', reason: gateReason(orderId, bashFinding('lease', forge.reason)) };
+  }
+  return null;
+}
+
+const ENDING_QUESTION_KINDS = new Set(['question', 'spec_change', 'escalated']);
+
+function noteAskOutcome(context, body, now) {
+  const order = isObject(body) && isObject(body.order) ? body.order : null;
+  if (!order || order.status !== 'blocked') return false;
+  const kind = typeof order.blocked_kind === 'string' ? order.blocked_kind : 'question';
+  markEnded(context, {
+    outcome: ENDING_QUESTION_KINDS.has(kind) ? 'success' : 'failure',
+    kind: `blocked:${kind}`,
+    delivered: true,
+    reason: typeof order.blocked_reason === 'string' ? order.blocked_reason : null,
+    at: now(),
+  });
+  return true;
+}
+
+function answersContext(orderId, answers) {
+  if (!Array.isArray(answers) || answers.length === 0) return null;
+  const lines = answers.map((entry) => {
+    const question = String(entry.question || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    const answer = String(entry.answer || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    return `- Question (${entry.category || 'uncategorised'}): ${JSON.stringify(question)} Answer: ${JSON.stringify(answer)}`;
+  });
+  return `Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${lines.join('\n')}`;
+}
+
+const DIRECT_ASK_RE = /(^|[\s;&|(])zensu\s+(?:\S+\s+)*?work\s+ask(\s|$)/;
+
+function postToolUpdate(context, payload, { env = process.env, now = Date.now } = {}) {
+  if (!context || context.fault || !isObject(payload)) return null;
+  const bounded = hookEnv(env);
+  const result = { additionalContext: null, cancelRun: null };
+  if (safeRead(context.files.ended).value) {
+    result.cancelRun = runToCancel(context);
+    return result;
+  }
+  if (safeRead(context.files.lost).value) return result;
+  const input = isObject(payload.tool_input) ? payload.tool_input : {};
+  if (payload.tool_name === 'Bash' && DIRECT_ASK_RE.test(String(input.command || ''))) {
+    const response = isObject(payload.tool_response) ? payload.tool_response : {};
+    const stdout = typeof response.stdout === 'string' ? response.stdout : '';
+    let body = null;
+    try {
+      body = JSON.parse(stdout);
+    } catch (_) {
+      body = null;
+    }
+    let ended = body ? noteAskOutcome(context, body, now) : false;
+    if (!body && /;\s*stop the session\s*$/m.test(stdout)) {
+      markEnded(context, { outcome: 'success', kind: 'blocked:question', delivered: true, reason: null, at: now() });
+      ended = true;
+    }
+    if (ended) {
+      result.cancelRun = runToCancel(context);
+      result.additionalContext = `Zensu work order ${context.marker.orderId} is blocked on the question just asked, and Zensu ended this session. Stop now: run zensu-work-order.sh --finish once and end the turn.`;
+      return result;
+    }
+  }
+  renew(context, { env: bounded, now: now() });
+  if (safeRead(context.files.lost).value) {
+    result.additionalContext = `The lease of Zensu work order ${context.marker.orderId} is lost. Stop now without any push, pull request or event: run zensu-work-order.sh --finish once and end the turn.`;
+    return result;
+  }
+  const drained = drain(context, { env: bounded, now });
+  if (drained.verdict === 'ended') {
+    result.cancelRun = runToCancel(context);
+    result.additionalContext = `Zensu blocked work order ${context.marker.orderId} and ended this session. Stop now: run zensu-work-order.sh --finish once and end the turn.`;
+    return result;
+  }
+  result.additionalContext = answersContext(context.marker.orderId, takePendingAnswers(context));
+  return result;
+}
+
+function ask(context, { env = process.env, now = Date.now, category, question, options = [], defaultOption = null, blocking = false, requirements = [] } = {}) {
+  if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
+  if (typeof category !== 'string' || !category || typeof question !== 'string' || !question.trim()) {
+    return { exit: EXIT.USAGE, message: '--ask needs --category and --question' };
+  }
+  if (!blocking && (typeof defaultOption !== 'string' || !defaultOption)) {
+    return { exit: EXIT.USAGE, message: '--ask needs --default-option unless --blocking is set' };
+  }
+  const forge = forgeWriteVerdict(context, now());
+  if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
+  const args = ['work', 'ask', context.marker.orderId, '--category', category, '--question', question,
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'ask', category, question)];
+  for (const option of options) args.push('--option', option);
+  if (defaultOption) args.push('--default-option', defaultOption);
+  if (blocking) args.push('--blocking');
+  for (const requirement of requirements) args.push('--requirement', requirement);
+  args.push('--json');
+  const outcome = runZensu(args, { env });
+  if (outcome.exitCode !== 0 || !isObject(outcome.json)) {
+    const failure = classifyFailure(outcome);
+    if (failure.verdict === VERDICTS.LOST) {
+      markLost(context, { code: failure.code || `status_${failure.status}`, via: 'ask', at: now() });
+      return { exit: EXIT.LOST, message: 'the lease is lost; the question was not asked' };
+    }
+    if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
+      return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
+    }
+    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})` };
+  }
+  const body = outcome.json;
+  const asked = isObject(body.question) ? body.question : {};
+  const value = { questionId: asked.id || null, status: asked.status || null, escalated: body.escalated === true, replay: body.replay === true };
+  if (noteAskOutcome(context, body, now)) {
+    return {
+      exit: EXIT.ENDED,
+      value: { ...value, ended: true },
+      message: `work order ${context.marker.orderId} waits for a person to answer; the session has ended`,
+      cancelRun: runToCancel(context),
+    };
+  }
+  return { exit: EXIT.OK, value: { ...value, ended: false, continueWith: defaultOption || null } };
+}
+
+function followup(context, { env = process.env, now = Date.now, title, rationale, severity = 'medium', paths = [] } = {}) {
+  if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
+  if (typeof title !== 'string' || !title.trim() || typeof rationale !== 'string' || !rationale.trim()) {
+    return { exit: EXIT.USAGE, message: '--followup needs --title and --rationale' };
+  }
+  const forge = forgeWriteVerdict(context, now());
+  if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
+  const args = ['work', 'followup', context.marker.orderId, '--title', title, '--rationale', rationale, '--severity', severity,
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'followup', title)];
+  for (const entry of paths) args.push('--path', entry);
+  args.push('--json');
+  const outcome = runZensu(args, { env });
+  if (outcome.exitCode === 0) return { exit: EXIT.OK, value: { filed: true, replay: isObject(outcome.json) && outcome.json.replay === true } };
+  const failure = classifyFailure(outcome);
+  if (failure.verdict === VERDICTS.LOST) {
+    markLost(context, { code: failure.code || `status_${failure.status}`, via: 'followup', at: now() });
+    return { exit: EXIT.LOST, message: 'the lease is lost; the follow-up was not filed' };
+  }
+  if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
+    return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(failure)})` };
+  }
+  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)})` };
+}
+
+function planSummary(text) {
+  const lines = String(text || '').split('\n')
+    .map((line) => line.replace(/[`*_#>|]/g, ' ').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !/^[-=]{3,}$/.test(line) && !/^<!--/.test(line));
+  const summary = lines.slice(0, 6).join(' ').slice(0, 360).trim();
+  return summary ? `Implementation plan. ${summary}` : 'Implementation plan for this work order.';
+}
+
+function blobLink(repository, sha, file) {
+  const base = String(repository || '').replace(/\.git$/, '').replace(/\/+$/, '');
+  if (!/^https:\/\/[^/\s]+\/\S+$/.test(base)) return null;
+  const host = base.slice('https://'.length).split('/')[0].toLowerCase();
+  if (host === 'github.com') return `${base}/blob/${sha}/${file}`;
+  if (host === 'gitlab.com' || host.startsWith('gitlab.')) return `${base}/-/blob/${sha}/${file}`;
+  return null;
+}
+
+function planApproval(context, { env = process.env, now = Date.now } = {}) {
+  if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
+  const ended = safeRead(context.files.ended).value;
+  if (ended) {
+    return {
+      exit: ended.outcome === 'success' ? EXIT.OK : EXIT.ENDED,
+      message: `the session of work order ${context.marker.orderId} has already ended (${ended.kind})`,
+      cancelRun: runToCancel(context),
+    };
+  }
+  const file = planFileFor(context.marker.orderId);
+  let planText = null;
+  try {
+    planText = fs.readFileSync(path.join(context.projectRoot, file), 'utf8');
+  } catch (_) {
+    planText = null;
+  }
+  if (planText === null || !planText.trim()) return { exit: EXIT.REFUSED, message: `write the implementation plan to ${file} first` };
+  const reported = drain(context, { env, now });
+  if (reported.verdict === 'ended') return { exit: EXIT.ENDED, message: 'Zensu ended the session of this work order', cancelRun: runToCancel(context) };
+  if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };
+  if (reported.verdict !== VERDICTS.OK && reported.verdict !== 'plan-approval-required') {
+    return { exit: EXIT.TRANSIENT, message: `the planning stage is not reported yet (${describeFailure(reported.failure)}); run --plan-approval again` };
+  }
+  const tracked = git(context.projectRoot, ['ls-files', '--error-unmatch', '--', file]);
+  const dirty = git(context.projectRoot, ['status', '--porcelain', '--', file]);
+  if (!tracked.ok || dirty.stdout.trim()) {
+    const added = git(context.projectRoot, ['add', '-f', '--', file], env);
+    const committed = added.ok
+      ? git(context.projectRoot, ['commit', '-m', `docs(plan): add the implementation plan of work order ${context.marker.orderId.slice(0, 8)}`, '--', file], env)
+      : added;
+    if (!committed.ok) {
+      return { exit: EXIT.REFUSED, message: `the plan file could not be committed: ${committed.stderr.trim().split('\n').slice(-1)[0] || 'no detail'}` };
+    }
+  }
+  const pushed = push(context, { env, now });
+  if (pushed.exit !== EXIT.OK) return pushed;
+  const sha = pushed.value.head;
+  const args = ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', planSummary(planText),
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha)];
+  const snapshot = safeRead(context.files.order).value;
+  const order = snapshot && isObject(snapshot.order) ? snapshot.order : {};
+  const link = blobLink(order.repository || context.marker.repository, sha, file);
+  if (link) args.push('--url', link);
+  const artifact = sendEvent(context, args, { env, now });
+  if (artifact.verdict !== VERDICTS.OK) {
+    if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
+    if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)})` };
+    return { exit: EXIT.TRANSIENT, message: `Zensu did not take the plan artifact yet (${describeFailure(artifact.failure)}); run --plan-approval again` };
+  }
+  const blocked = deliverBlocked(context, {
+    env, now, kind: 'plan_approval', reason: 'The implementation plan is attached and waits for a human approval.', eventKey: `plan-approval:${sha}`,
+  });
+  if (blocked.delivered) {
+    return {
+      exit: EXIT.OK,
+      value: { plan: file, commit: sha, link },
+      message: `the plan of work order ${context.marker.orderId} waits for approval; the session is complete`,
+      cancelRun: runToCancel(context),
+    };
+  }
+  if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the approval request was not sent', cancelRun: runToCancel(context) };
+  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the approval request (${describeFailure(blocked.failure)})`, cancelRun: runToCancel(context) };
+  return { exit: EXIT.TRANSIENT, message: `the approval request is not delivered yet (${describeFailure(blocked.failure)}); run --plan-approval again` };
+}
+
 const STOP_BLOCK_BUDGET = 3;
 const STOP_RETRY_BUDGET_MS = 20000;
 
@@ -1244,6 +1897,9 @@ function stopDecision(context, { env = process.env, now = Date.now } = {}) {
   return { decision: 'allow', cancelRun: closed.cancelRun || runToCancel(context), exit: closed.exit };
 }
 
+const REPEATABLE_OPTIONS = new Set(['option', 'requirement', 'path']);
+const BOOLEAN_OPTIONS = new Set(['force', 'blocking']);
+
 function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -1251,14 +1907,27 @@ function parseArgs(argv) {
     if (!token.startsWith('--')) throw new Error(`unexpected argument ${token}`);
     const name = token.slice(2);
     const value = argv[index + 1];
-    if (value === undefined || value.startsWith('--')) {
+    if (BOOLEAN_OPTIONS.has(name) || value === undefined || value.startsWith('--')) {
       options[name] = true;
+      continue;
+    }
+    index += 1;
+    if (REPEATABLE_OPTIONS.has(name)) {
+      options[name] = [...(Array.isArray(options[name]) ? options[name] : []), value];
     } else {
       options[name] = value;
-      index += 1;
     }
   }
   return options;
+}
+
+function readStdinJson() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(0, 'utf8'));
+    return isObject(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function runCli(argv, env = process.env) {
@@ -1313,11 +1982,6 @@ function dispatchCli(argv, env) {
       if (result.message) process.stderr.write(`zensu work-order: ${result.message}\n`);
       return result.exit;
     }
-    if (env.WO_EMIT === 'cancel-run') {
-      if (result.cancelRun) process.stdout.write(`${result.cancelRun}\n`);
-      if (result.message) process.stderr.write(`zensu work-order: ${result.message}\n`);
-      return result.exit;
-    }
     const body = {};
     if (result.value !== undefined) body.value = result.value;
     if (result.cancelRun) body.cancelRun = result.cancelRun;
@@ -1368,6 +2032,53 @@ function dispatchCli(argv, env) {
       provider: typeof options.provider === 'string' ? options.provider : null,
     }));
   }
+  const list = (value) => (Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []));
+  const text = (value) => (typeof value === 'string' ? value : null);
+  if (verb === 'gate') {
+    const decided = gateDecision(context, readStdinJson(), { env });
+    if (env.WO_EMIT === 'hook') {
+      process.stdout.write('\n');
+      if (decided) {
+        process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decided.reason } })}\n`);
+      }
+    } else if (decided) {
+      process.stdout.write(`${JSON.stringify(decided)}\n`);
+    }
+    return EXIT.OK;
+  }
+  if (verb === 'post') {
+    const updated = postToolUpdate(context, readStdinJson(), { env });
+    if (env.WO_EMIT === 'hook') {
+      process.stdout.write(`${updated && updated.cancelRun ? updated.cancelRun : ''}\n`);
+      if (updated && updated.additionalContext) {
+        process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: updated.additionalContext } })}\n`);
+      }
+      return EXIT.OK;
+    }
+    if (updated) process.stdout.write(`${JSON.stringify(updated)}\n`);
+    return EXIT.OK;
+  }
+  if (verb === 'ask') {
+    return emit(ask(context, {
+      env,
+      category: text(options.category),
+      question: text(options.question),
+      options: list(options.option),
+      defaultOption: text(options['default-option']),
+      blocking: options.blocking === true,
+      requirements: list(options.requirement),
+    }));
+  }
+  if (verb === 'followup') {
+    return emit(followup(context, {
+      env,
+      title: text(options.title),
+      rationale: text(options.rationale),
+      severity: text(options.severity) || 'medium',
+      paths: list(options.path),
+    }));
+  }
+  if (verb === 'plan-approval') return emit(planApproval(context, { env }));
   if (verb === 'stop') {
     const decided = stopDecision(context, { env });
     if (env.WO_EMIT === 'hook') {
@@ -1392,15 +2103,24 @@ module.exports = {
   STATE_SEGMENTS,
   SUPPORTED_KINDS,
   VERDICTS,
+  analyzeBash,
   approvedPlanCommit,
+  ask,
   bindSpec,
   binding,
   drain,
   finish,
+  followup,
+  gateDecision,
   markerRun,
   openPr,
+  parseArgs,
+  planApproval,
+  planSummary,
+  postToolUpdate,
   push,
   readRunRecord,
+  shellCommands,
   stopDecision,
   classifyFailure,
   clientEventId,

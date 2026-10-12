@@ -161,6 +161,24 @@ test('the fake speaks every CLI error form the harness parses', () => {
   }
 });
 
+test('the status and code are read when context follows the suffix and the message spans lines', () => {
+  for (const format of ['json', 'line']) {
+    const box = sandbox();
+    box.seed({ errorFormat: format, staleAttempt: true, errorContext: 'created before the failure: item 1 (status 500)', errorContinuation: 'second line of the message' });
+    const outcome = wo.runZensu(['work', 'heartbeat', ORDER, '--json'], { env: box.env });
+    assert.equal(outcome.status, 409, format);
+    assert.equal(outcome.code, 'stale_attempt', format);
+    assert.equal(wo.classifyFailure(outcome).verdict, wo.VERDICTS.LOST, format);
+  }
+  const multi = wo.cliOutcome({ status: 1, stdout: '', stderr: 'error: item 3: create failed\nfeature already exists (status 409, code conflict); created before the failure: one\n' });
+  assert.equal(multi.status, 409);
+  assert.equal(multi.code, 'conflict');
+  const flagError = wo.cliOutcome({ status: 1, stdout: '', stderr: 'error: unknown flag --bogus\n{"error":{"message":"unknown flag --bogus"}}\n' });
+  assert.equal(flagError.status, null);
+  assert.equal(flagError.code, null);
+  assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.TRANSIENT);
+});
+
 test('clientEventId is deterministic, prefixed and inside the backend pattern', () => {
   const first = wo.clientEventId('run_abc', 'start');
   assert.equal(first, wo.clientEventId('run_abc', 'start'));
@@ -622,4 +640,151 @@ test('binding answers only for this session\'s order and the push refuses before
   assert.equal(pushed.exit, wo.EXIT.LOST);
   assert.equal(wo.forgeWriteVerdict(context).allowed, false);
   assert.equal(wo.push(context, { env: box.env }).exit, wo.EXIT.LOST);
+});
+
+test('the Bash analysis denies raw forge writes, human-gate verbs and token handling, and reads nested commands', () => {
+  const denied = {
+    'git push origin HEAD': 'push',
+    'git -C /tmp/x -c a=b push --force': 'push',
+    'cd x && git push': 'push',
+    'bash -lc "git push origin main"': 'push',
+    'eval git push': 'push',
+    'echo $(git push 2>&1)': 'push',
+    'env FOO=1 git push': 'push',
+    'sudo -u bot git push': 'push',
+    'gh pr create --fill': 'open-pr',
+    'gh -R acme/w pr merge 7 --squash': 'merge',
+    'glab mr merge 3': 'merge',
+    'glab mr create --fill': 'open-pr',
+    'zensu auth login': 'auth',
+    'zensu work approve 1234': 'human-gate',
+    'zensu work policy set --plan-approval auto': 'human-gate',
+    'zensu plan approve abc': 'human-gate',
+    'zensu work event 1234 --stage implementing': 'helper-verb',
+    'zensu work heartbeat 1234': 'helper-verb',
+    'printenv': 'token',
+    'printenv ZENSU_SESSION_TOKEN': 'token',
+    'env': 'token',
+    'env -0': 'token',
+    'set': 'token',
+    'export': 'token',
+    'declare -p': 'token',
+    'echo "$ZENSU_SESSION_TOKEN"': 'token',
+    'echo ${ZENSU_SESSION_TOKEN:0:4}': 'token',
+    'unset ZENSU_SESSION_TOKEN': 'token',
+    'ZENSU_SESSION_TOKEN=x zensu work get 1': 'token',
+    'env -u ZENSU_SESSION_TOKEN zensu work get 1': 'token',
+    'export ZENSU_SESSION_TOKEN=abc': 'token',
+    'cat /proc/self/environ': 'token',
+  };
+  for (const [command, code] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, code, command);
+  }
+  const allowed = [
+    'git status', 'git commit -m "do not git push here"', 'git log --oneline -3', 'printenv PATH', 'set -e',
+    'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
+    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work policy get', 'gh pr view 7', 'echo hello',
+    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1',
+  ];
+  for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
+  assert.equal(wo.analyzeBash('gh pr view 7').forge, true);
+  assert.equal(wo.analyzeBash('bash hooks/lib/zensu-vcs.sh --pr-state 7').forge, true);
+  assert.equal(wo.analyzeBash('bash scripts/build.sh').forge, false);
+  assert.equal(wo.analyzeBash('zensu-vcs.sh --pr-state 7').forge, true);
+});
+
+test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
+  const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
+  assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
+  assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
+  const box = sandbox();
+  const context = startedContext(box);
+  for (const tool of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) {
+    const decided = wo.gateDecision(context, payload(tool), { env: box.env });
+    assert.equal(decided.code, 'ask', tool);
+    assert.match(decided.reason, new RegExp(`zensu work ask ${ORDER}`));
+  }
+  const chip = wo.gateDecision(context, payload('mcp__ccd_session__spawn_task'), { env: box.env });
+  assert.match(chip.reason, new RegExp(`zensu work followup ${ORDER}`));
+  assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
+  assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
+  assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
+  wo.markLost(context, { code: 'stale_attempt', via: 'test', at: Date.now() });
+  const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
+  assert.equal(lost.code, 'lease');
+  assert.match(lost.reason, /stale_attempt/);
+  assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
+});
+
+test('the gate renews a lease that is due and leaves a fresh one alone', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const beats = () => box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'heartbeat').length;
+  const before = beats();
+  wo.gateDecision(context, { tool_name: 'Read', tool_input: {} }, { env: box.env, now: () => Date.now() });
+  assert.equal(beats(), before);
+  wo.gateDecision(context, { tool_name: 'Read', tool_input: {} }, { env: box.env, now: () => Date.now() + 61000 });
+  assert.equal(beats(), before + 1);
+});
+
+test('ask continues with the default, and a blocking question ends the session', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const usage = wo.ask(context, { env: box.env, category: 'scope', question: 'Which table?' });
+  assert.equal(usage.exit, wo.EXIT.USAGE);
+  const asked = wo.ask(context, { env: box.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['bullmq', 'pg-boss'], defaultOption: 'pg-boss' });
+  assert.equal(asked.exit, wo.EXIT.OK, asked.message);
+  assert.equal(asked.value.continueWith, 'pg-boss');
+  assert.equal(asked.value.ended, false);
+  const again = wo.ask(context, { env: box.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['bullmq', 'pg-boss'], defaultOption: 'pg-boss' });
+  assert.equal(again.value.replay, true);
+  assert.equal(box.fake().questions.length, 1);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TDD_RUNNING', DONE_LEDGER.slice(0, 3));
+  const blocking = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should deleted widgets stay visible to admins?', blocking: true });
+  assert.equal(blocking.exit, wo.EXIT.ENDED, blocking.message);
+  assert.equal(blocking.cancelRun, RUN);
+  assert.equal(box.fake().order.blocked_kind, 'question');
+  const ended = wo.readState(context.files.ended);
+  assert.equal(ended.outcome, 'success');
+  assert.equal(ended.kind, 'blocked:question');
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('followup files once per title and the CLI parser collects repeated flags', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const filed = wo.followup(context, { env: box.env, title: 'Add an index on widgets.owner_id', rationale: 'The list query scans the table.', severity: 'medium', paths: ['db/schema.sql'] });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+  wo.followup(context, { env: box.env, title: 'Add an index on widgets.owner_id', rationale: 'The list query scans the table.', severity: 'medium' });
+  assert.equal(box.fake().followups.length, 1);
+  assert.deepEqual(wo.parseArgs(['--option', 'a', '--option', 'b', '--blocking', '--question', 'q', '--requirement', 'AC-001']),
+    { option: ['a', 'b'], blocking: true, question: 'q', requirement: ['AC-001'] });
+});
+
+test('the post-tool update hands answers over once and ends the session on a blocked direct ask', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.equal(wo.postToolUpdate(null, { tool_name: 'Read' }), null);
+  wo.recordAnswers(context, [{ id: 'q-1', category: 'scope', question: 'Include archived widgets?', answer: 'No, active ones only.', status: 'answered' }]);
+  const first = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(first.additionalContext, /active ones only/);
+  const second = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.equal(second.additionalContext, null);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TDD_RUNNING', DONE_LEDGER.slice(0, 3));
+  const response = { stdout: JSON.stringify({ question: { id: 'q-2', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
+  const ended = wo.postToolUpdate(context, { tool_name: 'Bash', tool_input: { command: `zensu work ask ${ORDER} --category scope --question "x" --blocking --json` }, tool_response: response }, { env: box.env });
+  assert.equal(ended.cancelRun, RUN);
+  assert.match(ended.additionalContext, /Stop now/);
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
+});
+
+test('the plan summary carries no markup, command line or control character', () => {
+  const summary = wo.planSummary('# Plan\n\n```bash\ngit push\n```\n- **AC-001** `widgets` render\n<!-- hidden -->\u0007bell');
+  assert.ok(!/[`*#<>\u0000-\u001f]/.test(summary), summary);
+  assert.ok(summary.length <= 400);
+  assert.match(summary, /^Implementation plan\./);
 });

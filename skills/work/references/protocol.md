@@ -80,12 +80,47 @@ with the current stage and `--head`, so Zensu records the new head.
 current head, and opens the pull request against the plan's integration branch, else its base
 branch, through `zensu-vcs.sh`. It prints a JSON line with the URL and number.
 
+## Questions, follow-ups and the plan approval
+
+`--ask` sends `zensu work ask` with a `client_event_id` derived from the order, the attempt, the
+category and the question, so a repeat replays. When Zensu answers with the order `blocked` — a
+blocking question, a scope question (`spec_change`) or any question past the order's limit
+(`escalated`) — the helper writes `ended-` with a successful outcome, cancels the local run and
+exits 6. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
+
+`--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
+file when it is new or changed, pushes through the push verb, sends an artifact event of kind
+`plan` with the path, the commit, a summary without markup and, for a GitHub or GitLab repository,
+the blob link, then sends `--blocked plan_approval`. Zensu ends the session there; the helper
+records a successful outcome.
+
+## Work-order hooks
+
+Outside work-order mode all three print nothing and exit 0.
+
+- `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
+  `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
+  `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask`, `followup`,
+  `questions`, `list`, `policy get` and `repositories list`, the `zensu plan` approval verbs, and
+  every command that prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`. It reads commands
+  inside `bash -c`, `eval`, command substitutions and wrappers such as `env` or `sudo`. It renews
+  the lease when due, and once the lease is lost or the session ended it denies every `gh`, `glab`
+  and `zensu-vcs.sh` call. It never allows anything.
+- `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
+  answers to the model, and ends the session when a direct `zensu work ask` blocked the order.
+- `stop-work-order.sh` blocks a Stop until the order reported an outcome.
+
+The gate reads command text; a command assembled at run time, such as a script file the model wrote,
+is not judged. The slot sandbox of the worker, not this gate, is the boundary.
+
 ## Errors the helpers handle
 
-The CLI prints a backend error as `error: <message> (status <n>, code <code>)`, and under `--json`
-adds a last stderr line `{"error":{"status":…,"code":…,"message":…}}`. The runtime reads the JSON
-line first, then the line form, and without a code it decides by status and, for a `409`, by one
-more `zensu work get`.
+The CLI prints a backend error as `error: <message> (status <n>, code <code>)`, possibly followed by
+more context on the same line or on further lines, and under `--json` adds a last stderr line
+`{"error":{"status":…,"code":…,"message":…}}`. Every helper call passes `--json`. The runtime reads
+the JSON line first and the first `(status …)` group of the error text second; without a code it
+decides by status and, for a `409`, by one more `zensu work get`. A failure without a status — a
+network, flag or validation error — is retried inside the retry budget like a missing answer.
 
 | Answer | Handling |
 |---|---|
