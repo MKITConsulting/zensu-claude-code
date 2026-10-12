@@ -209,6 +209,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\"",
             "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-work-order.sh\"",
+            "timeout": 120
           }
         ]
       }

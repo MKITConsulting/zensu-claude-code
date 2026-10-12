@@ -443,3 +443,183 @@ test('the module CLI is inert outside work-order mode', () => {
   assert.equal(box.calls().length, 0);
   assert.equal(fs.existsSync(path.join(box.project, '.zensu')), false);
 });
+
+const HEAD = 'c'.repeat(40);
+const RUN = 'run_0123abcd';
+
+function startedContext(box, seedOverrides = {}) {
+  box.seed(seedOverrides);
+  const started = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(started.exit, wo.EXIT.OK, started.message);
+  return wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+}
+
+function writeRun(box, stage, events) {
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  const evidence = { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7', headSha: HEAD } };
+  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({ runId: RUN, stage, events, evidence }));
+}
+
+function ledger(...steps) {
+  return steps.map(([eventType, toStage, payload = {}], index) => ({
+    eventId: index === 0 ? 'start' : `e${index}`, eventType, payload, fromStage: null, toStage,
+  }));
+}
+
+const DONE_LEDGER = ledger(
+  ['START', 'PLANNING'],
+  ['ORDER_SPEC_BOUND', 'AWAIT_TDD'],
+  ['TDD_STARTED', 'TDD_RUNNING'],
+  ['TDD_CHAIN_DONE', 'GATES'],
+  ['GATES_PASSED', 'CONVERGE'],
+  ['CONVERGENCE_PASSED', 'OPEN_PR'],
+  ['PR_OPEN_REQUESTED', 'OPEN_PR'],
+  ['PR_OPENED', 'TEAM_REVIEW', { operationKey: 'op', pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7', headSha: HEAD } }],
+  ['TEAM_REVIEW_REQUESTED', 'TEAM_REVIEW'],
+  ['TEAM_REVIEW_PUBLISHED', 'FIX_FINDINGS'],
+  ['FINDINGS_CLEARED', 'VALIDATE'],
+  ['VALIDATION_PASSED', 'DELIVER'],
+  ['DELIVERY_COMPLETE', 'DONE', { headSha: HEAD }],
+);
+
+const stageCalls = (box) => box.calls()
+  .filter((argv) => argv[0] === 'work' && argv[1] === 'event')
+  .map((argv) => {
+    const flag = (name) => (argv.indexOf(name) >= 0 ? argv[argv.indexOf(name) + 1] : null);
+    return { stage: flag('--stage'), blocked: flag('--blocked'), id: flag('--client-event-id'), argv };
+  });
+
+test('a DONE run reports every stage in order and then ready_for_merge with the full head', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.deepEqual(wo.markerRun(context, RUN), { runId: RUN });
+  writeRun(box, 'DONE', DONE_LEDGER);
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const sent = stageCalls(box);
+  assert.deepEqual(sent.map((call) => call.stage),
+    ['planning', 'implementing', 'pr_open', 'reviewing', 'validating', 'ready_for_merge']);
+  assert.equal(new Set(sent.map((call) => call.id)).size, sent.length);
+  assert.equal(sent[0].id, wo.clientEventId(RUN, 'start'));
+  const prOpen = sent[2].argv;
+  assert.equal(prOpen[prOpen.indexOf('--pr-url') + 1], 'https://github.com/acme/widgets/pull/7');
+  assert.equal(prOpen[prOpen.indexOf('--pr-number') + 1], '7');
+  assert.equal(prOpen[prOpen.indexOf('--head') + 1], HEAD);
+  const ready = sent[5].argv;
+  assert.equal(ready[ready.indexOf('--head') + 1], HEAD);
+  assert.equal(ready[ready.indexOf('--autopilot-stage') + 1], 'DONE');
+  assert.equal(ready[ready.indexOf('--client-name') + 1], 'zensu-claude-code');
+  assert.equal(box.fake().order.status, 'ready_for_merge');
+  const ended = wo.readState(context.files.ended);
+  assert.equal(ended.outcome, 'success');
+  assert.equal(ended.kind, 'ready_for_merge');
+  const again = wo.finish(context, { env: box.env });
+  assert.equal(again.exit, wo.EXIT.OK);
+  assert.equal(stageCalls(box).length, sent.length);
+});
+
+test('drain sends each stage once, never ready_for_merge, and counts invalid_transition as delivered', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  const first = wo.drain(context, { env: box.env });
+  assert.equal(first.verdict, wo.VERDICTS.OK);
+  assert.deepEqual(first.sent, ['planning', 'implementing', 'pr_open']);
+  const second = wo.drain(context, { env: box.env });
+  assert.deepEqual(second.sent, []);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 409, code: 'invalid_transition', times: 1 }]; });
+  const third = wo.drain(context, { env: box.env });
+  assert.equal(third.verdict, wo.VERDICTS.OK);
+  assert.deepEqual(third.sent, ['validating']);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 0);
+});
+
+test('finish without a terminal run needs a reason and then blocks the order with worker_error', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  const refused = wo.finish(context, { env: box.env });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.match(refused.message, /still at GATES/);
+  const result = wo.finish(context, { env: box.env, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.equal(result.cancelRun, RUN);
+  const order = box.fake().order;
+  assert.equal(order.status, 'blocked');
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /missing database migration/);
+  const blocks = stageCalls(box).filter((call) => call.blocked);
+  assert.equal(blocks.length, 1);
+  assert.deepEqual(stageCalls(box).filter((call) => call.stage).map((call) => call.stage), ['planning', 'implementing']);
+  assert.equal(wo.readState(context.files.ended).outcome, 'failure');
+});
+
+test('a BLOCKED run finishes without a reason and names its block code', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  const run = DONE_LEDGER.slice(0, 4);
+  writeRun(box, 'BLOCKED', run);
+  const file = path.join(box.project, '.zensu', 'state', `autopilot-run-${RUN}.json`);
+  const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  record.blocked = { from: 'GATES', code: 'TDD_MAX_ROUNDS' };
+  fs.writeFileSync(file, JSON.stringify(record));
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(box.fake().order.blocked_reason, /did not converge/);
+});
+
+test('the approved plan is the last plan artifact before the last approval of the spec hash', () => {
+  const spec = 'b'.repeat(64);
+  const events = [
+    { event_type: 'artifact', detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'artifact', detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
+    { event_type: 'artifact', detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
+    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(events, spec).sha, '2'.repeat(40));
+  assert.equal(wo.approvedPlanCommit(events, 'd'.repeat(64)), null);
+});
+
+test('the Stop decision blocks until three stops pass without progress, then ends the order', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.equal(wo.stopDecision(null).decision, 'inert');
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  for (let index = 0; index < 3; index += 1) {
+    const decided = wo.stopDecision(context, { env: box.env });
+    assert.equal(decided.decision, 'block');
+    assert.match(decided.reason, /zensu-work-order\.sh --finish/);
+  }
+  writeRun(box, 'CONVERGE', DONE_LEDGER.slice(0, 5));
+  assert.equal(wo.stopDecision(context, { env: box.env }).decision, 'block');
+  assert.equal(wo.stopDecision(context, { env: box.env }).decision, 'block');
+  assert.equal(wo.stopDecision(context, { env: box.env }).decision, 'block');
+  const closed = wo.stopDecision(context, { env: box.env });
+  assert.equal(closed.decision, 'allow');
+  assert.equal(closed.cancelRun, RUN);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+  assert.equal(wo.stopDecision(context, { env: box.env }).decision, 'allow');
+});
+
+test('binding answers only for this session\'s order and the push refuses before any write when the lease is stale', () => {
+  const box = sandbox();
+  assert.deepEqual(wo.binding(null, null), { exit: wo.EXIT.OK, value: null });
+  assert.equal(wo.binding(null, ORDER).exit, wo.EXIT.NOT_BOUND);
+  const context = startedContext(box);
+  assert.equal(wo.binding(context, null).exit, wo.EXIT.NOT_BOUND);
+  assert.equal(wo.binding(context, '99999999-9999-4999-8999-999999999999').exit, wo.EXIT.NOT_BOUND);
+  assert.deepEqual(wo.binding(context, ORDER.toUpperCase()).value, { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) });
+  box.mutate((state) => { state.staleAttempt = true; });
+  const pushed = wo.push(context, { env: box.env });
+  assert.equal(pushed.exit, wo.EXIT.LOST);
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+  assert.equal(wo.push(context, { env: box.env }).exit, wo.EXIT.LOST);
+});

@@ -546,6 +546,11 @@ const STOP_TERMINAL = new Set(["DONE", "BLOCKED", "CANCELLED"]);
 const STATE_KEYS = ["schemaVersion", "runId", "projectRoot", "ownerSessionId", "stage", "nextActionCode",
   "approvedPlanSha256", "options", "tdd", "effects", "evidence", "blocked", "bypasses", "stopBudget", "events"];
 const STATE_KEYS_WORKSPACE = [...STATE_KEYS, "workspaceRoot"];
+const STATE_KEYS_WORK_ORDER = [...STATE_KEYS_WORKSPACE, "workOrder"];
+const uuidValue = value => typeof value === "string"
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+const workOrderValid = value => exact(value, ["orderId", "attempt", "specHash"])
+  && uuidValue(value.orderId) && positive(value.attempt) && /^[a-f0-9]{64}$/.test(String(value.specHash));
 const workspaceOf = state => state.workspaceRoot;
 // One tree CONTAINING the other makes them ONE resource: a worktree under the
 // project root drives the same branch, history and pull request. The key is a
@@ -610,7 +615,7 @@ const EVENT_TYPES = new Set([
   "PR_OPENED", "TEAM_REVIEW_REQUESTED", "TEAM_REVIEW_PUBLISHED", "FIX_REQUIRED",
   "FINDINGS_CLEARED", "VALIDATION_FAILED", "VALIDATION_PASSED", "COVERAGE_FAILED",
   "COVERAGE_PASSED", "PR_HEAD_UPDATED", "DELIVERY_COMPLETE", "BLOCK", "RESUME", "CANCEL",
-  "BYPASS_RECORDED",
+  "BYPASS_RECORDED", "ORDER_SPEC_BOUND",
 ]);
 
 const canonical = value => {
@@ -683,6 +688,10 @@ const payloadValid = (type, payload) => {
       return exact(payload, []);
     case "PLAN_APPROVED":
       return exact(payload, ["approvedPlanSha256"]) && sha256(payload.approvedPlanSha256);
+    case "ORDER_SPEC_BOUND":
+      return exact(payload, ["orderId", "attempt", "specHash", "approvedPlanSha256"])
+        && uuidValue(payload.orderId) && positive(payload.attempt)
+        && /^[a-f0-9]{64}$/.test(String(payload.specHash)) && sha256(payload.approvedPlanSha256);
     case "TDD_STARTED":
       return exact(payload, ["attempt", "chainId", "sessionId"])
         && positive(payload.attempt) && identifier(payload.chainId) && identifier(payload.sessionId);
@@ -844,7 +853,8 @@ const deliveryInvariants = state => {
 
 let semanticHistoryValid;
 const stateValid = state => {
-  if (!exact(state, STATE_KEYS) && !exact(state, STATE_KEYS_WORKSPACE)) return false;
+  if (!exact(state, STATE_KEYS) && !exact(state, STATE_KEYS_WORKSPACE) && !exact(state, STATE_KEYS_WORK_ORDER)) return false;
+  if (Object.prototype.hasOwnProperty.call(state, "workOrder") && !workOrderValid(state.workOrder)) return false;
   if (state.schemaVersion !== 1 || !identifier(state.runId) || !nonEmpty(state.projectRoot, 4096)
     || !identifier(state.ownerSessionId) || !STAGES.has(state.stage) || state.nextActionCode !== NEXT_ACTION[state.stage]) return false;
   if (Object.prototype.hasOwnProperty.call(state, "workspaceRoot") && !nonEmpty(state.workspaceRoot, 4096)) return false;
@@ -1127,6 +1137,15 @@ const transition = (state, type, payload, reject = fail) => {
 
   switch (`${from}:${type}`) {
     case "PLANNING:PLAN_APPROVED":
+      if (state.workOrder) reject(3, "a work-order run binds its spec through ORDER_SPEC_BOUND, never through PLAN_APPROVED");
+      state.approvedPlanSha256 = payload.approvedPlanSha256.toLowerCase();
+      state.tdd.returnStage = "GATES";
+      move(state, "AWAIT_TDD");
+      return;
+    case "PLANNING:ORDER_SPEC_BOUND":
+      if (!state.workOrder) reject(3, "ORDER_SPEC_BOUND applies to a work-order run only");
+      if (payload.orderId !== state.workOrder.orderId || payload.attempt !== state.workOrder.attempt
+        || payload.specHash !== state.workOrder.specHash) reject(4, "ORDER_SPEC_BOUND does not match the run's work-order binding");
       state.approvedPlanSha256 = payload.approvedPlanSha256.toLowerCase();
       state.tdd.returnStage = "GATES";
       move(state, "AWAIT_TDD");
@@ -1321,6 +1340,7 @@ semanticHistoryValid = state => {
     stopBudget: { stage: "PLANNING", count: 0 },
     events: [first],
   };
+  if (Object.prototype.hasOwnProperty.call(state, "workOrder")) replay.workOrder = state.workOrder;
   const rejectReplay = (_code, message) => { throw new Error(message || "invalid semantic history"); };
   try {
     for (const event of state.events.slice(1)) {
@@ -1431,7 +1451,12 @@ if (mode === "read-run") {
 
 if (mode === "begin") {
   const [activeFile, runFile, runOutput, activeOutput, runId, ownerSessionId, projectRoot, coverRaw, validateRaw,
-    workspaceRoot, legacyActiveFile = ""] = args;
+    workspaceRoot, legacyActiveFile = "", workOrderJson = ""] = args;
+  let workOrder = null;
+  if (workOrderJson !== "") {
+    try { workOrder = JSON.parse(workOrderJson); } catch (_) { fail(3, "invalid work-order binding"); }
+    if (!workOrderValid(workOrder)) fail(3, "invalid work-order binding");
+  }
   // `ownerIdentity`, the WRITE-side vocabulary, matching this verb's own shell layer
   // (`autopilot_begin_run`) and `stateValid`, which judges the persisted field. The
   // loose `sessionIdentifier` was the opposite choice from `adopt`, which mints the
@@ -1542,7 +1567,9 @@ if (mode === "begin") {
   if (existing) {
     if (existing.runId !== runId || existing.ownerSessionId !== ownerSessionId
       || existing.projectRoot !== projectRoot || !mayHoldWorkspace(existing, workspaceRoot)
-      || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
+      || canonical(existing.options) !== canonical(options)
+      || canonical(Object.prototype.hasOwnProperty.call(existing, "workOrder") ? existing.workOrder : null)
+        !== canonical(workOrder)) fail(4, "run identity/options conflict");
     // A record minted before `workspaceRoot` existed holds EVERY tree, so while
     // it stays nonterminal it blocks every other tree in the project. The exact
     // retry is the owner asking for this same run from a known tree, which is
@@ -1589,6 +1616,7 @@ if (mode === "begin") {
       toStage: "PLANNING",
     }],
   };
+  if (workOrder) state.workOrder = workOrder;
   if (!stateValid(state)) fail(2, "initial state failed internal validation");
   writeOutput(runOutput, state);
   writeOutput(activeOutput, { schemaVersion: 1, runId });
@@ -2171,7 +2199,7 @@ NODE
 
 _autopilot_begin_critical() {
   local root="$1" run_id="$2" owner_session_id="$3" cover="$4" validate="$5"
-  local workspace_root="${6:-}"
+  local workspace_root="${6:-}" work_order_json="${7:-}"
   [ -n "$workspace_root" ] || workspace_root="$(_autopilot_session_workspace "$root")" || return 2
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
@@ -2186,7 +2214,8 @@ _autopilot_begin_critical() {
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   active_tmp="$(_autopilot_mktemp_beside "$active_file")" || { rm -f "$run_tmp"; return 5; }
   _autopilot_node begin "$active_file" "$run_file" "$run_tmp" "$active_tmp" \
-    "$run_id" "$owner_session_id" "$root" "$cover" "$validate" "$workspace_root" "$legacy_file"
+    "$run_id" "$owner_session_id" "$root" "$cover" "$validate" "$workspace_root" "$legacy_file" \
+    "$work_order_json"
   rc=$?
   if [ "$rc" -eq 10 ]; then
     rm -f "$run_tmp" "$active_tmp"
@@ -2202,7 +2231,9 @@ _autopilot_begin_critical() {
 
 autopilot_begin_run() {
   local run_id="${1:-}" owner_session_id="${2:-}" root cover validate workspace_root session_workspace root_rendered declared_rendered
+  local work_order_json="${7:-}"
   _autopilot_identifier_ok "$run_id" && _autopilot_owner_identity_ok "$owner_session_id" || return 3
+  case "$work_order_json" in *[$'\n\r']*) return 3 ;; esac
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   cover="${4:-false}"
   validate="${5:-true}"
@@ -2247,7 +2278,7 @@ autopilot_begin_run() {
   case "$workspace_root" in *[$'\n\r']*) return 3 ;; esac
   _autopilot_prepare_storage "$root" || return 2
   _autopilot_locked_run "$root" "$run_id" _autopilot_begin_critical \
-    "$root" "$run_id" "$owner_session_id" "$cover" "$validate" "$workspace_root"
+    "$root" "$run_id" "$owner_session_id" "$cover" "$validate" "$workspace_root" "$work_order_json"
 }
 
 _autopilot_attest_team_review_publication_critical() {

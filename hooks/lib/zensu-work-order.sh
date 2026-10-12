@@ -48,11 +48,61 @@ if ! _ZENSU_WO_KEY="$(zensu_resolve_session_id "")" || [ -z "$_ZENSU_WO_KEY" ]; 
 fi
 _ZENSU_WO_EXCL="$(zensu_msys_env_exclusions WO_PROJECT_ROOT WO_PLUGIN_DATA 2>/dev/null)" || _ZENSU_WO_EXCL=""
 
-(
-  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 2
-  export WO_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" WO_SESSION_KEY="$_ZENSU_WO_KEY"
-  export WO_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-}" WO_MODEL_PROJECT_DIR="$_ZENSU_WO_PD"
-  if [ -n "$_ZENSU_WO_EXCL" ]; then export MSYS2_ENV_CONV_EXCL="$_ZENSU_WO_EXCL"; fi
-  exec node ./work-order-v1.js "$_ZENSU_WO_VERB" "$@"
-)
-exit $?
+_wo_node() {
+  (
+    cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 2
+    export WO_PROJECT_ROOT="$ZENSU_PROJECT_ROOT" WO_SESSION_KEY="$_ZENSU_WO_KEY"
+    export WO_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-}" WO_MODEL_PROJECT_DIR="$_ZENSU_WO_PD"
+    if [ -n "$_ZENSU_WO_EXCL" ]; then export MSYS2_ENV_CONV_EXCL="$_ZENSU_WO_EXCL"; fi
+    exec node ./work-order-v1.js "$@"
+  )
+}
+
+_wo_cancel_run() {
+  local run_id="$1"
+  [ -n "$run_id" ] || return 0
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" || return 1
+  autopilot_apply_event "$run_id" work-order-end CANCEL '{}' "$_ZENSU_WO_PD" "$_ZENSU_WO_KEY"
+}
+
+case "$_ZENSU_WO_VERB" in
+  bind-spec)
+    _ZENSU_WO_RUN=""
+    _ZENSU_WO_ARGS=("$@")
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run) [ $# -ge 2 ] || { echo "zensu-work-order.sh --bind-spec: missing --run value" >&2; exit 2; }; _ZENSU_WO_RUN="$2"; shift 2 ;;
+        *) echo "zensu-work-order.sh --bind-spec: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$_ZENSU_WO_RUN" ] || { echo "zensu-work-order.sh --bind-spec requires --run <id>" >&2; exit 2; }
+    _ZENSU_WO_PAYLOAD="$(WO_EMIT=value _wo_node bind-spec "${_ZENSU_WO_ARGS[@]}")"
+    _ZENSU_WO_RC=$?
+    if [ "$_ZENSU_WO_RC" -ne 0 ]; then
+      exit "$_ZENSU_WO_RC"
+    fi
+    [ -n "$_ZENSU_WO_PAYLOAD" ] || { echo "zensu-work-order.sh --bind-spec: the runtime returned no binding" >&2; exit 2; }
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" || exit 2
+    autopilot_apply_event "$_ZENSU_WO_RUN" order-spec-bound ORDER_SPEC_BOUND "$_ZENSU_WO_PAYLOAD" \
+      "$_ZENSU_WO_PD" "$_ZENSU_WO_KEY" || {
+      _ZENSU_WO_RC=$?
+      echo "zensu-work-order.sh --bind-spec: Zensu accepted the implementing stage but the run did not record ORDER_SPEC_BOUND (exit $_ZENSU_WO_RC); run --bind-spec again" >&2
+      exit 7
+    }
+    echo "work-order: spec bound, Autopilot run $_ZENSU_WO_RUN is at AWAIT_TDD"
+    exit 0
+    ;;
+  finish)
+    _ZENSU_WO_CANCEL="$(WO_EMIT=cancel-run _wo_node finish "$@")"
+    _ZENSU_WO_RC=$?
+    if [ -n "$_ZENSU_WO_CANCEL" ]; then
+      _wo_cancel_run "$_ZENSU_WO_CANCEL" \
+        || echo "zensu-work-order.sh --finish: the local Autopilot run $_ZENSU_WO_CANCEL could not be cancelled; run --finish again" >&2
+    fi
+    exit "$_ZENSU_WO_RC"
+    ;;
+  *)
+    _wo_node "$_ZENSU_WO_VERB" "$@"
+    exit $?
+    ;;
+esac

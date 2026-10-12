@@ -737,11 +737,14 @@ case "${1:-}" in
     cover_val=false
     validate_val=true
     workspace_val=""
+    work_order_val=""
+    work_order_json=""
     seen_run=false
     seen_session=false
     seen_cover=false
     seen_validate=false
     seen_workspace=false
+    seen_work_order=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -765,6 +768,10 @@ case "${1:-}" in
           [ "$seen_workspace" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --workspace" >&2; exit 2; }
           seen_workspace=true; workspace_val="$2"; shift 2
           ;;
+        --work-order)
+          [ "$seen_work_order" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --work-order" >&2; exit 2; }
+          seen_work_order=true; work_order_val="$2"; shift 2
+          ;;
         *) echo "zensu-log.sh --autopilot-begin: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
@@ -779,6 +786,14 @@ case "${1:-}" in
       echo "zensu-log.sh --autopilot-begin: --workspace must name an existing directory" >&2
       exit 2
     fi
+    if [ "$seen_work_order" = true ] && [ -z "$work_order_val" ]; then
+      echo "zensu-log.sh --autopilot-begin: --work-order must not be empty" >&2
+      exit 2
+    fi
+    if [ "$seen_work_order" = true ] && [ "$seen_session" = true ]; then
+      echo "zensu-log.sh --autopilot-begin: --work-order binds this session's own run; --session is not accepted with it" >&2
+      exit 2
+    fi
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-begin --run $run_val}"
     fi
@@ -787,9 +802,32 @@ case "${1:-}" in
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
       exit 2
     }
+    if [ "$seen_work_order" = true ] || [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
+      if [ "$seen_work_order" = true ]; then
+        work_order_json="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --binding --run "$run_val" --order "$work_order_val")"
+      else
+        work_order_json="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --binding --run "$run_val")"
+      fi
+      work_order_rc=$?
+      if [ "$work_order_rc" -ne 0 ]; then
+        echo "zensu-log.sh --autopilot-begin: the work-order binding was refused" >&2
+        exit 4
+      fi
+      if [ "$seen_work_order" = true ] && [ -z "$work_order_json" ]; then
+        echo "zensu-log.sh --autopilot-begin: --work-order was given but this session runs no work order" >&2
+        exit 4
+      fi
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val" "$workspace_val"
-    exit $?
+    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val" "$workspace_val" "$work_order_json"
+    begin_rc=$?
+    if [ "$begin_rc" -eq 0 ] && [ -n "$work_order_json" ]; then
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --bind-run --run "$run_val" >/dev/null || {
+        echo "zensu-log.sh --autopilot-begin: the run began but the work order does not report it yet; run --autopilot-begin again" >&2
+        exit 5
+      }
+    fi
+    exit "$begin_rc"
     ;;
   --autopilot-event)
     run_val=""
@@ -840,6 +878,10 @@ case "${1:-}" in
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use the generation-bound TDD commands" >&2
+        exit 2
+        ;;
+      ORDER_SPEC_BOUND)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --bind-spec" >&2
         exit 2
         ;;
     esac

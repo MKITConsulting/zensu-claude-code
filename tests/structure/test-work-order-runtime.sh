@@ -36,15 +36,20 @@ UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"
 UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# pass ' | grep -oE '[0-9]+' | tail -1)"
 UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' | tail -1)"
 UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_FLOOR=21
-if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" = "0" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
+source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
+if [ -n "$UNIT_FLOOR" ] && [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" = "0" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
   check "R2 unit suite green with at least $UNIT_FLOOR cases and none skipped (pass=$UNIT_PASS)" PASS
 else
-  check "R2 unit suite green with at least $UNIT_FLOOR cases and none skipped (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?})" FAIL
+  check "R2 unit suite green with at least ${UNIT_FLOOR:-<no overview row>} cases and none skipped (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?})" FAIL
   printf '%s\n' "$UNIT_OUT" | grep -E '^not ok|# SKIP' | head -5
 fi
+if R2_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "R2-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
+else
+  check "R2-overview $R2_OVERVIEW" FAIL
+fi
 
-# shellcheck disable=SC1090
 source "$FAKE_LIB"
 
 SBOX="$(mktemp -d -t wo-runtime-XXXXXX)"
@@ -59,7 +64,6 @@ export ZENSU_CONFIG="$SBOX/config.json"
 printf '%s\n' '{}' > "$ZENSU_CONFIG"
 SESSION="wo-runtime-session-0001"
 ORDER="33333333-3333-4333-8333-333333333333"
-# shellcheck disable=SC1090
 source "$BASELINE" "$SESSION" || { check "R3 test session binds" FAIL; finish; exit 1; }
 check "R3 test session binds" PASS
 
@@ -127,7 +131,6 @@ ORDER2="44444444-4444-4444-8444-444444444444"
 (
   export CLAUDE_PROJECT_DIR="$PROJECT2"
   export ZENSU_TEST_PLUGIN_DATA="$SBOX/plugin-data-2"
-  # shellcheck disable=SC1090
   source "$BASELINE" "$SESSION2" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER2" "$SESSION2" auto verify
   bash "$WRAPPER" --start --order "$ORDER2" >"$SBOX/start2.out" 2>"$SBOX/start2.err"

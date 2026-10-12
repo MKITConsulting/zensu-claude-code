@@ -152,6 +152,7 @@
     "test-versioned-plugin-upgrade.sh",
     "test-windows-ci-contract.sh",
     "test-windows-portability-guards.sh",
+    "test-work-order-implement.sh",
     "test-work-order-runtime.sh",
     "test-workflow-checkout-credentials.sh",
     "test-workflow-dispatch-inputs.sh",
