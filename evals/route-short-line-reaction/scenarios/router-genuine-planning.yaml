@@ -6,6 +6,7 @@ vars:
   expected_shape: router-short
   expected_field: n/a
   allowed_first: ask
+  router_fires: "yes"
   anchor_clause: "your very next action is to ask the user the three project-context triage questions (is the code built, is there a plan or spec document, does the plan hold unbuilt items) instead of guessing them, before reading any file or launching a search"
 assert:
   - type: javascript

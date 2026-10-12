@@ -90,7 +90,7 @@ CAPTURE_LINE="$(node -e '
   const [dir, live] = process.argv.slice(1);
   const value = JSON.parse(fs.readFileSync(`${dir}/capture.json`, "utf8"));
   const silence = JSON.parse(fs.readFileSync(`${dir}/silence.json`, "utf8"));
-  value.live = { root: live, version: silence.version, silent_hooks: silence.hooks.length, leaks: silence.leaks.length, control_chars: silence.control.chars };
+  value.live = { root: live, version: silence.version, silent_hooks: silence.hooks.length, leaks: silence.leaks.length, control_chars: silence.control.chars, router_control_chars: silence.router_control ? silence.router_control.chars : 0 };
   process.stdout.write(JSON.stringify(value));
 ' "$RUN_DIR" "$LIVE_ROOT")" || die "cannot assemble the capture line"
 

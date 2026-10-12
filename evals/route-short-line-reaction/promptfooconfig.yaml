@@ -1,4 +1,4 @@
-description: "Reaction to the tdd-reminder's ask short line and decided lines and the intent-router's short line, each delivered alone through a real UserPromptSubmit hook while the installed Zensu runtime is silenced. Run promptfooconfig-preflight.yaml first."
+description: "Reaction to the tdd-reminder's ask short line and decided lines and the intent-router's short line, each delivered alone through a real UserPromptSubmit hook while the installed Zensu runtime's prompt hooks are silenced. Run promptfooconfig-preflight.yaml first."
 
 providers:
   - id: 'exec: ./provider.sh'
@@ -27,6 +27,7 @@ defaultTest:
 
 tests:
   - file://scenarios/control-no-injection.yaml
+  - file://scenarios/control-planning-no-injection.yaml
   - file://scenarios/ask-headless-code-change.yaml
   - file://scenarios/decided-tdd-code-change.yaml
   - file://scenarios/decided-direct-code-change.yaml

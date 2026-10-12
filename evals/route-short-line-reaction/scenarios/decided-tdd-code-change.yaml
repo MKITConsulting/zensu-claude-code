@@ -1,4 +1,4 @@
-description: "The decided tdd line alone, with the route set by hooks.defaultDeliveryRoute, on a code change. The reply begins with the exact status line, the source substituted for the placeholder, and runs the Zensu workflow through the Skill tool without asking, without recording anything."
+description: "The decided tdd line alone, with the route set by hooks.defaultDeliveryRoute, on a code change. The reply begins with the exact status line, the source substituted for the placeholder, and runs the Zensu workflow through the Skill tool with the request as its argument, without asking and without recording anything."
 vars:
   route_source: tdd-config
   user_message: "Add an optional discountPercent parameter to cartTotal in src/cart.js that reduces the item subtotal by that percentage before the shipping fee is added, default 0."
@@ -7,6 +7,7 @@ vars:
   expected_field: tdd (hooks.defaultDeliveryRoute)
   expected_status: "Executing via /zensu:tdd (vanilla mode, route: hooks.defaultDeliveryRoute)"
   allowed_first: skill:zensu:tdd
+  first_args_contains: discountPercent
   anchor_clause: "run the Zensu workflow without asking (the Skill tool with skill zensu:tdd and this request as the feature specification)"
 assert:
   - type: javascript

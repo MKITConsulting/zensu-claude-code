@@ -2,7 +2,7 @@
 
 const { parse, firstEnd } = require('../lib/envelope.js');
 
-const MUTATION = /(^|[\s;&|])zensu\s+[a-z-]+\s+(create|update|delete|set|add|remove|link|import|move)\b/;
+const MUTATION = /(^|[\s;&|/])zensu(?:\s+--?[\w-]+(?:=\S+)?)*\s+(?:[a-z][\w-]*\s+)?(create|update|delete|set|add|remove|link|import|move)\b/;
 
 module.exports = (output) => {
   const cut = firstEnd(parse(output));

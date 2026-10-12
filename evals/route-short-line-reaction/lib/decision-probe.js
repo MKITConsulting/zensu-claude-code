@@ -7,13 +7,14 @@ const ALLOW_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'LSP', 'WebSearch', 'WebFetch
 const SETUP_TOOLS = ['EnterWorktree'];
 const PLAIN = /^[^;&|<>$`\\\r\n]*$/;
 const QUIET = /\s+([12]?>\s*\/dev\/null|2>&1)(?=\s|$)/g;
-const READ_COMMAND = /^(ls|cat|head|tail|wc|pwd|tree|file|stat|cd|grep|egrep|fgrep|rg|find)(\s|$)|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(status|log|diff|show|ls-files|rev-parse)(\s|$)|^(node\s+--test|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test)(\s|$)/;
+const READ_COMMAND = /^(ls|cat|head|tail|wc|pwd|tree|file|stat|cd|grep|egrep|fgrep|rg|find|echo|printf|nl|true|test|\[)(\s|$)|^sed\s+-n\s+\d+(,\d+)?p(\s+[^\s-]\S*)*$|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(status|log|diff|show|ls-files|rev-parse)(\s|$)|^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?remote(\s+(-v|--verbose))?$|^(node\s+--test|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test)(\s|$)/;
+const NAME_FLAG = /^(test|\[|printf)\s(.*\s)?-[vR](\s|$)/;
 const UNSAFE_FLAG = /(^|\s)(--output|--ext-diff|--pre|--watch|--test-reporter-destination|-exec|-execdir|-delete|-ok|-okdir|-fprint|-fprint0|-fprintf|-fls)(=|\s|$)/;
 const FOLLOW = /^tail\s(.*\s)?(-[A-Za-z0-9]*[fF][A-Za-z0-9]*|--follow)(=|\s|$)/;
-const SETUP_COMMAND = /^git\s+(-C\s+\S+\s+)?(worktree|checkout|switch|branch)(\s|$)/;
-const SEPARATOR = /\s*(?:&&|\|\||;|\|)\s*/;
+const SETUP_COMMAND = /^git\s+(-C\s+\S+\s+)?(--no-pager\s+)?(worktree|checkout|switch|branch)(\s|$)/;
+const QUOTED_META = /[;&|<>()$`\\]/;
 const END_REASON = 'Not available in this environment; end your turn now with one sentence naming what you would do next.';
-const CONTINUE_REASON = 'No person can answer questions in this run; continue without an answer.';
+const CONTINUE_REASON = 'No person can answer questions in this run.';
 const SETUP_REASON = 'Worktrees and branches are not available in this environment; work in the current directory.';
 const LIMIT = 4000;
 
@@ -37,17 +38,65 @@ function flattenQuestion(input) {
   return bounded(parts.join(' | '), LIMIT);
 }
 
+function segments(command) {
+  const parts = [];
+  let current = '';
+  let quote = '';
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === quote) quote = '';
+      else current += QUOTED_META.test(c) ? '_' : c;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === quote) quote = '';
+      else if (c === '$' || c === '`') return null;
+      else if (c === '\\') {
+        i += 1;
+        current += '_';
+      } else current += QUOTED_META.test(c) ? '_' : c;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '\\') {
+      const next = command[i + 1];
+      if (next === undefined) return null;
+      current += QUOTED_META.test(next) ? '_' : next;
+      i += 1;
+      continue;
+    }
+    const pair = command.slice(i, i + 2);
+    if (pair === '&&' || pair === '||') {
+      parts.push(current);
+      current = '';
+      i += 1;
+    } else if (c === '|' || c === ';' || c === '(' || c === ')') {
+      parts.push(current);
+      current = '';
+    } else current += c;
+  }
+  if (quote) return null;
+  parts.push(current);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
 function bashPart(raw) {
   const part = raw.replace(QUIET, '');
   if (!PLAIN.test(part)) return 'other';
-  if (READ_COMMAND.test(part) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part)) return 'read';
+  if (READ_COMMAND.test(part) && !UNSAFE_FLAG.test(part) && !FOLLOW.test(part) && !NAME_FLAG.test(part)) return 'read';
   if (SETUP_COMMAND.test(part)) return 'setup';
   return 'other';
 }
 
 function bashDecision(command) {
-  const parts = command.trim().split(SEPARATOR);
-  const kinds = parts.map((p) => (p === '' ? 'other' : bashPart(p)));
+  if (/[\r\n]/.test(command)) return 'END';
+  const parts = segments(command);
+  if (!parts || parts.length === 0) return 'END';
+  const kinds = parts.map(bashPart);
   if (kinds.every((k) => k === 'read')) return 'ALLOW';
   if (kinds.every((k) => k !== 'other')) return 'SETUP';
   return 'END';
@@ -70,6 +119,7 @@ function reasonFor(decision) {
 function record(tool, input, id, decision) {
   const entry = { id: id || '', tool, decision };
   if (tool === 'Skill') entry.skill = bounded((input && (input.skill || input.name || input.command)) || '', 200);
+  if (tool === 'Skill' && input && input.args) entry.args = bounded(input.args, LIMIT);
   if (tool === 'Bash') entry.command = bounded((input && input.command) || '', 400);
   if (input && (input.file_path || input.path || input.pattern)) entry.path = bounded(input.file_path || input.path || input.pattern, 400);
   if (tool === 'AskUserQuestion') entry.question = flattenQuestion(input);
@@ -118,6 +168,7 @@ module.exports = {
   END_REASON,
   CONTINUE_REASON,
   SETUP_REASON,
+  segments,
   bashDecision,
   decide,
   reasonFor,

@@ -1,4 +1,4 @@
-description: "Preflight for the route short line reaction eval: one run that proves the injection channel and the PreToolUse interception before the graded config spends its runs."
+description: "Preflight for the route short line reaction eval: two runs that prove the injection channel, the PreToolUse interception and an allowed call that runs, before the graded config spends its runs."
 
 providers:
   - id: 'exec: ./provider.sh'
@@ -8,7 +8,7 @@ providers:
 
 prompts:
   - id: route-short-line-preflight
-    label: "route short line preflight (nonce injection + Skill interception)"
+    label: "route short line preflight (nonce injection, Skill interception, allowed read)"
     raw: |
       route-eval-source: {{route_source}}
       {{user_message}}
@@ -27,6 +27,7 @@ defaultTest:
 
 tests:
   - file://scenarios/preflight/channel-check.yaml
+  - file://scenarios/preflight/read-check.yaml
 
 evaluateOptions:
   maxConcurrency: 1

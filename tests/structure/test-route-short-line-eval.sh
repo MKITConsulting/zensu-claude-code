@@ -219,11 +219,11 @@ if bash "$CAPTURE" silence "$PLUGIN_DIR" "$EVAL_CONFIG" "$WORK/silence-ok" "$PLA
     const hooks = JSON.parse(fs.readFileSync(`${plugin}/hooks/hooks.json`, "utf8")).hooks.UserPromptSubmit
       .flatMap((g) => g.hooks || []).map((h) => /hooks\/([A-Za-z0-9._-]+)\.sh/.exec(h.command || "")).filter(Boolean).map((m) => m[1]);
     const version = JSON.parse(fs.readFileSync(`${plugin}/.claude-plugin/plugin.json`, "utf8")).version;
-    process.exit(s.leaks.length === 0 && s.control.chars > 0 && s.version === version && hooks.length > 0
+    process.exit(s.leaks.length === 0 && s.control.chars > 0 && s.router_control && s.router_control.chars > 0 && s.version === version && hooks.length > 0
       && JSON.stringify(s.hooks) === JSON.stringify(hooks)
       && hooks.includes("user-prompt-tdd-reminder") && hooks.includes("user-prompt-intent-router") ? 0 : 1);
   ' "$WORK/silence-ok" "$PLUGIN_DIR"; then
-  check "RS6 eval-config.json silences every UserPromptSubmit hook of this tree on a planning prompt, against a live positive control" PASS
+  check "RS6 eval-config.json silences every UserPromptSubmit hook of this tree on a planning prompt, against live positive controls for the reminder and the intent router" PASS
 else
   check "RS6 eval-config.json silences every UserPromptSubmit hook of this tree on a planning prompt ($(head -c 300 "$WORK/silence-ok.err"))" FAIL
 fi
@@ -269,6 +269,41 @@ else
   check "RS6d a prompt hook that exits non-zero under the eval config counts as a leak, not as silence (rc=$RS6D_RC)" FAIL
 fi
 
+cat > "$WORK/control-ok.sh" <<'SH'
+#!/bin/bash
+[ -f "$ZENSU_CONFIG" ] && exit 0
+printf '%s' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"control"}}'
+SH
+cat > "$WORK/control-exit.sh" <<'SH'
+#!/bin/bash
+[ -f "$ZENSU_CONFIG" ] && exit 0
+exit 2
+SH
+RS6E_BAD=""
+for RS6E_FAILING in user-prompt-tdd-reminder user-prompt-intent-router; do
+  RS6E_ROOT="$WORK/fake-control-$RS6E_FAILING"
+  mkdir -p "$RS6E_ROOT/hooks" "$WORK/silence-control-$RS6E_FAILING"
+  printf '%s\n' '{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh\""},{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh\""}]}]}}' > "$RS6E_ROOT/hooks/hooks.json"
+  cp "$FAKE_ROOT/hooks/session-start-session-control.sh" "$RS6E_ROOT/hooks/"
+  for RS6E_HOOK in user-prompt-tdd-reminder user-prompt-intent-router; do
+    if [ "$RS6E_HOOK" = "$RS6E_FAILING" ]; then
+      cp "$WORK/control-exit.sh" "$RS6E_ROOT/hooks/$RS6E_HOOK.sh"
+    else
+      cp "$WORK/control-ok.sh" "$RS6E_ROOT/hooks/$RS6E_HOOK.sh"
+    fi
+  done
+  bash "$CAPTURE" silence "$RS6E_ROOT" "$EVAL_CONFIG" "$WORK/silence-control-$RS6E_FAILING" "$PLAN_MESSAGE" >/dev/null 2>"$WORK/silence-control-$RS6E_FAILING.err"
+  RS6E_RC=$?
+  if [ "$RS6E_RC" -ne 70 ] || ! grep -qF 'a positive control failed when fired without the eval config' "$WORK/silence-control-$RS6E_FAILING.err"; then
+    RS6E_BAD="$RS6E_BAD $RS6E_FAILING:$RS6E_RC"
+  fi
+done
+if [ -z "$RS6E_BAD" ]; then
+  check "RS6e a positive control that fails without the eval config stops the silence check, for the reminder and for the intent router" PASS
+else
+  check "RS6e a failing positive control stops the silence check (got:$RS6E_BAD)" FAIL
+fi
+
 FAKE_USER_HOME="$WORK/user-home"
 FAKE_HOME="$FAKE_USER_HOME/.claude"
 CONFIG_DIR="$WORK/config-dir"
@@ -311,10 +346,11 @@ for RS7_CASE in "none|$CODE_MESSAGE||other@market" "router|$PLAN_MESSAGE|user-pr
         && env === `ZENSU_CONFIG=${evalDir}/eval-config.json ZENSU_WRAPPER_SETTINGS=<run>/settings.json ZENSU_ROUTE_EVAL_DIR=<run> ZENSU_ROUTE_EVAL_HOOK=${hook}`
         && after("ROUTE_EVAL_DRY_RUN: message ") === message
         && capture.route_source === source && capture.hook === hook
-        && capture.live.root === plugin && capture.live.version === version && capture.live.leaks === 0 && capture.live.control_chars > 0 && capture.live.silent_hooks > 0;
+        && capture.live.root === plugin && capture.live.version === version && capture.live.leaks === 0 && capture.live.control_chars > 0 && capture.live.silent_hooks > 0
+        && (source === "router" ? capture.live.router_control_chars > 0 : capture.live.router_control_chars === 0);
       process.exit(ok ? 0 : 1);
     ' "$WORK/dry-$RS7_SOURCE.out" "$RS7_SOURCE" "$RS7_MESSAGE" "$RS7_HOOK" "$EVAL_DIR" "$PLUGIN_DIR" "$RS7_OFF"; then
-    check "RS7 the provider dry run for '$RS7_SOURCE' reads the user-scoped install from $([ "$RS7_SOURCE" = none ] && echo '~/.claude' || echo 'CLAUDE_CONFIG_DIR'), pins ZENSU_CONFIG, writes the probe, the inject hook only when a line is delivered, the other plugins off and an attested capture" PASS
+    check "RS7 the provider dry run for '$RS7_SOURCE' reads the user-scoped install from $([ "$RS7_SOURCE" = none ] && echo '~/.claude' || echo 'CLAUDE_CONFIG_DIR'), pins ZENSU_CONFIG, writes the probe, the inject hook only when a line is delivered, the other plugins off and an attested capture with the intent router's control" PASS
   else
     check "RS7 the provider dry run for '$RS7_SOURCE' (rc=$RS7_RC, $(head -c 300 "$WORK/dry-$RS7_SOURCE.err"))" FAIL
   fi
@@ -375,7 +411,7 @@ fi
 
 RS10_BAD=""
 for RS10_NEEDLE in 'control-no-injection.yaml' 'ask-headless-code-change.yaml' 'decided-tdd-code-change.yaml' \
-  'decided-direct-code-change.yaml' 'router-genuine-planning.yaml' 'preflight/channel-check.yaml' \
+  'decided-direct-code-change.yaml' 'router-genuine-planning.yaml' 'preflight/channel-check.yaml' 'preflight/read-check.yaml' \
   'promptfoo eval --no-cache --no-share -c promptfooconfig-preflight.yaml' 'promptfoo eval --no-cache --no-share -c promptfooconfig.yaml' \
   'Run the preflight first' 'Always pass `--no-cache`' \
   'cost API credits' 'local-only' 'route-short-line-graders.test.js' 'test-route-short-line-eval.sh' '## Known confounds'; do

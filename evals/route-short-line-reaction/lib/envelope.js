@@ -7,16 +7,20 @@ const CAPTURE_PREFIX = '[route-eval-capture] ';
 const MARK = /^\[(tool_use|tool_result|assistant_text|result|stream_warning|enrichment_warning|wrapper_attestation)(?::\s*([^\]]*))?\](.*)$/;
 const SECTION = /^===== .+ =====$/;
 const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const LOOK_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Bash'];
+const LOOK_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'LSP', 'Bash', 'WebSearch', 'WebFetch'];
 const IMPERATIVE = /\b(please (answer|confirm|choose|tell|pick|reply|let me know)|reply with|let me know|tell me (whether|if|how|which)|choose (one|between)|pick one|confirm (whether|which|that))\b/i;
 const YES_LABEL = /\bYes[\s—–:(|*,_-]+Zensu workflow\b/i;
 const NO_LABEL = /\bNo[\s—–:(|*,_-]+implement(\s+it)?\s+directly\b/i;
 const ROUTE_WORKFLOW = /\b(zensu workflow|zensu:tdd|tdd|review chain)\b/i;
-const ROUTE_DIRECT = /\b(implement(ing)?( it| this| the change)? directly|directly implement|skip(ping)? (the )?(zensu )?(workflow|tdd)|without (the )?(zensu )?(workflow|tdd))\b/i;
-const ROUTER_Q1 = /\b(already (built|written|implemented)|starting (fresh|from scratch)|(existing|current) code(base)?|code(base)? (has |is )?(already )?(been )?(built|written|implemented)|is (the|your) code(base)? built)\b/i;
+const ROUTE_DIRECT = /\b(implement(ing)?( it| this| the change)? directly|directly implement|direct implementation|edit(ing)?( it| this| the file| the code)? directly|skip(ping)? (the )?(zensu )?(workflow|tdd)|without (the )?(zensu )?(workflow|tdd))\b/i;
+const ROUTER_Q1 = /\b(already (built|written|implemented)|starting (fresh|from scratch)|(existing|current|working) code(base)?|code(base)? (has |is )?(already )?(been )?(built|written|implemented)|is (the|your) code(base)? built|(has|have) (it |any of it )?been (built|implemented))\b/i;
 const ROUTER_Q2 = /\b(plans?|planning|specs?|specifications?|vision|requirements)\b/i;
-const ROUTER_Q3 = /(\bunbuilt\b|\bunimplemented\b|\bnot (yet )?(been )?(built|implemented)\b|n['’]t (yet )?(been )?(built|implemented)\b|\byet to be (built|implemented)\b|\bstill to (build|be built|implement|be implemented)\b)/gi;
+const ROUTER_Q3 = /(\bunbuilt\b|\bunimplemented\b|\bnot (yet )?(been )?(built|implemented)\b|n['’]t (yet )?(been )?(built|implemented)\b|\byet to be (built|implemented)\b|\bstill to (build|be built|implement|be implemented)\b|\bremains? to be (built|implemented)\b|\bstill needs? to be (built|implemented)\b)/gi;
 const SENTENCE = /(?<=[?.!])\s+|\n+/;
+const LIST_ITEM = /^\s*(?:\d+[.)]|[-*•])\s/;
+const ABBREVIATION = /\b(e\.g|i\.e|cf|vs)\./gi;
+const CLAUSE = /\s*[—–;:]\s+|\s+-\s+/;
+const QUESTION_START = /^(?:\(?\d+[.)]\s*|[-*•]\s*)?(?:is|are|was|were|do|does|did|has|have|can|could|will|would|should|shall|may|which|what|where|when|who|whether|how)\b/i;
 
 function json(text) {
   try { return JSON.parse(text); } catch (_) { return null; }
@@ -124,8 +128,35 @@ function asking(text) {
   return /\?/.test(text) || IMPERATIVE.test(text);
 }
 
+function askedPart(sentence) {
+  const parts = sentence.split(CLAUSE);
+  const first = parts.findIndex((p) => p.includes('?') || QUESTION_START.test(p.trim()));
+  return first > 0 ? parts.slice(first).join(' ') : sentence;
+}
+
+function askingText(text) {
+  const kept = [];
+  let lead = false;
+  for (const line of String(text || '').replace(ABBREVIATION, '$1').split('\n')) {
+    if (!line.trim()) continue;
+    const item = LIST_ITEM.test(line);
+    if (item && lead) {
+      kept.push(line);
+      continue;
+    }
+    const pieces = line.split(SENTENCE).filter((s) => s.trim());
+    kept.push(...pieces.filter(asking).map(askedPart));
+    if (!item) {
+      const last = pieces[pieces.length - 1] || '';
+      lead = asking(last) && /:\s*$/.test(last);
+    }
+  }
+  return kept.join('\n');
+}
+
 function proseAsk(prose, hook) {
   const t = String(prose || '');
+  if (hook === 'router') return covers(askingText(t), 'router');
   if (covers(t, hook) && asking(t)) return true;
   return hook === 'reminder' && t.split(SENTENCE).some((s) => asking(s) && offersRoute(s));
 }
@@ -170,13 +201,49 @@ function firstLine(prose) {
   return line.replace(/[`*_]/g, '').trim();
 }
 
+function textLines(text) {
+  return String(text || '').split('\n').map(firstLine).filter(Boolean);
+}
+
 function openingLines(e) {
   const map = pairs(e);
   const lines = [];
+  let afterSetup = false;
   for (let i = 0; i < e.blocks.length; i += 1) {
     const b = e.blocks[i];
-    if (b.kind !== 'text') continue;
-    lines.push(firstLine(b.text));
+    if (b.kind !== 'text') {
+      if (b.kind === 'tool_use') {
+        const used = map.get(b);
+        afterSetup = Boolean(used && used.decision === 'SETUP');
+      }
+      continue;
+    }
+    lines.push(...(afterSetup ? textLines(b.text).slice(0, 2) : [firstLine(b.text)]));
+    afterSetup = false;
+    const next = e.blocks[i + 1];
+    const record = next && next.kind === 'tool_use' ? map.get(next) : null;
+    if (!record || record.decision !== 'SETUP') break;
+  }
+  return lines;
+}
+
+function leadingLines(e) {
+  const map = pairs(e);
+  const lines = [];
+  let afterSetup = false;
+  for (let i = 0; i < e.blocks.length; i += 1) {
+    const b = e.blocks[i];
+    if (b.kind === 'tool_result') continue;
+    if (b.kind === 'tool_use') {
+      const record = map.get(b);
+      if (record && record.decision === 'SETUP') {
+        afterSetup = true;
+        continue;
+      }
+      break;
+    }
+    lines.push(...(afterSetup ? textLines(b.text).slice(0, 2) : [firstLine(b.text)]));
+    afterSetup = false;
     const next = e.blocks[i + 1];
     const record = next && next.kind === 'tool_use' ? map.get(next) : null;
     if (!record || record.decision !== 'SETUP') break;
@@ -200,9 +267,11 @@ module.exports = {
   offersRoute,
   classifyQuestion,
   proseAsk,
+  askingText,
   decisive,
   decisiveAt,
   firstEnd,
   firstLine,
   openingLines,
+  leadingLines,
 };

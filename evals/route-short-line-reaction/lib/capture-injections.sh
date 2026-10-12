@@ -130,7 +130,7 @@ capture() {
 }
 
 silence() {
-  local root="$1" cfg="$2" out="$3" prompt="$4" roster hook got leaks="" summary="" control
+  local root="$1" cfg="$2" out="$3" prompt="$4" roster hook got leaks="" summary="" control router_control
   [ -d "$out" ] || die "the output directory does not exist" 64
   [ -f "$cfg" ] || die "the eval config $cfg does not exist" 64
   [ -f "$root/hooks/hooks.json" ] || die "$root has no hooks/hooks.json"
@@ -158,16 +158,21 @@ silence() {
   done
   session_start "$root" "$NO_CONFIG"
   control="$(fire "$root" user-prompt-tdd-reminder.sh "$NO_CONFIG" "$prompt")"
+  router_control=""
+  if printf '%s\n' "$roster" | grep -qxF user-prompt-intent-router.sh; then
+    router_control="$(fire "$root" user-prompt-intent-router.sh "$NO_CONFIG" "$prompt")"
+  fi
   node -e '
     const fs = require("node:fs");
-    const [out, root, hooks, leaks, control] = process.argv.slice(1);
+    const [out, root, hooks, leaks, control, routerControl] = process.argv.slice(1);
     let version = "";
     try { version = JSON.parse(fs.readFileSync(`${root}/.claude-plugin/plugin.json`, "utf8")).version || ""; } catch (_) { version = ""; }
-    const value = { root, version, hooks: hooks.trim().split(/\s+/).filter(Boolean), leaks: leaks.trim().split(/\s+/).filter(Boolean), control: { hook: "user-prompt-tdd-reminder", chars: Number(control) } };
+    const value = { root, version, hooks: hooks.trim().split(/\s+/).filter(Boolean), leaks: leaks.trim().split(/\s+/).filter(Boolean), control: { hook: "user-prompt-tdd-reminder", chars: Number(control) }, router_control: { hook: "user-prompt-intent-router", chars: Number(routerControl) } };
     fs.writeFileSync(`${out}/silence.json`, `${JSON.stringify(value)}\n`, { mode: 0o600 });
     process.stdout.write(`${JSON.stringify(value)}\n`);
-  ' "$out" "$root" "$summary" "$leaks" "${#control}" || die "cannot write silence.json"
+  ' "$out" "$root" "$summary" "$leaks" "${#control}" "${#router_control}" || die "cannot write silence.json"
   [ -z "$leaks" ] || die "the live runtime injects context under the eval config:$leaks"
+  case "$control$router_control" in *"<<route-eval:"*) die "a positive control failed when fired without the eval config, so the silence check proves nothing" ;; esac
   [ "${#control}" -gt 0 ] || die "the positive control fired user-prompt-tdd-reminder.sh without the eval config and got nothing, so the silence check proves nothing"
 }
 

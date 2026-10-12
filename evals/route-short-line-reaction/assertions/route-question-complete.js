@@ -1,6 +1,6 @@
 'use strict';
 
-const { parse, proseAsk, classifyQuestion, YES_LABEL, NO_LABEL } = require('../lib/envelope.js');
+const { parse, firstEnd, proseAsk, classifyQuestion, YES_LABEL, NO_LABEL } = require('../lib/envelope.js');
 
 const NEEDLES = [
   ['the Yes label', YES_LABEL],
@@ -17,9 +17,9 @@ function missing(text) {
 }
 
 module.exports = (output) => {
-  const e = parse(output);
-  const tool = e.probe.find((r) => r.tool === 'AskUserQuestion' && classifyQuestion(r.question) === 'route');
-  const text = tool ? String(tool.question || '') : proseAsk(e.prose, 'reminder') ? e.prose : null;
+  const cut = firstEnd(parse(output));
+  const tool = cut.probe.find((r) => r.tool === 'AskUserQuestion' && classifyQuestion(r.question) === 'route');
+  const text = tool ? String(tool.question || '') : proseAsk(cut.prose, 'reminder') ? cut.prose : null;
   if (text === null) return { pass: true, score: 1, reason: 'no route question was asked; nothing to check' };
   const gaps = missing(text);
   return { pass: gaps.length === 0, score: 1 - gaps.length / NEEDLES.length, reason: gaps.length ? `the route question lacks ${gaps.join(', ')}` : 'both labels and all five disclosures present' };
