@@ -190,12 +190,13 @@ When present it is read as follows; `contractVersion` must be the literal intege
 - `routes` is no longer part of the contract. A recipe written for an earlier contract may still
   carry it; it is ignored and restricts nothing.
 
-## Concrete instance — the zensu-monorepo (verified values)
+## Concrete instance — a Go API behind a Vite dev server
 
-This is the autopilot recipe the probe resolves for the Zensu monorepo, using real values from
-that repo's `backend/Makefile`, `backend/internal/config/config.go`, and
-`frontend/vite.config.ts`. It is an autopilot example, not a `/zensu:verify-feature`-compatible
-live recipe: the verifier uses its bundled collision-safe, lease-owned adapter instead.
+An illustrative autopilot recipe for a repository with a Go backend in `backend/`, a pnpm
+frontend in `frontend/` whose Vite dev server proxies `/api` to the backend, and a Compose
+PostgreSQL. Every command and port stands in for the project's own. It is an autopilot example,
+not a `/zensu:verify-feature`-compatible live recipe: its fixed ports and shared Compose database
+fail the verifier's per-run isolation rules.
 
 ```yaml
 version: 1
@@ -206,21 +207,21 @@ services:
     up:    "make -C backend db-up"            # docker compose postgres :5432
     ready: "pg_isready -h localhost -p 5432"
   - name: backend
-    up:    "make -C backend migrate && make -C backend dev"   # air hot-reload, :8080
+    up:    "make -C backend migrate && make -C backend dev"   # hot reload, :8080
     ready: "curl -fs http://localhost:8080/<health>"          # exact path resolved by probe
-    env:   { EMAIL_PROVIDER: noop, NOTIFICATION_PROVIDER: noop }
+    env:   { EMAIL_PROVIDER: noop }
   - name: frontend
     up:    "pnpm -C frontend dev"             # vite :5173, proxies /api → :8080
     ready: "curl -fs http://localhost:5173"
 
 gates:
-  - "make -C backend check"                   # fmt + vet + lint + test + migrations-integration
+  - "make -C backend check"                   # fmt + vet + lint + test
   - "pnpm -C frontend exec vitest run --coverage"
-coverageMinPerFile: 90                        # repo rule 16
+coverageMinPerFile: 90
 
 auth:
   mode:        login-script
-  loginScript: "make -C backend e2e-session"  # NEW small target — see prerequisite below
+  loginScript: "make -C backend e2e-session"  # small project target — see prerequisite below
   artifact:    storageState
   baseUrl:     "http://localhost:5173" # same-origin /api proxy
   appOrigin:   "http://localhost:5173" # exact browser/storage-state origin
@@ -234,20 +235,19 @@ validate:
 
 ## Login-script prerequisite a project supplies
 
-For the monorepo this is the only thing autopilot needs that does not exist yet: a small
-`make e2e-session` target (the consumer-side login script) that
+The `loginScript` above is a small target the project adds itself, for example
+`make e2e-session`, that
 
-1. runs the existing seed (the monorepo's `backend/cmd/seed/main.go` already creates an
-   email-confirmed `admin@zensu.dev` owner user, idempotent + RLS-safe),
-2. logs that user in against `ZENSU_AUTH_BASE_URL` (`POST /api/auth/login`),
+1. runs the project's seed, which creates an email-confirmed test user idempotently,
+2. logs that user in against `ZENSU_AUTH_BASE_URL` (for example `POST /api/auth/login`),
 3. writes `storageState.json` for `ZENSU_APP_ORIGIN` (cookies/localStorage) beneath the supplied
    `ZENSU_AUTH_ARTIFACT_DIR`,
 4. prints exactly `STORAGE_STATE=<path>` and nothing else.
 
 The credentials stay **inside that target**. The skill runs it and reads only the
 `STORAGE_STATE=` line — it never sees the password. This is the login-script convention
-from `auth.md` applied to one concrete repo; any project provides the equivalent for its
-own stack (an API-login script, a headless-form script, or a seed+login target), and the
+from `auth.md` applied to one stack; every project provides the equivalent for its own
+stack (an API-login script, a headless-form script, or a seed+login target), and the
 orchestration is identical.
 
 ## Notes

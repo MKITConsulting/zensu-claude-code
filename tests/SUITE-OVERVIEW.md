@@ -53,9 +53,10 @@ merging `main` into it made 156. The twelfth is the tenth's shape without the gr
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
 moved.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 156 against 159 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 155 against 159 CI-classified suites, so FOUR CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
-`test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
+`test-incremental-review-rounds.sh`, `test-restore-project-root.sh` and
+`test-session-hub-receipt.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, evidence & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
@@ -100,7 +101,7 @@ is ever measured for the suite.
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **9** (`windows-shard-1`…`-9`, 44 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
-| Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
+| Approx. assertions in structure layer | **~4,100** (~3,680 in the CI set) | — |
 
 ## 2. Run modes (`tests/run-all.sh`)
 
@@ -138,13 +139,13 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (17)
+### Session Control & workflow state (16)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` · `session-reanchor` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
-`workflow-scope` · `worktree-keep` · `zensu-runtime-controller`
+`workflow-scope` · `worktree-keep`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
@@ -437,7 +438,6 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `claude-stream-render.test.js` | 6 | `test-eval-harness-units.sh` | stream renderer |
 | `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
-| `process-supervisor.test.js` | 7 | `test-zensu-runtime-controller.sh` | bounded supervisor + process-tree teardown, a stop that never fails on the EPERM macOS answers while the group holds only zombies (a macOS-only fixture keeps one there), and the distinct exit code for an endpoint no supervisor answers |
 | `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
@@ -445,8 +445,8 @@ file with a row calls the same helper beside the floor it reads from that cell t
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (48
-files) against this table's 43 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (47
+files) against this table's 42 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR

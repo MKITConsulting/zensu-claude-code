@@ -159,8 +159,7 @@
     "test-worktree-keep.sh",
     "test-zen-mode.sh",
     "test-zensu-help-skill.sh",
-    "test-zensu-plm-arg-guidance.sh",
-    "test-zensu-runtime-controller.sh"
+    "test-zensu-plm-arg-guidance.sh"
   ],
   "localStructureTests": [
     "test-claude-promptfoo-wrapper.sh",

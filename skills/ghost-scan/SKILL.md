@@ -281,8 +281,8 @@ This mirrors `/zensu:bootstrap` Step 2.
 
 > **Build-out baseline (automatic, server-side).** Each newly created feature is
 > seated at a `v1` "Discovered baseline" automatically by the scan apply — minted
-> backend-side (zensu-monorepo #266), no client step here. Backends predating #266
-> simply have no baseline; harmless. Features fan out later into deeper revisions
+> server-side, no client step here. Older servers simply have no baseline;
+> harmless. Features fan out later into deeper revisions
 > and subfeatures.
 
 ### Phase 5b: Cross-Component Deep Journey Pass (multi-component products)

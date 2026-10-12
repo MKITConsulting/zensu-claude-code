@@ -1031,9 +1031,9 @@ case "$POST_MISMATCH_ERR" in *'CLAUDE_PLUGIN_ROOT'*) MISMATCH_SAID=1 ;; *) MISMA
 TEMPLATE_ROUTES_RE='^[[:space:]]*routes:'
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD" \
   && ! grep -qE "$TEMPLATE_ROUTES_RE" "$SETUP_MD"; then
-  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" PASS
+  check "V34a the template carries no key the autopilot contract never reads (portEnv, routes)" PASS
 else
-  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" FAIL
+  check "V34a the template carries no key the autopilot contract never reads (portEnv, routes)" FAIL
 fi
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD"; then
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" PASS

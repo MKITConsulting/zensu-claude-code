@@ -314,10 +314,10 @@ This common `$RUN_DIR` must exist before runtime or authentication preparation.
 ### Local mode
 
 Local means the application process actually uses files from the current worktree.
-Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
-`rules/zensu-monorepo.md` says `<absolute-plugin-root>`, replace it with this
-concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
-Claude's native placeholder substitution.
+Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule, and run every
+plugin script a bundled rule names from this concrete absolute `ROOT`, because
+supporting files loaded through `Read` do not receive Claude's native placeholder
+substitution.
 
 0. When `--attach=<origin>` was given, skip runtime preparation entirely: see "Attach mode"
    below. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
@@ -346,25 +346,18 @@ Claude's native placeholder substitution.
    rejected; do not execute any part of it.
 2. Resolve the runtime from the first **compatible** option:
    - the accepted candidate recipe;
-   - when the repository matches the Zensu monorepo markers, the bundled
-     `rules/zensu-monorepo.md` adapter (including when an autopilot candidate was rejected);
    - otherwise, in an interactive session, offer the guided setup with ONE `AskUserQuestion`
      ("No runtime recipe found. Set one up now?"); on yes run `rules/setup.md`, then resume at
      step 1 with the recipe it wrote. On no, or when no human can answer, stop with PARTIAL and
      list the missing startup, readiness, base URL, auth, fixture, isolation, and teardown
      facts. Never invent commands.
-   In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
+   In consent mode the accepted candidate takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
    recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then that port on the
    loopback origin the application expects — `http://127.0.0.1:$ZENSU_VERIFY_PORT`, or
    `http://localhost:$ZENSU_VERIFY_PORT` when the recipe's `validate.baseUrlCommand` prints it or
    the app's CORS allow-list, cookies or auth callback name `localhost` — and the first
-   navigation to it asks the user. The
-   MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
-   `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
-   for the run, so a reused run directory keeps the port it already recorded. Never derive the
-   adapter's origin from a second free-port call — the two would diverge on a reused run
-   directory and on two concurrent runs.
+   navigation to it asks the user.
 3. Before starting a service, register its scoped cleanup. A daemonized or shared service
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own
