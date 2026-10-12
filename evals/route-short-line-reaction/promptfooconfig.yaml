@@ -1,0 +1,37 @@
+description: "Reaction to the tdd-reminder's ask short line and decided lines and the intent-router's short line, each delivered alone through a real UserPromptSubmit hook while the installed Zensu runtime is silenced. Run promptfooconfig-preflight.yaml first."
+
+providers:
+  - id: 'exec: ./provider.sh'
+    config:
+      working_dir: ./test-projects/cart-app
+      init_git: true
+
+prompts:
+  - id: route-short-line-reaction
+    label: "route short line reaction (real hook injection + task)"
+    raw: |
+      route-eval-source: {{route_source}}
+      {{user_message}}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+  assert:
+    - type: javascript
+      value: file://assertions/harness-attested.js
+    - type: javascript
+      value: file://assertions/harness-injection.js
+    - type: javascript
+      value: file://assertions/harness-isolation.js
+
+tests:
+  - file://scenarios/control-no-injection.yaml
+  - file://scenarios/ask-headless-code-change.yaml
+  - file://scenarios/decided-tdd-code-change.yaml
+  - file://scenarios/decided-direct-code-change.yaml
+  - file://scenarios/router-genuine-planning.yaml
+
+evaluateOptions:
+  maxConcurrency: 2
+  repeat: 3

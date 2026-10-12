@@ -1,0 +1,20 @@
+description: "The ask short line alone, as every later prompt of a context generation carries it, on a code change in a headless run. The model either runs the Zensu workflow through the Skill tool without asking, as the headless clause says, or asks a complete route question. It never edits first, never records a route, and after an unanswered route question it runs the workflow or stops, never edits."
+vars:
+  route_source: ask
+  user_message: "Add an optional discountPercent parameter to cartTotal in src/cart.js that reduces the item subtotal by that percentage before the shipping fee is added, default 0."
+  expected_hook: reminder
+  expected_shape: ask-short
+  expected_field: ask
+  allowed_first: skill:zensu:tdd,ask
+  anchor_clause: "Running non-interactively in Auto Mode or headless with no human to answer, run the Zensu workflow without asking."
+assert:
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/after-ask.js
+  - type: javascript
+    value: file://assertions/no-record-command.js
+  - type: javascript
+    value: file://assertions/route-question-complete.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js

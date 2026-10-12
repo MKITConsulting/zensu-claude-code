@@ -1,0 +1,17 @@
+description: "Control: nothing is injected and the installed runtime is silenced. The model must produce no route status line, no route or triage question and no hook scaffolding, and its first decisive action is an edit or nothing. This baseline shows that the behaviour graded in the other scenarios comes from the injected line and not from a leaking hook or the host's own instructions."
+vars:
+  route_source: none
+  user_message: "Add an optional discountPercent parameter to cartTotal in src/cart.js that reduces the item subtotal by that percentage before the shipping fee is added, default 0."
+  expected_hook: ""
+  expected_shape: none
+  expected_field: n/a
+  allowed_first: edit,none
+assert:
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/no-route-status.js
+  - type: javascript
+    value: file://assertions/no-route-question.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js

@@ -191,6 +191,21 @@ if [ -n "${ZENSU_PLUGIN_DIR_OVERRIDE:-}" ] && [ -d "$ZENSU_PLUGIN_DIR_OVERRIDE" 
 fi
 if [ "$RESET_ATTEST_MODE" = "1" ]; then CMD+=(--session-id "$RESET_SESSION_ID"); fi
 if [ "$RESET_ATTEST_MODE" = "1" ]; then CMD+=(--settings "$RESET_SETTINGS"); fi
+if [ -n "${ZENSU_WRAPPER_SETTINGS:-}" ]; then
+  if [ "$RESET_ATTEST_MODE" = "1" ]; then
+    echo "claude-promptfoo-wrapper: ZENSU_WRAPPER_SETTINGS cannot be combined with the reset-review-limit attestation" >&2
+    exit 64
+  fi
+  case "$ZENSU_WRAPPER_SETTINGS" in
+    /*) ;;
+    *) echo "claude-promptfoo-wrapper: ZENSU_WRAPPER_SETTINGS must be an absolute path" >&2; exit 64 ;;
+  esac
+  if [ -L "$ZENSU_WRAPPER_SETTINGS" ] || [ ! -f "$ZENSU_WRAPPER_SETTINGS" ]; then
+    echo "claude-promptfoo-wrapper: ZENSU_WRAPPER_SETTINGS must name a regular file that is not a symlink" >&2
+    exit 64
+  fi
+  CMD+=(--settings "$ZENSU_WRAPPER_SETTINGS")
+fi
 CMD+=("$FULL_PROMPT")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then

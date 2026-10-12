@@ -1,0 +1,33 @@
+description: "Preflight for the route short line reaction eval: one run that proves the injection channel and the PreToolUse interception before the graded config spends its runs."
+
+providers:
+  - id: 'exec: ./provider.sh'
+    config:
+      working_dir: ./test-projects/cart-app
+      init_git: true
+
+prompts:
+  - id: route-short-line-preflight
+    label: "route short line preflight (nonce injection + Skill interception)"
+    raw: |
+      route-eval-source: {{route_source}}
+      {{user_message}}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+  assert:
+    - type: javascript
+      value: file://assertions/harness-attested.js
+    - type: javascript
+      value: file://assertions/harness-injection.js
+    - type: javascript
+      value: file://assertions/harness-isolation.js
+
+tests:
+  - file://scenarios/preflight/channel-check.yaml
+
+evaluateOptions:
+  maxConcurrency: 1
+  repeat: 1

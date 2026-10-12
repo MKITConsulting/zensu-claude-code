@@ -928,6 +928,37 @@ else
   check "P14-S2 empty argv[2] default (got '$P14_EMPTY')" FAIL
 fi
 
+P15_DIR="$(mktemp -d)"
+printf '{}\n' > "$P15_DIR/settings.json"
+ln -s "$P15_DIR/settings.json" "$P15_DIR/link.json"
+P15_OUT="$(ZENSU_WRAPPER_SETTINGS="$P15_DIR/settings.json" DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1)"
+P15_RC=$?
+if [ "$P15_RC" -eq 0 ] && printf '%s\n' "$P15_OUT" | grep -qF -- "--settings  $(printf '%q' "$P15_DIR/settings.json")"; then
+  check "P15-S1 ZENSU_WRAPPER_SETTINGS adds --settings with the named file" PASS
+else
+  check "P15-S1 ZENSU_WRAPPER_SETTINGS adds --settings with the named file (rc=$P15_RC, out=${P15_OUT:0:300})" FAIL
+fi
+P15_BAD=""
+for P15_CASE in "settings.json|must be an absolute path" "$P15_DIR/link.json|must name a regular file that is not a symlink" \
+  "$P15_DIR/missing.json|must name a regular file that is not a symlink"; do
+  P15_VALUE="${P15_CASE%%|*}"
+  P15_WANT="${P15_CASE#*|}"
+  P15_ERR="$(ZENSU_WRAPPER_SETTINGS="$P15_VALUE" DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1 >/dev/null)"
+  P15_RC=$?
+  { [ "$P15_RC" -eq 64 ] && printf '%s' "$P15_ERR" | grep -qF -- "ZENSU_WRAPPER_SETTINGS $P15_WANT"; } || P15_BAD="$P15_BAD [$P15_VALUE rc=$P15_RC]"
+done
+P15_ERR="$(ZENSU_RESET_REVIEW_LIMIT_ATTESTATION=1 ZENSU_RESET_REVIEW_LIMIT_SCENARIO=reset-cas-happy ZENSU_WRAPPER_SETTINGS="$P15_DIR/settings.json" \
+  DRY_RUN=1 bash "$WRAPPER" 'p' '{"config":{"init_git":true}}' 2>&1 >/dev/null)"
+P15_RC=$?
+{ [ "$P15_RC" -eq 64 ] && printf '%s' "$P15_ERR" | grep -qF 'cannot be combined with the reset-review-limit attestation'; } || P15_BAD="$P15_BAD [reset rc=$P15_RC]"
+if DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1 | grep -qF -- '--settings'; then P15_BAD="$P15_BAD [--settings without the variable]"; fi
+rm -rf "$P15_DIR"
+if [ -z "$P15_BAD" ]; then
+  check "P15-S2 ZENSU_WRAPPER_SETTINGS refuses a relative, linked or missing file and the reset attestation with 64, and no run without it gets --settings" PASS
+else
+  check "P15-S2 ZENSU_WRAPPER_SETTINGS refusals:$P15_BAD" FAIL
+fi
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

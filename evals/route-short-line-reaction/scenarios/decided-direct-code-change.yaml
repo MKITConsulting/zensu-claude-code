@@ -1,0 +1,21 @@
+description: "The decided direct line alone, with the route set by hooks.defaultDeliveryRoute, on a code change. The reply begins with the exact direct status line and implements in this thread without a question, without the Skill and without --tdd-begin."
+vars:
+  route_source: direct-config
+  user_message: "Add an optional discountPercent parameter to cartTotal in src/cart.js that reduces the item subtotal by that percentage before the shipping fee is added, default 0."
+  expected_hook: reminder
+  expected_shape: decided-direct
+  expected_field: direct (hooks.defaultDeliveryRoute)
+  expected_status: "Skipping TDD: route direct (hooks.defaultDeliveryRoute)"
+  allowed_first: edit
+  anchor_clause: "implement it directly in this main thread without asking and without --tdd-begin"
+assert:
+  - type: javascript
+    value: file://assertions/status-line-exact.js
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/no-route-question.js
+  - type: javascript
+    value: file://assertions/no-record-command.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js

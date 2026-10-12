@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (167 = 160 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 160 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 167). The figures here have drifted TWELVE times, eleven of them upward, and every
+reconciled to that manifest (168 = 161 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 161 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 168). The figures here have drifted TWELVE times, eleven of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -53,7 +53,7 @@ merging `main` into it made 156. The twelfth is the tenth's shape without the gr
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
 moved.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 157 against 160 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 158 against 161 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -93,8 +93,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **167** — 160 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **160 structure suites + 5 offline evals = 165 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 167 − 160 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **168** — 161 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **161 structure suites + 5 offline evals = 166 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 168 − 161 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -106,8 +106,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 167 structure suites + 5 offline evals | none |
-| `--ci` | 160 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 168 structure suites + 5 offline evals | none |
+| `--ci` | 161 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -288,16 +288,16 @@ developer's real sessions.
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
 listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
-### Prompt routing & payloads (9)
+### Prompt routing & payloads (10)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
-`prompt-ledger` · `user-prompt-budget` · `zensu-plm-arg-guidance`
+`prompt-ledger` · `route-short-line-eval` · `user-prompt-budget` · `zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
 CI-event prompts, for the first prompt of a context generation and for every later one, the
-per-session delivery ledger behind that split and the `SessionStart` reset that clears it, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
+per-session delivery ledger behind that split and the `SessionStart` reset that clears it, the deterministic half of the local-only reaction eval for the reminder's and the router's short lines (the line each scenario grades, captured from this tree; the silence of every prompt hook under the eval config; the provider's run settings and refusals; and the graders, through their unit file), and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
 a distinct receipt for each failure mode).
 
 ### VCS / forge integration (7)
@@ -427,6 +427,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `playwright-cli-version-v1.test.js` | 14 | `test-verify-consent.sh` (V7d) | the installed playwright-cli version identity the doctor and the run-config helper share: the `@playwright/cli` manifest the resolved binary belongs to, read without running it; a manifest naming another package or malformed, which is never executed; the npm shim sibling, read before any directory above the shim; the bounded `--version` self-report with stdin closed and the update notifier off; the PATH walk in shell order, with an empty or relative entry read against the working directory and named as unstable; and the key-per-line CLI |
 | `release-run-step.test.js` | 11 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `workflow-dispatch-inputs.test.js` | 24 | `test-workflow-dispatch-inputs.sh` | dispatcher-controlled values reach `run:` scripts only through `env:` or a runner variable: no `run:` block in any workflow template-expands an `inputs`, `env` or `needs` reference, or a `github` reference other than a dotted `sha`, `event_name`, `repository` or `server_url`, in any letter case (with a synthetic document proving the scan flags dotted, index and whole-context forms and no trusted one), every release step reading `SKIP_REASON`, `SKIP_TEST_GATE` or `VERSION_TYPE` maps it from that input, and prepare and publish carry one identical skip-request validation. EXECUTED through an emulated expression renderer: that validation against hostile, empty, whitespace-only, multi-line and edge-padded reasons; the release commit step in a throwaway repository followed by the publish plan's own decision block, for an ordinary release and a skipped one; that block's push default, which runs the gate unless the trailer reads `skipped`, its dispatch branches, the trailer outranking a dispatched reason with a notice only when the reasons differ, and a trailer without a reason, refused on push and left to the dispatch on a publish retry; the plan's `gate` and `gate_reason` outputs as one line each, a hostile reason included; both evidence steps, which record `passed` only after the suite job succeeded and `skipped` only when it was skipped with a reason, and refuse every contradicting combination; the main-only guard against a hostile ref; and the version computation |
+| `route-short-line-graders.test.js` | 31 | `test-route-short-line-eval.sh` (RS1) | route short-line eval GRADERS and harness: the envelope constants read from the wrapper, the renderer and the provider that print them, the stream parse and its one-header rule, the pairing of tool calls with probe records by id or by position, the route-label, route-offer and triage matchers, the first decisive action past allowed, setup and clarifying calls, the cut at the first denied call, the opening lines past a setup detour, the probe's decision table and its hook output and log, the inject hook's delivery and digest, every grader in both directions, and the binding of every grader and scenario var |
 | `zen-anchor-assertions.test.js` | 12 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, every scenario bound to an anchor the module can produce, and every short-body scenario carrying exactly the graders and the anchor of its full-contract twin |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
 | `verify-feature-transcript-check.test.js` | 26 | `test-eval-harness-units.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module, the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs a passing `network-only` preflight before the helper call, the helper flag echoed back in the spelling the skill documents, every required operation in a session whose config that flagged call wrote last, and no navigation toward the network-only origin |
@@ -445,8 +446,8 @@ file with a row calls the same helper beside the floor it reads from that cell t
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (47
-files) against this table's 42 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (48
+files) against this table's 43 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
@@ -572,8 +573,9 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
   A test that compares a file mtime, a git date or a lease age with `Date.now()` therefore
   fails under the shift by design; the allowlist names each such test with its dependency
   (`file-mtime`, `git-date` or `lease-staleness`).
-- 4 eval directories are not wired into any `run-all.sh` mode
-  (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
+- 5 eval directories are not wired into any `run-all.sh` mode
+  (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`,
+  `route-short-line-reaction`).
 - The 2 offline eval self-checks whose `ciOfflineSuites` entry sets `needsNodeDeps`
   (`session-control`, `reset-review-limit`) and every structure suite listed in the
   manifest's `nodeDepsStructureTests` need `npm ci`; without `node_modules` they report

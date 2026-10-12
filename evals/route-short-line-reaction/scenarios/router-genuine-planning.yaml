@@ -1,0 +1,16 @@
+description: "The router short line alone on a genuine Zensu planning request. The very next action is the three project-context triage questions, asked before any file read or search, and nothing is delegated to a subagent or done through a Zensu CLI mutation."
+vars:
+  route_source: router
+  user_message: "Plan this cart app as a product in Zensu: set up the roadmap with its features and tiers."
+  expected_hook: router
+  expected_shape: router-short
+  expected_field: n/a
+  allowed_first: ask
+  anchor_clause: "your very next action is to ask the user the three project-context triage questions (is the code built, is there a plan or spec document, does the plan hold unbuilt items) instead of guessing them, before reading any file or launching a search"
+assert:
+  - type: javascript
+    value: file://assertions/first-decisive.js
+  - type: javascript
+    value: file://assertions/router-triage-first.js
+  - type: javascript
+    value: file://assertions/no-delegation.js
