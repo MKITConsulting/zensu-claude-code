@@ -1827,6 +1827,46 @@ _zensu_vcs_extract_url() {
   node -e 'var s="";process.stdin.on("data",function(d){s+=d;});process.stdin.on("end",function(){var m=s.match(/https?:\/\/[^\s]*\/(?:pull|merge_requests)\/[0-9]+[^\s]*/);if(!m){m=s.match(/https?:\/\/[^\s]+/);}var u=m?m[0]:"",o="";for(var z=0;z<u.length;z++){var cc=u.charCodeAt(z);if(cc>=32&&cc!==127){o+=u[z];}}process.stdout.write(o);});'
 }
 
+_zensu_vcs_review_markers() {
+  local provider="" repoid="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  repoid="${2:-}"; shift ;;
+      --*) ;;
+      *) [ -z "$id" ] && id="$1" ;;
+    esac
+    shift
+  done
+  _zensu_vcs_is_num "$id" || return 1
+  case "$provider" in
+    github) _zensu_vcs_is_gh_repoid "$repoid" || return 1 ;;
+    gitlab) _zensu_vcs_is_gl_repoid "$repoid" || return 1 ;;
+    *) return 1 ;;
+  esac
+  command -v node >/dev/null 2>&1 || return 1
+  local inventory
+  inventory="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
+  printf '%s' "$inventory" | node -e '
+    var chunks=[];process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
+      var raw=Buffer.concat(chunks);if(raw.length>32*1024*1024)process.exit(1);
+      var data;try{data=JSON.parse(raw.toString("utf8"));}catch(_){process.exit(1);}
+      var re=/<!-- zensu-review:v1:[a-f0-9]{64}:[a-f0-9]{64}:[a-f0-9]{7,64}:[1-9][0-9]{0,5}:part=1\/[1-9][0-9]{0,5} -->/g;
+      var seen={},out=[];
+      function walk(value,depth){
+        if(depth>64||value===null||typeof value!=="object")return;
+        if(Array.isArray(value)){value.forEach(function(item){walk(item,depth+1);});return;}
+        Object.keys(value).forEach(function(key){
+          if(key==="body"&&typeof value[key]==="string"){
+            (value[key].match(re)||[]).forEach(function(marker){if(!seen[marker]){seen[marker]=true;out.push(marker);}});
+          }else{walk(value[key],depth+1);}
+        });
+      }
+      walk(data,0);
+      process.stdout.write(out.length?out.join("\n")+"\n":"");
+    });'
+}
+
 _zensu_vcs_open_pr() {
   local provider="" base="" head="" title="" bodyfile=""
   while [ $# -gt 0 ]; do
@@ -1866,7 +1906,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
+export -f _zensu_vcs_clamp_diag _zensu_vcs_report_failure _zensu_vcs_run _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_review_markers _zensu_vcs_open_pr 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
@@ -1881,6 +1921,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     --reconcile-review) shift; _zensu_vcs_reconcile_review "$@" ;;
     --post-review)    shift; _zensu_vcs_post_review "$@" ;;
     --open-pr)        shift; _zensu_vcs_open_pr "$@" ;;
-    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--reconcile-review|--post-review|--open-pr [--provider github|gitlab] [--repo-id R] [--reply TEXT] [--diff-refs-json JSON] [--expected-head SHA] [--operation-key KEY] [--base B] [--head H] [--title T] [--body-file F] [args]\n' >&2; exit 2 ;;
+    --review-markers) shift; _zensu_vcs_review_markers "$@" ;;
+    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--reconcile-review|--post-review|--open-pr|--review-markers [--provider github|gitlab] [--repo-id R] [--reply TEXT] [--diff-refs-json JSON] [--expected-head SHA] [--operation-key KEY] [--base B] [--head H] [--title T] [--body-file F] [args]\n' >&2; exit 2 ;;
   esac
 fi
