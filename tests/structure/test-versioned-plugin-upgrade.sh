@@ -25,6 +25,13 @@ check() {
   fi
 }
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "the recognizer unit file passes" "$ROOT/tests/structure/zensu-doctor-invocation.test.js"
+unit_check "AC-011 the runtimeLineageCompatible unit file passes" "$ROOT/tests/structure/session-control-lineage.test.js"
+unit_check "the superseded-lease sweep unit file passes" "$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
+unit_check "the adoption report unit file passes" "$ROOT/tests/structure/session-adopt-report-v1.test.js"
+unit_check "the automatic-adoption unit file passes" "$ROOT/tests/structure/session-auto-adopt-v1.test.js"
+
 # HOISTED to the very front on purpose - before the mktemp, before the first
 # synthetic install. These two pins need no fixture, no synthetic install and no
 # session lifecycle: they read $ROOT and compare two strings. They were the LAST
@@ -1443,116 +1450,6 @@ else
   else
     check "AC-013 a $PREVIOUS_RELEASE_TAG record and workflow document validate under the current tree" FAIL
   fi
-fi
-
-# AC-011 — the predicate's own truth table. Driven from here rather than
-# registered separately: this suite is already in every profile, so the unit
-# file cannot be silently left out of a shard.
-# WORKING TREE, not HEAD: this requires ../../hooks/lib directly, unlike every
-# behavioural row above, which reaches the fixture-installed copy of that file.
-. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
-RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
-RECOGNIZER_FLOOR="$(unit_overview_declared "${RECOGNIZER_UNIT##*/}")"
-if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/recognizer-unit.out" "$RECOGNIZER_FLOOR"; then
-  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), driven from here — nothing else referenced it)" PASS
-else
-  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), want >= ${RECOGNIZER_FLOOR:-<no overview row>} registered — driven from here, nothing else referenced it)" FAIL
-  # The FAILING lines, not the first forty. node --test emits every passing case
-  # before any failure, so a head-style dump of a 26-case suite showed only
-  # successes and the verdict never reached the log — exactly what happened on
-  # windows-shard-2, where it cost a CI round to notice the dump was truncated.
-  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
-    "$TMP/recognizer-unit.out" 2>/dev/null | head -40
-fi
-if RECOGNIZER_OVERVIEW="$(unit_overview_check "$RECOGNIZER_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${RECOGNIZER_UNIT##*/} registers ($RECOGNIZER_FLOOR)" PASS
-else
-  check "$RECOGNIZER_OVERVIEW" FAIL
-fi
-
-# WORKING TREE, not HEAD — same split as the recognizer unit row above.
-LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
-LINEAGE_FLOOR="$(unit_overview_declared "${LINEAGE_UNIT##*/}")"
-if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/lineage-unit.out" "$LINEAGE_FLOOR"; then
-  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"))" PASS
-else
-  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= ${LINEAGE_FLOOR:-<no overview row>} registered)" FAIL
-  sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
-fi
-if LINEAGE_OVERVIEW="$(unit_overview_check "$LINEAGE_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${LINEAGE_UNIT##*/} registers ($LINEAGE_FLOOR)" PASS
-else
-  check "$LINEAGE_OVERVIEW" FAIL
-fi
-
-# WORKING TREE, not HEAD — same split again. The superseded-lease sweep moved out
-# of session-control-core-v1.js into its own module (requiring the lease owner from
-# the core is a require cycle), which finally gives it a unit driver: its refusal
-# arms used to cost a full synthetic install plus a session lifecycle each, and
-# three of its return shapes were not reachable from here at all. Driven from this
-# file for the same reason the two above are — tests/run-all.sh discovers only
-# test-*.sh, so an undriven *.test.js never executes anywhere.
-SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
-SWEEP_FLOOR="$(unit_overview_declared "${SWEEP_UNIT##*/}")"
-if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/sweep-unit.out" "$SWEEP_FLOOR"; then
-  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
-else
-  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= ${SWEEP_FLOOR:-<no overview row>} registered — driven from here)" FAIL
-  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
-    "$TMP/sweep-unit.out" 2>/dev/null | head -40
-fi
-if SWEEP_OVERVIEW="$(unit_overview_check "$SWEEP_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${SWEEP_UNIT##*/} registers ($SWEEP_FLOOR)" PASS
-else
-  check "$SWEEP_OVERVIEW" FAIL
-fi
-
-# WORKING TREE, not HEAD — same split. The adoption REPORT moved out of a
-# single-quoted `node -e` shell payload into its own module, which is what finally
-# gives safe() a driver: it had no test in either direction, so deleting its whole
-# guard condition and returning the text unchanged left the suite green.
-REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
-REPORT_FLOOR="$(unit_overview_declared "${REPORT_UNIT##*/}")"
-if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" "$REPORT_FLOOR"; then
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
-else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= ${REPORT_FLOOR:-<no overview row>} registered — driven from here)" FAIL
-  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
-    "$TMP/report-unit.out" 2>/dev/null | head -40
-fi
-if REPORT_OVERVIEW="$(unit_overview_check "$REPORT_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${REPORT_UNIT##*/} registers ($REPORT_FLOOR)" PASS
-else
-  check "$REPORT_OVERVIEW" FAIL
-fi
-
-# WORKING TREE, not HEAD — same split. The automatic adoption is ONE module shared
-# by every hook-side binder and by the manual entry point; its ladder (probe, then
-# the opt-out, adopt under the lock, sweep — the probe FIRST, so `opted-out` only
-# ever stands for a record that would otherwise have been adopted) and every refusal
-# arm are driven here through injected core and sweep stubs, which no synthetic
-# install can reach. It also drives two things no other layer can: the screens and
-# selectors the all-tool gate exports for this purpose alone, and the adapter's
-# serve-or-adopt with stubs, which is the only way to reach a sibling adoption that
-# finished BEFORE this process probed.
-AUTO_ADOPT_UNIT="$ROOT/tests/structure/session-auto-adopt-v1.test.js"
-AUTO_ADOPT_FLOOR="$(unit_overview_declared "${AUTO_ADOPT_UNIT##*/}")"
-if [ -f "$AUTO_ADOPT_UNIT" ] && node --test "$AUTO_ADOPT_UNIT" >"$TMP/auto-adopt-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" "$AUTO_ADOPT_FLOOR"; then
-  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), driven from here)" PASS
-else
-  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= ${AUTO_ADOPT_FLOOR:-<no overview row>} registered — driven from here)" FAIL
-  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
-    "$TMP/auto-adopt-unit.out" 2>/dev/null | head -40
-fi
-if AUTO_ADOPT_OVERVIEW="$(unit_overview_check "$AUTO_ADOPT_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${AUTO_ADOPT_UNIT##*/} registers ($AUTO_ADOPT_FLOOR)" PASS
-else
-  check "$AUTO_ADOPT_OVERVIEW" FAIL
 fi
 
 # The non-sibling case is the one that cannot be inferred from the version
@@ -7132,6 +7029,8 @@ if auto_session_start "$AUTO_SWEEP_SESSION" "$AUTO_SWEEP_PROJECT" "$SYNTHETIC_CA
 else
   check "AUTO-29 fixture: the served-sweep sessions register under the candidate root" FAIL
 fi
+
+unit_check_done "every unit file the registry gives this suite was graded"
 
 printf '%s\n' '----' \
   "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"

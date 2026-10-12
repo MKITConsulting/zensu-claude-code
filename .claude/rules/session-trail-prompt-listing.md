@@ -67,8 +67,9 @@ with the constant and checks its clauses, and `T24m` holds the description of th
   verbatim, and an advice statement that names neither listing name.
 - `tests/structure/prompt-listing-v1.test.js` drives `extractPrompts` and
   `QUEUE_DELIVERY_REACH` directly. `tests/run-all.sh` discovers only `test-*.sh`, so
-  `test-session-trail-verdict.sh` runs the file and holds its case count in
-  `PL_UNIT_TOTAL_WANT`. The count is exact and hand-maintained: a new case means raising it.
+  `test-session-trail-verdict.sh` runs the file and grades it against its entry in
+  `tests/profiles/unit-files.v1.json`. The `registered` count there is exact: a new case means
+  raising it, and the five sole-holder cases are that entry's `guards`, which must PASS.
 - Further checks read the listing's constants, comments and body out of `trail.mjs`. That set
   is a grep, not a list: run
   `grep -nE 'queueWithdrawals|extractPrompts|QUEUE_[A-Z_]+|WITHDRAWN_[A-Z_]+' tests/structure/test-session-trail-*.sh`

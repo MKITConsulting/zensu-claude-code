@@ -213,7 +213,8 @@ the capped and uncapped arms then agree. A new cap needs a fixture count above i
 **Test-side couplings, which break silently rather than loudly:** the manifest
 entry in `tests/profiles/promptfoo-local-only.v1.json` (`run-all.sh` refuses to
 execute at all when the manifest and the directory disagree) together with the
-counts in `tests/SUITE-OVERVIEW.md`; and the grep-exact literals
+generated totals in `tests/SUITE-OVERVIEW.md`, which
+`node tests/structure/lib-unit-registry.js render --write` rewrites; and the grep-exact literals
 of the secure-open inventory in `tests/structure/test-windows-portability-guards.sh` —
 which is also the ONLY Windows pin any part of this module has, since
 `test-artifact-redaction.sh` has no `windows-ci.v1.json` entry and the `\Users\<seg>`

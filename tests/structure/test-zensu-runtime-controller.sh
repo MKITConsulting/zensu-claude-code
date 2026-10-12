@@ -4,9 +4,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONTROLLER="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 SUPERVISOR_TEST="$ROOT/tests/structure/process-supervisor.test.js"
-# Shared, locale-independent `node --test` summary parse (see the file header for
-# why the count matters and why it is not hand-copied here).
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 
 TMP="$(mktemp -d -t zensu-runtime-controller-XXXXXX)"
 STUBS="$TMP/stubs"
@@ -63,19 +61,14 @@ if node -e '
   LOOPBACK_AVAILABLE=1
 fi
 
-SUPERVISOR_FLOOR="$(unit_overview_declared "${SUPERVISOR_TEST##*/}")"
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
-  check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
-elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
-  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" "$SUPERVISOR_FLOOR"; then
-  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
+  if unit_not_run "$SUPERVISOR_TEST" "the managed host forbids loopback listeners"; then
+    check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
+  else
+    check "process-supervisor integration: $UNIT_RUN_VERDICT" FAIL
+  fi
 else
-  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= ${SUPERVISOR_FLOOR:-<no overview row>} registered)" FAIL
-fi
-if SUPERVISOR_OVERVIEW="$(unit_overview_check "$SUPERVISOR_TEST")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${SUPERVISOR_TEST##*/} registers ($SUPERVISOR_FLOOR)" PASS
-else
-  check "$SUPERVISOR_OVERVIEW" FAIL
+  unit_check "process supervisor authenticates status/stop and terminates its child group" "$SUPERVISOR_TEST"
 fi
 
 mkdir -p "$STUBS" "$RUN_DIR" "$DOCKER_STATE" "$WORKTREE/backend/cmd/zensu" \
@@ -716,6 +709,8 @@ if [ "$?" != 0 ]; then
 else
   check "controller rejects run directories outside the physical worktree boundary" FAIL
 fi
+
+unit_check_done "every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-zensu-runtime-controller: $PASS PASS / $FAIL FAIL"

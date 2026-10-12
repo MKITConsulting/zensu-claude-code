@@ -148,8 +148,8 @@ introduced were the only ones — one of them silently load-bearing for a slice 
 
 **The couplings here that fire in the UNOBVIOUS direction are stated as MEMBERS, never as
 a count** — the paragraph opened "TWO" over three of them and then gained a fourth, which is
-the drift this file records about its own rosters. They are `R13`, the `R12` family, `R13b`,
-and the CLAUDE.md-grading `R6h`/`R6i` family — named as a FAMILY for the reason this section
+the drift this file records about its own rosters. They are the `R12` family and the
+CLAUDE.md-grading `R6h`/`R6i` family — named as a FAMILY for the reason this section
 states two paragraphs up about `P6s`, and because the numeric range that stood here once
 ended seven rows short of the suite it claimed to enumerate; `R6i18` forbids the endpoint
 form outright, so raising the number is not a way to make it green — of which `R6i5`
@@ -158,22 +158,13 @@ feature's section (§"Adopting a Record Across a Lineage Break") so an edit to t
 reddens a suite named for the project-root restore. Re-grep before trusting this list. All of
 them take the shape §"Gate-Disable Prefixes"
 records for G12 — an ordinary edit elsewhere reddens a suite named for the project-root
-restore, and nothing points at it from the side that changes. `R13` in
-`tests/structure/test-restore-project-root.sh` derives its file list from
-`tests/SUITE-OVERVIEW.md` and compares every declared registration count against the file that
-registers it, so adding or removing a `test()` in ANY driven `tests/structure/*.test.js`, or
-reformatting that table, reddens this suite; when it was first derived rather than
-hand-enumerated it found SEVEN stale counts at once. The comparison and the row reader live in
-`tests/structure/lib-unit-summary.sh` (`unit_overview_check`, `unit_overview_declared`), and
-every driver that sources it and drives a file with a row reads its floor from that row and
-calls the check beside it, so the same edit also reddens the file's own driver, and a
-reformatted table reddens every one of those drivers, not only this suite. And the `R12`
+restore, and nothing points at it from the side that changes. The `R12`
 family grades COMMENT PROSE
 inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
 comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
-comment in the core reddens it too. `R13b` widens that direction again: it measures
-`ls tests/structure/*.test.js` against `tests/SUITE-OVERVIEW.md`'s own rowless-file paragraph,
-so ANY new unit file anywhere in the tree reddens a suite named for the project-root restore.
+comment in the core reddens it too. `R13`, `R13b` and `R13c`, which graded the unit-file counts
+of `tests/SUITE-OVERVIEW.md` from this suite, are gone: `tests/profiles/unit-files.v1.json` owns
+those counts now, and `test-unit-registry.sh` holds the generated table against it.
 
 **Port-relevant, and the authoritative split lives at the export block rather than here.**
 The core/host list for this feature is the comment above `RESTORE_ROOT_REFUSALS`'s export

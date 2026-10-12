@@ -264,8 +264,9 @@ Ten things are coupled and must move together:
   an oversight.
 - **The unit suite needs a driver.** `tests/run-all.sh` discovers only
   `tests/structure/test-*.sh`, so `tests/structure/reviewer-spawn-denial-v1.test.js`
-  is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which asserts a
-  case-count floor because exit 0 also accepts a file registering zero cases). A new
+  is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which grades the run
+  against the file's entry in `tests/profiles/unit-files.v1.json`, because exit 0 also
+  accepts a file registering zero cases). A new
   `*.test.js` with no driver is never executed by the tree runner. That driver
   charges the unit suite's runtime to this shard's Windows budget
   (`tests/profiles/windows-ci.v1.json`, `stop-enforcer-self-review-routing`), where

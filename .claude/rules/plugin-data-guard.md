@@ -146,8 +146,8 @@ unpinned and contradicted §"Reviewer-Spawn Grant" two sections up; the flagless
 roster in `docs/architecture.md`; the per-gate roster in `docs/session-control.md` (this gate
 binds no session, so all three columns are identical); `docs/gates.md`'s gate COUNT in its own
 intro, which no test checks; the README docs-index row; the suite manifest entry in
-`tests/profiles/promptfoo-local-only.v1.json` together with the counts in
-`tests/SUITE-OVERVIEW.md`; and the seam-consumer sentence in `bash-source-write-parse.js` —
+`tests/profiles/promptfoo-local-only.v1.json` together with the unit file's entry in
+`tests/profiles/unit-files.v1.json`; and the seam-consumer sentence in `bash-source-write-parse.js` —
 this module is its SECOND consumer, so removing `within` or `msysToDrive` now degrades a DENY
 gate to allow, not just a skill's rendering.
 
