@@ -848,9 +848,41 @@ STUB
     check "P13-S8b writable fixture ancestors fail closed (home=$RC_HOME_OVERLAP reservation=$RC_RESERVATION_OVERLAP)" FAIL
   fi
   rm -rf "$STUB_OVERLAP_DIR" "$SRC_OVERLAP_DIR"
+
+  STUB_P13S8C_DIR="$(mktemp -d)"
+  cat >"$STUB_P13S8C_DIR/claude" <<'STUB'
+#!/bin/bash
+real="$(cd "$TMPDIR" 2>/dev/null && pwd -P)"
+probe="$(mktemp "$TMPDIR/hook-probe.XXXXXX" 2>/dev/null)" && rm -f "$probe" && tmp=writable || tmp=denied
+mkdir -p "$CLAUDE_CODE_TMPDIR/claude-probe" 2>/dev/null && pwd -P >|"$CLAUDE_CODE_TMPDIR/claude-probe-cwd" 2>/dev/null \
+  && internal=writable || internal=denied
+same=no
+[ "$TMPDIR" = "$TMP" ] && [ "$TMPDIR" = "$TEMP" ] && [ "$TMPDIR" = "$CLAUDE_CODE_TMPDIR" ] && same=yes
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"tmp=%s canonical=%s internal=%s same=%s"}]}}\n' \
+  "$tmp" "$([ -n "$real" ] && [ "$real" = "$TMPDIR" ] && echo yes || echo no)" "$internal" "$same"
+printf '{"type":"result","result":"ok"}\n'
+exit 0
+STUB
+  chmod +x "$STUB_P13S8C_DIR/claude"
+  SRC_P13S8C_DIR="$(mktemp -d -t p13s8c-src-XXXXXX)"
+  printf 'seeded\n' >"$SRC_P13S8C_DIR/marker.txt"
+  OPT_P13S8C="$(printf '{"config":{"working_dir":"%s","init_git":true}}' "$SRC_P13S8C_DIR")"
+  OUT_P13S8C=$(env PATH="$STUB_P13S8C_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8C" 2>&1)
+  RC_P13S8C=$?
+  if [ "$RC_P13S8C" = 0 ] \
+    && printf '%s\n' "$OUT_P13S8C" | grep -qF 'tmp=writable canonical=yes internal=writable same=yes'; then
+    check "P13-S8c live init_git sandbox gives Claude and its hooks one canonical writable temp directory" PASS
+  elif [ "$RC_P13S8C" = 2 ] \
+    && exact_isolated_failure "$OUT_P13S8C" "$WATCH_START_FAILURE" "tmp="; then
+    check "P13-S8c sandbox temp integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
+  else
+    check "P13-S8c live init_git sandbox temp directory is canonical and writable (rc=$RC_P13S8C, out=${OUT_P13S8C:0:400})" FAIL
+  fi
+  rm -rf "$STUB_P13S8C_DIR" "$SRC_P13S8C_DIR"
   else
     check "P13-S8 live immutable-fixture integration skipped because the host forbids fs.watch; production remains fail-closed" PASS
     check "P13-S8b writable-root integration skipped because the host forbids the prerequisite immutable watcher" PASS
+    check "P13-S8c sandbox temp integration skipped because the host forbids the prerequisite immutable watcher" PASS
   fi
 fi
 

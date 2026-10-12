@@ -411,7 +411,9 @@ fi
 export GIT_OPTIONAL_LOCKS=0
 EXEC_CMD=("${CMD[@]}")
 if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
-  SANDBOX_TMP="$(mktemp -d -t zensu-claude-runtime-XXXXXX)" || exit 69
+  SANDBOX_TMP="$(mktemp -d /tmp/zensu-rt.XXXXXX 2>/dev/null || mktemp -d -t zensu-rt.XXXXXX)" || exit 69
+  SANDBOX_TMP_REAL="$(cd "$SANDBOX_TMP" && pwd -P)" || exit 69
+  SANDBOX_TMP="$SANDBOX_TMP_REAL"
   RESERVATION_PARENT=""
   if [ -n "${ZENSU_VERIFY_FIXTURE_RESERVATION_HANDOFF:-}" ]; then
     case "$ZENSU_VERIFY_FIXTURE_RESERVATION_HANDOFF" in /*) ;; *)
@@ -467,7 +469,8 @@ if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
       if [ -n "$RESERVATION_PARENT" ]; then
         printf '(allow file-write* (subpath "%s"))\n' "$RESERVATION_PARENT" >>"$SANDBOX_PROFILE"
       fi
-      EXEC_CMD=(sandbox-exec -f "$SANDBOX_PROFILE" env TMPDIR="$SANDBOX_TMP" "${CMD[@]}")
+      EXEC_CMD=(sandbox-exec -f "$SANDBOX_PROFILE" env TMPDIR="$SANDBOX_TMP" TMP="$SANDBOX_TMP" TEMP="$SANDBOX_TMP" \
+        CLAUDE_CODE_TMPDIR="$SANDBOX_TMP" "${CMD[@]}")
       ;;
     Linux)
       command -v bwrap >/dev/null 2>&1 || {
@@ -480,7 +483,8 @@ if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
       fi
       EXEC_CMD=(bwrap --ro-bind / / --dev-bind /dev /dev --proc /proc --share-net)
       [ -n "${HOME:-}" ] && EXEC_CMD+=(--bind "$HOME" "$HOME")
-      EXEC_CMD+=(--bind "$SANDBOX_TMP" "$SANDBOX_TMP" --setenv TMPDIR "$SANDBOX_TMP")
+      EXEC_CMD+=(--bind "$SANDBOX_TMP" "$SANDBOX_TMP" --setenv TMPDIR "$SANDBOX_TMP" --setenv TMP "$SANDBOX_TMP")
+      EXEC_CMD+=(--setenv TEMP "$SANDBOX_TMP" --setenv CLAUDE_CODE_TMPDIR "$SANDBOX_TMP")
       [ -n "$RESERVATION_PARENT" ] && EXEC_CMD+=(--bind "$RESERVATION_PARENT" "$RESERVATION_PARENT")
       EXEC_CMD+=(--bind "$ISOLATED_REAL/.zensu/hook-events.log" "$ISOLATED_REAL/.zensu/hook-events.log")
       EXEC_CMD+=(--bind "$ISOLATED_REAL/.zensu/logs" "$ISOLATED_REAL/.zensu/logs")
