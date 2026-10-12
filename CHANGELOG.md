@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stop guard releases up to three Stops in a row while a workflow still runs, then blocks until
   it ends. The import needs the judge, so `"reviewJudge": false` turns it off as well;
   `"externalReviewImport": false` restores the previous behavior.
+- **subagents**: a subagent that is not one of the plugin's own agents, such as `Explore`,
+  `general-purpose` or another plugin's agent, may now call only an allowlist of tools instead
+  of every tool outside a short denylist: `Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit`, `apply_patch`, `LSP`, `WebFetch`, `WebSearch`, `ToolSearch`, `TodoWrite`,
+  `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `Agent`, `SendMessage`, `AskUserQuestion`,
+  `StructuredOutput`, `ReportFindings` and `SubagentHandback`, the two Context7 documentation
+  tools, and the read-only Zensu MCP tools. Every other tool is denied, MCP tools included: a
+  subagent that drove a browser, a terminal, context-mode, the desktop session tools, `Skill`,
+  `TaskStop` or `Monitor` is now refused and reports back to the main thread, so run such work
+  in the main thread. An MCP tool whose name carries a command word (`exec`, `execute`, `run`,
+  `shell`, `terminal`, `command` or `code`, as in `ctx_execute` or `run_in_terminal`) gets the
+  same deny as `Bash`. A host tool that a later Claude Code version adds or renames stays
+  denied until the allowlist names it.
 
 ## [0.25.0] - 2026-10-06
 
