@@ -1,0 +1,6 @@
+{
+  "harness": "zensu-claude-code",
+  "contract_version": 1,
+  "launcher": "harness/launcher.js",
+  "supported_kinds": ["implement"]
+}

@@ -2960,6 +2960,14 @@ function autopilotExactKeys(value, want) {
     return Object.prototype.hasOwnProperty.call(value, key);
   });
 }
+var AUTOPILOT_WORK_ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+var AUTOPILOT_WORK_ORDER_SPEC_RE = /^[a-f0-9]{64}$/;
+function autopilotWorkOrderBinding(value) {
+  return autopilotExactKeys(value, ['orderId', 'attempt', 'specHash'])
+    && typeof value.orderId === 'string' && AUTOPILOT_WORK_ORDER_ID_RE.test(value.orderId)
+    && Number.isSafeInteger(value.attempt) && value.attempt > 0
+    && AUTOPILOT_WORK_ORDER_SPEC_RE.test(String(value.specHash));
+}
 var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
 function autopilotOwnerNonEmpty(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -3041,7 +3049,8 @@ function autopilotRun(file, stem, projectRoot) {
   var shapeReject = AUTOPILOT_TERMINAL.indexOf(looseStage) !== -1
     ? AUTOPILOT_TERMINAL_UNSHAPED : null;
   if (!autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS)
-    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']))) return shapeReject;
+    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']))
+    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot', 'workOrder']))) return shapeReject;
   // The owner refuses on the VALUE too, and a record it refuses fails the whole
   // project's inventory closed — so describing it here as an ordinary run would
   // pair a description with a remedy that cannot execute.
@@ -3161,6 +3170,8 @@ function autopilotRun(file, stem, projectRoot) {
     && Array.isArray(parsed.bypasses) && parsed.bypasses.length <= 128
     && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
       || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX))
+    && (!Object.prototype.hasOwnProperty.call(parsed, 'workOrder')
+      || autopilotWorkOrderBinding(parsed.workOrder))
     && (parsed.approvedPlanSha256 === null
       || autopilotSha256(parsed.approvedPlanSha256));
   if (ownerWouldAccept) {

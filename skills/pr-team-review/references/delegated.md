@@ -42,8 +42,11 @@ Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`; it is equal
 
 Validate that the operation key itself equals
 `team-review:v1:<sha256(canonical({headSha,runId}))>` using the bound lowercased head and
-exact run id. Then scout the remote PR from `$REPO`: it must still be `OPEN`, its URL/number
-must match durable state, and its remote head must equal the bound head. Repeat this
+exact run id. A work-order run, whose state carries `workOrder`, binds its review to the order
+instead: there the key is `team-review:v1:<sha256(canonical({headSha,orderId}))>` with the
+lowercased `workOrder.orderId`, as `autopilot_work_order_review_operation_key` generates it.
+Then scout the remote PR from `$REPO`: it must still be `OPEN`, its URL/number must match durable
+state, and its remote head must equal the bound head. Repeat this
 OPEN/current-head check immediately before the reconcile call. Any mismatch blocks; never
 review a successor commit under the old capability.
 
