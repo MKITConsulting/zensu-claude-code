@@ -228,9 +228,11 @@ function exitAfterOwnDiagnostic(code = 1) {
   process.exit(code);
 }
 
+const READ_ONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'diff.autoRefreshIndex=false'];
+
 function git(cwd, args) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
@@ -5777,8 +5779,8 @@ function cmdRelease(opts) {
       }
     }
     if (opts.git) {
-      const status = git(root, ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain', '--ignored']);
-      const count = git(root, ['--no-optional-locks', 'rev-list', '--count', 'HEAD', '--not', '--remotes']);
+      const status = git(root, ['status', '--porcelain', '--ignored']);
+      const count = git(root, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
       const rows = status === null ? null : status.split('\n').filter(Boolean);
       const zensuHoldsOnlyState = () => {
         try { return fs.readdirSync(path.join(root, '.zensu')).every((name) => name === 'state'); } catch { return false; }

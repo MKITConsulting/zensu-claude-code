@@ -7377,4 +7377,96 @@ else
   check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
 fi
 
+RO_HOME="$(cd "$FAKE" && pwd -P)/readonly-git"
+RO_REPO="$RO_HOME/repo"
+RO_HOOK="$RO_HOME/fsmonitor-hook"
+RO_LOG="$RO_HOME/fsmonitor.log"
+RO_SID=ab0ab0ab-0000-0000-0000-000000000071
+mkdir -p "$RO_HOME"
+cat > "$RO_HOOK" <<RO_HOOK_BODY
+#!/bin/sh
+echo ran >> "$RO_LOG"
+exit 1
+RO_HOOK_BODY
+ro_prime() {
+  node -e '
+const fs = require("node:fs");
+const [file, index, log, step] = process.argv.slice(1);
+const touched = new Date(Date.UTC(2021, 0, 1, 0, Number(step)));
+fs.utimesSync(file, touched, touched);
+const old = new Date(Date.UTC(2020, 0, 1));
+fs.utimesSync(index, old, old);
+fs.writeFileSync(log, "");
+' "$RO_REPO/stat-only.txt" "$RO_REPO/.git/index" "$RO_LOG" "$1"
+}
+ro_index_mtime() { node -e 'process.stdout.write(String(require("node:fs").statSync(process.argv[1]).mtimeMs))' "$RO_REPO/.git/index" 2>/dev/null; }
+ro_hook_runs() { if [ -s "$RO_LOG" ]; then wc -l < "$RO_LOG" | tr -d ' '; else echo 0; fi; }
+ro_trail() { ( unset GIT_OPTIONAL_LOCKS; trailrun "$@" ); }
+
+RO_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO_HOOK" \
+  && git init -q "$RO_REPO" >/dev/null 2>&1 \
+  && printf 'stat only\n' > "$RO_REPO/stat-only.txt" \
+  && printf 'base\n' > "$RO_REPO/edited.txt" \
+  && git -C "$RO_REPO" add stat-only.txt edited.txt >/dev/null 2>&1 \
+  && git -C "$RO_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && git -C "$RO_REPO" config core.fsmonitor "$RO_HOOK" >/dev/null 2>&1 \
+  && printf 'base\nedited\n' > "$RO_REPO/edited.txt" \
+  && fix "$RO_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO_REPO"; then
+  RO_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO* git is not on PATH — the read-only git checks need a real repository and are unverified in this run"
+elif [ "$RO_OK" != 1 ]; then
+  check "RO-fixture the read-only git fixture (a stat-dirty tracked file, an edited one and a logging fsmonitor hook) could not be built" FAIL
+else
+  RO_BAD=""
+  RO_STEP=0
+  for RO_VERB in takeover show handoff; do
+    RO_STEP=$((RO_STEP + 1))
+    ro_prime "$RO_STEP"
+    RO_BEFORE="$(ro_index_mtime)"
+    if [ "$RO_VERB" = takeover ]; then
+      RO_OUT="$(ro_trail takeover "$RO_SID" --all --no-record --json 2>/dev/null)"; RO_RC=$?
+      RO_SEEN="$(printf '%s' "$RO_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const files = (o.git && o.git.dirtyFiles) || [];
+  const diff = (o.diff && o.diff.uncommitted) || "";
+  const ok = o.git && o.git.dirty === 1 && files.some((f) => f.endsWith("edited.txt")) && /^\+edited$/m.test(diff) && !diff.includes("stat-only.txt");
+  process.stdout.write(ok ? "ok" : `dirty=${o.git && o.git.dirty} files=${files.join(",")}`);
+});
+')"
+    else
+      RO_OUT="$(ro_trail "$RO_VERB" "$RO_SID" --all 2>/dev/null)"; RO_RC=$?
+      if printf '%s' "$RO_OUT" | grep -qF 'edited.txt' && ! printf '%s' "$RO_OUT" | grep -qF 'stat-only.txt'; then RO_SEEN=ok; else RO_SEEN=edited-file-not-listed; fi
+    fi
+    [ "$RO_RC" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:rc=$RO_RC"
+    [ "$RO_SEEN" = ok ] || RO_BAD="$RO_BAD $RO_VERB:git-state-not-read($RO_SEEN)"
+    { [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" = "$(ro_index_mtime)" ]; } || RO_BAD="$RO_BAD $RO_VERB:index-rewritten"
+    [ "$(ro_hook_runs)" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:fsmonitor-hook-ran"
+  done
+  if [ -z "$RO_BAD" ]; then
+    check "RO1 takeover, show and handoff read the source worktree's git state without rewriting its index or running its fsmonitor hook" PASS
+  else
+    check "RO1 read-only git in the source worktree:$RO_BAD" FAIL
+  fi
+
+  RO_STEP=$((RO_STEP + 1))
+  ro_prime "$RO_STEP"
+  RO_BEFORE="$(ro_index_mtime)"
+  ( unset GIT_OPTIONAL_LOCKS; git -C "$RO_REPO" status --porcelain >/dev/null 2>&1 )
+  RO_AFTER="$(ro_index_mtime)"
+  RO_RUNS="$(ro_hook_runs)"
+  if [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" != "$RO_AFTER" ] && [ "$RO_RUNS" != 0 ]; then
+    check "RO1-control a plain git status in the same fixture rewrites the index and runs the fsmonitor hook, so RO1 measured both" PASS
+  else
+    check "RO1-control a plain git status left the index at ${RO_AFTER:-?} (was ${RO_BEFORE:-?}) and ran the hook $RO_RUNS times, so RO1 proved nothing here" FAIL
+  fi
+fi
+
 report
