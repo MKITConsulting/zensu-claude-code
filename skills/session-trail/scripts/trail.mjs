@@ -4738,11 +4738,12 @@ function gitDiffText(cwd, base, maxLines) {
     const lines = s.split('\n');
     return lines.length > maxLines ? `${lines.slice(0, maxLines).join('\n')}\n…[${lines.length - maxLines} more lines]` : s;
   };
+  const diff = (...args) => cut(git(cwd, ['diff', '--no-ext-diff', '--no-textconv', ...args]));
   return {
-    uncommitted: cut(git(cwd, ['diff'])),
-    staged: cut(git(cwd, ['diff', '--cached'])),
+    uncommitted: diff(),
+    staged: diff('--cached'),
     untracked: (git(cwd, ['ls-files', '--others', '--exclude-standard']) || '').split('\n').filter(Boolean).slice(0, 40),
-    branchDiff: base ? cut(git(cwd, ['diff', `${base}...HEAD`])) : null,
+    branchDiff: base ? diff(`${base}...HEAD`) : null,
   };
 }
 

@@ -7553,4 +7553,92 @@ process.stdin.on("data", (d) => { s += d; }).on("end", () => {
   fi
 fi
 
+RO2_HOME="$(cd "$FAKE" && pwd -P)/diff-drivers"
+RO2_REPO="$RO2_HOME/repo"
+RO2_TEXTCONV="$RO2_HOME/textconv"
+RO2_EXTERNAL="$RO2_HOME/external-diff"
+RO2_TEXTCONV_LOG="$RO2_HOME/textconv.log"
+RO2_EXTERNAL_LOG="$RO2_HOME/external-diff.log"
+RO2_SID=ab0ab0ab-0000-0000-0000-000000000072
+mkdir -p "$RO2_HOME"
+cat > "$RO2_TEXTCONV" <<RO2_TEXTCONV_BODY
+#!/bin/sh
+echo ran >> "$RO2_TEXTCONV_LOG"
+tr 'a-z' 'A-Z' < "\$1"
+RO2_TEXTCONV_BODY
+cat > "$RO2_EXTERNAL" <<RO2_EXTERNAL_BODY
+#!/bin/sh
+echo ran >> "$RO2_EXTERNAL_LOG"
+echo EXTERNAL-DIFF-DRIVER-OUTPUT
+RO2_EXTERNAL_BODY
+ro2_reset() { : > "$RO2_TEXTCONV_LOG"; : > "$RO2_EXTERNAL_LOG"; }
+ro2_runs() { if [ -s "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+ro2_git() { ( unset GIT_EXTERNAL_DIFF; git -C "$RO2_REPO" "$@" ); }
+
+RO2_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO2_TEXTCONV" "$RO2_EXTERNAL" \
+  && git init -q "$RO2_REPO" >/dev/null 2>&1 \
+  && ro2_git symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 \
+  && printf '*.conv diff=logconv\n' > "$RO2_REPO/.gitattributes" \
+  && printf 'alpha\nbeta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add .gitattributes notes.conv >/dev/null 2>&1 \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && ro2_git checkout -q -b feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -am feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add notes.conv >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\nepsilon\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git config diff.logconv.textconv "$RO2_TEXTCONV" >/dev/null 2>&1 \
+  && ro2_git config diff.external "$RO2_EXTERNAL" >/dev/null 2>&1 \
+  && fix "$RO2_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO2_REPO"; then
+  RO2_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO2* git is not on PATH — the diff-driver checks need a real repository and are unverified in this run"
+elif [ "$RO2_OK" != 1 ]; then
+  check "RO2-fixture the diff-driver fixture (a logging textconv driver, a logging diff.external driver, and a committed, a staged and an unstaged edit of one file) could not be built" FAIL
+else
+  ro2_reset
+  RO2_OUT="$( ( unset GIT_EXTERNAL_DIFF; trailrun takeover "$RO2_SID" --all --no-record --json ) 2>/dev/null)"; RO2_RC=$?
+  RO2_SEEN="$(printf '%s' "$RO2_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const d = o.diff || {};
+  const raw = (key, line) => {
+    const lines = (typeof d[key] === "string" ? d[key] : "").split("\n");
+    return lines.includes("diff --git a/notes.conv b/notes.conv") && lines.includes(line);
+  };
+  const missing = [["uncommitted", "+epsilon"], ["staged", "+delta"], ["branchDiff", "+gamma"]].filter(([key, line]) => !raw(key, line)).map(([key]) => key);
+  process.stdout.write(missing.length ? `raw-line-missing-in:${missing.join(",")}` : "ok");
+});
+')"
+  RO2_BAD=""
+  [ "$RO2_RC" = 0 ] || RO2_BAD="$RO2_BAD rc=$RO2_RC"
+  [ "$RO2_SEEN" = ok ] || RO2_BAD="$RO2_BAD $RO2_SEEN"
+  [ "$(ro2_runs "$RO2_TEXTCONV_LOG")" = 0 ] || RO2_BAD="$RO2_BAD textconv-driver-ran"
+  [ "$(ro2_runs "$RO2_EXTERNAL_LOG")" = 0 ] || RO2_BAD="$RO2_BAD diff.external-driver-ran"
+  if [ -z "$RO2_BAD" ]; then
+    check "RO2 takeover --json carries the source worktree's uncommitted, staged and branch diffs raw, without running its textconv driver or its diff.external driver" PASS
+  else
+    check "RO2 diff drivers in the source worktree:$RO2_BAD" FAIL
+  fi
+
+  ro2_reset
+  ro2_git diff >/dev/null 2>&1
+  RO2_EXTERNAL_RUNS="$(ro2_runs "$RO2_EXTERNAL_LOG")"
+  ro2_reset
+  ro2_git diff --no-ext-diff >/dev/null 2>&1
+  RO2_TEXTCONV_RUNS="$(ro2_runs "$RO2_TEXTCONV_LOG")"
+  if [ "$RO2_EXTERNAL_RUNS" != 0 ] && [ "$RO2_TEXTCONV_RUNS" != 0 ]; then
+    check "RO2-control a plain git diff in the same fixture runs the diff.external driver, and once --no-ext-diff stops that one it runs the textconv driver, so RO2 measured both" PASS
+  else
+    check "RO2-control a plain git diff ran the diff.external driver $RO2_EXTERNAL_RUNS times and git diff --no-ext-diff ran the textconv driver $RO2_TEXTCONV_RUNS times, so RO2 proved nothing here" FAIL
+  fi
+fi
+
 report
