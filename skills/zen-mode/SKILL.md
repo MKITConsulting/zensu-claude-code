@@ -1,17 +1,9 @@
 ---
 name: zen-mode
 description: >
-  [Zensu] Focused, low-noise response mode for working at reduced capacity. Keeps
-  every bit of technical substance but strips presentation noise: each answer opens
-  with a one-line recap of what just happened, states the result first, stays short,
-  withholds depth until asked, asks at most one question per turn, and ends with
-  exactly one next step. Stays active across the whole session through a
-  UserPromptSubmit hook rather than fading after a few turns, and overrides any
-  compressed or telegraphic style mode while it is on. It is ON by default; set
-  hooks.zenModeDefault:false to make it opt-in. Use when the user says "zen mode",
-  "I'm tired", "keep it simple", "low energy", "less detail", "one thing at a time",
-  or invokes /zensu:zen-mode. Leave it with "normal mode", "zen off",
-  "zen-mode off", "turn off zen", or "stop zen".
+  [Zensu] Low-noise answers for low-capacity work: recap first, result first,
+  one next step. Use when the user says "zen mode", "I'm tired",
+  "keep it simple", "low energy" or "less detail", or /zensu:zen-mode.
 ---
 
 # /zensu:zen-mode

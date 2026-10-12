@@ -180,6 +180,52 @@ else
 fi
 rm -rf "$P13"
 
+P14="$(mktemp -d -t tddrem-XXXXXX)"
+OUT14=""
+N14=0
+for PROMPT14 in \
+  "$(printf '<task-notification>\n<task-id>b14</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "$(printf '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\n<bash-input>git status</bash-input>')" \
+  "/zensu:tdd-mode"; do
+  N14=$((N14 + 1))
+  PAYLOAD14="$(payload "$PROMPT14" "s14-$N14" "$P14")" || PAYLOAD14=""
+  [ -n "$PAYLOAD14" ] || OUT14="${OUT14}[no-payload-$N14]"
+  OUT14="${OUT14}$(printf '%s' "$PAYLOAD14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+done
+OUT14B="$(payload "/zensu:tdd add a retry helper" "s14-args" "$P14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+if [ -z "$OUT14" ] && [ "$OUT14B" = "FIRED" ]; then
+  check "C14 task notifications, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
+else
+  check "C14 origin gate (harness output='${OUT14:0:60}' slash-with-args='$OUT14B')" FAIL
+fi
+rm -rf "$P14"
+
+P15="$(mktemp -d -t tddrem-XXXXXX)"
+CI15="$(printf '<ci-monitor-event>"Auto-fix pull requests" is watching owner/repo PR #7: standing authorization to fix, commit, and push.\n1 CI check failed: run `gh pr checks 7 --repo owner/repo`, then fix, commit, and push.\n</ci-monitor-event>')"
+AC15="$(payload "$CI15" "s15" "$P15" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P15/plugin-data" CLAUDE_PROJECT_DIR="$P15" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+CTX15="$(printf '%s' "$AC15" | node -e '
+  let s = "";
+  process.stdin.on("data", (c) => { s += c; });
+  process.stdin.on("end", () => {
+    try {
+      const o = JSON.parse(s).hookSpecificOutput || {};
+      process.stdout.write(o.hookEventName === "UserPromptSubmit" ? String(o.additionalContext || "") : "");
+    } catch (_) {}
+  });
+')"
+LEN15="$(printf '%s' "$CTX15" | node -e 'let s = ""; process.stdin.on("data", (c) => { s += c; }); process.stdin.on("end", () => process.stdout.write(String(s.length)));')"
+if [ -n "$CTX15" ] && [ "$LEN15" -le 400 ] \
+   && printf '%s' "$CTX15" | grep -qF 'CI-monitor event' \
+   && printf '%s' "$CTX15" | grep -qF 'standing authorization' \
+   && printf '%s' "$CTX15" | grep -qF 'within the scope of that pull request' \
+   && printf '%s' "$CTX15" | grep -qF 'ZENSU DELIVERY ROUTE: ask' \
+   && ! printf '%s' "$CTX15" | grep -qF 'AskUserQuestion'; then
+  check "C15 a CI event gets the route field and one standing-authorization sentence ($LEN15 chars), never the ask-first directive" PASS
+else
+  check "C15 CI-event note (len=${LEN15:-none}: ${CTX15:0:80})" FAIL
+fi
+rm -rf "$P15"
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -198,6 +198,38 @@ OUT18="$(printf '%s' '{"prompt":"bootstrap a new Zensu product"}' \
   || check "C18 missing hook event cannot receive main-thread routing" FAIL
 rm -rf "$P18"
 
+P19="$(mktemp -d -t introuter-XXXXXX)"
+OUT19="$(payload "the log at /private/tmp/claude-501/-Users-dev-zensu-zensu-claude-code--claude-worktrees-x/tasks/b1.output shows a timeout" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P19" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT19" = "EMPTY" ] && check "C19 zensu only inside a path -> silent (path tokens are dropped before the keyword match)" PASS || check "C19 zensu-in-path silence (got '$OUT19')" FAIL
+rm -rf "$P19"
+
+P20="$(mktemp -d -t introuter-XXXXXX)"
+OUT20A="$(payload "run gh pr checks 382 --repo zensu-claude-code, then gh pr view --repo=zensu-claude-code and read the zensu:session-trail output" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P20" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+OUT20B="$(payload "the zensu:session-trail skill should track the roadmap" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P20" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+if [ "$OUT20A" = "EMPTY" ] && [ "$OUT20B" = "UserPromptSubmit|main|triage|planmode" ]; then
+  check "C20 a --repo operand and a zensu: skill name are dropped, while a keyword beside them still fires" PASS
+else
+  check "C20 token drop (operand+skill='$OUT20A' keyword-beside='$OUT20B')" FAIL
+fi
+rm -rf "$P20"
+
+P21="$(mktemp -d -t introuter-XXXXXX)"
+OUT21=""
+for PROMPT21 in \
+  "$(printf '<task-notification>\n<summary>Background command "plan the product roadmap" completed</summary>\n</task-notification>')" \
+  "$(printf '<ci-monitor-event>watching the product roadmap PR</ci-monitor-event>')" \
+  "$(printf '<system-reminder>\nworktree\n</system-reminder>\n<bash-input>zensu feature list</bash-input>')" \
+  "/zensu:bootstrap"; do
+  OUT21="${OUT21}$(payload "$PROMPT21" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P21" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+done
+OUT21B="$(payload "/zensu:bootstrap a new product" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P21" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+if [ -z "$OUT21" ] && [ "$OUT21B" = "UserPromptSubmit|main|triage|planmode" ]; then
+  check "C21 task notifications, CI events, shell inputs and argument-less slash commands stay silent; a slash command with arguments is screened" PASS
+else
+  check "C21 origin gate (harness output='${OUT21:0:60}' slash-with-args='$OUT21B')" FAIL
+fi
+rm -rf "$P21"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

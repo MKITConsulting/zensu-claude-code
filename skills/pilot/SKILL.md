@@ -1,19 +1,9 @@
 ---
 name: pilot
 description: >
-  [Zensu] Interactive pipeline conductor — guide a tracked Zensu feature through
-  the delivery pipeline step by step. Probes the feature's real state (Zensu
-  backend via the CLI, git, and the GitHub PR), renders a status card, offers
-  the next sensible step via AskUserQuestion, delegates the work to the matching
-  sibling skill (implement, tdd, cover, pr-team-review, pr-fix-findings,
-  converge, docs, security-review), and executes confirmed status transitions
-  along the server's strict lifecycle FSM. Loops probe → offer → delegate until
-  the feature is released or the user exits; resumable across sessions because
-  the backend status IS the pipeline state. Use whenever the user wants guided,
-  checkpointed delivery instead of autonomous autopilot: "what's next for
-  ZEN-42", "continue feature X", "guide me through this feature", "manual
-  pipeline", or the slash command /zensu:pilot. For a fully unattended
-  idea-to-PR build use /zensu:autopilot instead.
+  [Zensu] Guide a tracked Zensu feature through the delivery pipeline one
+  confirmed step at a time. Use when the user asks "what's next for ZEN-42",
+  "continue feature X", or /zensu:pilot.
 ---
 
 # /zensu:pilot

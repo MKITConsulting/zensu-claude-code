@@ -1,14 +1,9 @@
 ---
 name: security-review
 description: >
-  [Zensu] Run a comprehensive security review for a Zensu feature — guides through security
-  classification, automated analysis and scoring, security-test capture, threat modeling,
-  and review completion, with each step wired through the Zensu CLI write-gate. Use before
-  releasing a feature to production, when a feature handles sensitive data (PII, financial,
-  credentials), after significant scope or architecture changes, when preparing for a
-  security audit, or the slash command /zensu:security-review. Requires a Zensu feature ID
-  (KEY-N, e.g. ZEN-42, or UUID); classification must be set first, as all later analysis
-  depends on it.
+  [Zensu] Run a Zensu feature's security review: classification, analysis, tests
+  and threat model. Use when a feature handles sensitive data or nears release,
+  or via /zensu:security-review.
 ---
 
 # /zensu:security-review

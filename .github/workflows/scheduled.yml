@@ -1,0 +1,35 @@
+name: Scheduled clock-shift pass
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: scheduled-clock-shift-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  clock-shift:
+    name: Unit suites on a shifted clock
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run tests/structure unit files with Date shifted by the allowlist's shiftDays
+        run: node tests/run-clock-shift.js

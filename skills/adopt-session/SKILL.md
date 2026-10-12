@@ -1,37 +1,9 @@
 ---
 name: adopt-session
 description: >
-  [Zensu] Rescue the CURRENT session when a Zensu plugin update landed while it was
-  running, or when the installation that minted its record was pruned from the plugin
-  cache. Its Session Control record is then intact but the executing installation
-  either declares an incompatible lineage or cannot re-verify the record, so every
-  stateful tool fails closed: Edit, Write, MultiEdit and writing Bash
-  deny, Bash denies everything but the two recognized commands, subagents cannot start,
-  and Stop cannot prove completion. Zensu adopts such a record automatically on the first
-  hook contact after the update, so this skill is the REPORT for an adoption that was
-  refused, opted out or did not complete and, with `--confirm`, the manual retry, which
-  ignores hooks.sessionAutoAdopt being false. The adoption mints a new record for the same session under the executing
-  runtime, sets the previous one aside unchanged, and records the takeover in the
-  workflow history. The session is
-  bound again from the next tool call onward — no restart; when the recorded project root is
-  also gone the lineage break is cleared while Edit, Write, MultiEdit and, with the opt-in source-write gate on, writing Bash stay denied until that
-  directory is re-created, which a SECOND mode, `--restore-root --confirm`, does in one step together with the
-  workflow document the removal took with it — it restores the anchor and not the work, so the directory comes
-  back empty and the chain that lived there is gone, unless another run finished that directory first, in which
-  case the report says it never saw the contents. Adoption is authorised by
-  SCHEMA equality, not by the version numbers, so a release that really changed a
-  persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
-  when tools started failing closed right after a plugin update, when this session's own
-  workflow document is gone and every tool denies with `activated workflow CAS state is
-  missing` — a served record whose baseline a deleted and re-created worktree took with
-  it, which is NOT a plugin update and which `--confirm` rebuilds in place — when
-  /zensu:doctor reports that the recorded project root itself no longer exists, the ordinary
-  shape after `git worktree remove`, which `--restore-root --confirm` repairs — when the
-  opt-in source-write gate denies `git add` in a sibling worktree of the same repository that this
-  session now works in, which `--reanchor --confirm`, run from inside that worktree, moves
-  this session's anchor to once it finds no other live session there —
-  or via /zensu:adopt-session. No network or API key. It never edits code, never touches the
-  workflow document's decision fields, and never bypasses a review.
+  [Zensu] Rescue the current session when Session Control fails closed. Use when
+  tools deny after a plugin update, /zensu:doctor reports a lineage or
+  project-root problem, or via /zensu:adopt-session.
 ---
 
 # /zensu:adopt-session

@@ -246,9 +246,9 @@ for t in $COMMAND_TOOL_NAMES; do
   flat_has "\`$t\`" "$SKILL_FLAT" || G8_MISS="$G8_MISS skill:$t"
 done
 # ARITY, not just membership. Both loops above are subset checks, so a SEVENTH entry in
-# COMMAND_TOOLS leaves every conjunct green — here, in G15 (which pins only the phrase
-# 'a six-name DENYLIST'), and in test-reviewer-capability-gate.sh (per-name behavioral
-# rows with no count) — while SKILL.md keeps telling the reader the denylist has six.
+# COMMAND_TOOLS leaves every conjunct green — here and in test-reviewer-capability-gate.sh
+# (per-name behavioral rows with no count) — while SKILL.md keeps telling the reader
+# there are six shell names.
 # This file already cross-checks an arity twice, for GERMAN_RE and for ESCAPE_STEMS;
 # the one enumeration whose count reaches a prompt carrier had neither.
 COMMAND_TOOL_ARITY="$(printf '%s' "$COMMAND_TOOLS_DECL" | grep -o "'[A-Za-z_][A-Za-z_]*'" | LC_ALL=C sort -u | grep -c .)"
@@ -463,30 +463,25 @@ case "$CLASSIFICATION" in
 esac
 
 # ── G15: the containment bullet states the bound the gate actually keeps ─────
-# G8 pairs the denial with the module. This pairs the RESIDUE with it: the gate's
-# second tool-name branch matches only mcp__*zensu*, so a code-executing MCP tool
-# from any other server is not denied, and classifyPreToolPayload returns main-v1
-# for a payload carrying neither agent_type nor agent_id. Both are load-bearing
-# for a reader deciding what a critic can reach, and neither is implied by the
-# six-name list. The module probe below is a line-scoped grep over JS source; the
-# skill-side anchors go through flat_has/SKILL_FLAT and are wrap-independent.
-MCP_SCOPE_RE='mcp__\.\*zensu'
 G15_MISS=""
-grep -qE "$MCP_SCOPE_RE" "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-mcp-scope"
+grep -qF 'const HOST_PROFILE_TOOLS = new Set([' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-allowlist"
+grep -qF 'const HOST_PROFILE_MCP_READ_TOOLS = new Set([' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-mcp-allowlist"
+grep -qE 'mcp__\.\*zensu' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-zensu-read-branch"
 # The agent_type premise is decided HERE, not in the capability module. Without this
 # conjunct PRINCIPAL_LIB was existence-gated by G0 and asserted against by nothing.
 grep -qF 'if (!hasAgentId && !hasAgentType) return PRINCIPALS.MAIN;' "$PRINCIPAL_LIB" \
   || G15_MISS="$G15_MISS module-main-fallthrough"
-flat_has 'from a non-Zensu server is not denied' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-mcp-residue"
+flat_has 'It is an ALLOWLIST, not a denylist' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-allowlist-shape"
+flat_has 'Every other MCP tool is denied too' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-mcp-bound"
+grep -qF 'neutral agent is denied browser tools of a foreign server keyed playwright' "$CAPABILITY_GATE_TEST" \
+  || G15_MISS="$G15_MISS sibling-browser-deny-row"
+flat_has 'a six-name DENYLIST' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-denylist-shape"
+flat_has 'from a non-Zensu server is not denied' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-mcp-residue"
 # The anchor spans the CONDITION and the CONSEQUENCE. The first version matched
 # only the hinge between them, so inverting the premise left it green — the exact
 # defect this file exists to prevent, committed inside the fix for it.
 flat_has 'neither `agent_type` nor `agent_id` classifies as `main-v1` and is unrestricted by this gate' "$SKILL_FLAT" \
   || G15_MISS="$G15_MISS skill-agent-type-premise"
-flat_has 'a six-name DENYLIST, not an' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-denylist-shape"
-# Residue conjuncts, moved here from G18 where a break in one was reported as a
-# redaction defect. This check owns what the denylist does NOT cover.
-#
 # The write-reach anchor deliberately spans the polarity-bearing verb as well as the
 # object. `flat_has` matches anywhere in the flattened file, so the bare fragment
 # 'including outside the project root' is satisfied by a sentence that INVERTS the
@@ -497,17 +492,13 @@ flat_has 'They may still read, and may write files including outside the project
   || G15_MISS="$G15_MISS skill-write-reach"
 flat_has 'They may still read and write project files.' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-write-reach-understated"
 flat_has 'only other tool-name branch matches' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-branch-overclaim"
-# The THIRD residue. Nested spawn is denied by nothing in the module — `Agent` appears
-# in none of neutralViolation's sets — and test-reviewer-capability-gate.sh pins that
-# allowance, so a builder can start its own fan-out outside the packet discipline.
-# The skill said "TWO things fall outside it" while three did.
 grep -qF 'neutral nested-agent capability stays host-governed' "$CAPABILITY_GATE_TEST" \
   || G15_MISS="$G15_MISS sibling-nested-agent-row"
-flat_has 'THREE things fall outside it' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-residue-arity"
 flat_has 'keeps its nested-spawn capability' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-nested-spawn"
+flat_has 'THREE things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 flat_has 'TWO things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 if [ -z "$G15_MISS" ]; then
-  check "G15 skill states the residue the six-name denylist does not cover" PASS
+  check "G15 skill states the allowlist bound and the nested spawn it still admits" PASS
 else
   check "G15 containment claim is unbounded —$G15_MISS" FAIL
 fi

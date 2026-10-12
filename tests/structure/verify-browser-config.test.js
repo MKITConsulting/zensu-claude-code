@@ -201,16 +201,23 @@ test('two remote origins that share a hostname are pinned once', async (t) => {
   assert.equal(consent.readRunConfig(result.configPath).ok, true);
 });
 
-test('the run config follows the navigation policy: remote needs one, and a policy admits only its targets', async (t) => {
+test('the run config pins a remote origin for consent, and a policy pre-approves only its targets', async (t) => {
   const dir = runDir(t);
   const resolver = publicResolver({ 'preview.example.com': ['93.184.216.34'] });
-  await assert.rejects(helper.run(['--run-dir', dir, '--mode', 'remote', '--origin', 'https://preview.example.com'], resolver, NO_POLICY, READY),
-    (error) => error.message === consent.REASONS.REMOTE_NEEDS_POLICY);
+  const remote = await helper.run(['--run-dir', dir, '--mode', 'remote', '--origin', 'https://preview.example.com'], resolver, NO_POLICY, READY);
+  assert.equal(remote.mode, 'consent');
+  assert.deepEqual(remote.config.browser.launchOptions.args, ['--no-proxy-server', '--host-resolver-rules=MAP preview.example.com 93.184.216.34']);
+  assert.equal(consent.readRunConfig(remote.configPath).ok, true);
   const local = policyEnv('local', [target('http://127.0.0.1:5173', ['/', '/login'])]);
   const admitted = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'], undefined, local, READY);
   assert.equal(admitted.mode, 'policy');
-  await assert.rejects(helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5174'], undefined, local, READY),
-    new RegExp(consent.REASONS.NOT_POLICY_TARGET));
+  const outside = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5174'], undefined, local, READY);
+  assert.equal(outside.mode, 'consent');
+  const mixed = await helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173', '--origin', 'http://127.0.0.1:5174'],
+    undefined, local, READY);
+  assert.equal(mixed.mode, 'consent');
+  const crossMode = await helper.run(['--run-dir', dir, '--mode', 'remote', '--origin', 'https://preview.example.com'], resolver, local, READY);
+  assert.equal(crossMode.mode, 'consent');
   await assert.rejects(helper.run(['--run-dir', dir, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'], undefined,
     { ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' }, READY), new RegExp(consent.REASONS.POLICY_INVALID));
 });
@@ -300,7 +307,7 @@ test('the policy check judges a network-only origin by its own operand', async (
   assert.equal(await helper.checkPolicy(['local', 'https://api.example.org', 'network-only'], local, resolver, READY), 'policy');
   await assert.rejects(helper.checkPolicy(['local', 'https://api.example.org', 'declared-safe'], local, resolver, READY),
     (error) => error.message === FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
-  await assert.rejects(helper.checkPolicy(['remote', 'https://api.example.org', 'network-only'], local, resolver, READY), /mode does not match/);
+  assert.equal(await helper.checkPolicy(['remote', 'https://api.example.org', 'network-only'], local, resolver, READY), 'policy');
 });
 
 test('the policy check answers consent or policy per origin and refuses what the gate would refuse', async () => {
@@ -309,13 +316,17 @@ test('the policy check answers consent or policy per origin and refuses what the
   assert.equal(await helper.checkPolicy(['local', 'http://localhost:5173', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
   assert.equal(await helper.checkPolicy(['local', 'http://localhost:5173', 'declared-safe'],
     policyEnv('local', [target('http://localhost:5173')]), resolver, READY), 'policy');
-  await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], NO_POLICY, resolver, READY),
-    (error) => error.message === consent.REASONS.REMOTE_NEEDS_POLICY);
+  assert.equal(await helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], NO_POLICY, resolver, READY), 'consent');
+  await assert.rejects(helper.checkPolicy(['remote', 'https://internal.example.com', 'declared-safe'], NO_POLICY, resolver, READY), /non-public/);
+  const noLookup = () => { throw new Error('the floor must refuse before any DNS lookup'); };
+  for (const host of ['https://*.example.com', 'https://{a,b}.example.com']) {
+    await assert.rejects(helper.checkPolicy(['remote', host, 'declared-safe'], NO_POLICY, noLookup, READY),
+      (error) => error.message === FLOOR_REASONS.HOSTNAME_PATTERN, host);
+  }
   for (const local of [policyEnv('local', [target('http://127.0.0.1:5173')]), policyEnv('local', [target('http://127.0.0.1:5173', ['/login'])])]) {
     assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5173', 'declared-safe'], local, resolver, READY), 'policy');
-    await assert.rejects(helper.checkPolicy(['local', 'http://127.0.0.1:5174', 'declared-safe'], local, resolver, READY),
-      new RegExp(consent.REASONS.NOT_POLICY_TARGET));
-    await assert.rejects(helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], local, resolver, READY), /mode does not match/);
+    assert.equal(await helper.checkPolicy(['local', 'http://127.0.0.1:5174', 'declared-safe'], local, resolver, READY), 'consent');
+    assert.equal(await helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], local, resolver, READY), 'consent');
   }
   const remote = policyEnv('remote', [target('https://preview.example.com'), target('https://internal.example.com')]);
   assert.equal(await helper.checkPolicy(['remote', 'https://preview.example.com', 'declared-safe'], remote, resolver, READY), 'policy');
@@ -455,13 +466,19 @@ test('the CLI prints the session, the config path and each origin, and exits 1 w
   assert.equal(bad.status, 1);
   assert.equal(bad.stdout, '');
   assert.equal(bad.stderr, `zensu verify browser config: ${FLOOR_REASONS.LOCAL_LOOPBACK_ONLY}\n`);
+  assert.equal(ok.stderr, '');
   const check = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:5173', 'declared-safe'], { encoding: 'utf8', env });
   assert.equal(check.status, 0, check.stderr);
   assert.equal(check.stdout, 'consent\n');
-  const refused = spawnSync(process.execPath, [HELPER, '--check-policy', 'remote', 'https://preview.example.com', 'declared-safe'], { encoding: 'utf8', env });
+  assert.equal(check.stderr, '');
+  const remoteCheck = spawnSync(process.execPath, [HELPER, '--check-policy', 'remote', 'https://93.184.216.34', 'declared-safe'], { encoding: 'utf8', env });
+  assert.equal(remoteCheck.status, 0, remoteCheck.stderr);
+  assert.equal(remoteCheck.stdout, 'consent\n');
+  assert.equal(remoteCheck.stderr, '');
+  const refused = spawnSync(process.execPath, [HELPER, '--check-policy', 'remote', 'https://*.example.com', 'declared-safe'], { encoding: 'utf8', env });
   assert.equal(refused.status, 1);
   assert.equal(refused.stdout, '');
-  assert.equal(refused.stderr, `zensu verify browser config: ${consent.REASONS.REMOTE_NEEDS_POLICY}\n`);
+  assert.equal(refused.stderr, `zensu verify browser config: ${FLOOR_REASONS.HOSTNAME_PATTERN}\n`);
   const other = runDir(t, 'run-stale');
   const stale = spawnSync(process.execPath, [HELPER, '--run-dir', other, '--mode', 'local', '--origin', 'http://127.0.0.1:5173'],
     { encoding: 'utf8', env: { ...env, [pathKey]: `${cliOnPath(t, '0.1.20')}${path.delimiter}${basePath}` } });
@@ -491,4 +508,35 @@ test('the CLI prints one network-only-origin line per network-only origin and ch
   const usage = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:9090', 'api'], { encoding: 'utf8', env });
   assert.equal(usage.status, 1);
   assert.equal(usage.stderr, 'zensu verify browser config: usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>\n');
+});
+
+test('the CLI notes on stderr when a present policy leaves an origin to the permission prompt, and only then', (t) => {
+  const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') || 'PATH';
+  const env = {
+    ...process.env,
+    ZENSU_VERIFY_NAVIGATION_POLICY_V1: JSON.stringify({ version: 1, mode: 'local', targets: [target('http://127.0.0.1:4200')] }),
+    [pathKey]: `${cliOnPath(t, MEASURED)}${path.delimiter}${process.env[pathKey] || ''}`,
+  };
+  const note = `zensu verify browser config: note: ${helper.POLICY_CONSENT_NOTE}\n`;
+  assert.match(helper.POLICY_CONSENT_NOTE, /permission mode bypassPermissions or dontAsk\) is denied them at open$/);
+  const named = spawnSync(process.execPath, [HELPER, '--check-policy', 'local', 'http://127.0.0.1:4200', 'declared-safe'], { encoding: 'utf8', env });
+  assert.equal(named.status, 0, named.stderr);
+  assert.equal(named.stdout, 'policy\n');
+  assert.equal(named.stderr, '');
+  for (const args of [['local', 'http://127.0.0.1:4201'], ['remote', 'https://93.184.216.34']]) {
+    const other = spawnSync(process.execPath, [HELPER, '--check-policy', ...args, 'declared-safe'], { encoding: 'utf8', env });
+    assert.equal(other.status, 0, other.stderr);
+    assert.equal(other.stdout, 'consent\n', args.join(' '));
+    assert.equal(other.stderr, note, args.join(' '));
+  }
+  const allNamed = spawnSync(process.execPath, [HELPER, '--run-dir', runDir(t), '--mode', 'local', '--origin', 'http://127.0.0.1:4200'],
+    { encoding: 'utf8', env });
+  assert.equal(allNamed.status, 0, allNamed.stderr);
+  assert.match(allNamed.stdout, /^mode=policy$/m);
+  assert.equal(allNamed.stderr, '');
+  const partly = spawnSync(process.execPath, [HELPER, '--run-dir', runDir(t, 'run-partly'), '--mode', 'local',
+    '--origin', 'http://127.0.0.1:4200', '--origin', 'http://127.0.0.1:4201'], { encoding: 'utf8', env });
+  assert.equal(partly.status, 0, partly.stderr);
+  assert.match(partly.stdout, /^mode=consent$/m);
+  assert.equal(partly.stderr, note);
 });

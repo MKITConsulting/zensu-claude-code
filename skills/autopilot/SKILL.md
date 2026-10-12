@@ -1,19 +1,9 @@
 ---
 name: autopilot
 description: >
-  [Zensu] Take a feature from a plain-language idea to a ready, validated GitHub or GitLab
-  pull/merge request — autonomously. One interactive planning gate (spec + acceptance
-  criteria), then a fully unattended build: implement via the Zensu workflow
-  (vanilla `/zensu:tdd` + review chain), open the PR, run `/zensu:pr-team-review`
-  once, fix every finding with `/zensu:pr-fix-findings`, then validate the running
-  feature against every acceptance criterion in a fix loop until green. Works for
-  any stack and app type (web, API, CLI, async, infra, mobile, desktop) via a
-  pluggable validation driver, and is credential-blind — the AI never sees a
-  password or token. Stops at a ready PR; the human reviews and merges. Use
-  whenever the user wants a feature built end-to-end, "idea to PR", "build it and
-  validate it", "plan, build, test, hand me a PR", an autonomous/unattended
-  feature build, or the slash command /zensu:autopilot. The skill self-configures
-  on first run and never auto-merges or auto-deploys.
+  [Zensu] Build a feature unattended from a plain-language idea to a validated
+  GitHub or GitLab pull request. Use when the user wants a feature built
+  end-to-end, "idea to PR", or /zensu:autopilot.
 ---
 
 # /zensu:autopilot
@@ -348,8 +338,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
 1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs and the exact
    `AUTOPILOT-RUN: <RUN_ID>` line as the feature
-   specification. Let the built-in 5-perspective review chain (conventions, bugs,
-   architecture, tests, security) run and address what it raises. Stay in the worktree.
+   specification. Let the built-in review chain run and address what it raises.
+   Stay in the worktree.
    (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass

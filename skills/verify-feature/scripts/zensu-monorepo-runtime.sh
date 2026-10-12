@@ -26,6 +26,7 @@ BACKEND_READY="$RUN_DIR/backend-supervisor.ready"
 FRONTEND_READY="$RUN_DIR/frontend-supervisor.ready"
 LOG_BACKEND="$RUN_DIR/backend.log"
 LOG_FRONTEND="$RUN_DIR/frontend.log"
+BLOB_DIR="$RUN_DIR/blobs"
 
 for marker in backend/cmd/zensu backend/Makefile frontend/package.json frontend/pnpm-lock.yaml; do
   [ -e "$WORKTREE/$marker" ] || fail "required repository marker is missing"
@@ -224,22 +225,23 @@ consent_origin() {
 }
 
 parent_origin() {
+  local planned
   if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
     consent_origin
     return
   fi
-  env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
-    const value = JSON.parse(process.env.POLICY || "null");
-    if (!value || value.version !== 1 || value.mode !== "local" || !Array.isArray(value.targets)
-        || value.targets.length !== 1) process.exit(2);
-    const target = value.targets[0];
-    if (!target || target.evidenceMode !== "declared-safe"
-        || (target.routes !== undefined && !Array.isArray(target.routes))) process.exit(2);
-    const url = new URL(target.origin);
-    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port
-        || url.pathname !== "/" || url.search || url.hash || url.username || url.password) process.exit(2);
-    process.stdout.write(url.origin);
-  ' 2>/dev/null || fail "an exact parent-authorized 127.0.0.1 origin is required before startup"
+  planned="$(cd -P -- "$PLUGIN_ROOT/hooks/lib" && env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
+    const parsed = require("./verify-navigation-floor-v1.js").parsePolicyTargets(process.env.POLICY || "");
+    if (!parsed.ok) process.exit(2);
+    const targets = [...parsed.targets.values()];
+    const url = parsed.mode === "local" && targets.length === 1 ? new URL(targets[0].origin) : null;
+    process.stdout.write(url && url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port ? url.origin : "consent");
+  ' 2>/dev/null)" || fail "the navigation policy in the launch environment is invalid, so no frontend origin is planned"
+  case "$planned" in
+    consent) consent_origin ;;
+    http://127.0.0.1:*) printf '%s' "$planned" ;;
+    *) fail "the navigation policy in the launch environment is invalid, so no frontend origin is planned" ;;
+  esac
 }
 
 case "$ACTION" in
@@ -253,6 +255,8 @@ case "$ACTION" in
     for command in docker go pnpm curl lsof cksum openssl git node make; do
       command -v "$command" >/dev/null 2>&1 || fail "$command is required"
     done
+    [ -d "$BLOB_DIR" ] && [ ! -L "$BLOB_DIR" ] || mkdir -m 700 "$BLOB_DIR" 2>/dev/null \
+      || fail "blob directory is unsafe"
 
     ORIGIN="$(parent_origin)"
     FRONTEND_PORT="${ORIGIN##*:}"
@@ -329,6 +333,7 @@ case "$ACTION" in
       DB_HOST=localhost DB_PORT="$PG_PORT" DB_USER=zensu DB_PASSWORD="$DB_PASSWORD" \
       DB_NAME=zensu DB_SSLMODE=disable REGISTRATION_ENABLED=true EMAIL_ALLOW_NOOP=true \
       NOTIFICATION_ALLOW_NOOP=true TRUSTED_PROXY_CIDRS=none JWT_SECRET="$JWT_SECRET" APP_BASE_URL="$ORIGIN" \
+      ZENSU_STORAGE_PROVIDER=filesystem ZENSU_STORAGE_BASE_PATH="$BLOB_DIR" \
       nohup node "$SUPERVISOR" start "$BACKEND_READY" "$LOG_BACKEND" \
       "$WORKTREE/backend" go run ./cmd/zensu </dev/null >/dev/null 2>&1 &
     BACKEND_SUPERVISOR_PID=$!

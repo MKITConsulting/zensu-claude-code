@@ -28,6 +28,7 @@
     "reviewPanel": "lean",
     "reviewConvergence": true,
     "criticalReproduction": true,
+    "externalReviewImport": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "sessionAutoAdopt": true,

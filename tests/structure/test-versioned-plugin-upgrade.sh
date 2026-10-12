@@ -346,6 +346,20 @@ REMEDY_LOCKSTEP="$(
       if (gate.split(childGate).length - 1 !== 1) faults.push("the gate spells the child close " + (gate.split(childGate).length - 1) + " times, want the constant alone");
       if (shell.split(childShell[1]).length - 1 !== 1) faults.push("the shell spells the child close " + (shell.split(childShell[1]).length - 1) + " times, want the constant alone");
     }
+    const bindShell = shell.match(/^ZENSU_BIND_CHILD_CLOSE=\x27([^\x27]*)\x27$/m);
+    const bindGate = constant("BIND_CHILD_CLOSE");
+    if (!bindShell || bindGate === null) faults.push("bind child close not parsed on both sides");
+    else {
+      if (bindGate !== bindShell[1]) faults.push("bind child close differs between the gate and the shell");
+      if (gate.split(bindGate).length - 1 !== 1) faults.push("the gate spells the bind child close " + (gate.split(bindGate).length - 1) + " times, want the constant alone");
+      if (shell.split(bindShell[1]).length - 1 !== 1) faults.push("the shell spells the bind child close " + (shell.split(bindShell[1]).length - 1) + " times, want the constant alone");
+      if (/\/zensu:|--confirm|--restore-root/.test(bindGate)) faults.push("the bind child close names a command");
+    }
+    const bindSites = gate.split("\n").filter((line) => /^\s*denyBind\(`\$\{cause\} \$\{BIND_CHILD_CLOSE\}`\);$/.test(line)).length;
+    if (bindSites !== 1) faults.push("bind child close deny sites in the gate=" + bindSites + " want 1 (baseline missing)");
+    if (!/^\s*if \(callerIsMain\) \{\n\s*denyBind\(`\$\{cause\} Run \/zensu:adopt-session to see the diagnosis, and \/zensu:adopt-session --confirm to rebuild the document\./m.test(gate)) faults.push("the baseline rebuild remedy is not the main-thread arm of a callerIsMain split");
+    const shellBindUses = shell.split("$ZENSU_BIND_CHILD_CLOSE").length - 1;
+    if (shellBindUses !== 3) faults.push("the shell renders the bind child close " + shellBindUses + " times, want 3 (narrowed, default, orphaned-project-root)");
 
     // The AUDIENCE, at source level: every deny that hands out the ADOPTION command
     // sits under the MAIN guard, and every child close follows that guard directly.
@@ -1438,11 +1452,12 @@ fi
 # behavioural row above, which reaches the fixture-installed copy of that file.
 . "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
+RECOGNIZER_FLOOR="$(unit_overview_declared "${RECOGNIZER_UNIT##*/}")"
 if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/recognizer-unit.out" 26; then
+  && unit_cases_registered_floor "$TMP/recognizer-unit.out" "$RECOGNIZER_FLOOR"; then
   check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), driven from here — nothing else referenced it)" PASS
 else
-  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), want >= 26 registered — driven from here, nothing else referenced it)" FAIL
+  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), want >= ${RECOGNIZER_FLOOR:-<no overview row>} registered — driven from here, nothing else referenced it)" FAIL
   # The FAILING lines, not the first forty. node --test emits every passing case
   # before any failure, so a head-style dump of a 26-case suite showed only
   # successes and the verdict never reached the log — exactly what happened on
@@ -1450,15 +1465,26 @@ else
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/recognizer-unit.out" 2>/dev/null | head -40
 fi
+if RECOGNIZER_OVERVIEW="$(unit_overview_check "$RECOGNIZER_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${RECOGNIZER_UNIT##*/} registers ($RECOGNIZER_FLOOR)" PASS
+else
+  check "$RECOGNIZER_OVERVIEW" FAIL
+fi
 
 # WORKING TREE, not HEAD — same split as the recognizer unit row above.
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
+LINEAGE_FLOOR="$(unit_overview_declared "${LINEAGE_UNIT##*/}")"
 if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/lineage-unit.out" 13; then
+  && unit_cases_registered_floor "$TMP/lineage-unit.out" "$LINEAGE_FLOOR"; then
   check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"))" PASS
 else
-  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= 13 registered)" FAIL
+  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= ${LINEAGE_FLOOR:-<no overview row>} registered)" FAIL
   sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
+fi
+if LINEAGE_OVERVIEW="$(unit_overview_check "$LINEAGE_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${LINEAGE_UNIT##*/} registers ($LINEAGE_FLOOR)" PASS
+else
+  check "$LINEAGE_OVERVIEW" FAIL
 fi
 
 # WORKING TREE, not HEAD — same split again. The superseded-lease sweep moved out
@@ -1469,13 +1495,19 @@ fi
 # file for the same reason the two above are — tests/run-all.sh discovers only
 # test-*.sh, so an undriven *.test.js never executes anywhere.
 SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
+SWEEP_FLOOR="$(unit_overview_declared "${SWEEP_UNIT##*/}")"
 if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/sweep-unit.out" 32; then
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" "$SWEEP_FLOOR"; then
   check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
 else
-  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 32 registered — driven from here)" FAIL
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= ${SWEEP_FLOOR:-<no overview row>} registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/sweep-unit.out" 2>/dev/null | head -40
+fi
+if SWEEP_OVERVIEW="$(unit_overview_check "$SWEEP_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${SWEEP_UNIT##*/} registers ($SWEEP_FLOOR)" PASS
+else
+  check "$SWEEP_OVERVIEW" FAIL
 fi
 
 # WORKING TREE, not HEAD — same split. The adoption REPORT moved out of a
@@ -1483,13 +1515,19 @@ fi
 # gives safe() a driver: it had no test in either direction, so deleting its whole
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
+REPORT_FLOOR="$(unit_overview_declared "${REPORT_UNIT##*/}")"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 56; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" "$REPORT_FLOOR"; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 56 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= ${REPORT_FLOOR:-<no overview row>} registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
+fi
+if REPORT_OVERVIEW="$(unit_overview_check "$REPORT_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${REPORT_UNIT##*/} registers ($REPORT_FLOOR)" PASS
+else
+  check "$REPORT_OVERVIEW" FAIL
 fi
 
 # WORKING TREE, not HEAD — same split. The automatic adoption is ONE module shared
@@ -1502,13 +1540,19 @@ fi
 # serve-or-adopt with stubs, which is the only way to reach a sibling adoption that
 # finished BEFORE this process probed.
 AUTO_ADOPT_UNIT="$ROOT/tests/structure/session-auto-adopt-v1.test.js"
+AUTO_ADOPT_FLOOR="$(unit_overview_declared "${AUTO_ADOPT_UNIT##*/}")"
 if [ -f "$AUTO_ADOPT_UNIT" ] && node --test "$AUTO_ADOPT_UNIT" >"$TMP/auto-adopt-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" 40; then
+  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" "$AUTO_ADOPT_FLOOR"; then
   check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), driven from here)" PASS
 else
-  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= 40 registered — driven from here)" FAIL
+  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= ${AUTO_ADOPT_FLOOR:-<no overview row>} registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/auto-adopt-unit.out" 2>/dev/null | head -40
+fi
+if AUTO_ADOPT_OVERVIEW="$(unit_overview_check "$AUTO_ADOPT_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${AUTO_ADOPT_UNIT##*/} registers ($AUTO_ADOPT_FLOOR)" PASS
+else
+  check "$AUTO_ADOPT_OVERVIEW" FAIL
 fi
 
 # The non-sibling case is the one that cannot be inferred from the version
@@ -5561,7 +5605,12 @@ AUTO_SCOPE_WRAPPERS="$TMP/auto-scope-wrappers.out"
     && zensu_emit_hook_session_deny incompatible-runtime 0.17.0 0.18.0 not-completed main \
     && zensu_emit_hook_session_deny narrowed record-unreadable child \
     && zensu_emit_hook_session_deny '' plugin-data-mismatch main \
-    && zensu_emit_hook_session_deny damaged-runtime record-unreadable main ) >"$AUTO_SCOPE_OUT" 2>/dev/null
+    && zensu_emit_hook_session_deny damaged-runtime record-unreadable main \
+    && zensu_emit_hook_session_deny narrowed '' child \
+    && zensu_emit_hook_session_deny '' '' child \
+    && zensu_emit_hook_session_deny '' plugin-data-mismatch child \
+    && zensu_emit_hook_session_deny orphaned-project-root /tmp/zensu-auto20-gone child \
+    && zensu_emit_hook_session_deny orphaned-project-root /tmp/zensu-auto20-gone main ) >"$AUTO_SCOPE_OUT" 2>/dev/null
 ( source "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session.sh" || exit 1
   for _scope_token in not-completed 'BAD"X'; do
     printf 'attempt\t%s\n' "$(zensu_session_adoption_attempt "$_scope_token")"
@@ -5572,13 +5621,14 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   const fs = require("node:fs");
   const lines = fs.readFileSync(process.env.OUT_FILE, "utf8").split("\n").filter((line) => line !== "");
   const faults = [];
-  if (lines.length !== 9) faults.push("emissions=" + lines.length + " want 9");
+  if (lines.length !== 14) faults.push("emissions=" + lines.length + " want 14");
   const reasons = lines.map((line, index) => {
     try { return String(JSON.parse(line).hookSpecificOutput.permissionDecisionReason || ""); }
     catch (_error) { faults.push("emission " + index + " is not JSON"); return ""; }
   });
-  const [main, child, screened, prunedChild, prunedMain, lineageMain, narrowedChild, genericMain, damaged] =
-    reasons.concat(new Array(9).fill("")).slice(0, 9);
+  const [main, child, screened, prunedChild, prunedMain, lineageMain, narrowedChild, genericMain, damaged,
+    narrowedBare, genericBare, genericChild, orphanChild, orphanMain] =
+    reasons.concat(new Array(14).fill("")).slice(0, 14);
   const COMMANDS = ["--confirm", "/zensu:adopt-session", "hooks.sessionAutoAdopt"];
   const CLOSE = "report this to the main thread rather than retrying.";
   const want = (label, text, needle) => { if (!text.includes(needle)) faults.push(label + " lacks: " + needle.slice(0, 50)); };
@@ -5627,6 +5677,37 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   want("damaged runtime", damaged, "a required Zensu runtime library is missing or unreadable");
   forbid("damaged runtime", damaged, "tried to adopt the record automatically");
 
+  const BIND_CLOSE = "The diagnosis and the repair are reserved for the main thread, so neither is available here — " + CLOSE;
+  const MAIN_ONLY = ["/zensu:doctor", "fresh Claude Code session", "stays reachable", "--restore-root", "still work"];
+  const childOnly = (label, text) => {
+    commandFree(label, text);
+    for (const needle of MAIN_ONLY) forbid(label, text, needle);
+    if (text.split(CLOSE).length - 1 !== 1) faults.push(label + " does not carry exactly one close");
+  };
+  for (const [label, text] of [["narrowed child", narrowedChild], ["narrowed bare child", narrowedBare],
+    ["generic bare child", genericBare], ["generic child", genericChild], ["orphan child", orphanChild]]) {
+    childOnly(label, text);
+  }
+  want("narrowed bare child", narrowedBare, "This is neither relaxable state");
+  if (!narrowedBare.endsWith(BIND_CLOSE)) faults.push("narrowed bare child does not end on the bind close");
+  forbid("narrowed bare child", narrowedBare, "tried to adopt the record automatically");
+  want("generic bare child", genericBare, "so every stateful Zensu tool fails closed");
+  want("generic bare child", genericBare, "The cause is one of three: this session has no record at all");
+  if (!genericBare.endsWith(BIND_CLOSE)) faults.push("generic bare child does not end on the bind close");
+  want("generic child", genericChild, "it was REFUSED: plugin-data-mismatch. The repair writes the immutable record");
+  forbid("generic child", genericChild, "The record belongs to a different plugin data store");
+  forbid("generic child", genericChild, BIND_CLOSE);
+  if (!genericChild.endsWith(CLOSE)) faults.push("generic child does not end on the child close");
+  want("orphan child", orphanChild, "the project root it records no longer exists");
+  forbid("orphan child", orphanChild, "/tmp/zensu-auto20-gone");
+  if (!orphanChild.endsWith(BIND_CLOSE)) faults.push("orphan child does not end on the bind close");
+  want("orphan main", orphanMain, "/zensu:adopt-session --restore-root");
+  want("orphan main", orphanMain, "Other shell commands and the read-only diagnostics still work");
+  want("orphan main", orphanMain, "records is: \"/tmp/zensu-auto20-gone\"");
+  forbid("orphan main", orphanMain, CLOSE);
+  want("generic main", genericMain, "Run /zensu:doctor");
+  want("generic main", genericMain, "Then start a fresh Claude Code session");
+
   const wrappers = fs.readFileSync(process.env.WRAP_FILE, "utf8").split("\n").filter((line) => line !== "")
     .map((line) => line.split("\t"));
   if (wrappers.length !== 6) faults.push("wrapper lines=" + wrappers.length + " want 6");
@@ -5641,7 +5722,7 @@ AUTO_SCOPE_VERDICT="$(OUT_FILE="$AUTO_SCOPE_OUT" WRAP_FILE="$AUTO_SCOPE_WRAPPERS
   process.stdout.write(faults.length ? faults.join("; ") : "ok");
 ' 2>/dev/null)" || AUTO_SCOPE_VERDICT=threw
 if [ "$AUTO_SCOPE_VERDICT" = ok ]; then
-  check "AUTO-20 every deny template no fixture reaches emits one valid JSON object: a lost race reads incomplete and its child form names a retry rather than the reserved close, the pruned and generic child forms carry cause, verb, token and close and no command, an incomplete token selects the retry wording in both named scopes, a damaged runtime grows no adoption sentence, and the wrappers screen a hostile token" PASS
+  check "AUTO-20 every deny template no fixture reaches emits one valid JSON object: a lost race reads incomplete and its child form names a retry rather than the reserved close, the pruned and generic child forms carry cause, verb, token and close and no command, an incomplete token selects the retry wording in both named scopes, a damaged runtime grows no adoption sentence, the wrappers screen a hostile token, and every child form of the narrowed, generic and orphaned-root scopes keeps its cause, names no main-thread remedy and ends on exactly one close" PASS
 else
   check "AUTO-20 the deny templates no fixture reaches ($AUTO_SCOPE_VERDICT)" FAIL
   head -c 400 "$AUTO_SCOPE_OUT" 2>/dev/null; printf '\n'
@@ -6867,8 +6948,8 @@ fi
 # the version pair alone: the kept record's name is the session selector confined
 # contexts withhold, and a lease clause can name a command that writes the record.
 # The user still gets the whole notice, as the deny's systemMessage. The baseline arm
-# names --confirm to every principal on its own (a separate, deferred finding), so
-# the command is asserted absent from the DISCLOSURE, which is what this row owns.
+# withholds its commands from every principal but the main thread, so the command is
+# asserted absent from the whole reason as well as from the DISCLOSURE.
 AUTO_BASE_KID_SESSION='versioned-upgrade-auto-baseline-gone-child'
 AUTO_BASE_KID_KEY="$(auto_key "$AUTO_BASE_KID_SESSION")"
 AUTO_BASE_KID_RECORD="$ADOPT_RECORDS_DIR/$AUTO_BASE_KID_KEY.json"
@@ -6890,6 +6971,9 @@ if auto_session_start "$AUTO_BASE_KID_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_
         && [ "$AUTO_BASE_KID_DISCLOSURE" != "$AUTO_BASE_KID_REASON" ] \
         && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF '.superseded-' \
         && ! printf '%s' "$AUTO_BASE_KID_DISCLOSURE" | grep -qF -- '--confirm' \
+        && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF '/zensu:adopt-session' \
+        && ! printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF 'fresh Claude Code session' \
+        && printf '%s' "$AUTO_BASE_KID_REASON" | grep -qF 'neither is available here — report this to the main thread rather than retrying.' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
         && printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'this tool call was still denied, for the reason its deny names.' \
         && ! printf '%s' "$AUTO_BASE_KID_SYSTEM" | grep -qF 'nothing else to do' \

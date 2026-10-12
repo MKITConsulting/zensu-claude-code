@@ -1,22 +1,9 @@
 ---
 name: docs
 description: >
-  Author genuine, code-grounded documentation for a tracked Zensu feature — or a
-  whole product/component in one batch — so the feature honestly clears the
-  hardened `docs_complete` release gate. For each feature it reads the REAL linked
-  source, writes ONE feature-specific doc of the correct type (derived from the
-  feature's `feature_scope`), publishes it as a Zensu wiki page (default) or a
-  per-feature repo markdown file, links it with `zensu link docs` so the docs
-  score recomputes, and verifies the gate flipped. It produces one doc PER feature
-  — never a shared README linked across many features (the exact false-green the
-  gate now rejects) — and forbids placeholder / metadata-dump stubs: content must
-  describe what THIS feature actually does, citing real code. Batchable across
-  parallel read-only authoring agents; idempotent (skips features already
-  `docs_complete`); logs every feature skipped or failed (no silent truncation).
-  Use whenever the user wants to document a feature, "write the docs", "generate
-  feature documentation", "clear the docs gate", "backfill missing docs" across a
-  product/component, make a feature release-ready on the docs axis, or the slash
-  command /zensu:docs.
+  [Zensu] Write code-grounded documentation for tracked Zensu features so they
+  clear the docs_complete release gate. Use when the user wants to document a
+  feature, "write the docs", or /zensu:docs.
 ---
 
 # /zensu:docs
@@ -203,14 +190,17 @@ feature record reformatted, not documentation. Never publish it.
 **Batch (parallel authoring fan-out — model on `/zensu:ghost-scan` Phase 2b):**
 
 1. Spawn authoring agents in ONE parallel batch with the `Agent` tool,
-   `subagent_type: Explore` (read-only — they cannot mutate Zensu or write repo
-   files, so every mutation stays in the main thread under the workflow marker).
+   `subagent_type: Explore` (read-only — they cannot mutate Zensu, write repo
+   files or run a command, so every mutation and every `zensu` call stays in the
+   main thread under the workflow marker).
 2. Each agent authors exactly ONE feature's doc. It receives: the feature id,
-   title, the target `doc_type`(s) + audience, and this instruction — run
-   `zensu doc gen-context <id> --doc-type <type>` (a read, ungated), **Read the
-   real source files it names**, author code-grounded Markdown per
-   `docs/documentation-guide.md`, and return `{feature_id, doc_type, title,
-   audience, markdown}`. It performs NO Zensu writes.
+   title, the target `doc_type`(s) + audience, and, inline in its brief, that
+   feature's Phase 2 context map (linked source paths, symbols, posture). The
+   agent cannot run `zensu doc gen-context`; only the main thread runs it, in
+   Phase 2. Its instruction: **Read the real source files the map names**,
+   author code-grounded Markdown per `docs/documentation-guide.md`, and return
+   `{feature_id, doc_type, title, audience, markdown}`.
+   It performs NO Zensu writes.
 3. **Cap concurrency (~8–12 agents) and wave through large batches.** A
    256-feature product is many waves — `log` wave progress and never silently cap:
    a trimmed batch must read as "capped on purpose," not "covered everything."
@@ -312,12 +302,12 @@ never published green.
 | `zensu features list` | 1 | Load the batch feature set (scope by product; filter component/status client-side; pages at 20) |
 | `zensu journeys suggest` | 1 | Full feature catalog when the list envelope's `total` exceeds one page |
 | `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only, no `--json` flag) |
-| `zensu doc gen-context` | 2, 3 | Aggregated authoring context map (paths + posture, not source) |
+| `zensu doc gen-context` | 2 | Aggregated authoring context map (paths + posture, not source); only the main thread runs it, and Phase 3 reads its output |
 | `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
 
 ## Agents & Skills Used
 
 | Component | Type | Phase | Purpose |
 |---|---|---|---|
-| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads source + gen-context, returns markdown, never mutates |
+| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and runs no command |
 | `docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |

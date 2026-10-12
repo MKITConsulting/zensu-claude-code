@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.24.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.25.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -22,9 +22,10 @@ Any language, any stack. Nothing to configure, and no account needed to start.
   take and remembers a Zensu-workflow answer for the rest of the session —
   or never, when the project sets `hooks.defaultDeliveryRoute`.
   You stay in the loop once, not every turn.
-- **A review that cannot be skipped.** Five specialist reviewers run in
-  parallel, an independent judge checks their blind spots, and a Stop hook makes
-  sure the chain actually finished before the turn ends.
+- **A review the turn waits for.** Specialist reviewers run in parallel and an
+  independent judge checks their blind spots. Once the implementation is marked
+  complete, a Stop hook keeps the turn from ending until the review chain
+  closes. The hold is bounded; when it lets go, it writes a notice saying why.
 - **Findings you can trust.** Every finding is graded against the real source
   before anyone acts on it. What does not hold up is marked, not silently fixed.
 - **Guardrails around the agent.** Gates stop it from committing a secret or
@@ -101,7 +102,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the permission prompt asks you once per session for each loopback origin and at every browser start for a deployed HTTPS origin, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -150,7 +151,7 @@ is included as [`config.example.json`](config.example.json).
 ## Works without a Zensu account
 
 The implementation workflow and the review chain need no CLI, no login, and no
-network: `/zensu:tdd`, the five-aspect review with its auto-fix loop, and the
+network: `/zensu:tdd`, the review-aspect panel with its auto-fix loop, and the
 progress log under `.zensu/logs/` all run locally.
 
 Installing and authenticating the CLI adds the tracking layer on top — feature
@@ -221,7 +222,7 @@ is unpinned).
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
-| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |

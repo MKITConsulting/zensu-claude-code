@@ -1,20 +1,9 @@
 ---
 name: cover
 description: >
-  [Zensu] Author durable, committed tests at the RIGHT level for a change — generic across any
-  stack, framework, and app type. Point it at a diff, a feature, a PR, a path, or a
-  described behavior and it probes the repo, decides per behavior whether a unit,
-  component, integration/contract, or end-to-end test is the faithful cover (the test
-  pyramid, encoded), mirrors the project's existing test conventions, and writes the
-  gap-filling tests green-first — because the code already exists, each test must pass on
-  first run; a first-run failure means either a bad test or a real bug, which it reports
-  rather than silently patching. Reuses the Zensu review chain (five review-aspect agents +
-  code-reviewer) as the quality gate and flags any surfaced bug loudly. It is the durable
-  regression-net complement to /zensu:autopilot's one-shot live validation, and can persist
-  autopilot's validated acceptance criteria into committed end-to-end tests via --from-acs.
-  Use whenever the user wants to add or backfill tests, "write e2e tests", "cover this",
-  "add regression tests", "fill the test gaps", "FE/BE/fullstack tests", a durable test net,
-  or the slash command /zensu:cover.
+  [Zensu] Write durable, committed tests at the right level for a diff, feature,
+  PR or behavior. Use when the user wants to add or backfill tests,
+  "write e2e tests", "cover this", or /zensu:cover.
 ---
 
 # /zensu:cover
@@ -123,19 +112,23 @@ For each plan item, in the project's own idiom:
      → write it as `xfail`/skip, record the bug, and move on. **Report-only — never patch
      production here.**
 
-Independent items across layers may fan out via parallel workflows where the probe says it is
-safe (a shared test DB or fixed port serializes them).
+Only test **authoring** (step 1) may fan out: parallel workflows or agents may write the tests
+of independent items across layers. A worker can run no command, so the main thread runs every
+authored test, the RED/GREEN triage and any executed mutation check itself, and runs them one
+at a time where the probe reports a shared test DB or a fixed port.
 
 ### Phase 3 — Quality gate + review chain
 
 1. Run the target suite green (except intentional `xfail` bug flags).
 2. Apply the `rules/quality.md` gate: determinism, isolation, no over-mocking, meaningful
    assertions.
-3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn the
-   **five** `zensu:review-aspect` agents in one parallel batch (`conventions`, `bugs`,
-   `architecture`, `tests` (emphasized), `security`) over the changed test files, merge their
-   findings in this thread, consolidate through a single `zensu:code-reviewer` spawn, and fix
-   the findings in-thread. `--no-review` skips this (degrade + note).
+3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn one
+   `zensu:review-aspect` agent per perspective of the configured panel in one parallel batch
+   (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
+   `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
+   `security`) over the changed test files, merge their findings in this thread, consolidate
+   through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. `--no-review`
+   skips this (degrade + note).
 
 **Not TDD — no phase-gate, no deferred marker.** cover **does not arm the phase-gate** (it
 never runs `--tdd-begin`) and records **no** `--pending-review` marker. It drives the review

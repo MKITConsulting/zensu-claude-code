@@ -1,21 +1,9 @@
 ---
 name: autopilot-adopt
 description: >
-  [Zensu] Take over a durable Autopilot run whose owning session is gone, so the work
-  continues here instead of being cancelled. Claude Code can carry a conversation into a NEW
-  session id — a fork, or a resume whose record was pruned — and ownership of a running
-  Autopilot run does not follow. The successor then cannot see the run through
-  `--autopilot-status`, cannot drive it, and cannot release it either while the previous
-  owner's workflow document still looks fresh; meanwhile the run's workspace hold refuses
-  every new chain in that tree. This skill reports the holding run and, only after the user
-  confirms, makes the current session its owner with one guarded write: the run record's
-  `ownerSessionId` and the owner pointer move, and nothing else. It adds no event, advances
-  no stage, resumes nothing, and refuses a run with a live inner TDD chain. Prefer it over
-  /zensu:autopilot-release whenever the run's work is worth keeping — release cancels, this
-  continues. Use when `--autopilot-begin` or a Stop refusal reports a held workspace, when a
-  session that was running Autopilot has been forked or resumed into this one, or via
-  /zensu:autopilot-adopt. No network or API key. Do not use to escape a review, and do not
-  use it to take a run away from a session that is still working.
+  [Zensu] Take over a durable Autopilot run whose owning session is gone, so its
+  work continues here. Use when a held workspace blocks Autopilot after a fork
+  or resume, or via /zensu:autopilot-adopt.
 ---
 
 # /zensu:autopilot-adopt

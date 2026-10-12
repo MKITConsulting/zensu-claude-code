@@ -30,7 +30,7 @@ test('the consent gate and the run-config helper require the floor module instea
     assert.match(source, /verify-navigation-floor-v1\.js/, file);
     for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isLocalHost(', 'function isPublicAddress(',
       'function resolveRemoteHost(', 'function classifyOrigin(', 'function normalizeRoute(', 'function parsePolicyTargets(',
-      'function policyContractFault(']) {
+      'function policyContractFault(', 'function isExactHost(', 'HOSTNAME_RE']) {
       assert.equal(source.includes(own), false, `${path.basename(file)}: ${own}`);
     }
   }
@@ -103,6 +103,23 @@ test('origin classification splits loopback origins from public https and refuse
   assert.equal(classifyOrigin('https://[::ffff:93.184.216.34]/').reason, FLOOR_REASONS.REMOTE_NOT_PUBLIC);
   assert.equal(classifyOrigin('http://user:pw@127.0.0.1:5173/').reason, FLOOR_REASONS.CREDENTIALS);
   assert.equal(classifyOrigin('http://127.0.0.1:5173/?q').reason, FLOOR_REASONS.QUERY_OR_FRAGMENT);
+  for (const url of ['https://*.example.com/', 'https://{a,b}.example.com/', 'https://api.*.example.com/', 'https://*/', 'wss://*.example.com/']) {
+    assert.equal(classifyOrigin(url).reason, FLOOR_REASONS.HOSTNAME_PATTERN, url);
+  }
+  assert.equal(classifyOrigin('http://*.example.com/').reason, FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
+  const idn = classifyOrigin('https://café.example/');
+  assert.equal(idn.mode, 'remote');
+  assert.equal(idn.origin, 'https://xn--caf-dma.example');
+});
+
+test('one exported exact-host predicate serves classifyOrigin, the policy parser and the run-config shape', () => {
+  for (const host of ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946', 'app.example.com', 'xn--caf-dma.example', 'my_host.example.com']) {
+    assert.equal(floor.isExactHost(host), true, host);
+  }
+  for (const host of ['*.example.com', '{a,b}.example.com', 'a,b.example.com', '']) {
+    assert.equal(floor.isExactHost(host), false, host);
+  }
+  assert.equal(FLOOR_REASONS.HOSTNAME_PATTERN.startsWith('an origin must name its host exactly: '), true);
 });
 
 test('remote host resolution pins only globally routable answers', async () => {

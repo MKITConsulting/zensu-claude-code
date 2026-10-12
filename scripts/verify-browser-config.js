@@ -22,6 +22,7 @@ const MAX_ORIGINS = consent.MAX_RUN_ORIGINS;
 const MODES = Object.freeze(['local', 'remote']);
 const USAGE = 'usage: verify-browser-config.js --run-dir <absolute-dir> --mode <local|remote> --origin <origin> [--origin <origin> ...] [--network-only-origin <origin> ...]';
 const CHECK_USAGE = 'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>';
+const POLICY_CONSENT_NOTE = 'the navigation policy in the launch environment does not name every origin checked here as a target: the permission prompt asks for the others, and a session that cannot show it (permission mode bypassPermissions or dontAsk) is denied them at open';
 const CHECK_ROLES = Object.freeze({ 'declared-safe': 'navigable', 'network-only': 'network-only' });
 
 function parseArgs(argv) {
@@ -85,7 +86,7 @@ async function resolverRule(classified, resolver) {
 }
 
 function policyVerdict(url, policy, navigation, role) {
-  const verdict = consent.judgeOrigin(url, { navigation, policy, role });
+  const verdict = consent.judgeOrigin(url, { navigation, policy, role, answerable: true });
   if (verdict.deny) throw new Error(verdict.deny);
   return verdict;
 }
@@ -99,10 +100,9 @@ async function checkPolicy(argv, env = process.env, resolver = dns.promises.look
   const networkOnly = CHECK_ROLES[operand] === 'network-only';
   const classified = checkOrigin(rawOrigin, mode, networkOnly);
   const policy = consent.readPolicy(env);
-  if (policy && policy.ok && policy.mode !== mode) throw new Error('navigation policy mode does not match');
-  policyVerdict(`${classified.origin}/`, policy, !networkOnly, CHECK_ROLES[operand]);
+  const verdict = policyVerdict(`${classified.origin}/`, policy, !networkOnly, CHECK_ROLES[operand]);
   if (classified.mode === 'remote') await resolveRemoteHost(classified.hostname, resolver);
-  return policy ? 'policy' : 'consent';
+  return verdict.decidedBy === 'policy-mode' ? 'policy' : 'consent';
 }
 
 function sessionName(runDir) {
@@ -187,12 +187,14 @@ async function run(argv, resolver = dns.promises.lookup, env = process.env, read
   const networkOnlyOrigins = [];
   const rules = [];
   const pinned = new Set();
+  let consentNeeded = false;
   const admit = async (rawOrigin, networkOnly) => {
     const classified = checkOrigin(rawOrigin, options.mode, networkOnly);
     if (origins.includes(classified.origin) || networkOnlyOrigins.includes(classified.origin)) {
       throw new Error('origins must be unique');
     }
-    policyVerdict(`${classified.origin}/`, policy, false, networkOnly ? 'network-only' : 'navigable');
+    const verdict = policyVerdict(`${classified.origin}/`, policy, false, networkOnly ? 'network-only' : 'navigable');
+    if (verdict.decidedBy !== 'policy-mode') consentNeeded = true;
     if (classified.mode === 'remote' && !pinned.has(classified.hostname)) {
       const rule = await resolverRule(classified, resolver);
       if (rule) rules.push(rule);
@@ -207,13 +209,14 @@ async function run(argv, resolver = dns.promises.lookup, env = process.env, read
   const shape = consent.runConfigShape(config, path.join(runDir, CONFIG_NAME));
   if (!shape.ok) throw new Error(shape.fault);
   const configPath = writeConfig(runDir, config);
-  return { session, configPath, origins, networkOnlyOrigins, config, mode: policy ? 'policy' : 'consent' };
+  return { session, configPath, origins, networkOnlyOrigins, config, mode: consentNeeded ? 'consent' : 'policy' };
 }
 
 module.exports = {
   CONFIG_NAME,
   MAX_ORIGINS,
   OUTPUT_DIR_NAME,
+  POLICY_CONSENT_NOTE,
   SESSION_PREFIX,
   buildConfig,
   checkOrigin,
@@ -226,15 +229,17 @@ module.exports = {
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
+  const policyPresent = consent.readPolicy(process.env) !== null;
   const work = argv[0] === '--check-policy'
-    ? checkPolicy(argv.slice(1)).then((verdict) => `${verdict}\n`)
+    ? checkPolicy(argv.slice(1)).then((verdict) => ({ text: `${verdict}\n`, consentUnderPolicy: policyPresent && verdict === 'consent' }))
     : run(argv).then((result) => {
       const lines = [`session=${result.session}`, `config=${result.configPath}`, `mode=${result.mode}`];
       for (const origin of result.origins) lines.push(`origin=${origin}`);
       for (const origin of result.networkOnlyOrigins) lines.push(`network-only-origin=${origin}`);
-      return `${lines.join('\n')}\n`;
+      return { text: `${lines.join('\n')}\n`, consentUnderPolicy: policyPresent && result.mode === 'consent' };
     });
-  work.then((text) => {
+  work.then(({ text, consentUnderPolicy }) => {
+    if (consentUnderPolicy) process.stderr.write(`zensu verify browser config: note: ${POLICY_CONSENT_NOTE}\n`);
     process.stdout.write(text);
   }).catch((error) => {
     process.stderr.write(`zensu verify browser config: ${error.message}\n`);

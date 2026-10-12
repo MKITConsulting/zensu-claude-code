@@ -55,24 +55,27 @@ bash "$ZENSU_RUNTIME_CONTROLLER" up "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKT
 bash "$ZENSU_RUNTIME_CONTROLLER" ready "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 ```
 
-Run every controller/preflight action as its own Bash invocation. If policy resolution or
-preflight fails, do not start or navigate. Report PARTIAL with instructions to launch a new
-Claude session with the exact origin policy. A child Bash command cannot
+Run every controller/preflight action as its own Bash invocation. If `planned-origin` or the
+preflight fails, do not start or navigate; report PARTIAL with its reason. An invalid parent
+policy is fixed in the environment that launches Claude Code: a child Bash command cannot
 change the environment the browser consent gate reads.
 
 Without a parent policy the gate runs in consent mode and the same three commands still
-apply: `planned-origin` then picks a free literal-loopback port through
+apply, as they do under a valid policy without exactly one `http://127.0.0.1:<port>` target:
+`planned-origin` then picks a free literal-loopback port through
 `<absolute-plugin-root>/scripts/verify-free-port.js`, records it once in the run directory
 (`zensu-planned-origin`, mode `0600`) so `up` reuses the same origin, and `--check-policy`
 prints `consent` with exit `0`. After `ready`, write the run config for `$APP_ORIGIN` as the
 parent skill's "Browser session" step describes; the first `playwright-cli` call that reaches
 that origin opens the host's permission prompt to the user, and a refused prompt ends the run
-PARTIAL after `down`.
+PARTIAL after `down`. Under a policy the preflight's `consent` also prints a note on stderr: in a
+session that cannot show the prompt (`bypassPermissions` or `dontAsk`) the gate will deny that
+origin at `open`, so stop there, before `up`, and report PARTIAL with the note's remedy.
 
-With a parent policy, before `up` that environment must authorize exactly one target containing a
-literal `http://127.0.0.1:<port>` origin and `declared-safe` evidence mode; that target covers
-every route on the origin, so no route list is needed.
-`up` uses that exact frontend port, fails if it is occupied,
+When a valid parent policy names exactly one target, a literal `http://127.0.0.1:<port>` origin
+with `declared-safe` evidence mode, `planned-origin` answers that origin and the preflight prints
+`policy`; the target covers every route on the origin, so no route list is needed.
+`up` uses the planned frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at
 `55432` and `8090`, creates per-run database/JWT secrets and a private runtime lease,
 starts `pgvector/pgvector:pg17`, waits until PostgreSQL accepts TCP connections, and launches
@@ -111,6 +114,17 @@ backend starts.
   verify run never scrapes `/metrics`, so the `WARN` that the listener is disabled is expected
   too. When the monorepo makes another variable required, add it to the backend environment in
   the controller and to the expected environment in that suite in the same change.
+- **Backend blob store.** The backend's filesystem blob store defaults to the relative path
+  `./data/blobs` (`ZENSU_STORAGE_BASE_PATH` in `backend/internal/config/config.go`), which
+  resolves against `backend/`, so every blob a run writes would stay in the worktree as an
+  untracked `backend/data/blobs/` tree after `down`. The controller passes
+  `ZENSU_STORAGE_PROVIDER=filesystem` and `ZENSU_STORAGE_BASE_PATH=<run dir>/blobs`, so every
+  blob lands in the run directory, which the parent skill removes; a provider or path set in
+  `backend/.env` or in the calling shell cannot move it out. Before it starts anything, `up`
+  creates that directory with mode `0700`, reuses the one an earlier `up` of the same run
+  directory left, and refuses a symlink or any other file in its place. When the monorepo adds
+  another setting whose default is a path relative to `backend/`, point it into the run
+  directory the same way.
 - **Database readiness.** The backend runs its migrations once at boot and exits when
   PostgreSQL does not answer yet (`running migrations` with `failed to open database: EOF` in
   `backend.log`); `ready` then fails with `runtime supervisor identity is unavailable`. `up`
@@ -157,8 +171,10 @@ Execute the previously registered `down` command byte-for-byte on success, failu
 cancellation, or timeout. It authenticates to the fixed run-local supervisor endpoints with the
 private lease, stops their complete child process groups, verifies the unique PostgreSQL
 container name and lease-hash label, and then removes internal secret/state files. Mutable JSON
-alone can never authorize a signal or container removal. The parent skill removes the unique run
-directory. Never use `pkill`, kill by a broad command pattern, or remove another worktree's resource.
+alone can never authorize a signal or container removal. `down` leaves the backend's blob store
+in the run directory, like the logs; the parent skill removes the unique run directory with
+everything in it. Never use `pkill`, kill by a broad command pattern, or remove another
+worktree's resource.
 
 `down` is idempotent, and a rerun after a failed teardown converges:
 

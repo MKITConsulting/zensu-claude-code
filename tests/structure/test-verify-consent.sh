@@ -24,11 +24,14 @@ SESSION="zensu-verify-vc"
 CLI="playwright-cli -s=$SESSION"
 NL=$'\n'
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 check() {
   local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  case "$cond" in
+    PASS) echo "  PASS  $label"; PASS=$((PASS+1)) ;;
+    SKIP) echo "  SKIP  $label"; SKIP=$((SKIP+1)) ;;
+    *) echo "  FAIL  $label"; FAIL=$((FAIL+1)) ;;
+  esac
 }
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
@@ -99,33 +102,33 @@ fi
 # The floor is EQUAL to what the file registers, and the SUITE-OVERVIEW cell is compared against
 # the same number, because a hand-maintained floor one below the real count hides a deleted case —
 # which is exactly what the V6 floor did.
-run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
-  local out rc registered cell
+run_unit() { # $1 label  $2 file
+  local out rc registered floor overview
+  floor="$(unit_overview_declared "${2##*/}")"
   out="$(node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
   [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  if unit_cases_registered_floor_text "$out" "$3"; then
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" PASS
+  if unit_cases_registered_floor_text "$out" "$floor"; then
+    check "$1-floor at least $floor unit cases registered ($(unit_cases_report_text "$out"))" PASS
   else
-    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" FAIL
+    check "$1-floor at least ${floor:-<no overview row>} unit cases registered ($(unit_cases_report_text "$out"))" FAIL
   fi
   registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-  if [ -n "$registered" ] && [ "$3" = "$registered" ]; then
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=$registered)" PASS
+  if [ -n "$registered" ] && [ "$floor" = "$registered" ]; then
+    check "$1-exact the floor equals what the file registers (floor=$floor registered=$registered)" PASS
   else
-    check "$1-exact the floor equals what the file registers (floor=$3 registered=${registered:-<none>})" FAIL
+    check "$1-exact the floor equals what the file registers (floor=${floor:-<no overview row>} registered=${registered:-<none>})" FAIL
   fi
-  cell="$(sed -n "s/^| \`$4\` | \([0-9][0-9]*\) |.*/\1/p" "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
-  if [ -n "$registered" ] && [ "$cell" = "$registered" ]; then
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=$cell)" PASS
+  if overview="$(unit_overview_check "$2")"; then
+    check "$1-overview the SUITE-OVERVIEW Blocks cell equals the file's test() registrations (cell=$floor)" PASS
   else
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
+    check "$1-overview $overview" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 20 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 115 "verify-consent-v1.test.js"
-run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 20 "verify-browser-config.test.js"
-run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR"
+run_unit "V7 consent" "$UNIT_CONSENT"
+run_unit "V7b free-port" "$UNIT_PORT"
+run_unit "V7c browser-config" "$UNIT_CONFIG"
+run_unit "V7d cli-version" "$UNIT_VERSION"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \
@@ -201,13 +204,14 @@ new_project() {
 }
 
 bash_payload() {
-  node -e '
-    const [event, command, sid, cwd, extra] = process.argv.slice(1);
+  printf '%s' "$2" | node -e '
+    const [event, sid, cwd, extra] = process.argv.slice(1);
+    const command = require("fs").readFileSync(0, "utf8");
     const body = { hook_event_name: event, tool_name: "Bash", tool_input: { command }, session_id: sid, cwd };
     if (event === "PostToolUse") body.tool_response = { stdout: "", stderr: "", interrupted: false };
     if (extra) Object.assign(body, JSON.parse(extra));
     process.stdout.write(JSON.stringify(body));
-  ' "$1" "$2" "$3" "$4" "${5:-}"
+  ' "$1" "$3" "$4" "${5:-}"
 }
 
 pre_verdict() {
@@ -239,12 +243,13 @@ pre_reason() {
 post_run() { bash_payload PostToolUse "$1" "$2" "$3" "${4:-}" | bash "$POST_HOOK" 2>&1 >/dev/null; }
 
 memory_has() {
-  node -e '
-    const [file, origin, route, decidedBy] = process.argv.slice(1);
-    const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
+  printf '%s\n%s\n%s' "$1" "$2" "$3" | node -e '
+    const fs = require("fs");
+    const [origin, route, decidedBy] = fs.readFileSync(0, "utf8").split("\n");
+    const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const hits = doc.records.filter((r) => r.origin === origin && r.route === route && r.decidedBy === decidedBy);
     process.exit(doc.version === 1 && hits.length === 1 ? 0 : 1);
-  ' "$MEMORY" "$1" "$2" "$3" 2>/dev/null
+  ' "$MEMORY" 2>/dev/null
 }
 
 memory_count() {
@@ -467,7 +472,8 @@ BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
 remember_tmp "$NONODE_BIN"
 for _vc_tool in cat sed tr dirname; do
-  ln -s "$(command -v "$_vc_tool")" "$NONODE_BIN/$_vc_tool"
+  printf '#!%s\nexec %q "$@"\n' "$BASH_BIN" "$(command -v "$_vc_tool")" > "$NONODE_BIN/$_vc_tool"
+  chmod 755 "$NONODE_BIN/$_vc_tool"
 done
 if env PATH="$NONODE_BIN" "$BASH_BIN" -c 'command -v node' >/dev/null 2>&1; then
   check "H17a-control the stripped PATH hides node" FAIL
@@ -661,8 +667,35 @@ done
   && check "H9b the exact name localhost asks like a loopback IP" PASS \
   || check "H9b the exact name localhost asks like a loopback IP" FAIL
 case "$(pre_reason "$CLI goto https://app.example.com/" "$SID" "$PROJ")" in
-  *'parent-environment navigation policy'*) check "H9a a remote target is refused in consent mode, naming the policy it needs" PASS ;;
-  *) check "H9a a remote target is refused in consent mode, naming the policy it needs" FAIL ;;
+  *'parent-environment navigation policy'*) check "H9a without a reported permission mode a remote target is refused in consent mode, naming the policy it needs" PASS ;;
+  *) check "H9a without a reported permission mode a remote target is refused in consent mode, naming the policy it needs" FAIL ;;
+esac
+HUMAN='{"permission_mode":"default"}'
+REMOTE_NEEDS_POLICY="$(node -e 'process.stdout.write(String(require(process.argv[1]).REASONS.REMOTE_NEEDS_POLICY || ""))' "$MODULE" 2>/dev/null)"
+H9C_VERDICT="$(pre_verdict "$CLI goto https://app.example.com/" "$SID" "$PROJ" "$HUMAN")"
+case "$H9C_VERDICT:$(pre_reason "$CLI goto https://app.example.com/" "$SID" "$PROJ" "$HUMAN")" in
+  ASK:*'is about to reach https://app.example.com (remote).'*'A remote origin is asked again every time the browser is opened.'*)
+    check "H9c in a mode that shows the prompt a remote target asks with the remote prompt text" PASS ;;
+  *) check "H9c in a mode that shows the prompt a remote target asks with the remote prompt text (verdict=$H9C_VERDICT)" FAIL ;;
+esac
+for unanswerable in bypassPermissions dontAsk; do
+  H9D_REASON="$(pre_reason "$CLI goto https://app.example.com/" "$SID" "$PROJ" "{\"permission_mode\":\"$unanswerable\"}")"
+  if [ -n "$REMOTE_NEEDS_POLICY" ] && [ "${H9D_REASON%"$REMOTE_NEEDS_POLICY"}" != "$H9D_REASON" ]; then
+    check "H9d under $unanswerable a remote target is denied with the remedy named" PASS
+  else
+    check "H9d under $unanswerable a remote target is denied with the remedy named (got: ${H9D_REASON:-<none>})" FAIL
+  fi
+done
+H9E_PORT=4396
+for unanswerable in bypassPermissions dontAsk; do
+  [ "$(pre_verdict "$CLI goto http://127.0.0.1:$H9E_PORT/" "$SID" "$PROJ" "{\"permission_mode\":\"$unanswerable\"}")" = "ASK" ] \
+    && check "H9e under $unanswerable a new loopback origin still asks" PASS \
+    || check "H9e under $unanswerable a new loopback origin still asks" FAIL
+  H9E_PORT=$((H9E_PORT + 1))
+done
+case "$(pre_reason "$CLI goto 'https://*.example.com/'" "$SID" "$PROJ" "$HUMAN")" in
+  *'an origin must name its host exactly'*) check "H9f a pattern host is refused by the floor even where a prompt could be shown" PASS ;;
+  *) check "H9f a pattern host is refused by the floor even where a prompt could be shown" FAIL ;;
 esac
 
 SUBAGENT='{"agent_id":"agent-1","agent_type":"general-purpose"}'
@@ -679,7 +712,8 @@ mkdir -p "$RUN_DIR"
 HELPER_OUT="$(config_helper --run-dir "$RUN_DIR" --mode local --origin 'http://127.0.0.1:4310' 2>/dev/null)"
 RUN_SESSION="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^session=//p')"
 RUN_CONFIG="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^config=//p')"
-if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ "$RUN_CONFIG" = "$RUN_DIR/playwright-cli.json" ] && [ -f "$RUN_CONFIG" ] \
+RUN_CONFIG_EXPECTED="$(node -e 'const fs = require("fs"); const path = require("path"); process.stdout.write(path.join(fs.realpathSync.native(process.argv[1]), "playwright-cli.json"))' "$RUN_DIR" 2>/dev/null)"
+if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ -n "$RUN_CONFIG_EXPECTED" ] && [ "$RUN_CONFIG" = "$RUN_CONFIG_EXPECTED" ] && [ -f "$RUN_CONFIG" ] \
   && printf '%s\n' "$HELPER_OUT" | grep -qx 'mode=consent'; then
   check "H11-control the run-config helper wrote the config, named the session and reported consent mode" PASS
 else
@@ -740,12 +774,24 @@ fi
   && check "H13a a legacy policy route list no longer narrows its origin: an unlisted route passes" PASS \
   || check "H13a a legacy policy route list no longer narrows its origin: an unlisted route passes" FAIL
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_reason "$CLI goto http://127.0.0.1:4200/login" "$SID" "$PROJ")" in
-  *'origin is not a target of the navigation policy'*) check "H13b policy mode denies a non-target even when the consent memory remembers it" PASS ;;
-  *) check "H13b policy mode denies a non-target even when the consent memory remembers it" FAIL ;;
+  *'origin is not a target of the navigation policy'*) check "H13b without a reported permission mode policy mode denies a non-target even when the consent memory remembers it" PASS ;;
+  *) check "H13b without a reported permission mode policy mode denies a non-target even when the consent memory remembers it" FAIL ;;
 esac
+if [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ" "$HUMAN")" = "NONE" ] \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4200/login" "$SID" "$PROJ" "$HUMAN")" = "NONE" ] \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4301/" "$SID" "$PROJ" "$HUMAN")" = "ASK" ] \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$CLI goto https://app.example.com/" "$SID" "$PROJ" "$HUMAN")" = "ASK" ]; then
+  check "H13b2 where a prompt can be shown a policy pre-approves its targets and leaves every other origin to consent" PASS
+else
+  check "H13b2 where a prompt can be shown a policy pre-approves its targets and leaves every other origin to consent" FAIL
+fi
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_reason "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ")" in
   *'the navigation policy in the launch environment is invalid'*) check "H13c an invalid policy in the environment denies rather than falling back to consent" PASS ;;
   *) check "H13c an invalid policy in the environment denies rather than falling back to consent" FAIL ;;
+esac
+case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_reason "$CLI goto http://127.0.0.1:4200/login" "$SID" "$PROJ" "$HUMAN")" in
+  *'the navigation policy in the launch environment is invalid'*) check "H13c2 an invalid policy denies a remembered origin even where a prompt could be shown" PASS ;;
+  *) check "H13c2 an invalid policy denies a remembered origin even where a prompt could be shown" FAIL ;;
 esac
 ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" post_run "$CLI goto http://127.0.0.1:4300/login" "$SID" "$PROJ" >/dev/null
 memory_has "http://127.0.0.1:4300" "/login" "policy-mode" \
@@ -763,13 +809,40 @@ esac
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$CLI goto http://127.0.0.1:4300/admin" "$SID" "$PROJ")" = "NONE" ] \
   && check "H13f-control a target of the same policy still passes without a prompt" PASS \
   || check "H13f-control a target of the same policy still passes without a prompt" FAIL
+NETWORK_ONLY_RUN_DIR="$PROJ/run-network-only"
+mkdir -p "$NETWORK_ONLY_RUN_DIR"
+NETWORK_ONLY_HELPER_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" config_helper --run-dir "$NETWORK_ONLY_RUN_DIR" --mode local --origin 'http://127.0.0.1:4300' --network-only-origin 'http://127.0.0.1:4390' 2>/dev/null)"
+NETWORK_ONLY_SESSION="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^session=//p')"
+NETWORK_ONLY_CONFIG="$(printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | sed -n 's/^config=//p')"
+NETWORK_ONLY_OPEN="playwright-cli -s=$NETWORK_ONLY_SESSION open --config='$NETWORK_ONLY_CONFIG' http://127.0.0.1:4300/network-only-open"
+network_only_records() {
+  node -e '
+    try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records.filter((r) => r.origin === process.argv[2]).length)); }
+    catch (_) { process.stdout.write("none"); }
+  ' "$MEMORY" "$1" 2>/dev/null
+}
 NETWORK_ONLY_COUNT_BEFORE="$(memory_count)"
-ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$CLI goto http://127.0.0.1:4390/" "$SID" "$PROJ" >/dev/null
-[ "$(memory_count)" = "$NETWORK_ONLY_COUNT_BEFORE" ] \
-  && check "H13g the recorder writes no consent record for a network-only origin" PASS \
-  || check "H13g the recorder writes no consent record for a network-only origin" FAIL
+if [ -n "$NETWORK_ONLY_SESSION" ] && [ -n "$NETWORK_ONLY_CONFIG" ] && [ -f "$NETWORK_ONLY_CONFIG" ] \
+  && printf '%s\n' "$NETWORK_ONLY_HELPER_OUT" | grep -qxF 'network-only-origin=http://127.0.0.1:4390' \
+  && grep -qF '"http://127.0.0.1:4390"' "$NETWORK_ONLY_CONFIG" \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" pre_verdict "$NETWORK_ONLY_OPEN" "$SID" "$PROJ")" = "NONE" ]; then
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1="$NETWORK_ONLY_POLICY" post_run "$NETWORK_ONLY_OPEN" "$SID" "$PROJ" >/dev/null
+  NETWORK_ONLY_COUNT_AFTER="$(memory_count)"
+  case "$NETWORK_ONLY_COUNT_BEFORE:$NETWORK_ONLY_COUNT_AFTER" in
+    (*[!0-9:]*|:*|*:) NETWORK_ONLY_GREW=0 ;;
+    (*) [ "$NETWORK_ONLY_COUNT_AFTER" -eq "$((NETWORK_ONLY_COUNT_BEFORE + 1))" ] && NETWORK_ONLY_GREW=1 || NETWORK_ONLY_GREW=0 ;;
+  esac
+  if [ "$NETWORK_ONLY_GREW" -eq 1 ] && memory_has "http://127.0.0.1:4300" "/network-only-open" "policy-mode" \
+    && [ "$(network_only_records 'http://127.0.0.1:4390')" = "0" ]; then
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin" PASS
+  else
+    check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (records: $NETWORK_ONLY_COUNT_BEFORE->$NETWORK_ONLY_COUNT_AFTER, network-only: $(network_only_records 'http://127.0.0.1:4390'))" FAIL
+  fi
+else
+  check "H13g an admitted open whose run config holds a network-only origin records its target and nothing for that origin (the helper wrote no such run config, or the gate did not admit its open)" FAIL
+fi
 case "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","evidenceMode":"declared-safe"}],"networkOnlyOrigins":["https://*.example.com"]}' pre_reason "$CLI goto http://127.0.0.1:4300/" "$SID" "$PROJ")" in
-  *'policy origin must name its host exactly'*) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" PASS ;;
+  *'an origin must name its host exactly'*) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" PASS ;;
   *) check "H13h a wildcard network-only origin invalidates the whole policy at the real hook" FAIL ;;
 esac
 
@@ -779,7 +852,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \
@@ -803,6 +876,56 @@ esac
 [ "$UNBOUND_RC" -eq 0 ] && [ "$UNBOUND_SAID" -eq 1 ] && [ "$BEFORE" = "$AFTER" ] \
   && check "H15b an unbound recorder writes nothing, exits 0 and names its cause" PASS \
   || check "H15b an unbound recorder writes nothing, exits 0 and names its cause (rc=$UNBOUND_RC)" FAIL
+
+REMOTE_ORIGIN='https://93.184.216.34'
+REMOTE_RUN_DIR="$PROJ/run-remote"
+mkdir -p "$REMOTE_RUN_DIR"
+REMOTE_HELPER_OUT="$(config_helper --run-dir "$REMOTE_RUN_DIR" --mode remote --origin "$REMOTE_ORIGIN" 2>/dev/null)"
+REMOTE_SESSION="$(printf '%s\n' "$REMOTE_HELPER_OUT" | sed -n 's/^session=//p')"
+REMOTE_CONFIG="$(printf '%s\n' "$REMOTE_HELPER_OUT" | sed -n 's/^config=//p')"
+if [ -n "$REMOTE_SESSION" ] && [ -n "$REMOTE_CONFIG" ] && [ -f "$REMOTE_CONFIG" ] \
+  && printf '%s\n' "$REMOTE_HELPER_OUT" | grep -qx 'mode=consent' \
+  && grep -qF "\"$REMOTE_ORIGIN\"" "$REMOTE_CONFIG"; then
+  check "H19-control without a policy the run-config helper writes a remote run config for consent" PASS
+else
+  check "H19-control without a policy the run-config helper writes a remote run config for consent" FAIL
+fi
+REMOTE_OPEN="playwright-cli -s=$REMOTE_SESSION open --config='$REMOTE_CONFIG' $REMOTE_ORIGIN/"
+REMOTE_VERDICT="$(pre_verdict "$REMOTE_OPEN" "$SID" "$PROJ" "$HUMAN")"
+case "$REMOTE_VERDICT:$(pre_reason "$REMOTE_OPEN" "$SID" "$PROJ" "$HUMAN")" in
+  ASK:*"is about to reach $REMOTE_ORIGIN (remote)."*'pages behind your own login included'*'asked again every time the browser is opened'*)
+    check "H19 open with a remote run config asks with the remote prompt text" PASS ;;
+  *) check "H19 open with a remote run config asks with the remote prompt text (verdict=$REMOTE_VERDICT)" FAIL ;;
+esac
+REMOTE_POST_RC=0
+REMOTE_POST_ERR="$(post_run "$REMOTE_OPEN" "$SID" "$PROJ" "$HUMAN")" || REMOTE_POST_RC=$?
+[ "$REMOTE_POST_RC" -eq 0 ] && [ -z "$REMOTE_POST_ERR" ] && memory_has "$REMOTE_ORIGIN" "/" "asked" \
+  && check "H19a the recorder writes an approved remote open as asked" PASS \
+  || check "H19a the recorder writes an approved remote open as asked (rc=$REMOTE_POST_RC err=$REMOTE_POST_ERR)" FAIL
+[ "$(pre_verdict "$REMOTE_OPEN" "$SID" "$PROJ" "$HUMAN")" = "ASK" ] \
+  && check "H19b the next open of the recorded remote origin asks again" PASS \
+  || check "H19b the next open of the recorded remote origin asks again" FAIL
+[ "$(pre_verdict "playwright-cli -s=$REMOTE_SESSION goto $REMOTE_ORIGIN/inventory" "$SID" "$PROJ" "$HUMAN")" = "NONE" ] \
+  && check "H19c a goto to the recorded remote origin gets no decision" PASS \
+  || check "H19c a goto to the recorded remote origin gets no decision" FAIL
+[ "$(pre_verdict "playwright-cli -s=$REMOTE_SESSION goto https://93.184.216.35/" "$SID" "$PROJ" "$HUMAN")" = "ASK" ] \
+  && check "H19d a goto to an unrecorded remote origin asks" PASS \
+  || check "H19d a goto to an unrecorded remote origin asks" FAIL
+H19E_OK=1
+for h19e_extra in '{"permission_mode":"bypassPermissions"}' '{"permission_mode":"dontAsk"}' ''; do
+  for h19e_cmd in "$REMOTE_OPEN" "playwright-cli -s=$REMOTE_SESSION goto $REMOTE_ORIGIN/inventory"; do
+    H19E_REASON="$(pre_reason "$h19e_cmd" "$SID" "$PROJ" "$h19e_extra")"
+    [ -n "$REMOTE_NEEDS_POLICY" ] && [ "${H19E_REASON%"$REMOTE_NEEDS_POLICY"}" != "$H19E_REASON" ] || H19E_OK=0
+  done
+done
+[ "$H19E_OK" -eq 1 ] \
+  && check "H19e where no prompt can be shown the recorded remote origin is denied at open and at goto with the remedy named" PASS \
+  || check "H19e where no prompt can be shown the recorded remote origin is denied at open and at goto with the remedy named" FAIL
+REMOTE_POLICY="{\"version\":1,\"mode\":\"remote\",\"targets\":[{\"origin\":\"$REMOTE_ORIGIN\",\"evidenceMode\":\"declared-safe\"}]}"
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$REMOTE_POLICY" pre_verdict "$REMOTE_OPEN" "$SID" "$PROJ" '{"permission_mode":"bypassPermissions"}')" = "NONE" ] \
+  && [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$REMOTE_POLICY" pre_verdict "$REMOTE_OPEN" "$SID" "$PROJ" "$HUMAN")" = "NONE" ] \
+  && check "H19f a remote policy target opens without a prompt in every mode" PASS \
+  || check "H19f a remote policy target opens without a prompt in every mode" FAIL
 
 bash_payload PreToolUse "$CLI goto http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/mismatch-pre.json"
 bash_payload PostToolUse "$CLI goto http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/mismatch-post.json"
@@ -840,12 +963,16 @@ mkdir -p "$SYMMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
 cp "$PREFILTER_LIB" "$SYMMOD_ROOT/hooks/lib/"
 ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
-SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
-case "$SYMMOD_DENY" in
-  *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
-    check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
-  *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
-esac
+if [ -L "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+  SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
+  case "$SYMMOD_DENY" in
+    *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+      check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
+    *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
+  esac
+else
+  check "V31f a plugin root whose decision module is a symlink denies — this host made no symlink, so ln -s copied the module" SKIP
+fi
 BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
 mkdir -p "$BADMOD_ROOT/hooks/lib"
@@ -947,17 +1074,13 @@ fi
   && check "V34b the policy rules/setup.md renders is accepted by the helper it tells the model to run" PASS \
   || check "V34b the policy rules/setup.md renders is accepted by the helper it tells the model to run (got: ${CHECK_POLICY_OUT:-<none>})" FAIL
 NEG_RC=0
-NEG_ERR=""
+NEG_OUT=""
 if [ -n "$RENDERED_POLICY" ]; then
-  NEG_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45174' declared-safe 2>&1 >/dev/null)" || NEG_RC=$?
+  NEG_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45174' declared-safe 2>/dev/null)" || NEG_RC=$?
 fi
-NOT_POLICY_TARGET_TEXT="$(node -e 'process.stdout.write(require(process.argv[1]).REASONS.NOT_POLICY_TARGET)' "$MODULE" 2>/dev/null)"
-case "$NEG_RC:$NEG_ERR" in
-  1:*"$NOT_POLICY_TARGET_TEXT"*)
-    [ -n "$NOT_POLICY_TARGET_TEXT" ] \
-      && check "V34b-neg another origin is refused against that same rendered policy, for the origin" PASS \
-      || check "V34b-neg another origin is refused against that same rendered policy (no reason text)" FAIL ;;
-  *) check "V34b-neg another origin is refused against that same rendered policy, for the origin (rc=$NEG_RC: ${NEG_ERR:-<none>})" FAIL ;;
+case "$NEG_RC:$NEG_OUT" in
+  0:consent) check "V34b-neg another origin is not approved by that same rendered policy: the helper answers consent, never policy" PASS ;;
+  *) check "V34b-neg another origin is not approved by that same rendered policy: the helper answers consent, never policy (rc=$NEG_RC: ${NEG_OUT:-<none>})" FAIL ;;
 esac
 CONSENT_CHECK_OUT="$(config_helper --check-policy local 'http://127.0.0.1:45173' declared-safe 2>/dev/null)"
 [ "$CONSENT_CHECK_OUT" = "consent" ] \
@@ -1009,12 +1132,16 @@ if ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'ignores every other Bash call' \
 else
   check "V47 docs/verify-feature.md states the mention-denial cost and its remedy" FAIL
 fi
-if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'That promise holds for an interactive session: how the host resolves the prompt under bypass permissions, in auto mode or in a headless run is unverified, so such a run belongs in policy mode.' \
-  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it is required for remote targets and for unattended runs — bypass permissions, auto mode, a headless run —' \
-  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Nor is it verified without a person at the prompt: how the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run was never observed, so run an unattended or bypass session in policy mode, which asks nothing.'; then
-  check "V48 docs/verify-feature.md limits the prompt promise to interactive sessions and sends unattended runs to policy mode" PASS
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'The gate counts Manual, Accept edits, Plan and Auto mode as able to show the prompt, and in Auto mode it was measured to reach you. Under bypass permissions or `dontAsk` the gate denies a remote origin itself and names the remedy.' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'in the other four modes whatever answers the host'"'"'s permission prompts, a program included, decides every origin the policy does not name.' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Nor can the gate tell a person from a program: it reads only the permission mode the host reports.' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'So run an unattended session under `dontAsk` or bypass permissions, with a policy that names every origin it needs.' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the host then refuses the prompt' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'nobody can answer' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'in auto mode or in a headless run is unverified'; then
+  check "V48 docs/verify-feature.md says the gate cannot tell a person from a program and sends unattended runs to dontAsk or bypass permissions with a policy" PASS
 else
-  check "V48 docs/verify-feature.md limits the prompt promise to interactive sessions and sends unattended runs to policy mode" FAIL
+  check "V48 docs/verify-feature.md says the gate cannot tell a person from a program and sends unattended runs to dontAsk or bypass permissions with a policy" FAIL
 fi
 DRIFT_MISSING=""
 for needle in 'The driver is user-supplied: the plugin ships no pin and no integrity check for `playwright-cli`.' \
@@ -1393,5 +1520,9 @@ else
 fi
 
 echo "----"
-echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+if [ "$SKIP" -gt 0 ]; then
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
+else
+  echo "test-verify-consent: $PASS PASS / $FAIL FAIL"
+fi
 [ "$FAIL" -eq 0 ]
