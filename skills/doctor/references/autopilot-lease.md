@@ -60,8 +60,8 @@ never deletes either artifact.
   exits. On Windows the row also says No holder marker exists for this record when a runtime
   from before holder markers, or a holder that could not create one, wrote it, and says that
   something exists at its holder marker's name that the core cannot judge, so it proves nothing
-  either way, when the marker's name holds a directory, a non-empty file or a file that cannot
-  be opened. The row says the doctor cannot establish whether pid `<pid>` is still the lock keeper
+  either way, when the marker's name holds a directory, a non-empty file, a file with a second
+  hard link or a file that cannot be opened. The row says the doctor cannot establish whether pid `<pid>` is still the lock keeper
   or the holder of the recovery sentinel, and names what a live one looks like. For the lock:
   the node lock keeper whose command line names `session-control-core-v1.js` and this project's
   `.zensu/state` (bash 4 or later, every Windows host), or the bash process that runs a Zensu

@@ -244,15 +244,20 @@ lease, while its own session recovers it on its next `Stop`.
 The locks that serialize these steps do not trust a live-looking id either. On Windows the
 process that holds a lock keeps a holder marker open for as long as it holds it: an empty file
 beside the lock, `.<lock file name>.<token>.marker`, which it opens exclusively before it
-publishes the lock and closes only after the lock is gone. Windows refuses every other open of
-that file while the holder runs and frees it the moment the holder exits, so a waiting process
-reads a marker it cannot open as a live holder and a marker it can open as a holder that is
-gone, whatever process the recorded id names now, and recovers such a lock on its next attempt.
-No clock and no helper process takes part. Where no marker decides — a lock written by an
-earlier release, by a holder whose file system did not enforce the exclusive open, or on Linux
-and macOS whenever the start identity the lock stored cannot be read — the start time decides.
-A lock is written by its holder, so the holder existed before the lock's recorded creation time,
-which never lies before the holder's own process start. When the process now using the recorded
+publishes the lock and closes after the lock is gone, or earlier when its own release fails, so
+the next waiting process recovers the lock at once. Windows refuses every other open of that
+file while the holder keeps it open and frees it within milliseconds of the holder's exit, so a
+waiting process reads a marker it cannot open as a live holder and a marker it can open as a
+holder that no longer holds the lock, whatever process the recorded id names now, and recovers
+such a lock on its next attempt. A lock whose recorded process is gone is recovered whatever its
+marker reads. No clock and no helper process takes part. Where no marker decides — a lock
+written by an earlier release, by a holder that could not create its marker, by a holder whose
+file system did not enforce the exclusive open, or on Linux and macOS whenever the start
+identity the lock stored cannot be read — the start time decides. A lock is written by its
+holder, so the holder existed before the lock's recorded creation time, which, for a lock this
+release wrote in its holder's own name, never lies before the holder's own process start; a
+lock from an earlier release, or a bash 3.2 lease that stored no start identity, can after a
+backward clock step, and such a live lock can then be recovered. When the process now using the recorded
 id provably started more than one second after that time, it cannot be the holder: the holder
 is gone, the id was reused, and the next acquisition recovers the lock. Windows reads that start
 time through `powershell.exe`, only for a lock older than one second, at most once every two
@@ -262,7 +267,8 @@ acquiring external process lock` or `timed out acquiring per-session lock` until
 exits. A marker refuses every open while its lock is held, so on Windows a `git add` of a
 `.zensu/state` that is not gitignored, and removing the worktree, fail for that moment. A
 `.marker` file whose lock file is gone is an inert empty file, left by a holder that was killed
-during its release, and may be deleted.
+during its release or by a recovery that could not delete it while another process held it
+open, and may be deleted.
 
 ## Unbindable sessions
 

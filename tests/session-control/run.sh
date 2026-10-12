@@ -16,7 +16,7 @@ fi
 # THE FLOOR IS THE PORTABLE MINIMUM, not the count on the author's machine, and
 # that distinction cost a red CI run to learn. Cases in this file are registered
 # CONDITIONALLY on the host, so the same tree runs a different number of them per
-# platform. MEASURED on one commit: darwin 153, ubuntu-latest 150, win32 138. A
+# platform. MEASURED on one commit: darwin 201, linux 198, win32 179. A
 # floor set at the local maximum fails on every other host for a reason that has
 # nothing to do with the property it guards. The floor exists to catch a suite
 # that stopped REGISTERING - zero cases, or a collapse - so it belongs at the

@@ -149,7 +149,7 @@ the file's existence and the skill's pointer to it.
   their start-time arms when `powershell.exe` answers there; on Linux and macOS an unreadable
   start fails `P1le10` instead of skipping it. The arm that cannot decide is pinned by a shim
   (`P1le10b`), because a live owner older than its record and older than 30 s cannot be planted
-  cheaply, and so are the holder-marker arms (`P1le27`–`P1le30`), because a planted record has
+  cheaply, and so are the holder-marker arms (`P1le27`–`P1le31`), because a planted record has
   no marker a live process holds.
 - On Windows the rows' `ps -ww -p <pid> -o args=` check runs in Git Bash, whose `ps` lists MSYS
   process ids and prints no Windows command line, while the record stores the Windows pid. A held

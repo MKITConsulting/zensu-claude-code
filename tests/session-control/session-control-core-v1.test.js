@@ -5110,6 +5110,7 @@ const SHARE_MODE_MODEL = String.raw`
     linkError: null,
     enforce: true,
     onBusyOpen: null,
+    afterChange: null,
   };
   {
     const realOpen = fs.openSync;
@@ -5118,6 +5119,10 @@ const SHARE_MODE_MODEL = String.raw`
     const realRename = fs.renameSync;
     const realLink = fs.linkSync;
     const nameOf = (file) => path.basename(String(file));
+    const noteChange = (event) => {
+      shareModel.events.push(event);
+      if (shareModel.afterChange) shareModel.afterChange(event);
+    };
     const refuse = (code, syscall, file) => Object.assign(new Error(code + ': ' + syscall + ' ' + String(file)), {
       code,
       syscall,
@@ -5154,13 +5159,13 @@ const SHARE_MODE_MODEL = String.raw`
     fs.unlinkSync = function modelUnlink(file) {
       if (shareModel.holds.has(nameOf(file))) throw refuse('EBUSY', 'unlink', file);
       const result = realUnlink.call(fs, file);
-      shareModel.events.push(['unlink', nameOf(file)]);
+      noteChange(['unlink', nameOf(file)]);
       return result;
     };
     fs.renameSync = function modelRename(from, to) {
       if (shareModel.holds.has(nameOf(from))) throw refuse('EBUSY', 'rename', from);
       const result = realRename.call(fs, from, to);
-      shareModel.events.push(['rename', nameOf(from), nameOf(to)]);
+      noteChange(['rename', nameOf(from), nameOf(to)]);
       return result;
     };
     fs.linkSync = function modelLink(from, to) {
@@ -5171,7 +5176,7 @@ const SHARE_MODE_MODEL = String.raw`
         throw refuse(refusal.code, 'link', to);
       }
       const result = realLink.call(fs, from, to);
-      shareModel.events.push(['link', nameOf(from), nameOf(to)]);
+      noteChange(['link', nameOf(from), nameOf(to)]);
       return result;
     };
   }
@@ -5186,27 +5191,36 @@ function runLockChild(source, args = []) {
 
 function assertMarkerLifecycle(events, lockName, token, label) {
   const marker = `.${lockName}.${token}.marker`;
-  const at = (predicate, what) => {
-    const index = events.findIndex(predicate);
+  const after = (from, predicate, what) => {
+    const index = events.findIndex((event, position) => position > from && predicate(event));
     assert.ok(index >= 0, `${label}: ${what} never happened`);
     return index;
   };
-  const opened = at((event) => event[0] === 'exclusive-open' && event[1] === marker, 'the exclusive marker open');
-  const probed = at((event) => event[0] === 'busy-open' && event[1] === marker, 'the exclusivity self-probe');
-  const published = at((event) => event[0] === 'link' && event[2] === lockName, 'the record publication');
-  const quarantined = at(
-    (event, index) => index > published && event[0] === 'rename' && event[1] === lockName,
+  const opened = after(-1, (event) => event[0] === 'exclusive-open' && event[1] === marker, 'the exclusive marker open');
+  const probed = after(opened, (event) => event[0] === 'busy-open' && event[1] === marker, 'the exclusivity self-probe');
+  const published = after(opened, (event) => event[0] === 'link' && event[2] === lockName, 'the record publication');
+  const quarantined = after(
+    published,
+    (event) => event[0] === 'rename' && event[1] === lockName,
     'the record quarantine',
   );
-  const removed = at(
-    (event, index) => index > quarantined && event[0] === 'unlink' && event[1] === events[quarantined][2],
+  const removed = after(
+    quarantined,
+    (event) => event[0] === 'unlink' && event[1] === events[quarantined][2],
     'the record removal',
   );
-  const closed = at((event) => event[0] === 'exclusive-close' && event[1] === marker, 'the marker close');
-  const unlinked = at((event) => event[0] === 'unlink' && event[1] === marker, 'the marker unlink');
+  const closed = after(opened, (event) => event[0] === 'exclusive-close' && event[1] === marker, 'the marker close');
+  const unlinked = after(opened, (event) => event[0] === 'unlink' && event[1] === marker, 'the marker unlink');
   assert.ok(opened < probed && probed < published, `${label}: the marker is held before the record is published`);
   assert.ok(published < quarantined && quarantined < removed, `${label}: the record leaves through its quarantine`);
   assert.ok(removed < closed && closed < unlinked, `${label}: the marker is released only after the record is gone`);
+}
+
+function holderMarkerTokens(events, lockName) {
+  const prefix = `.${lockName}.`;
+  return events
+    .filter((event) => event[0] === 'exclusive-open' && event[1].startsWith(prefix) && event[1].endsWith('.marker'))
+    .map((event) => event[1].slice(prefix.length, -'.marker'.length));
 }
 
 test('a free holder marker reclaims a young record whose owner pid is alive, without a start-time read', async () => {
@@ -5374,6 +5388,57 @@ test('a holder marker that is not a free empty file proves nothing, so a young l
   assert.equal(report.startReads, 0);
 });
 
+test('a holder marker that is not a free empty file falls through to the start-time rule, which reclaims an old record whose pid was reused', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-unreadable-old-'));
+  const source = WIN32_LOCK_CHILD + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const cases = {
+      'non-empty file': (marker) => fs.writeFileSync(marker, 'x'),
+      directory: (marker) => fs.mkdirSync(marker),
+      'second link': (marker) => {
+        fs.writeFileSync(marker, '');
+        fs.linkSync(marker, marker + '.link');
+      },
+    };
+    startAnswer = () => filetime(Date.now());
+    const report = {};
+    let index = 0;
+    for (const [name, plantMarker] of Object.entries(cases)) {
+      index += 1;
+      const token = String(index).repeat(48);
+      plant(binding.lockFile, { pid: process.ppid, token, created_at: new Date(Date.now() - 3600000).toISOString() });
+      const marker = markerFile(binding.lockFile, token);
+      plantMarker(marker);
+      const readsBefore = startReads.length;
+      const inspection = core.inspectExternalProcessLock(options).lock;
+      report[name] = {
+        marker: inspection.marker,
+        alive: inspection.alive,
+        stale: inspection.stale,
+        startedAfterRecord: inspection.startedAfterRecord,
+        outcome: attempt(options, 2),
+        startReads: startReads.length - readsBefore,
+        lockAfter: core.inspectExternalProcessLock(options).lock,
+      };
+      fs.rmSync(marker, { recursive: true, force: true });
+      fs.rmSync(marker + '.link', { force: true });
+    }
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  for (const name of ['non-empty file', 'directory', 'second link']) {
+    assert.equal(report[name].marker, 'unreadable', name);
+    assert.equal(report[name].alive, true, name);
+    assert.equal(report[name].stale, true, name);
+    assert.equal(report[name].startedAfterRecord, true, name);
+    assert.equal(report[name].outcome, 'acquired', name);
+    assert.ok(report[name].startReads >= 1, `${name}: the start-time rule never ran`);
+    assert.deepEqual(report[name].lockAfter, { state: 'absent' }, name);
+  }
+});
+
 test('a holder marker is tested on every attempt, so a holder that exits between start-time probes is reclaimed at once', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-every-attempt-'));
   const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
@@ -5422,6 +5487,7 @@ test('a holder opens its marker exclusively before it publishes and retires it o
       external,
       perSession,
       perSessionName: path.basename(perSessionFile),
+      perSessionRecoveryName: '.marker-order.recovery',
       holdsAfter: shareModel.holds.size,
       markers: markersIn(directory),
     }));
@@ -5430,13 +5496,15 @@ test('a holder opens its marker exclusively before it publishes and retires it o
   assertMarkerLifecycle(report.events, report.lockName, report.external, 'external lease');
   assertMarkerLifecycle(report.events, report.perSessionName, report.perSession, 'per-session lock');
   assert.ok(report.heldDuring.includes(`.${report.lockName}.${report.external}.marker`));
-  const sentinelMarkers = report.events
-    .filter((event) => event[0] === 'exclusive-open' && event[1].startsWith(`.${report.recoveryName}.`))
-    .map((event) => event[1]);
-  assert.ok(sentinelMarkers.length > 0, 'the recovery sentinel took no holder marker');
-  for (const marker of sentinelMarkers) {
-    assert.ok(report.events.some((event) => event[0] === 'exclusive-close' && event[1] === marker), `${marker} stayed open`);
-    assert.ok(report.events.some((event) => event[0] === 'unlink' && event[1] === marker), `${marker} stayed behind`);
+  for (const [recoveryName, label] of [
+    [report.recoveryName, 'external lease recovery sentinel'],
+    [report.perSessionRecoveryName, 'per-session recovery sentinel'],
+  ]) {
+    const generations = holderMarkerTokens(report.events, recoveryName);
+    assert.ok(generations.length > 0, `${label} took no holder marker`);
+    generations.forEach((token, index) => {
+      assertMarkerLifecycle(report.events, recoveryName, token, `${label} generation ${index + 1}`);
+    });
   }
   assert.equal(report.holdsAfter, 0);
   assert.deepEqual(report.markers, []);
@@ -5520,6 +5588,65 @@ test('a holder never leaves its marker open or behind when an acquisition or a r
     }
     report.swappedHolds = shareModel.holds.size;
     fs.unlinkSync(swappedFile);
+
+    const renamed = (name) => (event) => event[0] === 'rename' && event[1] === name;
+    const linked = (name) => (event) => event[0] === 'link' && event[2] === name;
+    const deadSentinel = (file, digit) => plant(file, { pid: 2147483647, token: digit.repeat(48), kind: 'recovery' });
+    const ownMarker = (file) => (fs.existsSync(file)
+      ? path.basename(markerFile(file, JSON.parse(fs.readFileSync(file, 'utf8')).token))
+      : null);
+    const sentinelStep = (lockFile, run, trigger, replace) => {
+      shareModel.afterChange = (event) => {
+        if (!trigger(event)) return;
+        shareModel.afterChange = null;
+        replace();
+      };
+      const step = {};
+      try {
+        run();
+        step.outcome = 'released';
+      } catch (error) {
+        step.outcome = error.message;
+      }
+      shareModel.afterChange = null;
+      step.holds = shareModel.holds.size;
+      step.markers = markersIn(directory);
+      step.lockMarker = ownMarker(lockFile);
+      return step;
+    };
+    const sessionLock = path.join(directory, '.sentinel-step.lock');
+    const sessionSentinel = path.join(directory, '.sentinel-step.recovery');
+    const sessionRun = () => core.withFileLock(directory, 'sentinel-step', () => 'entered');
+    const leaseRun = () => {
+      const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+      core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+    };
+    report.sessionSwap = sentinelStep(sessionLock, sessionRun, renamed(path.basename(sessionLock)), () => {
+      fs.unlinkSync(sessionSentinel);
+      deadSentinel(sessionSentinel, '8');
+    });
+    report.sessionSwapRecovered = sessionRun();
+    report.sessionUnverified = sentinelStep(
+      sessionLock,
+      sessionRun,
+      linked(path.basename(sessionSentinel)),
+      () => deadSentinel(sessionSentinel, '9'),
+    );
+    report.sessionUnverifiedRecovered = sessionRun();
+    report.leaseSwap = sentinelStep(binding.lockFile, leaseRun, renamed(path.basename(binding.lockFile)), () => {
+      fs.unlinkSync(binding.recoveryFile);
+      deadSentinel(binding.recoveryFile, '8');
+    });
+    report.leaseSwapRecovered = attempt(options, 40);
+    report.leaseUnverified = sentinelStep(
+      binding.lockFile,
+      leaseRun,
+      linked(path.basename(binding.recoveryFile)),
+      () => deadSentinel(binding.recoveryFile, '9'),
+    );
+    report.leaseUnverifiedState = core.inspectExternalProcessLock(options).lock.marker;
+    report.leaseUnverifiedRecovered = attempt(options, 40);
+    report.finalHolds = shareModel.holds.size;
     report.markers = markersIn(directory);
     process.stdout.write(JSON.stringify(report));
   `;
@@ -5537,6 +5664,35 @@ test('a holder never leaves its marker open or behind when an acquisition or a r
   assert.equal(report.wrongTokenHolds, 1, 'a refused release must not take the rightful holder\'s marker');
   assert.match(report.swapped, /ownership changed before release/i);
   assert.equal(report.swappedHolds, 0);
+  for (const [name, replaced] of [
+    ['sessionSwap', true],
+    ['sessionUnverified', false],
+    ['leaseSwap', true],
+    ['leaseUnverified', false],
+  ]) {
+    const step = report[name];
+    if (replaced) {
+      assert.match(step.outcome, /recovery sentinel ownership changed/i, name);
+      assert.equal(step.holds, 0, `${name}: a replaced sentinel must not keep its marker open`);
+      assert.deepEqual(step.markers, [], `${name}: a replaced sentinel must not leave its marker behind`);
+      assert.equal(step.lockMarker, null, `${name}: the released lock record is gone`);
+    } else {
+      assert.match(step.outcome, /new lock identity could not be verified/i, name);
+      assert.equal(step.holds, 0, `${name}: an unverified sentinel must not keep a marker open`);
+      assert.ok(step.lockMarker, `${name}: the lock whose release failed keeps its record`);
+      assert.deepEqual(
+        step.markers,
+        [step.lockMarker],
+        `${name}: only the closed marker of the lock whose release failed may stay, never the sentinel's`,
+      );
+    }
+  }
+  assert.equal(report.leaseUnverifiedState, 'released');
+  assert.equal(report.sessionSwapRecovered, 'entered');
+  assert.equal(report.sessionUnverifiedRecovered, 'entered');
+  assert.equal(report.leaseSwapRecovered, 'acquired');
+  assert.equal(report.leaseUnverifiedRecovered, 'acquired');
+  assert.equal(report.finalHolds, 0);
   assert.deepEqual(report.markers, []);
 });
 

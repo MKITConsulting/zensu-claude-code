@@ -7060,9 +7060,11 @@ else
   if printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF "by pid $LE_LIVE_PID, which is alive" \
     && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'holder marker absent' \
     && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'No holder marker exists for this record, so a runtime from before holder markers, or a holder that could not create one, wrote it' \
+    && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF "the core reclaims the lock artifact only once the process holding pid $LE_LIVE_PID provably started more than a second after the record was written" \
     && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'Every lease acquisition checks again' \
+    && ! printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'its holder marker is free' \
     && ! printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'removable'; then
-    check "P1le29 a live owner without a holder marker says who wrote such a record and is never called removable" PASS
+    check "P1le29 a live owner without a holder marker says who wrote such a record, names no free marker as a way out, and is never called removable" PASS
   else
     check "P1le29 absent holder marker row (got: $LE_MARKER_ABSENT_ROW)" FAIL
   fi
