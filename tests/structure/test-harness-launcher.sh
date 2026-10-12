@@ -20,6 +20,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "native Windows launcher run skipped (macOS/Linux/WSL required)" PASS
+    finish; exit 0
+    ;;
+esac
+
 if [ -f "$LAUNCHER" ] && node --check "$LAUNCHER" 2>/dev/null && [ -f "$MANIFEST" ] && [ -f "$RUNTIME" ] \
   && [ -f "$STATE_LIB" ] && [ -f "$FAKE_LIB" ] && bash -n "$FAKE_LIB" 2>/dev/null; then
   check "H0 launcher, manifest, runtime, state library and fake exist and parse" PASS
