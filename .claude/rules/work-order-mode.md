@@ -72,6 +72,10 @@ that Zensu took the lease away from the earlier one.
 **`harness/` is outside the Session Control runtime digest.** The launcher runs in the worker's
 process, never inside a bound session, and it loads the digested runtime from `hooks/lib/`.
 
+**The launcher stops its session through `scripts/process-supervisor.js`.** It is that module's
+only production caller, so removing or renaming the module breaks the launcher, not only a test. `test-harness-launcher.sh` H12 drives the
+module's unit file.
+
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.
