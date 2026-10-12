@@ -156,6 +156,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)** — where a taken-over session continues, and the carry-over recipe: `.claude/rules/takeover-destination.md`
 - **Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)** — the prompt timeline and the separate list of withdrawn prompts: `.claude/rules/session-trail-prompt-listing.md`
 - **Session-Trail Open Task Chips (`openTaskChips` in `skills/session-trail/scripts/trail.mjs`)** — why every takeover carries the old session's open task chips, and from which record: `.claude/rules/session-trail-open-chips.md`
+- **Session Hub Receipt (`hooks/user-prompt-session-hub-receipt.sh` + `session-hub-receipt-v1.mjs`)** — the receipt the Zensu Session Hub waits for after it types a takeover, and the handover contract it checks first: `.claude/rules/session-hub-receipt.md`
 - **zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)** — the hook-supplied progress anchor of zen-mode: `.claude/rules/zen-mode-chain-anchor.md`
 - **bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)** — why `case` patterns inside `$( )` need the leading paren: `.claude/rules/bash32-command-substitution.md`
 - **Skill Argument Placeholders (`test-skill-workflow-markers.sh` AP checks)** — why a skill body never carries `$1` or `$ARGUMENTS` in a shell snippet, and the allowlist for a skill that consumes its arguments: `.claude/rules/skill-argument-placeholders.md`

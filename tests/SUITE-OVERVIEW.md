@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (171 = 164 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 164 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 171). The figures here have drifted THIRTEEN times, twelve of them upward, and every
+reconciled to that manifest (172 = 165 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 165 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 172). The figures here have drifted FOURTEEN times, thirteen of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -28,7 +28,8 @@ then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and
 159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
 while the merge of the two was landing the 156th, and then 165 = 158 + 7 while the external
 review import was landing the 159th, and then 166 = 159 + 7 while the work-order runtime suite
-was landing the 160th. Each
+was landing the 160th, and then 171 = 164 + 7 while the merge of `main` into the work-order
+branch was landing the 165th. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
@@ -56,10 +57,14 @@ moved. The thirteenth is the twelfth's shape again: `test-work-order-runtime.sh`
 manifest in its own commit while neither the figure nor its §3 group moved, and the commit that
 added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh`,
 `test-work-order-takeover.sh` and `test-harness-launcher.sh` each moved both in their own commit.
+The fourteenth is the merge shape again: `test-session-hub-receipt.sh` took `main` to 160 CI
+entries while the figure there still read 166 = 159 + 7 and no §3 group listed it, and the
+work-order branch independently reached 164, so merging `main` into it made 165.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 161 against 164 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 161 against 165 CI-classified suites, so FOUR CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
-`test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
+`test-incremental-review-rounds.sh`, `test-restore-project-root.sh` and
+`test-session-hub-receipt.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, evidence & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
@@ -97,8 +102,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **171** — 164 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **164 structure suites + 5 offline evals = 169 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 171 − 164 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **172** — 165 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **165 structure suites + 5 offline evals = 170 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 172 − 165 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -110,8 +115,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 171 structure suites + 5 offline evals | none |
-| `--ci` | 164 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 172 structure suites + 5 offline evals | none |
+| `--ci` | 165 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -452,12 +457,13 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
+| `session-hub-receipt-v1.test.js` | 12 | `test-session-hub-receipt.sh` (R2) | the Session Hub takeover receipt: the token read from the raw takeover command the Hub types and from the command-tag spelling in either tag order, leading system reminders skipped before the command is read, every other prompt shape refused, the six-field receipt built for a `UserPromptSubmit` payload only, the command and receipt directory the session-trail handover contract declares, the config root taken from `CLAUDE_CONFIG_DIR` with the `~/.claude` fallback, a private receipt that lands once and is never replaced, the refusal of a symlinked component below the config root, pruning of old receipts and temp files within its scan bound that never follows a symlinked receipts directory, and that recording needs the skill on disk and writes nothing for any other prompt |
 | `work-order-v1.test.js` | 38 | `test-work-order-runtime.sh` (R2) | work-order runtime: the CLI error grammar and its verdicts with context after the status group and messages over several lines, deterministic client event ids, the forward-only ledger-to-stage mapping, renewal cadence and lease expiry, the inert context outside work-order mode, state-file refusals, the once-only markers, forge-write verdicts, queued answers, start with its refusals and the unsupported-kind block, lease loss on renewal, retries and the codeless-409 probe, a replay after the session ended, the DONE delivery order with `ready_for_merge` last, drain replays and `invalid_transition`, the reasoned and the BLOCKED finish, the approved-plan lookup, the Stop budget without progress, the order binding and the push refused on a stale attempt, the Bash analysis of the gate, the gate's denials and renewal, `--ask` with its default and its blocking end, `--followup` and the repeated CLI flags, the post-tool answers and the blocked direct ask, the plan summary, the order-bound review key against the state library, and the release plan of a takeover |
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (48
-files) against this table's 43 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (49
+files) against this table's 44 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
