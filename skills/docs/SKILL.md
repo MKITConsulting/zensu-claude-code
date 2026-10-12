@@ -67,7 +67,7 @@ Slash form: `/zensu:docs [<target>] [--flag=value ...]`.
 
 ## The `docs_complete` contract (read this first)
 
-The release gate (`DocsStrictness`, zensu-monorepo) satisfies a required
+The server's release gate (`DocsStrictness`) satisfies a required
 `doc_type` for a feature **only** with a live doc that is ALL of:
 
 1. **Fresh** — not `is_outdated`. CI flips `is_outdated` when the feature's code
