@@ -147,6 +147,117 @@ else
 fi
 rm -f "$GIT_PROJ/untracked.txt"
 
+G14_HOME="$STATE_DIR/g14-home"
+G14_SAFE_HOME="$STATE_DIR/g14-safe-home"
+mkdir -p "$G14_HOME" "$G14_SAFE_HOME"
+printf '[safe]\n\tdirectory = *\n' > "$G14_SAFE_HOME/.gitconfig"
+foreign_owner() {
+  HOME="$G14_HOME" XDG_CONFIG_HOME="$G14_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+foreign_owner_excepted() {
+  HOME="$G14_SAFE_HOME" XDG_CONFIG_HOME="$G14_SAFE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+G14_ERR="$(foreign_owner env LC_ALL=C git -C "$GIT_PROJ" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"; G14_RC=$?
+if [ "$G14_RC" -ne 0 ] && printf '%s\n' "$G14_ERR" | grep -qF "dubious ownership" \
+  && ! printf '%s\n' "$G14_ERR" | grep -qiF "not a git repository"; then
+  check "G14-control real git refuses the fixture repository as owned by another user" PASS
+else
+  check "G14-control dubious-ownership refusal (rc=$G14_RC err='$G14_ERR')" FAIL
+fi
+if [ "$(foreign_owner_excepted git -C "$GIT_PROJ" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
+  check "G14-control a safe.directory exception in the same HOME clears the refusal" PASS
+else
+  check "G14-control a safe.directory exception in the same HOME clears the refusal" FAIL
+fi
+SID14A="unqualified-dubious-owner"
+arm "$SID14A"
+SF14A="$(tdd_state_file "$SID14A")"
+ERR14B="$STATE_DIR/g14b.err"
+foreign_owner bash "$LOG" --code-review-done --session "$SID14A" >/dev/null 2>"$ERR14B"; RC14B=$?
+CRD14B="$(tdd_code_review_done "$SF14A" 2>/dev/null)"
+if [ "$RC14B" -eq 1 ] && [ "$CRD14B" = "false" ] && grep -qF "$REVIEW_GATE_PHRASE" "$ERR14B" \
+  && grep -qF "$LISTING_PHRASE" "$ERR14B" && ! grep -qF "changed file(s)" "$ERR14B"; then
+  check "G14b a safe.directory refusal refuses the unqualified review mark on a clean tree" PASS
+else
+  check "G14b dubious owner on --code-review-done (rc=$RC14B codeReviewDone=$CRD14B err='$(cat "$ERR14B" 2>/dev/null)')" FAIL
+fi
+ERR14A="$STATE_DIR/g14a.err"
+foreign_owner bash "$LOG" --chain-done --session "$SID14A" >/dev/null 2>"$ERR14A"; RC14A=$?
+DONE14A="$(tdd_chain_done "$SF14A" 2>/dev/null)"
+if [ "$RC14A" -eq 1 ] && [ "$DONE14A" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR14A" \
+  && grep -qF "$LISTING_PHRASE" "$ERR14A" && ! grep -qF "changed file(s)" "$ERR14A"; then
+  check "G14a a safe.directory refusal refuses the unqualified terminus on a clean tree" PASS
+else
+  check "G14a dubious owner on --chain-done (rc=$RC14A chainDone=$DONE14A err='$(cat "$ERR14A" 2>/dev/null)')" FAIL
+fi
+ERR14C="$STATE_DIR/g14c.err"
+foreign_owner_excepted bash "$LOG" --chain-done --session "$SID14A" >/dev/null 2>"$ERR14C"; RC14C=$?
+DONE14C="$(tdd_chain_done "$SF14A" 2>/dev/null)"
+if [ "$RC14C" -eq 0 ] && [ "$DONE14C" = "true" ]; then
+  check "G14c the same clean-tree chain closes once a safe.directory exception clears the refusal" PASS
+else
+  check "G14c excepted owner on --chain-done (rc=$RC14C chainDone=$DONE14C err='$(cat "$ERR14C" 2>/dev/null)')" FAIL
+fi
+WORK_TREE_PROBE='process.stdout.write(String(require(process.argv[1]).workTree(process.argv[2]).applicable))'
+G14D_REFUSED="$(foreign_owner node -e "$WORK_TREE_PROBE" "$PLUGIN_DIR/hooks/lib/evidence-run-v1.js" "$GIT_PROJ" 2>/dev/null)"
+G14D_OUTSIDE="$(node -e "$WORK_TREE_PROBE" "$PLUGIN_DIR/hooks/lib/evidence-run-v1.js" "$PLAIN_PROJ" 2>/dev/null)"
+if [ "$G14D_REFUSED" = "null" ] && [ "$G14D_OUTSIDE" = "false" ]; then
+  check "G14d the full-suite gate reads the same refusal as unavailable and a root outside git as not applicable" PASS
+else
+  check "G14d evidence-runner workTree parity (refused='$G14D_REFUSED' outside='$G14D_OUTSIDE')" FAIL
+fi
+
+G15_BIN="$STATE_DIR/g15-bin"
+mkdir -p "$G15_BIN"
+cat > "$G15_BIN/git" <<'STUB'
+#!/bin/bash
+seen=""
+for arg in "$@"; do
+  case "$arg" in
+    (rev-parse) seen="${seen}r" ;;
+    (--verify) seen="${seen}v" ;;
+    (HEAD) seen="${seen}h" ;;
+  esac
+done
+case "$seen" in
+  (rvh) echo "fatal: stub git refuses to resolve HEAD" >&2; exit 128 ;;
+esac
+exec "$G15_REAL_GIT" "$@"
+STUB
+chmod +x "$G15_BIN/git"
+G15_REAL_GIT="$(command -v git)"; export G15_REAL_GIT
+G15_INSIDE="$("$G15_BIN/git" -C "$GIT_PROJ" rev-parse --is-inside-work-tree 2>/dev/null)"
+"$G15_BIN/git" -C "$GIT_PROJ" rev-parse --verify --quiet HEAD >/dev/null 2>&1; G15_HEAD_RC=$?
+if [ "$G15_INSIDE" = "true" ] && [ "$G15_HEAD_RC" -eq 128 ] \
+  && git -C "$GIT_PROJ" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+  check "G15-control the stub git fails only the HEAD probe, with a git error rather than a missing revision" PASS
+else
+  check "G15-control stub HEAD probe (inside='$G15_INSIDE' head_rc=$G15_HEAD_RC)" FAIL
+fi
+SID15A="unqualified-head-probe-error"
+arm "$SID15A"
+SF15A="$(tdd_state_file "$SID15A")"
+ERR15B="$STATE_DIR/g15b.err"
+PATH="$G15_BIN:$PATH" bash "$LOG" --code-review-done --session "$SID15A" >/dev/null 2>"$ERR15B"; RC15B=$?
+CRD15B="$(tdd_code_review_done "$SF15A" 2>/dev/null)"
+if [ "$RC15B" -eq 1 ] && [ "$CRD15B" = "false" ] && grep -qF "$REVIEW_GATE_PHRASE" "$ERR15B" \
+  && grep -qF "$LISTING_PHRASE" "$ERR15B" && ! grep -qF "changed file(s)" "$ERR15B"; then
+  check "G15b a HEAD probe that git aborts refuses the unqualified review mark" PASS
+else
+  check "G15b HEAD probe error on --code-review-done (rc=$RC15B codeReviewDone=$CRD15B err='$(cat "$ERR15B" 2>/dev/null)')" FAIL
+fi
+ERR15A="$STATE_DIR/g15a.err"
+PATH="$G15_BIN:$PATH" bash "$LOG" --chain-done --session "$SID15A" >/dev/null 2>"$ERR15A"; RC15A=$?
+DONE15A="$(tdd_chain_done "$SF15A" 2>/dev/null)"
+if [ "$RC15A" -eq 1 ] && [ "$DONE15A" = "false" ] && grep -qF "$GATE_PHRASE" "$ERR15A" \
+  && grep -qF "$LISTING_PHRASE" "$ERR15A" && ! grep -qF "changed file(s)" "$ERR15A"; then
+  check "G15a a HEAD probe that git aborts refuses the unqualified terminus" PASS
+else
+  check "G15a HEAD probe error on --chain-done (rc=$RC15A chainDone=$DONE15A err='$(cat "$ERR15A" 2>/dev/null)')" FAIL
+fi
+
 # --- G4 ignored-only change: allowed ---
 SID4="terminus-ignored"
 arm "$SID4"
@@ -472,6 +583,30 @@ if [ "$RC7" -eq 0 ] && [ "$DONE7" = "true" ]; then
 else
   check "G7 non-git root (rc=$RC7 chainDone=$DONE7 err='$(cat "$ERR7" 2>/dev/null)')" FAIL
 fi
+G16_LOCALE=""
+for G16_CANDIDATE in de_DE.UTF-8 fr_FR.UTF-8 es_ES.UTF-8 it_IT.UTF-8 pt_BR.UTF-8; do
+  G16_MSG="$(env LC_ALL="$G16_CANDIDATE" LANG="$G16_CANDIDATE" git -C "$PLAIN_PROJ" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+  case "$G16_MSG" in
+    (""|*"ot a git repository"*) ;;
+    (*) G16_LOCALE="$G16_CANDIDATE"; break ;;
+  esac
+done
+SID16="terminus-no-repo-localized"
+arm "$SID16"
+ERR16="$STATE_DIR/g16.err"
+if [ -n "$G16_LOCALE" ]; then
+  env LC_ALL="$G16_LOCALE" LANG="$G16_LOCALE" bash "$LOG" --chain-done --session "$SID16" >/dev/null 2>"$ERR16"; RC16=$?
+  G16_CASE="git answered in $G16_LOCALE"
+else
+  bash "$LOG" --chain-done --session "$SID16" >/dev/null 2>"$ERR16"; RC16=$?
+  G16_CASE="no candidate locale localized git here, so this run does not discriminate"
+fi
+DONE16="$(tdd_chain_done "$(tdd_state_file "$SID16")" 2>/dev/null)"
+if [ "$RC16" -eq 0 ] && [ "$DONE16" = "true" ]; then
+  check "G16 a localized git still reads a root outside git as not evaluable ($G16_CASE)" PASS
+else
+  check "G16 localized root outside git ($G16_CASE rc=$RC16 chainDone=$DONE16 err='$(cat "$ERR16" 2>/dev/null)')" FAIL
+fi
 SID9A="review-mark-no-repo"
 arm "$SID9A"
 ERR9A="$STATE_DIR/g9a.err"
@@ -521,8 +656,9 @@ HELPER_BODY="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
 if [ -z "$BARE_GIT_LOG" ] \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
   && printf '%s\n' "$HELPER_BODY" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard' \
-  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 3 ]; then
-  check "G13 both unqualified verbs and the minted-ticket terminus count through one scrubbed helper and no bare git -C remains" PASS
+  && [ "$(grep -cF '_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR"' "$LOG")" -eq 3 ] \
+  && [ "$(grep -cF '_zensu_unqualified_change_count "$_tc_root"' "$LOG")" -eq 1 ]; then
+  check "G13 both unqualified verbs, the minted-ticket terminus and --tdd-complete count through one scrubbed helper and no bare git -C remains" PASS
 else
   check "G13 shared scrubbed helper (bare='$BARE_GIT_LOG')" FAIL
 fi

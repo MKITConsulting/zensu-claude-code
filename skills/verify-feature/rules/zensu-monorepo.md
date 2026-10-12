@@ -78,17 +78,27 @@ with `declared-safe` evidence mode, `planned-origin` answers that origin and the
 `up` uses the planned frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at
 `55432` and `8090`, creates per-run database/JWT secrets and a private runtime lease,
-starts `pgvector/pgvector:pg17`, and launches the backend and Vite with `--strictPort` on
-literal loopback. Secrets are stored mode `0600` beneath the run directory solely for later
-controller actions; never read, print, or pass that file to another tool. The persistent JSON
-state contains no secret values or killable PIDs.
+starts `pgvector/pgvector:pg17`, waits until PostgreSQL accepts TCP connections, and launches
+the backend and Vite with `--strictPort` on literal loopback. Secrets are stored mode `0600`
+beneath the run directory solely for later controller actions; never read, print, or pass that
+file to another tool. The persistent JSON state contains no secret values or killable PIDs.
+
+A run directory keeps its planned frontend port, so when `up` reports that port as held by a
+process this run does not own, every retry in the same run directory fails the same way. Never
+stop that process: this run did not start it. Without a parent policy, run the registered
+`down`, then start over in a fresh run directory: register its own `down` before `up`, and run
+`planned-origin`, the preflight, `up` and `ready` again. `planned-origin` skips every port that
+`up` would report as in use at that moment. With a parent policy the port is fixed for the
+session: report PARTIAL with instructions for the user to free the port or to launch a new
+session whose policy names a free port.
 
 ## Keeping up with the monorepo
 
-The controller hard-codes the start contract of two services it does not own, so a monorepo
-change can break it without any change here. Both contracts are pinned by
+The controller hard-codes the start contracts of services it does not own, so a monorepo or
+image change can break it without any change here. Each contract is pinned by
 `tests/structure/test-zensu-runtime-controller.sh`, whose stubs record the exact argv and
-environment the controller hands each service.
+environment the controller hands each service, and every database probe it makes before the
+backend starts.
 
 - **Backend environment.** The backend refuses to boot when a required variable is missing
   (`validateConfigs` in `backend/cmd/zensu/main.go`); the controller then reports only that
@@ -97,9 +107,32 @@ environment the controller hands each service.
   (`middleware.TrustedProxiesNone`), the value for a backend that receives client connections
   directly: no forwarding header is trusted, so every request is attributed to its TCP peer,
   which in this single-user loopback run is the Vite dev server's proxy. The backend logs a
-  `WARN` that the trust set is empty; that is expected here. When the monorepo makes another
-  variable required, add it to the backend environment in the controller and to the expected
-  environment in that suite in the same change.
+  `WARN` that the trust set is empty; that is expected here. The controller also passes
+  `METRICS_PORT=0`, which turns the metrics listener off. At its default that listener binds
+  the fixed `127.0.0.1:9091`, so any other local backend, such as another worktree's verify
+  run, makes ours exit with `bind: address already in use` right after its migrations. A
+  verify run never scrapes `/metrics`, so the `WARN` that the listener is disabled is expected
+  too. When the monorepo makes another variable required, add it to the backend environment in
+  the controller and to the expected environment in that suite in the same change.
+- **Backend blob store.** The backend's filesystem blob store defaults to the relative path
+  `./data/blobs` (`ZENSU_STORAGE_BASE_PATH` in `backend/internal/config/config.go`), which
+  resolves against `backend/`, so every blob a run writes would stay in the worktree as an
+  untracked `backend/data/blobs/` tree after `down`. The controller passes
+  `ZENSU_STORAGE_PROVIDER=filesystem` and `ZENSU_STORAGE_BASE_PATH=<run dir>/blobs`, so every
+  blob lands in the run directory, which the parent skill removes; a provider or path set in
+  `backend/.env` or in the calling shell cannot move it out. Before it starts anything, `up`
+  creates that directory with mode `0700`, reuses the one an earlier `up` of the same run
+  directory left, and refuses a symlink or any other file in its place. When the monorepo adds
+  another setting whose default is a path relative to `backend/`, point it into the run
+  directory the same way.
+- **Database readiness.** The backend runs its migrations once at boot and exits when
+  PostgreSQL does not answer yet (`running migrations` with `failed to open database: EOF` in
+  `backend.log`); `ready` then fails with `runtime supervisor identity is unavailable`. `up`
+  therefore runs `pg_isready -h 127.0.0.1 -p 5432` inside the container once a second, at most
+  60 times, before it starts the backend, and fails through its cleanup path when no probe
+  succeeds. The probe must use TCP: the image initializes the database with a temporary server
+  that listens only on the Unix socket, so a socket probe passes while the published port still
+  drops every connection.
 - **Frontend flags.** The frontend starts as `pnpm dev --host 127.0.0.1 --port <port>
   --strictPort`. Never put a literal `--` between the script name and the flags: npm strips it,
   but pnpm forwards it, and Vite then ignores every flag after it. Vite falls back to
@@ -107,8 +140,8 @@ environment the controller hands each service.
   `ready` fails on `127.0.0.1` and a planned origin on `5173` matches only by accident.
 
 `ready` authenticates both supervisors with the private lease, verifies the container's
-lease-hash label, then checks PostgreSQL readiness, `/api/health`, and the frontend origin. A
-sleep alone is never readiness evidence. The controller never uses the repository's
+lease-hash label, then checks PostgreSQL readiness over TCP, `/api/health`, and the frontend
+origin. A sleep alone is never readiness evidence. The controller never uses the repository's
 fixed-port Compose stack and never removes a pre-existing container.
 
 ## Runtime identity and fixture data
@@ -138,8 +171,10 @@ Execute the previously registered `down` command byte-for-byte on success, failu
 cancellation, or timeout. It authenticates to the fixed run-local supervisor endpoints with the
 private lease, stops their complete child process groups, verifies the unique PostgreSQL
 container name and lease-hash label, and then removes internal secret/state files. Mutable JSON
-alone can never authorize a signal or container removal. The parent skill removes the unique run
-directory. Never use `pkill`, kill by a broad command pattern, or remove another worktree's resource.
+alone can never authorize a signal or container removal. `down` leaves the backend's blob store
+in the run directory, like the logs; the parent skill removes the unique run directory with
+everything in it. Never use `pkill`, kill by a broad command pattern, or remove another
+worktree's resource.
 
 `down` is idempotent, and a rerun after a failed teardown converges:
 

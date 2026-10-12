@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (168 = 161 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 161 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 168). The figures here have drifted TWELVE times, eleven of them upward, and every
+reconciled to that manifest (169 = 162 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 162 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 169). The figures here have drifted THIRTEEN times, twelve of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -27,7 +27,8 @@ evidence-runner branch after it retired three witness suites and added two, leav
 then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
 159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
 while the merge of the two was landing the 156th, and then 165 = 158 + 7 while the external
-review import was landing the 159th. Each
+review import was landing the 159th, and then 166 = 159 + 7 while the Session Hub receipt was
+landing the 160th. Each
 of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
@@ -51,9 +52,10 @@ moved the figure. The eleventh is the merge shape again: `test-user-prompt-budge
 own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
 merging `main` into it made 156. The twelfth is the tenth's shape without the group:
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
-moved.
+moved. The thirteenth is the twelfth's shape again: `test-session-hub-receipt.sh` joined the
+manifest while neither the figure nor its §3 group moved.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 158 against 161 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 159 against 162 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -93,8 +95,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **168** — 161 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **161 structure suites + 5 offline evals = 166 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 168 − 161 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **169** — 162 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **162 structure suites + 5 offline evals = 167 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 169 − 162 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -106,8 +108,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 168 structure suites + 5 offline evals | none |
-| `--ci` | 161 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 169 structure suites + 5 offline evals | none |
+| `--ci` | 162 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -288,16 +290,17 @@ developer's real sessions.
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
 listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
-### Prompt routing & payloads (10)
+### Prompt routing & payloads (11)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
-`prompt-ledger` · `route-short-line-eval` · `user-prompt-budget` · `zensu-plm-arg-guidance`
+`prompt-ledger` · `route-short-line-eval` · `session-hub-receipt` · `user-prompt-budget` ·
+`zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
 CI-event prompts, for the first prompt of a context generation and for every later one, the
-per-session delivery ledger behind that split and the `SessionStart` reset that clears it, the deterministic half of the local-only reaction eval for the reminder's and the router's short lines (the line each scenario grades, captured from this tree; the silence of every prompt hook under the eval config; the provider's run settings and refusals; and the graders, through their unit file), and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
+per-session delivery ledger behind that split and the `SessionStart` reset that clears it, the receipt written only for the Session Hub's exact takeover command, the deterministic half of the local-only reaction eval for the reminder's and the router's short lines (the line each scenario grades, captured from this tree; the silence of every prompt hook under the eval config; the provider's run settings and refusals; and the graders, through their unit file), and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
 a distinct receipt for each failure mode).
 
 ### VCS / forge integration (7)
@@ -443,11 +446,12 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
+| `session-hub-receipt-v1.test.js` | 12 | `test-session-hub-receipt.sh` (R2) | the Session Hub takeover receipt: the token read from the raw takeover command the Hub types and from the command-tag spelling in either tag order, leading system reminders skipped before the command is read, every other prompt shape refused, the six-field receipt built for a `UserPromptSubmit` payload only, the command and receipt directory the session-trail handover contract declares, the config root taken from `CLAUDE_CONFIG_DIR` with the `~/.claude` fallback, a private receipt that lands once and is never replaced, the refusal of a symlinked component below the config root, pruning of old receipts and temp files within its scan bound that never follows a symlinked receipts directory, and that recording needs the skill on disk and writes nothing for any other prompt |
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (48
-files) against this table's 43 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (49
+files) against this table's 44 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR

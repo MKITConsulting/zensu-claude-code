@@ -165,7 +165,7 @@ ROSTER="$(node -e '
   process.stdout.write(out.join("\n"));
 ' "$HOOKS_JSON" 2>/dev/null)"
 
-BUDGETED="user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh"
+BUDGETED="user-prompt-context-nudge.sh user-prompt-intent-router.sh user-prompt-tdd-reminder.sh user-prompt-zen-mode.sh user-prompt-best-solution-first.sh user-prompt-worktree-keep.sh user-prompt-session-hub-receipt.sh"
 
 budget() {
   case "${3:-first}:$1:$2" in
@@ -181,6 +181,7 @@ budget() {
     repeat:user-prompt-zen-mode.sh:*) echo "1 1500" ;;
     *:user-prompt-best-solution-first.sh:*) echo "300 420" ;;
     *:user-prompt-worktree-keep.sh:*) echo "0 0" ;;
+    *:user-prompt-session-hub-receipt.sh:*) echo "0 0" ;;
     *) echo "" ;;
   esac
 }

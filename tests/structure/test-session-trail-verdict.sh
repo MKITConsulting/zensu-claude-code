@@ -7272,4 +7272,109 @@ else
     || check "WR12 gone layout: $(wr_json "$WR_OUT" 'o.verdict + " " + o.source.layout')" FAIL
 fi
 
+CH_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-chips/ws-0001"
+CH_SID=cdcdcdcd-0000-0000-0000-0000000000c1
+CH_EMPTY_SID=cdcdcdcd-0000-0000-0000-0000000000c2
+CH_NONE_SID=cdcdcdcd-0000-0000-0000-0000000000c3
+mkdir -p "$CH_STORE"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, full, empty, none] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+for (const sid of [full, empty, none]) {
+  const wt = path.join(home, "work", `wt-chips-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+}
+const esc = String.fromCharCode(27);
+const tick = "```";
+fs.writeFileSync(path.join(store, `local_${full}.json`), JSON.stringify({
+  sessionId: `local_${full}`, cliSessionId: full, isArchived: false, title: "chips fixture",
+  backgroundTaskSuggestions: [
+    { id: "task_00000001", title: "First chip", tldr: "Why the first chip matters.", prompt: `Fix it.\n${tick}js\nx()\n${tick}\nDone${esc}[2K.`, createdAt: 1 },
+    { id: "task_00000002", title: "Offer card", tldr: "An offer.", prompt: "Offer prompt.", createdAt: 2, offer: true },
+    { id: "task_00000003", title: "Second chip", tldr: "Why the second chip matters.", prompt: "Second prompt.", cwd: "/tmp/elsewhere-chip", createdAt: 3 },
+  ],
+}));
+fs.writeFileSync(path.join(store, `local_${empty}.json`), JSON.stringify({ sessionId: `local_${empty}`, cliSessionId: empty, isArchived: false, title: "no chips fixture" }));
+' "$FAKE" "$CH_STORE" "$CH_SID" "$CH_EMPTY_SID" "$CH_NONE_SID" 2>/dev/null
+
+CH_GOT="$(trailrun takeover "$CH_SID" --all --no-record --no-git --json 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s).openChips; } catch { process.stdout.write("unparseable"); return; }
+  const esc = String.fromCharCode(27);
+  const tick = "```";
+  const bad = [];
+  if (!o || o.measured !== true) bad.push("not-measured");
+  const chips = (o && o.chips) || [];
+  if (chips.map((c) => c.title).join("|") !== "First chip|Second chip") bad.push(`titles=${chips.map((c) => c.title).join("|")}`);
+  if (!chips[0] || chips[0].prompt !== `Fix it.\n${tick}js\nx()\n${tick}\nDone[2K.`) bad.push("prompt-not-verbatim");
+  if (chips.some((c) => (c.title + c.tldr + c.prompt).includes(esc))) bad.push("esc-survived");
+  if (!chips[1] || chips[1].cwd !== "/tmp/elsewhere-chip") bad.push("cwd-lost");
+  if (chips[0] && chips[0].cwd !== null) bad.push("cwd-invented");
+  process.stdout.write(bad.join(" "));
+});
+')"
+[ -z "$CH_GOT" ] && check "CH1 takeover --json lists the open chips of the desktop record verbatim, minus control characters, and leaves offers out" PASS || check "CH1 takeover --json openChips:$CH_GOT" FAIL
+
+CH_MD="$(trailrun takeover "$CH_SID" --all --no-record --no-git 2>/dev/null)"
+CH_BAD=""
+printf '%s\n' "$CH_MD" | grep -qxF '## Open task chips' || CH_BAD="$CH_BAD section-absent"
+printf '%s\n' "$CH_MD" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'exactly once, after the user has confirmed the plan and takeover has run with `--force`' || CH_BAD="$CH_BAD trigger-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'one `spawn_task` call per chip' || CH_BAD="$CH_BAD tool-absent"
+printf '%s\n' "$CH_MD" | grep -qxF '````text' || CH_BAD="$CH_BAD fence-not-widened"
+printf '%s\n' "$CH_MD" | grep -qxF '/tmp/elsewhere-chip' || CH_BAD="$CH_BAD cwd-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'Offer card' && CH_BAD="$CH_BAD offer-rendered"
+case "$CH_MD" in *"$(printf '\033')"*) CH_BAD="$CH_BAD esc-survived" ;; esac
+CH_AT_CHIPS="$(printf '%s\n' "$CH_MD" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+CH_AT_RECENT="$(printf '%s\n' "$CH_MD" | grep -nF '## Recent instructions' | head -1 | cut -d: -f1)"
+[ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_RECENT" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_RECENT" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_RECENT"
+[ -z "$CH_BAD" ] && check "CH2 the takeover brief carries every open chip in a fence its prompt cannot close, with the instruction to re-create each one once" PASS || check "CH2 takeover brief chips:$CH_BAD" FAIL
+
+CH_EMPTY_MD="$(trailrun takeover "$CH_EMPTY_SID" --all --no-record --no-git 2>/dev/null)"
+printf '%s\n' "$CH_EMPTY_MD" | grep -qxF '_the session had no open task chips_' \
+  && check "CH3 a desktop record without chips says so in the takeover brief" PASS \
+  || check "CH3 empty record: $(printf '%s\n' "$CH_EMPTY_MD" | grep -A1 -xF '## Open task chips' | tail -1)" FAIL
+
+CH_NONE_GOT="$(trailrun takeover "$CH_NONE_SID" --all --no-record --no-git --json 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const o = JSON.parse(s).openChips; process.stdout.write(`${o.measured}:${o.reason}:${o.chips.length}`); } catch { process.stdout.write("unparseable"); }
+});
+')"
+CH_NONE_MD="$(trailrun takeover "$CH_NONE_SID" --all --no-record --no-git 2>/dev/null)"
+if [ "$CH_NONE_GOT" = "false:Claude Desktop holds no record for this session:0" ] \
+  && printf '%s\n' "$CH_NONE_MD" | grep -qF '_Not read: Claude Desktop holds no record for this session.'; then
+  check "CH4 a session without a desktop record reports its chips as not read instead of as none" PASS
+else
+  check "CH4 missing record: $CH_NONE_GOT" FAIL
+fi
+
+CH_HO="$(trailrun handoff "$CH_SID" --all 2>/dev/null)"
+CH_BAD=""
+printf '%s\n' "$CH_HO" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_HO" | grep -qF 'exactly once, after the user has confirmed your plan' || CH_BAD="$CH_BAD trigger-absent"
+CH_AT_CHIPS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 | cut -d: -f1)"
+[ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_THREADS" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_THREADS" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_THREADS"
+[ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
+
+CH_REF="$PLUGIN_DIR/skills/session-trail/references/takeover.md"
+CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
+CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH_AT_RELEASE" ] \
+  && grep -qF 'mcp__ccd_session__spawn_task' "$CH_REF" \
+  && grep -qF 'how many open task chips the brief lists' "$CH_REF"; then
+  check "CH6 references/takeover.md carries the chips before the release step and names the tool and the plan confirmation line" PASS
+else
+  check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
+fi
+
 report

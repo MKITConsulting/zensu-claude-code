@@ -47,20 +47,21 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1474`) and runs every `git` call with the discovery and
-config-injection variables unset (`:89`, `:1519-1521`). The `--chain-done`
-zero-change terminus counts through the same scrubbed wrapper (`:106-107`), on the
+(`hooks/lib/zensu-log.sh:1486`) and counts through the shared helper (`:1524`),
+which runs every `git` call with the discovery and config-injection variables unset
+(`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
+helper, on the
 `CLAUDE_PROJECT_DIR` that `zensu-log.sh` re-exports from `zensu_resolve_project_dir()`
 before any verb runs, so the `.` fallback never applies there. Which root the ambient
 variable names for the audit in a multi-root topology, and what the fallback means
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:89`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:884`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:90`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:241-266`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:931`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1463`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1475`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -418,10 +419,10 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:884` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:931` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1519-1521`, `:106-107` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1524`, `:118-119` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:631`, `:607` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -434,7 +435,7 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2602`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2611`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -451,7 +452,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4689`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4698`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -796,7 +797,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1441`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1453`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

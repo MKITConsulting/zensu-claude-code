@@ -16,6 +16,7 @@
     "secretScan": false,
     "selfReview": false,
     "sessionBanner": false,
+    "sessionHubReceipt": false,
     "tddReminder": false,
     "worktreeKeep": false,
     "zenMode": false

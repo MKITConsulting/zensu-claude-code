@@ -181,7 +181,7 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and six hooks are registered on it. Three of them send their
+on every prompt with no de-bounce, and seven hooks are registered on it. Three of them send their
 full text only once per context generation and a short line after that, through the prompt
 ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 `tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a
@@ -197,7 +197,9 @@ a prompt carries a planning keyword outside paths, `zensu:` skill names and `--r
 that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
 characters, on every prompt kind for the same reason). Two emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
-`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose. With
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
+`user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
+takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or

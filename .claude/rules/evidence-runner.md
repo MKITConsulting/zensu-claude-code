@@ -124,6 +124,13 @@ because `execSync` runs them through `cmd.exe` on Windows.
 repository or work tree, or a host without git, skips the gate. Every other git failure
 is `unavailable` and blocks under `required`: a `safe.directory` refusal also exits 128,
 and reading it as "not a repository" would open the gate on a real repository.
+`_zensu_unqualified_change_count` in `hooks/lib/zensu-log.sh` copies this split in shell, under
+`LC_ALL=C`, for the unqualified `--chain-done` and `--code-review-done`, for the count a minted
+`zc_` ticket takes and for the scope of `--tdd-complete`'s two preconditions, and `G14d` in
+`tests/structure/test-chain-terminus-zero-change-gate.sh` asks `workTree` about the inputs that
+suite drives through the unqualified verbs. The edit-landing audit draws the same split a third
+time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
+(`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
 
 **The gate sits at `--chain-done` only**: the ticket-bound standalone terminus and a
 bound chain with outcome `pass`. `--tdd-complete` is deliberately not gated, because
