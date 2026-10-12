@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (170 = 163 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 163 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 170). The figures here have drifted THIRTEEN times, twelve of them upward, and every
+reconciled to that manifest (171 = 164 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 164 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 171). The figures here have drifted THIRTEEN times, twelve of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -54,10 +54,10 @@ merging `main` into it made 156. The twelfth is the tenth's shape without the gr
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
 moved. The thirteenth is the twelfth's shape again: `test-work-order-runtime.sh` joined the
 manifest in its own commit while neither the figure nor its §3 group moved, and the commit that
-added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh` and
-`test-work-order-takeover.sh` each moved both in their own commit.
+added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh`,
+`test-work-order-takeover.sh` and `test-harness-launcher.sh` each moved both in their own commit.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 160 against 163 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 161 against 164 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -97,8 +97,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **170** — 163 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **163 structure suites + 5 offline evals = 168 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 170 − 163 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **171** — 164 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **164 structure suites + 5 offline evals = 169 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 171 − 164 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -110,8 +110,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 170 structure suites + 5 offline evals | none |
-| `--ci` | 163 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 171 structure suites + 5 offline evals | none |
+| `--ci` | 164 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -200,7 +200,7 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (21)
+### Autopilot (22)
 `autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
 already close to its `profileTimeoutMs`, so adding one has to be paid for by moving another
 suite off. It is in `ciStructureTests`, and `run-windows-safety-shard.js` maps every such entry
@@ -216,7 +216,7 @@ that pin was never a Windows question; what is unverified is the runtime behavio
 `autopilot-post-review-max-rounds` · `autopilot-release-cli` · `autopilot-review-rearm` ·
 `autopilot-session-resume` · `autopilot-skill` · `autopilot-state-machine` ·
 `autopilot-stop-enforcer` · `work-order-gates` · `work-order-implement` · `work-order-runtime` ·
-`work-order-takeover`
+`work-order-takeover` · `harness-launcher`
 
 Covers the durable outer state machine (schema, transitions, idempotency, storage —
 ~132 assertions), inner-TDD ↔ outer-Autopilot linkage and crash reconciliation,
@@ -227,7 +227,8 @@ the order binding and `ORDER_SPEC_BOUND`, the push verb, the finish verb and its
 PreToolUse gate and the PostToolUse reporter with their silence outside the mode, and the plan
 approval with the next attempt that implements it, and the takeover of an order by a new attempt
 that releases the earlier run, imports the pull request and the earlier team review, all against a
-stateful fake `zensu` and, for the takeover, a fake `gh`).
+stateful fake `zensu` and, for the takeover, a fake `gh`; `harness-launcher` validates the harness
+manifest and drives the worker-facing launcher against a fake `claude`).
 
 ### Bash gates, evidence & secrets (12)
 `acceptance-gate` · `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` ·

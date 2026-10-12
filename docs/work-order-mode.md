@@ -90,6 +90,56 @@ new Autopilot ledger event end the order on its own: it reports `ready_for_merge
 `blocked(worker_error)` for any other, then lets the session stop. A lost lease ends the session
 without a report.
 
+## The launcher and the manifest
+
+`harness/manifest.json` tells a Zensu worker how to run this harness:
+
+```json
+{
+  "harness": "zensu-claude-code",
+  "contract_version": 1,
+  "launcher": "harness/launcher.js",
+  "supported_kinds": ["implement"]
+}
+```
+
+`launcher` is relative to the plugin root and executable. The worker starts it in the checkout it
+prepared, with the session token in `ZENSU_SESSION_TOKEN`:
+
+```text
+harness/launcher.js --order <order-id> --session-id <client-session-id> [--project <dir>]
+  [--claude <executable>] [--permission-mode <mode>] [--settings <file>] [--mcp-config <file>]
+  [--plugin-dir <dir>] [--log <file>] [-- <further claude arguments>]
+```
+
+The launcher runs `claude -p --session-id <client-session-id> --output-format stream-json
+--verbose --setting-sources user --strict-mcp-config`, the slot options and the further arguments,
+and the prompt `/zensu:work <order-id>`, in its own process group in the project directory, which
+defaults to its working directory. Claude Code refuses `stream-json` output under `-p` without
+`--verbose`.
+
+It prints one JSON line per event on stdout and nothing else:
+
+| Line | When |
+|---|---|
+| `{"event":"session_started","client_session_id":"<id>"}` | the session initialized |
+| `{"event":"rate_limited","reset_at":"<time or null>"}` | Claude Code retries because of a rate limit |
+| `{"event":"exited","status":"success\|failure\|cancelled","exit_code":<n>,"reason":"<code>"}` | the session ended |
+
+`reason` appears with `failure` only: `lease_lost`, `harness_error` for a session whose result
+was an error, `harness_failed` for a non-zero exit, `harness_unavailable` when `claude` could not
+start. The launcher exits 0 on success, 1 on failure and 143 when it was cancelled; a usage error
+or a missing session token exits 2 and prints nothing on stdout.
+
+`SIGTERM`, `SIGINT` and `SIGHUP` cancel the session: the launcher sends `SIGTERM` to its process
+group, then `SIGKILL` after the grace time. While the session runs, the launcher renews the lease
+when no renewal succeeded for a third of the lease time; a lost lease writes the lease-lost marker
+and terminates the session. After the session ended, the launcher releases the session's
+nonterminal Autopilot run, so a reused checkout is free.
+
+The transcript, the tool calls, the tool output and the cost stay on the host. `--log` appends the
+raw output to a file there; nothing else keeps it.
+
 ## Known gaps
 
 - The installed `zensu` CLI must provide `zensu work`; until a CLI release carries it, `/zensu:work`
@@ -101,3 +151,5 @@ without a report.
 - `--review-import` trusts a review marker by its digest, which anyone who knows the order id can
   compute, and it reads only the first part of a review. A review that an earlier attempt published
   only in part is imported as if it were complete.
+- The launcher's process-group handling is POSIX only; Windows is unverified.
+- The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.

@@ -140,6 +140,11 @@ Outside work-order mode all three print nothing and exit 0.
 The gate reads command text; a command assembled at run time, such as a script file the model wrote,
 is not judged. The slot sandbox of the worker, not this gate, is the boundary.
 
+The worker starts the session through `harness/launcher.js` (`docs/work-order-mode.md`). The
+launcher renews the lease when no renewal succeeded for a third of the lease time, terminates the
+session once the lease is lost, and releases the session's nonterminal Autopilot run after the
+session exited.
+
 ## Errors the helpers handle
 
 The CLI prints a backend error as `error: <message> (status <n>, code <code>)`, possibly followed by
