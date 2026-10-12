@@ -12,7 +12,7 @@ const supervisor = path.resolve(__dirname, '../../scripts/process-supervisor.js'
 const { UNREACHABLE_EXIT_CODE, groupAlive, probeGroup, signalGroup, waitForGroupExit } = require(supervisor);
 const lease = 'a'.repeat(64);
 const posixProcessGroups = process.platform === 'win32'
-  ? { skip: 'native Windows has no POSIX process-group signaling; the local adapter requires macOS, Linux, or WSL' }
+  ? { skip: 'native Windows has no POSIX process-group signaling; the supervisor requires macOS, Linux, or WSL' }
   : {};
 const zombieOnlyGroup = process.platform !== 'darwin'
   ? { skip: 'only macOS answers EPERM for a group that holds nothing but zombies; Linux reports it alive until it is reaped' }

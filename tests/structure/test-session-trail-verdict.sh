@@ -7377,4 +7377,88 @@ else
   check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
 fi
 
+DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
+DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"
+DR_ARCH_SID=d0d0d0d0-0000-0000-0000-0000000000d1
+DR_OPEN_SID=d0d0d0d0-0000-0000-0000-0000000000d2
+DR_NONE_SID=d0d0d0d0-0000-0000-0000-0000000000d3
+DR_ARCHIVED_LINE='- **ARCHIVED** in the desktop app: its process was stopped and the worktree may have been cleaned up'
+mkdir -p "$DR_STORE"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, archived, open, none] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+for (const sid of [archived, open, none]) {
+  const wt = path.join(home, "work", `wt-dr-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+}
+for (const [sid, isArchived] of [[archived, true], [open, false]]) {
+  fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({ sessionId: `local_${sid}`, cliSessionId: sid, isArchived, title: "desktop record fixture", model: "opus", effort: "high", permissionMode: "default" }));
+}
+' "$FAKE" "$DR_STORE" "$DR_ARCH_SID" "$DR_OPEN_SID" "$DR_NONE_SID" 2>/dev/null
+
+dr_markdown() {
+  printf '%s\n' "$1" | awk '/^--- BEGIN [A-Z]+ MARKDOWN ---$/{f=1;next} /^--- END [A-Z]+ MARKDOWN ---$/{f=0} f'
+}
+dr_source_bad() {
+  local src got
+  src="$(dr_markdown "$2" | awk '$0=="## Source"{f=1;next} /^## /{f=0} f')"
+  if [ -z "$src" ]; then printf ' %s:source-absent' "$1"; return; fi
+  printf '%s\n' "$src" | grep -qF '(unknown)' && printf ' %s:unknown-rendered' "$1"
+  printf '%s\n' "$2" | grep -qF 'owning desktop instance' && printf ' %s:instance-line-rendered' "$1"
+  got="$(printf '%s\n' "$src" | grep -cxF -- "$DR_ARCHIVED_LINE")"
+  [ "$got" = "$3" ] || printf ' %s:archived-bullets=%s-want-%s' "$1" "$got" "$3"
+}
+DR_ARCH_MD="$(trailrun takeover "$DR_ARCH_SID" --all --no-record --no-git 2>/dev/null)"
+DR_BAD="$(dr_source_bad archived "$DR_ARCH_MD" 1)"
+DR_BAD="$DR_BAD$(dr_source_bad open "$(trailrun takeover "$DR_OPEN_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+DR_BAD="$DR_BAD$(dr_source_bad no-record "$(trailrun takeover "$DR_NONE_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+[ -z "$DR_BAD" ] \
+  && check "DR1 the takeover brief's Source section renders no (unknown) and no desktop-instance line, with or without a desktop record, and carries the ARCHIVED bullet exactly when the record is archived" PASS \
+  || check "DR1 takeover Source section:$DR_BAD" FAIL
+
+DR_BAD=""
+DR_PREFIX="$(printf '%s' "$DR_ACCT" | cut -c1-8)"
+[ "$(field "$DR_ARCH_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD archived-record-account-not-resolved"
+[ "$(field "$DR_OPEN_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD open-record-account-not-resolved"
+for DR_VERB in takeover handoff; do
+  if [ "$DR_VERB" = takeover ]; then DR_MD="$(dr_markdown "$DR_ARCH_MD")"; else DR_MD="$(dr_markdown "$(trailrun handoff "$DR_ARCH_SID" --all 2>/dev/null)")"; fi
+  if [ -z "$DR_MD" ]; then DR_BAD="$DR_BAD $DR_VERB-brief-absent"; continue; fi
+  printf '%s\n' "$DR_MD" | grep -qF -- "$DR_PREFIX" && DR_BAD="$DR_BAD $DR_VERB-brief-names-the-account"
+done
+DR_REF="$PLUGIN_DIR/skills/session-trail/references/disclosure.md"
+grep -qF 'NEITHER brief carries an account-adjacent value at all' "$DR_REF" || DR_BAD="$DR_BAD disclosure-claim-gone"
+grep -qF 'never its account' "$DR_REF" || DR_BAD="$DR_BAD disclosure-source-sentence-gone"
+[ -z "$DR_BAD" ] \
+  && check "DR2 neither brief names the account the desktop store resolves for the session, as references/disclosure.md states" PASS \
+  || check "DR2 brief account disclosure:$DR_BAD" FAIL
+
+dr_field_scan() {
+  node -e '
+const fs = require("node:fs");
+const code = `${fs.readFileSync(process.argv[1], "utf8")}\n${process.argv[2]}`.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+const start = code.indexOf("function ccdIndex() {");
+const body = start < 0 ? "" : code.slice(start, code.indexOf("\n}\n", start));
+const lit = /map\.set\(o\.cliSessionId, \{([\s\S]*?)\}\);/.exec(body);
+const stored = new Set(lit ? [...lit[1].matchAll(/^\s*([A-Za-z_$][\w$]*):/gm)].map((m) => m[1]) : []);
+const read = new Set([...code.matchAll(/[^\w$]app\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+process.stdout.write(`${[...stored].sort().join(",")}|${[...read].filter((f) => !stored.has(f)).sort().join(",")}`);
+' "$TRAIL_MJS" "${1:-}"
+}
+DR_SCAN="$(dr_field_scan)"
+DR_STORED="${DR_SCAN%%|*}"
+DR_CTRL="$(dr_field_scan '  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);')"
+DR_BAD=""
+case ",$DR_STORED," in *,accountUuid,*archived,*) ;; *) DR_BAD="$DR_BAD stored-keys-not-derived($DR_STORED)" ;; esac
+[ -z "${DR_SCAN#*|}" ] || DR_BAD="$DR_BAD reads-unstored:${DR_SCAN#*|}"
+[ "${DR_CTRL#*|}" = "instance" ] || DR_BAD="$DR_BAD control-read-not-reported(${DR_CTRL#*|})"
+[ -z "$DR_BAD" ] \
+  && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdIndex stores ($DR_STORED), and the same scan reports a read of an unstored field" PASS \
+  || check "DR3 desktop-record field reads:$DR_BAD" FAIL
+
 report
