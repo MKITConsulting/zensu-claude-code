@@ -242,6 +242,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-worktree-keep.sh\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-session-hub-receipt.sh\"",
+            "timeout": 10
           }
         ]
       }
