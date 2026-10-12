@@ -34,10 +34,11 @@ delta; that deletes the compensating control rather than a redundancy.
 decision.** The first review spawns `correctness`, `design` and `security` plus the judge; a fix
 round's re-review spawns `correctness` alone on the round delta and no judge (`--panel <panel>
 --round <round>` of `aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of
-both delegate arms). That drops the compensating control above knowingly: with one fix round by
-default, the re-review is the last review before `/zensu:self-review`, which re-reads the whole
-change, and the consume-mode code-reviewer still reads the merge. `reviewPanel: full` restores
-five perspectives and a judge on every review. Without a judge, a lean re-review routes an
+both delegate arms). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
+by default a chain runs up to two lean re-reviews, the last of them hands the chain to
+`/zensu:self-review`, which re-reads the whole change, and the consume-mode code-reviewer still
+reads the merge. With `hooks.selfReview: false` that whole-change read is gone (see the known
+gaps). `reviewPanel: full` restores five perspectives and a judge on every review. Without a judge, a lean re-review routes an
 IMPORTANT finding only when it cites code the fix pass edited, and the convergence clause runs
 its helpers before classifying instead of before a judge pass. Coupled sites: `zensu_review_panel`
 in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, `REVIEW_PANEL` and
@@ -130,6 +131,12 @@ PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `
   costed at `defaultSeconds` until a real ubuntu `--ci` figure exists.
 - **No `/zensu:doctor` row.** A project whose activation helper stopped loading is visible only
   in the run log's `ASPECT ACTIVATION UNAVAILABLE` line, not in a diagnostic.
+- **`hooks.selfReview: false` leaves the lean panel without a whole-change read after the first
+  review.** A lean re-review reads only its round's delta and runs no judge, and the stage that
+  would re-read the whole change is switched off, so a fix round's drift into a file it did not
+  touch reaches no reviewer. A project that switches the self-review off and still wants that read
+  sets `hooks.reviewPanel: full`, which keeps the judge, and the full cumulative change set it
+  reads, on every review.
 
 **Port-relevant.** The core half is both libs, which are host-neutral, zero-dependency and carry
 no environment reads of their own — every anchor arrives as an option or an argument. The host
