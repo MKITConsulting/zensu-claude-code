@@ -34,7 +34,8 @@ its interactive planning gate, and no `zensu work` command runs.
    blocks the order with `worker_error` when the plan file on the branch differs from it.
 3. Every push goes through `zensu-work-order.sh --push`, which renews the lease first, pushes with
    `--force-with-lease` against the head Zensu recorded for the order and reports the new head. The
-   pull request opens through `--open-pr`.
+   pull request opens through `--open-pr`, which imports the order's open pull request instead of
+   opening a second one.
 4. `--drain` sends each stage the Autopilot ledger reached and Zensu has not seen, never backwards
    and each with a fixed `client_event_id`.
 5. `--finish` reports `ready_for_merge` for a `DONE` run, or blocks the order with `worker_error`
@@ -42,6 +43,22 @@ its interactive planning gate, and no `zensu work` command runs.
 
 `skills/work/references/protocol.md` lists the state files, the stage mapping and every backend
 error the helpers handle.
+
+## Taking over an order
+
+When an attempt ends without an outcome, for example because its lease expired, Zensu can claim the
+order again with a higher attempt number. The new session continues the order instead of starting
+over:
+
+- `--start` releases the local Autopilot run an earlier attempt of the order left in the checkout,
+  so a reused checkout does not hold the new run off.
+- The session works on the order's branch and pushes against the head Zensu recorded.
+- `--open-pr` imports the order's open pull request. A pull request a person closed or merged is
+  refused, and the session ends with a stated reason.
+- A work-order run binds its team review to the order rather than to the run. Before it requests a
+  team review, `--review-import` looks for a review an earlier attempt published on the pull request
+  and, when it finds one for an ancestor of the current head, records it and continues with the
+  findings. No second team review is published.
 
 ## Questions and follow-ups
 
@@ -79,3 +96,8 @@ without a report.
   refuses in one line.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, is not judged; the worker's slot sandbox, not the gate, is the boundary.
+- `--start` releases only runs of the same order. A nonterminal run of another order in a reused
+  checkout still holds the new run off, and the session ends with a stated reason.
+- `--review-import` trusts a review marker by its digest, which anyone who knows the order id can
+  compute, and it reads only the first part of a review. A review that an earlier attempt published
+  only in part is imported as if it were complete.

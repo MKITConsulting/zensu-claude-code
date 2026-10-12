@@ -788,3 +788,31 @@ test('the plan summary carries no markup, command line or control character', ()
   assert.ok(summary.length <= 400);
   assert.match(summary, /^Implementation plan\./);
 });
+
+test('the order-bound review key matches the state library helper and differs per order and head', () => {
+  const head = 'ABCDEF0123456789abcdef0123456789abcdef01';
+  const library = path.join(__dirname, '..', '..', 'hooks', 'lib', 'zensu-autopilot-state.sh');
+  const fromLibrary = execFileSync('bash', ['-c', 'source "$1" && autopilot_work_order_review_operation_key "$2" "$3"', 'key', library, ORDER.toUpperCase(), head], { encoding: 'utf8' });
+  assert.equal(wo.workOrderReviewKey(ORDER, head), fromLibrary);
+  assert.match(fromLibrary, /^team-review:v1:[a-f0-9]{64}$/);
+  assert.notEqual(wo.workOrderReviewKey(ORDER, head), wo.workOrderReviewKey('33333333-3333-4333-8333-333333333333', head));
+  assert.notEqual(wo.workOrderReviewKey(ORDER, head), wo.workOrderReviewKey(ORDER, 'abcdef0'));
+});
+
+test('the release plan names only nonterminal runs of earlier attempts of the same order', () => {
+  const box = sandbox();
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  const put = (runId, stage, workOrder) => fs.writeFileSync(path.join(dir, `autopilot-run-${runId}.json`),
+    JSON.stringify({ runId, stage, events: [], ...(workOrder ? { workOrder } : {}) }));
+  put('run_a1_open', 'FIX_FINDINGS', { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) });
+  put('run_a1_done', 'CANCELLED', { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) });
+  put('run_a2_open', 'TEAM_REVIEW', { orderId: ORDER, attempt: 2, specHash: 'a'.repeat(64) });
+  put('run_other_open', 'GATES', { orderId: '33333333-3333-4333-8333-333333333333', attempt: 1, specHash: 'a'.repeat(64) });
+  put('run_plain_open', 'GATES', null);
+  fs.writeFileSync(path.join(dir, 'autopilot-run-bad name.json'), '{}');
+  assert.deepEqual(wo.releasePlan(box.project, ORDER, 2), ['run_a1_open']);
+  assert.deepEqual(wo.releasePlan(box.project, ORDER.toUpperCase(), 3), ['run_a1_open', 'run_a2_open']);
+  assert.deepEqual(wo.releasePlan(box.project, ORDER, 1), []);
+  assert.deepEqual(wo.releasePlan('relative/path', ORDER, 2), []);
+});

@@ -155,6 +155,7 @@
     "test-work-order-gates.sh",
     "test-work-order-implement.sh",
     "test-work-order-runtime.sh",
+    "test-work-order-takeover.sh",
     "test-workflow-checkout-credentials.sh",
     "test-workflow-dispatch-inputs.sh",
     "test-workflow-scope.sh",

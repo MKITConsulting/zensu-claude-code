@@ -323,7 +323,6 @@ function stageForLedgerEvent(event) {
     case 'PR_OPEN_REQUESTED':
       return null;
     case 'PR_OPENED':
-    case 'ORDER_PR_IMPORTED':
       return 'pr_open';
     case 'DELIVERY_COMPLETE':
       return 'ready_for_merge';
@@ -364,7 +363,7 @@ function planStageEvents(run, deliveredRank = 0) {
       autopilotStage: event.toStage,
       autopilotEventId: event.eventId,
       clientEventId: clientEventId(run.runId, event.eventId),
-      pr: (event.eventType === 'PR_OPENED' || event.eventType === 'ORDER_PR_IMPORTED') && isObject(event.payload)
+      pr: event.eventType === 'PR_OPENED' && isObject(event.payload)
         && isObject(event.payload.pr) ? event.payload.pr : null,
       headSha: event.eventType === 'DELIVERY_COMPLETE' && isObject(event.payload) ? event.payload.headSha : null,
     });
@@ -1016,21 +1015,25 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     }
     approvedPlanSha256 = crypto.createHash('sha256').update(approved.stdout, 'utf8').digest('hex');
   }
+  const bindingValue = { orderId: context.marker.orderId.toLowerCase(), attempt: context.marker.attempt, specHash: order.spec_hash, approvedPlanSha256 };
+  const pastImplementing = () => {
+    writeOutbox(context, { deliveredRank: Math.max(readOutbox(context).deliveredRank || 0, STAGE_RANK.implementing) });
+    return { exit: EXIT.OK, value: bindingValue };
+  };
+  if ((STAGE_RANK[order.status] || 0) > STAGE_RANK.implementing) return pastImplementing();
   const args = ['--stage', 'implementing', '--client-event-id', clientEventId(bound.runId, 'order-spec-bound'),
     '--autopilot-stage', 'AWAIT_TDD', '--autopilot-run-id', bound.runId];
   const branch = currentBranch(context.projectRoot);
   if (branch) args.push('--branch', branch);
   const sent = sendEvent(context, args, { env, now, target: 'implementing' });
+  if (sent.verdict === VERDICTS.FINAL && sent.failure && sent.failure.code === 'invalid_transition') return pastImplementing();
   if (sent.verdict === VERDICTS.OK) {
     if (sent.order && sent.order.status === 'blocked') {
       noteBlockedOrder(context, sent.order, now);
       return { exit: EXIT.ENDED, message: `Zensu blocked work order ${context.marker.orderId} (${sent.order.blocked_kind || 'unknown'})` };
     }
     writeOutbox(context, { deliveredRank: Math.max(readOutbox(context).deliveredRank || 0, STAGE_RANK.implementing), lastStatus: 'implementing' });
-    return {
-      exit: EXIT.OK,
-      value: { orderId: context.marker.orderId.toLowerCase(), attempt: context.marker.attempt, specHash: order.spec_hash, approvedPlanSha256 },
-    };
+    return { exit: EXIT.OK, value: bindingValue };
   }
   if (sent.verdict === VERDICTS.FINAL && sent.failure && sent.failure.code === 'plan_approval_required') {
     return { exit: EXIT.REFUSED, message: 'plan-approval-required', planApproval: true };
@@ -1177,6 +1180,37 @@ function push(context, { env = process.env, now = Date.now } = {}) {
   return { exit: EXIT.OK, value: { branch, head } };
 }
 
+const PR_NUMBER_IN_URL_RE = /\/(?:pull|merge_requests)\/(\d+)(?:[/?#]|$)/;
+
+function locatePullRequest(context, { env, vcs, provider, number }) {
+  const located = spawnSync('bash', [vcs, '--locate-pr', '--provider', provider, ...(number ? [String(number)] : [])], {
+    env, cwd: context.projectRoot, encoding: 'utf8', timeout: 60000,
+  });
+  if (located.status !== 0) return null;
+  try {
+    const parsed = JSON.parse(located.stdout);
+    if (!isObject(parsed) || !/^[1-9][0-9]*$/.test(String(parsed.id)) || !/^https:\/\//.test(String(parsed.url))) return null;
+    return { number: Number(parsed.id), url: parsed.url, state: parsed.state, base: typeof parsed.base === 'string' ? parsed.base : null, head: parsed.head };
+  } catch (_) {
+    return null;
+  }
+}
+
+function existingPullRequest(context, { env, vcs, provider, order, branch }) {
+  const fromUrl = typeof order.pr_url === 'string' ? PR_NUMBER_IN_URL_RE.exec(order.pr_url) : null;
+  const recorded = Number.isSafeInteger(order.pr_number) && order.pr_number > 0 ? order.pr_number : (fromUrl ? Number(fromUrl[1]) : null);
+  if (recorded) {
+    const pr = locatePullRequest(context, { env, vcs, provider, number: recorded });
+    if (!pr) return { refused: `the pull request #${recorded} this order names could not be read; run --open-pr again, and after three failures finish with --reason` };
+    if (pr.state !== 'OPEN') return { refused: `the pull request #${recorded} this order names is ${String(pr.state).toLowerCase()}; finish with --reason, because a person decides what happens to it` };
+    if (pr.head !== branch) return { refused: `the pull request #${recorded} this order names belongs to branch ${pr.head}, not ${branch}; finish with --reason` };
+    return { pr };
+  }
+  const pr = locatePullRequest(context, { env, vcs, provider, number: null });
+  if (pr && pr.state === 'OPEN' && pr.head === branch) return { pr };
+  return {};
+}
+
 function openPr(context, { env = process.env, now = Date.now, title, bodyFile, provider } = {}) {
   if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
   if (typeof title !== 'string' || !title.trim() || typeof bodyFile !== 'string' || !bodyFile) {
@@ -1205,6 +1239,11 @@ function openPr(context, { env = process.env, now = Date.now, title, bodyFile, p
     chosen = match ? match[1] : null;
   }
   if (!['github', 'gitlab'].includes(chosen)) return { exit: EXIT.REFUSED, message: 'the forge of this repository could not be detected' };
+  const existing = existingPullRequest(context, { env, vcs, provider: chosen, order, branch });
+  if (existing.refused) return { exit: EXIT.REFUSED, message: existing.refused };
+  if (existing.pr) {
+    return { exit: EXIT.OK, value: { url: existing.pr.url, number: existing.pr.number, base: existing.pr.base || base, branch, head, imported: true } };
+  }
   const opened = spawnSync('bash', [vcs, '--open-pr', '--provider', chosen, '--base', base, '--head', branch, '--title', title, '--body-file', bodyFile], {
     env, cwd: context.projectRoot, encoding: 'utf8', timeout: 120000,
   });
@@ -1214,6 +1253,118 @@ function openPr(context, { env = process.env, now = Date.now, title, bodyFile, p
   }
   const number = Number(/\/(?:pull|merge_requests)\/(\d+)/.exec(url) ? /\/(?:pull|merge_requests)\/(\d+)/.exec(url)[1] : NaN);
   return { exit: EXIT.OK, value: { url, number: Number.isSafeInteger(number) ? number : null, base, branch, head } };
+}
+
+const REVIEW_MARKER_RE = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/;
+const MAX_REVIEW_MARKERS = 200;
+const TERMINAL_RUN_STAGES = new Set(['DONE', 'CANCELLED']);
+
+function workOrderReviewKey(orderId, headSha) {
+  const canonical = `{"headSha":${JSON.stringify(String(headSha).toLowerCase())},"orderId":${JSON.stringify(String(orderId).toLowerCase())}}`;
+  return `team-review:v1:${crypto.createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+function detectForge(context, env) {
+  const vcs = path.join(__dirname, 'zensu-vcs.sh');
+  const detected = spawnSync('bash', [vcs, '--detect', '--repo', context.projectRoot], { env, encoding: 'utf8', timeout: 60000 });
+  const provider = /^provider=(github|gitlab)$/m.exec(detected.stdout || '');
+  const repo = /^repo=(\S+)$/m.exec(detected.stdout || '');
+  return { vcs, provider: provider ? provider[1] : null, repo: repo ? repo[1] : null };
+}
+
+function commitPresent(projectRoot, sha) {
+  return git(projectRoot, ['cat-file', '-e', `${sha}^{commit}`]).ok;
+}
+
+function reviewImport(context, { env = process.env, now = Date.now, runId } = {}) {
+  if (!context || context.fault) return { exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' };
+  const bound = markerRun(context, runId);
+  if (bound.error) return { exit: EXIT.NOT_BOUND, message: bound.error };
+  const forge = forgeWriteVerdict(context, now());
+  if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
+  const run = readRunRecord(context.projectRoot, bound.runId);
+  const orderId = context.marker.orderId.toLowerCase();
+  if (!run || !isObject(run.workOrder) || run.workOrder.orderId !== orderId) {
+    return { exit: EXIT.NOT_BOUND, message: `Autopilot run ${bound.runId} is not bound to work order ${context.marker.orderId}` };
+  }
+  const prior = run.events.find((event) => event.eventType === 'TEAM_REVIEW_IMPORTED');
+  if (prior && isObject(prior.payload)) {
+    return { exit: EXIT.OK, value: { imported: true, operationKey: prior.payload.operationKey, headSha: prior.payload.headSha, provider: prior.payload.provider }, already: true };
+  }
+  const review = isObject(run.effects) && isObject(run.effects.teamReview) ? run.effects.teamReview : {};
+  if (run.stage !== 'TEAM_REVIEW' || review.status !== 'none') {
+    return { exit: EXIT.REFUSED, message: `Autopilot run ${bound.runId} is at ${run.stage}; --review-import runs at TEAM_REVIEW before TEAM_REVIEW_REQUESTED` };
+  }
+  const pr = isObject(run.evidence) && isObject(run.evidence.pr) ? run.evidence.pr : null;
+  if (!pr || !Number.isSafeInteger(pr.number) || !/^[0-9a-fA-F]{7,64}$/.test(String(pr.headSha))) {
+    return { exit: EXIT.REFUSED, message: `Autopilot run ${bound.runId} records no opened pull request` };
+  }
+  const prHead = String(pr.headSha).toLowerCase();
+  const { vcs, provider, repo } = detectForge(context, env);
+  if (!provider || !repo) return { exit: EXIT.REFUSED, message: 'the forge of this repository could not be detected' };
+  const fresh = { imported: false, operationKey: workOrderReviewKey(orderId, prHead), headSha: prHead, provider };
+  const listed = spawnSync('bash', [vcs, '--review-markers', '--provider', provider, '--repo-id', repo, String(pr.number)], {
+    env, cwd: context.projectRoot, encoding: 'utf8', timeout: 120000,
+  });
+  if (listed.status !== 0) {
+    return { exit: EXIT.REFUSED, message: 'the team-review markers on the pull request could not be read; run --review-import again, and after three failures finish with --reason' };
+  }
+  const candidates = [];
+  for (const line of String(listed.stdout || '').split('\n').slice(0, MAX_REVIEW_MARKERS)) {
+    const match = REVIEW_MARKER_RE.exec(line.trim());
+    if (!match || match[4] !== match[5]) continue;
+    const headSha = match[3];
+    const operationKey = workOrderReviewKey(orderId, headSha);
+    if (crypto.createHash('sha256').update(operationKey).digest('hex') !== match[1]) continue;
+    candidates.push({ marker: match[0], headSha, operationKey });
+  }
+  if (candidates.length === 0) return { exit: EXIT.OK, value: fresh };
+  if (candidates.some((candidate) => !commitPresent(context.projectRoot, candidate.headSha))) {
+    git(context.projectRoot, ['fetch', '--quiet', 'origin'], env);
+  }
+  let chosen = null;
+  for (const candidate of candidates) {
+    if (!commitPresent(context.projectRoot, candidate.headSha)) continue;
+    if (!git(context.projectRoot, ['merge-base', '--is-ancestor', candidate.headSha, prHead]).ok) continue;
+    const counted = git(context.projectRoot, ['rev-list', '--count', `${candidate.headSha}..${prHead}`]);
+    const distance = counted.ok ? Number(counted.stdout.trim()) : NaN;
+    if (!Number.isSafeInteger(distance)) continue;
+    if (!chosen || distance < chosen.distance) chosen = { ...candidate, distance };
+  }
+  if (!chosen) return { exit: EXIT.OK, value: fresh };
+  return {
+    exit: EXIT.OK,
+    value: {
+      imported: true,
+      operationKey: chosen.operationKey,
+      headSha: chosen.headSha,
+      provider,
+      payload: { operationKey: chosen.operationKey, marker: chosen.marker, headSha: chosen.headSha, provider },
+    },
+  };
+}
+
+function releasePlan(projectRoot, orderId, belowAttempt) {
+  if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot) || !ORDER_ID_RE.test(String(orderId || ''))
+    || !Number.isSafeInteger(belowAttempt) || belowAttempt < 1) return [];
+  const stateDir = path.join(projectRoot, '.zensu', 'state');
+  let names;
+  try {
+    names = fs.readdirSync(stateDir);
+  } catch (_) {
+    return [];
+  }
+  const runs = [];
+  for (const name of names.sort()) {
+    const match = /^autopilot-run-(.+)\.json$/.exec(name);
+    if (!match || !RUN_ID_RE.test(match[1])) continue;
+    const run = readRunRecord(projectRoot, match[1]);
+    if (!run || !isObject(run.workOrder) || run.workOrder.orderId !== String(orderId).toLowerCase()) continue;
+    if (!Number.isSafeInteger(run.workOrder.attempt) || run.workOrder.attempt >= belowAttempt) continue;
+    if (TERMINAL_RUN_STAGES.has(run.stage)) continue;
+    runs.push(run.runId);
+  }
+  return runs;
 }
 
 const TOKEN_VARIABLE = 'ZENSU_SESSION_TOKEN';
@@ -2032,6 +2183,13 @@ function dispatchCli(argv, env) {
       provider: typeof options.provider === 'string' ? options.provider : null,
     }));
   }
+  if (verb === 'review-import') return emit(reviewImport(context, { env, runId: typeof options.run === 'string' ? options.run : null }));
+  if (verb === 'release-plan') {
+    if (!context || context.fault) return emit({ exit: EXIT.NOT_BOUND, message: context ? context.fault : 'this session runs no work order' });
+    const runs = releasePlan(context.projectRoot, context.marker.orderId, context.marker.attempt);
+    if (runs.length > 0) process.stdout.write(`${runs.join('\n')}\n`);
+    return EXIT.OK;
+  }
   const list = (value) => (Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []));
   const text = (value) => (typeof value === 'string' ? value : null);
   if (verb === 'gate') {
@@ -2109,6 +2267,7 @@ module.exports = {
   bindSpec,
   binding,
   drain,
+  existingPullRequest,
   finish,
   followup,
   gateDecision,
@@ -2120,8 +2279,11 @@ module.exports = {
   postToolUpdate,
   push,
   readRunRecord,
+  releasePlan,
+  reviewImport,
   shellCommands,
   stopDecision,
+  workOrderReviewKey,
   classifyFailure,
   clientEventId,
   cliOutcome,

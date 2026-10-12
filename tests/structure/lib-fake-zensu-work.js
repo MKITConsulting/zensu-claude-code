@@ -282,7 +282,7 @@ function applyStage(flags, clientEventId) {
     head_sha: flags.head || null,
     client_name: flags['client-name'],
     client_version: flags['client-version'],
-    detail: { autopilot_run_id: flags['autopilot-run-id'] || null },
+    detail: {},
   });
   if (target === 'ready_for_merge') {
     state.mode = 'ended';

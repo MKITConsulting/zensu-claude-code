@@ -13,7 +13,8 @@ order's id. Run every helper with its leading `CLAUDE_PLUGIN_DATA="…"` assignm
 Stay in the checkout the session started in: the worker prepared it. Do not create a worktree.
 
 - The `--start` summary names a `branch`: the order was worked on before. Fetch it and continue on
-  it: `git fetch origin <branch>`, then `git checkout -B <branch> origin/<branch>`.
+  it: `git fetch origin <branch>`, then `git checkout -B <branch> origin/<branch>`. `--start`
+  already released the local Autopilot run an earlier attempt left in this checkout.
 - No `branch`: create `workBranch` from the order's integration branch, else its base branch:
   `git fetch origin <base>`, then `git checkout -b <workBranch> origin/<base>`.
 
@@ -83,7 +84,15 @@ These steps differ:
   `PR_OPEN_REQUESTED`, then run
   `"$WO" --open-pr --title "<title>" --body-file "<absolute path>"` instead of the driver's
   `--open-pr`. Its stdout is `{"value":{"url":…,"number":…,"base":…,"branch":…,"head":…}}`; persist
-  `PR_OPENED` with that number, URL and head, then run `--drain`.
+  `PR_OPENED` with that number, URL and head, then run `--drain`. When the order already has an open
+  pull request, the value carries `"imported":true` and names it: persist `PR_OPENED` with it all
+  the same, and never open a second one.
+- **The team review** (Phase 1 step 4): before `TEAM_REVIEW_REQUESTED`, run
+  `"$WO" --review-import --run "$RUN_ID"`. With `"imported":true` an earlier attempt's team review
+  covers this pull request and the run is already at `FIX_FINDINGS`: continue there and publish no
+  second review. Otherwise persist `TEAM_REVIEW_REQUESTED` with the `operationKey` and `provider` it
+  printed, not with a key from `autopilot_team_review_operation_key`: a work-order run binds its
+  review to the order, so a later attempt can find it.
 - **A blocker that the one rule would halt on** ends the order: finish with `--reason` and one
   plain sentence naming the blocker.
 

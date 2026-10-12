@@ -874,6 +874,10 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-event: the 'release-' event-id namespace is reserved for --autopilot-release" >&2
         exit 2
         ;;
+      work-order-release-*)
+        echo "zensu-log.sh --autopilot-event: the 'work-order-release-' event-id namespace is reserved for zensu-work-order.sh" >&2
+        exit 2
+        ;;
     esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
@@ -882,6 +886,10 @@ case "${1:-}" in
         ;;
       ORDER_SPEC_BOUND)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --bind-spec" >&2
+        exit 2
+        ;;
+      TEAM_REVIEW_IMPORTED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --review-import" >&2
         exit 2
         ;;
     esac

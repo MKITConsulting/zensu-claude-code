@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (169 = 162 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 162 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 169). The figures here have drifted THIRTEEN times, twelve of them upward, and every
+reconciled to that manifest (170 = 163 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 163 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 170). The figures here have drifted THIRTEEN times, twelve of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -54,10 +54,10 @@ merging `main` into it made 156. The twelfth is the tenth's shape without the gr
 `test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
 moved. The thirteenth is the twelfth's shape again: `test-work-order-runtime.sh` joined the
 manifest in its own commit while neither the figure nor its §3 group moved, and the commit that
-added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh` moved both in its
-own commit.
+added `test-work-order-implement.sh` re-derived both; `test-work-order-gates.sh` and
+`test-work-order-takeover.sh` each moved both in their own commit.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 159 against 162 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 160 against 163 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -97,8 +97,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **169** — 162 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **162 structure suites + 5 offline evals = 167 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 169 − 162 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **170** — 163 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **163 structure suites + 5 offline evals = 168 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 170 − 163 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -110,8 +110,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 169 structure suites + 5 offline evals | none |
-| `--ci` | 162 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 170 structure suites + 5 offline evals | none |
+| `--ci` | 163 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -200,7 +200,7 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (20)
+### Autopilot (21)
 `autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
 already close to its `profileTimeoutMs`, so adding one has to be paid for by moving another
 suite off. It is in `ciStructureTests`, and `run-windows-safety-shard.js` maps every such entry
@@ -215,7 +215,8 @@ that pin was never a Windows question; what is unverified is the runtime behavio
 `autopilot-inner-termination` · `autopilot-plan-delegate` ·
 `autopilot-post-review-max-rounds` · `autopilot-release-cli` · `autopilot-review-rearm` ·
 `autopilot-session-resume` · `autopilot-skill` · `autopilot-state-machine` ·
-`autopilot-stop-enforcer` · `work-order-gates` · `work-order-implement` · `work-order-runtime`
+`autopilot-stop-enforcer` · `work-order-gates` · `work-order-implement` · `work-order-runtime` ·
+`work-order-takeover`
 
 Covers the durable outer state machine (schema, transitions, idempotency, storage —
 ~132 assertions), inner-TDD ↔ outer-Autopilot linkage and crash reconciliation,
@@ -224,7 +225,9 @@ rearm/retirement, the read-only SessionStart resume hook, a composed full-lifecy
 walk, and the work-order mode a Zensu worker session runs Autopilot in (the inert runtime,
 the order binding and `ORDER_SPEC_BOUND`, the push verb, the finish verb and its Stop hook, the
 PreToolUse gate and the PostToolUse reporter with their silence outside the mode, and the plan
-approval with the next attempt that implements it, all against a stateful fake `zensu`).
+approval with the next attempt that implements it, and the takeover of an order by a new attempt
+that releases the earlier run, imports the pull request and the earlier team review, all against a
+stateful fake `zensu` and, for the takeover, a fake `gh`).
 
 ### Bash gates, evidence & secrets (12)
 `acceptance-gate` · `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` ·
@@ -448,7 +451,7 @@ file with a row calls the same helper beside the floor it reads from that cell t
 | `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
 | `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
-| `work-order-v1.test.js` | 36 | `test-work-order-runtime.sh` (R2) | work-order runtime: the CLI error grammar and its verdicts with context after the status group and messages over several lines, deterministic client event ids, the forward-only ledger-to-stage mapping, renewal cadence and lease expiry, the inert context outside work-order mode, state-file refusals, the once-only markers, forge-write verdicts, queued answers, start with its refusals and the unsupported-kind block, lease loss on renewal, retries and the codeless-409 probe, a replay after the session ended, the DONE delivery order with `ready_for_merge` last, drain replays and `invalid_transition`, the reasoned and the BLOCKED finish, the approved-plan lookup, the Stop budget without progress, the order binding and the push refused on a stale attempt, the Bash analysis of the gate, the gate's denials and renewal, `--ask` with its default and its blocking end, `--followup` and the repeated CLI flags, the post-tool answers and the blocked direct ask, and the plan summary |
+| `work-order-v1.test.js` | 38 | `test-work-order-runtime.sh` (R2) | work-order runtime: the CLI error grammar and its verdicts with context after the status group and messages over several lines, deterministic client event ids, the forward-only ledger-to-stage mapping, renewal cadence and lease expiry, the inert context outside work-order mode, state-file refusals, the once-only markers, forge-write verdicts, queued answers, start with its refusals and the unsupported-kind block, lease loss on renewal, retries and the codeless-409 probe, a replay after the session ended, the DONE delivery order with `ready_for_merge` last, drain replays and `invalid_transition`, the reasoned and the BLOCKED finish, the approved-plan lookup, the Stop budget without progress, the order binding and the push refused on a stale attempt, the Bash analysis of the gate, the gate's denials and renewal, `--ask` with its default and its blocking end, `--followup` and the repeated CLI flags, the post-tool answers and the blocked direct ask, the plan summary, the order-bound review key against the state library, and the release plan of a takeover |
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —

@@ -92,6 +92,73 @@ case "$_ZENSU_WO_VERB" in
     echo "work-order: spec bound, Autopilot run $_ZENSU_WO_RUN is at AWAIT_TDD"
     exit 0
     ;;
+  review-import)
+    _ZENSU_WO_RUN=""
+    _ZENSU_WO_ARGS=("$@")
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run) [ $# -ge 2 ] || { echo "zensu-work-order.sh --review-import: missing --run value" >&2; exit 2; }; _ZENSU_WO_RUN="$2"; shift 2 ;;
+        *) echo "zensu-work-order.sh --review-import: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$_ZENSU_WO_RUN" ] || { echo "zensu-work-order.sh --review-import requires --run <id>" >&2; exit 2; }
+    _ZENSU_WO_OUT="$(WO_EMIT=value _wo_node review-import "${_ZENSU_WO_ARGS[@]}")"
+    _ZENSU_WO_RC=$?
+    if [ "$_ZENSU_WO_RC" -ne 0 ]; then
+      exit "$_ZENSU_WO_RC"
+    fi
+    _ZENSU_WO_PAYLOAD="$(printf '%s' "$_ZENSU_WO_OUT" | node -e '
+      let input = "";
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => {
+        try {
+          const body = JSON.parse(input);
+          if (body && body.payload && typeof body.payload === "object") process.stdout.write(JSON.stringify(body.payload));
+        } catch (_) {}
+      });
+    ' 2>/dev/null)"
+    if [ -n "$_ZENSU_WO_PAYLOAD" ]; then
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh" || exit 2
+      autopilot_apply_event "$_ZENSU_WO_RUN" team-review-imported TEAM_REVIEW_IMPORTED "$_ZENSU_WO_PAYLOAD" \
+        "$_ZENSU_WO_PD" "$_ZENSU_WO_KEY" || {
+        _ZENSU_WO_RC=$?
+        echo "zensu-work-order.sh --review-import: the run did not record the imported team review (exit $_ZENSU_WO_RC); run --review-import again" >&2
+        exit 7
+      }
+    fi
+    printf '%s\n' "$_ZENSU_WO_OUT"
+    exit 0
+    ;;
+  start)
+    _ZENSU_WO_OUT="$(_wo_node start "$@")"
+    _ZENSU_WO_RC=$?
+    if [ -n "$_ZENSU_WO_OUT" ]; then printf '%s\n' "$_ZENSU_WO_OUT"; fi
+    if [ "$_ZENSU_WO_RC" -eq 0 ]; then
+      _ZENSU_WO_RELEASE="$(_wo_node release-plan 2>/dev/null)" || _ZENSU_WO_RELEASE=""
+      if [ -n "$_ZENSU_WO_RELEASE" ]; then
+        _ZENSU_WO_ORDER_ID="$(printf '%s' "$_ZENSU_WO_OUT" | node -e '
+          let input = "";
+          process.stdin.on("data", (chunk) => { input += chunk; });
+          process.stdin.on("end", () => {
+            try {
+              const body = JSON.parse(input);
+              if (body && typeof body.orderId === "string" && Number.isSafeInteger(body.attempt)) process.stdout.write(`${body.orderId} ${body.attempt}`);
+            } catch (_) {}
+          });
+        ' 2>/dev/null)"
+        if [ -n "$_ZENSU_WO_ORDER_ID" ] && source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"; then
+          while IFS= read -r _ZENSU_WO_STALE_RUN; do
+            [ -n "$_ZENSU_WO_STALE_RUN" ] || continue
+            autopilot_release_work_order_run "$_ZENSU_WO_STALE_RUN" "${_ZENSU_WO_ORDER_ID% *}" "${_ZENSU_WO_ORDER_ID#* }" "$_ZENSU_WO_PD" \
+              || echo "zensu-work-order.sh --start: the Autopilot run $_ZENSU_WO_STALE_RUN of an earlier attempt could not be released; a new run in this checkout will be refused" >&2
+          done <<EOF_RELEASE
+$_ZENSU_WO_RELEASE
+EOF_RELEASE
+        fi
+      fi
+    fi
+    exit "$_ZENSU_WO_RC"
+    ;;
   finish|ask|plan-approval)
     _ZENSU_WO_OUT="$(_wo_node "$_ZENSU_WO_VERB" "$@")"
     _ZENSU_WO_RC=$?

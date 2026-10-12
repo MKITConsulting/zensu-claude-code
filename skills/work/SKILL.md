@@ -62,8 +62,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --start --order "<order-id
 ```
 
 `--start` checks that the CLI has `zensu work`, reads the order with the session token, refuses an
-order claimed for another session, writes this session's work-order marker, renews the lease and
-links the Pulse session. Its stdout is a JSON summary: `orderId`, `attempt`, `kind`, `status`,
+order claimed for another session, writes this session's work-order marker, renews the lease,
+links the Pulse session and releases the local Autopilot run an earlier attempt of the order left
+in this checkout. Its stdout is a JSON summary: `orderId`, `attempt`, `kind`, `status`,
 `baseBranch`, `integrationBranch`, `branch`, `workBranch`, `prUrl`, `prNumber`, `headSha`,
 `specHash`, `planApproval`, `planApproved`, `orderFile`, `pulse` and `action`.
 
@@ -149,5 +150,6 @@ own.
 
 ## Reference Files
 
-- `references/protocol.md` — the state files, the stage mapping, the error codes the helpers
-  handle, what each verb sends to Zensu, and what the work-order hooks deny.
+- `references/protocol.md` — the state files, the stage mapping, how a new attempt takes an order
+  over, the error codes the helpers handle, what each verb sends to Zensu, and what the work-order
+  hooks deny.

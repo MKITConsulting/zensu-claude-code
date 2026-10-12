@@ -416,6 +416,7 @@ _autopilot_node() {
     begin) path_indexes=(0 1 2 3 6 10) ;;
     apply) path_indexes=(0 1 2 7) ;;
     release) path_indexes=(0 1 4 6) ;;
+    release-work-order) path_indexes=(0 1 4) ;;
     adopt) path_indexes=(0 1 3 5 8) ;;
     team-review-receipt-meta) path_indexes=(0) ;;
     increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
@@ -461,6 +462,7 @@ const projectRootIndex = Object.freeze({
   begin: 6,
   apply: 7,
   release: 4,
+  "release-work-order": 4,
   adopt: 3,
   "increment-budget": 5,
   "increment-budget-capped": 5,
@@ -615,7 +617,7 @@ const EVENT_TYPES = new Set([
   "PR_OPENED", "TEAM_REVIEW_REQUESTED", "TEAM_REVIEW_PUBLISHED", "FIX_REQUIRED",
   "FINDINGS_CLEARED", "VALIDATION_FAILED", "VALIDATION_PASSED", "COVERAGE_FAILED",
   "COVERAGE_PASSED", "PR_HEAD_UPDATED", "DELIVERY_COMPLETE", "BLOCK", "RESUME", "CANCEL",
-  "BYPASS_RECORDED", "ORDER_SPEC_BOUND",
+  "BYPASS_RECORDED", "ORDER_SPEC_BOUND", "TEAM_REVIEW_IMPORTED",
 ]);
 
 const canonical = value => {
@@ -627,6 +629,8 @@ const digest = payload => crypto.createHash("sha256").update(canonical(payload))
 const rawDigest = value => crypto.createHash("sha256").update(value).digest("hex");
 const teamReviewOperationKey = (runId, headSha) =>
   `team-review:v1:${digest({ headSha: headSha.toLowerCase(), runId })}`;
+const workOrderReviewOperationKey = (orderId, headSha) =>
+  `team-review:v1:${digest({ headSha: headSha.toLowerCase(), orderId: orderId.toLowerCase() })}`;
 const parseReviewMarker = marker => {
   if (typeof marker !== "string") return null;
   const match = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/.exec(marker);
@@ -727,6 +731,10 @@ const payloadValid = (type, payload) => {
           || (exact(payload, ["operationKey", "marker", "headSha", "provider"])
             && ["github", "gitlab"].includes(payload.provider)))
         && nonEmpty(payload.operationKey, 256) && parseReviewMarker(payload.marker) !== null && sha(payload.headSha);
+    case "TEAM_REVIEW_IMPORTED":
+      return exact(payload, ["operationKey", "marker", "headSha", "provider"])
+        && ["github", "gitlab"].includes(payload.provider)
+        && nonEmpty(payload.operationKey, 256) && parseReviewMarker(payload.marker) !== null && sha(payload.headSha);
     case "FIX_REQUIRED":
       return exact(payload, ["headSha", "unresolvedCount"])
         && sha(payload.headSha) && positive(payload.unresolvedCount);
@@ -796,12 +804,18 @@ const originalPrHead = state => {
   return opened && opened.payload && opened.payload.pr && opened.payload.pr.headSha;
 };
 const teamReviewOperationKeyForState = state => {
+  if (state.workOrder) {
+    const imported = state.events.find(event => event.eventType === "TEAM_REVIEW_IMPORTED");
+    const head = imported ? imported.payload.headSha : originalPrHead(state);
+    return head ? workOrderReviewOperationKey(state.workOrder.orderId, head) : null;
+  }
   const head = originalPrHead(state);
   return head ? teamReviewOperationKey(state.runId, head) : null;
 };
 const reviewBelongsToPrGeneration = state => {
   const prIndex = state.events.findIndex(event => event.eventType === "PR_OPENED");
-  const reviewIndex = state.events.findIndex(event => event.eventType === "TEAM_REVIEW_PUBLISHED");
+  const reviewIndex = state.events.findIndex(event => event.eventType === "TEAM_REVIEW_PUBLISHED"
+    || event.eventType === "TEAM_REVIEW_IMPORTED");
   if (prIndex < 0 || reviewIndex <= prIndex || !state.evidence.pr || !state.evidence.review) return false;
   const prEvent = state.events[prIndex];
   const reviewEvent = state.events[reviewIndex];
@@ -818,7 +832,8 @@ const reviewBelongsToPrGeneration = state => {
     || state.evidence.review.provider !== (["github", "gitlab"].includes(reviewEvent.payload.provider)
       ? reviewEvent.payload.provider : null)
     || !sameSha(state.evidence.review.headSha, reviewEvent.payload.headSha)
-    || !sameSha(reviewEvent.payload.headSha, prEvent.payload.pr.headSha)) return false;
+    || (reviewEvent.eventType === "TEAM_REVIEW_PUBLISHED"
+      && !sameSha(reviewEvent.payload.headSha, prEvent.payload.pr.headSha))) return false;
 
   let currentHead = prEvent.payload.pr.headSha;
   for (const event of state.events.slice(prIndex + 1)) {
@@ -1248,6 +1263,30 @@ const transition = (state, type, payload, reject = fail) => {
       };
       move(state, "FIX_FINDINGS");
       return;
+    case "TEAM_REVIEW:TEAM_REVIEW_IMPORTED": {
+      if (!state.workOrder) reject(3, "TEAM_REVIEW_IMPORTED applies to a work-order run only");
+      if (state.effects.teamReview.status !== "none") reject(4, "team review already requested");
+      if (!state.evidence.pr || state.effects.prOpen.status !== "completed") reject(4, "an imported team review needs the opened pull request");
+      if (payload.operationKey !== workOrderReviewOperationKey(state.workOrder.orderId, payload.headSha)) {
+        reject(4, "imported team-review operation key is not bound to this work order and its review head");
+      }
+      const importedMarker = parseReviewMarker(payload.marker);
+      if (!importedMarker || !reviewMarkerMatches(payload.marker, payload.operationKey, payload.headSha,
+          importedMarker.payloadDigest, importedMarker.partCount)) {
+        reject(4, "imported team-review marker does not prove the operation, head, and first publication part");
+      }
+      state.effects.teamReview = { status: "completed", operationKey: payload.operationKey, provider: payload.provider };
+      state.evidence.review = {
+        published: true,
+        marker: payload.marker,
+        headSha: payload.headSha.toLowerCase(),
+        payloadDigest: importedMarker.payloadDigest,
+        partCount: importedMarker.partCount,
+        provider: payload.provider,
+      };
+      move(state, "FIX_FINDINGS");
+      return;
+    }
     case "FIX_FINDINGS:FIX_REQUIRED":
       if (!headMatchesPr(state, payload.headSha)) reject(4, "findings target a stale PR head");
       state.evidence.findings = { cleared: false, headSha: payload.headSha.toLowerCase(), unresolvedCount: payload.unresolvedCount };
@@ -1803,6 +1842,37 @@ if (mode === "release") {
       process.stderr.write(`[zensu-autopilot-state] owner liveness unchecked: autopilotReleaseOwnerActivityTtlHours is ${ownerActivityTtlHours}\n`);
     }
   }
+  if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
+  const fromStage = state.stage;
+  transition(state, "CANCEL", payload);
+  state.events.push({ eventId, eventType: "CANCEL", payloadDigest, payload, fromStage, toStage: state.stage });
+  if (!stateValid(state)) fail(2, "transition produced invalid state");
+  writeOutput(runOutput, state);
+  process.exit(0);
+}
+
+if (mode === "release-work-order") {
+  const [runFile, runOutput, runId, eventId, expectedProjectRoot, orderId, belowAttempt] = args;
+  if (!identifier(runId) || !identifier(eventId) || !uuidValue(String(orderId || "").toLowerCase())
+    || !/^[1-9][0-9]{0,8}$/.test(String(belowAttempt))) {
+    fail(3, "invalid work-order release arguments");
+  }
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "run file identity or physical project root mismatch");
+  }
+  if (!state.workOrder || state.workOrder.orderId !== String(orderId).toLowerCase()
+    || state.workOrder.attempt >= Number(belowAttempt)) {
+    fail(4, "run is not an earlier attempt of this work order");
+  }
+  const payload = {};
+  const payloadDigest = digest(payload);
+  const prior = state.events.find(event => event.eventId === eventId);
+  if (prior) {
+    if (prior.eventType === "CANCEL" && prior.payloadDigest === payloadDigest) process.exit(10);
+    fail(4, `eventId conflict: ${eventId}`);
+  }
+  if (TERMINAL.has(state.stage)) process.exit(10);
   if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
   const fromStage = state.stage;
   transition(state, "CANCEL", payload);
@@ -2502,6 +2572,39 @@ autopilot_release_run() {
     "$root" "$run_id" "$event_id" "$caller_session_id" "$caller_workspace" "$ttl_hours"
 }
 
+_autopilot_release_work_order_critical() {
+  local root="$1" run_id="$2" event_id="$3" order_id="$4" below_attempt="$5"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local run_tmp rc
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
+  _autopilot_node release-work-order "$run_file" "$run_tmp" "$run_id" "$event_id" "$root" "$order_id" "$below_attempt"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp"
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+}
+
+autopilot_release_work_order_run() {
+  local run_id="${1:-}" order_id="${2:-}" below_attempt="${3:-}" root
+  [ "$#" -ge 3 ] && [ "$#" -le 4 ] || return 3
+  _autopilot_identifier_ok "$run_id" || return 3
+  case "$order_id" in ''|*[!0-9a-fA-F-]*) return 3 ;; esac
+  [ "${#order_id}" -eq 36 ] || return 3
+  case "$below_attempt" in ''|0*|*[!0-9]*) return 3 ;; esac
+  [ "${#below_attempt}" -le 9 ] || return 3
+  root="$(_autopilot_project_root "${4:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_release_work_order_critical \
+    "$root" "$run_id" "work-order-release-${below_attempt}" "$order_id" "$below_attempt"
+}
+
 _autopilot_adopt_critical() {
   local root="$1" run_id="$2" caller_session_id="$3"
   # The mode is POSITIONALLY REQUIRED, not defaulted. Refusing an unrecognized value
@@ -2886,6 +2989,23 @@ autopilot_team_review_operation_key() {
   ' 2>/dev/null
 }
 
+autopilot_work_order_review_operation_key() {
+  local order_id="${1:-}" head_sha="${2:-}"
+  [ "$#" -eq 2 ] || return 3
+  ORDER_ID="$order_id" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const head=process.env.HEAD_SHA;
+    const order=process.env.ORDER_ID;
+    if(!/^[a-fA-F0-9]{7,64}$/.test(head))process.exit(3);
+    if(!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(order))process.exit(3);
+    const canonical=value => value && typeof value === "object" && !Array.isArray(value)
+      ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+    const seed={headSha:head.toLowerCase(),orderId:order.toLowerCase()};
+    process.stdout.write(`team-review:v1:${crypto.createHash("sha256").update(canonical(seed)).digest("hex")}`);
+  ' 2>/dev/null
+}
+
 # The delegated review body is a remote-write input, so a crash after the forge
 # accepted it must not allow a retry to synthesize different bytes for the same
 # operation key. Keep one private immutable snapshot per operation/head pair in
@@ -2912,10 +3032,21 @@ _autopilot_team_review_payload_target() {
 
 _autopilot_team_review_payload_identity_critical() {
   local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
-  local state_dir="$root/.zensu/state" expected_key state owner
+  local state_dir="$root/.zensu/state" expected_key state owner order_id
   case "$provider" in github|gitlab) ;; *) return 3 ;; esac
   expected_key="$(autopilot_team_review_operation_key "$run_id" "$head_sha")" || return $?
-  [ "$operation_key" = "$expected_key" ] || return 4
+  if [ "$operation_key" != "$expected_key" ]; then
+    order_id="$(_autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root" \
+      | node -e '
+        try {
+          const run = JSON.parse(require("fs").readFileSync(0, "utf8"));
+          if (!run.workOrder || typeof run.workOrder.orderId !== "string") process.exit(4);
+          process.stdout.write(run.workOrder.orderId);
+        } catch (_) { process.exit(4); }
+      ' 2>/dev/null)" || return 4
+    expected_key="$(autopilot_work_order_review_operation_key "$order_id" "$head_sha")" || return 4
+    [ "$operation_key" = "$expected_key" ] || return 4
+  fi
   # The pointer that must still designate this run is its OWNER's, and the
   # owner is a property of the run rather than of whoever is attesting.
   owner="$(_autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root" \
