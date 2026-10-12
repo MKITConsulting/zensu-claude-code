@@ -26,7 +26,7 @@ fi
 # THE FLOOR LIVES HERE rather than in the tests/structure driver on purpose: the
 # Windows profiles invoke this script directly, so a floor in the driver alone
 # would leave exactly those runs unfloored.
-SESSION_CONTROL_FLOOR="${SESSION_CONTROL_FLOOR:-138}"
+SESSION_CONTROL_FLOOR="${SESSION_CONTROL_FLOOR:-179}"
 SESSION_CONTROL_TIMEOUT_MS="${SESSION_CONTROL_TIMEOUT_MS:-180000}"
 
 LOG="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-log-XXXXXX")"

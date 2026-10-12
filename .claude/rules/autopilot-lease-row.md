@@ -21,8 +21,8 @@ while the run records look healthy. The rows are the diagnostic for that state.
 exported `externalProcessLockPath({ lockDirectory, resourcePath })` and judges it through
 `inspectExternalProcessLock` with the same options. Neither takes the lease, writes or deletes.
 The row says when an artifact is removable; the doctor never removes it, and
-`skills/doctor/SKILL.md` tells the model never to offer that, because Phase 3 stays the
-pending-review cleanup alone. `P1le1` in `tests/structure/test-doctor.sh` pins that the lease
+`skills/doctor/SKILL.md` and its `references/autopilot-lease.md` tell the model never to offer
+that, because Phase 3 stays the pending-review cleanup alone. `P1le1` in `tests/structure/test-doctor.sh` pins that the lease
 block of the renderer reads nothing on its own, `P1le6` that a report leaves a removable
 artifact byte-identical, and `P1le4` holds the real lease through `_autopilot_locked_run` while
 the report runs, so it also proves the row reads the artifact production writes.
@@ -46,11 +46,15 @@ calls an artifact stale exactly when acquisition reclaims it` holds the verdict 
   (`P1le21`);
 - `ownerless` with `stale` and `mtimeMs`;
 - `owned` with `pid`, `alive`, `identityRecorded`, `identityCurrent`, `startedAfterRecord`,
-  `createdAtMs` and `stale`. `startedAfterRecord` says that the process now holding a live pid
-  provably started after the record was written, which is the second way a live owner turns
-  stale (`.claude/rules/deferred-review-claim-ownership.md` §"Lock staleness"); the row names
-  that cause instead of a start-identity mismatch. The token and the release digest are never
-  returned.
+  `marker`, `createdAtMs` and `stale`. `marker` is the win32 holder marker's verdict — `held`,
+  `released`, `absent` or `unreadable`, and `not-applicable` off win32 or where no probe ran
+  (`.claude/rules/lock-holder-liveness.md`). The row keys on it before the identity arms: `held`
+  renders the NOT-removable live-keeper arm, `released` the removable arm with the marker as its
+  cause, and `absent` or `unreadable` add one sentence to the arm that cannot decide; the facts
+  name the marker whenever it is not `not-applicable`. `startedAfterRecord` says that the process
+  now holding a live pid provably started after the record was written, the other way a live
+  owner without a usable marker turns stale; the row names that cause instead of a
+  start-identity mismatch. The token and the release digest are never returned.
 
 **The row ages every artifact on the inspection's own clock.** The inspector returns
 `inspectedAtMs`, sampled after both reads, and the row measures `created_at` and the owner-less
@@ -63,17 +67,22 @@ render an ordinary live lease as future-dated (`P1le25`).
 never reads "free" while a sentinel exists and renders the sentinel's own verdict beside the
 lock's (`P1le22`).
 
-**Removal by hand is named only where the core cannot decide.** A live owner without a recorded
-start identity, or with one that cannot be re-read now, is reclaimed only once the process
-holding that pid provably started more than a second after the record was written. Without that
-proof the core never reclaims it while the pid lives, and the row says the doctor cannot
-establish whether the pid is still the lock keeper. It names
+**Removal by hand is named only where the core cannot decide.** A live owner without a usable
+holder marker and without a recorded start identity, or with one that cannot be re-read now, is
+reclaimed only once the process holding that pid provably started more than a second after the
+record was written. Every acquisition checks again, so the row does not say the artifact clears
+only on release or exit; it says the doctor cannot establish whether the pid is still the lock
+keeper, that a pid reused within that second keeps the artifact while it lives, and that a
+removal by hand must follow a fresh `/zensu:doctor` run that still names the same pid and
+`created_at`. A held holder marker never reaches this arm: it proves a live holder, so its row
+offers no removal at all. It names
 what a live lock keeper looks like, and both shapes are load-bearing: under bash 4 or later
 `_tdd_locked_run` runs a coprocess `node` keeper that owns the lease itself
 (`ownerPid: process.pid` in `_tdd_core_lock_keeper`), and under bash 3.2 the owner is the shell
-that runs `_tdd_locked_run` (`ownerPid: process.ppid`). On Windows no start identity exists, so a
-lease older than 30 s lands in this arm unless its pid provably started after the record, and
-its live owner there is the `node.exe` keeper. The recovery sentinel has one shape: `withRecoverySentinel` records the node process
+that runs `_tdd_locked_run` (`ownerPid: process.ppid`). On Windows no start identity exists; a
+lease older than 30 s renders the NOT-removable arm while a process holds its holder marker, and
+lands in this arm only when its record has no usable marker, where its live owner is the
+`node.exe` keeper. The recovery sentinel has one shape: `withRecoverySentinel` records the node process
 that runs the core, under any bash. The row says removal by hand clears the artifact only when
 the pid is neither shape, and it never calls that artifact removable.
 
@@ -116,8 +125,11 @@ and the hung remedy describe (`P1le26`). The renderer:
 `LEASE_` and `lease…` rather than `AUTOPILOT_` and `autopilot…` on purpose:
 `.claude/rules/autopilot-run-scope.md` prescribes `grep -nE 'AUTOPILOT_|autopilot[A-Z]|…'` as the
 census of run-record hand copies, and this row copies no run record. Operator account: the
-`autopilot lease:` bullets and the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`;
-`P1le24` holds every row phrase against both.
+`autopilot lease:` bullets in `skills/doctor/references/autopilot-lease.md`, which the skill's
+Phase 2 names, and the `Session state` bullet of §"What it checks" in `skills/doctor/SKILL.md`.
+The bullets live in the references file because the skill body sits on the shrink-only allowlist
+of `tests/structure/test-skill-text-budget.sh`. `P1le24` holds every row phrase against both,
+the file's existence and the skill's pointer to it.
 
 **Known gaps:**
 
@@ -134,9 +146,15 @@ census of run-record hand copies, and this row copies no run record. Operator ac
 - `leaseResolveCause` keys on the core's refusal text rather than an error code.
 - Windows is unmeasured. `test-doctor.sh` runs only in the weekly Windows Safety structure
   shard, where no start identity is readable, so `P1le8` skips, and `P1le7` and `P1le10` take
-  their start-time arms when `powershell.exe` answers there. The arm that cannot decide is
-  pinned by a shim (`P1le10b`), because a live owner older than its record and older than 30 s
-  cannot be planted cheaply.
+  their start-time arms when `powershell.exe` answers there; on Linux and macOS an unreadable
+  start fails `P1le10` instead of skipping it. The arm that cannot decide is pinned by a shim
+  (`P1le10b`), because a live owner older than its record and older than 30 s cannot be planted
+  cheaply, and so are the holder-marker arms (`P1le27`–`P1le30`), because a planted record has
+  no marker a live process holds.
+- On Windows the rows' `ps -ww -p <pid> -o args=` check runs in Git Bash, whose `ps` lists MSYS
+  process ids and prints no Windows command line, while the record stores the Windows pid. A held
+  holder marker gives the NOT-removable verdict without that check; the arm that cannot decide
+  still depends on it.
 
 **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md` entry by entry: no
 context-record or workflow-state field, no strict key set, no hook added, removed or renamed, no
