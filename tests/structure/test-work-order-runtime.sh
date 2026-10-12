@@ -20,6 +20,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "native Windows work-order run skipped (macOS/Linux/WSL required)" PASS
+    finish; exit 0
+    ;;
+esac
+
 for f in "$MODULE" "$WRAPPER" "$UNIT" "$FAKE_LIB" "$BASELINE"; do
   if [ ! -f "$f" ]; then
     check "R0 required file exists: $f" FAIL
