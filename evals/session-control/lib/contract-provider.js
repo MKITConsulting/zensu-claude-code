@@ -72,6 +72,7 @@ function runtimeEnvironment(pluginRoot, pluginData, projectRoot, recordsDir, ses
     CLAUDE_PLUGIN_ROOT: boundPluginRoot,
     CLAUDE_PLUGIN_DATA: boundPluginData,
     CLAUDE_CODE_SESSION_ID: sessionId,
+    ZENSU_CONFIG: path.join(path.dirname(projectRoot), 'session-control-eval-absent-config.json'),
   };
 }
 
@@ -485,21 +486,11 @@ function provePrincipalAndPreToolContracts(options) {
     }, environment), 'general-purpose mutating Zensu MCP', 'outside the read allowlist');
     const exactCommandReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
     for (const [label, toolName, toolInput] of [
-      ['Bash environment enumeration', 'Bash', { command: 'env' }],
       ['shell alias', 'shell', { command: 'pwd' }],
       ['exec alias', 'exec', { cmd: 'pwd' }],
       ['exec_command alias', 'exec_command', { cmd: 'pwd' }],
       ['terminal alias', 'terminal', { script: 'pwd' }],
       ['command alias', 'command', { command: 'pwd' }],
-      ['obfuscated workflow root', 'Bash', { command: 'd=.zen; ls "$d"su/state' }],
-      ['obfuscated helper name', 'Bash', { command: 'n=zensu-log; printf %s "$n.sh"' }],
-      ['interpreter shell', 'Bash', { command: 'sh -c true' }],
-      ['Session Control selector', 'Bash', { command: 'printf %s "$ZENSU_SESSION_KEY"' }],
-      ['Session Control helper', 'Bash', { command: `bash ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'zensu-log.sh'))} render-main` }],
-      ['host session selector', 'Bash', { command: 'printf %s "$CLAUDE_CODE_SESSION_ID"' }],
-      ['model binder function', 'Bash', { command: 'zensu_bind_model_session' }],
-      ['model binder source', 'Bash', { command: `source ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'zensu-session.sh'))}` }],
-      ['private binder CLI', 'Bash', { command: `node ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'claude-hook-session-v1.js'))} model-bind` }],
       ['context-mode execute', 'mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'env' }],
       ['terminal MCP', 'mcp__terminal__run_in_terminal', { command: 'env' }],
     ]) {
@@ -541,6 +532,54 @@ function provePrincipalAndPreToolContracts(options) {
           !== `reviewer-capability-v1 deny: host-profile-v1 cannot invoke ${toolName}; ${neutralAllowance}`) {
         throw new Error(`general-purpose unlisted ${toolName} denial was not exact`);
       }
+    }
+
+    const guardTail = 'The guard prevents accidents and is not a sandbox; report the need to the main thread instead.';
+    const guardRules = {
+      dump: 'the command prints the inherited environment',
+      selector: 'the command reads or sets a Session Control selector variable',
+      helper: 'the command runs a Zensu session or workflow helper',
+      runtime: 'the command names the private plugin data, the installed plugin, the session record or the Zensu config file',
+    };
+    for (const [label, command, rules] of [
+      ['Bash environment enumeration', 'env', ['dump']],
+      ['Session Control selector', 'printf %s "$ZENSU_SESSION_KEY"', ['selector']],
+      ['Session Control helper', `bash ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'zensu-log.sh'))} render-main`, ['runtime', 'helper']],
+      ['host session selector', 'printf %s "$CLAUDE_CODE_SESSION_ID"', ['selector']],
+      ['model binder function', 'zensu_bind_model_session', ['helper']],
+      ['model binder source', `source ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'zensu-session.sh'))}`, ['runtime', 'helper']],
+      ['private binder CLI', `node ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'claude-hook-session-v1.js'))} model-bind`, ['runtime', 'helper']],
+    ]) {
+      const denied = assertDenied(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: 'Bash',
+        tool_input: { command },
+      }, environment), `general-purpose ${label}`, 'host-profile-v1 shell guard');
+      const reason = denied.hookSpecificOutput.permissionDecisionReason;
+      if (!rules.some((rule) => reason === `reviewer-capability-v1 deny: host-profile-v1 shell guard: ${guardRules[rule]}. ${guardTail}`)) {
+        throw new Error(`general-purpose ${label} guard denial was not exact: ${reason}`);
+      }
+    }
+
+    for (const [label, command] of [
+      ['ordinary repository status', 'git status --short'],
+      ['interpreter shell', 'sh -c true'],
+      ['obfuscated workflow root (a documented guard gap)', 'd=.zen; ls "$d"su/state'],
+      ['obfuscated helper name (a documented guard gap)', 'n=zensu-log; printf %s "$n.sh"'],
+    ]) {
+      assertAllowed(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: 'Bash',
+        tool_input: { command },
+      }, environment), `general-purpose ${label} guarded shell`);
     }
 
     for (const [label, cwd, toolName, toolInput, exactReason, remedied] of [
@@ -591,7 +630,7 @@ function provePrincipalAndPreToolContracts(options) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
-    return ['Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:CommandAndUnlistedToolsDenied'];
+    return ['Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied'];
   }
 
   const denyScenarios = [

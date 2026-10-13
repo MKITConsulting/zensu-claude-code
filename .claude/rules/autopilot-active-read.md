@@ -220,16 +220,17 @@ two checks require.
   `BLOCKED` included, or whose own state is orphaned or inconsistent, because the look answers 5
   for each of them. That is the fail-closed trade for an owned run.
   Such a fault is a live but hung holder, a lock keeper that cannot run, or a lock artifact
-  that is never reclaimed: `artifactIsStale` reclaims a lock whose owner is dead, and one whose
-  pid was reused only when the artifact recorded a process start identity. `processStartIdentity`
-  answers null off linux and darwin, and on darwin when `/bin/ps` fails, so an artifact without
-  one is never reclaimed while any process holds its pid, and it lives in `.zensu/state`, which
-  the session can write. Storage and path faults still block every session in the project, as
-  their 2 did before.
-- `/zensu:doctor`, the remedy every refusal names, shows the run records but not the lease or
-  its holder, so a lease that never clears is visible there only as runs that look healthy. A
-  read-only lease row naming the artifact, its owner pid, whether that pid is alive and whether
-  a start identity was recorded is the missing diagnostic and is not in this change.
+  that is reclaimed late or never: `artifactIsStale` reclaims a lock whose owner is dead, one
+  whose win32 holder marker is free, one whose recorded start identity no longer matches, and
+  one whose pid provably started more than a second after the record was written. A lock
+  without a usable marker or identity whose pid was reused within that second, or whose
+  holder's start cannot be read, is not reclaimed while that pid lives
+  (`.claude/rules/lock-holder-liveness.md`), and it lives in `.zensu/state`, which the session
+  can write. Storage and path faults still block every session in the project, as their 2 did
+  before.
+- `/zensu:doctor` names a lease that does not clear in its `autopilot lease:` rows
+  (`.claude/rules/autopilot-lease-row.md`): the artifact, its owner pid, liveness, start
+  identity, holder marker and `created_at`, and whether the next acquisition reclaims it.
 - The post-review standalone preflight refuses without a word. A session whose look found its
   run, whose workspace read could not prove the tree free, or whose storage is unsafe, keeps its
   ticket and gets no directive, and the next Stop's resume directive orders the review again.

@@ -236,6 +236,54 @@ run "B28e backslash zensu + mutation"        "\\zensu security classify f1"     
 run "B28f cmd-substitution mutation"         "zensu features get \$(zensu security classify f1)"          '' DENY
 run "B28g assignment-substitution mutation"  "x=\$(zensu security classify f1 --foo bar)"                 '' DENY
 
+run "B38a timeout wrapper + mutation"                 "timeout 60 zensu security classify f1"                  '' DENY
+run "B38b subagent timeout wrapper + mutation"        "timeout 60 zensu security classify f1"                  general-purpose DENY
+run "B38c subagent nice -n + mutation"                "nice -n 5 zensu security classify f1"                   general-purpose DENY
+run "B38d subagent env -i + mutation"                 "env -i zensu security classify f1"                      general-purpose DENY
+run "B38e subagent xargs + mutation"                  "printf 'f1\\n' | xargs -n1 zensu security classify"     general-purpose DENY
+run "B38f subagent loop body + mutation"              "for id in f1; do zensu security classify \"\$id\"; done" general-purpose DENY
+run "B38g subagent bash -c body + mutation"           "bash -c \"zensu security classify f1\""                 general-purpose DENY
+run "B38h subagent eval body + mutation"              "eval \"zensu security classify f1\""                    general-purpose DENY
+run "B38i subagent wrapped read"                      "timeout 60 zensu features get f1"                       general-purpose ALLOW
+run "B38j search text that names a mutation"          "grep -rn \"zensu security classify\" skills"            general-purpose ALLOW
+run "B38l inline off reaches a wrapped main-thread mutation" "ZENSU_MCP_GATE=off timeout 60 zensu security classify f1" '' ALLOW
+run "B38m substitution inside a parameter expansion"   "FEATURE_ID=\${FEATURE_ID:-\$(zensu features create --product p --title T)}" '' DENY
+run "B38n subagent substitution inside a parameter expansion" "FEATURE_ID=\${FEATURE_ID:-\$(zensu features create --product p --title T)}" general-purpose DENY
+run "B38o subagent remote command string"              "ssh deploy@host \"cd /srv/app && zensu security classify f1\"" general-purpose DENY
+run "B38p subagent container shell string"             "docker compose exec api sh -c \"cd /app && zensu security classify f1\"" general-purpose DENY
+
+FALLBACK_BASE="$(mktemp -d -t bashgate-fallback-XXXXXX)"
+FALLBACK_ROOT="$FALLBACK_BASE/plugin"
+mkdir -p "$FALLBACK_ROOT" "$FALLBACK_BASE/project"
+for part in hooks agents skills docs templates scripts .claude-plugin; do
+  [ -e "$PLUGIN_DIR/$part" ] && cp -R "$PLUGIN_DIR/$part" "$FALLBACK_ROOT/$part"
+done
+rm -f "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js"
+FALLBACK_OUT="$(
+  export CLAUDE_PROJECT_DIR="$FALLBACK_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$FALLBACK_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" fallback-gate "$FALLBACK_ROOT" || exit 1
+  printf 'BOUND\n'
+  for cmd in 'zensu security classify f1' 'zensu features get f1' 'timeout 60 zensu security classify f1'; do
+    payload "$cmd" '' fallback-gate | env CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+    printf '\n<<%s>>\n' "$cmd"
+  done
+)"
+FALLBACK_BOUND="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '1p')"
+FALLBACK_DENY="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '2p')"
+FALLBACK_READ="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '4p')"
+FALLBACK_WRAPPED="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '6p')"
+if [ "$FALLBACK_BOUND" = "BOUND" ] && [ ! -e "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js" ] \
+   && printf '%s' "$FALLBACK_DENY" | grep -qF "maps to 'set_security_classification'"; then
+  check "B39a without the shell-model module the token scan still gates a mutation" PASS
+else
+  check "B39a module-less fallback mutation (bound='$FALLBACK_BOUND' got '$FALLBACK_DENY')" FAIL
+fi
+[ "$FALLBACK_BOUND" = "BOUND" ] && [ -z "$FALLBACK_READ" ] && check "B39b the module-less copy is bound, so a read passes" PASS \
+  || check "B39b module-less read (bound='$FALLBACK_BOUND' got '$FALLBACK_READ')" FAIL
+[ "$FALLBACK_BOUND" = "BOUND" ] && [ -z "$FALLBACK_WRAPPED" ] && check "B39c the token scan alone does not see a wrapped mutation, so the module was absent" PASS \
+  || check "B39c module-less wrapped mutation (bound='$FALLBACK_BOUND' got '$FALLBACK_WRAPPED')" FAIL
+rm -rf "$FALLBACK_BASE"
+
 # B30 --api-url <value> must not be misread as the subcommand
 run "B30 --api-url value + mutation"          "zensu --api-url https://h security classify f1"             '' DENY
 
@@ -270,6 +318,8 @@ run "B33 mutation + --help (a read) -> ALLOW"      "zensu security classify f1 -
 run "B33b mutation + -h (a read) -> ALLOW"         "zensu features create -h"                                   '' ALLOW
 run "B34 inline ZENSU_MCP_GATE=off -> ALLOW"       "ZENSU_MCP_GATE=off zensu security classify f1"              '' ALLOW
 run "B34b inline gate value not 'off' -> DENY"     "ZENSU_MCP_GATE=on zensu security classify f1"               '' DENY
+run "B34c subagent inline ZENSU_MCP_GATE=off -> DENY" "ZENSU_MCP_GATE=off zensu security classify f1"           general-purpose DENY
+run "B34d subagent inline off keeps reads"         "ZENSU_MCP_GATE=off zensu features get f1"                   general-purpose ALLOW
 run "B35 --api-url localhost -> ALLOW"             "zensu --api-url http://localhost:8090 security classify f1" '' ALLOW
 run "B35b inline ZENSU_API_URL 127.0.0.1 -> ALLOW" "ZENSU_API_URL=http://127.0.0.1:8090 zensu security classify f1" '' ALLOW
 run "B35c --api-url prod still -> DENY"            "zensu --api-url https://api.zensu.dev security classify f1" '' DENY
@@ -286,6 +336,15 @@ if printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE=off' && printf '%s' "$REAS
   check "B37 deny reason advertises inline-off + localhost escapes" PASS
 else
   check "B37 deny reason narrowed-escape wording" FAIL
+fi
+REASON_S="$(payload 'ZENSU_MCP_GATE=off zensu security classify f1' general-purpose gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retry this command, with or without a prefix.' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
+   && ! printf '%s' "$REASON_S" | grep -qF 'ZENSU_API_URL' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'never a route for a subagent'; then
+  check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
+else
+  check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
 fi
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"

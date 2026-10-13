@@ -564,7 +564,7 @@ async function main() {
       type: 'tool_use', id: 'generic-command', name: 'Bash',
       input: { command: 'env', description: 'host-profile-v1' },
     };
-    const genericDenialReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
+    const genericDenialReason = 'reviewer-capability-v1 deny: host-profile-v1 shell guard: the command prints the inherited environment. The guard prevents accidents and is not a sandbox; report the need to the main thread instead.';
     const genericCommandResult = {
       type: 'tool_result', tool_use_id: 'generic-command', is_error: true,
       content: genericDenialReason,

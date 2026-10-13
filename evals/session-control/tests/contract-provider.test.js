@@ -35,7 +35,7 @@ for (const [scenario, expectedMarker] of [
   ['bare-reviewer-types', 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1'],
   ['unknown-neutral-profile', 'Contract:SessionStartAgent:Unknown:host-profile-v1'],
   ['plm-readonly-boundary', 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied'],
-  ['generic-review-worker-boundary', 'Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:CommandAndUnlistedToolsDenied'],
+  ['generic-review-worker-boundary', 'Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied'],
   ['native-helper-binding', 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied'],
 ]) {
   const attestation = runScenario(scenario);

@@ -11,8 +11,8 @@
 #
 # Scoped to its actual threat model — a low-context agent writing to the real
 # tracked product — so it deliberately does NOT fire on: reads and `--help`/`-h`
-# (how an agent *gains* the context the gate wants), an explicit per-command
-# `ZENSU_MCP_GATE=off` prefix, or a write whose target backend
+# (how an agent *gains* the context the gate wants), the explicit per-command
+# `ZENSU_MCP_GATE=off` prefix of a main-thread command, or a write whose target backend
 # (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
 # where the dedup/journey/classification conventions are meaningless.
 #
@@ -48,13 +48,14 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" node -e '
-  let cmd = "";
+INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" node -e '
+  let cmd = "", sub = false;
   try {
     const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
+    sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
   } catch (_) { process.exit(0); }
-  if (!cmd || cmd.indexOf("zensu") === -1) process.exit(0);
+  if (!cmd || !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd)) process.exit(0);
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
   const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
@@ -70,25 +71,39 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" node -e '
     }
     return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
   }
-  const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                        // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
-  for (const seg of norm.split(/\|\||&&|[;|\n&]/)) {
-    const toks = seg.trim().split(/\s+/).filter(Boolean);
-    let i = 0, base = "";
-    const envp = {};
-    for (;;) {
-      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {         // capture env prefixes (VAR=val)
-        const a = toks[i], eq = a.indexOf("=");
-        envp[a.slice(0, eq)] = a.slice(eq + 1).replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
-        i++;
+  function tokenInvocations() {
+    const found = [];
+    const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                      // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
+    for (const seg of norm.split(/\|\||&&|[;|\n&]/)) {
+      const toks = seg.trim().split(/\s+/).filter(Boolean);
+      let i = 0, base = "";
+      const envp = {};
+      for (;;) {
+        while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {       // capture env prefixes (VAR=val)
+          const a = toks[i], eq = a.indexOf("=");
+          envp[a.slice(0, eq)] = a.slice(eq + 1).replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
+          i++;
+        }
+        if (i >= toks.length) break;
+        const t = toks[i].replace(/^\\/, "").replace(/^[\x22\x27]+|[\x22\x27]+$/g, ""); // strip a leading backslash and any wrapping quote chars; quote bytes are hex-escaped so no literal quote appears in this bash single-quoted node script
+        if (WRAP.has(t)) { i++; continue; }                                        // skip transparent wrappers (command/env/sudo/…)
+        base = t.split("/").pop(); break;                                           // resolved command basename
       }
-      if (i >= toks.length) break;
-      const t = toks[i].replace(/^\\/, "").replace(/^[\x22\x27]+|[\x22\x27]+$/g, ""); // strip a leading backslash and any wrapping quote chars; quote bytes are hex-escaped so no literal quote appears in this bash single-quoted node script
-      if (WRAP.has(t)) { i++; continue; }                                          // skip transparent wrappers (command/env/sudo/…)
-      base = t.split("/").pop(); break;                                             // resolved command basename
+      if (base !== "zensu") continue;                                              // command basename must be zensu
+      found.push({ envp, rest: toks.slice(i + 1) });
     }
-    if (base !== "zensu") continue;                                                // command basename must be zensu
-    const rest = toks.slice(i + 1);
-    if (envp.ZENSU_MCP_GATE === "off") {                                           // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
+    return found;
+  }
+  let invocations = tokenInvocations();
+  try {
+    invocations = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
+      .filter((c) => c.name === "zensu")
+      .map((c) => ({ envp: c.environment, rest: c.words }))
+      .concat(invocations);
+  } catch (_) {}
+  for (const invocation of invocations) {
+    const envp = invocation.envp, rest = invocation.rest;
+    if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
       if (out.indexOf("__bypass__\tZENSU_MCP_GATE") < 0) out.push("__bypass__\tZENSU_MCP_GATE");
       continue;
     }
@@ -112,7 +127,7 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" node -e '
       const t = rest[m];
       if (t === "--api-url") { m++; continue; }
       if (t.charAt(0) === "-") continue;
-      verb = t; break;
+      verb = t.split(/[\t\r\n]/)[0]; break;
     }
     out.push(noun + "\t" + verb);
   }
