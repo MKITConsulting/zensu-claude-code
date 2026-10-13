@@ -205,12 +205,20 @@ self-hosting keeps the data under your control.
 
 ## Requirements
 
-Claude Code 2.1.211 or newer on macOS or Linux. Hooks need a POSIX shell —
-Windows users need WSL or Git Bash; native `cmd.exe` and PowerShell are not
-supported. `/zensu:verify-feature` and the autopilot browser driver additionally
-need `playwright-cli` on `PATH` (`npm install -g @playwright/cli@0.1.21`, the
-version the browser consent gate was measured against; `brew install playwright-cli`
-is unpinned).
+Claude Code 2.1.211 or newer, and `node` on the `PATH` of the environment that
+starts Claude Code: without it, Zensu refuses every tool call. Zensu's hooks are
+bash scripts, which macOS and Linux run as they are. On Windows, run Claude Code
+inside WSL, or install Git for Windows so that Claude Code runs the hooks through
+Git Bash, whichever terminal you start `claude` from. Native Windows without Git
+Bash is not supported. With Git Bash, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`
+in the environment that starts Claude Code or in the `env` block of
+`~/.claude/settings.json`: Zensu's shell-command gates watch only the Bash tool,
+so a command Claude runs through the PowerShell tool skips them.
+[Platform Support](docs/operations.md#platform-support) has the details and the
+known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
+driver additionally need `playwright-cli` on `PATH`
+(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+was measured against; `brew install playwright-cli` is unpinned).
 
 ## Documentation
 
