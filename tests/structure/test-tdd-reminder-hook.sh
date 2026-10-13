@@ -226,6 +226,26 @@ else
 fi
 rm -rf "$P15"
 
+P16="$(mktemp -d -t tddrem-XXXXXX)"
+payload "x" "s16" "$P16" >/dev/null
+LARGE16="$P16/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "s16", prompt: "fix the auth token expiry bug\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE16"
+PAD16=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD16="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT16="$(env PAD16_A="$PAD16" PAD16_B="$PAD16" PAD16_C="$PAD16" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P16/plugin-data" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE16" 2>/dev/null | fired)"
+[ "$OUT16" = "FIRED" ] \
+  && check "C16 a code prompt in a payload over the exec size limit still fires the TDD directive" PASS \
+  || check "C16 oversized code prompt (got '$OUT16')" FAIL
+rm -rf "$P16"
+
+if grep -qF 'PAYLOAD="$INPUT"' "$HOOK" || grep -qF 'process.env.PAYLOAD' "$HOOK"; then
+  check "C17 a child reads the hook payload from the environment, where the session-id read fails silently over the exec size limit" FAIL
+else
+  check "C17 no child reads the hook payload from the environment" PASS
+fi
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

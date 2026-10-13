@@ -48,10 +48,10 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
+INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" node -e '
   let cmd = "";
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
   } catch (_) { process.exit(0); }
   if (!cmd || cmd.indexOf("zensu") === -1) process.exit(0);
@@ -120,9 +120,9 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
 ' 2>/dev/null)"
 
 field() {
-  PAYLOAD="$INPUT" F="$1" node -e '
+  printf '%s' "$INPUT" | F="$1" node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const v = j[process.env.F];
       process.stdout.write(typeof v === "string" ? v : "");
     } catch (_) { process.stdout.write(""); }

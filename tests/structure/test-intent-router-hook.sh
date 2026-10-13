@@ -230,6 +230,19 @@ else
 fi
 rm -rf "$P21"
 
+P22="$(mktemp -d -t introuter-XXXXXX)"
+LARGE22="$P22/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "Plan the product roadmap for this repository.\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE22"
+PAD22=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD22="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT22="$(env PAD22_A="$PAD22" PAD22_B="$PAD22" PAD22_C="$PAD22" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P22" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE22" 2>/dev/null | classify)"
+[ "$OUT22" = "UserPromptSubmit|main|triage|planmode" ] \
+  && check "C22 a planning prompt in a payload over the exec size limit still gets the routing" PASS \
+  || check "C22 oversized planning prompt (got '$OUT22')" FAIL
+rm -rf "$P22"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
