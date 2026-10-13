@@ -18,9 +18,10 @@ source had open chips (80 chips), no chip id on both sides, and only 6 handovers
 receiving model re-created any chips (14) on its own, from a stale `Currently pending`
 snapshot it grepped out of the old transcript.
 
-**The record is the source, never the transcript.** `ccdIndex` remembers each record's path
-in `CCD_RECORD_PATHS`, and `openTaskChips` reads that file again when a brief is built, so the
-list is the queue at takeover time. It keeps every entry except an `offer`, which is a
+**The record is the source, never the transcript.** `ccdIndex` and `ccdApp` both remember a
+record's path in `CCD_RECORD_PATHS`, the last match in walk order winning in both, and
+`openTaskChips` reads that file again when a brief is built, so the list is the queue at
+takeover time. It keeps every entry except an `offer`, which is a
 side-session offer bound to a live waiter, and strips C0, C1 and line-separator characters
 from the text. A missing store, a missing record and an unreadable record each return
 `measured: false` with a reason, and both briefs print that reason instead of claiming there

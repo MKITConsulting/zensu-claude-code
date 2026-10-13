@@ -992,13 +992,18 @@ function ccdStoreExists() {
 
 let CCD_CACHE = null;
 const CCD_RECORD_PATHS = new Map();
+let CCD_FILES = null;
+let CCD_CANDIDATES = null;
+const CCD_APPS = new Map();
+const CCD_ID_KEY = Buffer.from('"cliSessionId"');
+let READ_SCRATCH = Buffer.alloc(0);
 
-function ccdIndex() {
-  if (CCD_CACHE) return CCD_CACHE;
-  const map = new Map();
-  CCD_CACHE = map;
+function ccdRecordFiles() {
+  if (CCD_FILES) return CCD_FILES;
+  const files = [];
+  CCD_FILES = files;
   const store = ccdStore();
-  if (!store) return map;
+  if (!store) return files;
   const walk = (dir, depth, accountUuid) => {
     if (depth > 3) return;
     let es;
@@ -1007,23 +1012,109 @@ function ccdIndex() {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) { walk(p, depth + 1, accountUuid || e.name); continue; }
       if (!/^local_.*\.json$/.test(e.name)) continue;
-      let o;
-      try { o = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
-      if (!o || !o.cliSessionId) continue;
-      CCD_RECORD_PATHS.set(o.cliSessionId, p);
-      map.set(o.cliSessionId, {
-        accountUuid: accountUuid || null,
-        archived: o.isArchived === true,
-        title: typeof o.title === 'string' && o.title ? o.title : null,
-        model: o.model || null,
-        effort: o.effort || null,
-        permissionMode: o.permissionMode || null,
-        lastFocusedAt: o.lastFocusedAt || null,
-      });
+      files.push({ path: p, accountUuid: accountUuid || null });
     }
   };
   walk(store.dir, 0, null);
+  return files;
+}
+
+function ccdAppEntry(o, accountUuid) {
+  return {
+    accountUuid,
+    archived: o.isArchived === true,
+    title: typeof o.title === 'string' && o.title ? o.title : null,
+    model: o.model || null,
+    effort: o.effort || null,
+    permissionMode: o.permissionMode || null,
+    lastFocusedAt: o.lastFocusedAt || null,
+  };
+}
+
+function ccdIndex() {
+  if (CCD_CACHE) return CCD_CACHE;
+  const map = new Map();
+  CCD_CACHE = map;
+  for (const f of ccdRecordFiles()) {
+    let o;
+    try { o = JSON.parse(fs.readFileSync(f.path, 'utf8')); } catch { continue; }
+    if (!o || !o.cliSessionId) continue;
+    CCD_RECORD_PATHS.set(o.cliSessionId, f.path);
+    map.set(o.cliSessionId, ccdAppEntry(o, f.accountUuid));
+  }
   return map;
+}
+
+function readPrefix(file, limit) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const want = Number.isFinite(limit) ? limit : fs.fstatSync(fd).size;
+    if (READ_SCRATCH.length < want) READ_SCRATCH = Buffer.allocUnsafe(Math.max(want, READ_SCRATCH.length * 2));
+    let n = 0;
+    while (n < want) {
+      const got = fs.readSync(fd, READ_SCRATCH, n, want - n, n);
+      if (got === 0) break;
+      n += got;
+    }
+    return READ_SCRATCH.subarray(0, n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function isJsonSpace(byte) {
+  return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d;
+}
+
+function cliSessionIdsIn(buf) {
+  const ids = [];
+  for (let at = buf.indexOf(CCD_ID_KEY); at !== -1; at = buf.indexOf(CCD_ID_KEY, at + CCD_ID_KEY.length)) {
+    let i = at + CCD_ID_KEY.length;
+    while (i < buf.length && isJsonSpace(buf[i])) i += 1;
+    if (buf[i] !== 0x3a) continue;
+    i += 1;
+    while (i < buf.length && isJsonSpace(buf[i])) i += 1;
+    if (buf[i] !== 0x22) continue;
+    let j = i + 1;
+    while (j < buf.length && buf[j] !== 0x22) j += buf[j] === 0x5c ? 2 : 1;
+    if (j >= buf.length) continue;
+    let id;
+    try { id = JSON.parse(buf.toString('utf8', i, j + 1)); } catch { continue; }
+    if (typeof id === 'string' && id) ids.push(id);
+  }
+  return ids;
+}
+
+function ccdCandidates() {
+  if (CCD_CANDIDATES) return CCD_CANDIDATES;
+  const map = new Map();
+  CCD_CANDIDATES = map;
+  ccdRecordFiles().forEach((f, index) => {
+    let buf;
+    try { buf = readPrefix(f.path, Infinity); } catch { return; }
+    for (const id of cliSessionIdsIn(buf)) {
+      const list = map.get(id);
+      if (!list) map.set(id, [index]);
+      else if (list[list.length - 1] !== index) list.push(index);
+    }
+  });
+  return map;
+}
+
+function ccdApp(sessionId) {
+  if (CCD_CACHE) return CCD_CACHE.get(sessionId);
+  if (CCD_APPS.has(sessionId)) return CCD_APPS.get(sessionId);
+  const files = ccdRecordFiles();
+  let found;
+  for (const index of ccdCandidates().get(sessionId) || []) {
+    let o;
+    try { o = JSON.parse(fs.readFileSync(files[index].path, 'utf8')); } catch { continue; }
+    if (!o || !o.cliSessionId || o.cliSessionId !== sessionId) continue;
+    CCD_RECORD_PATHS.set(sessionId, files[index].path);
+    found = ccdAppEntry(o, files[index].accountUuid);
+  }
+  CCD_APPS.set(sessionId, found);
+  return found;
 }
 
 // The desktop instance id, bounded for a FIXED-COLUMN row. `flatPath` strips the
@@ -1453,12 +1544,12 @@ function selfIdentity() {
   const hostSessionId = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim() || null;
   let accountUuid = null;
   if (sessionId) {
-    const app = ccdIndex().get(sessionId);
+    const app = ccdApp(sessionId);
     if (app) accountUuid = app.accountUuid;
   }
   if (!accountUuid && hostSessionId) accountUuid = accountForHostSession(hostSessionId);
   const cwd = process.cwd();
-  const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;
+  const wt = worktreeOfCwd(cwd);
   return makeEndpoint({
     sessionId,
     accountUuid,
@@ -1601,13 +1692,10 @@ function instanceId(value, width) {
 
 // MEMOIZED, exactly as `ccdIndex` is, and for a reason `ccdIndex` never had to
 // state: `SKIPPED` is a module-scope counter this function increments, so a second
-// walk of the same directory counts the same unreadable file twice. `cmdShow`
-// reaches `buildIndex` twice — once through `resolve` and once through `siblings`
-// — and `buildIndex` calls this unconditionally, so one corrupt registry record
-// would render `NOTE 2 record(s) unreadable` in the plain-text path while
-// `show --json`, emitted BEFORE `siblings` runs, reported `"skipped": 1` for the
-// identical machine state. Two carriers of one command disagreeing about a number
-// the skill documents is worse than the number being large.
+// walk of the same directory counts the same unreadable file twice. `cmdRelease`
+// reaches it three times — directly, through `indexScope` and through `keepOwners`
+// — so without the memo one corrupt registry record would render
+// `NOTE 3 record(s) unreadable` for one unreadable file.
 let LIVE_CACHE = null;
 const LIVE_GAPS = { directory: null, records: 0 };
 
@@ -2603,7 +2691,7 @@ function summarize(file, size, deep) {
     out.tasks = extractTasks(text);
     out.compaction = extractCompaction(text, 8000);
   }
-  return out;
+  return structuredClone(out);
 }
 
 function unescapeJson(s) {
@@ -2649,26 +2737,46 @@ function detectBase(cwd) {
 // command, and a second identical pass fired every SKIPPED increment twice — so
 // `show` reported double what `show --json` did for the same machine state.
 const INDEX_CACHE = new Map();
+function indexKey(opts) {
+  return JSON.stringify([opts.repo || null, opts.all, opts.days, opts.live, opts.git]);
+}
+
 function buildIndex(opts) {
-  const key = JSON.stringify([opts.repo || null, opts.all, opts.days, opts.live, opts.git]);
+  const key = indexKey(opts);
   if (INDEX_CACHE.has(key)) return INDEX_CACHE.get(key);
   const built = buildIndexUncached(opts);
   INDEX_CACHE.set(key, built);
   return built;
 }
 
-function buildIndexUncached(opts) {
+const SCOPE_CACHE = new Map();
+function indexScope(opts) {
+  const key = JSON.stringify([opts.repo || null, opts.all, opts.days]);
+  if (SCOPE_CACHE.has(key)) return SCOPE_CACHE.get(key);
   const live = liveRegistry();
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   if (!opts.all && !ctx) fail('not inside a git repository — use --all or --repo <path>');
-  const prefix = ctx ? normSlug(ctx.root) : null;
-  const cutoff = opts.days > 0 ? Date.now() - opts.days * 86400000 : 0;
-  const rows = [];
-  if (!dirExists(PROJECTS)) return { rows, ctx, live };
+  const scope = {
+    live,
+    ctx,
+    prefix: ctx ? normSlug(ctx.root) : null,
+    cutoff: opts.days > 0 ? Date.now() - opts.days * 86400000 : 0,
+    inventory: null,
+    rows: new Map(),
+  };
+  SCOPE_CACHE.set(key, scope);
+  return scope;
+}
+
+function transcriptInventory(scope) {
+  if (scope.inventory) return scope.inventory;
+  const inventory = [];
+  scope.inventory = inventory;
+  if (!dirExists(PROJECTS)) return inventory;
   let projectDirs;
-  try { projectDirs = fs.readdirSync(PROJECTS); } catch { SKIPPED += 1; return { rows, ctx, live }; }
+  try { projectDirs = fs.readdirSync(PROJECTS); } catch { SKIPPED += 1; return inventory; }
   for (const dir of projectDirs) {
-    if (prefix && !dir.startsWith(prefix)) continue;
+    if (scope.prefix && !dir.startsWith(scope.prefix)) continue;
     const full = path.join(PROJECTS, dir);
     let st;
     try { st = fs.statSync(full); } catch { continue; }
@@ -2680,59 +2788,121 @@ function buildIndexUncached(opts) {
       const file = path.join(full, f);
       let fst;
       try { fst = fs.statSync(file); } catch { continue; }
-      const sessionId = f.replace(/\.jsonl$/, '');
-      const isLive = live.has(sessionId);
-      if (!isLive && cutoff && fst.mtimeMs < cutoff) continue;
-      if (fst.size < 200) continue;
-      let s;
-      try { s = summarize(file, fst.size, false); } catch { SKIPPED += 1; continue; }
-      // The registry half is TYPED, because it comes from another process's
-      // `~/.claude/sessions/*.json` and `liveRegistry` accepts any record carrying a
-      // `sessionId` and a `pid`. An object or a number there reaches `worktreeRoot`
-      // and `path.basename` and takes the whole command down with an uncaught
-      // TypeError, instead of the SKIPPED accounting this script is built around —
-      // and the `cwd` repair is what made that value newly reachable in a runnable
-      // `cd` line. `cmdInstances` already guards the same field this way.
-      const registryCwd = (live.get(sessionId) || {}).cwd;
-      const cwd = s.cwd || (typeof registryCwd === 'string' && registryCwd ? registryCwd : null) || null;
-      if (!cwd) continue;
-      if (ctx && !inRepo(cwd, ctx)) continue;
-      const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;
-      const app = ccdIndex().get(sessionId) || null;
-      const row = {
-        sessionId,
-        transcript: file,
-        transcriptDir: dir,
-        size: fst.size,
-        mtime: fst.mtimeMs,
-        wt,
-        cwdExists: dirExists(cwd),
-        ccdStore: ccdStoreExists(),
-        worktree: path.basename(wt),
-        live: isLive ? live.get(sessionId) : null,
-        ...s,
-        // AFTER the spread, deliberately. `summarize()` ALWAYS emits a `cwd` key,
-        // and it is null for exactly the rows the live-registry fallback above
-        // exists to serve — a live session whose transcript carries no `"cwd":"…"`
-        // match. Placed before `...s` the fallback value was written and then
-        // immediately overwritten with that null, so `r.cwd` came back empty for a
-        // session whose working directory the registry knew perfectly well. `r.wt`
-        // hid it: that one is computed before this literal and `summarize` has no
-        // `wt` key, so every worktree-shaped carrier looked correct while
-        // `printResume` rendered `cd -- ''` and `cmdHandoff` called
-        // `path.basename(null)`.
-        cwd,
-        app,
-      };
-      if (!row.title && app && app.title) row.title = app.title;
-      if (!isLive && cutoff && activityMs(row) < cutoff) continue;
-      row.lastActivity = new Date(activityMs(row)).toISOString();
-      rows.push(row);
+      inventory.push({ dir, file, fst, sessionId: f.replace(/\.jsonl$/, '') });
     }
+  }
+  return inventory;
+}
+
+function transcriptAdmitted(scope, item) {
+  if (!scope.live.has(item.sessionId) && scope.cutoff && item.fst.mtimeMs < scope.cutoff) return false;
+  return item.fst.size >= 200;
+}
+
+function worktreeOfCwd(cwd) {
+  return (dirExists(cwd) && worktreeRoot(cwd)) || cwd;
+}
+
+function indexRow(scope, item, appOf) {
+  if (scope.rows.has(item.file)) return scope.rows.get(item.file);
+  const row = buildIndexRow(scope, item, appOf);
+  scope.rows.set(item.file, row);
+  return row;
+}
+
+function buildIndexRow(scope, item, appOf) {
+  const { live, ctx, cutoff } = scope;
+  const { dir, file, fst, sessionId } = item;
+  const isLive = live.has(sessionId);
+  if (!transcriptAdmitted(scope, item)) return null;
+  let s;
+  try { s = summarize(file, fst.size, false); } catch { SKIPPED += 1; return null; }
+  // The registry half is TYPED, because it comes from another process's
+  // `~/.claude/sessions/*.json` and `liveRegistry` accepts any record carrying a
+  // `sessionId` and a `pid`. An object or a number there reaches `worktreeRoot`
+  // and `path.basename` and takes the whole command down with an uncaught
+  // TypeError, instead of the SKIPPED accounting this script is built around —
+  // and the `cwd` repair is what made that value newly reachable in a runnable
+  // `cd` line. `cmdInstances` already guards the same field this way.
+  const registryCwd = (live.get(sessionId) || {}).cwd;
+  const cwd = s.cwd || (typeof registryCwd === 'string' && registryCwd ? registryCwd : null) || null;
+  if (!cwd) return null;
+  if (ctx && !inRepo(cwd, ctx)) return null;
+  const wt = worktreeOfCwd(cwd);
+  const app = appOf(sessionId) || null;
+  const row = {
+    sessionId,
+    transcript: file,
+    transcriptDir: dir,
+    size: fst.size,
+    mtime: fst.mtimeMs,
+    wt,
+    cwdExists: dirExists(cwd),
+    ccdStore: ccdStoreExists(),
+    worktree: path.basename(wt),
+    live: isLive ? live.get(sessionId) : null,
+    ...s,
+    // AFTER the spread, deliberately. `summarize()` ALWAYS emits a `cwd` key,
+    // and it is null for exactly the rows the live-registry fallback above
+    // exists to serve — a live session whose transcript carries no `"cwd":"…"`
+    // match. Placed before `...s` the fallback value was written and then
+    // immediately overwritten with that null, so `r.cwd` came back empty for a
+    // session whose working directory the registry knew perfectly well. `r.wt`
+    // hid it: that one is computed before this literal and `summarize` has no
+    // `wt` key, so every worktree-shaped carrier looked correct while
+    // `printResume` rendered `cd -- ''` and `cmdHandoff` called
+    // `path.basename(null)`.
+    cwd,
+    app,
+  };
+  if (!row.title && app && app.title) row.title = app.title;
+  if (!isLive && cutoff && activityMs(row) < cutoff) return null;
+  row.lastActivity = new Date(activityMs(row)).toISOString();
+  return row;
+}
+
+function buildIndexUncached(opts) {
+  const scope = indexScope(opts);
+  const { live, ctx } = scope;
+  const rows = [];
+  for (const item of transcriptInventory(scope)) {
+    const row = indexRow(scope, item, (sessionId) => ccdIndex().get(sessionId));
+    if (row) rows.push(row);
   }
   rows.sort((a, b) => activityMs(b) - activityMs(a));
   if (opts.live) return { rows: rows.filter((r) => r.live), ctx, live };
   return { rows, ctx, live };
+}
+
+function matchesSessionId(id, sel) {
+  return id === sel;
+}
+
+function matchesSessionIdPrefix(id, sel) {
+  return sel.length >= 6 && id.startsWith(sel.toLowerCase());
+}
+
+function idCandidateRows(opts, sel) {
+  const scope = indexScope(opts);
+  const rows = [];
+  for (const item of transcriptInventory(scope)) {
+    if (!matchesSessionId(item.sessionId, sel) && !matchesSessionIdPrefix(item.sessionId, sel)) continue;
+    const row = indexRow(scope, item, ccdApp);
+    if (row) rows.push(row);
+  }
+  return rows.sort((a, b) => activityMs(b) - activityMs(a));
+}
+
+const CWD_PROBE_BYTES = 64 * 1024;
+const CWD_KEY = Buffer.from('"cwd":"');
+
+function firstCwdOf(file) {
+  let buf;
+  try { buf = readPrefix(file, CWD_PROBE_BYTES); } catch { return null; }
+  const at = buf.indexOf(CWD_KEY);
+  if (at === -1) return null;
+  const m = /"cwd":"((?:[^"\\]|\\.)*)"/y.exec(buf.toString('utf8', at));
+  return m && m[1] ? unescapeJson(m[1]) || null : null;
 }
 
 function inRepo(cwd, ctx) {
@@ -2908,8 +3078,11 @@ function noteSelfSkipped(self, sel, remedy) {
 }
 
 function resolve(opts, selectorRaw, selfRemedy = SELF_REMEDY) {
-  const { rows } = buildIndex({ ...opts, live: false });
   const sel = String(selectorRaw || '').trim();
+  const byId = sel ? idCandidateRows(opts, sel) : [];
+  let indexed = null;
+  const allRows = () => indexed || (indexed = buildIndex({ ...opts, live: false }).rows);
+  const idRows = byId.length ? byId : allRows();
   if (!sel) fail('missing selector');
   const low = sel.toLowerCase();
   const self = selfSessionId();
@@ -2919,7 +3092,7 @@ function resolve(opts, selectorRaw, selfRemedy = SELF_REMEDY) {
     return matched.filter((r) => r.sessionId !== self);
   };
   const byText = () => {
-    const matched = others(rows.filter((r) => `${r.title || ''} ${r.lastPrompt || ''}`.toLowerCase().includes(low)));
+    const matched = others(allRows().filter((r) => `${r.title || ''} ${r.lastPrompt || ''}`.toLowerCase().includes(low)));
     const exactIds = new Set(matched.filter((r) => (r.title || '').trim().toLowerCase() === low).map((r) => r.sessionId));
     return exactIds.size ? matched.filter((r) => exactIds.has(r.sessionId)) : matched;
   };
@@ -2927,12 +3100,12 @@ function resolve(opts, selectorRaw, selfRemedy = SELF_REMEDY) {
   const oneDirectory = (t) => new Set(t.map((r) => r.cwd)).size === 1;
   const oneLineOfWork = (t) => oneSession(t) || oneDirectory(t);
   const tiers = [
-    { collapse: oneSession, match: () => rows.filter((r) => r.sessionId === sel) },
-    { collapse: oneSession, match: () => rows.filter((r) => sel.length >= 6 && r.sessionId.startsWith(low)) },
-    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => /^#?\d+$/.test(sel) && r.pr && String(r.pr.number) === sel.replace('#', ''))) },
-    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => r.worktree.toLowerCase() === low || r.cwd === sel)) },
-    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => (r.branch || '').toLowerCase() === low)) },
-    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => r.worktree.toLowerCase().includes(low) || (r.branch || '').toLowerCase().includes(low))) },
+    { collapse: oneSession, match: () => idRows.filter((r) => matchesSessionId(r.sessionId, sel)) },
+    { collapse: oneSession, match: () => idRows.filter((r) => matchesSessionIdPrefix(r.sessionId, sel)) },
+    { collapse: oneLineOfWork, match: () => others(allRows().filter((r) => /^#?\d+$/.test(sel) && r.pr && String(r.pr.number) === sel.replace('#', ''))) },
+    { collapse: oneLineOfWork, match: () => others(allRows().filter((r) => r.worktree.toLowerCase() === low || r.cwd === sel)) },
+    { collapse: oneLineOfWork, match: () => others(allRows().filter((r) => (r.branch || '').toLowerCase() === low)) },
+    { collapse: oneLineOfWork, match: () => others(allRows().filter((r) => r.worktree.toLowerCase().includes(low) || (r.branch || '').toLowerCase().includes(low))) },
     { collapse: oneSession, match: byText },
   ];
   const select = (row) => { SELECTED_SESSION_ID = row.sessionId; SELF_SKIPPED_ID = selfSkipped ? self : null; return row; };
@@ -2981,11 +3154,21 @@ function hydrate(row) {
 // SKIPPED increment twice, so `show` reported double what `show --json` did for
 // the identical machine state.
 function siblings(opts, row) {
-  // The index is built HERE rather than by the caller: `buildIndex` is memoized, so
-  // the second walk costs nothing, and passing rows in let a caller hand over an
-  // index built with different options than the row it is comparing against.
-  const { rows } = buildIndex({ ...opts, live: false });
-  return rows.filter((r) => r.wt === row.wt && r.sessionId !== row.sessionId);
+  // The rows are derived HERE rather than by the caller: passing rows in let a caller
+  // hand over an index built with different options than the row it is comparing
+  // against. The same options reuse the memoized index or the per-scope rows.
+  const built = INDEX_CACHE.get(indexKey({ ...opts, live: false }));
+  if (built) return built.rows.filter((r) => r.wt === row.wt && r.sessionId !== row.sessionId);
+  const scope = indexScope(opts);
+  const found = [];
+  for (const item of transcriptInventory(scope)) {
+    if (item.sessionId === row.sessionId || !transcriptAdmitted(scope, item)) continue;
+    const cwd = firstCwdOf(item.file);
+    if (cwd && worktreeOfCwd(cwd) !== row.wt) continue;
+    const candidate = indexRow(scope, item, ccdApp);
+    if (candidate && candidate.wt === row.wt) found.push(candidate);
+  }
+  return found.sort((a, b) => activityMs(b) - activityMs(a));
 }
 
 // The ONE recipe every arm ends in, hoisted to module scope with its rationale
@@ -4066,7 +4249,7 @@ function whereAdviceLines(row, takerWorktree, options = {}) {
     //
     // EQUALITY, not containment, and `canonicalPair` rather than a predicate of this function's
     // own. Both operands are `worktreeRoot()` results WHEN THAT READ SUCCEEDS, and that
-    // qualifier is load-bearing: `buildIndex` and `selfIdentity` are character-identical
+    // qualifier is load-bearing: `buildIndex` and `selfIdentity` both call `worktreeOfCwd`,
     // `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`, so a cwd whose `.git` is not found within
     // the parent walk keeps its RAW value. The collapse the next clause relies on then does not
     // happen, the comparison measures two different levels of one tree, and `standingIn` stays
@@ -4782,7 +4965,7 @@ function cmdLimited(opts) {
 const CHIP_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\p{Zl}\p{Zp}]/gu;
 
 function openTaskChips(r) {
-  ccdIndex();
+  ccdApp(r.sessionId);
   const file = CCD_RECORD_PATHS.get(r.sessionId);
   if (!file) {
     return {
@@ -4999,7 +5182,7 @@ function cmdTakeover(opts) {
   // because under the rule above this path is NEVER the destination.
   //
   // The "worktree ROOT" claim is CONDITIONAL, because `r.wt` is only a worktree root on
-  // one leg. `buildIndexUncached` computes `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`,
+  // one leg. `worktreeOfCwd` computes `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`,
   // so the derivation is skipped outright when the recorded directory is unreadable — and
   // even where it runs, `worktreeRoot` gives up after 12 parent levels with no `.git`.
   // Claiming a root on the gone leg contradicted the advice a few lines above it, which
@@ -5614,12 +5797,15 @@ function releaseSubject(recordedWorktree, recordedCwd, keep) {
   return { layout: 'gone', root: null, managed: false, recorded };
 }
 
-function keepOwners(core, opts) {
+function keepOwners(core, opts, wanted) {
   const owners = new Map();
   const live = liveRegistry();
-  for (const row of buildIndex({ ...opts, live: false }).rows) {
-    const key = keepKeyOf(core, row.sessionId);
-    if (key) owners.set(key, { sessionId: row.sessionId, live: live.has(row.sessionId) });
+  const scope = indexScope(opts);
+  for (const item of transcriptInventory(scope)) {
+    const key = keepKeyOf(core, item.sessionId);
+    if (!key || !wanted.has(key)) continue;
+    const row = indexRow(scope, item, ccdApp);
+    if (row) owners.set(key, { sessionId: row.sessionId, live: live.has(row.sessionId) });
   }
   for (const sid of live.keys()) {
     const key = keepKeyOf(core, sid);
@@ -5630,7 +5816,7 @@ function keepOwners(core, opts) {
 
 function selfAccount() {
   const id = selfSessionId();
-  const app = id ? ccdIndex().get(id) : null;
+  const app = id ? ccdApp(id) : null;
   if (app && app.accountUuid) return app.accountUuid;
   const host = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim();
   return host ? accountForHostSession(host) : null;
@@ -5749,7 +5935,7 @@ function cmdRelease(opts) {
     if (subject.managed) {
       const listing = keep.listAnchors(root, now, idleMs);
       if (!listing.ok) blockers.push({ code: 'anchors-unreadable', text: `The keep anchors in ${flatPath(root)} could not be listed (${flatPath(listing.reason)}).` });
-      const owners = keepOwners(core, opts);
+      const owners = keepOwners(core, opts, new Set(listing.live.map((entry) => entry.key)));
       const sourceKey = keepKeyOf(core, r.sessionId);
       const selfKey = selfId !== null ? keepKeyOf(core, selfId) : null;
       for (const entry of listing.live) {
@@ -5807,7 +5993,7 @@ function cmdRelease(opts) {
   const where = flatPath(subject.root || subject.recorded || '(unknown)');
   const endedOthers = anchors.filter((a) => a.action === 'end' && a.owner === 'ended-session' && a.sessionId);
   const unarchivedOthers = endedOthers.map((a) => a.sessionId).filter((sid) => {
-    const app = ccdIndex().get(sid);
+    const app = ccdApp(sid);
     return !(app && app.archived === true);
   });
   const archiveLines = releaseArchiveLines(r, subject, v, state, unarchivedOthers);
