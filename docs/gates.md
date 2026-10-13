@@ -38,6 +38,20 @@ compatible-schema record automatically on its first failed bind
 command is the report and the manual retry for a refusal. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
 
+## Shell Tools
+
+Claude Code has two shell tools, `Bash` and `PowerShell`. Every Zensu hook that reads a shell
+command is registered on the `Bash` matcher: the CLI write-gate, the Session Control check and
+the opt-in rules of the source-write gate, the secret scan of shell commands, the browser consent
+gate and artifact redaction. None of them sees a command Claude runs through the PowerShell
+tool, and the work-order gate, which sees every tool, judges only Bash commands. The PowerShell
+tool is on by default on Windows for claude.ai and Console accounts, and opt-in elsewhere through
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Until these gates judge PowerShell commands, set
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=0` so Claude runs shell commands through the Bash tool. The
+session banner and the `shell tools:` row of `/zensu:doctor` warn while the PowerShell tool may
+be active and a hook that fires for `Bash` does not fire for `PowerShell`; see
+[Platform Support](operations.md#platform-support).
+
 ## CLI Write-Gate
 
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or

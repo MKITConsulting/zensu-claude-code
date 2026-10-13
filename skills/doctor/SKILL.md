@@ -26,10 +26,10 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 - **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
   its auth resolved from the repo's provider, whether playwright-cli is installed and its
   version, and the browser consent gate's registration on the Bash matcher.
-- **Plugin integrity** — hooks.json wired to files on disk, and plugin.json ↔
-  marketplace.json version sync.
-- **Config** — valid JSON, the quoted-boolean trap where "true"/"false" as a string is
-  silently ignored by strict === checks, and whether the permission rules in
+- **Plugin integrity** — hooks.json wired to files on disk, Bash-to-PowerShell hook
+  coverage, and plugin.json ↔ marketplace.json version sync.
+- **Config** — valid JSON, quoted booleans that strict === checks ignore, and whether the
+  permission rules in
   ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal before any chain
   has wedged.
 - **Session state** — the state dir is writable; canonical CAS workflow documents are valid;

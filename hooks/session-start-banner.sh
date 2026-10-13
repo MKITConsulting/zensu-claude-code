@@ -57,6 +57,21 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh" ] \
   echo "zensu: Reviewer spawns — this plugin is configured to admit its own read-only reviewer subagents (Read/Grep/Glob only) itself, so the host permission layer is not asked for them. This line checks the flag and the two files; /zensu:doctor is the authoritative check and additionally verifies the hook's registration and that its decision module loads. Turn off: hooks.reviewerSpawnAutoAllow=false in ~/.zensu/config.json."
 fi
 
+_zensu_powershell_host() {
+  [ -n "${CLAUDE_CODE_USE_POWERSHELL_TOOL:-}" ] && return 0
+  case "$(uname -s 2>/dev/null)" in
+    (MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  return 1
+}
+if _zensu_powershell_host && command -v node >/dev/null 2>&1; then
+  _ZENSU_POWERSHELL_LINE="$(
+    cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 0
+    node ./shell-tool-coverage-v1.js banner ../hooks.json 2>/dev/null
+  )"
+  [ -n "$_ZENSU_POWERSHELL_LINE" ] && printf '%s\n' "$_ZENSU_POWERSHELL_LINE"
+fi
+
 # Whether the delivery-route question can actually be asked. Four conditions, all
 # required: the flag, node, the hook file, and no configured default route —
 # plan-approved-delegate.sh exits 0 silently without node or without its own

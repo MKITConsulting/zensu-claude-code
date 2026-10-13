@@ -356,6 +356,68 @@ case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when
 case "$GREEN" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1ea playwright-cli at the measured version renders green" PASS ;; *) check "P1ea playwright-cli at the measured version (got: $GREEN)" FAIL ;; esac
 case "$GREEN" in *'Playwright MCP'*|*'verify-feature gate:'*) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" FAIL ;; *) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" PASS ;; esac
 
+shell_root() {
+  local root="$SBOX/shell-$1"
+  mkdir -p "$root/.claude-plugin" "$root/hooks"
+  printf '{"name":"zensu","version":"1.2.3"}\n' > "$root/.claude-plugin/plugin.json"
+  printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$root/.claude-plugin/marketplace.json"
+  printf '%s\n' "$2" > "$root/hooks/hooks.json"
+  printf '#!/bin/bash\n' > "$root/hooks/gate.sh"
+  printf '%s' "$root"
+}
+shell_row() {
+  ZDOC_POWERSHELL_TOOL="$2" ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$1" ZENSU_CONFIG="$PLUGIN_DIR/.no-such-doctor-config" CLAUDE_PROJECT_DIR="$PLUGIN_DIR/.no-such-doctor-project" \
+    HOME="$PLUGIN_DIR/.no-such-doctor-home" node "${3:-$REPORT}" 2>/dev/null | grep -F 'shell tools:' || true
+}
+SHELL_GAP="$(shell_root gap '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh\""}]}]}}')"
+SHELL_COVERED="$(shell_root covered '{"hooks":{"PreToolUse":[{"matcher":"Bash|PowerShell","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh\""}]}]}}')"
+SHELL_ARRAY="$(shell_root array '{"hooks":[]}')"
+case "$(shell_row "$SHELL_GAP" default)" in
+  *'⚠️  shell tools: 1 hook(s) fire for the Bash tool but not for the PowerShell tool (gate.sh), and this is Windows, where the PowerShell tool is on by default for claude.ai and Console accounts'*'CLAUDE_CODE_USE_POWERSHELL_TOOL=0'*) check "P2p1 a Bash-only hook on a Windows host warns and names the hook and the remedy" PASS ;;
+  *) check "P2p1 a Bash-only hook on a Windows host warns and names the hook and the remedy" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" on)" in
+  *'⚠️  shell tools: 1 hook(s)'*'the PowerShell tool is enabled here'*) check "P2p2 a Bash-only hook warns when CLAUDE_CODE_USE_POWERSHELL_TOOL enables the tool" PASS ;;
+  *) check "P2p2 a Bash-only hook warns when CLAUDE_CODE_USE_POWERSHELL_TOOL enables the tool" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" off)" in
+  *'✅  shell tools: 1 hook(s)'*'the PowerShell tool is off here'*) check "P2p3 a Bash-only hook is reported without a warning when the tool is off" PASS ;;
+  *) check "P2p3 a Bash-only hook is reported without a warning when the tool is off" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" absent)" in
+  *'✅  shell tools: 1 hook(s)'*'opt-in through CLAUDE_CODE_USE_POWERSHELL_TOOL=1'*) check "P2p4 a Bash-only hook is reported without a warning where the tool is opt-in" PASS ;;
+  *) check "P2p4 a Bash-only hook is reported without a warning where the tool is opt-in" FAIL ;;
+esac
+case "$(shell_row "$SHELL_COVERED" default)" in
+  *'✅  shell tools: all 1 hooks that fire for the Bash tool also fire for the PowerShell tool'*) check "P2p5 a hook on Bash|PowerShell renders the coverage green" PASS ;;
+  *) check "P2p5 a hook on Bash|PowerShell renders the coverage green" FAIL ;;
+esac
+case "$(shell_row "$SHELL_ARRAY" default)" in
+  *'⚠️  shell tools: not checked — hooks.json has a shape this check cannot read'*) check "P2p6 an unreadable hooks.json shape is a missing check, never an all-clear" PASS ;;
+  *) check "P2p6 an unreadable hooks.json shape is a missing check, never an all-clear" FAIL ;;
+esac
+SHELL_LONE="$SBOX/shell-lone/hooks/lib"
+mkdir -p "$SHELL_LONE"
+cp "$REPORT" "$SHELL_LONE/zensu-doctor-report.js"
+case "$(shell_row "$SHELL_GAP" default "$SHELL_LONE/zensu-doctor-report.js")" in
+  *'⚠️  shell tools: not checked — hooks/lib/shell-tool-coverage-v1.js could not be loaded'*) check "P2p7 a missing coverage module is a missing check, never an all-clear" PASS ;;
+  *) check "P2p7 a missing coverage module is a missing check, never an all-clear" FAIL ;;
+esac
+SHELL_REAL_GAPS="$(node -e '
+  const m = require(process.argv[1]);
+  process.stdout.write(String(m.gapNames(m.shellCoverage(JSON.parse(require("fs").readFileSync(process.argv[2], "utf8")))).length));
+' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+SHELL_REAL_ROW="$(shell_row "$PLUGIN_DIR" default)"
+case "$SHELL_REAL_GAPS" in
+  0) case "$SHELL_REAL_ROW" in *'✅  shell tools: all '*' hooks that fire for the Bash tool also fire for the PowerShell tool'*) SHELL_REAL_OK=true ;; *) SHELL_REAL_OK=false ;; esac ;;
+  [1-9]*) case "$SHELL_REAL_ROW" in *"⚠️  shell tools: $SHELL_REAL_GAPS hook(s) fire for the Bash tool but not for the PowerShell tool"*) SHELL_REAL_OK=true ;; *) SHELL_REAL_OK=false ;; esac ;;
+  *) SHELL_REAL_OK=false ;;
+esac
+[ "$SHELL_REAL_OK" = true ] \
+  && check "P2p8 the shipped hooks.json renders the row the coverage module derives ($SHELL_REAL_GAPS gap(s))" PASS \
+  || check "P2p8 the shipped hooks.json renders the row the coverage module derives (gaps: ${SHELL_REAL_GAPS:-<none>}; row: $SHELL_REAL_ROW)" FAIL
+
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
   ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \

@@ -254,6 +254,28 @@ else
   check "banner loads plugin.json from the special plugin root" FAIL
 fi
 
+PS_BANNER_OUT="$(session_payload \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" CLAUDE_CODE_USE_POWERSHELL_TOOL=1 \
+    bash "$PLUGIN/hooks/session-start-banner.sh" 2>"$RAW_TMP/banner-powershell.err")"
+PS_EXPECTED="$(cd -P -- "$PLUGIN" && node -e '
+  const coverage = require("./hooks/lib/shell-tool-coverage-v1.js");
+  const manifest = JSON.parse(require("node:fs").readFileSync("./hooks/hooks.json", "utf8"));
+  process.stdout.write(coverage.bannerLine(manifest, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, process.platform));
+' 2>/dev/null)"
+if [ -n "$PS_EXPECTED" ]; then
+  if printf '%s\n' "$PS_BANNER_OUT" | grep -qxF -- "$PS_EXPECTED" \
+    && ! printf '%s' "$PS_EXPECTED" | grep -qF 'could not read'; then
+    PS_VERDICT=PASS
+  else
+    PS_VERDICT=FAIL
+  fi
+elif printf '%s' "$PS_BANNER_OUT" | grep -qF 'zensu: ⚠ PowerShell tool'; then
+  PS_VERDICT=FAIL
+else
+  PS_VERDICT=PASS
+fi
+check "banner reads the shell-tool coverage of hooks.json from the special plugin root" "$PS_VERDICT"
+
 REANCHOR_OUT="$(cd -- "$PROJECT" \
   && CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" HOME="$HOME_DIR" \
     ZENSU_CONFIG="$CONFIG" bash "$PLUGIN/hooks/lib/zensu-session-reanchor.sh" \

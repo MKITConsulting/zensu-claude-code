@@ -529,6 +529,41 @@ function pluginBlock() {
   if (!missing.length && !unwired.length) {
     line(OK, 'hooks wiring: all ' + Object.keys(wired).length + ' hooks referenced in hooks.json exist on disk');
   }
+  shellToolRow(hj.data);
+}
+
+var SHELL_TOOL_STATE_TEXT = {
+  on: 'the PowerShell tool is enabled here (CLAUDE_CODE_USE_POWERSHELL_TOOL)',
+  default: 'this is Windows, where the PowerShell tool is on by default for claude.ai and Console accounts',
+  off: 'the PowerShell tool is off here (CLAUDE_CODE_USE_POWERSHELL_TOOL=0)',
+  absent: 'the PowerShell tool is not enabled on this host, where it is opt-in through CLAUDE_CODE_USE_POWERSHELL_TOOL=1',
+};
+
+function shellToolRow(manifest) {
+  var mod = null;
+  try { mod = require('./shell-tool-coverage-v1.js'); } catch (_error) { mod = null; }
+  if (!mod) {
+    line(WARN, 'shell tools: not checked — hooks/lib/shell-tool-coverage-v1.js could not be loaded, so this is a missing check rather than an all-clear; reinstall the plugin');
+    return;
+  }
+  var coverage = mod.shellCoverage(manifest);
+  if (coverage === null) {
+    line(WARN, 'shell tools: not checked — hooks.json has a shape this check cannot read, so this is a missing check rather than an all-clear');
+    return;
+  }
+  var injected = env.ZDOC_POWERSHELL_TOOL || '';
+  var state = mod.POWERSHELL_STATE_VALUES.indexOf(injected) !== -1 ? injected : mod.powershellToolState(env, process.platform);
+  if (!coverage.gaps.length) {
+    line(OK, 'shell tools: all ' + coverage.hooks.length + ' hooks that fire for the Bash tool also fire for the PowerShell tool');
+    return;
+  }
+  var names = mod.gapNames(coverage);
+  var lead = 'shell tools: ' + names.length + ' hook(s) fire for the Bash tool but not for the PowerShell tool (' + names.join(', ') + ')';
+  if (mod.mayRunPowerShell(state)) {
+    line(WARN, lead + ', and ' + SHELL_TOOL_STATE_TEXT[state] + ', so the commands Claude runs through PowerShell skip them — ' + mod.REMEDY);
+  } else {
+    line(OK, lead + '; ' + SHELL_TOOL_STATE_TEXT[state]);
+  }
 }
 
 // Two hooks inject a rule read at RUN TIME from a one-line marker block under docs/,

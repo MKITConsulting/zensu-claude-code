@@ -153,4 +153,8 @@ raw output to a file there; nothing else keeps it.
   only in part is imported as if it were complete.
 - Work-order mode is unverified on native Windows: the launcher's process-group handling is POSIX
   only, and the work-order suites skip on that host.
+- The gate judges only Bash commands. A worker session in which Claude Code's PowerShell tool is
+  active runs PowerShell commands past every denial above, so keep
+  `CLAUDE_CODE_USE_POWERSHELL_TOOL` unset or `0` in the worker's environment (see
+  [Platform Support](operations.md#platform-support)).
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.
