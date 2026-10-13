@@ -243,6 +243,18 @@ OUT22="$(env PAD22_A="$PAD22" PAD22_B="$PAD22" PAD22_C="$PAD22" CLAUDE_PLUGIN_RO
   || check "C22 oversized planning prompt (got '$OUT22')" FAIL
 rm -rf "$P22"
 
+C23_GROW="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8");
+  const start = src.indexOf("| awk \x27");
+  const end = start === -1 ? -1 : src.indexOf("\x27", start + 7);
+  if (start === -1 || end === -1) { process.stdout.write("no keyword scan found"); process.exit(0); }
+  const grow = src.slice(start + 7, end).split("\n").filter((line) => /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\1\s/.test(line));
+  process.stdout.write(grow.join("\n"));
+')"
+[ -z "$C23_GROW" ] \
+  && check "C23 the keyword scan prints each kept token instead of growing a line buffer, which is quadratic on a long single-line prompt" PASS \
+  || check "C23 keyword scan grows a buffer (${C23_GROW:0:120})" FAIL
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

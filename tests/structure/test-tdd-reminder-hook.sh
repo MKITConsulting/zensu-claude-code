@@ -240,10 +240,17 @@ OUT16="$(env PAD16_A="$PAD16" PAD16_B="$PAD16" PAD16_C="$PAD16" CLAUDE_PLUGIN_RO
   || check "C16 oversized code prompt (got '$OUT16')" FAIL
 rm -rf "$P16"
 
-if grep -qF 'PAYLOAD="$INPUT"' "$HOOK" || grep -qF 'process.env.PAYLOAD' "$HOOK"; then
-  check "C17 a child reads the hook payload from the environment, where the session-id read fails silently over the exec size limit" FAIL
+C17_LEAK="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8").replace(/\\\n\s*/g, " ");
+  const leaks = src.split("\n").filter((line) =>
+    /(^|[\s;\x28|&])[A-Za-z_][A-Za-z0-9_]*="\$\{?INPUT\}?"[^\n]*\bnode\b/.test(line)
+    || /\bnode\b[^|\n]*"\$\{?INPUT\}?"/.test(line));
+  process.stdout.write(leaks.join("\n"));
+')"
+if [ -z "$C17_LEAK" ]; then
+  check "C17 no node child takes the hook payload from its environment or argv" PASS
 else
-  check "C17 no child reads the hook payload from the environment" PASS
+  check "C17 a node child takes the hook payload from its environment or argv, so an oversized payload fails the exec silently (${C17_LEAK:0:120})" FAIL
 fi
 
 echo "----"

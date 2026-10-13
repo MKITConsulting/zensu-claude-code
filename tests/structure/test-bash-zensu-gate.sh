@@ -101,7 +101,7 @@ LARGE_SUB="$PROJECT/large-subagent.json"
 large_payload "$LARGE_MAIN"
 large_payload "$LARGE_SUB" general-purpose
 
-run "B5 read (features get)"               "zensu features get f1"                                      '' ALLOW
+run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
 run "B7 neutral zensu-plm has no mutation exemption" "zensu security classify f1"                    zensu-plm DENY
 run "B12 alias mutation (sec classify)"     "zensu sec classify f1"                                      '' DENY

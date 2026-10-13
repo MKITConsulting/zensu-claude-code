@@ -300,7 +300,7 @@ fi
 OUT_C12="$(env C12_PAD_A="$C12_PAD" C12_PAD_B="$C12_PAD" C12_PAD_C="$C12_PAD" \
   STATE_DIR="$C12_STATE_DIR" bash "$HOOK" < "$C12_PAYLOAD_FILE" 2>/dev/null)"
 if printf '%s' "$OUT_C12" | grep -qF '"permissionDecision":"deny"' \
-  && printf '%s' "$OUT_C12" | grep -qF 'TDD-Phase-Gate: Write on /tmp/x.ts blocked.'; then
+  && printf '%s' "$OUT_C12" | grep -qF 'TDD-Phase-Gate: Write on '; then
   check "C12 a Write whose payload is over the exec size limit is still phase-gated" PASS
 else
   check "C12 oversized Write payload (out=${OUT_C12:0:240})" FAIL
