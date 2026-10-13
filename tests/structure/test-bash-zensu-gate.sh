@@ -203,6 +203,32 @@ run "B28e backslash zensu + mutation"        "\\zensu security classify f1"     
 run "B28f cmd-substitution mutation"         "zensu features get \$(zensu security classify f1)"          '' DENY
 run "B28g assignment-substitution mutation"  "x=\$(zensu security classify f1 --foo bar)"                 '' DENY
 
+run "B38a timeout wrapper + mutation"                 "timeout 60 zensu security classify f1"                  '' DENY
+run "B38b subagent timeout wrapper + mutation"        "timeout 60 zensu security classify f1"                  general-purpose DENY
+run "B38c subagent nice -n + mutation"                "nice -n 5 zensu security classify f1"                   general-purpose DENY
+run "B38d subagent env -i + mutation"                 "env -i zensu security classify f1"                      general-purpose DENY
+run "B38e subagent xargs + mutation"                  "printf 'f1\\n' | xargs -n1 zensu security classify"     general-purpose DENY
+run "B38f subagent loop body + mutation"              "for id in f1; do zensu security classify \"\$id\"; done" general-purpose DENY
+run "B38g subagent bash -c body + mutation"           "bash -c \"zensu security classify f1\""                 general-purpose DENY
+run "B38h subagent eval body + mutation"              "eval \"zensu security classify f1\""                    general-purpose DENY
+run "B38i subagent wrapped read"                      "timeout 60 zensu features get f1"                       general-purpose ALLOW
+run "B38j search text that names a mutation"          "grep -rn \"zensu security classify\" skills"            general-purpose ALLOW
+run "B38k heredoc data that names a mutation"         "cat <<'EOF'
+zensu security classify f1
+EOF"                                                                                                             '' ALLOW
+run "B38l inline off reaches a wrapped main-thread mutation" "ZENSU_MCP_GATE=off timeout 60 zensu security classify f1" '' ALLOW
+
+FALLBACK_ROOT="$(mktemp -d -t bashgate-fallback-XXXXXX)"
+cp -R "$PLUGIN_DIR/hooks" "$FALLBACK_ROOT/hooks"
+rm -f "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js"
+OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | classify)"
+if [ ! -e "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js" ] && [ "$OUT" = "DENY" ]; then
+  check "B39 without the shell-model module the token parser still gates a mutation -> DENY" PASS
+else
+  check "B39 module-less fallback (got '$OUT')" FAIL
+fi
+rm -rf "$FALLBACK_ROOT"
+
 # B30 --api-url <value> must not be misread as the subcommand
 run "B30 --api-url value + mutation"          "zensu --api-url https://h security classify f1"             '' DENY
 

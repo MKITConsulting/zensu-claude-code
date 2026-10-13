@@ -585,14 +585,14 @@ function parseScript(text, options = {}) {
   const recordExpansion = (body) => {
     expansions.push(body);
   };
+  const atBoundary = (quoted) => !word || word.value === '' || (quoted && /[\s;&|(]$/.test(word.value));
   const expandName = (name, body, quoted) => {
     recordExpansion(body);
-    const atStart = !word || word.value === '';
     if (body === 'HOME' && home) {
       append(home, true);
       return;
     }
-    if (body === 'PWD' && atStart) {
+    if (body === 'PWD' && atBoundary(quoted)) {
       append('.', true);
       return;
     }
@@ -600,9 +600,8 @@ function parseScript(text, options = {}) {
     if (quoted) startWord().quoted = true;
   };
   const substitute = (inner, quoted) => {
-    const atStart = !word || word.value === '';
     const spelling = substitutionSpelling(inner, root);
-    if (spelling !== null && atStart) {
+    if (spelling !== null && atBoundary(quoted)) {
       append(spelling, true);
     } else {
       addNested(inner);
@@ -687,6 +686,11 @@ function parseScript(text, options = {}) {
       }
       if (char === '`') {
         parseBacktick(true);
+        continue;
+      }
+      if (char === DYNAMIC) {
+        appendDynamic();
+        index += 1;
         continue;
       }
       append(char, true);
@@ -875,6 +879,11 @@ function parseScript(text, options = {}) {
         continue;
       }
     }
+    if (char === DYNAMIC) {
+      appendDynamic();
+      index += 1;
+      continue;
+    }
     let mark = '.';
     if (char === '*' || char === '?' || char === '[') mark = 'g';
     else if (char === '{' || char === ',' || char === '}' || char === '~') mark = 'x';
@@ -977,11 +986,16 @@ function shortFlagsInclude(value, flag) {
   return /^-[A-Za-z]+$/.test(value) && value.includes(flag);
 }
 
-function gitViolation(rest) {
+function gitViolation(rest, context) {
   let index = 0;
+  let cwd = context.cwd;
   while (index < rest.length) {
-    const value = rest[index];
+    const value = rest[index].value;
     if (GIT_GLOBAL_ARGS.has(value)) {
+      const operand = rest[index + 1];
+      if (value === '-C' && operand && !operand.dynamic && operand.value !== '') {
+        cwd = resolveSpelling(cwd, wordPath(operand, context));
+      }
       index += 2;
       continue;
     }
@@ -991,9 +1005,12 @@ function gitViolation(rest) {
     }
     break;
   }
-  const sub = rest[index];
-  const args = rest.slice(index + 1);
-  const wholeTree = () => args.some((value) => WHOLE_TREE_PATHSPECS.has(value));
+  const sub = rest[index] ? rest[index].value : undefined;
+  const words = rest.slice(index + 1);
+  const args = words.map((word) => word.value);
+  const scoped = { ...context, cwd };
+  const wholeTree = () => args.some((value) => WHOLE_TREE_PATHSPECS.has(value))
+    || operands(words).some((word) => removesProjectRoot(word, scoped));
   const has = (long, short) => args.some((value) => value === long || shortFlagsInclude(value, short));
   if (sub === 'clean') return 'git clean';
   if (sub === 'stash' && !['list', 'show'].includes(args[0])) return 'git stash';
@@ -1058,6 +1075,29 @@ function removesProjectRoot(word, context) {
   }));
 }
 
+function globReach(value, glob, context) {
+  const cut = value.lastIndexOf('/', glob);
+  let directory = cut === -1 ? context.cwd : resolveSpelling(context.cwd, value.slice(0, cut) || '/');
+  const pattern = [];
+  for (const segment of value.slice(cut + 1).split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment !== '..') pattern.push(segment);
+    else if (pattern.length > 0) pattern.pop();
+    else directory = collapse(`${directory}/..`);
+  }
+  for (const form of spellingForms(directory, context)) {
+    for (const target of context.protectedTargets) {
+      if (target === form || !isAncestorOrSelf(form, target)) continue;
+      const remaining = target.slice(form.length).replace(/^\//, '').split('/');
+      if (pattern.length < remaining.length) continue;
+      if (remaining.every((name, position) => segmentMatches(pattern[position], name))) {
+        return context.protectedForms.includes(target) ? REASONS.protectedPath : REASONS.protectedParent;
+      }
+    }
+  }
+  return null;
+}
+
 function pathWordViolation(word, context) {
   if (word.dynamic || word.value === '') return null;
   const values = [word.value];
@@ -1075,20 +1115,8 @@ function pathWordViolation(word, context) {
   const glob = firstGlob(word);
   if (glob === -1) return null;
   const value = wordPath(word, context);
-  const literal = resolveSpelling(context.cwd, value.slice(0, glob));
-  const literalForms = new Set([literal]);
-  const cut = value.lastIndexOf('/', glob);
-  if (cut !== -1) {
-    const directory = resolveSpelling(context.cwd, value.slice(0, cut) || '/');
-    const partial = value.slice(cut + 1, glob);
-    for (const form of spellingForms(directory, context)) literalForms.add(collapse(`${form}/${partial}`));
-  }
-  for (const form of literalForms) {
-    if (context.homeForm && form.length > context.homeForm.length + 1 && form.startsWith(`${context.homeForm}/`)
-        && context.protectedTargets.some((target) => target.startsWith(form))) {
-      return REASONS.protectedParent;
-    }
-  }
+  const reached = globReach(value, glob, context);
+  if (reached) return reached;
   const segments = value.split('/');
   let offset = 0;
   for (const segment of segments) {
@@ -1299,7 +1327,7 @@ function wordsViolation(words, item, context, depth) {
     const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
     const scripts = flag === -1
       ? stdinCode(item)
-      : [rest[flag + 1]].filter((script) => script && !script.dynamic).map((script) => script.value);
+      : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
     for (const script of scripts) {
       const nested = scriptViolation(script, context, depth + 1);
       if (nested) return nested;
@@ -1337,7 +1365,7 @@ function wordsViolation(words, item, context, depth) {
   if (name === 'ps' && psShowsEnvironment(values)) return REASONS.dump;
 
   if (name === 'git') {
-    const git = gitViolation(values);
+    const git = gitViolation(rest, context);
     if (git) return `the command runs a git operation that removes or reverts work (${git})`;
   }
   if (name === 'claude' && ['plugin', 'plugins'].includes(operands(rest).map((word) => word.value)[0])) return REASONS.plugin;
@@ -1480,6 +1508,58 @@ function scriptViolation(text, context, depth = 0) {
   return backgroundViolation(parsed.items, context.platform);
 }
 
+function assignmentsOf(words) {
+  const assignments = {};
+  for (const word of words) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(word.value);
+    if (match) assignments[match[1]] = word.value.slice(match[0].length);
+  }
+  return assignments;
+}
+
+function commandInvocations(text, options = {}) {
+  const platform = options.platform || process.platform;
+  const parsing = { platform, home: options.home || '', root: options.root || '' };
+  const commands = [];
+  const visitWords = (words, item, inherited, depth) => {
+    if (depth > MAX_DEPTH) return;
+    const start = commandStart(words);
+    const environment = { ...inherited, ...assignmentsOf(words.slice(0, start)) };
+    if (start >= words.length) return;
+    const name = commandName(words[start].value, platform);
+    const rest = words.slice(start + 1);
+    if (name === 'eval') {
+      visitScript(rest.map((word) => word.value).join(' '), environment, depth + 1);
+      return;
+    }
+    const wrapper = Object.prototype.hasOwnProperty.call(WRAPPERS, name) ? WRAPPERS[name] : null;
+    if (wrapper) {
+      const inner = unwrap(wrapper, rest);
+      const own = rest.slice(0, rest.length - inner.length);
+      visitWords(inner, item, wrapper.assignments ? { ...environment, ...assignmentsOf(own) } : environment, depth + 1);
+      return;
+    }
+    if (SHELLS.has(name)) {
+      const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
+      const scripts = flag === -1 ? stdinCode(item) : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
+      for (const script of scripts) visitScript(script, environment, depth + 1);
+    }
+    commands.push({ name, environment, words: rest.map((word) => word.value) });
+  };
+  const visitScript = (script, inherited, depth) => {
+    if (depth > MAX_DEPTH || typeof script !== 'string' || script === '') return;
+    for (const item of parseScript(script, parsing).items) {
+      if (item.kind !== 'command') continue;
+      visitWords(item.words, item, inherited, depth);
+      for (const nested of [...item.nested, ...item.heredocs.flatMap((heredoc) => heredoc.nestedScripts || [])]) {
+        visitScript(nested, {}, depth + 1);
+      }
+    }
+  };
+  visitScript(text, {}, 0);
+  return commands;
+}
+
 function withoutComments(text, context) {
   let visible = text;
   for (const [start, end] of parseScript(text, parseOptions(context)).comments) {
@@ -1587,6 +1667,7 @@ module.exports = {
   GUARD_TAIL,
   REASONS,
   accidentReason,
+  commandInvocations,
   configAuthorities,
   grantRefusal,
   isShellCall,

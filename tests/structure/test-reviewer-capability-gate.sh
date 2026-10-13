@@ -626,6 +626,8 @@ assert_case "the shell guard denies a background shell" deny general-purpose Bas
 assert_case "the shell guard scans every string field" deny general-purpose Bash '{"command":"pwd","description":"inspect .zensu/state"}'
 GATE_HOME="$TMP" assert_case "the shell guard expands ~ before matching protected paths" deny general-purpose Bash '{"command":"ls ~/plugin-data/session-control"}'
 GATE_HOME="$TMP" assert_case "the shell guard expands \$HOME before matching protected paths" deny general-purpose Bash '{"command":"ls \"$HOME/plugin-data\""}'
+CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "a root-level glob passes while the project overlay lies under HOME" allow general-purpose Bash '{"command":"ls *.md"}'
+CLAUDE_PROJECT_DIR="$PROJECT" GATE_HOME="$TMP" assert_case "the project overlay under HOME keeps the project-root rule" deny general-purpose Bash '{"command":"rm -rf *"}'
 assert_case "a Monitor command is not part of the shell grant" deny general-purpose Monitor '{"command":"tail -f build.log"}'
 assert_case "a Monitor stream stays outside the allowlist" deny ? Monitor '{"ws":"wss://example.test/feed"}'
 MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"

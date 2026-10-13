@@ -201,6 +201,15 @@ const DENIED = [
   ['nohup npm run dev > /tmp/dev.log 2>&1 &', guard.REASONS.background],
   ['setsid npm start', guard.REASONS.background],
   ['bash -c "git reset --hard"', 'the command runs a git operation that removes or reverts work (git reset --hard)'],
+  ['bash -c "cd $REPO && git reset --hard origin/main"', 'the command runs a git operation that removes or reverts work (git reset --hard)'],
+  ['sh -c "git clean -fdx $X"', 'the command runs a git operation that removes or reverts work (git clean)'],
+  ['sh -c "npm start > $LOG 2>&1 &"', guard.REASONS.background],
+  ['bash -c "cd $X && rm -rf ."', guard.REASONS.projectRoot],
+  ['bash -c "rm -rf $PWD"', guard.REASONS.projectRoot],
+  ['eval "cd $X && rm -rf ."', guard.REASONS.projectRoot],
+  ['git checkout -- "$(git rev-parse --show-toplevel)"', 'the command runs a git operation that removes or reverts work (git checkout over the whole tree or with --force)'],
+  ['cd src && git checkout -- ..', 'the command runs a git operation that removes or reverts work (git checkout over the whole tree or with --force)'],
+  ['git -C src restore ..', 'the command runs a git operation that removes or reverts work (git restore over the whole tree)'],
   ['claude plugin update zensu', guard.REASONS.plugin],
   ['claude plugins list', guard.REASONS.plugin],
   ['rm -rf .', guard.REASONS.projectRoot],
@@ -303,6 +312,28 @@ test('absolute spellings of the project root and its parents are denied', () => 
   }
   assert.equal(verdict(fixture, `rm -rf ${projectRoot}/src/*`), 'allow');
   assert.equal(verdict(fixture, `ls ${fixture.trusted.pluginData}`), 'deny');
+  const git = (operation) => `the command runs a git operation that removes or reverts work (${operation})`;
+  assert.equal(guard.accidentReason(bash(`git restore ${projectRoot}`), fixture.trusted, fixture.env), git('git restore over the whole tree'));
+  assert.equal(guard.accidentReason(bash(`git checkout -- ${projectRoot}/`), fixture.trusted, fixture.env), git('git checkout over the whole tree or with --force'));
+  assert.equal(guard.accidentReason(bash(`git rm -r ${projectRoot}`), fixture.trusted, fixture.env), git('git rm over the whole tree'));
+  assert.equal(verdict(fixture, `git restore --staged ${projectRoot}`), 'allow');
+  assert.equal(verdict(fixture, `git rm -r --cached ${projectRoot}`), 'allow');
+  assert.equal(verdict(fixture, `git checkout -- ${projectRoot}/src`), 'allow');
+});
+
+test('the project overlay under HOME leaves globs that cannot reach protected state alone', () => {
+  const fixture = layout();
+  const env = { ...fixture.env, CLAUDE_PROJECT_DIR: fixture.trusted.projectRoot };
+  for (const command of [...ALLOWED, 'ls *.md', 'cat */package.json', 'du -sh *', 'for f in *.json; do wc -l "$f"; done']) {
+    assert.equal(guard.accidentReason(bash(command), fixture.trusted, env), null, command);
+  }
+  for (const [command, reason] of DENIED) {
+    assert.equal(guard.accidentReason(bash(command), fixture.trusted, env), reason, command);
+  }
+  assert.equal(guard.accidentReason(bash('cat .zens*/config.json'), fixture.trusted, env), guard.REASONS.protectedPath);
+  assert.equal(guard.accidentReason(bash('rm -rf ~/.claude/plug*'), fixture.trusted, env), guard.REASONS.protectedParent);
+  assert.equal(guard.accidentReason(bash('ls ~/.claude/plugins/*/zensu-zensu'), fixture.trusted, env), guard.REASONS.protectedPath);
+  assert.equal(guard.accidentReason(bash('ls ~/.claude/plugins/data/zen*/session-control'), fixture.trusted, env), guard.REASONS.protectedPath);
 });
 
 test('background shells and a disabled sandbox are denied', () => {
@@ -373,6 +404,56 @@ test('a ZENSU_CONFIG beside the project protects only its own file', () => {
   assert.equal(reason('ls ..'), null);
   assert.equal(reason('cd .. && rm -rf project'), guard.REASONS.projectRoot);
   assert.equal(reason('cat ../zensu.json'), guard.REASONS.protectedPath);
+  assert.equal(reason('ls ../*.md'), null);
+  assert.equal(reason('cat ../*'), guard.REASONS.protectedPath);
+  assert.equal(reason('cat */../../zen*'), guard.REASONS.protectedPath);
+});
+
+test('the command walker finds every simple command the shell would run', () => {
+  const zensu = (command) => guard.commandInvocations(command, { platform: 'linux' })
+    .filter((invocation) => invocation.name === 'zensu')
+    .map((invocation) => invocation.words.join(' '));
+  for (const command of [
+    'zensu security classify f1',
+    'timeout 60 zensu security classify f1',
+    'nice -n 5 zensu security classify f1',
+    'env -i zensu security classify f1',
+    'sudo -u ci zensu security classify f1',
+    "printf 'f1\\n' | xargs -n1 zensu security classify f1",
+    'for id in f1; do zensu security classify f1; done',
+    'if true; then zensu security classify f1; fi',
+    'bash -c "zensu security classify f1"',
+    "sh -lc 'zensu security classify f1'",
+    'eval "zensu security classify f1"',
+    'bash <<EOF\nzensu security classify f1\nEOF',
+    'bash <<< "zensu security classify f1"',
+    'x=$(zensu security classify f1)',
+    'echo `zensu security classify f1`',
+    '"zensu" security classify f1',
+    '\\zensu security classify f1',
+    '/opt/bin/zensu security classify f1',
+  ]) {
+    assert.deepEqual(zensu(command), ['security classify f1'], command);
+  }
+  for (const command of [
+    'grep -rn "zensu security classify" skills',
+    'echo use zensu security classify please',
+    "cat <<'EOF'\nzensu security classify f1\nEOF",
+    'git commit -m "docs: run zensu security classify; then review"',
+    'bash hooks/lib/zensu-log.sh --workflow-begin',
+  ]) {
+    assert.deepEqual(zensu(command), [], command);
+  }
+  const [prefixed] = guard.commandInvocations('ZENSU_MCP_GATE=off env ZENSU_API_URL=http://localhost:8090 timeout 9 zensu features get f1', { platform: 'linux' });
+  assert.equal(prefixed.name, 'zensu');
+  assert.deepEqual(prefixed.environment, { ZENSU_MCP_GATE: 'off', ZENSU_API_URL: 'http://localhost:8090' });
+  assert.deepEqual(prefixed.words, ['features', 'get', 'f1']);
+  assert.deepEqual(zensu('ZENSU_MCP_GATE=off bash -c "zensu security classify f1"'), ['security classify f1']);
+  assert.equal(
+    guard.commandInvocations('ZENSU_MCP_GATE=off bash -c "zensu security classify f1"', { platform: 'linux' })
+      .find((invocation) => invocation.name === 'zensu').environment.ZENSU_MCP_GATE,
+    'off',
+  );
 });
 
 test('a symlinked config layer protects its target', { skip: process.platform === 'win32' }, () => {
