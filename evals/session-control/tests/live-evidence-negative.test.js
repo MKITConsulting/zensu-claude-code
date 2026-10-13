@@ -608,6 +608,19 @@ async function main() {
       'structured permission denial should satisfy generic command evidence',
     );
 
+    const withdrawnGrantReason = `reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell (false in a config layer, a config layer that could not be read or resolved, or no config layer to consult). To search the project, call Grep or Glob with a path that names a subdirectory of the project root ${genericWorktree} other than .zensu: src. For example, pass ${path.join(genericWorktree, 'src')} as the path. Report the need to the main thread instead.`;
+    const withdrawnGrantGeneric = eventFile('valid-generic-withdrawn-grant.jsonl', spawnEvents(genericAgent, [
+      assistant('agent-1', [genericRead]),
+      user('agent-1', [genericReadResult]),
+      assistant('agent-1', [genericCommand]),
+      user('agent-1', [{ ...genericCommandResult, content: withdrawnGrantReason }]),
+    ]));
+    const withdrawnGrantResult = run([
+      'generic-review-worker', withdrawnGrantGeneric, genericAgent, genericMarkerCanonical,
+    ]);
+    assert.equal(withdrawnGrantResult.status, 0, withdrawnGrantResult.stderr);
+    assert.deepEqual(JSON.parse(withdrawnGrantResult.stdout), JSON.parse(validGenericResult.stdout));
+
     const seededGenericContext = eventFile('generic-parent-seeded-context.jsonl', spawnEvents(genericAgent, [
       assistant('agent-1', [genericRead]), user('agent-1', [genericReadResult]),
       assistant('agent-1', [genericCommand]), user('agent-1', [genericCommandResult]),

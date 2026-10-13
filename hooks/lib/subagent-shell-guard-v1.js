@@ -86,7 +86,7 @@ const JQ_VALUE_OPTIONS = new Map([['--arg', 2], ['--argjson', 2], ['--slurpfile'
 const YQ_SUBCOMMANDS = new Set(['e', 'eval', 'ea', 'eval-all']);
 const POWERSHELL = new Set(['pwsh', 'powershell']);
 
-const HELPER_RE = /(?:^|[/(,=:])(?:zensu-log\.sh|zensu-session[a-z0-9._-]*\.sh|zensu-doctor\.sh|zensu-review-evidence\.sh|claude-hook-session-v1\.js|claude-session-control-v1\.js|session-control-core-v1\.js|review-evidence-lease-v1\.js|session-auto-adopt-v1\.js|zensu_bind_[a-z0-9_]+|model-bind)(?=$|[)\s;,:])/i;
+const HELPER_RE = /(?:^|[/(,=:'"`])(?:zensu-log\.sh|zensu-session[a-z0-9._-]*\.sh|zensu-doctor\.sh|zensu-review-evidence\.sh|claude-hook-session-v1\.js|claude-session-control-v1\.js|session-control-core-v1\.js|review-evidence-lease-v1\.js|session-auto-adopt-v1\.js|zensu_bind_[a-z0-9_]+|model-bind)(?=$|[)\s;,:'"`])/i;
 const READ_ONLY_COMMANDS = new Set([
   'cat', 'tac', 'head', 'tail', 'less', 'more', 'bat', 'batcat', 'nl', 'od', 'xxd', 'hexdump',
   'strings', 'wc', 'cut', 'sort', 'uniq', 'tr', 'fold', 'column', 'paste', 'comm', 'fmt',
@@ -101,6 +101,11 @@ const FIND_EXEC_WORDS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
 const FIND_NAME_TESTS = new Set(['-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename', '-regex', '-iregex', '-lname', '-ilname', '-samefile', '-inum', '-newer']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'mksh', 'fish']);
 const BACKGROUND_COMMANDS = new Set(['setsid', 'disown', 'coproc']);
+const TMUX_VALUE_OPTIONS = new Set(['c', 'f', 'L', 'S', 'T']);
+const TMUX_PROCESS_ALIASES = new Set(['new', 'neww', 'splitw', 'respawnp', 'respawnw', 'run', 'if', 'pipep', 'send']);
+const TMUX_PROCESS_COMMANDS = Object.freeze(['new-session', 'new-window', 'split-window', 'respawn-pane', 'respawn-window', 'run-shell', 'if-shell', 'pipe-pane', 'send-keys']);
+const SCREEN_VALUE_OPTIONS = new Set(['c', 'e', 'h', 'p', 's', 'S', 't', 'T']);
+const SCREEN_PROCESS_COMMANDS = new Set(['screen', 'exec', 'stuff']);
 const EXIT_COMMANDS = new Set(['exit', 'return']);
 const DIRECTORY_WRAPPERS = new Set(['command', 'builtin']);
 const PS_ARGUMENT_OPTIONS = new Set(['-o', '-O', '-p', '-u', '-U', '-g', '-G', '-t', '-q', '-C', '--format', '--pid', '--user', '--group', '--tty', '--sort']);
@@ -1211,6 +1216,49 @@ function psShowsEnvironment(rest) {
   return false;
 }
 
+function leadingOptions(rest, valueOptions) {
+  const flags = new Set();
+  let index = 0;
+  while (index < rest.length) {
+    const value = rest[index].value;
+    if (value === '--') return { flags, end: index + 1 };
+    if (!/^-[A-Za-z0-9]/.test(value)) break;
+    index += 1;
+    for (let position = 1; position < value.length; position += 1) {
+      flags.add(value[position]);
+      if (!valueOptions.has(value[position])) continue;
+      if (position === value.length - 1) index += 1;
+      break;
+    }
+  }
+  return { flags, end: index };
+}
+
+function endsTmuxCommand(value) {
+  return value.endsWith(';') && !value.endsWith('\\;');
+}
+
+function startsTmuxProcess(value) {
+  const name = endsTmuxCommand(value) ? value.slice(0, -1) : value;
+  if (name === '' || name.startsWith('-')) return false;
+  return TMUX_PROCESS_ALIASES.has(name) || TMUX_PROCESS_COMMANDS.some((command) => command.startsWith(name));
+}
+
+function startsDetachedSession(name, rest) {
+  if (name === 'tmux') {
+    let commandPosition = true;
+    for (const word of rest.slice(leadingOptions(rest, TMUX_VALUE_OPTIONS).end)) {
+      if (commandPosition && startsTmuxProcess(word.value)) return true;
+      commandPosition = endsTmuxCommand(word.value);
+    }
+    return false;
+  }
+  if (name !== 'screen') return false;
+  const { flags, end } = leadingOptions(rest, SCREEN_VALUE_OPTIONS);
+  if (flags.has('d') && flags.has('m')) return true;
+  return flags.has('X') && end < rest.length && SCREEN_PROCESS_COMMANDS.has(rest[end].value);
+}
+
 function matchesEverything(test, pattern) {
   if (typeof pattern !== 'string') return true;
   if (/regex$/.test(test)) return /^(?:\.\*)+$/.test(pattern);
@@ -1378,7 +1426,7 @@ function wordsViolation(words, item, context, depth) {
   const rest = words.slice(start + 1);
   const values = rest.map((word) => word.value);
 
-  if (BACKGROUND_COMMANDS.has(name)) return REASONS.background;
+  if (BACKGROUND_COMMANDS.has(name) || startsDetachedSession(name, rest)) return REASONS.background;
   if (name === 'eval') return scriptViolation(values.join(' '), context, depth + 1);
   const wrapper = Object.prototype.hasOwnProperty.call(WRAPPERS, name) ? WRAPPERS[name] : null;
   if (wrapper) {

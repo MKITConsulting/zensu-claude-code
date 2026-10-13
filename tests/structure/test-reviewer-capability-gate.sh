@@ -294,7 +294,7 @@ native_real() { node -e 'process.stdout.write(require("node:fs").realpathSync.na
 native_join() { node -e 'process.stdout.write(require("node:path").join(process.argv[1], process.argv[2]))' "$1" "$2"; }
 NATIVE_PROJECT="$(native_real "$PROJECT")"
 NATIVE_PLUGIN="$(bash "$HOST_PATH" "$PLUGIN")"
-HOST_PROFILE_VERDICTS="$(node -e '
+HOST_PROFILE_VERDICTS="$(ZENSU_CONFIG="$TMP/absent-zensu-config.json" node -e '
   const gate = require(process.argv[1]);
   const [projectRoot, pluginRoot, pluginData, contextFile] = process.argv.slice(2);
   const trusted = { projectRoot, toolCwd: projectRoot, pluginRoot, pluginData, contextFile };
@@ -317,6 +317,17 @@ HOST_PROFILE_VERDICTS="$(node -e '
   for (const tool of ["Skill", "Monitor", "Task", "TaskOutput", "TaskStop", "BashOutput", "KillShell", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "Workflow", "EnterWorktree", "Artifact", "Config", "REPL", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookRead", "subagenthandback", " Read", "MCP__zensu__get_feature", "mcp__github__get_pull_request", "mcp__context7__query-docs", "mcp__plugin_context-mode_context-mode__ctx_search", "mcp__Claude_Browser__navigate", "mcp__playwright__browser_snapshot", "mcp__ccd_session_mgmt__search_session_transcripts"]) {
     const reason = judge(tool, { path: "src", command: "pwd", prompt: "x" });
     verdict(reason === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `host-profile-v1 denies ${JSON.stringify(tool)} outside its allowlist and names the allowlist`, reason);
+  }
+  const shellAllowance = `a neutral subagent may use only ${host.join(", ")}, Bash behind an accident guard, the MCP tools ${mcp.join(", ")}, and read-only Zensu MCP tools`;
+  const judgeAs = (type, tool, input) => {
+    try { return gate.neutralViolation({ tool_name: tool, tool_input: input, agent_id: "agent-1", agent_type: type }, trusted); }
+    catch (error) { return `threw ${error.message}`; }
+  };
+  for (const tool of ["Monitor", "Skill", "mcp__github__get_pull_request"]) {
+    const named = judgeAs("general-purpose", tool, { path: "src", command: "pwd", prompt: "x" });
+    verdict(named === `host-profile-v1 cannot invoke ${tool}; ${shellAllowance}`, `a named neutral child denied ${JSON.stringify(tool)} is told it holds Bash behind the accident guard`, named);
+    const persona = judgeAs("zensu-review-domain", tool, { path: "src", command: "pwd", prompt: "x" });
+    verdict(persona === `host-profile-v1 cannot invoke ${tool}; ${allowance}`, `a zensu-review-* persona denied ${JSON.stringify(tool)} is not told it holds Bash`, persona);
   }
   const commandLead = "host-profile-v1 cannot invoke command-execution tools. To search the project, ";
   for (const tool of ["shell", "exec", "exec_command", "terminal", "command", "mcp__plugin_context-mode_context-mode__ctx_execute", "mcp__plugin_context-mode_context-mode__ctx_execute_file", "mcp__plugin_context-mode_context-mode__ctx_batch_execute", "mcp__terminal__run_in_terminal", "mcp__playwright__browser_run_code_unsafe", "mcp__desktop-commander__execute_command", "mcp__python__run_code"]) {
@@ -632,10 +643,17 @@ assert_case "a Monitor command is not part of the shell grant" deny general-purp
 assert_case "a Monitor stream stays outside the allowlist" deny ? Monitor '{"ws":"wss://example.test/feed"}'
 MONITOR_REASON="$(deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
 case "$MONITOR_REASON" in
-  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*)
-    check "a named neutral agent's Monitor command gets the allowlist deny, not the shell guard" PASS ;;
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*", SubagentHandback, Bash behind an accident guard, the MCP tools "*)
+    check "a named neutral agent's Monitor command gets the allowlist deny, which names its guarded Bash" PASS ;;
   *)
-    check "a Monitor command must get the allowlist deny (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
+    check "a Monitor command must get the allowlist deny naming the guarded Bash (got: ${MONITOR_REASON:-<empty>})" FAIL ;;
+esac
+MONITOR_OFF_REASON="$(GATE_ZENSU_CONFIG="$SHELL_OFF_CONFIG" deny_reason general-purpose Monitor '{"command":"tail -f build.log"}')"
+case "$MONITOR_OFF_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke Monitor; a neutral subagent may use only "*", SubagentHandback, the MCP tools "*)
+    check "a withdrawn grant leaves Bash out of the allowlist deny" PASS ;;
+  *)
+    check "a withdrawn grant must leave Bash out of the allowlist deny (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
 esac
 GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
 GUARD_REASON="$(deny_reason general-purpose Bash '{"command":"git clean -fdx"}')"
