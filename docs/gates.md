@@ -873,7 +873,7 @@ The ordinary shape after `git worktree remove`: the Session Control record is re
 installation may serve it, and the directory it records as `project_root` is gone.
 `readOrphanedProjectRootContext` waives exactly that one existence check, so reads and the
 read-only diagnostics keep working — while `Edit`, `Write` and `MultiEdit` deny, and so does a
-Bash write while the opt-in source-write gate is on, because the workflow document lived under
+Bash write while the opt-in source-write gate is on and no usable `CLAUDE_PROJECT_DIR` remains, because the workflow document lived under
 that root and no write can be attributed to a project that is not there. It IS a relaxable bind failure, and the table in
 [Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
 

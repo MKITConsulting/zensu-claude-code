@@ -536,7 +536,7 @@ exists the session is bound from the next tool call onward — do not tell the u
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
 Bash (except a `zensu` CLI call) and the read-only diagnostics work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash
-write the opted-in source-write gate attributes, until that exact directory is re-created. Say which of the two happened; never report the second as an
+write the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints
@@ -569,6 +569,6 @@ directory that is gone and there is nothing to rebuild into. Report that NOTE;
 do not upgrade it to the rebuild recommendation, which is for the other shape.
 After a successful adoption, do not tell the user to restart — and when the
 recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
-and so does any Bash command the source-write gate can attribute as a write
-while that opt-in gate is on (`hooks.bashWriteGate: true`), until it is re-created — read-only Bash and the diagnostics do run — rather than
+as does any Bash write the opted-in source-write gate attributes with no usable
+`CLAUDE_PROJECT_DIR` left, until it is re-created — read-only Bash and diagnostics run — rather than
 reporting an unqualified success.

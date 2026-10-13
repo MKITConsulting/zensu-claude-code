@@ -376,7 +376,7 @@ test('the notice renderer screens every value and names a refused sweep as refus
 
   const orphan = mod.renderAdoptionNotice({ ...base, orphanedProjectRoot: true }, { where: 'at this SessionStart' });
   assert.match(orphan, /project root is still gone, so Edit, Write, MultiEdit/);
-  assert.match(orphan, /while the opt-in source-write gate is on \(hooks\.bashWriteGate: true\), any Bash command it can attribute as a write stay denied/);
+  assert.match(orphan, /while the opt-in source-write gate is on \(hooks\.bashWriteGate: true\) and no usable CLAUDE_PROJECT_DIR remains, any Bash command it can attribute as a write stay denied/);
   assert.doesNotMatch(orphan, /any writing Bash command/);
   assert.match(orphan, /adopted automatically at this SessionStart/);
 

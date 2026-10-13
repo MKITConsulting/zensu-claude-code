@@ -24,7 +24,7 @@ This one answers "it serves it fine and the DIRECTORY the record anchors is gone
 ordinary shape after `git worktree remove`, which one machine measured at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
 `readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
-deny — a Bash write too, but only while the opt-in source-write gate is on.
+deny — a Bash write too, but only while the opt-in source-write gate is on and no usable `CLAUDE_PROJECT_DIR` remains.
 
 **The destination is carried FROM the record and never from an argument, and that is the whole
 safety argument.** `CLAUDE.md` records that re-anchoring a record to a CALLER-NAMED directory
