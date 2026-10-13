@@ -781,14 +781,14 @@ function flatPath(p) {
 // renders further runnable `briefShellArg` commands outside it — `continuationPlan`'s
 // four `git -C …` lines, which operate ON a worktree rather than entering one. They are
 // bound by the same no-clip rule and are enumerated in the carrier census below.
-// `CONTROL_RUN` FIRST, then `oneLine`. The two bounds are not interchangeable and
-// neither subsumes the other: `oneLine` collapses `/\s+/`, and JS `\s` is only the
-// line-break class plus a few spaces — it does not cover ESC, the rest of C0, DEL
-// or C1. Leaving the brief on `oneLine` alone therefore let exactly the class
-// `flatPath`'s header names as its whole reason for existing — a CSI sequence that
-// moves the cursor and overwrites a row the reader already trusted — through on the
-// carrier that matters most, since a brief is PERSISTED and opened by an instance
-// that need not have this skill loaded. The clip stays, and stays SECOND, so the
+// `CONTROL_RUN` FIRST, then `oneLine`. `oneLine` delegates to `boundText`, whose
+// class (`\p{Cc}`, `\p{Cf}`, U+2028/U+2029 and `\s`) covers every member of
+// `CONTROL_RUN`, so the first pass changes no output. It keeps `briefPath` on the
+// class T29 pins for all three helpers, not on that delegation alone. While
+// `oneLine` collapsed `/\s+/` only, bounding the brief by `oneLine` alone let the
+// class `flatPath`'s header names as its whole reason for existing — a CSI sequence
+// that moves the cursor and overwrites a row the reader already trusted — through
+// on the carrier that matters most. The clip stays, and stays SECOND, so the
 // 200-char budget is measured on the text that will actually be rendered.
 function briefPath(p) {
   return oneLine(String(p == null ? '' : p).replace(CONTROL_RUN, ' '), 200).replace(/`/g, "'") || '(unknown)';

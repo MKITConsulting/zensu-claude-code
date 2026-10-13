@@ -3491,7 +3491,7 @@ fi
 
 # W12 — the BRIEF carriers must bound the same control class as the plain-text
 # ones. `flatPath` and `briefShellArg` both route through `CONTROL_RUN`;
-# `briefPath` routed only through `oneLine`, whose `/\s+/` covers the line-break
+# `briefPath` routed only through `oneLine`, whose `/\s+/` covered the line-break
 # class and nothing else — JS `\s` excludes ESC (), the rest of C0, DEL and
 # all of C1. So the exact class `flatPath`'s own header names as its reason for
 # existing ("a CSI sequence moves the cursor and overwrites a row the reader
@@ -3552,20 +3552,20 @@ else
   check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
 fi
 
-# W13 — the desktop instance id, on both renderers that print it. `appTag` used
-# `oneLine(app.instance, 8)`, which gets BOTH halves wrong: `oneLine` collapses
-# `/\s+/` only, so a CSI sequence survives into a row a reader trusts, and its clip
-# returns `slice(0, n - 1) + '…'` — SEVEN characters plus an ellipsis, where
-# `cmdInstances` renders `flatPath(i).slice(0, 8)`, eight raw ones. The ONLY purpose
-# of an 8-character prefix is correlating a `list`/`show` row with an `instances`
-# row, so two spellings of one id defeat the field entirely. `cmdShow`'s OWNER row
-# carried the same defect at width 64.
+# W13 — the desktop store's account UUID, on `list`'s `appTag` row and `show`'s
+# OWNER row. `appTag` used `oneLine(app.instance, 8)`, which got BOTH halves wrong:
+# `oneLine` then collapsed `/\s+/` only, so a CSI sequence survived into a row a
+# reader trusts, and its clip returns `slice(0, n - 1) + '…'` — SEVEN characters
+# plus an ellipsis, where `cmdInstances` rendered `flatPath(i).slice(0, 8)`, eight
+# raw ones. The ONLY purpose of an 8-character prefix is correlating a `list`/`show`
+# row with an `instances` row, so two spellings of one id defeat the field entirely.
+# `cmdShow`'s OWNER row carried the same defect at width 64.
 #
 # The ellipsis arm IS scoped to this fixture's own row — `grep -a 'account inst-A'`
 # cannot match the `archive()` fixture, which renders a different account name.
-# That is sufficient: this fixture's instance name is fifteen characters, well past
-# the eight-character prefix, so the clip is exposed here. An earlier wording
-# claimed the arm covered every long instance name in the suite; it does not.
+# That is sufficient: this fixture's account directory name is fifteen characters,
+# well past the eight-character prefix, so the clip is exposed here. An earlier
+# wording claimed the arm covered every long account name in the suite; it does not.
 W13_SID=abababab-0000-0000-0000-0000000000b1
 W13_ESC="$(printf '\033')"
 W13_INST="inst-A${W13_ESC}[2K-0001"
