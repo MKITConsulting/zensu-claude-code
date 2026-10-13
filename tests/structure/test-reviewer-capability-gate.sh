@@ -1003,11 +1003,39 @@ EOF
 fi
 
 GUARD_UNIT="$PLUGIN/tests/structure/subagent-shell-guard-v1.test.js"
-if node --test "$GUARD_UNIT" >"$TMP/guard-unit.out" 2>&1; then
-  check "the shell guard unit suite passes (node --test subagent-shell-guard-v1.test.js)" PASS
+source "$PLUGIN/tests/structure/lib-unit-summary.sh"
+GUARD_FLOOR="$(unit_overview_declared "${GUARD_UNIT##*/}")"
+if node --test --test-reporter=tap "$GUARD_UNIT" >"$TMP/guard-unit.out" 2>&1 \
+   && [ -n "$GUARD_FLOOR" ] && unit_cases_registered_floor "$TMP/guard-unit.out" "$GUARD_FLOOR"; then
+  check "the shell guard unit suite passes with at least $GUARD_FLOOR registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" PASS
 else
   sed 's/^/    /' "$TMP/guard-unit.out" | tail -40
-  check "the shell guard unit suite passes (node --test subagent-shell-guard-v1.test.js)" FAIL
+  check "the shell guard unit suite passes with at least ${GUARD_FLOOR:-<no overview row>} registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" FAIL
+fi
+if GUARD_OVERVIEW="$(unit_overview_check "$GUARD_UNIT")"; then
+  check "the SUITE-OVERVIEW Blocks cell matches what ${GUARD_UNIT##*/} registers ($GUARD_FLOOR)" PASS
+else
+  check "$GUARD_OVERVIEW" FAIL
+fi
+
+SANDBOX_MISSING=""
+for text in docs/configuration.md docs/session-control.md docs/gates.md docs/review-chain.md \
+  docs/tdd-manager-workflow.md docs/session-control-release-gate.md evals/session-control/README.md \
+  skills/gauntlet-loop/SKILL.md skills/gauntlet-loop/references/harness.md skills/ghost-scan/SKILL.md \
+  skills/cover/SKILL.md skills/docs/SKILL.md skills/tdd/SKILL.md \
+  skills/session-trail/references/limits.md skills/session-trail/references/takeover.md; do
+  grep -qE 'not a sandbox|no sandbox' "$PLUGIN/$text" || SANDBOX_MISSING="$SANDBOX_MISSING $text"
+done
+[ -z "$SANDBOX_MISSING" ] && check "every operator text that names the subagent shell says the guard is not a sandbox" PASS \
+  || check "operator texts without the not-a-sandbox statement:$SANDBOX_MISSING" FAIL
+
+if node -e '
+  const config = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(config.hooks && config.hooks.subagentShell === true ? 0 : 1);
+' "$PLUGIN/config.example.json"; then
+  check "config.example.json documents hooks.subagentShell as true, the default" PASS
+else
+  check "config.example.json documents hooks.subagentShell as true, the default" FAIL
 fi
 
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"

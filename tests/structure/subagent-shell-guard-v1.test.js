@@ -128,6 +128,8 @@ const ALLOWED = [
   'jq -r .env.PATH config.json',
   'jq . env/config.json',
   "jq -n 'env.HOME'",
+  'git -C src/lib restore ..',
+  'cd build && rm -rf "$PWD"/*',
 ];
 
 const DENIED = [
@@ -210,6 +212,16 @@ const DENIED = [
   ['git checkout -- "$(git rev-parse --show-toplevel)"', 'the command runs a git operation that removes or reverts work (git checkout over the whole tree or with --force)'],
   ['cd src && git checkout -- ..', 'the command runs a git operation that removes or reverts work (git checkout over the whole tree or with --force)'],
   ['git -C src restore ..', 'the command runs a git operation that removes or reverts work (git restore over the whole tree)'],
+  ['git -C .. restore project', 'the command runs a git operation that removes or reverts work (git restore over the whole tree)'],
+  ['bash -c "cd \\"$X\\" && rm -rf ."', guard.REASONS.projectRoot],
+  ['eval "cd \\"$X\\" && rm -rf ."', guard.REASONS.projectRoot],
+  ['bash -c "cd build && rm -rf $(pwd)/*"', guard.REASONS.projectRoot],
+  ['eval "cd build && rm -rf $PWD"', guard.REASONS.projectRoot],
+  ['bash <<EOF\ncd build && rm -rf $PWD\nEOF', guard.REASONS.projectRoot],
+  ['env -C build rm -rf "$PWD"', guard.REASONS.projectRoot],
+  ['git -C src restore -- "$PWD"/*', 'the command runs a git operation that removes or reverts work (git restore over the whole tree)'],
+  ['echo "${X:-$(rm -rf .)}"', guard.REASONS.projectRoot],
+  ['echo $(( $(git clean -fdx) + 1 ))', 'the command runs a git operation that removes or reverts work (git clean)'],
   ['claude plugin update zensu', guard.REASONS.plugin],
   ['claude plugins list', guard.REASONS.plugin],
   ['rm -rf .', guard.REASONS.projectRoot],
@@ -429,6 +441,9 @@ test('the command walker finds every simple command the shell would run', () => 
     'bash <<< "zensu security classify f1"',
     'x=$(zensu security classify f1)',
     'echo `zensu security classify f1`',
+    'X=${X:-$(zensu security classify f1)}',
+    'echo "${X:-`zensu security classify f1`}"',
+    'echo $(( $(zensu security classify f1) + 1 ))',
     '"zensu" security classify f1',
     '\\zensu security classify f1',
     '/opt/bin/zensu security classify f1',
@@ -584,12 +599,18 @@ test('a relative explicit config path withdraws the grant', () => {
   assert.equal(guard.strictFlagEnabled(guard.CONFIG_KEY, { ZENSU_CONFIG: 'C:/cfg.json' }, { platform: 'linux' }), false);
 });
 
-test('the config authorities are the layers the strict reader consults', () => {
+test('the config authorities name every layer, a superset of the strict candidates', () => {
+  const env = { HOME: '/h', ZENSU_CONFIG: '/x/c.json', CLAUDE_PROJECT_DIR: '/p' };
   assert.deepEqual(
-    guard.configAuthorities({ HOME: '/h', ZENSU_CONFIG: '/x/c.json', CLAUDE_PROJECT_DIR: '/p' }),
+    guard.configAuthorities(env),
     ['/h/.zensu', '/h/.zensu/config.json', '/x/c.json', '/p/.zensu', '/p/.zensu/config.json'],
   );
   assert.deepEqual(guard.configAuthorities({}), []);
+  for (const layers of [env, { HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }]) {
+    for (const candidate of guard.strictCandidates(layers, 'linux')) {
+      assert.ok(guard.configAuthorities(layers).includes(candidate), candidate);
+    }
+  }
 });
 
 test('the strict candidates mirror the shell reader', () => {

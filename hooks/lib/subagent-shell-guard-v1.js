@@ -132,6 +132,7 @@ const WHOLE_TREE_PATHSPECS = new Set(['.', './', ':/', ':/:', '*', '**']);
 const MATCH_ALL_SEGMENTS = new Set(['*', '.*', '**']);
 const REMOVING_COMMANDS = new Set(['rm', 'rmdir', 'unlink', 'mv']);
 const DYNAMIC = '\u0001';
+const PWD_MARK = '\u0002';
 const MAX_DEPTH = 8;
 const MAX_PATH_WORDS = 400;
 const MAX_DIRECTORIES = 64;
@@ -448,9 +449,60 @@ function ansiCString(text, start) {
 }
 
 function substitutionSpelling(inner, root) {
-  if (/^\s*pwd(?:\s+-[LP])?\s*$/.test(inner)) return '.';
-  if (/^\s*git\s+rev-parse\s+--show-toplevel\s*$/.test(inner)) return root || '.';
+  if (/^\s*pwd(?:\s+-[LP])?\s*$/.test(inner)) return PWD_MARK;
+  if (/^\s*git\s+rev-parse\s+--show-toplevel\s*$/.test(inner)) return root || PWD_MARK;
   return null;
+}
+
+function substitutionsIn(body, skipSingle) {
+  const found = [];
+  let index = 0;
+  while (index < body.length) {
+    const char = body[index];
+    if (char === '\\') {
+      index += 2;
+      continue;
+    }
+    if (skipSingle && char === "'") {
+      const close = body.indexOf("'", index + 1);
+      index = close === -1 ? body.length : close + 1;
+      continue;
+    }
+    if (char === '$' && body[index + 1] === '(' && body[index + 2] !== '(') {
+      const close = matchingParen(body, index + 2);
+      found.push(body.slice(index + 2, close === -1 ? body.length : close));
+      index = close === -1 ? body.length : close + 1;
+      continue;
+    }
+    if (char === '`') {
+      const close = closingBacktick(body, index + 1);
+      found.push(body.slice(index + 1, close === -1 ? body.length : close).replace(/\\`/g, '`'));
+      index = close === -1 ? body.length : close + 1;
+      continue;
+    }
+    index += 1;
+  }
+  return found;
+}
+
+function materialized(word, cwd) {
+  if (!word.value.includes(PWD_MARK)) return word;
+  let value = '';
+  let mask = '';
+  for (let index = 0; index < word.value.length; index += 1) {
+    if (word.value[index] === PWD_MARK) {
+      value += cwd;
+      mask += '.'.repeat(cwd.length);
+    } else {
+      value += word.value[index];
+      mask += word.mask[index];
+    }
+  }
+  return { ...word, value, mask };
+}
+
+function expandPwd(text, cwd) {
+  return text.replace(/(?<!\\)(?:\$\{PWD\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`)/g, () => cwd);
 }
 
 function braceSpan(value, mask) {
@@ -585,15 +637,14 @@ function parseScript(text, options = {}) {
   const recordExpansion = (body) => {
     expansions.push(body);
   };
-  const atBoundary = (quoted) => !word || word.value === '' || (quoted && /[\s;&|(]$/.test(word.value));
   const expandName = (name, body, quoted) => {
     recordExpansion(body);
     if (body === 'HOME' && home) {
       append(home, true);
       return;
     }
-    if (body === 'PWD' && atBoundary(quoted)) {
-      append('.', true);
+    if (body === 'PWD') {
+      append(PWD_MARK, true);
       return;
     }
     appendDynamic();
@@ -601,7 +652,7 @@ function parseScript(text, options = {}) {
   };
   const substitute = (inner, quoted) => {
     const spelling = substitutionSpelling(inner, root);
-    if (spelling !== null && atBoundary(quoted)) {
+    if (spelling !== null) {
       append(spelling, true);
     } else {
       addNested(inner);
@@ -615,7 +666,9 @@ function parseScript(text, options = {}) {
       if (text[index + 2] === '(') {
         const close = matchingParen(text, index + 3);
         const end = close === -1 ? text.length : close + 1;
-        recordExpansion(text.slice(index + 3, close === -1 ? text.length : close));
+        const arithmetic = text.slice(index + 3, close === -1 ? text.length : close);
+        recordExpansion(arithmetic);
+        for (const inner of substitutionsIn(arithmetic, false)) addNested(inner);
         appendDynamic();
         index = end + (text[end] === ')' ? 1 : 0);
         return;
@@ -629,6 +682,7 @@ function parseScript(text, options = {}) {
       const close = matchingBrace(text, index + 2);
       const body = text.slice(index + 2, close === -1 ? text.length : close);
       index = close === -1 ? text.length : close + 1;
+      for (const inner of substitutionsIn(body, !quoted)) addNested(inner);
       expandName(body.replace(/^[!#]/, '').match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0] || body, body, quoted);
       return;
     }
@@ -1179,10 +1233,12 @@ function heredocText(body) {
   return body.replace(/\\(?:([$`\\])|\n)/g, (match, char) => char || '');
 }
 
-function stdinCode(item) {
+function stdinCode(item, cwd = null) {
+  const outer = (text) => (cwd === null ? text : expandPwd(text, cwd));
   return [
-    ...item.heredocs.map((heredoc) => (heredoc.quoted ? heredoc.body || '' : heredocText(heredoc.body || ''))),
-    ...item.redirects.filter((redirect) => redirect.op === '<<<').map((redirect) => redirect.word.value),
+    ...item.heredocs.map((heredoc) => (heredoc.quoted ? heredoc.body || '' : heredocText(outer(heredoc.body || '')))),
+    ...item.redirects.filter((redirect) => redirect.op === '<<<')
+      .map((redirect) => (cwd === null ? redirect.word.value : materialized(redirect.word, cwd).value)),
   ];
 }
 
@@ -1326,7 +1382,7 @@ function wordsViolation(words, item, context, depth) {
   if (SHELLS.has(name)) {
     const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
     const scripts = flag === -1
-      ? stdinCode(item)
+      ? stdinCode(item, context.cwd)
       : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
     for (const script of scripts) {
       const nested = scriptViolation(script, context, depth + 1);
@@ -1388,8 +1444,7 @@ function nextDirectories(words, context, current, history) {
   if (targets.length === 0) return name === 'cd' && context.homeForm ? [context.homeForm] : [...history];
   const target = targets[0];
   if (target.dynamic || target.value === '-' || /^[+-][0-9]+$/.test(target.value)) return [...history];
-  const spelled = wordPath(target, context);
-  return [...new Set(current.map((directory) => resolveSpelling(directory, spelled)))];
+  return [...new Set(current.map((directory) => resolveSpelling(directory, wordPath(materialized(target, directory), context))))];
 }
 
 function errexitAfter(words, enabled) {
@@ -1405,12 +1460,12 @@ function errexitAfter(words, enabled) {
 }
 
 function commandItemViolation(item, context, depth) {
-  const words = item.words;
+  const words = item.words.map((word) => materialized(word, context.cwd));
   for (const word of words) {
     if (!ASSIGNMENT_RE.test(word.raw)) break;
     if (SELECTOR_WORD_RE.test(word.raw)) return REASONS.selector;
   }
-  const candidates = [...words, ...item.redirects.map((redirect) => redirect.word)].slice(0, MAX_PATH_WORDS);
+  const candidates = [...words, ...item.redirects.map((redirect) => materialized(redirect.word, context.cwd))].slice(0, MAX_PATH_WORDS);
   for (const word of candidates) {
     const violation = pathWordViolation(word, context);
     if (violation) return violation;

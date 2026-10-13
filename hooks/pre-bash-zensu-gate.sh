@@ -94,13 +94,13 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGI
     }
     return found;
   }
-  let invocations = null;
+  let invocations = tokenInvocations();
   try {
     invocations = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
       .filter((c) => c.name === "zensu")
-      .map((c) => ({ envp: c.environment, rest: c.words }));
-  } catch (_) { invocations = null; }
-  if (!Array.isArray(invocations)) invocations = tokenInvocations();
+      .map((c) => ({ envp: c.environment, rest: c.words }))
+      .concat(invocations);
+  } catch (_) {}
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -127,7 +127,7 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGI
       const t = rest[m];
       if (t === "--api-url") { m++; continue; }
       if (t.charAt(0) === "-") continue;
-      verb = t; break;
+      verb = t.split(/[\t\r\n]/)[0]; break;
     }
     out.push(noun + "\t" + verb);
   }
