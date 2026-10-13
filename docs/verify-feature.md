@@ -44,9 +44,8 @@ and a five-second bound that kills it on every host; the version it prints is re
 self-reported and is never taken as measured, so the run-config helper still refuses to start a
 run on it.
 
-In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
-bundled Zensu monorepo adapter recognizes, or an application you already run
-(`--attach`). `/zensu:verify-feature --setup` writes the recipe with you. The authoritative
+In local mode the skill also needs a **runtime recipe** it can accept, or an application you
+already run (`--attach`). `/zensu:verify-feature --setup` writes the recipe with you. The authoritative
 contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules/setup.md`
 and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
 replace them.
@@ -370,12 +369,9 @@ nothing fits:
 
 1. `--config=<path>`, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`, inspected as a
    **candidate** against the rules below;
-2. the bundled Zensu monorepo adapter (`skills/verify-feature/rules/zensu-monorepo.md`), when
-   the repository carries `backend/cmd/zensu`, `backend/Makefile`, `frontend/package.json`,
-   and `frontend/pnpm-lock.yaml`; it needs macOS, Linux, or WSL;
-3. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
+2. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
    `.zensu/runtime.yaml` with the user, after which resolution restarts at step 1;
-4. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
+3. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
    isolation, and teardown facts. The skill never invents commands.
 
 The design decisions behind consent mode, its residuals and the alternatives that were weighed

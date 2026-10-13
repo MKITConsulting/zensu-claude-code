@@ -142,8 +142,8 @@ raw output to a file there; nothing else keeps it.
 
 ## Known gaps
 
-- The installed `zensu` CLI must provide `zensu work`; until a CLI release carries it, `/zensu:work`
-  refuses in one line.
+- The installed `zensu` CLI must provide `zensu work`, which zensu-cli 0.8.0 is the first release
+  to carry; with an older CLI, `/zensu:work` refuses in one line.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, is not judged; the worker's slot sandbox, not the gate, is the boundary.
 - `--start` releases only runs of the same order. A nonterminal run of another order in a reused
@@ -151,5 +151,6 @@ raw output to a file there; nothing else keeps it.
 - `--review-import` trusts a review marker by its digest, which anyone who knows the order id can
   compute, and it reads only the first part of a review. A review that an earlier attempt published
   only in part is imported as if it were complete.
-- The launcher's process-group handling is POSIX only; Windows is unverified.
+- Work-order mode is unverified on native Windows: the launcher's process-group handling is POSIX
+  only, and the work-order suites skip on that host.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.

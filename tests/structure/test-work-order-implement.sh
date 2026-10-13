@@ -21,6 +21,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "native Windows work-order run skipped (macOS/Linux/WSL required)" PASS
+    finish; exit 0
+    ;;
+esac
+
 for f in "$WRAPPER" "$LOG_HELPER" "$STOP_HOOK" "$STATE_LIB" "$FAKE_LIB" "$BASELINE"; do
   if [ ! -f "$f" ] || ! bash -n "$f" 2>/dev/null; then
     check "I0 required file exists and parses: $f" FAIL

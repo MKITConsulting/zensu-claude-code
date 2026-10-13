@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-12
+
+### Added
+
+- **work-order**: Run Zensu work orders as the reference harness (#428)
+- **session-trail**: Write a receipt for the Session Hub's takeover command (#427)
+- **session-trail**: Carry open task chips over on every takeover (#426)
+- **review**: Import a template workflow review on the first review (#420)
+- **verify-feature**: Approve remote origins at the permission prompt (#412)
+- **tdd**: Split the tdd skill into a router and references (#391)
+- **skills**: Budget skill text and split session-trail into references (#390)
+
+### Changed
+
+- **verify-feature**: Remove the bundled Zensu monorepo adapter (#430)
+- **work-order**: Name zensu-cli 0.8.0 as the first CLI with zensu work (#432)
+- **changelog**: Add the upgrade note for the neutral-subagent tool allowlist (#431)
+- **tests**: File the session-hub-receipt suite in the suite overview (#429)
+- **ci**: Run the eval-harness unit files in a CI suite (#418)
+- **ci**: Run the unit suites daily on a shifted clock (#386)
+- Correct review-guarantee and principal claims (#415)
+- Keep every command run with the main thread in subagent guidance (#411)
+- **stop**: Link L13 and L17d through the Node helpers (#373)
+- **windows**: Make the structure fixtures hold on Git Bash (#407)
+- **evals**: Fit the Windows offline shards into their time budgets (#406)
+- **profile**: Canonicalize and bound the Windows profile sandbox (#405)
+- **structure**: Read unit-file floors from the suite overview (#393)
+
+### Fixed
+
+- **session-trail**: Drop the takeover brief's dead owning-instance line (#436)
+- **verify-feature**: Wait for PostgreSQL and drop the fixed metrics port in the monorepo adapter (#385)
+- **verify-feature**: Keep the monorepo backend's blob store inside the run directory (#425)
+- **chain**: Refuse --tdd-complete when git cannot list the changes (#423)
+- **chain**: Refuse the unqualified terminus when git refuses the repository (#421)
+- **chain**: Count changes before a minted self-review ticket closes a chain (#422)
+- **hooks**: Name no main-thread remedy in a deny a subagent reads (#413)
+- **review**: Describe the configured review panel instead of five aspects (#417)
+- **chain**: Refuse an unqualified --code-review-done on a changed tree (#414)
+- **stop**: Count blocked Stops at the cap and correct the Stop-guard docs (#416)
+- **skills**: Drop the session-id rebind from the review-evidence lease commands (#394)
+- **reviewer-capability**: Align the gauntlet critic packet, docs and C39 with the allowlist (#410)
+- **session-trail**: Ask one plan confirmation per takeover (#408)
+- **verify**: Compare the consent memory directory in native separators (#404)
+- **windows**: Accept a state directory whose mode Git Bash cannot set (#403)
+- **session**: Name a Windows project root in the Stop and deny diagnostics (#402)
+- **windows**: Refuse a symlinked state file where O_NOFOLLOW is missing (#401)
+- **log**: Canonicalize both sides of the truncate anchor natively (#400)
+- **reanchor**: Judge a Windows root on the spelling the shell pastes (#399)
+- **deps**: Close all 33 open Dependabot advisories in the eval tooling (#398)
+- **verify-feature**: Correct the network-only accounts and their eval grading (#397)
+- **redact**: Redact Claude Code's dash-encoded home and project paths (#396)
+- **hooks**: Answer harness prompts with only the user-visible directives (#389)
+- **skills**: Shrink the gauntlet-loop body back under its budget entry (#395)
+- **reviewer-capability**: Confine neutral subagents to a tool allowlist (#387)
+- **hooks**: Keep the plan-approval directive inline and decision-first (#388)
+
 ### Upgrade notes
 
 - **verify-feature**: a remote HTTPS origin no longer needs `ZENSU_VERIFY_NAVIGATION_POLICY_V1`.

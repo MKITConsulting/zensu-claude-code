@@ -726,7 +726,7 @@ through Bash.
   running session was not measured. Pinning the launch-time policy in the Session Control record
   would be a schema change and is left to a separate change.
 - **A session that cannot show the prompt may boot a whole runtime before it is refused.** The preflight
-  and the monorepo controller cannot see the permission mode, so under bypass permissions or
+  cannot see the permission mode, so under bypass permissions or
   `dontAsk` a policy that does not name the run's origin is answered `consent` with a stderr
   note, the runtime starts, and `open` is denied. The skill stops before booting when it sees
   that note in such a session; nothing enforces it.

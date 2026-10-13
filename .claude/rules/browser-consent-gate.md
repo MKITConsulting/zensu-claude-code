@@ -260,7 +260,7 @@ identifiers minted on every run (`/teams/:teamId/sprints/:sprintId`) could never
 exactly, so every protected scenario on them ended PARTIAL. What was removed: the gate's
 `NOT_POLICY_ROUTE` refusal, the recipe route reader behind the prompt's route line
 (`declaredRoutesFromRecipe`, `readRecipeRoutes`, `promptRoutes`), the route operand of
-`--check-policy`, the monorepo controller's `/`-in-routes requirement, and the exact-route
+`--check-policy`, and the exact-route
 coverage the skill demanded of `validate.evidenceSafety`, which is now an optional
 data-classification declaration that gates nothing. Do not reintroduce routes as prompt context
 either: a listed route reads to the human as a limit nothing enforces. **Compatibility is
@@ -534,7 +534,7 @@ retirement's, rides the same mechanism with no check of its own.
   satisfies a later hook `ask` was not measured; if one does, drop that sentence from
   `remotePromptText` and add a doctor finding for the allow rule.
 - **A session that cannot show the prompt may boot a whole runtime before `open` is denied.** The preflight
-  and `parent_origin` cannot see the permission mode, so a policy that does not name the run's
+  cannot see the permission mode, so a policy that does not name the run's
   origin is answered `consent` plus `POLICY_CONSENT_NOTE`, the runtime starts, and the gate then
   denies. The skill's rules stop before booting on that note in such a session; that is prose.
 - **The model can still grant itself a policy** through the `env` block of
@@ -627,9 +627,7 @@ the gate refuse an unpinned or pattern host with the same text. Sites that move 
 `ANSWERABLE_MODES`, `REASONS.REMOTE_NEEDS_POLICY` / `NOT_POLICY_TARGET` / `NOT_POLICY_KIND` and
 their `FINAL_REASONS` entries, `floor.CONSENT_REMOTE_REASON`, `remotePromptText`, the `answerable`
 option of `judgeOrigin`, the helper's `policyVerdict` / `checkPolicy` / `run` and its exported
-`POLICY_CONSENT_NOTE` (pinned by `P6p` and the unit file), `parent_origin` in
-`skills/verify-feature/scripts/zensu-monorepo-runtime.sh` (a valid policy without exactly one
-`http://127.0.0.1:<port>` target falls back to the consent origin), the banner line, the doctor's
+`POLICY_CONSENT_NOTE` (pinned by `P6p` and the unit file), the banner line, the doctor's
 policy, consent and consent-no-recipe rows, and the operator accounts listed above. **Version:
 `patch`** — the gate asks where it denied, the new refusals hit only inputs denied before, and no
 schema field, `decidedBy` value, key set, hook, matcher, config key or attestation moves; a new
