@@ -27,11 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file the gate consults (the `ZENSU_CONFIG` file alone while that variable is set, otherwise the
   global file and the project overlay), and so does a consulted config file that cannot be read.
   While `ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is not read.
-- **CLI write-gate**: the gate now reads a Bash command with the accident guard's shell model, on
-  the main thread too. A `zensu` mutation behind a wrapper (`timeout`, `nice -n`, `env -i`,
-  `xargs`), in a loop or `if` body, in a `bash -c` body, a heredoc a shell reads or `eval` is now
-  gated like a plain one, and text that only names a mutation, such as a search pattern, a commit
-  message or a heredoc fed to `cat`, is no longer denied.
+- **CLI write-gate**: the gate now also reads a Bash command with the accident guard's shell model,
+  on the main thread too, and gates every invocation that model or its token scan finds. A `zensu`
+  mutation behind a wrapper (`timeout`, `nice -n`, `env -i`, `xargs`), in a loop or `if` body, in
+  a `bash -c` body, a heredoc a shell reads, `eval` or a command substitution inside a parameter
+  expansion is now gated like a plain one, and every command the token scan denied before is still
+  denied.
 
 ## [0.26.0] - 2026-10-12
 

@@ -320,10 +320,10 @@ unverified regardless of how many checks passed before it.
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `cmd0` anchoring depends on — is hand-duplicated as a JS literal in
-`hooks/pre-bash-zensu-gate.sh`, where it now serves only that gate's fallback token scan: the
-CLI gate itself unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger
-set, so `timeout`, `xargs` or `stdbuf` in front of a command is transparent to the CLI gate and
-not to rule (C).
+`hooks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
+unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
+what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is
+transparent to the CLI gate and not to rule (C).
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the
@@ -346,7 +346,7 @@ user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
 export, the specifier and the degrade-on-load-failure behaviour. Removing either
 `within` or `msysToDrive` from the export list therefore breaks a shipped skill,
 not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
-against its `pre-bash-zensu-gate.sh` fallback copy — check that one by hand. A THIRD wrapper set sits on
+against its `pre-bash-zensu-gate.sh` copy — check that one by hand. A THIRD wrapper set sits on
 the same `Bash` matcher and is deliberately NOT a copy of `WRAP`: `commandPosition` in
 `hooks/lib/verify-consent-v1.js` skips `command`, `builtin`, `exec`, `nohup`, `time`, `nice`,
 `timeout`, `gtimeout`, `env`, `sudo` and `doas`, with one operand list shared by the last three.

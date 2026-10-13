@@ -79,7 +79,8 @@ after it normalizes backslashes, quotes, `$HOME` and `~`, the `$PWD` and
 mention of a protected form, a `.zensu` segment, or a `/proc/<pid>/environ` path. The comments of
 the `command` field are blanked first. Then `parseScript` parses the `command` field as shell:
 single and double quotes, `$'…'`, backslash escapes, `$(…)`, backticks and process substitution,
-parameter and arithmetic expansion, comments, brace expansion, redirections (kept apart from the
+parameter and arithmetic expansion (a command substitution inside either is a nested script),
+comments, brace expansion, redirections (kept apart from the
 command words), heredocs (data with the escapes of an unquoted heredoc, parsed as a script only
 when a shell reads them and as code only when an interpreter does, while a `$(…)` in an unquoted
 heredoc is judged) and `(`/`)` subshells. Per simple command, in every working directory it may
@@ -97,8 +98,8 @@ run in, it checks, in this order:
   unwrapped, with `env -C` and `sudo -D` moving the inner command's directory: `setsid`,
   `disown` and `coproc`, an `eval` body, a Zensu helper name outside `READ_ONLY_COMMANDS`, a
   shell's `-c` body (also when the outer shell expands part of it: the reparse keeps such a part
-  unknown, and a quoted `$PWD`, `$(pwd)` or `$(git rev-parse --show-toplevel)` after a blank or
-  an operator keeps its spelling), heredoc or here-string, interpreter code that dumps the environment or reads
+  unknown, and `$PWD` and `$(pwd)` arrive as the absolute directory the outer shell expanded them
+  in), heredoc or here-string, interpreter code that dumps the environment or reads
   a selector (`node`/`bun -e|-p`, `python -c`, `ruby` and `perl -e`, `php -r`, `deno eval`,
   `pwsh -c`, an `awk` or `jq` program, and the heredoc or here-string an interpreter reads as its
   script), a selector builtin or `test -v`, an environment dump (also redirected into a file), a
@@ -119,8 +120,12 @@ joined by `&&` replaces the set for the rest of that list; any other separator a
 directories to the old ones. `cd x || exit` and a `cd` under `set -e` keep only the new
 directory. `cd -`, `popd` and a dynamic target fall back to every directory seen so far,
 `command cd` and `builtin cd` count, and a subshell restores the set it started with.
-`$(git rev-parse --show-toplevel)` stands for the project root and `$(pwd)` for the current
-directory. A command whose set grows past 64 directories is denied (`directories`).
+`$(git rev-parse --show-toplevel)` stands for the project root. `$PWD` and `$(pwd)` stand for the
+absolute directory of the command whose word holds them: the parse writes `PWD_MARK`, and
+`materialized` replaces it per candidate directory before any rule reads the word, so a `-c`,
+`eval` or heredoc body that changes directory and a `git -C` or `env -C` operand still see the
+directory the outer shell expanded them in. A command whose set grows past 64 directories is
+denied (`directories`).
 
 **Decisions.**
 
@@ -144,12 +149,17 @@ directory. A command whose set grows past 64 directories is denied (`directories
   for a subagent leaves the prefix out, and the guard also denies that assignment.
 - `mcpGate: false` and a host-environment `ZENSU_MCP_GATE=off` switch the CLI gate off for the
   subagent too. The operator chose that; the guard does not re-implement the CLI map.
-- The CLI gate reads command words through `commandInvocations`, this module's walker over
-  `parseScript`: reserved words, assignments, `WRAPPERS` with their options, `-c` bodies, a
-  heredoc or here-string a shell reads, `eval` and substitutions resolve the same way in both
-  hooks, on the main thread too, and an assignment in front of a wrapper or a shell reaches the
-  command inside it. The gate runs the walker only when the command holds `zensu` as a word of
-  its own, and it keeps its own token scan as the fallback when the module cannot load.
+- The CLI gate gates every invocation that `commandInvocations`, this module's walker over
+  `parseScript`, or its own token scan finds, on the main thread too. The walker resolves
+  reserved words, assignments, `WRAPPERS` with their options, `-c` bodies, a heredoc or
+  here-string a shell reads, `eval` and substitutions the same way in both hooks, and an
+  assignment in front of a wrapper or a shell reaches the command inside it. The token scan splits
+  the text at separators whatever the quoting and keeps every deny it made before, such as a
+  `zensu` call after `&&` inside an `ssh` or `su -c` command string, which the walker does not
+  run, and its false positive on a heredoc line fed to `cat`. The gate
+  runs the walker only when the command holds `zensu` as a word of its own, runs the token scan
+  alone when the module cannot load, and keeps only the first line of a verb word, so a word that
+  decodes to a line break cannot add a line to its tab-separated output.
 - Guidance stays conservative. Skill text keeps every gate, every test whose result counts as
   evidence, every commit and every `zensu` call with the main thread, because the grant can be
   switched off, the guard can refuse, and the guard's helper rule refuses a subagent
@@ -178,9 +188,11 @@ directory. A command whose set grows past 64 directories is denied (`directories
   `evals/session-control/scenarios/catalog.yaml`. The same contract drives the guard deny for
   environment, selector and helper commands, the two documented obfuscation gaps as allowed, and
   the allowlist deny for unlisted tools.
-- `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 and B39 in
-  `tests/structure/test-bash-zensu-gate.sh` drive it and the fallback, and the walker test in
-  `subagent-shell-guard-v1.test.js` pins what it finds.
+- `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 in
+  `tests/structure/test-bash-zensu-gate.sh` drives it, B39a-B39c drive the token scan alone
+  through a bound plugin copy without the module, P5n3 in `tests/structure/test-bypass-ledger.sh`
+  pins the line-break guard, and the walker test in `subagent-shell-guard-v1.test.js` pins what
+  it finds.
 - `tests/structure/test-gauntlet-loop-skill.sh`: G0 requires the guard module, G8 pairs the
   skill's guarded-`Bash` claim and its two conditions with `isShellCall`, `CONFIG_KEY` and the
   `agent_type` refusal, G15 pins the allowlist bound, and G16 and G19 hold the skill's and the
@@ -216,8 +228,10 @@ directory. A command whose set grows past 64 directories is denied (`directories
 - No banner or `/zensu:doctor` row discloses the grant.
 - Windows spellings are unit-tested with a stub filesystem only.
 - The CLI gate does not see a `zensu` name assembled from variables, a call made from interpreter
-  code, a `find -exec` command, a pipe into a shell or a command read from a file, and its token
-  fallback misses wrapped, loop and `-c` forms.
+  code, a `find -exec` command, a pipe into a shell or a command read from a file. It sees a call
+  that `ssh`, `su`, `docker exec` or `kubectl exec` runs only when a separator such as `&&`
+  precedes the call in the command text. When the module cannot load, its token scan alone misses
+  wrapped, loop and `-c` forms.
 
 **Version: `minor`.** A named neutral child gains `Bash`, and the gates deny more in three places:
 a neutral child's file edit of a Zensu config layer, a subagent's `zensu` CLI mutation behind

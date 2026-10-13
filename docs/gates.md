@@ -49,13 +49,19 @@ security-review conventions the skills enforce. Reads and telemetry are always a
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
 name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
-source of truth. It reads the command with the shell model of the subagent accident guard
-(`hooks/lib/subagent-shell-guard-v1.js`): an invocation behind a wrapper such as `timeout`,
-`nice -n`, `env -i` or `xargs`, in a loop or `if` body, in a `bash -c` body or a heredoc a shell
-reads, in `eval` or in a command substitution counts, and text that only names one, such as a
-search pattern or a heredoc fed to `cat`, does not. When that module cannot load, a token scan
-that sees fewer forms takes over. A command name assembled from variables, a call made from
-interpreter code and a `find -exec` command are not seen. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
+source of truth. It reads the command twice and gates every invocation either reading finds. The
+shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
+invocation behind a wrapper such as `timeout`, `nice -n`, `env -i` or `xargs`, in a loop or `if`
+body, in a `bash -c` body or a heredoc a shell reads, in `eval`, and in a command substitution,
+also one inside a parameter or arithmetic expansion. The gate's own token scan splits the text at
+separators such as `;`, `&&`, `|` and a line break, whatever the quoting, and keeps every
+invocation it found before. So a call that follows `&&` inside an `ssh` or `su -c` command string
+is gated, and a line inside a heredoc fed to `cat` that names a mutation is still denied. A search
+pattern that names a mutation passes unless a separator precedes the name inside it. When the
+module cannot load, the token scan runs alone. A command name assembled from variables, a call
+made from interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
+`docker exec` or `kubectl exec` runs is seen only when a separator precedes it in the command
+text. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
 is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
 conventions, not a security control (the same role, and the same `ZENSU_MCP_GATE=off` escape, as
 the MCP write-gate it replaced).
