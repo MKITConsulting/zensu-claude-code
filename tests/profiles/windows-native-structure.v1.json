@@ -113,6 +113,22 @@
     {
       "path": "tests/structure/test-harness-launcher.sh",
       "reason": "The launcher run is explicitly unsupported and skipped on native Windows: the launcher stops its session through POSIX process groups, and the suite starts a fake claude through its shebang line. H1 also carries a win32 guard, because that host has no executable bit to check."
+    },
+    {
+      "path": "tests/structure/test-work-order-runtime.sh",
+      "reason": "Work-order mode is unverified on native Windows and the suite skips there: its fake zensu is a shell script on PATH, and the runtime starts zensu through Node without a shell, which cannot run such a script on that host."
+    },
+    {
+      "path": "tests/structure/test-work-order-implement.sh",
+      "reason": "Work-order mode is unverified on native Windows and the suite skips there: its fake zensu is a shell script on PATH, and the runtime starts zensu through Node without a shell, which cannot run such a script on that host."
+    },
+    {
+      "path": "tests/structure/test-work-order-gates.sh",
+      "reason": "Work-order mode is unverified on native Windows and the suite skips there: its fake zensu is a shell script on PATH, and the runtime starts zensu through Node without a shell, which cannot run such a script on that host. Outside the mode each hook exits after one environment check, before any Node call."
+    },
+    {
+      "path": "tests/structure/test-work-order-takeover.sh",
+      "reason": "Work-order mode is unverified on native Windows and the suite skips there: its fake zensu is a shell script on PATH, and the runtime starts zensu through Node without a shell, which cannot run such a script on that host."
     }
   ]
 }
