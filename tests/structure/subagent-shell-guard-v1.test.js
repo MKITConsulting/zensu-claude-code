@@ -10,6 +10,7 @@ const test = require('node:test');
 const ROOT = path.join(__dirname, '..', '..');
 const guard = require(path.join(ROOT, 'hooks', 'lib', 'subagent-shell-guard-v1.js'));
 const CONFIG_SH = path.join(ROOT, 'hooks', 'lib', 'zensu-config.sh');
+const FIXTURE_FILESYSTEM_ROOT = path.parse(os.tmpdir()).root.replace(/\\/g, '/');
 
 function tempDir(label) {
   const created = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `shell-guard-${label}-`)));
@@ -243,7 +244,7 @@ const DENIED = [
   ['rm -rf $(pwd)', guard.REASONS.projectRoot],
   ['rm -rf "$PWD"', guard.REASONS.projectRoot],
   ['rm -rf ~', guard.REASONS.projectRoot],
-  ['rm -rf /', guard.REASONS.projectRoot],
+  [`rm -rf ${FIXTURE_FILESYSTEM_ROOT}`, guard.REASONS.projectRoot],
   ['mv . ../elsewhere', guard.REASONS.projectRoot],
   ['rmdir ../project', guard.REASONS.projectRoot],
   ['rm -rf "$(git rev-parse --show-toplevel)"', guard.REASONS.projectRoot],
@@ -555,11 +556,12 @@ test('the shell violation carries the guard tail and separates grant from guard'
 });
 
 function shellStrict(env) {
-  const result = spawnSync('bash', ['-c', 'source "$1"; if zensu_hook_enabled_strict subagentShell; then printf 1; else printf 0; fi', 'zensu-config', CONFIG_SH], {
+  const result = spawnSync('bash', ['-c', 'source "$1"; printf "%s\\n" "${HOME-}"; if zensu_hook_enabled_strict subagentShell; then printf 1; else printf 0; fi', 'zensu-config', CONFIG_SH], {
     env: { PATH: process.env.PATH, ...env },
     encoding: 'utf8',
   });
-  return result.stdout;
+  const [home = '', verdict = ''] = result.stdout.split('\n');
+  return { home, verdict };
 }
 
 test('the strict flag reader agrees with zensu_hook_enabled_strict', () => {
@@ -603,8 +605,10 @@ test('the strict flag reader agrees with zensu_hook_enabled_strict', () => {
     }
     if (files.explicitAbsent) env.ZENSU_CONFIG = path.join(base, 'missing.json');
     if (files.explicitBroken) env.ZENSU_CONFIG = `${path.join(base, 'broken')}\n.json`;
-    const js = guard.strictFlagEnabled(guard.CONFIG_KEY, env) ? '1' : '0';
-    assert.equal(js, shellStrict(env), label);
+    const shell = shellStrict(env);
+    const observed = env.HOME === undefined && shell.home !== '' ? { ...env, HOME: shell.home } : env;
+    const js = guard.strictFlagEnabled(guard.CONFIG_KEY, observed) ? '1' : '0';
+    assert.equal(js, shell.verdict, label);
   }
 });
 
@@ -628,9 +632,10 @@ test('the config authorities name every layer, a superset of the strict candidat
 });
 
 test('the strict candidates mirror the shell reader', () => {
-  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }), ['/x/c.json']);
-  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
-  assert.deepEqual(guard.strictCandidates({ HOME: '' }), []);
+  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }, 'linux'), ['/x/c.json']);
+  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }, 'linux'), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
+  assert.deepEqual(guard.strictCandidates({ HOME: '' }, 'linux'), []);
+  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }, 'win32'), ['X:/c.json']);
   assert.deepEqual(guard.strictCandidates({ HOME: '/c/Users/dev' }, 'win32'), ['C:/Users/dev/.zensu/config.json']);
 });
 
@@ -652,6 +657,7 @@ test('Windows spellings reach the same rules', () => {
   assert.equal(reason('rm -rf ~/.claude/plugins'), guard.REASONS.protectedParent);
   assert.equal(reason('rm -rf /c/Users/dev/work/project'), guard.REASONS.projectRoot);
   assert.equal(reason('rm -rf C:\\Users\\dev\\work'), guard.REASONS.projectRoot);
+  assert.equal(reason('rm -rf /c'), guard.REASONS.projectRoot);
   assert.equal(reason('type .ZENSU\\state\\x.json'), guard.REASONS.workflowDirectory);
   assert.equal(reason('git.exe clean -fd'), 'the command runs a git operation that removes or reverts work (git clean)');
   assert.equal(reason('ls src'), null);

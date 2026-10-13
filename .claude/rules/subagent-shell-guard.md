@@ -237,6 +237,12 @@ grows past 64 directories is denied (`directories`).
   accepts both deny reasons, so it does not measure this either.
 - No banner or `/zensu:doctor` row discloses the grant.
 - Windows spellings are unit-tested with a stub filesystem only.
+- On win32 a rooted word without a drive, such as `/`, resolves against the current drive of
+  the guard's node process, while Git Bash reads it below its own install root. The Windows
+  runner keeps the unit fixtures under TEMP on `C:` and runs the suites from the repository on
+  `D:`, so `rm -rf /` is no parent of a fixture there. The unit lists therefore name the root
+  of the fixtures' filesystem, `/` on POSIX and `C:/` on the runner, and the Windows spellings
+  case pins the MSYS drive root `/c`.
 - The CLI gate does not see a `zensu` name assembled from variables, a call made from interpreter
   code, a `find -exec` command, a pipe into a shell or a command read from a file. It sees a call
   that `ssh`, `su`, `docker exec` or `kubectl exec` runs only when a separator such as `&&`

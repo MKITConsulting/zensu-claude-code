@@ -1009,7 +1009,11 @@ if node --test --test-reporter=tap "$GUARD_UNIT" >"$TMP/guard-unit.out" 2>&1 \
    && [ -n "$GUARD_FLOOR" ] && unit_cases_registered_floor "$TMP/guard-unit.out" "$GUARD_FLOOR"; then
   check "the shell guard unit suite passes with at least $GUARD_FLOOR registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" PASS
 else
-  sed 's/^/    /' "$TMP/guard-unit.out" | tail -40
+  if grep -q '^not ok ' "$TMP/guard-unit.out"; then
+    awk '/^not ok /{show=1} show{print "    " $0} show && /^  \.\.\.$/{show=0}' "$TMP/guard-unit.out"
+  else
+    sed 's/^/    /' "$TMP/guard-unit.out" | tail -40
+  fi
   check "the shell guard unit suite passes with at least ${GUARD_FLOOR:-<no overview row>} registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" FAIL
 fi
 if GUARD_OVERVIEW="$(unit_overview_check "$GUARD_UNIT")"; then
