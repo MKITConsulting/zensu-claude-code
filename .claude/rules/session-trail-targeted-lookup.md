@@ -58,6 +58,9 @@ other admitted transcript to find its siblings.
   Otherwise the probe can find a first cwd the row never sees and drop a real sibling.
 - `CCD_RECORD_PATHS` has two writers, `ccdIndex` and `ccdApp`, and both keep the last match in
   walk order; `openTaskChips` calls `ccdApp` and then reads the path.
+- `ccdAppEntry` is the one desktop-entry builder, and `ccdIndex` and `ccdApp` both call it.
+  `DR3` in the verdict suite derives the stored key set from it and fails when either walk
+  builds its entry another way.
 - The `T22` guards in `test-session-trail-skill.sh` pin the `projectDirs`, `entries`,
   `summarize` and desktop-store `readdirSync` statements by their spelling.
 

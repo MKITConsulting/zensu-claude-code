@@ -7442,23 +7442,26 @@ dr_field_scan() {
   node -e '
 const fs = require("node:fs");
 const code = `${fs.readFileSync(process.argv[1], "utf8")}\n${process.argv[2]}`.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
-const start = code.indexOf("function ccdIndex() {");
-const body = start < 0 ? "" : code.slice(start, code.indexOf("\n}\n", start));
-const lit = /map\.set\(o\.cliSessionId, \{([\s\S]*?)\}\);/.exec(body);
-const stored = new Set(lit ? [...lit[1].matchAll(/^\s*([A-Za-z_$][\w$]*):/gm)].map((m) => m[1]) : []);
+const fn = (head) => { const at = code.indexOf(head); return at < 0 ? "" : code.slice(at, code.indexOf("\n}\n", at)); };
+const lit = /return \{([\s\S]*?)\};/.exec(fn("function ccdAppEntry("));
+const stored = new Set(lit ? [...lit[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*(?::|,|$)/gm)].map((m) => m[1]) : []);
 const read = new Set([...code.matchAll(/[^\w$]app\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
-process.stdout.write(`${[...stored].sort().join(",")}|${[...read].filter((f) => !stored.has(f)).sort().join(",")}`);
+const bypass = ["function ccdIndex() {", "function ccdApp("].filter((h) => !fn(h).includes("ccdAppEntry(")).map((h) => h.split(/[ (]/)[1]);
+process.stdout.write(`${[...stored].sort().join(",")}|${[...read].filter((f) => !stored.has(f)).sort().join(",")}|${bypass.join(",")}`);
 ' "$TRAIL_MJS" "${1:-}"
 }
 DR_SCAN="$(dr_field_scan)"
 DR_STORED="${DR_SCAN%%|*}"
+DR_REST="${DR_SCAN#*|}"
 DR_CTRL="$(dr_field_scan '  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);')"
+DR_CTRL_REST="${DR_CTRL#*|}"
 DR_BAD=""
 case ",$DR_STORED," in *,accountUuid,*archived,*) ;; *) DR_BAD="$DR_BAD stored-keys-not-derived($DR_STORED)" ;; esac
-[ -z "${DR_SCAN#*|}" ] || DR_BAD="$DR_BAD reads-unstored:${DR_SCAN#*|}"
-[ "${DR_CTRL#*|}" = "instance" ] || DR_BAD="$DR_BAD control-read-not-reported(${DR_CTRL#*|})"
+[ -z "${DR_REST%%|*}" ] || DR_BAD="$DR_BAD reads-unstored:${DR_REST%%|*}"
+[ -z "${DR_REST#*|}" ] || DR_BAD="$DR_BAD entry-built-outside-ccdAppEntry:${DR_REST#*|}"
+[ "${DR_CTRL_REST%%|*}" = "instance" ] || DR_BAD="$DR_BAD control-read-not-reported(${DR_CTRL_REST%%|*})"
 [ -z "$DR_BAD" ] \
-  && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdIndex stores ($DR_STORED), and the same scan reports a read of an unstored field" PASS \
+  && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdAppEntry stores ($DR_STORED), ccdIndex and ccdApp both build through it, and the same scan reports a read of an unstored field" PASS \
   || check "DR3 desktop-record field reads:$DR_BAD" FAIL
 
 RO_HOME="$(cd "$FAKE" && pwd -P)/readonly-git"
