@@ -73,6 +73,17 @@ run() {
   out="$(payload "$cmd" "$at" gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ${sd:+STATE_DIR=$sd} bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
+large_payload() {
+  node -e '
+    const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"zensu security classify f1 --reason \x27"+"a".repeat(700000)+"\x27"},session_id:"gate-test",cwd:"/tmp"};
+    if(process.argv[2]) { o.agent_id="gate-subagent-1"; o.agent_type=process.argv[2]; }
+    require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+  ' "$1" "${2:-}"
+}
+run_large() {
+  env LARGE_PAD_A="$LARGE_PAD" LARGE_PAD_B="$LARGE_PAD" LARGE_PAD_C="$LARGE_PAD" \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$1" 2>/dev/null
+}
 
 CFG_ON="$(mktemp -t bashgate-on-XXXXXX)";   printf '%s' '{"hooks":{"mcpGate":true}}'  > "$CFG_ON"
 CFG_OFF="$(mktemp -t bashgate-def-XXXXXX)";  printf '%s' '{"hooks":{}}'                 > "$CFG_OFF"
@@ -81,6 +92,14 @@ PROJECT="$(mktemp -d -t bashgate-project-XXXXXX)"
 export CLAUDE_PROJECT_DIR="$PROJECT"
 # shellcheck disable=SC1091
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" gate-test
+LARGE_PAD=
+if [ "$(uname -s)" = Darwin ]; then
+  LARGE_PAD="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+LARGE_MAIN="$PROJECT/large-main.json"
+LARGE_SUB="$PROJECT/large-subagent.json"
+large_payload "$LARGE_MAIN"
+large_payload "$LARGE_SUB" general-purpose
 
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
@@ -95,6 +114,13 @@ run "B17 auth login (neutral)"              "zensu auth login"                  
 run "B17b version flag"                     "zensu --version"                                            '' ALLOW
 run "B18 knowledge search (POST-but-read)"  "zensu knowledge search --query x"                           '' ALLOW
 run "B25 compound: read && mutation"        "zensu features get f1 && zensu security classify f2"        '' DENY
+LARGE_OUT="$(run_large "$LARGE_MAIN")"
+if [ "$(printf '%s' "$LARGE_OUT" | classify)" = "DENY" ] \
+   && printf '%s' "$LARGE_OUT" | grep -qF "maps to 'set_security_classification'"; then
+  check "B40 a mutation in a payload over the exec size limit is still parsed and denied" PASS
+else
+  check "B40 oversized-payload mutation (got '$(printf '%s' "$LARGE_OUT" | cut -c1-160)')" FAIL
+fi
 
 # B8 workflow-active (skill running) -> mutation in declared set ALLOW
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
@@ -102,6 +128,13 @@ tdd_workflow_begin gate-test "set_security_classification" "$(( $(date +%s) + 36
 run "B8 mutation + workflowActive (in set)" "zensu security classify f1"                                '' ALLOW
 run "B8a arbitrary subagent cannot borrow the active main workflow window" "zensu security classify f1" general-purpose DENY
 run "B8b arbitrary subagent keeps Zensu CLI reads" "zensu features get f1" general-purpose ALLOW
+LARGE_OUT="$(run_large "$LARGE_SUB")"
+if [ "$(printf '%s' "$LARGE_OUT" | classify)" = "DENY" ] \
+   && printf '%s' "$LARGE_OUT" | grep -qF 'reserved for the interactive main thread'; then
+  check "B40b a subagent mutation in a payload over the exec size limit cannot borrow the active main workflow window" PASS
+else
+  check "B40b oversized subagent payload (got '$(printf '%s' "$LARGE_OUT" | cut -c1-160)')" FAIL
+fi
 run "B27b out-of-scope mutation -> DENY"    "zensu link test f1 --test-type unit --file a.go"            '' DENY
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
