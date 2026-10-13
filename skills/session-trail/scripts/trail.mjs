@@ -228,9 +228,11 @@ function exitAfterOwnDiagnostic(code = 1) {
   process.exit(code);
 }
 
+const READ_ONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'diff.autoRefreshIndex=false'];
+
 function git(cwd, args) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
@@ -4736,11 +4738,12 @@ function gitDiffText(cwd, base, maxLines) {
     const lines = s.split('\n');
     return lines.length > maxLines ? `${lines.slice(0, maxLines).join('\n')}\n…[${lines.length - maxLines} more lines]` : s;
   };
+  const diff = (...args) => cut(git(cwd, ['diff', '--no-ext-diff', '--no-textconv', ...args]));
   return {
-    uncommitted: cut(git(cwd, ['diff'])),
-    staged: cut(git(cwd, ['diff', '--cached'])),
+    uncommitted: diff(),
+    staged: diff('--cached'),
     untracked: (git(cwd, ['ls-files', '--others', '--exclude-standard']) || '').split('\n').filter(Boolean).slice(0, 40),
-    branchDiff: base ? cut(git(cwd, ['diff', `${base}...HEAD`])) : null,
+    branchDiff: base ? diff(`${base}...HEAD`) : null,
   };
 }
 
@@ -5777,8 +5780,8 @@ function cmdRelease(opts) {
       }
     }
     if (opts.git) {
-      const status = git(root, ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain', '--ignored']);
-      const count = git(root, ['--no-optional-locks', 'rev-list', '--count', 'HEAD', '--not', '--remotes']);
+      const status = git(root, ['status', '--porcelain', '--ignored']);
+      const count = git(root, ['rev-list', '--count', 'HEAD', '--not', '--remotes']);
       const rows = status === null ? null : status.split('\n').filter(Boolean);
       const zensuHoldsOnlyState = () => {
         try { return fs.readdirSync(path.join(root, '.zensu')).every((name) => name === 'state'); } catch { return false; }

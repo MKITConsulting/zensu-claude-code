@@ -7461,4 +7461,184 @@ case ",$DR_STORED," in *,accountUuid,*archived,*) ;; *) DR_BAD="$DR_BAD stored-k
   && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdIndex stores ($DR_STORED), and the same scan reports a read of an unstored field" PASS \
   || check "DR3 desktop-record field reads:$DR_BAD" FAIL
 
+RO_HOME="$(cd "$FAKE" && pwd -P)/readonly-git"
+RO_REPO="$RO_HOME/repo"
+RO_HOOK="$RO_HOME/fsmonitor-hook"
+RO_LOG="$RO_HOME/fsmonitor.log"
+RO_SID=ab0ab0ab-0000-0000-0000-000000000071
+mkdir -p "$RO_HOME"
+cat > "$RO_HOOK" <<RO_HOOK_BODY
+#!/bin/sh
+echo ran >> "$RO_LOG"
+exit 1
+RO_HOOK_BODY
+ro_prime() {
+  node -e '
+const fs = require("node:fs");
+const [file, index, log, step] = process.argv.slice(1);
+const touched = new Date(Date.UTC(2021, 0, 1, 0, Number(step)));
+fs.utimesSync(file, touched, touched);
+const old = new Date(Date.UTC(2020, 0, 1));
+fs.utimesSync(index, old, old);
+fs.writeFileSync(log, "");
+' "$RO_REPO/stat-only.txt" "$RO_REPO/.git/index" "$RO_LOG" "$1"
+}
+ro_index_mtime() { node -e 'process.stdout.write(String(require("node:fs").statSync(process.argv[1]).mtimeMs))' "$RO_REPO/.git/index" 2>/dev/null; }
+ro_hook_runs() { if [ -s "$RO_LOG" ]; then wc -l < "$RO_LOG" | tr -d ' '; else echo 0; fi; }
+ro_trail() { ( unset GIT_OPTIONAL_LOCKS; trailrun "$@" ); }
+
+RO_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO_HOOK" \
+  && git init -q "$RO_REPO" >/dev/null 2>&1 \
+  && printf 'stat only\n' > "$RO_REPO/stat-only.txt" \
+  && printf 'base\n' > "$RO_REPO/edited.txt" \
+  && git -C "$RO_REPO" add stat-only.txt edited.txt >/dev/null 2>&1 \
+  && git -C "$RO_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && git -C "$RO_REPO" config core.fsmonitor "$RO_HOOK" >/dev/null 2>&1 \
+  && printf 'base\nedited\n' > "$RO_REPO/edited.txt" \
+  && fix "$RO_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO_REPO"; then
+  RO_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO* git is not on PATH — the read-only git checks need a real repository and are unverified in this run"
+elif [ "$RO_OK" != 1 ]; then
+  check "RO-fixture the read-only git fixture (a stat-dirty tracked file, an edited one and a logging fsmonitor hook) could not be built" FAIL
+else
+  RO_BAD=""
+  RO_STEP=0
+  for RO_VERB in takeover show handoff; do
+    RO_STEP=$((RO_STEP + 1))
+    ro_prime "$RO_STEP"
+    RO_BEFORE="$(ro_index_mtime)"
+    if [ "$RO_VERB" = takeover ]; then
+      RO_OUT="$(ro_trail takeover "$RO_SID" --all --no-record --json 2>/dev/null)"; RO_RC=$?
+      RO_SEEN="$(printf '%s' "$RO_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const files = (o.git && o.git.dirtyFiles) || [];
+  const diff = (o.diff && o.diff.uncommitted) || "";
+  const ok = o.git && o.git.dirty === 1 && files.some((f) => f.endsWith("edited.txt")) && /^\+edited$/m.test(diff) && !diff.includes("stat-only.txt");
+  process.stdout.write(ok ? "ok" : `dirty=${o.git && o.git.dirty} files=${files.join(",")}`);
+});
+')"
+    else
+      RO_OUT="$(ro_trail "$RO_VERB" "$RO_SID" --all 2>/dev/null)"; RO_RC=$?
+      if printf '%s' "$RO_OUT" | grep -qF 'edited.txt' && ! printf '%s' "$RO_OUT" | grep -qF 'stat-only.txt'; then RO_SEEN=ok; else RO_SEEN=edited-file-not-listed; fi
+    fi
+    [ "$RO_RC" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:rc=$RO_RC"
+    [ "$RO_SEEN" = ok ] || RO_BAD="$RO_BAD $RO_VERB:git-state-not-read($RO_SEEN)"
+    { [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" = "$(ro_index_mtime)" ]; } || RO_BAD="$RO_BAD $RO_VERB:index-rewritten"
+    [ "$(ro_hook_runs)" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:fsmonitor-hook-ran"
+  done
+  if [ -z "$RO_BAD" ]; then
+    check "RO1 takeover, show and handoff read the source worktree's git state without rewriting its index or running its fsmonitor hook" PASS
+  else
+    check "RO1 read-only git in the source worktree:$RO_BAD" FAIL
+  fi
+
+  RO_STEP=$((RO_STEP + 1))
+  ro_prime "$RO_STEP"
+  RO_BEFORE="$(ro_index_mtime)"
+  ( unset GIT_OPTIONAL_LOCKS; git -C "$RO_REPO" status --porcelain >/dev/null 2>&1 )
+  RO_AFTER="$(ro_index_mtime)"
+  RO_RUNS="$(ro_hook_runs)"
+  if [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" != "$RO_AFTER" ] && [ "$RO_RUNS" != 0 ]; then
+    check "RO1-control a plain git status in the same fixture rewrites the index and runs the fsmonitor hook, so RO1 measured both" PASS
+  else
+    check "RO1-control a plain git status left the index at ${RO_AFTER:-?} (was ${RO_BEFORE:-?}) and ran the hook $RO_RUNS times, so RO1 proved nothing here" FAIL
+  fi
+fi
+
+RO2_HOME="$(cd "$FAKE" && pwd -P)/diff-drivers"
+RO2_REPO="$RO2_HOME/repo"
+RO2_TEXTCONV="$RO2_HOME/textconv"
+RO2_EXTERNAL="$RO2_HOME/external-diff"
+RO2_TEXTCONV_LOG="$RO2_HOME/textconv.log"
+RO2_EXTERNAL_LOG="$RO2_HOME/external-diff.log"
+RO2_SID=ab0ab0ab-0000-0000-0000-000000000072
+mkdir -p "$RO2_HOME"
+cat > "$RO2_TEXTCONV" <<RO2_TEXTCONV_BODY
+#!/bin/sh
+echo ran >> "$RO2_TEXTCONV_LOG"
+tr 'a-z' 'A-Z' < "\$1"
+RO2_TEXTCONV_BODY
+cat > "$RO2_EXTERNAL" <<RO2_EXTERNAL_BODY
+#!/bin/sh
+echo ran >> "$RO2_EXTERNAL_LOG"
+echo EXTERNAL-DIFF-DRIVER-OUTPUT
+RO2_EXTERNAL_BODY
+ro2_reset() { : > "$RO2_TEXTCONV_LOG"; : > "$RO2_EXTERNAL_LOG"; }
+ro2_runs() { if [ -s "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+ro2_git() { ( unset GIT_EXTERNAL_DIFF; git -C "$RO2_REPO" "$@" ); }
+
+RO2_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO2_TEXTCONV" "$RO2_EXTERNAL" \
+  && git init -q "$RO2_REPO" >/dev/null 2>&1 \
+  && ro2_git symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 \
+  && printf '*.conv diff=logconv\n' > "$RO2_REPO/.gitattributes" \
+  && printf 'alpha\nbeta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add .gitattributes notes.conv >/dev/null 2>&1 \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && ro2_git checkout -q -b feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -am feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add notes.conv >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\nepsilon\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git config diff.logconv.textconv "$RO2_TEXTCONV" >/dev/null 2>&1 \
+  && ro2_git config diff.external "$RO2_EXTERNAL" >/dev/null 2>&1 \
+  && fix "$RO2_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO2_REPO"; then
+  RO2_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO2* git is not on PATH — the diff-driver checks need a real repository and are unverified in this run"
+elif [ "$RO2_OK" != 1 ]; then
+  check "RO2-fixture the diff-driver fixture (a logging textconv driver, a logging diff.external driver, and a committed, a staged and an unstaged edit of one file) could not be built" FAIL
+else
+  ro2_reset
+  RO2_OUT="$( ( unset GIT_EXTERNAL_DIFF; trailrun takeover "$RO2_SID" --all --no-record --json ) 2>/dev/null)"; RO2_RC=$?
+  RO2_SEEN="$(printf '%s' "$RO2_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const d = o.diff || {};
+  const raw = (key, line) => {
+    const lines = (typeof d[key] === "string" ? d[key] : "").split("\n");
+    return lines.includes("diff --git a/notes.conv b/notes.conv") && lines.includes(line);
+  };
+  const missing = [["uncommitted", "+epsilon"], ["staged", "+delta"], ["branchDiff", "+gamma"]].filter(([key, line]) => !raw(key, line)).map(([key]) => key);
+  process.stdout.write(missing.length ? `raw-line-missing-in:${missing.join(",")}` : "ok");
+});
+')"
+  RO2_BAD=""
+  [ "$RO2_RC" = 0 ] || RO2_BAD="$RO2_BAD rc=$RO2_RC"
+  [ "$RO2_SEEN" = ok ] || RO2_BAD="$RO2_BAD $RO2_SEEN"
+  [ "$(ro2_runs "$RO2_TEXTCONV_LOG")" = 0 ] || RO2_BAD="$RO2_BAD textconv-driver-ran"
+  [ "$(ro2_runs "$RO2_EXTERNAL_LOG")" = 0 ] || RO2_BAD="$RO2_BAD diff.external-driver-ran"
+  if [ -z "$RO2_BAD" ]; then
+    check "RO2 takeover --json carries the source worktree's uncommitted, staged and branch diffs raw, without running its textconv driver or its diff.external driver" PASS
+  else
+    check "RO2 diff drivers in the source worktree:$RO2_BAD" FAIL
+  fi
+
+  ro2_reset
+  ro2_git diff >/dev/null 2>&1
+  RO2_EXTERNAL_RUNS="$(ro2_runs "$RO2_EXTERNAL_LOG")"
+  ro2_reset
+  ro2_git diff --no-ext-diff >/dev/null 2>&1
+  RO2_TEXTCONV_RUNS="$(ro2_runs "$RO2_TEXTCONV_LOG")"
+  if [ "$RO2_EXTERNAL_RUNS" != 0 ] && [ "$RO2_TEXTCONV_RUNS" != 0 ]; then
+    check "RO2-control a plain git diff in the same fixture runs the diff.external driver, and once --no-ext-diff stops that one it runs the textconv driver, so RO2 measured both" PASS
+  else
+    check "RO2-control a plain git diff ran the diff.external driver $RO2_EXTERNAL_RUNS times and git diff --no-ext-diff ran the textconv driver $RO2_TEXTCONV_RUNS times, so RO2 proved nothing here" FAIL
+  fi
+fi
+
 report
