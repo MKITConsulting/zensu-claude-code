@@ -54,7 +54,7 @@ fi
 # because it fails CLOSED: it sources the summary helper unconditionally and exits 1
 # when the helper is unavailable, where the inline form would have left the floor
 # silently unchecked.
-SC_FLOOR=170
+SC_FLOOR=217
 
 OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-core-XXXXXX")" \
   || { printf '%s\n' 'test-session-control-core: cannot create temp file' >&2; exit 1; }

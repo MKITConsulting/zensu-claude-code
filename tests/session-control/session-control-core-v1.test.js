@@ -1276,6 +1276,9 @@ test('serializes true concurrent workflow mutations without lost revisions', asy
   const results = await Promise.all(Array.from({ length: 16 }, () => runNode(source, [JSON.stringify(options)])));
   for (const result of results) assert.equal(result.code, 0, result.stderr);
   assert.equal(core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION }).revision, 17);
+  const leftovers = fs.readdirSync(path.join(f.projectRoot, '.zensu', 'state'))
+    .filter((name) => /\.(lock|recovery|marker)$/.test(name));
+  assert.deepEqual(leftovers, [], 'sixteen writers left lock artifacts or holder markers behind');
 });
 
 test('fails closed on corrupt workflow JSON instead of resetting revision', () => {
@@ -4415,6 +4418,16 @@ test('external process lease token capability releases across a different proces
   const released = await runNode(source, [root, resourcePath, acquired.token]);
   assert.equal(released.code, 0, released.stderr);
   assert.equal(fs.existsSync(acquired.lockFile), false);
+  const marker = holderMarkerFile(acquired.lockFile, artifact.token);
+  if (WINDOWS) {
+    assert.throws(
+      () => fs.openSync(marker, 'r'),
+      (error) => error.code === 'EBUSY',
+      'a release from another process cannot close the acquirer\'s marker, which stays held until the acquirer exits',
+    );
+  } else {
+    assert.equal(fs.existsSync(marker), false);
+  }
 });
 
 test('external process lease artifact identity is not a release capability', () => {
@@ -4824,7 +4837,6 @@ test('external process lease reclaims a live owner PID that started after the re
       lockDirectory: root,
       resourcePath,
       ownerPid: process.pid,
-      attemptLimit: 40,
     });
     assert.notEqual(JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')).token, '2'.repeat(48));
     core.releaseExternalProcessLock({
@@ -4857,7 +4869,9 @@ test('external process lease keeps a live owner without identity that started be
       process_start_identity: null,
     };
     fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
-    assert.ok(core.processStartLowerBoundForPid(child.pid) <= Date.parse(owner.created_at));
+    const lowerBound = core.processStartLowerBoundForPid(child.pid);
+    assert.equal(typeof lowerBound, 'number');
+    assert.ok(lowerBound <= Date.parse(owner.created_at), `${lowerBound} lies after ${owner.created_at}`);
     await new Promise((resolve) => setTimeout(resolve, 1500));
     assert.throws(() => core.acquireExternalProcessLock({
       lockDirectory: root,
@@ -4951,6 +4965,962 @@ test('the win32 start reader runs a pinned PowerShell only for a record older th
   assert.ok(!report.program.includes('"'), report.program);
 });
 
+test('the darwin start reader runs a pinned ps and reads its lstart line as UTC', async () => {
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    const invocations = [];
+    let output = 'Wed Jul 16 12:34:56 2026\n';
+    childProcess.execFileSync = (file, args, options) => {
+      invocations.push({ file, args, options });
+      return output;
+    };
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const parsed = core.processStartLowerBoundForPid(4242);
+    output = 'not a start line\n';
+    const malformed = core.processStartLowerBoundForPid(4242);
+    process.stdout.write(JSON.stringify({ parsed, malformed, invocation: invocations[0], calls: invocations.length }));
+  `;
+  const result = await runNode(source);
+  assert.equal(result.code, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.parsed, Date.UTC(2026, 6, 16, 12, 34, 56));
+  assert.equal(report.malformed, null);
+  assert.equal(report.calls, 2);
+  assert.equal(report.invocation.file, '/bin/ps');
+  assert.deepEqual(report.invocation.args, ['-p', '4242', '-o', 'lstart=']);
+  assert.deepEqual(report.invocation.options.env, { PATH: '/usr/bin:/bin', LC_ALL: 'C', LANG: 'C', TZ: 'UTC' });
+  assert.equal(report.invocation.options.timeout, 1000);
+});
+
+test('recovers a per-session lock whose recorded identity cannot be re-read but whose owner pid provably started after the record', async (t) => {
+  if (!START_READER_PLATFORMS.has(process.platform)) {
+    t.skip('no process start reader exists for this platform');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-unread-identity-'));
+  const { child, ready } = spawnUnrelatedProcess();
+  try {
+    await ready;
+    if (startReaderUnavailable(t, child.pid)) return;
+    const source = String.raw`
+      const childProcess = require('node:child_process');
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const [directory, owner] = process.argv.slice(1);
+      let refused = 0;
+      if (process.platform === 'darwin') {
+        const realExec = childProcess.execFileSync;
+        childProcess.execFileSync = (file, args, options) => {
+          if (refused === 0 && Array.isArray(args) && args[1] === owner) {
+            refused += 1;
+            throw new Error('ps refused');
+          }
+          return realExec(file, args, options);
+        };
+      }
+      if (process.platform === 'linux') {
+        const realRead = fs.readFileSync;
+        fs.readFileSync = function patchedRead(file, ...rest) {
+          if (refused === 0 && String(file) === '/proc/' + owner + '/stat') {
+            refused += 1;
+            throw new Error('proc refused');
+          }
+          return realRead.call(fs, file, ...rest);
+        };
+      }
+      const core = require(process.env.SESSION_CONTROL_CORE);
+      const lockFile = path.join(directory, '.unread-identity.lock');
+      fs.writeFileSync(lockFile, JSON.stringify({
+        pid: Number(owner),
+        token: '9'.repeat(48),
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+        process_start_identity: 'recorded:1',
+      }), { mode: 0o600 });
+      const entered = core.withFileLock(directory, 'unread-identity', () => 'entered');
+      process.stdout.write(JSON.stringify({ entered, refused, left: fs.existsSync(lockFile) }));
+    `;
+    const result = await runNode(source, [root, String(child.pid)]);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.entered, 'entered');
+    assert.equal(report.left, false);
+    if (!WINDOWS) assert.equal(report.refused, 1, 'the identity read was never refused, so the start-time rule did not decide');
+  } finally {
+    child.kill();
+  }
+});
+
+test('a lock record never dates from before the process start its readers see', (t) => {
+  if (!START_READER_PLATFORMS.has(process.platform)) {
+    t.skip('no process start reader exists for this platform');
+    return;
+  }
+  const started = core.processStartLowerBoundForPid(process.pid);
+  assert.equal(typeof started, 'number');
+  assert.ok(started <= Math.ceil(performance.timeOrigin), `${started} lies after timeOrigin ${performance.timeOrigin}`);
+});
+
+function holderMarkerFile(file, token) {
+  return path.join(path.dirname(file), `.${path.basename(file)}.${token}.marker`);
+}
+
+const WIN32_LOCK_CHILD = String.raw`
+  const childProcess = require('node:child_process');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const startReads = [];
+  let startAnswer = () => '';
+  childProcess.execFileSync = (file) => {
+    startReads.push(String(file));
+    return startAnswer();
+  };
+  const filetime = (ms) => String(BigInt(Math.floor(ms)) * 10000n + 116444736000000000n);
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  const core = require(process.env.SESSION_CONTROL_CORE);
+  const markerFile = (file, token) => path.join(path.dirname(file), '.' + path.basename(file) + '.' + token + '.marker');
+  const exclusiveFlags = fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | 0x10000000;
+  const lockOptions = (directory) => ({ lockDirectory: directory, resourcePath: path.join(directory, 'state.json') });
+  const markersIn = (directory) => fs.readdirSync(directory).filter((name) => name.endsWith('.marker')).sort();
+  const plant = (file, owner) => fs.writeFileSync(file, JSON.stringify({
+    kind: 'external-process-lock',
+    created_at: new Date().toISOString(),
+    process_start_identity: null,
+    ...owner,
+  }), { mode: 0o600 });
+  const attempt = (options, attemptLimit) => {
+    try {
+      const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid, attemptLimit });
+      core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+      return 'acquired';
+    } catch (error) {
+      return error.message;
+    }
+  };
+`;
+
+const SHARE_MODE_MODEL = String.raw`
+  const shareModel = {
+    events: [],
+    holds: new Map(),
+    exclusiveError: null,
+    exclusiveCreates: false,
+    linkError: null,
+    enforce: true,
+    onBusyOpen: null,
+    afterChange: null,
+  };
+  {
+    const realOpen = fs.openSync;
+    const realClose = fs.closeSync;
+    const realUnlink = fs.unlinkSync;
+    const realRename = fs.renameSync;
+    const realLink = fs.linkSync;
+    const nameOf = (file) => path.basename(String(file));
+    const noteChange = (event) => {
+      shareModel.events.push(event);
+      if (shareModel.afterChange) shareModel.afterChange(event);
+    };
+    const refuse = (code, syscall, file) => Object.assign(new Error(code + ': ' + syscall + ' ' + String(file)), {
+      code,
+      syscall,
+      path: String(file),
+    });
+    fs.openSync = function modelOpen(file, flags, mode) {
+      const name = nameOf(file);
+      if (typeof flags === 'number' && (flags & 0x10000000) !== 0) {
+        shareModel.events.push(['exclusive-open', name]);
+        if (shareModel.exclusiveError) {
+          if (shareModel.exclusiveCreates) realClose.call(fs, realOpen.call(fs, file, flags & ~0x10000000, mode));
+          throw refuse(shareModel.exclusiveError, 'open', file);
+        }
+        const descriptor = realOpen.call(fs, file, flags & ~0x10000000, mode);
+        if (shareModel.enforce) shareModel.holds.set(name, descriptor);
+        return descriptor;
+      }
+      if (shareModel.holds.has(name)) {
+        shareModel.events.push(['busy-open', name]);
+        if (shareModel.onBusyOpen) shareModel.onBusyOpen(name);
+        throw refuse('EBUSY', 'open', file);
+      }
+      return realOpen.call(fs, file, flags, mode);
+    };
+    fs.closeSync = function modelClose(descriptor) {
+      for (const [name, held] of shareModel.holds) {
+        if (held === descriptor) {
+          shareModel.holds.delete(name);
+          shareModel.events.push(['exclusive-close', name]);
+        }
+      }
+      return realClose.call(fs, descriptor);
+    };
+    fs.unlinkSync = function modelUnlink(file) {
+      if (shareModel.holds.has(nameOf(file))) throw refuse('EBUSY', 'unlink', file);
+      const result = realUnlink.call(fs, file);
+      noteChange(['unlink', nameOf(file)]);
+      return result;
+    };
+    fs.renameSync = function modelRename(from, to) {
+      if (shareModel.holds.has(nameOf(from))) throw refuse('EBUSY', 'rename', from);
+      const result = realRename.call(fs, from, to);
+      noteChange(['rename', nameOf(from), nameOf(to)]);
+      return result;
+    };
+    fs.linkSync = function modelLink(from, to) {
+      const refusal = shareModel.linkError;
+      if (refusal && refusal.to === nameOf(to)) {
+        shareModel.linkError = null;
+        shareModel.events.push(['link-refused', nameOf(from), nameOf(to)]);
+        throw refuse(refusal.code, 'link', to);
+      }
+      const result = realLink.call(fs, from, to);
+      noteChange(['link', nameOf(from), nameOf(to)]);
+      return result;
+    };
+  }
+`;
+
+function runLockChild(source, args = []) {
+  return runNode(source, args).then((result) => {
+    assert.equal(result.code, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  });
+}
+
+function assertMarkerLifecycle(events, lockName, token, label) {
+  const marker = `.${lockName}.${token}.marker`;
+  const after = (from, predicate, what) => {
+    const index = events.findIndex((event, position) => position > from && predicate(event));
+    assert.ok(index >= 0, `${label}: ${what} never happened`);
+    return index;
+  };
+  const opened = after(-1, (event) => event[0] === 'exclusive-open' && event[1] === marker, 'the exclusive marker open');
+  const probed = after(opened, (event) => event[0] === 'busy-open' && event[1] === marker, 'the exclusivity self-probe');
+  const published = after(opened, (event) => event[0] === 'link' && event[2] === lockName, 'the record publication');
+  const quarantined = after(
+    published,
+    (event) => event[0] === 'rename' && event[1] === lockName,
+    'the record quarantine',
+  );
+  const removed = after(
+    quarantined,
+    (event) => event[0] === 'unlink' && event[1] === events[quarantined][2],
+    'the record removal',
+  );
+  const closed = after(opened, (event) => event[0] === 'exclusive-close' && event[1] === marker, 'the marker close');
+  const unlinked = after(opened, (event) => event[0] === 'unlink' && event[1] === marker, 'the marker unlink');
+  assert.ok(opened < probed && probed < published, `${label}: the marker is held before the record is published`);
+  assert.ok(published < quarantined && quarantined < removed, `${label}: the record leaves through its quarantine`);
+  assert.ok(removed < closed && closed < unlinked, `${label}: the marker is released only after the record is gone`);
+}
+
+function holderMarkerTokens(events, lockName) {
+  const prefix = `.${lockName}.`;
+  return events
+    .filter((event) => event[0] === 'exclusive-open' && event[1].startsWith(prefix) && event[1].endsWith('.marker'))
+    .map((event) => event[1].slice(prefix.length, -'.marker'.length));
+}
+
+test('a free holder marker reclaims a young record whose owner pid is alive, without a start-time read', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-free-'));
+  const source = WIN32_LOCK_CHILD + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const report = {};
+    plant(binding.lockFile, { pid: process.ppid, token: '1'.repeat(48) });
+    fs.writeFileSync(markerFile(binding.lockFile, '1'.repeat(48)), '');
+    report.inspected = core.inspectExternalProcessLock(options).lock;
+    report.lock = attempt(options, 2);
+    plant(binding.recoveryFile, { pid: process.ppid, token: '2'.repeat(48), kind: 'recovery' });
+    fs.writeFileSync(markerFile(binding.recoveryFile, '2'.repeat(48)), '');
+    report.recovery = attempt(options, 2);
+    plant(binding.lockFile, { pid: 2147483647, token: '3'.repeat(48) });
+    fs.writeFileSync(markerFile(binding.lockFile, '3'.repeat(48)), '');
+    report.dead = attempt(options, 2);
+    const perSession = path.join(directory, '.marker-free.lock');
+    plant(perSession, { pid: process.ppid, token: '4'.repeat(48), kind: 'lock' });
+    fs.writeFileSync(markerFile(perSession, '4'.repeat(48)), '');
+    const started = Date.now();
+    report.perSession = core.withFileLock(directory, 'marker-free', () => 'entered');
+    report.perSessionMs = Date.now() - started;
+    report.startReads = startReads.length;
+    report.markers = markersIn(directory);
+    report.leftovers = fs.readdirSync(directory).filter((name) => /\.(lock|recovery)$/.test(name));
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.equal(report.inspected.marker, 'released');
+  assert.equal(report.inspected.alive, true);
+  assert.equal(report.inspected.stale, true);
+  assert.equal(report.lock, 'acquired');
+  assert.equal(report.recovery, 'acquired');
+  assert.equal(report.dead, 'acquired');
+  assert.equal(report.perSession, 'entered');
+  assert.ok(report.perSessionMs < 2000, `withFileLock waited ${report.perSessionMs} ms for a free marker`);
+  assert.equal(report.startReads, 0);
+  assert.deepEqual(report.markers, []);
+  assert.deepEqual(report.leftovers, []);
+});
+
+test('a held holder marker keeps a live owner even when its start time reads as replaced', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-held-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const token = '5'.repeat(48);
+    plant(binding.lockFile, { pid: process.ppid, token, created_at: new Date(Date.now() - 3600000).toISOString() });
+    const held = fs.openSync(markerFile(binding.lockFile, token), exclusiveFlags, 0o600);
+    startAnswer = () => filetime(Date.now());
+    const report = {
+      outcome: attempt(options, 2),
+      inspection: core.inspectExternalProcessLock(options).lock,
+      startReads: startReads.length,
+      recordKept: JSON.parse(fs.readFileSync(binding.lockFile, 'utf8')).token === token,
+    };
+    fs.closeSync(held);
+    report.afterExit = attempt(options, 2);
+    report.markers = markersIn(directory);
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.match(report.outcome, /timed out acquiring external process lock/i);
+  assert.equal(report.inspection.marker, 'held');
+  assert.equal(report.inspection.alive, true);
+  assert.equal(report.inspection.stale, false);
+  assert.equal(report.inspection.startedAfterRecord, false);
+  assert.equal(report.startReads, 0);
+  assert.equal(report.recordKept, true);
+  assert.equal(report.afterExit, 'acquired');
+  assert.deepEqual(report.markers, []);
+});
+
+test('a dead owner is recovered even while a foreign handle still holds its marker, and that marker stays behind inert', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-foreign-handle-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const deadToken = 'a'.repeat(48);
+    plant(binding.lockFile, { pid: 2147483647, token: deadToken });
+    const foreign = fs.openSync(markerFile(binding.lockFile, deadToken), exclusiveFlags, 0o600);
+    const perSession = path.join(directory, '.marker-foreign.lock');
+    const perSessionToken = 'b'.repeat(48);
+    plant(perSession, { pid: 2147483647, token: perSessionToken, kind: 'lock' });
+    const foreignPerSession = fs.openSync(markerFile(perSession, perSessionToken), exclusiveFlags, 0o600);
+    const report = {
+      inspection: core.inspectExternalProcessLock(options).lock,
+      outcome: attempt(options, 2),
+      perSession: core.withFileLock(directory, 'marker-foreign', () => 'entered'),
+    };
+    report.markersWhileHeld = markersIn(directory);
+    fs.closeSync(foreign);
+    fs.closeSync(foreignPerSession);
+    report.afterClose = attempt(options, 2);
+    report.lockAfter = core.inspectExternalProcessLock(options).lock;
+    report.markersAfterClose = markersIn(directory);
+    report.orphans = [markerFile(binding.lockFile, deadToken), markerFile(perSession, perSessionToken)]
+      .map((file) => path.basename(file)).sort();
+    report.startReads = startReads.length;
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.equal(report.inspection.alive, false);
+  assert.equal(report.inspection.stale, true);
+  assert.equal(report.inspection.marker, 'not-applicable');
+  assert.equal(report.outcome, 'acquired');
+  assert.equal(report.perSession, 'entered');
+  assert.deepEqual(report.markersWhileHeld, report.orphans);
+  assert.equal(report.afterClose, 'acquired');
+  assert.deepEqual(report.lockAfter, { state: 'absent' });
+  assert.deepEqual(report.markersAfterClose, report.orphans);
+  assert.equal(report.startReads, 0);
+});
+
+test('a holder marker that is not a free empty file proves nothing, so a young live owner keeps its lock without a start-time read', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-unreadable-'));
+  const source = WIN32_LOCK_CHILD + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const cases = {
+      'non-empty file': (marker) => fs.writeFileSync(marker, 'x'),
+      directory: (marker) => fs.mkdirSync(marker),
+      'second link': (marker) => {
+        fs.writeFileSync(marker, '');
+        fs.linkSync(marker, marker + '.link');
+      },
+    };
+    const report = {};
+    let index = 0;
+    for (const [name, plantMarker] of Object.entries(cases)) {
+      index += 1;
+      const token = String(index).repeat(48);
+      plant(binding.lockFile, { pid: process.ppid, token });
+      const marker = markerFile(binding.lockFile, token);
+      plantMarker(marker);
+      const inspection = core.inspectExternalProcessLock(options).lock;
+      report[name] = {
+        marker: inspection.marker,
+        alive: inspection.alive,
+        stale: inspection.stale,
+        outcome: attempt(options, 2),
+        recordKept: JSON.parse(fs.readFileSync(binding.lockFile, 'utf8')).token === token,
+      };
+      fs.rmSync(marker, { recursive: true, force: true });
+      fs.rmSync(marker + '.link', { force: true });
+      fs.unlinkSync(binding.lockFile);
+    }
+    report.startReads = startReads.length;
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  for (const name of ['non-empty file', 'directory', 'second link']) {
+    assert.equal(report[name].marker, 'unreadable', name);
+    assert.equal(report[name].alive, true, name);
+    assert.equal(report[name].stale, false, name);
+    assert.match(report[name].outcome, /timed out acquiring external process lock/i, name);
+    assert.equal(report[name].recordKept, true, name);
+  }
+  assert.equal(report.startReads, 0);
+});
+
+test('a holder marker that is not a free empty file falls through to the start-time rule, which reclaims an old record whose pid was reused', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-unreadable-old-'));
+  const source = WIN32_LOCK_CHILD + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const cases = {
+      'non-empty file': (marker) => fs.writeFileSync(marker, 'x'),
+      directory: (marker) => fs.mkdirSync(marker),
+      'second link': (marker) => {
+        fs.writeFileSync(marker, '');
+        fs.linkSync(marker, marker + '.link');
+      },
+    };
+    startAnswer = () => filetime(Date.now());
+    const report = {};
+    let index = 0;
+    for (const [name, plantMarker] of Object.entries(cases)) {
+      index += 1;
+      const token = String(index).repeat(48);
+      plant(binding.lockFile, { pid: process.ppid, token, created_at: new Date(Date.now() - 3600000).toISOString() });
+      const marker = markerFile(binding.lockFile, token);
+      plantMarker(marker);
+      const readsBefore = startReads.length;
+      const inspection = core.inspectExternalProcessLock(options).lock;
+      report[name] = {
+        marker: inspection.marker,
+        alive: inspection.alive,
+        stale: inspection.stale,
+        startedAfterRecord: inspection.startedAfterRecord,
+        outcome: attempt(options, 2),
+        startReads: startReads.length - readsBefore,
+        lockAfter: core.inspectExternalProcessLock(options).lock,
+      };
+      fs.rmSync(marker, { recursive: true, force: true });
+      fs.rmSync(marker + '.link', { force: true });
+    }
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  for (const name of ['non-empty file', 'directory', 'second link']) {
+    assert.equal(report[name].marker, 'unreadable', name);
+    assert.equal(report[name].alive, true, name);
+    assert.equal(report[name].stale, true, name);
+    assert.equal(report[name].startedAfterRecord, true, name);
+    assert.equal(report[name].outcome, 'acquired', name);
+    assert.ok(report[name].startReads >= 1, `${name}: the start-time rule never ran`);
+    assert.deepEqual(report[name].lockAfter, { state: 'absent' }, name);
+  }
+});
+
+test('a holder marker is tested on every attempt, so a holder that exits between start-time probes is reclaimed at once', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-every-attempt-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const options = lockOptions(process.argv[1]);
+    const binding = core.inspectExternalProcessLock(options);
+    const token = '6'.repeat(48);
+    const name = path.basename(markerFile(binding.lockFile, token));
+    plant(binding.lockFile, { pid: process.ppid, token, created_at: new Date(Date.now() - 3600000).toISOString() });
+    const held = fs.openSync(markerFile(binding.lockFile, token), exclusiveFlags, 0o600);
+    let probes = 0;
+    shareModel.onBusyOpen = (busyName) => {
+      if (busyName !== name) return;
+      probes += 1;
+      if (probes === 3) fs.closeSync(held);
+    };
+    startAnswer = () => filetime(Date.now() - 7200000);
+    const outcome = attempt(options, 10);
+    process.stdout.write(JSON.stringify({ outcome, probes, startReads: startReads.length }));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.equal(report.outcome, 'acquired');
+  assert.equal(report.probes, 3);
+  assert.equal(report.startReads, 0);
+});
+
+test('a holder opens its marker exclusively before it publishes and retires it only after its record is gone', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-order-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    const external = JSON.parse(fs.readFileSync(binding.lockFile, 'utf8')).token;
+    const heldDuring = [...shareModel.holds.keys()];
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+    const perSessionFile = path.join(directory, '.marker-order.lock');
+    let perSession = null;
+    core.withFileLock(directory, 'marker-order', () => {
+      perSession = JSON.parse(fs.readFileSync(perSessionFile, 'utf8')).token;
+    });
+    process.stdout.write(JSON.stringify({
+      events: shareModel.events,
+      heldDuring,
+      lockName: path.basename(binding.lockFile),
+      recoveryName: path.basename(binding.recoveryFile),
+      external,
+      perSession,
+      perSessionName: path.basename(perSessionFile),
+      perSessionRecoveryName: '.marker-order.recovery',
+      holdsAfter: shareModel.holds.size,
+      markers: markersIn(directory),
+    }));
+  `;
+  const report = await runLockChild(source, [root]);
+  assertMarkerLifecycle(report.events, report.lockName, report.external, 'external lease');
+  assertMarkerLifecycle(report.events, report.perSessionName, report.perSession, 'per-session lock');
+  assert.ok(report.heldDuring.includes(`.${report.lockName}.${report.external}.marker`));
+  for (const [recoveryName, label] of [
+    [report.recoveryName, 'external lease recovery sentinel'],
+    [report.perSessionRecoveryName, 'per-session recovery sentinel'],
+  ]) {
+    const generations = holderMarkerTokens(report.events, recoveryName);
+    assert.ok(generations.length > 0, `${label} took no holder marker`);
+    generations.forEach((token, index) => {
+      assertMarkerLifecycle(report.events, recoveryName, token, `${label} generation ${index + 1}`);
+    });
+  }
+  assert.equal(report.holdsAfter, 0);
+  assert.deepEqual(report.markers, []);
+});
+
+test('only a lock held by its own process creates a holder marker', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-owner-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const options = lockOptions(process.argv[1]);
+    const binding = core.inspectExternalProcessLock(options);
+    const prefix = '.' + path.basename(binding.lockFile) + '.';
+    const lockMarkers = () => shareModel.events
+      .filter((event) => event[0] === 'exclusive-open' && event[1].startsWith(prefix)).length;
+    const parentLease = core.acquireExternalProcessLock({ ...options, ownerPid: process.ppid });
+    const parentHeld = lockMarkers();
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.ppid, token: parentLease.token });
+    const ownLease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    const ownHeld = lockMarkers();
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: ownLease.token });
+    process.stdout.write(JSON.stringify({ parentHeld, ownHeld, markers: markersIn(process.argv[1]) }));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.equal(report.parentHeld, 0);
+  assert.equal(report.ownHeld, 1);
+  assert.deepEqual(report.markers, []);
+});
+
+test('a holder never leaves its marker open or behind when an acquisition or a release fails', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-failures-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const directory = process.argv[1];
+    const options = lockOptions(directory);
+    const binding = core.inspectExternalProcessLock(options);
+    const report = {};
+    shareModel.linkError = { to: path.basename(binding.lockFile), code: 'EEXIST' };
+    report.contended = attempt(options, 3);
+    const opened = shareModel.events.filter((event) => event[0] === 'exclusive-open').map((event) => event[1]);
+    const unlinked = new Set(shareModel.events.filter((event) => event[0] === 'unlink').map((event) => event[1]));
+    report.refusedLink = shareModel.events.some((event) => event[0] === 'link-refused');
+    report.everyMarkerUnlinked = opened.length > 0 && opened.every((name) => unlinked.has(name));
+
+    shareModel.exclusiveError = 'EMFILE';
+    const degraded = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    report.degradedMarker = core.inspectExternalProcessLock(options).lock.marker;
+    report.degradedMarkers = markersIn(directory);
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: degraded.token });
+    shareModel.exclusiveCreates = true;
+    const leftBehind = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    report.leftBehindMarker = core.inspectExternalProcessLock(options).lock.marker;
+    report.leftBehindMarkers = markersIn(directory);
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: leftBehind.token });
+    shareModel.exclusiveCreates = false;
+    shareModel.exclusiveError = null;
+
+    shareModel.enforce = false;
+    const unenforced = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    report.unenforcedMarker = core.inspectExternalProcessLock(options).lock.marker;
+    report.unenforcedMarkers = markersIn(directory);
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: unenforced.token });
+    shareModel.enforce = true;
+
+    const rightful = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    try {
+      core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: 'f'.repeat(48) });
+      report.wrongToken = 'released';
+    } catch (error) {
+      report.wrongToken = error.message;
+    }
+    report.wrongTokenHolds = shareModel.holds.size;
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: rightful.token });
+
+    const swappedFile = path.join(directory, '.marker-swap.lock');
+    try {
+      core.withFileLock(directory, 'marker-swap', () => {
+        fs.unlinkSync(swappedFile);
+        plant(swappedFile, { pid: process.ppid, token: '7'.repeat(48), kind: 'lock' });
+      });
+      report.swapped = 'released';
+    } catch (error) {
+      report.swapped = error.message;
+    }
+    report.swappedHolds = shareModel.holds.size;
+    fs.unlinkSync(swappedFile);
+
+    const renamed = (name) => (event) => event[0] === 'rename' && event[1] === name;
+    const linked = (name) => (event) => event[0] === 'link' && event[2] === name;
+    const deadSentinel = (file, digit) => plant(file, { pid: 2147483647, token: digit.repeat(48), kind: 'recovery' });
+    const ownMarker = (file) => (fs.existsSync(file)
+      ? path.basename(markerFile(file, JSON.parse(fs.readFileSync(file, 'utf8')).token))
+      : null);
+    const sentinelStep = (lockFile, run, trigger, replace) => {
+      shareModel.afterChange = (event) => {
+        if (!trigger(event)) return;
+        shareModel.afterChange = null;
+        replace();
+      };
+      const step = {};
+      try {
+        run();
+        step.outcome = 'released';
+      } catch (error) {
+        step.outcome = error.message;
+      }
+      shareModel.afterChange = null;
+      step.holds = shareModel.holds.size;
+      step.markers = markersIn(directory);
+      step.lockMarker = ownMarker(lockFile);
+      return step;
+    };
+    const sessionLock = path.join(directory, '.sentinel-step.lock');
+    const sessionSentinel = path.join(directory, '.sentinel-step.recovery');
+    const sessionRun = () => core.withFileLock(directory, 'sentinel-step', () => 'entered');
+    const leaseRun = () => {
+      const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+      core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+    };
+    report.sessionSwap = sentinelStep(sessionLock, sessionRun, renamed(path.basename(sessionLock)), () => {
+      fs.unlinkSync(sessionSentinel);
+      deadSentinel(sessionSentinel, '8');
+    });
+    report.sessionSwapRecovered = sessionRun();
+    report.sessionUnverified = sentinelStep(
+      sessionLock,
+      sessionRun,
+      linked(path.basename(sessionSentinel)),
+      () => deadSentinel(sessionSentinel, '9'),
+    );
+    report.sessionUnverifiedRecovered = sessionRun();
+    report.leaseSwap = sentinelStep(binding.lockFile, leaseRun, renamed(path.basename(binding.lockFile)), () => {
+      fs.unlinkSync(binding.recoveryFile);
+      deadSentinel(binding.recoveryFile, '8');
+    });
+    report.leaseSwapRecovered = attempt(options, 40);
+    report.leaseUnverified = sentinelStep(
+      binding.lockFile,
+      leaseRun,
+      linked(path.basename(binding.recoveryFile)),
+      () => deadSentinel(binding.recoveryFile, '9'),
+    );
+    report.leaseUnverifiedState = core.inspectExternalProcessLock(options).lock.marker;
+    report.leaseUnverifiedRecovered = attempt(options, 40);
+    report.finalHolds = shareModel.holds.size;
+    report.markers = markersIn(directory);
+    process.stdout.write(JSON.stringify(report));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.equal(report.contended, 'acquired');
+  assert.equal(report.refusedLink, true);
+  assert.equal(report.everyMarkerUnlinked, true);
+  assert.equal(report.degradedMarker, 'absent');
+  assert.deepEqual(report.degradedMarkers, []);
+  assert.equal(report.leftBehindMarker, 'absent', 'a failed create must not leave a free marker beside a live record');
+  assert.deepEqual(report.leftBehindMarkers, []);
+  assert.equal(report.unenforcedMarker, 'absent');
+  assert.deepEqual(report.unenforcedMarkers, []);
+  assert.match(report.wrongToken, /ownership does not match release token/i);
+  assert.equal(report.wrongTokenHolds, 1, 'a refused release must not take the rightful holder\'s marker');
+  assert.match(report.swapped, /ownership changed before release/i);
+  assert.equal(report.swappedHolds, 0);
+  for (const [name, replaced] of [
+    ['sessionSwap', true],
+    ['sessionUnverified', false],
+    ['leaseSwap', true],
+    ['leaseUnverified', false],
+  ]) {
+    const step = report[name];
+    if (replaced) {
+      assert.match(step.outcome, /recovery sentinel ownership changed/i, name);
+      assert.equal(step.holds, 0, `${name}: a replaced sentinel must not keep its marker open`);
+      assert.deepEqual(step.markers, [], `${name}: a replaced sentinel must not leave its marker behind`);
+      assert.equal(step.lockMarker, null, `${name}: the released lock record is gone`);
+    } else {
+      assert.match(step.outcome, /new lock identity could not be verified/i, name);
+      assert.equal(step.holds, 0, `${name}: an unverified sentinel must not keep a marker open`);
+      assert.ok(step.lockMarker, `${name}: the lock whose release failed keeps its record`);
+      assert.deepEqual(
+        step.markers,
+        [step.lockMarker],
+        `${name}: only the closed marker of the lock whose release failed may stay, never the sentinel's`,
+      );
+    }
+  }
+  assert.equal(report.leaseUnverifiedState, 'released');
+  assert.equal(report.sessionSwapRecovered, 'entered');
+  assert.equal(report.sessionUnverifiedRecovered, 'entered');
+  assert.equal(report.leaseSwapRecovered, 'acquired');
+  assert.equal(report.leaseUnverifiedRecovered, 'acquired');
+  assert.equal(report.finalHolds, 0);
+  assert.deepEqual(report.markers, []);
+});
+
+test('a lock record written after the wall clock stepped back never predates its writer', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-clock-step-'));
+  const source = WIN32_LOCK_CHILD + SHARE_MODE_MODEL + String.raw`
+    const options = lockOptions(process.argv[1]);
+    const binding = core.inspectExternalProcessLock(options);
+    shareModel.exclusiveError = 'EMFILE';
+    const RealDate = Date;
+    const steppedBack = Math.floor(performance.timeOrigin) - 3600000;
+    globalThis.Date = class SteppedBackDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(steppedBack);
+        else super(...args);
+      }
+
+      static now() {
+        return steppedBack;
+      }
+    };
+    const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    globalThis.Date = RealDate;
+    const createdAt = JSON.parse(fs.readFileSync(binding.lockFile, 'utf8')).created_at;
+    while (Date.now() - Date.parse(createdAt) <= 1100) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    startAnswer = () => filetime(performance.timeOrigin - 10);
+    const contended = attempt(options, 1);
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+    process.stdout.write(JSON.stringify({
+      createdAt,
+      timeOrigin: performance.timeOrigin,
+      contended,
+      startReads: startReads.length,
+    }));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.ok(
+    Date.parse(report.createdAt) >= Math.ceil(report.timeOrigin),
+    `${report.createdAt} predates the writer start ${report.timeOrigin}`,
+  );
+  assert.match(report.contended, /timed out acquiring external process lock/i);
+  assert.equal(report.startReads, 1);
+});
+
+test('the start-time probe re-reads a live generation at most every two seconds and keeps a replaced verdict', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-probe-cache-'));
+  const source = WIN32_LOCK_CHILD + String.raw`
+    const options = lockOptions(process.argv[1]);
+    const binding = core.inspectExternalProcessLock(options);
+    let clock = Date.now();
+    Date.now = () => clock;
+    const recordAt = new Date(clock - 5000).toISOString();
+    const token = '8'.repeat(48);
+    plant(binding.lockFile, { pid: process.pid, token, created_at: recordAt });
+    startAnswer = () => filetime(clock - 3600000);
+    const verdicts = [];
+    const look = () => {
+      const lock = core.inspectExternalProcessLock(options).lock;
+      verdicts.push([startReads.length, lock.startedAfterRecord]);
+    };
+    look();
+    clock += 1000;
+    look();
+    clock += 1100;
+    look();
+    startAnswer = () => filetime(clock);
+    clock += 2100;
+    look();
+    clock += 60000;
+    look();
+    for (let index = 0; index < 256; index += 1) {
+      plant(binding.lockFile, { pid: process.pid, token: index.toString(16).padStart(48, '0'), created_at: recordAt });
+      core.inspectExternalProcessLock(options);
+    }
+    const afterFlood = startReads.length;
+    plant(binding.lockFile, { pid: process.pid, token, created_at: recordAt });
+    look();
+    process.stdout.write(JSON.stringify({ verdicts, afterFlood }));
+  `;
+  const report = await runLockChild(source, [root]);
+  assert.deepEqual(report.verdicts.slice(0, 5), [[1, false], [1, false], [2, false], [3, true], [3, true]]);
+  assert.equal(report.afterFlood, 3 + 256);
+  assert.deepEqual(report.verdicts[5], [3 + 256 + 1, true]);
+});
+
+function spawnLockHolder(directory, mode = 'hold') {
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const [directory, mode] = process.argv.slice(1);
+    const options = { lockDirectory: directory, resourcePath: path.join(directory, 'state.json') };
+    const lease = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    const record = JSON.parse(fs.readFileSync(lease.lockFile, 'utf8'));
+    const grandchild = mode === 'spawn-child'
+      ? childProcess.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], {
+        stdio: 'ignore',
+        detached: true,
+        windowsHide: true,
+      })
+      : null;
+    process.stdout.write(JSON.stringify({
+      lockFile: lease.lockFile,
+      token: record.token,
+      grandchild: grandchild ? grandchild.pid : null,
+    }) + '\n');
+    process.stdin.resume();
+    process.stdin.on('end', () => {
+      core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: lease.token });
+      process.exit(0);
+    });
+  `;
+  const child = spawn(process.execPath, ['-e', source, directory, mode], {
+    env: { ...process.env, SESSION_CONTROL_CORE: path.resolve(corePath) },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  const ready = new Promise((resolve, reject) => {
+    let seen = '';
+    child.stdout.on('data', (chunk) => {
+      seen += chunk;
+      const newline = seen.indexOf('\n');
+      if (newline >= 0) resolve(JSON.parse(seen.slice(0, newline)));
+    });
+    child.on('error', reject);
+    exited.then((code) => reject(new Error(`lock holder exited before it held the lock (${code}): ${stderr}`)));
+  });
+  return { child, ready, exited };
+}
+
+async function markerFreedWithin(marker, milliseconds) {
+  const deadline = Date.now() + milliseconds;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(marker, 'r'));
+      return true;
+    } catch (error) {
+      if (error.code !== 'EBUSY') throw error;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+test('the kernel holds a live holder marker against every other open, and frees it the moment the holder dies', async (t) => {
+  if (!WINDOWS) {
+    t.skip('share modes are a win32 kernel property');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-kernel-'));
+  const options = { lockDirectory: root, resourcePath: path.join(root, 'state.json') };
+  const holder = spawnLockHolder(root);
+  try {
+    const held = await holder.ready;
+    const marker = holderMarkerFile(held.lockFile, held.token);
+    assert.throws(() => fs.openSync(marker, 'r'), (error) => error.code === 'EBUSY');
+    assert.throws(() => fs.unlinkSync(marker), (error) => error.code === 'EBUSY' || error.code === 'EPERM');
+    assert.equal(fs.existsSync(marker), true);
+    const inspection = core.inspectExternalProcessLock(options).lock;
+    assert.equal(inspection.marker, 'held');
+    assert.equal(inspection.stale, false);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const contender = String.raw`
+      const childProcess = require('node:child_process');
+      const path = require('node:path');
+      let reads = 0;
+      childProcess.execFileSync = () => {
+        reads += 1;
+        return String(BigInt(Date.now()) * 10000n + 116444736000000000n);
+      };
+      const core = require(process.env.SESSION_CONTROL_CORE);
+      const options = { lockDirectory: process.argv[1], resourcePath: path.join(process.argv[1], 'state.json') };
+      let outcome = 'acquired';
+      try {
+        core.acquireExternalProcessLock({ ...options, ownerPid: process.pid, attemptLimit: 2 });
+      } catch (error) {
+        outcome = error.message;
+      }
+      process.stdout.write(JSON.stringify({ outcome, reads }));
+    `;
+    const contended = await runLockChild(contender, [root]);
+    assert.match(contended.outcome, /timed out acquiring external process lock/i);
+    assert.equal(contended.reads, 0);
+    holder.child.kill();
+    await holder.exited;
+    assert.equal(await markerFreedWithin(marker, 2000), true, 'the marker stayed held after its holder died');
+    const acquired = core.acquireExternalProcessLock({ ...options, ownerPid: process.pid });
+    core.releaseExternalProcessLock({ ...options, ownerPid: process.pid, token: acquired.token });
+    assert.deepEqual(fs.readdirSync(root).filter((name) => name.endsWith('.marker')), []);
+  } finally {
+    if (holder.child.exitCode === null && holder.child.signalCode === null) holder.child.kill();
+  }
+});
+
+test('a child of the holder does not inherit its marker, so the marker frees when the holder dies', async (t) => {
+  if (!WINDOWS) {
+    t.skip('handle inheritance is a win32 kernel property');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-marker-inherit-'));
+  const holder = spawnLockHolder(root, 'spawn-child');
+  let grandchild = null;
+  try {
+    const held = await holder.ready;
+    grandchild = held.grandchild;
+    const marker = holderMarkerFile(held.lockFile, held.token);
+    assert.throws(() => fs.openSync(marker, 'r'), (error) => error.code === 'EBUSY');
+    holder.child.kill();
+    await holder.exited;
+    assert.equal(await markerFreedWithin(marker, 2000), true, 'a child of the dead holder still holds its marker');
+    assert.doesNotThrow(() => process.kill(grandchild, 0), 'the holder child must outlive the holder for this check');
+  } finally {
+    if (holder.child.exitCode === null && holder.child.signalCode === null) holder.child.kill();
+    if (grandchild) {
+      try {
+        process.kill(grandchild);
+      } catch (error) {
+        assert.equal(error.code, 'ESRCH');
+      }
+    }
+  }
+});
+
 function lockInspectionFixture(prefix) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const options = { lockDirectory: root, resourcePath: path.join(root, 'autopilot') };
@@ -4967,7 +5937,8 @@ function plantLockArtifact(file, owner, ageMs = 0) {
 function lockDirectoryFingerprint(root) {
   return fs.readdirSync(root).sort().map((name) => {
     const stat = fs.lstatSync(path.join(root, name));
-    const bytes = stat.isFile() ? fs.readFileSync(path.join(root, name)).toString('hex') : '';
+    const readable = stat.isFile() && !name.endsWith('.marker');
+    const bytes = readable ? fs.readFileSync(path.join(root, name)).toString('hex') : '';
     return `${name}:${stat.size}:${stat.mtimeMs}:${bytes}`;
   });
 }
@@ -5013,8 +5984,17 @@ test('external process lock inspection reports a live holder without taking the 
   const fixture = lockInspectionFixture('zensu-external-inspect-held-');
   const acquired = core.acquireExternalProcessLock({ ...fixture.options, ownerPid: process.pid });
   try {
-    const recorded = JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')).process_start_identity;
+    const record = JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8'));
+    const recorded = record.process_start_identity;
+    const marker = holderMarkerFile(acquired.lockFile, record.token);
+    if (WINDOWS) {
+      assert.equal(fs.existsSync(marker), true, 'the holder keeps its marker while it holds the lease');
+      assert.throws(() => fs.readFileSync(marker), (error) => error.code === 'EBUSY');
+    } else {
+      assert.equal(fs.existsSync(marker), false, 'no holder marker exists off win32');
+    }
     const inspection = inspectWithoutChange(fixture);
+    assert.equal(inspection.lock.marker, WINDOWS ? 'held' : 'not-applicable');
     const afterInspection = Date.now();
     assert.ok(Number.isFinite(inspection.inspectedAtMs));
     assert.ok(inspection.inspectedAtMs >= inspection.lock.createdAtMs);
@@ -5087,7 +6067,12 @@ test('external process lock inspection calls an artifact stale exactly when acqu
       expect: { state: 'ownerless', stale: true },
     },
   ];
-  if (core.processStartLowerBoundForPid(process.pid) !== null) {
+  if (START_READER_PLATFORMS.has(process.platform)) {
+    assert.equal(
+      typeof core.processStartLowerBoundForPid(process.pid),
+      'number',
+      `no process start time was readable on ${process.platform}`,
+    );
     cases.push({
       name: 'live pid that started after an identity-less record',
       owner: {
@@ -5165,19 +6150,28 @@ test('external process lock inspection keeps a live holder whose start identity 
       pid: process.pid,
       token: 'f'.repeat(48),
       kind: 'external-process-lock',
-      created_at: new Date().toISOString(),
+      created_at: process.argv[2],
       process_start_identity: 'recorded:1',
     }), { mode: 0o600 });
-    process.stdout.write(JSON.stringify(core.inspectExternalProcessLock(options).lock));
+    const lock = core.inspectExternalProcessLock(options).lock;
+    let outcome = 'acquired';
+    try {
+      core.acquireExternalProcessLock({ ...options, ownerPid: process.pid, attemptLimit: 1 });
+    } catch (error) {
+      outcome = error.message;
+    }
+    process.stdout.write(JSON.stringify({ lock, outcome }));
   `;
-  const result = await runNode(source, [JSON.stringify(fixture.options)]);
+  const result = await runNode(source, [JSON.stringify(fixture.options), CREATED_AT]);
   assert.equal(result.code, 0, result.stderr);
-  const lock = JSON.parse(result.stdout);
+  const { lock, outcome } = JSON.parse(result.stdout);
   assert.equal(lock.state, 'owned');
   assert.equal(lock.alive, true);
   assert.equal(lock.identityRecorded, true);
   assert.equal(lock.identityCurrent, null);
+  assert.equal(lock.startedAfterRecord, false);
   assert.equal(lock.stale, false);
+  assert.match(outcome, /timed out acquiring external process lock/i);
 });
 
 test('external process lock inspection refuses what lockOwner cannot read, and so does every acquisition', () => {
