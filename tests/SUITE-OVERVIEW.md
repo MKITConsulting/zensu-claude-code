@@ -234,7 +234,8 @@ PreToolUse gate and the PostToolUse reporter with their silence outside the mode
 approval with the next attempt that implements it, and the takeover of an order by a new attempt
 that releases the earlier run, imports the pull request and the earlier team review, all against a
 stateful fake `zensu` and, for the takeover, a fake `gh`; `harness-launcher` validates the harness
-manifest and drives the worker-facing launcher against a fake `claude`).
+manifest and drives the worker-facing launcher against a fake `claude`). All five skip on native
+Windows, where Node cannot start their shell-script fakes without a shell.
 
 ### Bash gates, evidence & secrets (12)
 `acceptance-gate` · `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` ·
