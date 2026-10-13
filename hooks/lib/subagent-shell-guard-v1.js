@@ -133,6 +133,9 @@ const MATCH_ALL_SEGMENTS = new Set(['*', '.*', '**']);
 const REMOVING_COMMANDS = new Set(['rm', 'rmdir', 'unlink', 'mv']);
 const DYNAMIC = '\u0001';
 const PWD_MARK = '\u0002';
+const MARKER_CHARS = new RegExp(`[${DYNAMIC}${PWD_MARK}]`, 'g');
+const NEUTRAL_CHAR = String.fromCodePoint(0xfffd);
+const VALUE_KEEPING_RE = /^[A-Za-z_][A-Za-z0-9_]*:?[-=?]/;
 const MAX_DEPTH = 8;
 const MAX_PATH_WORDS = 400;
 const MAX_DIRECTORIES = 64;
@@ -457,13 +460,23 @@ function substitutionSpelling(inner, root) {
 function substitutionsIn(body, skipSingle) {
   const found = [];
   let index = 0;
+  let double = false;
   while (index < body.length) {
     const char = body[index];
     if (char === '\\') {
       index += 2;
       continue;
     }
-    if (skipSingle && char === "'") {
+    if (char === '"') {
+      double = !double;
+      index += 1;
+      continue;
+    }
+    if (skipSingle && !double && char === '$' && body[index + 1] === "'") {
+      index = ansiCString(body, index + 2).end + 1;
+      continue;
+    }
+    if (skipSingle && !double && char === "'") {
       const close = body.indexOf("'", index + 1);
       index = close === -1 ? body.length : close + 1;
       continue;
@@ -501,8 +514,8 @@ function materialized(word, cwd) {
   return { ...word, value, mask };
 }
 
-function expandPwd(text, cwd) {
-  return text.replace(/(?<!\\)(?:\$\{PWD\}|\$PWD(?![A-Za-z0-9_])|\$\(\s*pwd(?:\s+-[LP])?\s*\)|`\s*pwd(?:\s+-[LP])?\s*`)/g, () => cwd);
+function withoutMarkers(text) {
+  return text.replace(MARKER_CHARS, NEUTRAL_CHAR);
 }
 
 function braceSpan(value, mask) {
@@ -639,11 +652,12 @@ function parseScript(text, options = {}) {
   };
   const expandName = (name, body, quoted) => {
     recordExpansion(body);
-    if (body === 'HOME' && home) {
+    const unchanged = body === name || VALUE_KEEPING_RE.test(body);
+    if (unchanged && name === 'HOME' && home) {
       append(home, true);
       return;
     }
-    if (body === 'PWD') {
+    if (unchanged && name === 'PWD') {
       append(PWD_MARK, true);
       return;
     }
@@ -771,6 +785,7 @@ function parseScript(text, options = {}) {
       if (!heredoc.quoted) {
         const inner = parseScript(heredoc.body, { ...nestedOptions, heredoc: true });
         expansions.push(...inner.expansions);
+        heredoc.expanded = inner.items.find((item) => item.kind === 'command')?.words[0] || null;
         heredoc.nestedScripts = inner.items
           .filter((item) => item.kind === 'command')
           .flatMap((item) => item.nested);
@@ -1234,9 +1249,11 @@ function heredocText(body) {
 }
 
 function stdinCode(item, cwd = null) {
-  const outer = (text) => (cwd === null ? text : expandPwd(text, cwd));
+  const unquoted = (heredoc) => (cwd !== null && heredoc.expanded
+    ? materialized(heredoc.expanded, cwd).value
+    : heredocText(heredoc.body || ''));
   return [
-    ...item.heredocs.map((heredoc) => (heredoc.quoted ? heredoc.body || '' : heredocText(outer(heredoc.body || '')))),
+    ...item.heredocs.map((heredoc) => (heredoc.quoted ? heredoc.body || '' : unquoted(heredoc))),
     ...item.redirects.filter((redirect) => redirect.op === '<<<')
       .map((redirect) => (cwd === null ? redirect.word.value : materialized(redirect.word, cwd).value)),
   ];
@@ -1382,7 +1399,7 @@ function wordsViolation(words, item, context, depth) {
   if (SHELLS.has(name)) {
     const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
     const scripts = flag === -1
-      ? stdinCode(item, context.cwd)
+      ? item.shellInput
       : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
     for (const script of scripts) {
       const nested = scriptViolation(script, context, depth + 1);
@@ -1470,7 +1487,7 @@ function commandItemViolation(item, context, depth) {
     const violation = pathWordViolation(word, context);
     if (violation) return violation;
   }
-  const violation = wordsViolation(words, item, context, depth);
+  const violation = wordsViolation(words, { ...item, shellInput: stdinCode(item, context.cwd) }, context, depth);
   if (violation) return violation;
   const nestedScripts = [...item.nested, ...item.heredocs.flatMap((heredoc) => heredoc.nestedScripts || [])];
   for (const script of nestedScripts) {
@@ -1611,7 +1628,7 @@ function commandInvocations(text, options = {}) {
       }
     }
   };
-  visitScript(text, {}, 0);
+  visitScript(typeof text === 'string' ? withoutMarkers(text) : text, {}, 0);
   return commands;
 }
 
@@ -1698,10 +1715,11 @@ function accidentReason(payload, trusted, environment = process.env, options = {
   if (input.run_in_background === true) return REASONS.background;
   if (input.dangerouslyDisableSandbox === true) return REASONS.sandbox;
   const context = guardContext(trusted, environment, options);
-  const command = typeof input.command === 'string' ? input.command : null;
+  const raw = typeof input.command === 'string' ? input.command : null;
+  const command = raw === null ? null : withoutMarkers(raw);
   const visible = command === null ? null : withoutComments(command, context);
   for (const value of inputStrings(input)) {
-    const violation = textViolation(value === command ? visible : value, context);
+    const violation = textViolation(value === raw ? visible : value, context);
     if (violation) return violation;
   }
   if (command !== null) return scriptViolation(command, context, 0);
