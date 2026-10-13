@@ -76,11 +76,14 @@ of its ancestors.
 `dangerouslyDisableSandbox: true` outright. It then scans every string of the tool input as text,
 after it normalizes backslashes, quotes, `$HOME` and `~`, the `$PWD` and
 `git rev-parse --show-toplevel` spellings and MSYS drives, case-folded on darwin and win32: a
-mention of a protected form, a `.zensu` segment, or a `/proc/<pid>/environ` path. The comments of
-the `command` field are blanked first. Then `parseScript` parses the `command` field as shell:
+mention of a protected form, a `.zensu` segment, or a `/proc/<pid>/environ` path. A raw U+0001 or
+U+0002 in the `command` field, the characters the parse uses as its `DYNAMIC` and `PWD_MARK`
+markers, becomes U+FFFD first, so only the parse writes a marker; then the field's comments are
+blanked. Then `parseScript` parses the `command` field as shell:
 single and double quotes, `$'…'`, backslash escapes, `$(…)`, backticks and process substitution,
-parameter and arithmetic expansion (a command substitution inside either is a nested script),
-comments, brace expansion, redirections (kept apart from the
+parameter and arithmetic expansion (a command substitution inside either is a nested script, and
+inside an unquoted parameter expansion only single quotes and `$'…'` outside double quotes hide
+one), comments, brace expansion, redirections (kept apart from the
 command words), heredocs (data with the escapes of an unquoted heredoc, parsed as a script only
 when a shell reads them and as code only when an interpreter does, while a `$(…)` in an unquoted
 heredoc is judged) and `(`/`)` subshells. Per simple command, in every working directory it may
@@ -120,12 +123,17 @@ joined by `&&` replaces the set for the rest of that list; any other separator a
 directories to the old ones. `cd x || exit` and a `cd` under `set -e` keep only the new
 directory. `cd -`, `popd` and a dynamic target fall back to every directory seen so far,
 `command cd` and `builtin cd` count, and a subshell restores the set it started with.
-`$(git rev-parse --show-toplevel)` stands for the project root. `$PWD` and `$(pwd)` stand for the
-absolute directory of the command whose word holds them: the parse writes `PWD_MARK`, and
-`materialized` replaces it per candidate directory before any rule reads the word, so a `-c`,
-`eval` or heredoc body that changes directory and a `git -C` or `env -C` operand still see the
-directory the outer shell expanded them in. A command whose set grows past 64 directories is
-denied (`directories`).
+`$(git rev-parse --show-toplevel)` stands for the project root. `$PWD`, `$(pwd)` and a `${PWD…}`
+whose operator keeps a set value (`:-`, `-`, `:=`, `=`, `:?`, `?`, `VALUE_KEEPING_RE`) stand for
+the absolute directory of the command whose word holds them, and `${HOME…}` with those operators
+for `HOME`: the parse writes `PWD_MARK`, and `materialized` replaces it per candidate directory
+before any rule reads the word, so a `-c` or `eval` body that changes directory and a `git -C` or
+`env -C` operand still see the directory the outer shell expanded them in. The text of a heredoc
+or here-string that a shell reads is materialized the same way in the command's own directory,
+before `env -C` or `sudo -D` moves the inner shell (`shellInput`, built in
+`commandItemViolation`), because the outer shell expands it when it sets up the redirection; for
+an unquoted heredoc that text is its heredoc-mode parse (`heredoc.expanded`). A command whose set
+grows past 64 directories is denied (`directories`).
 
 **Decisions.**
 
@@ -218,6 +226,8 @@ denied (`directories`).
   still reach `.zensu`.
 - A protected parent is denied on a read too (`ls ~/.claude`), and a word that only looks like
   a path is resolved against the working directory like one.
+- A `${PWD…}` or `${HOME…}` whose operator can change the value (`%`, `#`, `/`, `:+`, a
+  substring) is unknown, so `rm -rf "${PWD%/}"` is not judged as the directory it names.
 - The directory set over-approximates: a `||` list such as `cd a || cd b && …` is judged in
   directories it never reaches, and `cd "$X" && rm -rf *` is denied when the session started
   in the project root.
