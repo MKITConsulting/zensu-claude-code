@@ -67,8 +67,10 @@ Read the repo and synthesize a recipe. Signals, by what they reveal:
 login-script convention. The probe never invents credentials and never reads a secret.
 
 **Validate / driver** — see `drivers.md`. The app type picks the driver: a web UI →
-`browser`; an HTTP service with no UI → `api`; a binary/TUI → `cli`; a queue/event
-consumer → `async`; terraform/helm/k8s → `iac`; anything else → `custom`.
+`browser`; an HTTP service with no UI → `api`; a binary/TUI → `cli`; a package without an
+entry point → `library`; a queue/event consumer → `async`; terraform/helm/k8s → `iac`; an
+iOS or Android app → `mobile`; a macOS, Electron, Tauri, Windows or Linux desktop app →
+`desktop`; anything else → `custom`.
 
 ## Verify before trust (the part that matters)
 
