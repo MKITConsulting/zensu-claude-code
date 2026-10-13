@@ -16,7 +16,7 @@ fi
 # THE FLOOR IS THE PORTABLE MINIMUM, not the count on the author's machine, and
 # that distinction cost a red CI run to learn. Cases in this file are registered
 # CONDITIONALLY on the host, so the same tree runs a different number of them per
-# platform. MEASURED on one commit: darwin 201, linux 198, win32 179. A
+# platform. MEASURED on one commit: darwin 215, linux 212, win32 195. A
 # floor set at the local maximum fails on every other host for a reason that has
 # nothing to do with the property it guards. The floor exists to catch a suite
 # that stopped REGISTERING - zero cases, or a collapse - so it belongs at the
@@ -26,7 +26,7 @@ fi
 # THE FLOOR LIVES HERE rather than in the tests/structure driver on purpose: the
 # Windows profiles invoke this script directly, so a floor in the driver alone
 # would leave exactly those runs unfloored.
-SESSION_CONTROL_FLOOR="${SESSION_CONTROL_FLOOR:-179}"
+SESSION_CONTROL_FLOOR="${SESSION_CONTROL_FLOOR:-195}"
 SESSION_CONTROL_TIMEOUT_MS="${SESSION_CONTROL_TIMEOUT_MS:-180000}"
 
 LOG="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-log-XXXXXX")"
