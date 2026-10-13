@@ -355,12 +355,16 @@ allowlist: file reads and edits, `LSP`, web fetch and search, `ToolSearch`, the
 task-list tools, `Agent`, `SendMessage`, `AskUserQuestion`, the report tools
 `StructuredOutput`, `ReportFindings` and `SubagentHandback`, and a short named
 list of read-only MCP tools; the capability-gate row in
-[Configuration](configuration.md) lists every name. They cannot invoke `Bash`,
-`shell`, `exec`, `exec_command`, `terminal`, `command`, or any other tool, every
+[Configuration](configuration.md) lists every name. They cannot invoke `shell`,
+`exec`, `exec_command`, `terminal`, `command`, `Monitor`, or any other tool, every
 other MCP tool included: arbitrary command execution cannot be confined by
 scanning its source text for protected tokens, and an MCP server can expose
-exactly that. The plugin gate adds no separate nesting policy: a child spawned by
-a child is classified and gated by the same rules.
+exactly that. The one exception is `Bash` for a child that reports its
+`agent_type` and is neither a read-only Zensu agent nor a `zensu-review-*`
+persona, unless `hooks.subagentShell` is `false`. Every such command is checked by an
+accident guard that scans its source text for protected tokens, so the guard
+prevents accidents and is not a sandbox. The plugin gate adds no separate nesting
+policy: a child spawned by a child is classified and gated by the same rules.
 
 The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
 the interactive main thread creates one private lease generation containing
@@ -386,11 +390,18 @@ filters carry this restriction.
 
 For a neutral child, the gate derives the principal only from the trusted hook
 payload. It denies every tool outside its allowlist, command execution
-included, independently of command text, blocks
+included, independently of command text, except a granted `Bash` command, which
+an accident guard judges by its text (`hooks.subagentShell`). It blocks
 actual canonical access to protected Session Control and workflow-root paths,
-blocks every file mutation below the installed-plugin/private plugin-data roots
-(including symlink, case, and hard-link aliases), and blocks mutating Zensu
-operations. It does not mistake ordinary report text that mentions those terms
+blocks every file-tool mutation below the installed-plugin/private plugin-data
+roots (including symlink, case, and hard-link aliases) and of a Zensu config
+layer, and blocks mutating Zensu MCP operations; the Zensu CLI gate, while it is on, denies a
+subagent every Zensu CLI mutation it recognizes and ignores the inline gate-escape
+prefix on its command, and the guard refuses a command that runs a
+Zensu session or workflow helper (see [Configuration](configuration.md)). A
+granted `Bash` command is denied a protected Session Control, workflow-root, plugin
+or plugin-data path only when its text names that path, so an obfuscated command
+still reads or writes it. It does not mistake ordinary report text that mentions those terms
 for a control attempt, and tool-input prose cannot claim `main-v1`. Mutating
 Zensu workflows therefore remain in the interactive main thread and are entered
 through the matching skill.

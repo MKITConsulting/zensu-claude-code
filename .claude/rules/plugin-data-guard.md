@@ -68,8 +68,8 @@ than as a uniform count: all eleven sit in the module header, `docs/gates.md` an
 the module header.
 
 **THE NET DELTA IS THE MAIN THREAD ONLY, and the measurement sentence must say so.**
-`hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a write into this
-store (`protectedRoots`, `immutableRuntimeRoots`) and returns early for `main-v1`. So this gate
+`hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a file-tool write
+into this store (`protectedRoots`, `immutableRuntimeRoots`) and returns early for `main-v1`. So this gate
 adds exactly main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel §6.1.2
 measured open, and is the justification. Never justify it with "every principal": true of the
 hook's behaviour, false as a description of what it adds. That module therefore belongs on the
