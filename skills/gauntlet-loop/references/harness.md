@@ -79,20 +79,24 @@ ledger and the progress artifact.
 ## Keeping critics clean
 
 A critic must be read-only. `subagent_type: "Explore"` is the right seat: its grant
-removes the write tools and `Agent`, so it cannot edit, publish, or spawn a
-sub-fleet. State the property, not the grant list — "no write tool, no spawn, no
-publish" — and always put "inspect only, change nothing" in the packet, because an
-instruction is what removes intent while a grant only removes reach.
+removes the edit tools and `Agent`, so it cannot edit through a file tool or spawn a
+sub-fleet. Inside Zensu it may still hold a guarded `Bash`, which can edit files and
+publish (`gh pr comment`, `curl -X POST`), so the packet is what keeps it read-only.
+State the property, not the grant list — "no write tool, no spawn" — and always put
+"inspect only, change nothing" in the packet, because an instruction is what removes
+intent while a grant only removes reach.
 
-**Inside the Zensu plugin an `Explore` critic cannot run commands at all.** The
-`.*` PreToolUse capability gate denies every command-execution tool, and every MCP
-tool outside a short read-only list, to a neutral
-`host-profile-v1` child, and `Explore` is one *while the host reports its
-`agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin" states why this
-plugin cannot establish that it always does, and that bound applies here unchanged.
-Under it, this is a hard difference from a bare
-Claude Code session, and it moves work: the lead runs the build, the tests, the dev
-server and the capture, then hands the redacted output into the packet.
+**Inside the Zensu plugin an `Explore` critic runs commands only through a guarded
+`Bash`.** The `.*` PreToolUse capability gate denies every other command-execution
+tool, and every MCP tool outside a short read-only list, to a neutral
+`host-profile-v1` child. It admits `Bash` only for a child that reports its
+`agent_type`, only while `hooks.subagentShell` is not `false`, and only past a guard
+that prevents accidents and is not a sandbox. `Explore` is such a child *while the
+host reports its `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"
+states why this plugin cannot establish that it always does, and that bound applies
+here unchanged. The lead still runs the build, the tests, the dev server and the
+capture, because the shell can be off and the guard can refuse, then hands the
+redacted output into the packet.
 
 If the project ships a dedicated read-only reviewer agent type, prefer it. Do
 not use a `general-purpose` critic — a critic that can edit will eventually fix
@@ -103,8 +107,8 @@ and its tool grant live in [SKILL.md](../SKILL.md) — this file deliberately do
 repeat them, because a second copy of an enumeration drifts the moment one is added,
 and the first version of this paragraph was already an incomplete copy on the day it
 shipped. See "Inside the Zensu plugin" there for the normative statement. The
-short version is the packet protocol, not the shell: no subagent here holds one, so
-that cannot be what separates them from an `Explore` critic. The reviewer types
+short version is the packet protocol, not the shell: an `Explore` critic's guarded
+shell is not what disqualifies the reviewer types. The reviewer types
 hard-refuse any spawn that is not a complete `REVIEW PACKET v1`, and
 `zensu:review-aspect` accepts only seven fixed perspectives, so none of them can
 be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
@@ -112,9 +116,10 @@ be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 The packet handed to a critic contains the goal, the frozen bar, house rules,
 the candidate, the reference, redacted gate output and the lead's capture of every
 inspection-recipe step, as redacted output or as files the critic can `Read`,
-because a critic here holds no shell, browser, preview or simulator tool to take a
-step itself. It contains no builder transcript, no rationale, no "we tried X because Y", and no
-hint about which way the lead is leaning.
+because a critic here holds no browser, preview or simulator tool and the lead's one
+measurement is what every critic judges against. It contains no builder transcript,
+no rationale, no "we tried X because Y", and no hint about which way the lead is
+leaning.
 
 ## Blinding an A/B comparison
 
@@ -152,8 +157,9 @@ Never grade a summary. The tools that make real inspection cheap:
 - **Files, images, PDFs, notebooks:** `Read`.
 
 Inside the Zensu plugin every one of these except `Read` is **lead-only** — a
-subagent's command, browser, preview and simulator tools are all denied. Run them
-yourself and put the redacted output in the packet: the redaction rule in
+subagent's browser, preview and simulator tools are denied, its shell is at most a
+guarded `Bash` that can be off or refuse, and the frozen measurement is the lead's.
+Run them yourself and put the redacted output in the packet: the redaction rule in
 [SKILL.md](../SKILL.md) is unconditional and the packet is one of the paths it
 covers, because a packet is delivered to a fresh agent and a builder that receives
 one can write.

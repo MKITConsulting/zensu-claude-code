@@ -84,13 +84,26 @@ never run in GitHub Actions.
   `StructuredOutput`; it receives neither `main-v1`
   nor Session Control selectors.
 - Every other neutral `host-profile-v1` child is denied every tool outside the
-  capability gate's allowlist — all shell/command tool aliases and every MCP
-  tool outside its named read-only list — before command contents are
-  considered. This is a capability rule, not a token denylist: `env`,
-  expansion, obfuscated protected paths/helpers, nested interpreters and
-  command-executing MCP servers cannot regain command execution. Allowlisted
-  host tools remain available subject to the child definition and the
-  remaining protected-path and mutating-Zensu checks.
+  capability gate's allowlist except `Bash` — the five other shell/command tool
+  aliases, `Monitor`, and every MCP tool outside its named read-only list,
+  command-executing MCP servers included — before command contents are
+  considered. For those tools this is a capability rule, not a token denylist.
+  `Bash` passes only for a child that reports a usable `agent_type`, and a usable
+  `agent_id` whenever it reports one, and that is not a `zensu-review-*` persona,
+  only while `hooks.subagentShell` grants it, and only past the accident guard in
+  `hooks/lib/subagent-shell-guard-v1.js`. A refused grant denies `Bash` with the
+  command-execution reason and its cause before the command is considered, so
+  with the grant withdrawn `env`, expansion, obfuscated protected paths/helpers,
+  nested interpreters and command-executing MCP servers cannot regain command
+  execution. The guard parses the command text and is not a capability rule: `env`, selector expansions, named Zensu helpers and binders,
+  and protected paths are denied, while an obfuscated protected path or helper
+  passes, a documented gap rather than a boundary. The guard prevents accidents
+  and is not a sandbox. The `general-purpose` contract scenario pins both
+  halves: the guard denies `env`, selector reads, `zensu-log.sh` and the model
+  binders, and it lets `git status --short`, `sh -c true` and two obfuscated
+  spellings of a `.zensu` path and a helper name through, the last two as
+  documented gaps. Allowlisted host tools remain available subject to the child
+  definition and the remaining protected-path and mutating-Zensu checks.
 - Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
   subtree. The gate denies both protected roots and ancestors that could
   recursively expose them, uses canonical `cwd` when a traversal path is
@@ -107,7 +120,11 @@ never run in GitHub Actions.
   principal only from injected context, performs exactly one successful `Read`
   of a wrapper-owned marker in an external detached review worktree, and then
   makes exactly one `Bash {command:"env"}` probe. The real capability gate must
-  return its exact structured command-denial reason. Extra calls, seeded
+  deny it with one of two exact structured reasons: the shell guard's
+  environment-dump reason when the child reported an `agent_type` and the grant
+  applies, or the command-denial reason when the grant was refused. L04 accepts
+  both, so it does not establish that a live `general-purpose` child reports an
+  `agent_type`; that premise stays unmeasured. Extra calls, seeded
   context, wrong marker/principal/command, reordered results, a failed Read, or
   a successful command all fail evidence validation. `Agent` is on the neutral
   allowlist, so a nested spawn stays governed by the child's frontmatter and
