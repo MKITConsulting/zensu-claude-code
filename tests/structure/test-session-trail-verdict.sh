@@ -7998,4 +7998,218 @@ process.stdout.write(`${owners}|${read}`);
     || check "TL11 release read scope: owners|transcripts read = $TL11 (want ended-session,source|e1000000,e3000000)" FAIL
 fi
 
+FK_HOME="$(cd "$FAKE" && pwd -P)/fork-home"
+FK_REPO="$FK_HOME/repo"
+FK_PARENT_WT="$FK_REPO/.claude/worktrees/parent-wt"
+FK_FORK_WT="$FK_REPO/.claude/worktrees/fork-wt"
+FK_TURNLESS_WT="$FK_REPO/.claude/worktrees/turnless-wt"
+FK_TAKER_WT="$FK_REPO/.claude/worktrees/taker-wt"
+FK_PARENT=fa000000-0000-0000-0000-000000000001
+FK_FORK=fb000000-0000-0000-0000-000000000002
+FK_TURNLESS=fc000000-0000-0000-0000-000000000003
+FK_ORPHAN=fd000000-0000-0000-0000-000000000004
+FK_SIB=fe000000-0000-0000-0000-000000000005
+FK_TAKER=ff000000-0000-0000-0000-000000000006
+FK_AGENT=agent-fa00000000000007
+FK_BIG=f9000000-0000-0000-0000-000000000008
+FK_BIG_WT="$FK_REPO/.claude/worktrees/large-fork-wt"
+FK_ACCT=fa000000-1111-2222-3333-444444444444
+mkdir -p "$FK_HOME"
+cat > "$FK_HOME/mkfork.mjs" <<'MKFORK'
+import fs from 'node:fs';
+import path from 'node:path';
+const [home, repo, parent, fork, turnless, orphan, sib, agent, acct, livePid, big] = process.argv.slice(2);
+const cfg = path.join(home, '.claude');
+const now = Date.now();
+const iso = (min) => new Date(now - min * 60000).toISOString();
+const wt = (name) => path.join(repo, '.claude', 'worktrees', name);
+const parentWt = wt('parent-wt');
+const parentSub = path.join(parentWt, 'sub');
+fs.mkdirSync(parentSub, { recursive: true });
+const record = (sessionId, cwd, gitBranch, type, text, min, extra = {}) => ({
+  parentUuid: null,
+  isSidechain: false,
+  type,
+  message: type === 'user' ? { role: 'user', content: text } : { role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' },
+  cwd,
+  sessionId,
+  gitBranch,
+  timestamp: iso(min),
+  ...extra,
+});
+const title = (sessionId, customTitle) => ({ type: 'custom-title', customTitle, sessionId });
+const inherited = [
+  record(parent, parentWt, 'claude/parent-wt', 'user', 'parent work', 300),
+  record(parent, parentWt, 'claude/parent-wt', 'assistant', 'parent done', 299),
+  record(parent, parentSub, 'claude/parent-wt', 'user', 'parent work in a subdirectory', 298),
+  record(parent, parentSub, 'claude/parent-wt', 'assistant', 'parent subdirectory done', 297),
+];
+const transcriptOf = (cwd, name) => path.join(cfg, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'), `${name}.jsonl`);
+const write = (cwd, name, records, min) => {
+  const file = transcriptOf(cwd, name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const at = new Date(now - min * 60000);
+  fs.utimesSync(file, at, at);
+};
+write(parentWt, parent, inherited, 297);
+write(wt('fork-wt'), fork, [
+  ...inherited,
+  title(fork, 'fork fixture'),
+  record(fork, wt('fork-wt'), 'claude/fork-wt', 'user', 'fork work', 60),
+  record(fork, wt('fork-wt'), 'claude/fork-wt', 'assistant', 'fork done', 59),
+], 59);
+write(wt('turnless-wt'), turnless, [...inherited, title(turnless, 'turnless fork fixture')], 50);
+write(wt('orphan-wt'), orphan, [...inherited, title(orphan, 'orphan fork fixture')], 45);
+write(wt('fork-wt'), sib, [
+  record(sib, wt('fork-wt'), 'claude/fork-wt', 'user', 'sibling work', 40),
+  record(sib, wt('fork-wt'), 'claude/fork-wt', 'assistant', 'sibling done', 39),
+], 39);
+write(parentWt, agent, inherited.slice(2).map((r) => ({ ...r, isSidechain: true, agentId: agent.replace(/^agent-/, '') })), 296);
+fs.mkdirSync(path.join(cfg, 'sessions'), { recursive: true });
+const register = (sessionId, cwd) => fs.writeFileSync(path.join(cfg, 'sessions', `${sessionId}.json`), JSON.stringify({
+  sessionId, cwd, pid: Number(livePid), startedAt: now - 3600000, entrypoint: 'claude-desktop', kind: 'interactive',
+}));
+register(fork, wt('fork-wt'));
+register(turnless, wt('turnless-wt'));
+const store = path.join(home, 'store', acct, 'ws-0001');
+fs.mkdirSync(store, { recursive: true });
+for (const sessionId of [fork, turnless, orphan]) {
+  fs.writeFileSync(path.join(store, `local_${sessionId}.json`), JSON.stringify({
+    sessionId: `local_${sessionId}`, cliSessionId: sessionId, isArchived: false, title: `desktop record ${sessionId.slice(0, 8)}`,
+    cwd: parentWt, worktreePath: parentWt, branch: 'claude/parent-wt', forkedFromSessionId: `local_${parent}`,
+  }));
+}
+const bigWt = wt('large-fork-wt');
+const nested = path.join(bigWt, '.claude', 'worktrees', 'nested');
+fs.mkdirSync(nested, { recursive: true });
+fs.writeFileSync(path.join(nested, '.git'), 'gitdir: /nonexistent/nested\n');
+const bigLines = [];
+let bigBytes = 0;
+for (let i = 0; bigBytes < 9 * 1024 * 1024; i += 1) {
+  const line = JSON.stringify(record(parent, parentWt, 'claude/parent-wt', i % 2 ? 'assistant' : 'user', 'p'.repeat(i % 97 === 0 ? 40000 : 3000), 600));
+  bigLines.push(line);
+  bigBytes += Buffer.byteLength(line) + 1;
+}
+bigLines.push(JSON.stringify(title(big, 'large fork fixture')));
+const forkPoint = bigBytes + Buffer.byteLength(bigLines[bigLines.length - 1]) + 1;
+bigLines.push(JSON.stringify({ parentUuid: null, isSidechain: false, cwd: bigWt, sessionId: big, gitBranch: 'claude/large-fork-wt', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'f'.repeat(300 * 1024) }], stop_reason: 'end_turn' }, timestamp: iso(30) }));
+for (let i = 0; i < 300; i += 1) bigLines.push(JSON.stringify(record(big, nested, 'claude/nested', i % 2 ? 'assistant' : 'user', 'n'.repeat(4000), 29)));
+const bigFile = transcriptOf(bigWt, big);
+fs.mkdirSync(path.dirname(bigFile), { recursive: true });
+fs.writeFileSync(bigFile, bigLines.join('\n') + '\n');
+const bigSize = fs.statSync(bigFile).size;
+const bigPremise = bigSize > 8 * 1024 * 1024 && forkPoint > 256 * 1024 && forkPoint < bigSize - 768 * 1024;
+const first = JSON.parse(fs.readFileSync(transcriptOf(wt('fork-wt'), fork), 'utf8').split('\n')[0]);
+process.stdout.write(first.sessionId === parent && first.cwd === parentWt && bigPremise ? 'premise-ok' : `premise-broken:${first.sessionId}:${first.cwd}:${bigSize}:${forkPoint}`);
+MKFORK
+fkrun() {
+  local at="$1"; shift
+  ( cd "$at" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$FK_HOME" USERPROFILE="$FK_HOME" ZENSU_CCD_STORE="$FK_HOME/store" CLAUDE_CODE_SESSION_ID="$FK_TAKER" node "$TRAIL_MJS" "$@" --all --config-dir "$FK_HOME/.claude" )
+}
+FK_OK=0
+FK_PREMISE=""
+if command -v git >/dev/null 2>&1 \
+  && git init -q "$FK_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n' > "$FK_REPO/.gitignore" \
+  && git -C "$FK_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$FK_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$FK_REPO/.claude/worktrees" \
+  && git -C "$FK_REPO" worktree add -q "$FK_PARENT_WT" -b claude/parent-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_FORK_WT" -b claude/fork-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_TURNLESS_WT" -b claude/turnless-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_TAKER_WT" -b claude/taker-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_BIG_WT" -b claude/large-fork-wt >/dev/null 2>&1 \
+  && FK_PREMISE="$(node "$FK_HOME/mkfork.mjs" "$FK_HOME" "$FK_REPO" "$FK_PARENT" "$FK_FORK" "$FK_TURNLESS" "$FK_ORPHAN" "$FK_SIB" "$FK_AGENT" "$FK_ACCT" "$LIVE_PID" "$FK_BIG" 2>&1)" \
+  && [ "$FK_PREMISE" = "premise-ok" ] \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$FK_PARENT_WT" "$FK_PARENT" 3600)" = "created" ] \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$FK_FORK_WT" "$FK_FORK" 60)" = "created" ]; then
+  FK_OK=1
+fi
+if ! command -v git >/dev/null 2>&1; then
+  skip "FK* git is not on PATH — the fork checks need real worktrees and are unverified in this run"
+elif [ "$FK_OK" != 1 ]; then
+  check "FK-fixture the fork fixture (worktrees, a transcript that opens with its parent's records, registry entries, desktop records, keep anchors) could not be built: ${FK_PREMISE:-<no premise output>}" FAIL
+else
+  check "FK0 the fork fixture holds a transcript whose first record carries its parent's session id and worktree, a live registry entry, a desktop fork record naming the parent's worktree, and a fork past the full-read limit whose fork point lies between the head and the tail" PASS
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json --anchor "$FK_FORK_WT" 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
+  [ "$(wr_json "$FK_OUT" 'o.cwd')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwd=$(wr_json "$FK_OUT" 'o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')" = "$FK_FORK_WT:true" ] || FK_BAD="$FK_BAD writes=$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')"
+  [ "$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')" = "not-needed:$FK_FORK_WT" ] || FK_BAD="$FK_BAD continuation=$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')"
+  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+
+  FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --anchor "$FK_FORK_WT" 2>/dev/null)"
+  FK_BAD=""
+  printf '%s\n' "$FK_TXT" | grep -qxF "WORKTREE $FK_FORK_WT" || FK_BAD="$FK_BAD worktree-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "BRANCH   claude/fork-wt" || FK_BAD="$FK_BAD branch-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^WRITES +allowed' || FK_BAD="$FK_BAD writes-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^CONTINUE not needed' || FK_BAD="$FK_BAD continue-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
+  printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
+  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" release "$FK_FORK" --json --force 2>/dev/null)"; FK_RC=$?
+  FK_BAD=""
+  [ "$FK_RC" = "0" ] || FK_BAD="$FK_BAD rc=$FK_RC"
+  [ "$(wr_json "$FK_OUT" 'o.verdict + ":" + o.applied')" = "releasable:false" ] || FK_BAD="$FK_BAD verdict=$(wr_json "$FK_OUT" 'o.verdict + ":" + o.applied') blockers=$(wr_json "$FK_OUT" 'JSON.stringify(o.blockers)')"
+  [ "$(wr_json "$FK_OUT" 'o.source.recordedWorktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD recorded=$(wr_json "$FK_OUT" 'o.source.recordedWorktree')"
+  [ "$(wr_json "$FK_OUT" 'o.source.worktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD worktree=$(wr_json "$FK_OUT" 'o.source.worktree')"
+  [ "$(wr_json "$FK_OUT" 'o.anchors.map((a) => a.owner + ":" + a.action).join(",")')" = "source:end" ] || FK_BAD="$FK_BAD anchors=$(wr_json "$FK_OUT" 'JSON.stringify(o.anchors)')"
+  [ -f "$FK_FORK_WT/.worktree-keep" ] || FK_BAD="$FK_BAD fork-marker-gone"
+  [ -f "$FK_PARENT_WT/.worktree-keep" ] || FK_BAD="$FK_BAD parent-marker-gone"
+  [ -z "$FK_BAD" ] && check "FK3 a release dry run of a fork targets the fork's own worktree and its own keep anchor, never the parent's, and changes nothing" PASS || check "FK3 fork release dry run:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" takeover "$FK_FORK" --json --force 2>/dev/null)"
+  FK_EDGE_FILE="$(find "$FK_HOME/.claude/zensu/session-lineage/v1/edges" -name '*.json' 2>/dev/null | head -1)"
+  FK_EDGE="$([ -n "$FK_EDGE_FILE" ] && cat "$FK_EDGE_FILE")"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.lineage.recorded')" = "true" ] || FK_BAD="$FK_BAD not-recorded=$(wr_json "$FK_OUT" 'o.lineage.message')"
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.branch')" = "$FK_FORK_WT:claude/fork-wt" ] || FK_BAD="$FK_BAD takeover-row=$(wr_json "$FK_OUT" 'o.wt + ":" + o.branch')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.sessionId + ":" + o.to.sessionId')" = "$FK_FORK:$FK_TAKER" ] || FK_BAD="$FK_BAD edge-ids=$(wr_json "$FK_EDGE" 'o.from.sessionId + ":" + o.to.sessionId')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.worktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD edge-worktree=$(wr_json "$FK_EDGE" 'o.from.worktree')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD edge-branch=$(wr_json "$FK_EDGE" 'o.from.branch')"
+  [ -z "$FK_BAD" ] && check "FK4 a takeover of a fork records the fork's own worktree and branch as the source endpoint of the lineage edge" PASS || check "FK4 fork lineage endpoint:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_TURNLESS" --json 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_TURNLESS_WT:$FK_TURNLESS_WT" ] || FK_BAD="$FK_BAD wt-cwd=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "null" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/turnless-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ -z "$FK_BAD" ] && check "FK5 a live fork with no record of its own yet takes its worktree from the live registry, not from its parent's records or its desktop record" PASS || check "FK5 turnless fork:$FK_BAD" FAIL
+
+  FK_ERR="$(fkrun "$FK_TAKER_WT" show "$FK_ORPHAN" --json 2>&1 >/dev/null)"; FK_RC=$?
+  { [ "$FK_RC" = "2" ] && printf '%s' "$FK_ERR" | grep -qF "no session matched \"$FK_ORPHAN\""; } \
+    && check "FK6 a fork that has no record of its own and no live registry entry is not resolved to its parent's worktree: it has no recorded directory, so no row is built" PASS \
+    || check "FK6 orphan fork: rc=$FK_RC ${FK_ERR:-<empty>}" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_PARENT" --json --no-git 2>/dev/null)"
+  FK_AGENT_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_AGENT" --json --no-git 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_PARENT_WT:$FK_PARENT_WT" ] || FK_BAD="$FK_BAD parent=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_PARENT_WT/sub" ] || FK_BAD="$FK_BAD parent-cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_AGENT_OUT" 'o.wt + ":" + o.cwd')" = "$FK_PARENT_WT:$FK_PARENT_WT/sub" ] || FK_BAD="$FK_BAD agent=$(wr_json "$FK_AGENT_OUT" 'o.wt + ":" + o.cwd')"
+  [ -z "$FK_BAD" ] && check "FK7 a session that is not a fork keeps the cwd of its first record, and so does a subagent transcript whose sidechain records carry its parent's session id" PASS || check "FK7 first-record rule:$FK_BAD" FAIL
+
+  FK_SIB_LINE="$(fkrun "$FK_TAKER_WT" show "$FK_SIB" --no-git 2>/dev/null | grep '^SIBLINGS')"
+  FK_PARENT_LINE="$(fkrun "$FK_TAKER_WT" show "$FK_PARENT" --no-git 2>/dev/null | grep '^SIBLINGS')"
+  FK_BAD=""
+  printf '%s' "$FK_SIB_LINE" | grep -qF 'fb000000(' || FK_BAD="$FK_BAD fork-missing-beside-its-sibling[$FK_SIB_LINE]"
+  printf '%s' "$FK_PARENT_LINE" | grep -qF 'agent-fa(' || FK_BAD="$FK_BAD subagent-missing-beside-the-parent[$FK_PARENT_LINE]"
+  for fk_tag in fb000000 fc000000 fd000000 f9000000; do printf '%s' "$FK_PARENT_LINE" | grep -qF "$fk_tag" && FK_BAD="$FK_BAD $fk_tag-listed-beside-the-parent"; done
+  [ -z "$FK_BAD" ] && check "FK8 show's SIBLINGS line places a fork in its own worktree: beside a session there, and never beside its parent" PASS || check "FK8 fork siblings:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_BIG" --json --no-git 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.truncated')" = "true" ] || FK_BAD="$FK_BAD truncated=$(wr_json "$FK_OUT" 'o.truncated')"
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_BIG_WT:$FK_BIG_WT" ] || FK_BAD="$FK_BAD wt-cwd=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')" = "$FK_BIG_WT/.claude/worktrees/nested:claude/nested" ] || FK_BAD="$FK_BAD last=$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')"
+  [ -z "$FK_BAD" ] && check "FK9 a fork past the full-read limit, whose first own record lies in the unread middle and spans more than one read chunk, resolves to that record's worktree, not to the nested worktree its tail shows or to its parent's" PASS || check "FK9 large fork:$FK_BAD" FAIL
+fi
+
 report

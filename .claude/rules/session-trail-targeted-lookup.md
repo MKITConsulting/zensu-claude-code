@@ -30,10 +30,15 @@ other admitted transcript to find its siblings.
   `no session matched` text are today's.
 - `siblings()` filters the memoized index when one exists. Otherwise it reads the first
   `CWD_PROBE_BYTES` (64 KiB) of each admitted transcript and takes the first `"cwd":"…"` with a
-  sticky match at the first literal occurrence. A probe that finds it and maps it to another
-  worktree skips the file; a miss, an empty value or a cut value falls back to the full row.
-  Only plain-text `show` calls it; `show --json` returns before it. Measured on the same
-  machine: the first cwd ends within 64 KiB in 2,416 of 2,420 transcripts.
+  sticky match at the first literal occurrence, provided the line that holds it ends inside the
+  window. When that line is a main-chain record of another session, the transcript is a fork, and
+  the probe answers with `forkOwnCwd`, the value the row takes too
+  (`.claude/rules/session-trail-fork-anchor.md`). A probe that finds a cwd and maps it to another
+  worktree skips the file; a miss, an empty value, a cut value, a line that does not end inside
+  the window and a fork with no own cwd fall back to the full row. Only plain-text `show` calls
+  it; `show --json` returns before it. Measured on the same machine: the first cwd ends within
+  64 KiB in 2,416 of 2,420 transcripts; on 2026-10-13 the line that holds it ended within 64 KiB
+  in 2,561 of 2,565.
 - `keepOwners()` takes the keep keys of the live anchors it must attribute and builds a row only
   for an inventory entry whose session id hashes to one of them. The caller reads the map only
   at those keys.
@@ -55,7 +60,10 @@ other admitted transcript to find its siblings.
 - `worktreeOfCwd` is the one cwd-to-worktree mapping for the row, the probe and `selfIdentity`.
 - `firstCwdOf` copies the first-cwd pattern of `summarize`, and its window must stay inside
   `HEAD_BYTES`, the head `readTranscript` keeps for a transcript above `FULL_READ_LIMIT`.
-  Otherwise the probe can find a first cwd the row never sees and drop a real sibling.
+  Otherwise the probe can find a first cwd the row never sees and drop a real sibling. Both
+  classify the line that holds the first cwd with `inheritedRecord` and answer a fork with
+  `forkOwnCwd`; a probe that took a fork's first cwd as its directory would skip the fork beside
+  a session in its own worktree and list it beside its parent.
 - `CCD_RECORD_PATHS` has two writers, `ccdIndex` and `ccdApp`, and both keep the last match in
   walk order; `openTaskChips` calls `ccdApp` and then reads the path.
 - `ccdAppEntry` is the one desktop-entry builder, and `ccdIndex` and `ccdApp` both call it.
