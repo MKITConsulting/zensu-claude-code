@@ -5140,8 +5140,8 @@ else
 fi
 
 # WT8n3 — the "WORKTREE ROOT" label, which was UNCONDITIONAL while the value it labels is
-# a worktree root on only one leg. `buildIndexUncached` computes
-# `const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;`, so `r.wt` falls back to the
+# a worktree root on only one leg. `worktreeOfCwd` computes
+# `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`, so `r.wt` falls back to the
 # raw recorded cwd whenever the directory is unreadable — and `worktreeRoot` also returns
 # null after 12 parent levels with no `.git`. On the gone leg the brief therefore told the
 # reader "this IS the worktree root" a few lines below advice saying the recorded path may
@@ -7375,6 +7375,360 @@ if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH
   check "CH6 references/takeover.md carries the chips before the release step and names the tool and the plan confirmation line" PASS
 else
   check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
+fi
+
+TL_HOME="$FAKE/tl-home"
+TL_CFG="$TL_HOME/.claude"
+TL_STORE="$TL_HOME/Library/Application Support/Claude/claude-code-sessions/inst-tl/ws-0001"
+TL_TARGET=7a7a7a01-0000-4000-8000-0000000000a1
+TL_SIB=7a7a7a02-0000-4000-8000-0000000000a2
+TL_OTHER=7a7a7a03-0000-4000-8000-0000000000b1
+TL_FAR=5c5c5c01-0000-4000-8000-0000000000c1
+TL_OLD=5c5c5c02-0000-4000-8000-0000000000c2
+mkdir -p "$TL_STORE"
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, target, sib, other, far, old] = process.argv.slice(1);
+const now = Date.now();
+const write = (sid, wt, title, ageMs) => {
+  const iso = new Date(now - ageMs).toISOString();
+  const cwd = path.join(home, "work", wt);
+  fs.mkdirSync(cwd, { recursive: true });
+  const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sid}.jsonl`);
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid }),
+    JSON.stringify({ type: "user", message: { role: "user", content: `start ${title}` }, cwd, gitBranch: `branch-${wt}`, isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, gitBranch: `branch-${wt}`, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+  const at = new Date(now - ageMs);
+  fs.utimesSync(file, at, at);
+};
+write(target, "wt-a", "tl target fixture", 3 * 3600000);
+write(sib, "wt-a", "tl sibling fixture", 5 * 3600000);
+write(other, "wt-b", "tl other fixture", 2 * 3600000);
+write(far, "wt-c", "tl far fixture", 4 * 3600000);
+write(old, "wt-d", "tl old fixture", 30 * 86400000);
+const record = (sid, title) => fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({ sessionId: `local_${sid}`, cliSessionId: sid, isArchived: false, title, model: "fixture-model" }));
+record(target, "tl target record");
+record(sib, "tl sibling record");
+record(other, "tl other record");
+for (const n of [1, 2, 3]) record(`9d9d9d0${n}-0000-4000-8000-00000000000${n}`, `decoy record ${n}`);
+' "$TL_HOME" "$TL_STORE" "$TL_TARGET" "$TL_SIB" "$TL_OTHER" "$TL_FAR" "$TL_OLD" 2>/dev/null
+
+cat > "$TL_HOME/trace.mjs" <<'TLTRACE'
+import fs from 'node:fs';
+const reads = [];
+let records = 0;
+const note = (kind, p) => { if (typeof p === 'string' && p.endsWith('.jsonl')) reads.push(`${kind} ${p}`); };
+const readFileSync = fs.readFileSync;
+fs.readFileSync = function tracedReadFileSync(p, ...rest) { note('whole', p); return readFileSync.call(this, p, ...rest); };
+const openSync = fs.openSync;
+fs.openSync = function tracedOpenSync(p, ...rest) { note('open', p); return openSync.call(this, p, ...rest); };
+const parse = JSON.parse;
+JSON.parse = function tracedParse(text, reviver) { if (typeof text === 'string' && text.includes('"cliSessionId"')) records += 1; return parse.call(this, text, reviver); };
+process.on('exit', () => { fs.writeFileSync(new URL(process.env.TL_TRACE_NAME, import.meta.url), JSON.stringify({ reads, records })); });
+TLTRACE
+tl_url() { node -e 'process.stdout.write(require("node:url").pathToFileURL(process.argv[1]).href)' "$1"; }
+TL_TRACE_URL="$(tl_url "$TL_HOME/trace.mjs")"
+tlrun() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID HOME="$TL_HOME" USERPROFILE="$TL_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_CFG"; }
+tltrace() { local name="$1"; shift; env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID HOME="$TL_HOME" USERPROFILE="$TL_HOME" TL_TRACE_NAME="$name" node --import "$TL_TRACE_URL" "$TRAIL_MJS" "$@" --config-dir "$TL_CFG"; }
+tl_trace_verdict() {
+  node -e '
+const fs = require("node:fs");
+const [trace, out, allowed] = process.argv.slice(1);
+const t = JSON.parse(fs.readFileSync(trace, "utf8"));
+let id = "";
+try { id = JSON.parse(fs.readFileSync(out, "utf8")).sessionId || ""; } catch { id = "text"; }
+const ok = allowed.split(",");
+const whole = t.reads.filter((r) => r.startsWith("whole "));
+const foreignWhole = whole.filter((r) => !ok.some((sid) => r.endsWith(`${sid}.jsonl`)));
+const foreignAny = t.reads.filter((r) => !ok.some((sid) => r.endsWith(`${sid}.jsonl`)));
+process.stdout.write([id, whole.length, foreignWhole.length, foreignAny.length, t.records].join(":"));
+' "$TL_HOME/$1" "$TL_HOME/$2" "$3" 2>/dev/null
+}
+
+TL1_RC=0
+tltrace tl1.json show "$TL_TARGET" --all --no-git --json > "$TL_HOME/tl1.out" 2>/dev/null || TL1_RC=$?
+TL1="$(tl_trace_verdict tl1.json tl1.out "$TL_TARGET")"
+case "$TL1" in
+  "$TL_TARGET":[1-9]*:0:0:1) check "TL1 show by full session id reads only the target transcript and parses only its own desktop record ($TL1)" PASS ;;
+  *) check "TL1 show by full session id (rc=$TL1_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL1)" FAIL ;;
+esac
+
+TL1B_RC=0
+tltrace tl1b.json show 5c5c5c01 --all --no-git --json > "$TL_HOME/tl1b.out" 2>/dev/null || TL1B_RC=$?
+TL1B="$(tl_trace_verdict tl1b.json tl1b.out "$TL_FAR")"
+case "$TL1B" in
+  "$TL_FAR":[1-9]*:0:0:*) check "TL1b show by an 8-character id prefix reads only the one matching transcript ($TL1B)" PASS ;;
+  *) check "TL1b show by id prefix (rc=$TL1B_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL1B)" FAIL ;;
+esac
+
+TL2_RC=0
+tltrace tl2.json takeover "$TL_TARGET" --all --no-record --no-git --json > "$TL_HOME/tl2.out" 2>/dev/null || TL2_RC=$?
+TL2="$(tl_trace_verdict tl2.json tl2.out "$TL_TARGET")"
+case "$TL2" in
+  "$TL_TARGET":[1-9]*:0:0:[12]) check "TL2 takeover by full session id reads only the target transcript and parses at most its own desktop record twice ($TL2)" PASS ;;
+  *) check "TL2 takeover by full session id (rc=$TL2_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL2)" FAIL ;;
+esac
+
+TL3_RC=0
+tltrace tl3.json show "$TL_TARGET" --all --no-git > "$TL_HOME/tl3.out" 2>/dev/null || TL3_RC=$?
+tlrun show "tl target fixture" --all --no-git > "$TL_HOME/tl3-full.out" 2>/dev/null
+TL3_SIB="$(grep '^SIBLINGS' "$TL_HOME/tl3.out")"
+TL3_SIB_FULL="$(grep '^SIBLINGS' "$TL_HOME/tl3-full.out")"
+TL3="$(tl_trace_verdict tl3.json tl3.out "$TL_TARGET,$TL_SIB")"
+TL3_OTHER_PROBED="$(node -e '
+const t = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write(String(t.reads.some((r) => r.startsWith("open ") && r.endsWith(`${process.argv[2]}.jsonl`))));
+' "$TL_HOME/tl3.json" "$TL_OTHER" 2>/dev/null)"
+TL3_BAD=""
+[ "$TL3_RC" = "0" ] || TL3_BAD="$TL3_BAD rc=$TL3_RC"
+[ -n "$TL3_SIB" ] && [ "$TL3_SIB" = "$TL3_SIB_FULL" ] || TL3_BAD="$TL3_BAD siblings-differ[$TL3_SIB|$TL3_SIB_FULL]"
+printf '%s' "$TL3_SIB" | grep -qF '7a7a7a02' || TL3_BAD="$TL3_BAD sibling-missing"
+printf '%s' "$TL3_SIB" | grep -qF '7a7a7a03' && TL3_BAD="$TL3_BAD other-worktree-listed"
+case "$TL3" in text:[1-9]*:0:*) ;; *) TL3_BAD="$TL3_BAD whole-read-of-a-non-sibling[$TL3]" ;; esac
+[ "$TL3_OTHER_PROBED" = "true" ] || TL3_BAD="$TL3_BAD other-worktree-not-head-probed"
+[ -z "$TL3_BAD" ] && check "TL3 show's SIBLINGS line by session id equals the full-index line while every non-sibling transcript is only head-probed" PASS || check "TL3 targeted siblings:$TL3_BAD" FAIL
+
+TL4_RC=0
+tltrace tl4.json show "tl target fixture" --all --no-git --json > "$TL_HOME/tl4.out" 2>/dev/null || TL4_RC=$?
+TL4_RECORDS="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).records))' "$TL_HOME/tl4.json" 2>/dev/null)"
+if [ "$TL4_RC" = "0" ] && [ "$TL4_RECORDS" = "6" ] && [ "${TL1##*:}" = "1" ]; then
+  check "TL4 the full-index control parses all 6 desktop records while the id lookup parsed 1" PASS
+else
+  check "TL4 desktop-record parses: control rc=$TL4_RC parsed ${TL4_RECORDS:-?} of 6, id lookup ${TL1##*:}" FAIL
+fi
+
+TL5="$(node -e '
+const fs = require("node:fs");
+const [byId, byText] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const strip = (o) => { const c = { ...o }; delete c.skipped; delete c.selfSkipped; delete c.takeover; return JSON.stringify(c); };
+process.stdout.write(strip(byId) === strip(byText) && byId.takeover.level === byText.takeover.level ? "same" : "differ");
+' "$TL_HOME/tl1.out" "$TL_HOME/tl4.out" 2>/dev/null)"
+tlrun takeover "tl target fixture" --all --no-record --no-git --json > "$TL_HOME/tl5-full.out" 2>/dev/null
+TL5T="$(node -e '
+const fs = require("node:fs");
+const [byId, byText] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const strip = (o) => { const c = { ...o }; delete c.skipped; delete c.selfSkipped; delete c.takeover; return JSON.stringify(c); };
+process.stdout.write(strip(byId) === strip(byText) && byId.takeover.level === byText.takeover.level ? "same" : "differ");
+' "$TL_HOME/tl2.out" "$TL_HOME/tl5-full.out" 2>/dev/null)"
+[ "$TL5" = "same" ] && [ "$TL5T" = "same" ] \
+  && check "TL5 show --json and takeover --json by session id equal the full-index results field for field, verdict level included" PASS \
+  || check "TL5 targeted versus full-index json: show=$TL5 takeover=$TL5T" FAIL
+
+TL6_RC=0
+TL6_ERR="$(tlrun show "$TL_OLD" --all --no-git --json 2>&1 >/dev/null)" || TL6_RC=$?
+TL6D_RC=0
+tlrun show "$TL_OLD" --all --no-git --days 0 --json > "$TL_HOME/tl6d.out" 2>/dev/null || TL6D_RC=$?
+TL6D_ID="$(node -e 'try{process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).sessionId||"")}catch{process.stdout.write("")}' "$TL_HOME/tl6d.out")"
+if [ "$TL6_RC" = "2" ] && printf '%s' "$TL6_ERR" | grep -qF "no session matched \"$TL_OLD\" (try --all or --days 0)" \
+  && [ "$TL6D_RC" = "0" ] && [ "$TL6D_ID" = "$TL_OLD" ]; then
+  check "TL6 an id outside the --days window still fails with the unchanged text and resolves with --days 0" PASS
+else
+  check "TL6 out-of-window id: rc=$TL6_RC days0 rc=$TL6D_RC id=${TL6D_ID:-<none>} err=$(printf '%s' "$TL6_ERR" | head -c 160)" FAIL
+fi
+
+TL7_RC=0
+TL7_OUT="$(tlrun show 7a7a7a --all --no-git 2>/dev/null)" || TL7_RC=$?
+TL7_BAD=""
+[ "$TL7_RC" = "2" ] || TL7_BAD="$TL7_BAD rc=$TL7_RC"
+printf '%s' "$TL7_OUT" | grep -qF 'ambiguous selector "7a7a7a" — 3 candidates' || TL7_BAD="$TL7_BAD header"
+for tl7_tag in 7a7a7a01 7a7a7a02 7a7a7a03; do printf '%s' "$TL7_OUT" | grep -qF "$tl7_tag" || TL7_BAD="$TL7_BAD missing-$tl7_tag"; done
+[ -z "$TL7_BAD" ] && check "TL7 an ambiguous 6-character id prefix still lists every candidate and exits 2" PASS || check "TL7 prefix ambiguity:$TL7_BAD" FAIL
+
+TL_PIN="$FAKE/tl-pin"
+TL_CTRL="$FAKE/tl-ctrl"
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [pin, ctrl] = process.argv.slice(1);
+const now = Date.now();
+const pad = `${"x".repeat(2000)} — `;
+for (const [home, recovered] of [[pin, true], [ctrl, false]]) {
+  for (const n of [1, 2, 3, 4]) {
+    const sid = `6e6e6e0${n}-0000-4000-8000-00000000000${n}`;
+    const cwd = path.join(home, "work", `wt-${n}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+    fs.mkdirSync(dir, { recursive: true });
+    const iso = (min) => new Date(now - min * 60000).toISOString();
+    const lines = [];
+    for (let i = 0; i < 1500; i += 1) lines.push(JSON.stringify({ type: "user", message: { role: "user", content: `${pad}${i}` }, cwd, isSidechain: false, timestamp: iso(600 - i * 0.1) }));
+    lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: recovered ? "API Error: 429 rate_limit" : "ordinary reply" }] }, cwd, isSidechain: false, ...(recovered ? { isApiErrorMessage: true, apiErrorStatus: 429, error: "rate_limit" } : {}), timestamp: iso(400) }));
+    lines.push(JSON.stringify({ type: "user", message: { role: "user", content: "continue" }, cwd, isSidechain: false, timestamp: iso(300) }));
+    lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "resumed" }], stop_reason: "end_turn" }, cwd, isSidechain: false, timestamp: iso(299) }));
+    fs.writeFileSync(path.join(dir, `${sid}.jsonl`), lines.join("\n") + "\n");
+  }
+}
+' "$TL_PIN" "$TL_CTRL" 2>/dev/null
+cat > "$FAKE/tl-exitmem.mjs" <<'TLMEM'
+import fs from 'node:fs';
+process.on('exit', () => {
+  globalThis.gc();
+  globalThis.gc();
+  const m = process.memoryUsage();
+  fs.writeFileSync(new URL(process.env.TL_MEM_NAME, import.meta.url), JSON.stringify({ retained: m.heapUsed + m.external }));
+});
+TLMEM
+TL_MEM_URL="$(tl_url "$FAKE/tl-exitmem.mjs")"
+tlmem() { local home="$1" name="$2"; env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$home" USERPROFILE="$home" TL_MEM_NAME="$name" node --expose-gc --import "$TL_MEM_URL" "$TRAIL_MJS" limited --all --json --config-dir "$home/.claude"; }
+tlmem "$TL_PIN" tl-mem-pin.json > "$FAKE/tl-pin.out" 2>/dev/null
+tlmem "$TL_CTRL" tl-mem-ctrl.json > "$FAKE/tl-ctrl.out" 2>/dev/null
+TL8="$(node -e '
+const fs = require("node:fs");
+const [pinMem, ctrlMem, pinOut, ctrlOut] = process.argv.slice(1);
+const read = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
+const delta = (read(pinMem).retained - read(ctrlMem).retained) / 1048576;
+process.stdout.write([(read(pinOut).recovered || []).length, (read(ctrlOut).recovered || []).length, delta.toFixed(1)].join(":"));
+' "$FAKE/tl-mem-pin.json" "$FAKE/tl-mem-ctrl.json" "$FAKE/tl-pin.out" "$FAKE/tl-ctrl.out" 2>/dev/null)"
+TL8_DELTA="${TL8##*:}"
+case "$TL8" in
+  4:0:*) if node -e 'process.exit(Number(process.argv[1]) < 3 ? 0 : 1)' "$TL8_DELTA"; then
+      check "TL8 four recovered 3 MiB transcripts keep no transcript text alive after the index is built (retained delta ${TL8_DELTA} MiB against a control without the API error)" PASS
+    else
+      check "TL8 recovered transcripts stay pinned after forced GC: retained delta ${TL8_DELTA} MiB (limit 3)" FAIL
+    fi ;;
+  *) check "TL8 retention premise: want 4 recovered rows and 0 in the control, got recovered:control:delta=$TL8" FAIL ;;
+esac
+
+TL_DUP_HOME="$FAKE/tl-dup-home"
+TL_DUP=8d8d8d01-0000-4000-8000-0000000000d1
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid] = process.argv.slice(1);
+const store = path.join(home, "Library", "Application Support", "Claude", "claude-code-sessions");
+const iso = new Date(Date.now() - 3600000).toISOString();
+const cwd = path.join(home, "work", "wt-dup");
+fs.mkdirSync(cwd, { recursive: true });
+const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type: "custom-title", customTitle: "tl duplicate fixture", sessionId: sid }),
+  JSON.stringify({ type: "user", message: { role: "user", content: "start tl duplicate fixture" }, cwd, isSidechain: false, timestamp: iso }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, isSidechain: false, timestamp: iso }),
+].join("\n") + "\n");
+for (const [acct, archived] of [["acct-dup-a", false], ["acct-dup-b", true]]) {
+  const ws = path.join(store, acct, "ws-0001");
+  fs.mkdirSync(ws, { recursive: true });
+  fs.writeFileSync(path.join(ws, `local_${sid}.json`), JSON.stringify({ cliSessionId: sid, isArchived: archived, title: `record ${acct}`, backgroundTaskSuggestions: [{ id: `chip-${acct}`, title: `chip from ${acct}`, prompt: `chip from ${acct}` }] }));
+}
+' "$TL_DUP_HOME" "$TL_DUP" 2>/dev/null
+tldup() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$TL_DUP_HOME" USERPROFILE="$TL_DUP_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_DUP_HOME/.claude"; }
+tldup show "$TL_DUP" --all --no-git --json > "$TL_DUP_HOME/id-show.out" 2>/dev/null
+tldup show "tl duplicate fixture" --all --no-git --json > "$TL_DUP_HOME/full-show.out" 2>/dev/null
+tldup takeover "$TL_DUP" --all --no-record --no-git --json > "$TL_DUP_HOME/id-takeover.out" 2>/dev/null
+tldup takeover "tl duplicate fixture" --all --no-record --no-git --json > "$TL_DUP_HOME/full-takeover.out" 2>/dev/null
+TL9="$(node -e '
+const fs = require("node:fs");
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+const [idShow, fullShow, idTake, fullTake] = process.argv.slice(1).map(read);
+if (!idShow || !fullShow || !idTake || !fullTake || !idShow.app || !fullShow.app) { process.stdout.write("unparseable"); process.exit(0); }
+const app = JSON.stringify(idShow.app) === JSON.stringify(fullShow.app) ? "same-app" : "app-differs";
+const chips = JSON.stringify(idTake.openChips) === JSON.stringify(fullTake.openChips) && idTake.openChips.chips.length === 1 ? "same-chips" : "chips-differ";
+process.stdout.write([app, chips, idShow.app.title, fullShow.app.title].join(":"));
+' "$TL_DUP_HOME/id-show.out" "$TL_DUP_HOME/full-show.out" "$TL_DUP_HOME/id-takeover.out" "$TL_DUP_HOME/full-takeover.out" 2>/dev/null)"
+case "$TL9" in
+  "same-app:same-chips:record acct-dup-"*) check "TL9 two desktop records carrying one session id: the id lookup reports the app and the open chips of the same record the full walk keeps ($TL9)" PASS ;;
+  *) check "TL9 duplicate desktop records: id lookup versus full walk = $TL9" FAIL ;;
+esac
+
+TL_FB_HOME="$FAKE/tl-fb-home"
+TL_FB_TARGET=8e8e8e01-0000-4000-8000-0000000000e1
+TL_FB_LATE=8e8e8e02-0000-4000-8000-0000000000e2
+TL_FB_CUT=8e8e8e03-0000-4000-8000-0000000000e3
+TL_FB_REG=8e8e8e04-0000-4000-8000-0000000000e4
+TL_FB_OTHER=8e8e8e05-0000-4000-8000-0000000000e5
+TL_FB_PREMISE="$(node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, target, late, cut, reg, other, pid] = process.argv.slice(1);
+const now = Date.now();
+const iso = (h) => new Date(now - h * 3600000).toISOString();
+const wtx = path.join(home, "work", "wt-x");
+const wty = path.join(home, "work", "wt-y");
+fs.mkdirSync(wtx, { recursive: true });
+fs.mkdirSync(wty, { recursive: true });
+const dirOf = (cwd) => { const d = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-")); fs.mkdirSync(d, { recursive: true }); return d; };
+const tail = (cwd, h) => [
+  JSON.stringify(cwd ? { cwd, type: "user", message: { role: "user", content: "work" }, isSidechain: false, timestamp: iso(h) } : { type: "user", message: { role: "user", content: "work" }, isSidechain: false, timestamp: iso(h) }),
+  JSON.stringify(cwd ? { cwd, type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, isSidechain: false, timestamp: iso(h) } : { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, isSidechain: false, timestamp: iso(h) }),
+];
+const write = (sid, cwd, title, h, padTo) => {
+  let head = JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid, pad: "" });
+  if (padTo) head = JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid, pad: "x".repeat(padTo - head.length) });
+  const file = path.join(dirOf(cwd || wtx), `${sid}.jsonl`);
+  fs.writeFileSync(file, [head, ...tail(cwd, h)].join("\n") + "\n");
+  return fs.readFileSync(file);
+};
+write(target, wtx, "tl fallback target", 1);
+const lateBuf = write(late, wtx, "tl fallback late", 2, 70000);
+const cutBuf = write(cut, wtx, "tl fallback cut", 3, 65536 - 8 - 2);
+write(reg, null, "tl fallback registry", 2);
+write(other, wty, "tl fallback other", 1);
+fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+fs.writeFileSync(path.join(home, ".claude", "sessions", "tl-fb-reg.json"), JSON.stringify({ sessionId: reg, pid: Number(pid), cwd: wtx, startedAt: now - 7200000 }));
+const key = Buffer.from("\"cwd\":\"");
+const lateAt = lateBuf.indexOf(key);
+const cutAt = cutBuf.indexOf(key);
+const cutClose = cutBuf.indexOf(0x22, cutAt + key.length);
+process.stdout.write(lateAt > 65536 && cutAt < 65536 && cutClose >= 65536 ? "premise-ok" : `premise-broken:${lateAt}:${cutAt}:${cutClose}`);
+' "$TL_FB_HOME" "$TL_FB_TARGET" "$TL_FB_LATE" "$TL_FB_CUT" "$TL_FB_REG" "$TL_FB_OTHER" "$$" 2>/dev/null)"
+tlfb() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$TL_FB_HOME" USERPROFILE="$TL_FB_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_FB_HOME/.claude"; }
+TL10_SIB="$(tlfb show "$TL_FB_TARGET" --all --no-git 2>/dev/null | grep '^SIBLINGS')"
+TL10_SIB_FULL="$(tlfb show "tl fallback target" --all --no-git 2>/dev/null | grep '^SIBLINGS')"
+TL10_BAD=""
+[ "$TL_FB_PREMISE" = "premise-ok" ] || TL10_BAD="$TL10_BAD $TL_FB_PREMISE"
+[ -n "$TL10_SIB" ] && [ "$TL10_SIB" = "$TL10_SIB_FULL" ] || TL10_BAD="$TL10_BAD siblings-differ[$TL10_SIB|$TL10_SIB_FULL]"
+for tl10_tag in 8e8e8e02 8e8e8e03 8e8e8e04; do printf '%s' "$TL10_SIB" | grep -qF "$tl10_tag" || TL10_BAD="$TL10_BAD missing-$tl10_tag"; done
+printf '%s' "$TL10_SIB" | grep -qF '8e8e8e05' && TL10_BAD="$TL10_BAD other-worktree-listed"
+[ -z "$TL10_BAD" ] && check "TL10 siblings the 64 KiB probe cannot decide (first cwd past the probe, a cwd cut at its edge, a live session whose cwd only the registry knows) still reach the SIBLINGS line, which equals the full-index line" PASS || check "TL10 probe fallback:$TL10_BAD" FAIL
+
+TLR_HOME="$(cd "$FAKE" && pwd -P)/tl-release-home"
+TLR_REPO="$TLR_HOME/repo"
+TLR_SRC_WT="$TLR_REPO/.claude/worktrees/src-wt"
+TLR_TAKER_WT="$TLR_REPO/.claude/worktrees/taker-wt"
+TLR_SRC=e1000000-0000-0000-0000-000000000001
+TLR_TAKER=e2000000-0000-0000-0000-000000000002
+TLR_ENDED=e3000000-0000-0000-0000-000000000003
+TLR_DECOY1=e9000000-0000-0000-0000-000000000009
+TLR_DECOY2=ea000000-0000-0000-0000-00000000000a
+TLR_ACCT=e6000000-1111-2222-3333-444444444444
+TLR_OK=0
+if command -v git >/dev/null 2>&1 \
+  && mkdir -p "$TLR_HOME/work/decoy-1" "$TLR_HOME/work/decoy-2" \
+  && git init -q "$TLR_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n' > "$TLR_REPO/.gitignore" \
+  && git -C "$TLR_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$TLR_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$TLR_REPO/.claude/worktrees" \
+  && git -C "$TLR_REPO" worktree add -q "$TLR_SRC_WT" -b claude/src-wt >/dev/null 2>&1 \
+  && git -C "$TLR_REPO" worktree add -q "$TLR_TAKER_WT" -b claude/taker-wt >/dev/null 2>&1 \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_SRC" "$TLR_SRC_WT" "$WR_DEAD" 7200 "$TLR_ACCT" \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_TAKER" "$TLR_TAKER_WT" "$WR_DEAD" 600 "$TLR_ACCT" \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_ENDED" "$TLR_SRC_WT" "$WR_DEAD" 7200 none \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_DECOY1" "$TLR_HOME/work/decoy-1" "$WR_DEAD" 900 none \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_DECOY2" "$TLR_HOME/work/decoy-2" "$WR_DEAD" 1200 none \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$TLR_SRC_WT" "$TLR_SRC" 60)" = "created" ] \
+  && node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$TLR_SRC_WT" "$TLR_ENDED" 120 >/dev/null; then
+  TLR_OK=1
+fi
+if ! command -v git >/dev/null 2>&1; then
+  skip "TL11 git is not on PATH — the release read check needs real worktrees and is unverified in this run"
+elif [ "$TLR_OK" != 1 ]; then
+  check "TL11-fixture the release read fixture (worktrees, sessions, keep anchors) could not be built" FAIL
+else
+  ( cd "$TLR_TAKER_WT" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$TLR_HOME" USERPROFILE="$TLR_HOME" ZENSU_CCD_STORE="$TLR_HOME/store" CLAUDE_CODE_SESSION_ID="$TLR_TAKER" TL_TRACE_NAME=tl11.json node --import "$TL_TRACE_URL" "$TRAIL_MJS" release "$TLR_SRC" --json --all --config-dir "$TLR_HOME/.claude" > "$TL_HOME/tl11.out" 2>/dev/null )
+  TL11="$(node -e '
+const fs = require("node:fs"), path = require("node:path");
+let o, t;
+try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); t = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); } catch { process.stdout.write("unparseable"); process.exit(0); }
+const owners = (o.anchors || []).map((a) => a.owner).sort().join(",");
+const read = [...new Set(t.reads.map((r) => path.basename(r.slice(r.indexOf(" ") + 1), ".jsonl").slice(0, 8)))].sort().join(",");
+process.stdout.write(`${owners}|${read}`);
+' "$TL_HOME/tl11.out" "$TL_HOME/tl11.json" 2>/dev/null)"
+  [ "$TL11" = "ended-session,source|e1000000,e3000000" ] \
+    && check "TL11 release attributes its keep anchors while reading only the source's and the anchor owner's transcripts, never the taker's or unrelated ones ($TL11)" PASS \
+    || check "TL11 release read scope: owners|transcripts read = $TL11 (want ended-session,source|e1000000,e3000000)" FAIL
 fi
 
 report
