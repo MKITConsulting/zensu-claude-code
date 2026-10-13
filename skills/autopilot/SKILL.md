@@ -17,8 +17,6 @@ interactive gate — planning. Everything after is autonomous. The final merge i
 the human's. Generic across stacks and app types via a pluggable validation **driver**,
 and **credential-blind**: the AI never holds a secret.
 
-> It flies the whole route — idea → reviewed → validated → ready PR. **You land it.**
-
 ## Arguments
 
 Slash form: `/zensu:autopilot <feature in plain words> [--flag=value ...]`.
@@ -31,6 +29,7 @@ Slash form: `/zensu:autopilot <feature in plain words> [--flag=value ...]`.
 | `--no-validate` | no | off | Skip Phase 1 step 6 (live validation). Ship a reviewed+tested PR only. Degrades — note it. |
 | `--config=<path>` | no | `.zensu/autopilot.yaml` | Project recipe file (see `rules/config.md`). |
 | `--cover` | no | off | After the validate loop goes green, persist the validated ACs as **durable committed tests** via `/zensu:cover --from-acs` (Phase 1 step 6b). |
+| `--work-order=<id>` | no | — | Set by `/zensu:work` only: build that Zensu work order headless under `rules/work-order.md`, which replaces the planning gate. |
 
 If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place asking is allowed).
 
@@ -458,9 +457,6 @@ Session artifact = what "logged in" means for that driver
                    storageState | bearer-token-file | keychain | none              (rules/auth.md)
 ```
 
-Everything else is identical across stacks. Unknown target → `custom` driver (two project
-scripts), never a dead end.
-
 ## Credential-blind auth (iron rule)
 
 **The AI never sees a password or token.** When a feature needs an authenticated session,
@@ -493,8 +489,6 @@ toolchain missing        → degrade that driver, note what was skipped
 worst case               → still a reviewed, tested PR — minus the live proof, stated
 ```
 
-The worst case is still a reviewed, gated PR. The skill never produces nothing.
-
 ## Reference Files
 
 - `rules/probe.md` — detection sources per stack, the resolution order, verify-before-trust,
@@ -505,6 +499,7 @@ The worst case is still a reviewed, gated PR. The skill never produces nothing.
   cross-cutting augments, on-demand drivers, and the `custom` escape hatch.
 - `rules/config.md` — `.zensu/autopilot.yaml` schema, a concrete worked instance, and the
   login-script prerequisite a project supplies.
+- `rules/work-order.md` — work-order mode: branch, plan file, spec binding, push and PR helpers.
 
 ## Critical Conventions
 

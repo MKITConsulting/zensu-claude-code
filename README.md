@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.25.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.26.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -86,9 +86,9 @@ direct, autopilot or pilot answer decides only that plan or request), and
 
 ## What's included
 
-### Skills (30)
+### Skills (31)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (31 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (32 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -121,6 +121,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:adopt-session` | Report a refused automatic adoption after a plugin update landed mid-run and retry it by hand, re-create a vanished recorded project root, or move the session's anchor to a sibling worktree of the same repository (`--reanchor`) |
 | `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
+| `/zensu:work` | Run one Zensu work order in a headless worker session, reporting every stage until ready_for_merge or a block |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`

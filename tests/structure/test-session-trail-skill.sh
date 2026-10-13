@@ -1701,8 +1701,8 @@ else
   # PLAIN-TEXT bound did not.
   case "$CONTROL_CLASS" in *'p{Cf}'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-the-format-block($CONTROL_CLASS)]" ;; esac
   # `briefPath` belongs here too, and its absence was the defect: it bounded with
-  # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
-  # was the only one of the three not covered by the shared class.
+  # `oneLine` alone, whose `/\s+/` missed ESC/C0/DEL/C1 at the time — so the
+  # PERSISTED carrier was the only one of the three not covered by the shared class.
   for helper in flatPath briefShellArg briefPath; do
     printf '%s\n' "$TRAIL_CODE" | grep -A2 "^function ${helper}(" | grep -qF 'CONTROL_RUN' \
       || CAUTION_MISS="$CAUTION_MISS [${helper}-does-not-use-CONTROL_RUN]"
@@ -1718,8 +1718,8 @@ fi
 # twice: first the `- worktree:` bullets, then the `- branch:` and touched-file
 # rows. The alternation is the roster of values that come out of ANOTHER session's
 # records — its transcript, its `~/.claude/sessions/` registry entry, or the
-# desktop store. (It already contains `r.app.instance`, which is desktop-store
-# derived, so "transcript" alone never described the class.) A NEW one has to be
+# desktop store. (The `r.app` config fields are desktop-store derived, so
+# "transcript" alone never described the class.) A NEW one has to be
 # added here, because nothing derives it.
 #
 # `grep -E` deliberately, matching every other alternation in this file — a BRE
@@ -1732,15 +1732,14 @@ fi
 # unbounded, which is why the control below asserts the pattern in BOTH directions.
 # The trailing class after each name is a hand-rolled word boundary: `\b` is a GNU
 # extension, and without it `r.cwd` also matches the innocuous `r.cwdExists`.
-# `r.title` and the three `r.app` config fields joined this roster with the same
+# `r.title` and the three `r.app` config fields are on this roster with the same
 # argument the others carry: they come from the SAME third-party stores — another
-# session's registry and the desktop app's `local_*.json` — as `r.app.instance`,
-# which sits one line away from them in `cmdShow` and was already listed.
+# session's registry and the desktop app's `local_*.json`.
 # The `s.` spellings are the SAME fields from the SAME store, rendered by
 # `cmdInstances` under a different binding — an `r.`-anchored roster could not see
 # them, which is how three unbounded carriers survived a round that hardened their
 # `cmdShow` twins one line apart.
-BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(instance|model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
+BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
 # `oneLine(` and `basename(` are deliberately NOT here: neither swaps a backtick,
 # so exempting them would certify a carrier that still closes a code span — the
 # very property this check asserts two paragraphs above. Nothing in the tree
@@ -1771,9 +1770,13 @@ RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . 
 # is compared, not clipped); `briefPath`/`oneLine` also remove a line break.
 # `oneLine\(` is NOT a compliant wrapper here, and admitting it was the structural
 # cause of two separate leaks. This roster is the only check that scans plain-text
-# print carriers for an unbounded third-party value, and `oneLine` collapses
-# `/\s+/` ONLY — JS `\s` excludes ESC, the rest of C0, DEL and C1, which is the
-# class that can overwrite a row the reader already trusted. While `oneLine(` sat
+# print carriers for an unbounded third-party value, and it certifies a SPELLING:
+# every accepted one routes through `CONTROL_RUN`, which T29 checks above, or
+# prints only text this tool computes. `oneLine` strips that class too, but only
+# through its delegation to `boundText` in the ledger module, which this roster
+# does not check. Before that delegation it collapsed `/\s+/` ONLY — JS `\s`
+# excludes ESC, the rest of C0, DEL and C1, which is the class that can overwrite
+# a row the reader already trusted. While `oneLine(` sat
 # in this alternation, every carrier still using it was invisible here: the BRANCH
 # row and the STATUS/CONFIG rows both passed for that reason alone, one line below
 # an OWNER row that had been moved to `flatPath` precisely because of this class.
@@ -1890,14 +1893,14 @@ NESTED_GAP='  L.push(`- x: ${r.wt ? `a ${z}` : ""}`);'
   || RAW_CTL_BAD="$RAW_CTL_BAD nested-outer-text-now-seen-update-the-stated-gap"
 # A weaker wrapper must NOT be accepted: `oneLine` clips but never neutralizes a
 # backtick, so an `oneLine`-wrapped carrier inside a code span is still a leak.
-# `r.app.instance` has no incidental cover: unlike `r.title`, its interpolation
+# `r.app.model` has no incidental cover: unlike `r.title`, its interpolation
 # carries no other roster name, so the scan could not see it unwrapped.
-APP_INSTANCE_CONTROL='  L.push(`- owning desktop instance: ${r.app.instance}`);'
-APP_INSTANCE_ANTICONTROL='  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);'
-[ "$(printf '%s\n' "$APP_INSTANCE_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
-  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-carrier-not-seen"
-[ "$(printf '%s\n' "$APP_INSTANCE_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
-  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-wrapped-carrier-flagged"
+APP_FIELD_CONTROL='  L.push(`- model: ${r.app.model}`);'
+APP_FIELD_ANTICONTROL='  L.push(`- model: ${briefPath(r.app.model)}`);'
+[ "$(printf '%s\n' "$APP_FIELD_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-field-carrier-not-seen"
+[ "$(printf '%s\n' "$APP_FIELD_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-field-wrapped-carrier-flagged"
 # Two-direction control for the plain-text scan, same convention as the brief one.
 PRINT_CONTROL='  print(`WORKTREE ${r.wt}`);'
 PRINT_ANTICONTROL='  print(`WORKTREE ${flatPath(r.wt)}`);'

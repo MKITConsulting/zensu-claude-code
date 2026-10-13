@@ -3392,7 +3392,7 @@ fi
 
 # W12 — the BRIEF carriers must bound the same control class as the plain-text
 # ones. `flatPath` and `briefShellArg` both route through `CONTROL_RUN`;
-# `briefPath` routed only through `oneLine`, whose `/\s+/` covers the line-break
+# `briefPath` routed only through `oneLine`, whose `/\s+/` covered the line-break
 # class and nothing else — JS `\s` excludes ESC (), the rest of C0, DEL and
 # all of C1. So the exact class `flatPath`'s own header names as its reason for
 # existing ("a CSI sequence moves the cursor and overwrites a row the reader
@@ -3453,20 +3453,20 @@ else
   check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
 fi
 
-# W13 — the desktop instance id, on both renderers that print it. `appTag` used
-# `oneLine(app.instance, 8)`, which gets BOTH halves wrong: `oneLine` collapses
-# `/\s+/` only, so a CSI sequence survives into a row a reader trusts, and its clip
-# returns `slice(0, n - 1) + '…'` — SEVEN characters plus an ellipsis, where
-# `cmdInstances` renders `flatPath(i).slice(0, 8)`, eight raw ones. The ONLY purpose
-# of an 8-character prefix is correlating a `list`/`show` row with an `instances`
-# row, so two spellings of one id defeat the field entirely. `cmdShow`'s OWNER row
-# carried the same defect at width 64.
+# W13 — the desktop store's account UUID, on `list`'s `appTag` row and `show`'s
+# OWNER row. `appTag` used `oneLine(app.instance, 8)`, which got BOTH halves wrong:
+# `oneLine` then collapsed `/\s+/` only, so a CSI sequence survived into a row a
+# reader trusts, and its clip returns `slice(0, n - 1) + '…'` — SEVEN characters
+# plus an ellipsis, where `cmdInstances` rendered `flatPath(i).slice(0, 8)`, eight
+# raw ones. The ONLY purpose of an 8-character prefix is correlating a `list`/`show`
+# row with an `instances` row, so two spellings of one id defeat the field entirely.
+# `cmdShow`'s OWNER row carried the same defect at width 64.
 #
 # The ellipsis arm IS scoped to this fixture's own row — `grep -a 'account inst-A'`
 # cannot match the `archive()` fixture, which renders a different account name.
-# That is sufficient: this fixture's instance name is fifteen characters, well past
-# the eight-character prefix, so the clip is exposed here. An earlier wording
-# claimed the arm covered every long instance name in the suite; it does not.
+# That is sufficient: this fixture's account directory name is fifteen characters,
+# well past the eight-character prefix, so the clip is exposed here. An earlier
+# wording claimed the arm covered every long account name in the suite; it does not.
 W13_SID=abababab-0000-0000-0000-0000000000b1
 W13_ESC="$(printf '\033')"
 W13_INST="inst-A${W13_ESC}[2K-0001"
@@ -5041,8 +5041,8 @@ else
 fi
 
 # WT8n3 — the "WORKTREE ROOT" label, which was UNCONDITIONAL while the value it labels is
-# a worktree root on only one leg. `buildIndexUncached` computes
-# `const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;`, so `r.wt` falls back to the
+# a worktree root on only one leg. `worktreeOfCwd` computes
+# `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`, so `r.wt` falls back to the
 # raw recorded cwd whenever the directory is unreadable — and `worktreeRoot` also returns
 # null after 12 parent levels with no `.git`. On the gone leg the brief therefore told the
 # reader "this IS the worktree root" a few lines below advice saying the recorded path may
@@ -7276,6 +7276,841 @@ if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH
   check "CH6 references/takeover.md carries the chips before the release step and names the tool and the plan confirmation line" PASS
 else
   check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
+fi
+
+DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
+DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"
+DR_ARCH_SID=d0d0d0d0-0000-0000-0000-0000000000d1
+DR_OPEN_SID=d0d0d0d0-0000-0000-0000-0000000000d2
+DR_NONE_SID=d0d0d0d0-0000-0000-0000-0000000000d3
+DR_ARCHIVED_LINE='- **ARCHIVED** in the desktop app: its process was stopped and the worktree may have been cleaned up'
+mkdir -p "$DR_STORE"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, archived, open, none] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+for (const sid of [archived, open, none]) {
+  const wt = path.join(home, "work", `wt-dr-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+}
+for (const [sid, isArchived] of [[archived, true], [open, false]]) {
+  fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({ sessionId: `local_${sid}`, cliSessionId: sid, isArchived, title: "desktop record fixture", model: "opus", effort: "high", permissionMode: "default" }));
+}
+' "$FAKE" "$DR_STORE" "$DR_ARCH_SID" "$DR_OPEN_SID" "$DR_NONE_SID" 2>/dev/null
+
+dr_markdown() {
+  printf '%s\n' "$1" | awk '/^--- BEGIN [A-Z]+ MARKDOWN ---$/{f=1;next} /^--- END [A-Z]+ MARKDOWN ---$/{f=0} f'
+}
+dr_source_bad() {
+  local src got
+  src="$(dr_markdown "$2" | awk '$0=="## Source"{f=1;next} /^## /{f=0} f')"
+  if [ -z "$src" ]; then printf ' %s:source-absent' "$1"; return; fi
+  printf '%s\n' "$src" | grep -qF '(unknown)' && printf ' %s:unknown-rendered' "$1"
+  printf '%s\n' "$2" | grep -qF 'owning desktop instance' && printf ' %s:instance-line-rendered' "$1"
+  got="$(printf '%s\n' "$src" | grep -cxF -- "$DR_ARCHIVED_LINE")"
+  [ "$got" = "$3" ] || printf ' %s:archived-bullets=%s-want-%s' "$1" "$got" "$3"
+}
+DR_ARCH_MD="$(trailrun takeover "$DR_ARCH_SID" --all --no-record --no-git 2>/dev/null)"
+DR_BAD="$(dr_source_bad archived "$DR_ARCH_MD" 1)"
+DR_BAD="$DR_BAD$(dr_source_bad open "$(trailrun takeover "$DR_OPEN_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+DR_BAD="$DR_BAD$(dr_source_bad no-record "$(trailrun takeover "$DR_NONE_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+[ -z "$DR_BAD" ] \
+  && check "DR1 the takeover brief's Source section renders no (unknown) and no desktop-instance line, with or without a desktop record, and carries the ARCHIVED bullet exactly when the record is archived" PASS \
+  || check "DR1 takeover Source section:$DR_BAD" FAIL
+
+DR_BAD=""
+DR_PREFIX="$(printf '%s' "$DR_ACCT" | cut -c1-8)"
+[ "$(field "$DR_ARCH_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD archived-record-account-not-resolved"
+[ "$(field "$DR_OPEN_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD open-record-account-not-resolved"
+for DR_VERB in takeover handoff; do
+  if [ "$DR_VERB" = takeover ]; then DR_MD="$(dr_markdown "$DR_ARCH_MD")"; else DR_MD="$(dr_markdown "$(trailrun handoff "$DR_ARCH_SID" --all 2>/dev/null)")"; fi
+  if [ -z "$DR_MD" ]; then DR_BAD="$DR_BAD $DR_VERB-brief-absent"; continue; fi
+  printf '%s\n' "$DR_MD" | grep -qF -- "$DR_PREFIX" && DR_BAD="$DR_BAD $DR_VERB-brief-names-the-account"
+done
+DR_REF="$PLUGIN_DIR/skills/session-trail/references/disclosure.md"
+grep -qF 'NEITHER brief carries an account-adjacent value at all' "$DR_REF" || DR_BAD="$DR_BAD disclosure-claim-gone"
+grep -qF 'never its account' "$DR_REF" || DR_BAD="$DR_BAD disclosure-source-sentence-gone"
+[ -z "$DR_BAD" ] \
+  && check "DR2 neither brief names the account the desktop store resolves for the session, as references/disclosure.md states" PASS \
+  || check "DR2 brief account disclosure:$DR_BAD" FAIL
+
+dr_field_scan() {
+  node -e '
+const fs = require("node:fs");
+const code = `${fs.readFileSync(process.argv[1], "utf8")}\n${process.argv[2]}`.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+const fn = (head) => { const at = code.indexOf(head); return at < 0 ? "" : code.slice(at, code.indexOf("\n}\n", at)); };
+const lit = /return \{([\s\S]*?)\};/.exec(fn("function ccdAppEntry("));
+const stored = new Set(lit ? [...lit[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\s*(?::|,|$)/gm)].map((m) => m[1]) : []);
+const read = new Set([...code.matchAll(/[^\w$]app\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+const bypass = ["function ccdIndex() {", "function ccdApp("].filter((h) => !fn(h).includes("ccdAppEntry(")).map((h) => h.split(/[ (]/)[1]);
+process.stdout.write(`${[...stored].sort().join(",")}|${[...read].filter((f) => !stored.has(f)).sort().join(",")}|${bypass.join(",")}`);
+' "$TRAIL_MJS" "${1:-}"
+}
+DR_SCAN="$(dr_field_scan)"
+DR_STORED="${DR_SCAN%%|*}"
+DR_REST="${DR_SCAN#*|}"
+DR_CTRL="$(dr_field_scan '  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);')"
+DR_CTRL_REST="${DR_CTRL#*|}"
+DR_BAD=""
+case ",$DR_STORED," in *,accountUuid,*archived,*) ;; *) DR_BAD="$DR_BAD stored-keys-not-derived($DR_STORED)" ;; esac
+[ -z "${DR_REST%%|*}" ] || DR_BAD="$DR_BAD reads-unstored:${DR_REST%%|*}"
+[ -z "${DR_REST#*|}" ] || DR_BAD="$DR_BAD entry-built-outside-ccdAppEntry:${DR_REST#*|}"
+[ "${DR_CTRL_REST%%|*}" = "instance" ] || DR_BAD="$DR_BAD control-read-not-reported(${DR_CTRL_REST%%|*})"
+[ -z "$DR_BAD" ] \
+  && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdAppEntry stores ($DR_STORED), ccdIndex and ccdApp both build through it, and the same scan reports a read of an unstored field" PASS \
+  || check "DR3 desktop-record field reads:$DR_BAD" FAIL
+
+RO_HOME="$(cd "$FAKE" && pwd -P)/readonly-git"
+RO_REPO="$RO_HOME/repo"
+RO_HOOK="$RO_HOME/fsmonitor-hook"
+RO_LOG="$RO_HOME/fsmonitor.log"
+RO_SID=ab0ab0ab-0000-0000-0000-000000000071
+mkdir -p "$RO_HOME"
+cat > "$RO_HOOK" <<RO_HOOK_BODY
+#!/bin/sh
+echo ran >> "$RO_LOG"
+exit 1
+RO_HOOK_BODY
+ro_prime() {
+  node -e '
+const fs = require("node:fs");
+const [file, index, log, step] = process.argv.slice(1);
+const touched = new Date(Date.UTC(2021, 0, 1, 0, Number(step)));
+fs.utimesSync(file, touched, touched);
+const old = new Date(Date.UTC(2020, 0, 1));
+fs.utimesSync(index, old, old);
+fs.writeFileSync(log, "");
+' "$RO_REPO/stat-only.txt" "$RO_REPO/.git/index" "$RO_LOG" "$1"
+}
+ro_index_mtime() { node -e 'process.stdout.write(String(require("node:fs").statSync(process.argv[1]).mtimeMs))' "$RO_REPO/.git/index" 2>/dev/null; }
+ro_hook_runs() { if [ -s "$RO_LOG" ]; then wc -l < "$RO_LOG" | tr -d ' '; else echo 0; fi; }
+ro_trail() { ( unset GIT_OPTIONAL_LOCKS; trailrun "$@" ); }
+
+RO_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO_HOOK" \
+  && git init -q "$RO_REPO" >/dev/null 2>&1 \
+  && printf 'stat only\n' > "$RO_REPO/stat-only.txt" \
+  && printf 'base\n' > "$RO_REPO/edited.txt" \
+  && git -C "$RO_REPO" add stat-only.txt edited.txt >/dev/null 2>&1 \
+  && git -C "$RO_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && git -C "$RO_REPO" config core.fsmonitor "$RO_HOOK" >/dev/null 2>&1 \
+  && printf 'base\nedited\n' > "$RO_REPO/edited.txt" \
+  && fix "$RO_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO_REPO"; then
+  RO_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO* git is not on PATH — the read-only git checks need a real repository and are unverified in this run"
+elif [ "$RO_OK" != 1 ]; then
+  check "RO-fixture the read-only git fixture (a stat-dirty tracked file, an edited one and a logging fsmonitor hook) could not be built" FAIL
+else
+  RO_BAD=""
+  RO_STEP=0
+  for RO_VERB in takeover show handoff; do
+    RO_STEP=$((RO_STEP + 1))
+    ro_prime "$RO_STEP"
+    RO_BEFORE="$(ro_index_mtime)"
+    if [ "$RO_VERB" = takeover ]; then
+      RO_OUT="$(ro_trail takeover "$RO_SID" --all --no-record --json 2>/dev/null)"; RO_RC=$?
+      RO_SEEN="$(printf '%s' "$RO_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const files = (o.git && o.git.dirtyFiles) || [];
+  const diff = (o.diff && o.diff.uncommitted) || "";
+  const ok = o.git && o.git.dirty === 1 && files.some((f) => f.endsWith("edited.txt")) && /^\+edited$/m.test(diff) && !diff.includes("stat-only.txt");
+  process.stdout.write(ok ? "ok" : `dirty=${o.git && o.git.dirty} files=${files.join(",")}`);
+});
+')"
+    else
+      RO_OUT="$(ro_trail "$RO_VERB" "$RO_SID" --all 2>/dev/null)"; RO_RC=$?
+      if printf '%s' "$RO_OUT" | grep -qF 'edited.txt' && ! printf '%s' "$RO_OUT" | grep -qF 'stat-only.txt'; then RO_SEEN=ok; else RO_SEEN=edited-file-not-listed; fi
+    fi
+    [ "$RO_RC" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:rc=$RO_RC"
+    [ "$RO_SEEN" = ok ] || RO_BAD="$RO_BAD $RO_VERB:git-state-not-read($RO_SEEN)"
+    { [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" = "$(ro_index_mtime)" ]; } || RO_BAD="$RO_BAD $RO_VERB:index-rewritten"
+    [ "$(ro_hook_runs)" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:fsmonitor-hook-ran"
+  done
+  if [ -z "$RO_BAD" ]; then
+    check "RO1 takeover, show and handoff read the source worktree's git state without rewriting its index or running its fsmonitor hook" PASS
+  else
+    check "RO1 read-only git in the source worktree:$RO_BAD" FAIL
+  fi
+
+  RO_STEP=$((RO_STEP + 1))
+  ro_prime "$RO_STEP"
+  RO_BEFORE="$(ro_index_mtime)"
+  ( unset GIT_OPTIONAL_LOCKS; git -C "$RO_REPO" status --porcelain >/dev/null 2>&1 )
+  RO_AFTER="$(ro_index_mtime)"
+  RO_RUNS="$(ro_hook_runs)"
+  if [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" != "$RO_AFTER" ] && [ "$RO_RUNS" != 0 ]; then
+    check "RO1-control a plain git status in the same fixture rewrites the index and runs the fsmonitor hook, so RO1 measured both" PASS
+  else
+    check "RO1-control a plain git status left the index at ${RO_AFTER:-?} (was ${RO_BEFORE:-?}) and ran the hook $RO_RUNS times, so RO1 proved nothing here" FAIL
+  fi
+fi
+
+RO2_HOME="$(cd "$FAKE" && pwd -P)/diff-drivers"
+RO2_REPO="$RO2_HOME/repo"
+RO2_TEXTCONV="$RO2_HOME/textconv"
+RO2_EXTERNAL="$RO2_HOME/external-diff"
+RO2_TEXTCONV_LOG="$RO2_HOME/textconv.log"
+RO2_EXTERNAL_LOG="$RO2_HOME/external-diff.log"
+RO2_SID=ab0ab0ab-0000-0000-0000-000000000072
+mkdir -p "$RO2_HOME"
+cat > "$RO2_TEXTCONV" <<RO2_TEXTCONV_BODY
+#!/bin/sh
+echo ran >> "$RO2_TEXTCONV_LOG"
+tr 'a-z' 'A-Z' < "\$1"
+RO2_TEXTCONV_BODY
+cat > "$RO2_EXTERNAL" <<RO2_EXTERNAL_BODY
+#!/bin/sh
+echo ran >> "$RO2_EXTERNAL_LOG"
+echo EXTERNAL-DIFF-DRIVER-OUTPUT
+RO2_EXTERNAL_BODY
+ro2_reset() { : > "$RO2_TEXTCONV_LOG"; : > "$RO2_EXTERNAL_LOG"; }
+ro2_runs() { if [ -s "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+ro2_git() { ( unset GIT_EXTERNAL_DIFF; git -C "$RO2_REPO" "$@" ); }
+
+RO2_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO2_TEXTCONV" "$RO2_EXTERNAL" \
+  && git init -q "$RO2_REPO" >/dev/null 2>&1 \
+  && ro2_git symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 \
+  && printf '*.conv diff=logconv\n' > "$RO2_REPO/.gitattributes" \
+  && printf 'alpha\nbeta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add .gitattributes notes.conv >/dev/null 2>&1 \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && ro2_git checkout -q -b feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -am feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add notes.conv >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\nepsilon\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git config diff.logconv.textconv "$RO2_TEXTCONV" >/dev/null 2>&1 \
+  && ro2_git config diff.external "$RO2_EXTERNAL" >/dev/null 2>&1 \
+  && fix "$RO2_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO2_REPO"; then
+  RO2_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO2* git is not on PATH — the diff-driver checks need a real repository and are unverified in this run"
+elif [ "$RO2_OK" != 1 ]; then
+  check "RO2-fixture the diff-driver fixture (a logging textconv driver, a logging diff.external driver, and a committed, a staged and an unstaged edit of one file) could not be built" FAIL
+else
+  ro2_reset
+  RO2_OUT="$( ( unset GIT_EXTERNAL_DIFF; trailrun takeover "$RO2_SID" --all --no-record --json ) 2>/dev/null)"; RO2_RC=$?
+  RO2_SEEN="$(printf '%s' "$RO2_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const d = o.diff || {};
+  const raw = (key, line) => {
+    const lines = (typeof d[key] === "string" ? d[key] : "").split("\n");
+    return lines.includes("diff --git a/notes.conv b/notes.conv") && lines.includes(line);
+  };
+  const missing = [["uncommitted", "+epsilon"], ["staged", "+delta"], ["branchDiff", "+gamma"]].filter(([key, line]) => !raw(key, line)).map(([key]) => key);
+  process.stdout.write(missing.length ? `raw-line-missing-in:${missing.join(",")}` : "ok");
+});
+')"
+  RO2_BAD=""
+  [ "$RO2_RC" = 0 ] || RO2_BAD="$RO2_BAD rc=$RO2_RC"
+  [ "$RO2_SEEN" = ok ] || RO2_BAD="$RO2_BAD $RO2_SEEN"
+  [ "$(ro2_runs "$RO2_TEXTCONV_LOG")" = 0 ] || RO2_BAD="$RO2_BAD textconv-driver-ran"
+  [ "$(ro2_runs "$RO2_EXTERNAL_LOG")" = 0 ] || RO2_BAD="$RO2_BAD diff.external-driver-ran"
+  if [ -z "$RO2_BAD" ]; then
+    check "RO2 takeover --json carries the source worktree's uncommitted, staged and branch diffs raw, without running its textconv driver or its diff.external driver" PASS
+  else
+    check "RO2 diff drivers in the source worktree:$RO2_BAD" FAIL
+  fi
+
+  ro2_reset
+  ro2_git diff >/dev/null 2>&1
+  RO2_EXTERNAL_RUNS="$(ro2_runs "$RO2_EXTERNAL_LOG")"
+  ro2_reset
+  ro2_git diff --no-ext-diff >/dev/null 2>&1
+  RO2_TEXTCONV_RUNS="$(ro2_runs "$RO2_TEXTCONV_LOG")"
+  if [ "$RO2_EXTERNAL_RUNS" != 0 ] && [ "$RO2_TEXTCONV_RUNS" != 0 ]; then
+    check "RO2-control a plain git diff in the same fixture runs the diff.external driver, and once --no-ext-diff stops that one it runs the textconv driver, so RO2 measured both" PASS
+  else
+    check "RO2-control a plain git diff ran the diff.external driver $RO2_EXTERNAL_RUNS times and git diff --no-ext-diff ran the textconv driver $RO2_TEXTCONV_RUNS times, so RO2 proved nothing here" FAIL
+  fi
+fi
+
+TL_HOME="$FAKE/tl-home"
+TL_CFG="$TL_HOME/.claude"
+TL_STORE="$TL_HOME/Library/Application Support/Claude/claude-code-sessions/inst-tl/ws-0001"
+TL_TARGET=7a7a7a01-0000-4000-8000-0000000000a1
+TL_SIB=7a7a7a02-0000-4000-8000-0000000000a2
+TL_OTHER=7a7a7a03-0000-4000-8000-0000000000b1
+TL_FAR=5c5c5c01-0000-4000-8000-0000000000c1
+TL_OLD=5c5c5c02-0000-4000-8000-0000000000c2
+mkdir -p "$TL_STORE"
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, target, sib, other, far, old] = process.argv.slice(1);
+const now = Date.now();
+const write = (sid, wt, title, ageMs) => {
+  const iso = new Date(now - ageMs).toISOString();
+  const cwd = path.join(home, "work", wt);
+  fs.mkdirSync(cwd, { recursive: true });
+  const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sid}.jsonl`);
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid }),
+    JSON.stringify({ type: "user", message: { role: "user", content: `start ${title}` }, cwd, gitBranch: `branch-${wt}`, isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, gitBranch: `branch-${wt}`, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+  const at = new Date(now - ageMs);
+  fs.utimesSync(file, at, at);
+};
+write(target, "wt-a", "tl target fixture", 3 * 3600000);
+write(sib, "wt-a", "tl sibling fixture", 5 * 3600000);
+write(other, "wt-b", "tl other fixture", 2 * 3600000);
+write(far, "wt-c", "tl far fixture", 4 * 3600000);
+write(old, "wt-d", "tl old fixture", 30 * 86400000);
+const record = (sid, title) => fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({ sessionId: `local_${sid}`, cliSessionId: sid, isArchived: false, title, model: "fixture-model" }));
+record(target, "tl target record");
+record(sib, "tl sibling record");
+record(other, "tl other record");
+for (const n of [1, 2, 3]) record(`9d9d9d0${n}-0000-4000-8000-00000000000${n}`, `decoy record ${n}`);
+' "$TL_HOME" "$TL_STORE" "$TL_TARGET" "$TL_SIB" "$TL_OTHER" "$TL_FAR" "$TL_OLD" 2>/dev/null
+
+cat > "$TL_HOME/trace.mjs" <<'TLTRACE'
+import fs from 'node:fs';
+const reads = [];
+let records = 0;
+const note = (kind, p) => { if (typeof p === 'string' && p.endsWith('.jsonl')) reads.push(`${kind} ${p}`); };
+const readFileSync = fs.readFileSync;
+fs.readFileSync = function tracedReadFileSync(p, ...rest) { note('whole', p); return readFileSync.call(this, p, ...rest); };
+const openSync = fs.openSync;
+fs.openSync = function tracedOpenSync(p, ...rest) { note('open', p); return openSync.call(this, p, ...rest); };
+const parse = JSON.parse;
+JSON.parse = function tracedParse(text, reviver) { if (typeof text === 'string' && text.includes('"cliSessionId"')) records += 1; return parse.call(this, text, reviver); };
+process.on('exit', () => { fs.writeFileSync(new URL(process.env.TL_TRACE_NAME, import.meta.url), JSON.stringify({ reads, records })); });
+TLTRACE
+tl_url() { node -e 'process.stdout.write(require("node:url").pathToFileURL(process.argv[1]).href)' "$1"; }
+TL_TRACE_URL="$(tl_url "$TL_HOME/trace.mjs")"
+tlrun() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID HOME="$TL_HOME" USERPROFILE="$TL_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_CFG"; }
+tltrace() { local name="$1"; shift; env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID HOME="$TL_HOME" USERPROFILE="$TL_HOME" TL_TRACE_NAME="$name" node --import "$TL_TRACE_URL" "$TRAIL_MJS" "$@" --config-dir "$TL_CFG"; }
+tl_trace_verdict() {
+  node -e '
+const fs = require("node:fs");
+const [trace, out, allowed] = process.argv.slice(1);
+const t = JSON.parse(fs.readFileSync(trace, "utf8"));
+let id = "";
+try { id = JSON.parse(fs.readFileSync(out, "utf8")).sessionId || ""; } catch { id = "text"; }
+const ok = allowed.split(",");
+const whole = t.reads.filter((r) => r.startsWith("whole "));
+const foreignWhole = whole.filter((r) => !ok.some((sid) => r.endsWith(`${sid}.jsonl`)));
+const foreignAny = t.reads.filter((r) => !ok.some((sid) => r.endsWith(`${sid}.jsonl`)));
+process.stdout.write([id, whole.length, foreignWhole.length, foreignAny.length, t.records].join(":"));
+' "$TL_HOME/$1" "$TL_HOME/$2" "$3" 2>/dev/null
+}
+
+TL1_RC=0
+tltrace tl1.json show "$TL_TARGET" --all --no-git --json > "$TL_HOME/tl1.out" 2>/dev/null || TL1_RC=$?
+TL1="$(tl_trace_verdict tl1.json tl1.out "$TL_TARGET")"
+case "$TL1" in
+  "$TL_TARGET":[1-9]*:0:0:1) check "TL1 show by full session id reads only the target transcript and parses only its own desktop record ($TL1)" PASS ;;
+  *) check "TL1 show by full session id (rc=$TL1_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL1)" FAIL ;;
+esac
+
+TL1B_RC=0
+tltrace tl1b.json show 5c5c5c01 --all --no-git --json > "$TL_HOME/tl1b.out" 2>/dev/null || TL1B_RC=$?
+TL1B="$(tl_trace_verdict tl1b.json tl1b.out "$TL_FAR")"
+case "$TL1B" in
+  "$TL_FAR":[1-9]*:0:0:*) check "TL1b show by an 8-character id prefix reads only the one matching transcript ($TL1B)" PASS ;;
+  *) check "TL1b show by id prefix (rc=$TL1B_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL1B)" FAIL ;;
+esac
+
+TL2_RC=0
+tltrace tl2.json takeover "$TL_TARGET" --all --no-record --no-git --json > "$TL_HOME/tl2.out" 2>/dev/null || TL2_RC=$?
+TL2="$(tl_trace_verdict tl2.json tl2.out "$TL_TARGET")"
+case "$TL2" in
+  "$TL_TARGET":[1-9]*:0:0:[12]) check "TL2 takeover by full session id reads only the target transcript and parses at most its own desktop record twice ($TL2)" PASS ;;
+  *) check "TL2 takeover by full session id (rc=$TL2_RC id:wholeReads:foreignWhole:foreignAny:recordParses=$TL2)" FAIL ;;
+esac
+
+TL3_RC=0
+tltrace tl3.json show "$TL_TARGET" --all --no-git > "$TL_HOME/tl3.out" 2>/dev/null || TL3_RC=$?
+tlrun show "tl target fixture" --all --no-git > "$TL_HOME/tl3-full.out" 2>/dev/null
+TL3_SIB="$(grep '^SIBLINGS' "$TL_HOME/tl3.out")"
+TL3_SIB_FULL="$(grep '^SIBLINGS' "$TL_HOME/tl3-full.out")"
+TL3="$(tl_trace_verdict tl3.json tl3.out "$TL_TARGET,$TL_SIB")"
+TL3_OTHER_PROBED="$(node -e '
+const t = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write(String(t.reads.some((r) => r.startsWith("open ") && r.endsWith(`${process.argv[2]}.jsonl`))));
+' "$TL_HOME/tl3.json" "$TL_OTHER" 2>/dev/null)"
+TL3_BAD=""
+[ "$TL3_RC" = "0" ] || TL3_BAD="$TL3_BAD rc=$TL3_RC"
+[ -n "$TL3_SIB" ] && [ "$TL3_SIB" = "$TL3_SIB_FULL" ] || TL3_BAD="$TL3_BAD siblings-differ[$TL3_SIB|$TL3_SIB_FULL]"
+printf '%s' "$TL3_SIB" | grep -qF '7a7a7a02' || TL3_BAD="$TL3_BAD sibling-missing"
+printf '%s' "$TL3_SIB" | grep -qF '7a7a7a03' && TL3_BAD="$TL3_BAD other-worktree-listed"
+case "$TL3" in text:[1-9]*:0:*) ;; *) TL3_BAD="$TL3_BAD whole-read-of-a-non-sibling[$TL3]" ;; esac
+[ "$TL3_OTHER_PROBED" = "true" ] || TL3_BAD="$TL3_BAD other-worktree-not-head-probed"
+[ -z "$TL3_BAD" ] && check "TL3 show's SIBLINGS line by session id equals the full-index line while every non-sibling transcript is only head-probed" PASS || check "TL3 targeted siblings:$TL3_BAD" FAIL
+
+TL4_RC=0
+tltrace tl4.json show "tl target fixture" --all --no-git --json > "$TL_HOME/tl4.out" 2>/dev/null || TL4_RC=$?
+TL4_RECORDS="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).records))' "$TL_HOME/tl4.json" 2>/dev/null)"
+if [ "$TL4_RC" = "0" ] && [ "$TL4_RECORDS" = "6" ] && [ "${TL1##*:}" = "1" ]; then
+  check "TL4 the full-index control parses all 6 desktop records while the id lookup parsed 1" PASS
+else
+  check "TL4 desktop-record parses: control rc=$TL4_RC parsed ${TL4_RECORDS:-?} of 6, id lookup ${TL1##*:}" FAIL
+fi
+
+TL5="$(node -e '
+const fs = require("node:fs");
+const [byId, byText] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const strip = (o) => { const c = { ...o }; delete c.skipped; delete c.selfSkipped; delete c.takeover; return JSON.stringify(c); };
+process.stdout.write(strip(byId) === strip(byText) && byId.takeover.level === byText.takeover.level ? "same" : "differ");
+' "$TL_HOME/tl1.out" "$TL_HOME/tl4.out" 2>/dev/null)"
+tlrun takeover "tl target fixture" --all --no-record --no-git --json > "$TL_HOME/tl5-full.out" 2>/dev/null
+TL5T="$(node -e '
+const fs = require("node:fs");
+const [byId, byText] = process.argv.slice(1).map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
+const strip = (o) => { const c = { ...o }; delete c.skipped; delete c.selfSkipped; delete c.takeover; return JSON.stringify(c); };
+process.stdout.write(strip(byId) === strip(byText) && byId.takeover.level === byText.takeover.level ? "same" : "differ");
+' "$TL_HOME/tl2.out" "$TL_HOME/tl5-full.out" 2>/dev/null)"
+[ "$TL5" = "same" ] && [ "$TL5T" = "same" ] \
+  && check "TL5 show --json and takeover --json by session id equal the full-index results field for field, verdict level included" PASS \
+  || check "TL5 targeted versus full-index json: show=$TL5 takeover=$TL5T" FAIL
+
+TL6_RC=0
+TL6_ERR="$(tlrun show "$TL_OLD" --all --no-git --json 2>&1 >/dev/null)" || TL6_RC=$?
+TL6D_RC=0
+tlrun show "$TL_OLD" --all --no-git --days 0 --json > "$TL_HOME/tl6d.out" 2>/dev/null || TL6D_RC=$?
+TL6D_ID="$(node -e 'try{process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).sessionId||"")}catch{process.stdout.write("")}' "$TL_HOME/tl6d.out")"
+if [ "$TL6_RC" = "2" ] && printf '%s' "$TL6_ERR" | grep -qF "no session matched \"$TL_OLD\" (try --all or --days 0)" \
+  && [ "$TL6D_RC" = "0" ] && [ "$TL6D_ID" = "$TL_OLD" ]; then
+  check "TL6 an id outside the --days window still fails with the unchanged text and resolves with --days 0" PASS
+else
+  check "TL6 out-of-window id: rc=$TL6_RC days0 rc=$TL6D_RC id=${TL6D_ID:-<none>} err=$(printf '%s' "$TL6_ERR" | head -c 160)" FAIL
+fi
+
+TL7_RC=0
+TL7_OUT="$(tlrun show 7a7a7a --all --no-git 2>/dev/null)" || TL7_RC=$?
+TL7_BAD=""
+[ "$TL7_RC" = "2" ] || TL7_BAD="$TL7_BAD rc=$TL7_RC"
+printf '%s' "$TL7_OUT" | grep -qF 'ambiguous selector "7a7a7a" — 3 candidates' || TL7_BAD="$TL7_BAD header"
+for tl7_tag in 7a7a7a01 7a7a7a02 7a7a7a03; do printf '%s' "$TL7_OUT" | grep -qF "$tl7_tag" || TL7_BAD="$TL7_BAD missing-$tl7_tag"; done
+[ -z "$TL7_BAD" ] && check "TL7 an ambiguous 6-character id prefix still lists every candidate and exits 2" PASS || check "TL7 prefix ambiguity:$TL7_BAD" FAIL
+
+TL_PIN="$FAKE/tl-pin"
+TL_CTRL="$FAKE/tl-ctrl"
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [pin, ctrl] = process.argv.slice(1);
+const now = Date.now();
+const pad = `${"x".repeat(2000)} — `;
+for (const [home, recovered] of [[pin, true], [ctrl, false]]) {
+  for (const n of [1, 2, 3, 4]) {
+    const sid = `6e6e6e0${n}-0000-4000-8000-00000000000${n}`;
+    const cwd = path.join(home, "work", `wt-${n}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+    fs.mkdirSync(dir, { recursive: true });
+    const iso = (min) => new Date(now - min * 60000).toISOString();
+    const lines = [];
+    for (let i = 0; i < 1500; i += 1) lines.push(JSON.stringify({ type: "user", message: { role: "user", content: `${pad}${i}` }, cwd, isSidechain: false, timestamp: iso(600 - i * 0.1) }));
+    lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: recovered ? "API Error: 429 rate_limit" : "ordinary reply" }] }, cwd, isSidechain: false, ...(recovered ? { isApiErrorMessage: true, apiErrorStatus: 429, error: "rate_limit" } : {}), timestamp: iso(400) }));
+    lines.push(JSON.stringify({ type: "user", message: { role: "user", content: "continue" }, cwd, isSidechain: false, timestamp: iso(300) }));
+    lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "resumed" }], stop_reason: "end_turn" }, cwd, isSidechain: false, timestamp: iso(299) }));
+    fs.writeFileSync(path.join(dir, `${sid}.jsonl`), lines.join("\n") + "\n");
+  }
+}
+' "$TL_PIN" "$TL_CTRL" 2>/dev/null
+cat > "$FAKE/tl-exitmem.mjs" <<'TLMEM'
+import fs from 'node:fs';
+process.on('exit', () => {
+  globalThis.gc();
+  globalThis.gc();
+  const m = process.memoryUsage();
+  fs.writeFileSync(new URL(process.env.TL_MEM_NAME, import.meta.url), JSON.stringify({ retained: m.heapUsed + m.external }));
+});
+TLMEM
+TL_MEM_URL="$(tl_url "$FAKE/tl-exitmem.mjs")"
+tlmem() { local home="$1" name="$2"; env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$home" USERPROFILE="$home" TL_MEM_NAME="$name" node --expose-gc --import "$TL_MEM_URL" "$TRAIL_MJS" limited --all --json --config-dir "$home/.claude"; }
+tlmem "$TL_PIN" tl-mem-pin.json > "$FAKE/tl-pin.out" 2>/dev/null
+tlmem "$TL_CTRL" tl-mem-ctrl.json > "$FAKE/tl-ctrl.out" 2>/dev/null
+TL8="$(node -e '
+const fs = require("node:fs");
+const [pinMem, ctrlMem, pinOut, ctrlOut] = process.argv.slice(1);
+const read = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
+const delta = (read(pinMem).retained - read(ctrlMem).retained) / 1048576;
+process.stdout.write([(read(pinOut).recovered || []).length, (read(ctrlOut).recovered || []).length, delta.toFixed(1)].join(":"));
+' "$FAKE/tl-mem-pin.json" "$FAKE/tl-mem-ctrl.json" "$FAKE/tl-pin.out" "$FAKE/tl-ctrl.out" 2>/dev/null)"
+TL8_DELTA="${TL8##*:}"
+case "$TL8" in
+  4:0:*) if node -e 'process.exit(Number(process.argv[1]) < 3 ? 0 : 1)' "$TL8_DELTA"; then
+      check "TL8 four recovered 3 MiB transcripts keep no transcript text alive after the index is built (retained delta ${TL8_DELTA} MiB against a control without the API error)" PASS
+    else
+      check "TL8 recovered transcripts stay pinned after forced GC: retained delta ${TL8_DELTA} MiB (limit 3)" FAIL
+    fi ;;
+  *) check "TL8 retention premise: want 4 recovered rows and 0 in the control, got recovered:control:delta=$TL8" FAIL ;;
+esac
+
+TL_DUP_HOME="$FAKE/tl-dup-home"
+TL_DUP=8d8d8d01-0000-4000-8000-0000000000d1
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid] = process.argv.slice(1);
+const store = path.join(home, "Library", "Application Support", "Claude", "claude-code-sessions");
+const iso = new Date(Date.now() - 3600000).toISOString();
+const cwd = path.join(home, "work", "wt-dup");
+fs.mkdirSync(cwd, { recursive: true });
+const dir = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type: "custom-title", customTitle: "tl duplicate fixture", sessionId: sid }),
+  JSON.stringify({ type: "user", message: { role: "user", content: "start tl duplicate fixture" }, cwd, isSidechain: false, timestamp: iso }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd, isSidechain: false, timestamp: iso }),
+].join("\n") + "\n");
+for (const [acct, archived] of [["acct-dup-a", false], ["acct-dup-b", true]]) {
+  const ws = path.join(store, acct, "ws-0001");
+  fs.mkdirSync(ws, { recursive: true });
+  fs.writeFileSync(path.join(ws, `local_${sid}.json`), JSON.stringify({ cliSessionId: sid, isArchived: archived, title: `record ${acct}`, backgroundTaskSuggestions: [{ id: `chip-${acct}`, title: `chip from ${acct}`, prompt: `chip from ${acct}` }] }));
+}
+' "$TL_DUP_HOME" "$TL_DUP" 2>/dev/null
+tldup() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$TL_DUP_HOME" USERPROFILE="$TL_DUP_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_DUP_HOME/.claude"; }
+tldup show "$TL_DUP" --all --no-git --json > "$TL_DUP_HOME/id-show.out" 2>/dev/null
+tldup show "tl duplicate fixture" --all --no-git --json > "$TL_DUP_HOME/full-show.out" 2>/dev/null
+tldup takeover "$TL_DUP" --all --no-record --no-git --json > "$TL_DUP_HOME/id-takeover.out" 2>/dev/null
+tldup takeover "tl duplicate fixture" --all --no-record --no-git --json > "$TL_DUP_HOME/full-takeover.out" 2>/dev/null
+TL9="$(node -e '
+const fs = require("node:fs");
+const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+const [idShow, fullShow, idTake, fullTake] = process.argv.slice(1).map(read);
+if (!idShow || !fullShow || !idTake || !fullTake || !idShow.app || !fullShow.app) { process.stdout.write("unparseable"); process.exit(0); }
+const app = JSON.stringify(idShow.app) === JSON.stringify(fullShow.app) ? "same-app" : "app-differs";
+const chips = JSON.stringify(idTake.openChips) === JSON.stringify(fullTake.openChips) && idTake.openChips.chips.length === 1 ? "same-chips" : "chips-differ";
+process.stdout.write([app, chips, idShow.app.title, fullShow.app.title].join(":"));
+' "$TL_DUP_HOME/id-show.out" "$TL_DUP_HOME/full-show.out" "$TL_DUP_HOME/id-takeover.out" "$TL_DUP_HOME/full-takeover.out" 2>/dev/null)"
+case "$TL9" in
+  "same-app:same-chips:record acct-dup-"*) check "TL9 two desktop records carrying one session id: the id lookup reports the app and the open chips of the same record the full walk keeps ($TL9)" PASS ;;
+  *) check "TL9 duplicate desktop records: id lookup versus full walk = $TL9" FAIL ;;
+esac
+
+TL_FB_HOME="$FAKE/tl-fb-home"
+TL_FB_TARGET=8e8e8e01-0000-4000-8000-0000000000e1
+TL_FB_LATE=8e8e8e02-0000-4000-8000-0000000000e2
+TL_FB_CUT=8e8e8e03-0000-4000-8000-0000000000e3
+TL_FB_REG=8e8e8e04-0000-4000-8000-0000000000e4
+TL_FB_OTHER=8e8e8e05-0000-4000-8000-0000000000e5
+TL_FB_PREMISE="$(node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, target, late, cut, reg, other, pid] = process.argv.slice(1);
+const now = Date.now();
+const iso = (h) => new Date(now - h * 3600000).toISOString();
+const wtx = path.join(home, "work", "wt-x");
+const wty = path.join(home, "work", "wt-y");
+fs.mkdirSync(wtx, { recursive: true });
+fs.mkdirSync(wty, { recursive: true });
+const dirOf = (cwd) => { const d = path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-")); fs.mkdirSync(d, { recursive: true }); return d; };
+const tail = (cwd, h) => [
+  JSON.stringify(cwd ? { cwd, type: "user", message: { role: "user", content: "work" }, isSidechain: false, timestamp: iso(h) } : { type: "user", message: { role: "user", content: "work" }, isSidechain: false, timestamp: iso(h) }),
+  JSON.stringify(cwd ? { cwd, type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, isSidechain: false, timestamp: iso(h) } : { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, isSidechain: false, timestamp: iso(h) }),
+];
+const write = (sid, cwd, title, h, padTo) => {
+  let head = JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid, pad: "" });
+  if (padTo) head = JSON.stringify({ type: "custom-title", customTitle: title, sessionId: sid, pad: "x".repeat(padTo - head.length) });
+  const file = path.join(dirOf(cwd || wtx), `${sid}.jsonl`);
+  fs.writeFileSync(file, [head, ...tail(cwd, h)].join("\n") + "\n");
+  return fs.readFileSync(file);
+};
+write(target, wtx, "tl fallback target", 1);
+const lateBuf = write(late, wtx, "tl fallback late", 2, 70000);
+const cutBuf = write(cut, wtx, "tl fallback cut", 3, 65536 - 8 - 2);
+write(reg, null, "tl fallback registry", 2);
+write(other, wty, "tl fallback other", 1);
+fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+fs.writeFileSync(path.join(home, ".claude", "sessions", "tl-fb-reg.json"), JSON.stringify({ sessionId: reg, pid: Number(pid), cwd: wtx, startedAt: now - 7200000 }));
+const key = Buffer.from("\"cwd\":\"");
+const lateAt = lateBuf.indexOf(key);
+const cutAt = cutBuf.indexOf(key);
+const cutClose = cutBuf.indexOf(0x22, cutAt + key.length);
+process.stdout.write(lateAt > 65536 && cutAt < 65536 && cutClose >= 65536 ? "premise-ok" : `premise-broken:${lateAt}:${cutAt}:${cutClose}`);
+' "$TL_FB_HOME" "$TL_FB_TARGET" "$TL_FB_LATE" "$TL_FB_CUT" "$TL_FB_REG" "$TL_FB_OTHER" "$$" 2>/dev/null)"
+tlfb() { env -u CLAUDE_CONFIG_DIR -u CLAUDE_CODE_SESSION_ID -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$TL_FB_HOME" USERPROFILE="$TL_FB_HOME" node "$TRAIL_MJS" "$@" --config-dir "$TL_FB_HOME/.claude"; }
+TL10_SIB="$(tlfb show "$TL_FB_TARGET" --all --no-git 2>/dev/null | grep '^SIBLINGS')"
+TL10_SIB_FULL="$(tlfb show "tl fallback target" --all --no-git 2>/dev/null | grep '^SIBLINGS')"
+TL10_BAD=""
+[ "$TL_FB_PREMISE" = "premise-ok" ] || TL10_BAD="$TL10_BAD $TL_FB_PREMISE"
+[ -n "$TL10_SIB" ] && [ "$TL10_SIB" = "$TL10_SIB_FULL" ] || TL10_BAD="$TL10_BAD siblings-differ[$TL10_SIB|$TL10_SIB_FULL]"
+for tl10_tag in 8e8e8e02 8e8e8e03 8e8e8e04; do printf '%s' "$TL10_SIB" | grep -qF "$tl10_tag" || TL10_BAD="$TL10_BAD missing-$tl10_tag"; done
+printf '%s' "$TL10_SIB" | grep -qF '8e8e8e05' && TL10_BAD="$TL10_BAD other-worktree-listed"
+[ -z "$TL10_BAD" ] && check "TL10 siblings the 64 KiB probe cannot decide (first cwd past the probe, a cwd cut at its edge, a live session whose cwd only the registry knows) still reach the SIBLINGS line, which equals the full-index line" PASS || check "TL10 probe fallback:$TL10_BAD" FAIL
+
+TLR_HOME="$(cd "$FAKE" && pwd -P)/tl-release-home"
+TLR_REPO="$TLR_HOME/repo"
+TLR_SRC_WT="$TLR_REPO/.claude/worktrees/src-wt"
+TLR_TAKER_WT="$TLR_REPO/.claude/worktrees/taker-wt"
+TLR_SRC=e1000000-0000-0000-0000-000000000001
+TLR_TAKER=e2000000-0000-0000-0000-000000000002
+TLR_ENDED=e3000000-0000-0000-0000-000000000003
+TLR_DECOY1=e9000000-0000-0000-0000-000000000009
+TLR_DECOY2=ea000000-0000-0000-0000-00000000000a
+TLR_ACCT=e6000000-1111-2222-3333-444444444444
+TLR_OK=0
+if command -v git >/dev/null 2>&1 \
+  && mkdir -p "$TLR_HOME/work/decoy-1" "$TLR_HOME/work/decoy-2" \
+  && git init -q "$TLR_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n' > "$TLR_REPO/.gitignore" \
+  && git -C "$TLR_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$TLR_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$TLR_REPO/.claude/worktrees" \
+  && git -C "$TLR_REPO" worktree add -q "$TLR_SRC_WT" -b claude/src-wt >/dev/null 2>&1 \
+  && git -C "$TLR_REPO" worktree add -q "$TLR_TAKER_WT" -b claude/taker-wt >/dev/null 2>&1 \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_SRC" "$TLR_SRC_WT" "$WR_DEAD" 7200 "$TLR_ACCT" \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_TAKER" "$TLR_TAKER_WT" "$WR_DEAD" 600 "$TLR_ACCT" \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_ENDED" "$TLR_SRC_WT" "$WR_DEAD" 7200 none \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_DECOY1" "$TLR_HOME/work/decoy-1" "$WR_DEAD" 900 none \
+  && node "$WR_HOME/mkrel.mjs" "$TLR_HOME" "$TLR_DECOY2" "$TLR_HOME/work/decoy-2" "$WR_DEAD" 1200 none \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$TLR_SRC_WT" "$TLR_SRC" 60)" = "created" ] \
+  && node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$TLR_SRC_WT" "$TLR_ENDED" 120 >/dev/null; then
+  TLR_OK=1
+fi
+if ! command -v git >/dev/null 2>&1; then
+  skip "TL11 git is not on PATH — the release read check needs real worktrees and is unverified in this run"
+elif [ "$TLR_OK" != 1 ]; then
+  check "TL11-fixture the release read fixture (worktrees, sessions, keep anchors) could not be built" FAIL
+else
+  ( cd "$TLR_TAKER_WT" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$TLR_HOME" USERPROFILE="$TLR_HOME" ZENSU_CCD_STORE="$TLR_HOME/store" CLAUDE_CODE_SESSION_ID="$TLR_TAKER" TL_TRACE_NAME=tl11.json node --import "$TL_TRACE_URL" "$TRAIL_MJS" release "$TLR_SRC" --json --all --config-dir "$TLR_HOME/.claude" > "$TL_HOME/tl11.out" 2>/dev/null )
+  TL11="$(node -e '
+const fs = require("node:fs"), path = require("node:path");
+let o, t;
+try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); t = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); } catch { process.stdout.write("unparseable"); process.exit(0); }
+const owners = (o.anchors || []).map((a) => a.owner).sort().join(",");
+const read = [...new Set(t.reads.map((r) => path.basename(r.slice(r.indexOf(" ") + 1), ".jsonl").slice(0, 8)))].sort().join(",");
+process.stdout.write(`${owners}|${read}`);
+' "$TL_HOME/tl11.out" "$TL_HOME/tl11.json" 2>/dev/null)"
+  [ "$TL11" = "ended-session,source|e1000000,e3000000" ] \
+    && check "TL11 release attributes its keep anchors while reading only the source's and the anchor owner's transcripts, never the taker's or unrelated ones ($TL11)" PASS \
+    || check "TL11 release read scope: owners|transcripts read = $TL11 (want ended-session,source|e1000000,e3000000)" FAIL
+fi
+
+FK_HOME="$(cd "$FAKE" && pwd -P)/fork-home"
+FK_REPO="$FK_HOME/repo"
+FK_PARENT_WT="$FK_REPO/.claude/worktrees/parent-wt"
+FK_FORK_WT="$FK_REPO/.claude/worktrees/fork-wt"
+FK_TURNLESS_WT="$FK_REPO/.claude/worktrees/turnless-wt"
+FK_TAKER_WT="$FK_REPO/.claude/worktrees/taker-wt"
+FK_PARENT=fa000000-0000-0000-0000-000000000001
+FK_FORK=fb000000-0000-0000-0000-000000000002
+FK_TURNLESS=fc000000-0000-0000-0000-000000000003
+FK_ORPHAN=fd000000-0000-0000-0000-000000000004
+FK_SIB=fe000000-0000-0000-0000-000000000005
+FK_TAKER=ff000000-0000-0000-0000-000000000006
+FK_AGENT=agent-fa00000000000007
+FK_BIG=f9000000-0000-0000-0000-000000000008
+FK_BIG_WT="$FK_REPO/.claude/worktrees/large-fork-wt"
+FK_ACCT=fa000000-1111-2222-3333-444444444444
+mkdir -p "$FK_HOME"
+cat > "$FK_HOME/mkfork.mjs" <<'MKFORK'
+import fs from 'node:fs';
+import path from 'node:path';
+const [home, repo, parent, fork, turnless, orphan, sib, agent, acct, livePid, big] = process.argv.slice(2);
+const cfg = path.join(home, '.claude');
+const now = Date.now();
+const iso = (min) => new Date(now - min * 60000).toISOString();
+const wt = (name) => path.join(repo, '.claude', 'worktrees', name);
+const parentWt = wt('parent-wt');
+const parentSub = path.join(parentWt, 'sub');
+fs.mkdirSync(parentSub, { recursive: true });
+const record = (sessionId, cwd, gitBranch, type, text, min, extra = {}) => ({
+  parentUuid: null,
+  isSidechain: false,
+  type,
+  message: type === 'user' ? { role: 'user', content: text } : { role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' },
+  cwd,
+  sessionId,
+  gitBranch,
+  timestamp: iso(min),
+  ...extra,
+});
+const title = (sessionId, customTitle) => ({ type: 'custom-title', customTitle, sessionId });
+const inherited = [
+  record(parent, parentWt, 'claude/parent-wt', 'user', 'parent work', 300),
+  record(parent, parentWt, 'claude/parent-wt', 'assistant', 'parent done', 299),
+  record(parent, parentSub, 'claude/parent-wt', 'user', 'parent work in a subdirectory', 298),
+  record(parent, parentSub, 'claude/parent-wt', 'assistant', 'parent subdirectory done', 297),
+];
+const transcriptOf = (cwd, name) => path.join(cfg, 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'), `${name}.jsonl`);
+const write = (cwd, name, records, min) => {
+  const file = transcriptOf(cwd, name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const at = new Date(now - min * 60000);
+  fs.utimesSync(file, at, at);
+};
+write(parentWt, parent, inherited, 297);
+write(wt('fork-wt'), fork, [
+  ...inherited,
+  title(fork, 'fork fixture'),
+  record(fork, wt('fork-wt'), 'claude/fork-wt', 'user', 'fork work', 60),
+  record(fork, wt('fork-wt'), 'claude/fork-wt', 'assistant', 'fork done', 59),
+], 59);
+write(wt('turnless-wt'), turnless, [...inherited, title(turnless, 'turnless fork fixture')], 50);
+write(wt('orphan-wt'), orphan, [...inherited, title(orphan, 'orphan fork fixture')], 45);
+write(wt('fork-wt'), sib, [
+  record(sib, wt('fork-wt'), 'claude/fork-wt', 'user', 'sibling work', 40),
+  record(sib, wt('fork-wt'), 'claude/fork-wt', 'assistant', 'sibling done', 39),
+], 39);
+write(parentWt, agent, inherited.slice(2).map((r) => ({ ...r, isSidechain: true, agentId: agent.replace(/^agent-/, '') })), 296);
+fs.mkdirSync(path.join(cfg, 'sessions'), { recursive: true });
+const register = (sessionId, cwd) => fs.writeFileSync(path.join(cfg, 'sessions', `${sessionId}.json`), JSON.stringify({
+  sessionId, cwd, pid: Number(livePid), startedAt: now - 3600000, entrypoint: 'claude-desktop', kind: 'interactive',
+}));
+register(fork, wt('fork-wt'));
+register(turnless, wt('turnless-wt'));
+const store = path.join(home, 'store', acct, 'ws-0001');
+fs.mkdirSync(store, { recursive: true });
+for (const sessionId of [fork, turnless, orphan]) {
+  fs.writeFileSync(path.join(store, `local_${sessionId}.json`), JSON.stringify({
+    sessionId: `local_${sessionId}`, cliSessionId: sessionId, isArchived: false, title: `desktop record ${sessionId.slice(0, 8)}`,
+    cwd: parentWt, worktreePath: parentWt, branch: 'claude/parent-wt', forkedFromSessionId: `local_${parent}`,
+  }));
+}
+const bigWt = wt('large-fork-wt');
+const nested = path.join(bigWt, '.claude', 'worktrees', 'nested');
+fs.mkdirSync(nested, { recursive: true });
+fs.writeFileSync(path.join(nested, '.git'), 'gitdir: /nonexistent/nested\n');
+const bigLines = [];
+let bigBytes = 0;
+for (let i = 0; bigBytes < 9 * 1024 * 1024; i += 1) {
+  const line = JSON.stringify(record(parent, parentWt, 'claude/parent-wt', i % 2 ? 'assistant' : 'user', 'p'.repeat(i % 97 === 0 ? 40000 : 3000), 600));
+  bigLines.push(line);
+  bigBytes += Buffer.byteLength(line) + 1;
+}
+bigLines.push(JSON.stringify(title(big, 'large fork fixture')));
+const forkPoint = bigBytes + Buffer.byteLength(bigLines[bigLines.length - 1]) + 1;
+bigLines.push(JSON.stringify({ parentUuid: null, isSidechain: false, cwd: bigWt, sessionId: big, gitBranch: 'claude/large-fork-wt', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'f'.repeat(300 * 1024) }], stop_reason: 'end_turn' }, timestamp: iso(30) }));
+for (let i = 0; i < 300; i += 1) bigLines.push(JSON.stringify(record(big, nested, 'claude/nested', i % 2 ? 'assistant' : 'user', 'n'.repeat(4000), 29)));
+const bigFile = transcriptOf(bigWt, big);
+fs.mkdirSync(path.dirname(bigFile), { recursive: true });
+fs.writeFileSync(bigFile, bigLines.join('\n') + '\n');
+const bigSize = fs.statSync(bigFile).size;
+const bigPremise = bigSize > 8 * 1024 * 1024 && forkPoint > 256 * 1024 && forkPoint < bigSize - 768 * 1024;
+const first = JSON.parse(fs.readFileSync(transcriptOf(wt('fork-wt'), fork), 'utf8').split('\n')[0]);
+process.stdout.write(first.sessionId === parent && first.cwd === parentWt && bigPremise ? 'premise-ok' : `premise-broken:${first.sessionId}:${first.cwd}:${bigSize}:${forkPoint}`);
+MKFORK
+fkrun() {
+  local at="$1"; shift
+  ( cd "$at" && env -u CLAUDE_CONFIG_DIR -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME HOME="$FK_HOME" USERPROFILE="$FK_HOME" ZENSU_CCD_STORE="$FK_HOME/store" CLAUDE_CODE_SESSION_ID="$FK_TAKER" node "$TRAIL_MJS" "$@" --all --config-dir "$FK_HOME/.claude" )
+}
+FK_OK=0
+FK_PREMISE=""
+if command -v git >/dev/null 2>&1 \
+  && git init -q "$FK_REPO" >/dev/null 2>&1 \
+  && printf '.zensu/\n' > "$FK_REPO/.gitignore" \
+  && git -C "$FK_REPO" add .gitignore >/dev/null 2>&1 \
+  && git -C "$FK_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && mkdir -p "$FK_REPO/.claude/worktrees" \
+  && git -C "$FK_REPO" worktree add -q "$FK_PARENT_WT" -b claude/parent-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_FORK_WT" -b claude/fork-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_TURNLESS_WT" -b claude/turnless-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_TAKER_WT" -b claude/taker-wt >/dev/null 2>&1 \
+  && git -C "$FK_REPO" worktree add -q "$FK_BIG_WT" -b claude/large-fork-wt >/dev/null 2>&1 \
+  && FK_PREMISE="$(node "$FK_HOME/mkfork.mjs" "$FK_HOME" "$FK_REPO" "$FK_PARENT" "$FK_FORK" "$FK_TURNLESS" "$FK_ORPHAN" "$FK_SIB" "$FK_AGENT" "$FK_ACCT" "$LIVE_PID" "$FK_BIG" 2>&1)" \
+  && [ "$FK_PREMISE" = "premise-ok" ] \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$FK_PARENT_WT" "$FK_PARENT" 3600)" = "created" ] \
+  && [ "$(node "$WR_HOME/mkanchor.cjs" "$PLUGIN_DIR/hooks/lib" "$FK_FORK_WT" "$FK_FORK" 60)" = "created" ]; then
+  FK_OK=1
+fi
+if ! command -v git >/dev/null 2>&1; then
+  skip "FK* git is not on PATH — the fork checks need real worktrees and are unverified in this run"
+elif [ "$FK_OK" != 1 ]; then
+  check "FK-fixture the fork fixture (worktrees, a transcript that opens with its parent's records, registry entries, desktop records, keep anchors) could not be built: ${FK_PREMISE:-<no premise output>}" FAIL
+else
+  check "FK0 the fork fixture holds a transcript whose first record carries its parent's session id and worktree, a live registry entry, a desktop fork record naming the parent's worktree, and a fork past the full-read limit whose fork point lies between the head and the tail" PASS
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --json --anchor "$FK_FORK_WT" 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD wt=$(wr_json "$FK_OUT" 'o.wt')"
+  [ "$(wr_json "$FK_OUT" 'o.cwd')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwd=$(wr_json "$FK_OUT" 'o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')" = "$FK_FORK_WT:true" ] || FK_BAD="$FK_BAD writes=$(wr_json "$FK_OUT" 'o.writes.targetRoot + ":" + o.writes.covered')"
+  [ "$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')" = "not-needed:$FK_FORK_WT" ] || FK_BAD="$FK_BAD continuation=$(wr_json "$FK_OUT" 'o.continuation.status + ":" + o.continuation.source')"
+  [ -z "$FK_BAD" ] && check "FK1 show --json resolves a fork's worktree, cwd and branch from its own records, not from the parent's records that open its transcript or from its desktop record, and its WRITES and CONTINUE verdicts judge that worktree" PASS || check "FK1 fork show --json:$FK_BAD" FAIL
+
+  FK_TXT="$(fkrun "$FK_TAKER_WT" show "$FK_FORK" --anchor "$FK_FORK_WT" 2>/dev/null)"
+  FK_BAD=""
+  printf '%s\n' "$FK_TXT" | grep -qxF "WORKTREE $FK_FORK_WT" || FK_BAD="$FK_BAD worktree-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "BRANCH   claude/fork-wt" || FK_BAD="$FK_BAD branch-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^WRITES +allowed' || FK_BAD="$FK_BAD writes-line"
+  printf '%s\n' "$FK_TXT" | grep -qE '^CONTINUE not needed' || FK_BAD="$FK_BAD continue-line"
+  printf '%s\n' "$FK_TXT" | grep -qxF "  cd -- '$FK_FORK_WT' && claude --resume '$FK_FORK'" || FK_BAD="$FK_BAD resume-line"
+  printf '%s\n' "$FK_TXT" | grep -E '^(WORKTREE|CWD|BRANCH|WRITES|CONTINUE) ' | grep -qF 'parent-wt' && FK_BAD="$FK_BAD names-the-parent-worktree"
+  [ -z "$FK_BAD" ] && check "FK2 show names the fork's own worktree and branch in its WORKTREE, BRANCH, WRITES and CONTINUE lines and in its resume line, and never the parent's" PASS || check "FK2 fork show text:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" release "$FK_FORK" --json --force 2>/dev/null)"; FK_RC=$?
+  FK_BAD=""
+  [ "$FK_RC" = "0" ] || FK_BAD="$FK_BAD rc=$FK_RC"
+  [ "$(wr_json "$FK_OUT" 'o.verdict + ":" + o.applied')" = "releasable:false" ] || FK_BAD="$FK_BAD verdict=$(wr_json "$FK_OUT" 'o.verdict + ":" + o.applied') blockers=$(wr_json "$FK_OUT" 'JSON.stringify(o.blockers)')"
+  [ "$(wr_json "$FK_OUT" 'o.source.recordedWorktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD recorded=$(wr_json "$FK_OUT" 'o.source.recordedWorktree')"
+  [ "$(wr_json "$FK_OUT" 'o.source.worktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD worktree=$(wr_json "$FK_OUT" 'o.source.worktree')"
+  [ "$(wr_json "$FK_OUT" 'o.anchors.map((a) => a.owner + ":" + a.action).join(",")')" = "source:end" ] || FK_BAD="$FK_BAD anchors=$(wr_json "$FK_OUT" 'JSON.stringify(o.anchors)')"
+  [ -f "$FK_FORK_WT/.worktree-keep" ] || FK_BAD="$FK_BAD fork-marker-gone"
+  [ -f "$FK_PARENT_WT/.worktree-keep" ] || FK_BAD="$FK_BAD parent-marker-gone"
+  [ -z "$FK_BAD" ] && check "FK3 a release dry run of a fork targets the fork's own worktree and its own keep anchor, never the parent's, and changes nothing" PASS || check "FK3 fork release dry run:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" takeover "$FK_FORK" --json --force 2>/dev/null)"
+  FK_EDGE_FILE="$(find "$FK_HOME/.claude/zensu/session-lineage/v1/edges" -name '*.json' 2>/dev/null | head -1)"
+  FK_EDGE="$([ -n "$FK_EDGE_FILE" ] && cat "$FK_EDGE_FILE")"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.lineage.recorded')" = "true" ] || FK_BAD="$FK_BAD not-recorded=$(wr_json "$FK_OUT" 'o.lineage.message')"
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.branch')" = "$FK_FORK_WT:claude/fork-wt" ] || FK_BAD="$FK_BAD takeover-row=$(wr_json "$FK_OUT" 'o.wt + ":" + o.branch')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.sessionId + ":" + o.to.sessionId')" = "$FK_FORK:$FK_TAKER" ] || FK_BAD="$FK_BAD edge-ids=$(wr_json "$FK_EDGE" 'o.from.sessionId + ":" + o.to.sessionId')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.worktree')" = "$FK_FORK_WT" ] || FK_BAD="$FK_BAD edge-worktree=$(wr_json "$FK_EDGE" 'o.from.worktree')"
+  [ "$(wr_json "$FK_EDGE" 'o.from.branch')" = "claude/fork-wt" ] || FK_BAD="$FK_BAD edge-branch=$(wr_json "$FK_EDGE" 'o.from.branch')"
+  [ -z "$FK_BAD" ] && check "FK4 a takeover of a fork records the fork's own worktree and branch as the source endpoint of the lineage edge" PASS || check "FK4 fork lineage endpoint:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_TURNLESS" --json 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_TURNLESS_WT:$FK_TURNLESS_WT" ] || FK_BAD="$FK_BAD wt-cwd=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.branch')" = "null" ] || FK_BAD="$FK_BAD branch=$(wr_json "$FK_OUT" 'o.branch')"
+  [ "$(wr_json "$FK_OUT" 'o.git && o.git.branch')" = "claude/turnless-wt" ] || FK_BAD="$FK_BAD git-branch=$(wr_json "$FK_OUT" 'o.git && o.git.branch')"
+  [ -z "$FK_BAD" ] && check "FK5 a live fork with no record of its own yet takes its worktree from the live registry, not from its parent's records or its desktop record" PASS || check "FK5 turnless fork:$FK_BAD" FAIL
+
+  FK_ERR="$(fkrun "$FK_TAKER_WT" show "$FK_ORPHAN" --json 2>&1 >/dev/null)"; FK_RC=$?
+  { [ "$FK_RC" = "2" ] && printf '%s' "$FK_ERR" | grep -qF "no session matched \"$FK_ORPHAN\""; } \
+    && check "FK6 a fork that has no record of its own and no live registry entry is not resolved to its parent's worktree: it has no recorded directory, so no row is built" PASS \
+    || check "FK6 orphan fork: rc=$FK_RC ${FK_ERR:-<empty>}" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_PARENT" --json --no-git 2>/dev/null)"
+  FK_AGENT_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_AGENT" --json --no-git 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_PARENT_WT:$FK_PARENT_WT" ] || FK_BAD="$FK_BAD parent=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast')" = "$FK_PARENT_WT/sub" ] || FK_BAD="$FK_BAD parent-cwdLast=$(wr_json "$FK_OUT" 'o.cwdLast')"
+  [ "$(wr_json "$FK_AGENT_OUT" 'o.wt + ":" + o.cwd')" = "$FK_PARENT_WT:$FK_PARENT_WT/sub" ] || FK_BAD="$FK_BAD agent=$(wr_json "$FK_AGENT_OUT" 'o.wt + ":" + o.cwd')"
+  [ -z "$FK_BAD" ] && check "FK7 a session that is not a fork keeps the cwd of its first record, and so does a subagent transcript whose sidechain records carry its parent's session id" PASS || check "FK7 first-record rule:$FK_BAD" FAIL
+
+  FK_SIB_LINE="$(fkrun "$FK_TAKER_WT" show "$FK_SIB" --no-git 2>/dev/null | grep '^SIBLINGS')"
+  FK_PARENT_LINE="$(fkrun "$FK_TAKER_WT" show "$FK_PARENT" --no-git 2>/dev/null | grep '^SIBLINGS')"
+  FK_BAD=""
+  printf '%s' "$FK_SIB_LINE" | grep -qF 'fb000000(' || FK_BAD="$FK_BAD fork-missing-beside-its-sibling[$FK_SIB_LINE]"
+  printf '%s' "$FK_PARENT_LINE" | grep -qF 'agent-fa(' || FK_BAD="$FK_BAD subagent-missing-beside-the-parent[$FK_PARENT_LINE]"
+  for fk_tag in fb000000 fc000000 fd000000 f9000000; do printf '%s' "$FK_PARENT_LINE" | grep -qF "$fk_tag" && FK_BAD="$FK_BAD $fk_tag-listed-beside-the-parent"; done
+  [ -z "$FK_BAD" ] && check "FK8 show's SIBLINGS line places a fork in its own worktree: beside a session there, and never beside its parent" PASS || check "FK8 fork siblings:$FK_BAD" FAIL
+
+  FK_OUT="$(fkrun "$FK_TAKER_WT" show "$FK_BIG" --json --no-git 2>/dev/null)"
+  FK_BAD=""
+  [ "$(wr_json "$FK_OUT" 'o.truncated')" = "true" ] || FK_BAD="$FK_BAD truncated=$(wr_json "$FK_OUT" 'o.truncated')"
+  [ "$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')" = "$FK_BIG_WT:$FK_BIG_WT" ] || FK_BAD="$FK_BAD wt-cwd=$(wr_json "$FK_OUT" 'o.wt + ":" + o.cwd')"
+  [ "$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')" = "$FK_BIG_WT/.claude/worktrees/nested:claude/nested" ] || FK_BAD="$FK_BAD last=$(wr_json "$FK_OUT" 'o.cwdLast + ":" + o.branch')"
+  [ -z "$FK_BAD" ] && check "FK9 a fork past the full-read limit, whose first own record lies in the unread middle and spans more than one read chunk, resolves to that record's worktree, not to the nested worktree its tail shows or to its parent's" PASS || check "FK9 large fork:$FK_BAD" FAIL
 fi
 
 unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"

@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 201, "skips": {"linux": 3, "root": 3, "win32": 22},
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 217, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
-      "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity and the workflow-baseline classification."
+      "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
     {
       "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 25,
@@ -88,8 +88,8 @@
     },
     {
       "path": "tests/structure/process-supervisor.test.js", "registered": 7, "skips": {"linux": 1, "root": 1, "win32": 4},
-      "runs": [{ "driver": "tests/structure/test-zensu-runtime-controller.sh" }],
-      "summary": "The bounded process supervisor: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code."
+      "runs": [{ "driver": "tests/structure/test-harness-launcher.sh" }],
+      "summary": "The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code."
     },
     {
       "path": "tests/structure/profile-runner.test.js", "registered": 23, "skips": {"win32": 2},
@@ -227,6 +227,11 @@
       "path": "tests/structure/windows-safety-shard.test.js", "registered": 5,
       "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
+    },
+    {
+      "path": "tests/structure/work-order-v1.test.js", "registered": 38,
+      "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,

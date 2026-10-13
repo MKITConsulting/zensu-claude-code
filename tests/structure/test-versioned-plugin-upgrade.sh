@@ -1697,7 +1697,7 @@ done
 # value of this list is that every member states why it cannot deny.
 adopt_hook_expected() {
   case "$1" in
-    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
+    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh|pre-work-order-gate.sh) printf 'allow\n' ;;
     *) printf '%s\n' "$2" ;;
   esac
 }

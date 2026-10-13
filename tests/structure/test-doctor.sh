@@ -6947,7 +6947,8 @@ else
   le_owner "$LE_LIVE_PID" "$LE_NOW" null
   LE_YOUNG_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
   le_keep "$LE_YOUNG_ROW"
-  if printf '%s' "$LE_YOUNG_ROW" | grep -qF "✅  autopilot lease: held right now — owner pid $LE_LIVE_PID (alive), process start identity not recorded, created_at $LE_NOW"; then
+  if printf '%s' "$LE_YOUNG_ROW" | grep -qF "✅  autopilot lease: held right now — owner pid $LE_LIVE_PID (alive), process start identity not recorded, " \
+    && printf '%s' "$LE_YOUNG_ROW" | grep -qF "created_at $LE_NOW"; then
     check "P1le9 a live owner inside the 30 s bound renders green as a lease held right now" PASS
   else
     check "P1le9 young lease row (got: $LE_YOUNG_ROW)" FAIL
@@ -6957,7 +6958,10 @@ else
   LE_BARE_ROW="$(le_row "$(ap_report bound "$AP_OWN")")"
   le_keep "$LE_BARE_ROW"
   if [ -z "$LE_LIVE_START" ]; then
-    check "P1le10 SKIPPED — no process start time is readable on this host" PASS
+    case "$(uname -s)" in
+      (Linux|Darwin) check "P1le10 no process start time was readable on $(uname -s), whose start reader always answers for a live pid" FAIL ;;
+      (*) check "P1le10 SKIPPED — no process start time is readable on this host" PASS ;;
+    esac
   elif printf '%s' "$LE_BARE_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID is alive but is not the process that took the lease" \
     && printf '%s' "$LE_BARE_ROW" | grep -qF 'process start identity not recorded' \
     && printf '%s' "$LE_BARE_ROW" | grep -qF "the process that holds pid $LE_LIVE_PID started after the record was written, so its pid was reused" \
@@ -6985,16 +6989,101 @@ else
   le_keep "$LE_NOPROOF_ROW"
   if printf '%s' "$LE_NOPROOF_ROW" | grep -qF "⚠️  autopilot lease: held for " \
     && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "by pid $LE_LIVE_PID, which is alive" \
-    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "the core reclaims the lock artifact only once the process holding pid $LE_LIVE_PID provably started after the record was written" \
-    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'it clears only when that process releases it or exits' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "the core reclaims the lock artifact only once the process holding pid $LE_LIVE_PID provably started more than a second after the record was written" \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'Every lease acquisition checks again, so it clears as soon as that shows, or when that process releases it or exits' \
+    && ! printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'its holder marker is free' \
     && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "cannot establish whether pid $LE_LIVE_PID is still the lock keeper" \
     && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'whose command line names session-control-core-v1.js' \
     && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'under bash 3.2, the bash process that runs that hook or zensu-log.sh itself' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "a process that took pid $LE_LIVE_PID within a second of the record keeps the lock artifact" \
     && printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'only a removal by hand clears it' \
+    && printf '%s' "$LE_NOPROOF_ROW" | grep -qF "remove it only while it still names pid $LE_LIVE_PID and the same created_at" \
+    && ! printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'it clears only when that process releases it or exits' \
     && ! printf '%s' "$LE_NOPROOF_ROW" | grep -qF 'removable'; then
     check "P1le10b a live owner without a start identity that nothing shows to be younger than its record is never called removable; the row names how to tell a live lock keeper apart" PASS
   else
     check "P1le10b identity-less live owner row (got: $LE_NOPROOF_ROW)" FAIL
+  fi
+
+  LE_MARKERS="$SBOX/le-markers"
+  rm -rf "$LE_MARKERS"
+  cp -R "$SBOX/plug" "$LE_MARKERS"
+  le_shim "$LE_MARKERS" 'function (options) {
+    var inspection = real.inspectExternalProcessLock(options);
+    [inspection.lock, inspection.recovery].forEach(function (artifact) {
+      if (artifact.state === "owned" && artifact.alive) {
+        artifact.marker = process.env.LE_MARKER;
+        artifact.stale = process.env.LE_MARKER === "released";
+        artifact.startedAfterRecord = false;
+      }
+    });
+    return inspection;
+  }'
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null
+  LE_MARKER_HELD_ROW="$(le_row "$(LE_MARKER=held le_report "$LE_MARKERS" "$AP_P")")"
+  le_keep "$LE_MARKER_HELD_ROW"
+  LE_MARKER_FREE_ROW="$(le_row "$(LE_MARKER=released le_report "$LE_MARKERS" "$AP_P")")"
+  le_keep "$LE_MARKER_FREE_ROW"
+  LE_MARKER_ABSENT_ROW="$(le_row "$(LE_MARKER=absent le_report "$LE_MARKERS" "$AP_P")")"
+  le_keep "$LE_MARKER_ABSENT_ROW"
+  LE_MARKER_UNREADABLE_ROW="$(le_row "$(LE_MARKER=unreadable le_report "$LE_MARKERS" "$AP_P")")"
+  le_keep "$LE_MARKER_UNREADABLE_ROW"
+  le_clear
+  le_owner "$LE_LIVE_PID" 2020-01-01T00:00:00.000Z null "$LE_TOKEN" "$LE_RECOVERY"
+  LE_MARKER_REC_ROW="$(le_row "$(LE_MARKER=held le_report "$LE_MARKERS" "$AP_P")")"
+  le_keep "$LE_MARKER_REC_ROW"
+  le_clear
+  if printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF '⚠️  autopilot lease: held for ' \
+    && printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'by a live lock keeper' \
+    && printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'holder marker held open' \
+    && printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF "a process still holds the record's holder marker open, normally the lock keeper itself" \
+    && printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'is NOT removable' \
+    && printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'Never end the node lock keeper alone' \
+    && ! printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'removal by hand' \
+    && ! printf '%s' "$LE_MARKER_HELD_ROW" | grep -qF 'is removable;'; then
+    check "P1le27 a lease whose holder marker a process still holds open is held by a live lock keeper and never offered for removal by hand" PASS
+  else
+    check "P1le27 held holder marker row (got: $LE_MARKER_HELD_ROW)" FAIL
+  fi
+  if printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF "⚠️  autopilot lease: pid $LE_LIVE_PID no longer holds the lease" \
+    && printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'holder marker free' \
+    && printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF "no process holds the record's holder marker open any more, so the process that took the lease has let it go: it exited, or gave it up after its own release failed" \
+    && printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'The artifact ' \
+    && printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'is removable; the next lease acquisition reclaims it on its own' \
+    && ! printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'pid was reused' \
+    && ! printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'is not a live lock keeper' \
+    && ! printf '%s' "$LE_MARKER_FREE_ROW" | grep -qF 'differs from the recorded one'; then
+    check "P1le28 a free holder marker says the process that took the lease let it go, exited or released after a failure, and the artifact is removable" PASS
+  else
+    check "P1le28 free holder marker row (got: $LE_MARKER_FREE_ROW)" FAIL
+  fi
+  if printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF "by pid $LE_LIVE_PID, which is alive" \
+    && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'holder marker absent' \
+    && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'No holder marker exists for this record, so a runtime from before holder markers, or a holder that could not create one, wrote it' \
+    && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF "the core reclaims the lock artifact only once the process holding pid $LE_LIVE_PID provably started more than a second after the record was written" \
+    && printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'Every lease acquisition checks again' \
+    && ! printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'its holder marker is free' \
+    && ! printf '%s' "$LE_MARKER_ABSENT_ROW" | grep -qF 'removable'; then
+    check "P1le29 a live owner without a holder marker says who wrote such a record, names no free marker as a way out, and is never called removable" PASS
+  else
+    check "P1le29 absent holder marker row (got: $LE_MARKER_ABSENT_ROW)" FAIL
+  fi
+  if printf '%s' "$LE_MARKER_UNREADABLE_ROW" | grep -qF "by pid $LE_LIVE_PID, which is alive" \
+    && printf '%s' "$LE_MARKER_UNREADABLE_ROW" | grep -qF 'holder marker unreadable' \
+    && printf '%s' "$LE_MARKER_UNREADABLE_ROW" | grep -qF "the core reclaims the lock artifact only once its holder marker is free or the process holding pid $LE_LIVE_PID provably started more than a second after the record was written" \
+    && printf '%s' "$LE_MARKER_UNREADABLE_ROW" | grep -qF "Something exists at its holder marker's name that the core cannot judge, so it proves nothing either way" \
+    && ! printf '%s' "$LE_MARKER_UNREADABLE_ROW" | grep -qF 'removable'; then
+    check "P1le31 a holder marker the core cannot judge proves nothing either way, and the artifact is never called removable" PASS
+  else
+    check "P1le31 unreadable holder marker row (got: $LE_MARKER_UNREADABLE_ROW)" FAIL
+  fi
+  if printf '%s' "$LE_MARKER_REC_ROW" | grep -qF '⚠️  autopilot lease: the recovery sentinel ' \
+    && printf '%s' "$LE_MARKER_REC_ROW" | grep -qF 'whose holder marker a process still holds open, normally the holder of the sentinel itself' \
+    && printf '%s' "$LE_MARKER_REC_ROW" | grep -qF 'The sentinel is NOT removable' \
+    && ! printf '%s' "$LE_MARKER_REC_ROW" | grep -qF 'is removable;'; then
+    check "P1le30 a recovery sentinel whose holder marker a process still holds open is not removable" PASS
+  else
+    check "P1le30 held holder marker sentinel row (got: $LE_MARKER_REC_ROW)" FAIL
   fi
 
   le_owner "$LE_LIVE_PID" 2099-01-01T00:00:00.000Z null
@@ -7301,9 +7390,13 @@ else
     check "P1le23 throwing lease row (row: $LE_THROWS_ROW)" FAIL
   fi
 
-  LE_SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
+  LE_SKILL_REF="$PLUGIN_DIR/skills/doctor/references/autopilot-lease.md"
+  LE_SKILL_FLAT="$(cat "$SKILL_MD" "$LE_SKILL_REF" 2>/dev/null | tr '\n' ' ' | tr -s ' ')"
   LE_INVENTORY="$(awk '$0 == "## What it checks" { inside = 1; next } inside && /^## / { exit } inside { print }' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
   LE_ROSTER_MISSING=""
+  [ -f "$LE_SKILL_REF" ] || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [reference file missing]"
+  grep -qF 'read `references/autopilot-lease.md` before you relay' "$SKILL_MD" \
+    || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [skill pointer]"
   for _phrase in \
     'autopilot lease: free' \
     'held right now' \
@@ -7322,6 +7415,15 @@ else
     'changed while it was read' \
     'which still carries the recorded start identity' \
     'started after the record was written' \
+    'holder marker' \
+    'normally the lock keeper itself' \
+    'holder marker open any more' \
+    'whose holder marker a process still holds open' \
+    'No holder marker exists for this record' \
+    'that the core cannot judge, so it proves nothing either way' \
+    'no longer holds' \
+    'gave it up after its own release failed' \
+    'Every lease acquisition checks again' \
     'ps -ww -p' \
     'evidence, not proof' \
     'the parent of the parent of' \
@@ -7337,11 +7439,11 @@ else
   printf '%s' "$LE_SKILL_FLAT" | grep -qF 'Never delete the artifact and never offer to' \
     || LE_ROSTER_MISSING="$LE_ROSTER_MISSING [no-deletion rule]"
   if [ -z "$LE_ROSTER_MISSING" ]; then
-    check "P1le24 every lease row phrase is both emitted and documented in skills/doctor/SKILL.md, with the inventory clause and the no-deletion rule" PASS
+    check "P1le24 every lease row phrase is both emitted and documented in skills/doctor/references/autopilot-lease.md, which the skill names, with the inventory clause and the no-deletion rule" PASS
   else
     check "P1le24 lease row wording drifted from the skill:$LE_ROSTER_MISSING" FAIL
   fi
-  rm -rf "$LE_NOIDENT" "$LE_NOPROOF" "$LE_NOCORE" "$LE_NOINSPECT" "$LE_THROWS" "$LE_LINK_P" "$SBOX/le-link-target"
+  rm -rf "$LE_NOIDENT" "$LE_NOPROOF" "$LE_MARKERS" "$LE_NOCORE" "$LE_NOINSPECT" "$LE_THROWS" "$LE_LINK_P" "$SBOX/le-link-target"
 fi
 le_clear
 kill "$LE_KEEPER_BG" 2>/dev/null || true

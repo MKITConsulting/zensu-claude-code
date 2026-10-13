@@ -53,6 +53,7 @@
     "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",
     "test-gitignore-zensu.sh",
+    "test-harness-launcher.sh",
     "test-immutable-marketplace-release.sh",
     "test-impl-stop-counter.sh",
     "test-incremental-review-rounds.sh",
@@ -154,14 +155,17 @@
     "test-versioned-plugin-upgrade.sh",
     "test-windows-ci-contract.sh",
     "test-windows-portability-guards.sh",
+    "test-work-order-gates.sh",
+    "test-work-order-implement.sh",
+    "test-work-order-runtime.sh",
+    "test-work-order-takeover.sh",
     "test-workflow-checkout-credentials.sh",
     "test-workflow-dispatch-inputs.sh",
     "test-workflow-scope.sh",
     "test-worktree-keep.sh",
     "test-zen-mode.sh",
     "test-zensu-help-skill.sh",
-    "test-zensu-plm-arg-guidance.sh",
-    "test-zensu-runtime-controller.sh"
+    "test-zensu-plm-arg-guidance.sh"
   ],
   "localStructureTests": [
     "test-claude-promptfoo-wrapper.sh",
