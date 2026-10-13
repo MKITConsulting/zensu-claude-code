@@ -2653,12 +2653,141 @@ function safePr(rec) {
   return { number, url, repository: oneLine(String(rec.prRepository ?? ''), 120) || null };
 }
 
+const SESSION_ID_KEY = Buffer.from('"sessionId":"');
+const FORK_PROBE_BYTES = 16 * 1024;
+const FORK_PROBE_MAX = 8 * 1024 * 1024;
+const FORK_READ_CHUNK = 256 * 1024;
+const FORK_SCAN_SPAN = 256 * 1024;
+
+function transcriptSessionId(file) {
+  return path.basename(file).replace(/\.jsonl$/, '');
+}
+
+function parsedLine(line) {
+  try { return JSON.parse(line); } catch { return null; }
+}
+
+function inheritedRecord(o, sessionId) {
+  return Boolean(o) && typeof o.cwd === 'string' && o.cwd !== ''
+    && typeof o.sessionId === 'string' && o.sessionId !== sessionId && o.isSidechain !== true;
+}
+
+function opensWithInheritedRecord(text, sessionId) {
+  const at = text.indexOf('"cwd":"');
+  if (at === -1) return false;
+  const end = text.indexOf('\n', at);
+  return inheritedRecord(parsedLine(text.slice(text.lastIndexOf('\n', at) + 1, end === -1 ? text.length : end)), sessionId);
+}
+
+function readRange(fd, size, position, length) {
+  const want = Math.max(0, Math.min(length, size - position));
+  const buf = Buffer.allocUnsafe(want);
+  let n = 0;
+  while (n < want) {
+    const got = fs.readSync(fd, buf, n, want - n, position + n);
+    if (got === 0) break;
+    n += got;
+  }
+  return buf.subarray(0, n);
+}
+
+function forkSide(fd, size, pos, ownKey) {
+  for (let width = FORK_PROBE_BYTES; ; width *= 2) {
+    const buf = readRange(fd, size, pos, width);
+    let start = 0;
+    if (pos > 0) {
+      start = buf.indexOf(0x0a) + 1;
+      if (start === 0) {
+        if (buf.length < width || width >= FORK_PROBE_MAX) return null;
+        continue;
+      }
+    }
+    for (let end = buf.indexOf(0x0a, start); end !== -1; start = end + 1, end = buf.indexOf(0x0a, start)) {
+      const line = buf.subarray(start, end);
+      if (line.includes(ownKey)) return { own: true, start: pos + start, end: pos + end + 1 };
+      if (line.includes(SESSION_ID_KEY)) return { own: false, start: pos + start, end: pos + end + 1 };
+    }
+    if (buf.length < width || width >= FORK_PROBE_MAX) return null;
+  }
+}
+
+function lineEndAt(fd, size, pos) {
+  for (let at = pos, width = FORK_PROBE_BYTES; at < size; width = Math.min(width * 2, FORK_READ_CHUNK)) {
+    const buf = readRange(fd, size, at, width);
+    if (!buf.length) break;
+    const nl = buf.indexOf(0x0a);
+    if (nl !== -1) return at + nl;
+    at += buf.length;
+  }
+  return size;
+}
+
+function ownCwdFrom(fd, size, from, ownKey, sessionId) {
+  let lineStart = from;
+  let skipTo = from;
+  for (let pos = from; pos < size;) {
+    const buf = readRange(fd, size, pos, FORK_READ_CHUNK);
+    if (!buf.length) return null;
+    const advance = buf.length < FORK_READ_CHUNK ? buf.length : buf.length - ownKey.length + 1;
+    for (let hit = buf.indexOf(ownKey); hit !== -1 && hit < advance; hit = buf.indexOf(ownKey, hit + 1)) {
+      if (pos + hit < skipTo) continue;
+      const before = buf.lastIndexOf(0x0a, hit);
+      const start = before === -1 ? lineStart : pos + before + 1;
+      const after = buf.indexOf(0x0a, hit);
+      const end = after === -1 ? lineEndAt(fd, size, pos + buf.length) : pos + after;
+      skipTo = end + 1;
+      const bytes = start >= pos && after !== -1 ? buf.subarray(start - pos, after) : readRange(fd, size, start, end - start);
+      const o = parsedLine(bytes.toString('utf8'));
+      if (o && o.sessionId === sessionId && typeof o.cwd === 'string' && o.cwd !== '') return o.cwd;
+    }
+    const last = buf.lastIndexOf(0x0a, advance - 1);
+    if (last !== -1) lineStart = pos + last + 1;
+    pos += advance;
+  }
+  return null;
+}
+
+function forkOwnCwd(file, sessionId) {
+  const ownKey = Buffer.from(`"sessionId":${JSON.stringify(sessionId)}`);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    let lo = 0;
+    let hi = size;
+    while (hi - lo > FORK_SCAN_SPAN) {
+      const mid = lo + Math.floor((hi - lo) / 2);
+      const side = forkSide(fd, size, mid, ownKey);
+      if (!side || side.start >= hi) hi = mid;
+      else if (side.own) hi = side.start;
+      else lo = side.end;
+    }
+    return ownCwdFrom(fd, size, lo, ownKey, sessionId);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function sessionAnchor(file, text) {
+  const sessionId = transcriptSessionId(file);
+  let scope = text;
+  let cwd;
+  if (opensWithInheritedRecord(text, sessionId)) {
+    cwd = forkOwnCwd(file, sessionId);
+    const at = cwd === null ? -1 : text.indexOf(`"sessionId":${JSON.stringify(sessionId)}`);
+    scope = at === -1 ? '' : text.slice(text.lastIndexOf('\n', at) + 1);
+  } else {
+    const first = firstMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
+    cwd = first ? unescapeJson(first) : null;
+  }
+  const last = lastMatch(scope, /"cwd":"((?:[^"\\]|\\.)*)"/g);
+  const branch = lastValidBranch(scope);
+  return { cwd, cwdLast: last ? unescapeJson(last) : null, branch: branch ? unescapeJson(branch) : null };
+}
+
 function summarize(file, size, deep) {
   const read = readTranscript(file, size);
   const text = read.text;
-  const cwd = firstMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
-  const cwdLast = lastMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
-  const branch = lastValidBranch(text);
+  const anchor = sessionAnchor(file, text);
   const titles = collectTyped(text, 'custom-title');
   const prs = collectTyped(text, 'pr-link');
   const lastPrompts = collectTyped(text, 'last-prompt');
@@ -2666,9 +2795,9 @@ function summarize(file, size, deep) {
   const lastTitle = titles.length ? titles[titles.length - 1].customTitle : null;
   const lastPromptText = lastPrompts.length ? lastPrompts[lastPrompts.length - 1].lastPrompt : null;
   const out = {
-    cwd: cwd ? unescapeJson(cwd) : null,
-    cwdLast: cwdLast ? unescapeJson(cwdLast) : null,
-    branch: branch ? unescapeJson(branch) : null,
+    cwd: anchor.cwd,
+    cwdLast: anchor.cwdLast,
+    branch: anchor.branch,
     title: typeof lastTitle === 'string' ? lastTitle : null,
     lastPrompt: typeof lastPromptText === 'string' ? lastPromptText : null,
     mode: modes.length ? modes[modes.length - 1].mode : null,
@@ -2901,7 +3030,13 @@ function firstCwdOf(file) {
   try { buf = readPrefix(file, CWD_PROBE_BYTES); } catch { return null; }
   const at = buf.indexOf(CWD_KEY);
   if (at === -1) return null;
-  const m = /"cwd":"((?:[^"\\]|\\.)*)"/y.exec(buf.toString('utf8', at));
+  const end = buf.indexOf(0x0a, at);
+  if (end === -1) return null;
+  const sessionId = transcriptSessionId(file);
+  if (inheritedRecord(parsedLine(buf.toString('utf8', buf.lastIndexOf(0x0a, at) + 1, end)), sessionId)) {
+    try { return forkOwnCwd(file, sessionId); } catch { return null; }
+  }
+  const m = /"cwd":"((?:[^"\\]|\\.)*)"/y.exec(buf.toString('utf8', at, end));
   return m && m[1] ? unescapeJson(m[1]) || null : null;
 }
 
