@@ -203,6 +203,28 @@ test('the census names an unregistered file, a nested registration and a stale c
   assert.match(registry.census(root)[0], /registers a case below column 0/);
 });
 
+test('the census refuses a subtest and a describe or it registration, which the static count cannot see', (t) => {
+  const root = makeRoot(t);
+  fs.writeFileSync(path.join(root, UNIT), `${cases(2)}test('case 3', async (t) => {\n  await t.test('inner', () => {});\n});\n`);
+  assert.match(registry.census(root)[0], /registers a case below column 0, as a subtest, or through describe or it/);
+  fs.writeFileSync(path.join(root, UNIT), `${cases(3)}describe('group', () => {\n  it('member', () => {});\n});\n`);
+  assert.match(registry.census(root)[0], /registers a case below column 0, as a subtest, or through describe or it/);
+});
+
+test('in a git work tree the census skips ignored files and still names an untracked unregistered one', (t) => {
+  const root = makeRoot(t);
+  const fixture = path.join(root, 'tests', 'e2e', 'fixtures', 'probe', 'math.test.js');
+  fs.mkdirSync(path.dirname(fixture), { recursive: true });
+  fs.writeFileSync(fixture, cases(1));
+  fs.writeFileSync(path.join(root, '.gitignore'), 'tests/e2e/fixtures/\n');
+  assert.deepEqual(registry.census(root), ['tests/e2e/fixtures/probe/math.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
+  const init = spawnSync('git', ['-C', root, 'init', '-q'], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+  assert.deepEqual(registry.census(root), []);
+  fs.writeFileSync(path.join(root, 'tests', 'structure', 'other.test.js'), cases(1));
+  assert.deepEqual(registry.census(root), ['tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
+});
+
 test('the rendered regions round-trip and a hand edit is reported with the render command', (t) => {
   const root = makeRoot(t);
   const rendered = registry.render(root);
@@ -226,6 +248,18 @@ test('the rendered regions round-trip and a hand edit is reported with the rende
   ]);
 });
 
+test('the generated table orders its rows by code point, whatever the locale collates', (t) => {
+  const root = makeRoot(t, {
+    files: [entry(), entry({ path: 'tests/structure/a_b.test.js', registered: 1 }), entry({ path: 'tests/structure/a-c.test.js', registered: 1 })],
+  });
+  fs.writeFileSync(path.join(root, 'tests', 'structure', 'a_b.test.js'), cases(1));
+  fs.writeFileSync(path.join(root, 'tests', 'structure', 'a-c.test.js'), cases(1));
+  const rendered = registry.render(root);
+  assert.deepEqual(rendered.errors, []);
+  const order = rendered.regions['section-4'].split('\n').filter((line) => line.startsWith('| `')).map((line) => line.split('`')[1]);
+  assert.deepEqual(order, ['structure/a-c.test.js', 'structure/a_b.test.js', 'structure/sample.test.js']);
+});
+
 test('the driver audit flags each broken convention and passes a clean driver', (t) => {
   const clean = makeRoot(t);
   assert.deepEqual(registry.driverProblems(clean), []);
@@ -238,6 +272,62 @@ test('the driver audit flags each broken convention and passes a clean driver', 
   assert.match(problems, /never calls unit_registry_done or unit_check_done/);
   assert.match(problems, /"exit 0" at line 2 comes before its first unit call at line 4/);
   assert.match(problems, /spawns node --test itself/);
+});
+
+test('the driver audit flags an exit 0 inside a top-level branch before the first unit call', (t) => {
+  const root = makeRoot(t, {
+    driverSource: [
+      '#!/bin/bash',
+      '. "$(dirname "$0")/lib-unit-registry.sh"',
+      'case "$(uname -s)" in',
+      '  MINGW*)',
+      '    exit 0',
+      '    ;;',
+      'esac',
+      'unit_check "S1" tests/structure/sample.test.js',
+      'unit_check_done "S2"',
+      '',
+    ].join('\n'),
+  });
+  assert.match(registry.driverProblems(root).join('\n'), /"exit 0" at line 5 comes before its first unit call at line 8/);
+});
+
+test('every node --test spawn needs its own unit_grade call, and a check label naming one is no spawn', (t) => {
+  const graded = [
+    '#!/bin/bash',
+    '. "$(dirname "$0")/lib-unit-registry.sh"',
+    'node --test --test-reporter=tap tests/structure/sample.test.js > "$LOG" 2>&1',
+    'UNIT_RUN_TEE=1 unit_grade tests/structure/sample.test.js "$LOG" "$?"',
+    'check "every node --test run is graded through unit_grade" PASS',
+    'unit_check_done "S2"',
+    '',
+  ];
+  const root = makeRoot(t, { driverSource: graded.join('\n') });
+  assert.deepEqual(registry.driverProblems(root), []);
+  const second = [...graded.slice(0, 4), 'OUT="$(cd "$ROOT" && timeout 60 "$NODE" --import x --test tests/structure/other.test.js)"', ...graded.slice(4)];
+  fs.writeFileSync(path.join(root, DRIVER), second.join('\n'));
+  assert.deepEqual(registry.driverProblems(root), [
+    `${DRIVER}: spawns node --test itself 2 time(s) but calls unit_grade 1 time(s); run unit files through unit_run, or grade each run through unit_grade`,
+  ]);
+});
+
+test('only a CI suite line outside a comment reaches a driver that is not itself a CI suite', (t) => {
+  const inner = 'tests/inner/run.sh';
+  const root = makeRoot(t, {
+    files: [entry({ runs: [{ driver: inner }] })],
+    driverSource: ['#!/bin/bash', '# drives tests/inner/run.sh', ''].join('\n'),
+  });
+  fs.mkdirSync(path.join(root, 'tests', 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(root, inner), [
+    '#!/bin/bash',
+    '. "$ROOT/tests/structure/lib-unit-registry.sh"',
+    'unit_check "S1" tests/structure/sample.test.js',
+    'unit_check_done "S2"',
+    '',
+  ].join('\n'));
+  assert.match(registry.driverProblems(root).join('\n'), /tests\/inner\/run\.sh: no CI structure suite runs it/);
+  fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'bash "$ROOT/tests/inner/run.sh"', ''].join('\n'));
+  assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
 });
 
 test('verify refuses a caller that is not a registered driver and owned names what was never graded', (t) => {
@@ -261,5 +351,5 @@ test('the host class is root for uid 0, the platform otherwise', () => {
   assert.equal(registry.hostClass('linux', () => 0), 'root');
   assert.equal(registry.hostClass('linux', () => 1000), 'linux');
   assert.equal(registry.hostClass('darwin', () => 501), 'darwin');
-  assert.equal(registry.hostClass('win32', undefined), 'win32');
+  assert.equal(registry.hostClass('win32', null), 'win32');
 });

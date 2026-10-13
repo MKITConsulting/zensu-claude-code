@@ -28,6 +28,26 @@ unit_one_line() {
   printf '%s' "$1" | tr '\r\n' '  ' | sed 's/  */ /g; s/ $//'
 }
 
+unit_failure_excerpt() {
+  awk '
+    { ring[NR % 40] = $0 }
+    /^not ok / {
+      found = 1
+      show = 1
+      if (printed < 200) { print; printed++ }
+      next
+    }
+    show && (/^ok [0-9]/ || /^# Subtest: / || /^1\.\./ || /^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) /) { show = 0 }
+    show && printed < 200 { print; printed++ }
+    END {
+      if (!found) {
+        start = NR > 40 ? NR - 39 : 1
+        for (i = start; i <= NR; i++) print ring[i % 40]
+      }
+    }
+  ' "$1"
+}
+
 unit_grade() {
   local abs out rc verdict status=0
   abs="$(unit_abs_path "${1:-}")"
@@ -39,21 +59,34 @@ unit_grade() {
   UNIT_RUN_VERDICT="$(unit_one_line "$verdict")"
   [ -n "$UNIT_RUN_VERDICT" ] || UNIT_RUN_VERDICT="${abs#"$UNIT_REGISTRY_ROOT"/}: the registry library printed no verdict (exit $status)"
   if [ "$status" -eq 1 ] && [ "${UNIT_RUN_TEE:-0}" != 1 ] && [ -r "$out" ]; then
-    if grep -q '^not ok' "$out"; then
-      grep '^not ok' "$out" | head -20 >&2
-    else
-      tail -20 "$out" >&2
-    fi
+    unit_failure_excerpt "$out" >&2
   fi
   return "$status"
 }
 
 unit_run() {
-  local given="${1:-}" abs out own=0 rc=0 status=0
+  local given="${1:-}" abs out own=0 rc=0 status=0 text=""
   [ "$#" -gt 0 ] && shift
   [ "${1:-}" = "--" ] && shift
   abs="$(unit_abs_path "$given")"
   out="${UNIT_RUN_OUTPUT:-}"
+  if [ -z "$out" ] && [ "${UNIT_RUN_TEE:-0}" != 1 ]; then
+    if text="$(cd "$UNIT_REGISTRY_ROOT" && exec node --test --test-reporter=tap ${1+"$@"} "$abs" 2>&1)"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    out="$(mktemp "${TMPDIR:-/tmp}/zensu-unit-run-XXXXXX")" || {
+      UNIT_RUN_VERDICT="${abs#"$UNIT_REGISTRY_ROOT"/}: cannot create a temp file for node's output"
+      UNIT_GRADED="$UNIT_GRADED$abs
+"
+      return 2
+    }
+    printf '%s\n' "$text" > "$out"
+    unit_grade "$abs" "$out" "$rc" || status=$?
+    rm -f "$out"
+    return "$status"
+  fi
   if [ -z "$out" ]; then
     out="$(mktemp "${TMPDIR:-/tmp}/zensu-unit-run-XXXXXX")" || {
       UNIT_RUN_VERDICT="${abs#"$UNIT_REGISTRY_ROOT"/}: cannot create a temp file for node's output"

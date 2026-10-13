@@ -49,7 +49,7 @@ else
 fi
 
 if U2_OUT="$(node "$LIB_JS" drivers 2>&1)"; then
-  check "U2 every registered driver is reached by CI, sources the library, names its files, calls the done check, drives its unit files before any top-level exit 0, and no suite spawns node --test outside unit_grade" PASS
+  check "U2 every registered driver is reached by CI, sources the library, names its files, calls the done check and drives its unit files before any exit 0 that starts a line, and no suite spawns node --test more often than it calls unit_grade" PASS
 else
   check "U2 drivers: $(unit_one_line "$U2_OUT")" FAIL
 fi
@@ -110,7 +110,7 @@ U5_RESULT="$(
   UNIT_DRIVER="$PROBE_DRIVER"
   UNIT_GRADED=""
   status=0
-  unit_run "$ROOT/$PROBE_UNIT" 2>/dev/null || status=$?
+  unit_run "$ROOT/$PROBE_UNIT" 2>"$WORK/lowered.err" || status=$?
   printf '%s|%s' "$status" "$UNIT_RUN_VERDICT"
 )"
 U5_WANT="1|$PROBE_UNIT: node registered $PROBE_REGISTERED, the registry declares $U5_LOWER; raise registered to $PROBE_REGISTERED in tests/profiles/unit-files.v1.json"
@@ -118,6 +118,12 @@ if [ "$U5_RESULT" = "$U5_WANT" ]; then
   check "U5 a real entry lowered by one fails its driver with the raise message" PASS
 else
   check "U5 lowered entry: got '$U5_RESULT', want '$U5_WANT'" FAIL
+fi
+
+if tr -d '\r' < "$WORK/lowered.err" 2>/dev/null | grep -qx "# tests $PROBE_REGISTERED"; then
+  check "U5d a failing grade replays the end of node's output on stderr" PASS
+else
+  check "U5d a failing grade replayed no excerpt of node's output on stderr" FAIL
 fi
 
 U5B_RESULT="$(
@@ -192,6 +198,80 @@ if [ "$U8_CI" = "1|NOT RUN $PROBE_UNIT: probe" ] && [ "$U8_LOCAL" = "0|NOT RUN $
   check "U8 unit_not_run prints NOT RUN with its reason, and fails only when CI is set" PASS
 else
   check "U8 unit_not_run: with CI '$U8_CI', without '$U8_LOCAL'" FAIL
+fi
+
+cat > "$WORK/failing.tap" <<'TAP'
+TAP version 13
+# Subtest: passes
+ok 1 - passes
+  ---
+  duration_ms: 0.3
+  type: 'test'
+  ...
+# Subtest: fails
+not ok 2 - fails
+  ---
+  duration_ms: 0.6
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    1 !== 2
+
+  code: 'ERR_ASSERTION'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  ...
+# Subtest: after
+ok 3 - after
+  ---
+  duration_ms: 0.1
+  type: 'test'
+  ...
+1..3
+# tests 3
+# pass 2
+# fail 1
+TAP
+cat > "$WORK/failing.want" <<'TAP'
+not ok 2 - fails
+  ---
+  duration_ms: 0.6
+  type: 'test'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    1 !== 2
+
+  code: 'ERR_ASSERTION'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  ...
+TAP
+unit_failure_excerpt "$WORK/failing.tap" > "$WORK/failing.got"
+if cmp -s "$WORK/failing.want" "$WORK/failing.got"; then
+  check "U10 the failure excerpt keeps each not ok line with its YAML diagnostics and stops at the next case" PASS
+else
+  check "U10 failure excerpt: got '$(unit_one_line "$(cat "$WORK/failing.got")")'" FAIL
+fi
+
+: > "$WORK/no-fail.tap"
+: > "$WORK/no-fail.want"
+LINE=1
+while [ "$LINE" -le 50 ]; do
+  printf 'line %s\n' "$LINE" >> "$WORK/no-fail.tap"
+  [ "$LINE" -le 10 ] || printf 'line %s\n' "$LINE" >> "$WORK/no-fail.want"
+  LINE=$((LINE + 1))
+done
+unit_failure_excerpt "$WORK/no-fail.tap" > "$WORK/no-fail.got"
+if cmp -s "$WORK/no-fail.want" "$WORK/no-fail.got"; then
+  check "U10b without a not ok line the failure excerpt is the last 40 lines of node's output" PASS
+else
+  check "U10b failure excerpt without a not ok line: got '$(unit_one_line "$(cat "$WORK/no-fail.got")")'" FAIL
 fi
 
 unit_check_done "U9 every unit file the registry gives this driver was graded"

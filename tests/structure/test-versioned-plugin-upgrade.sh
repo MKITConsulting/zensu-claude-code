@@ -26,11 +26,11 @@ check() {
 }
 
 . "$(dirname "$0")/lib-unit-registry.sh"
-unit_check "the recognizer unit file passes" "$ROOT/tests/structure/zensu-doctor-invocation.test.js"
-unit_check "AC-011 the runtimeLineageCompatible unit file passes" "$ROOT/tests/structure/session-control-lineage.test.js"
-unit_check "the superseded-lease sweep unit file passes" "$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
-unit_check "the adoption report unit file passes" "$ROOT/tests/structure/session-adopt-report-v1.test.js"
-unit_check "the automatic-adoption unit file passes" "$ROOT/tests/structure/session-auto-adopt-v1.test.js"
+unit_check "the recognizer unit file passes — WORKING TREE, not HEAD" "$ROOT/tests/structure/zensu-doctor-invocation.test.js"
+unit_check "AC-011 the runtimeLineageCompatible unit file passes — WORKING TREE, not HEAD" "$ROOT/tests/structure/session-control-lineage.test.js"
+unit_check "the superseded-lease sweep unit file passes — WORKING TREE, not HEAD" "$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
+unit_check "the adoption report unit file passes — WORKING TREE, not HEAD" "$ROOT/tests/structure/session-adopt-report-v1.test.js"
+unit_check "the automatic-adoption unit file passes — WORKING TREE, not HEAD" "$ROOT/tests/structure/session-auto-adopt-v1.test.js"
 
 # HOISTED to the very front on purpose - before the mktemp, before the first
 # synthetic install. These two pins need no fixture, no synthetic install and no

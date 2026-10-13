@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const REGISTRY_REL = 'tests/profiles/unit-files.v1.json';
 const MANIFEST_REL = 'tests/profiles/promptfoo-local-only.v1.json';
@@ -14,13 +15,11 @@ const UNIT_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.test\.js$/;
 const DRIVER_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.sh$/;
 const MODE = /^[a-z][a-z0-9-]*$/;
 const REGISTRATION = /^test(?:\.(?:skip|todo|only))?\(/gm;
-const NESTED_REGISTRATION = /^[ \t]+test(?:\.(?:skip|todo|only))?\(/m;
+const NESTED_REGISTRATION = /^[ \t]+test(?:\.(?:skip|todo|only))?\(|^[ \t]*(?:await[ \t]+)?[A-Za-z_$][\w$]*\.test\([ \t]*['"`]|^[ \t]*(?:describe|it)(?:\.(?:skip|todo|only))?\(/m;
 const UNIT_CALL = /\bunit_(?:run|check|grade|not_run)\b/;
 const DONE_CALL = /\bunit_(?:registry_done|check_done)\b/;
-const NODE_TEST_SPAWN = /\bnode\s+--test\b/;
-const PRIVATE_SPAWN_EXEMPT = new Map([
-  ['tests/structure/test-run-all-preflight-watchdog.sh', 'writes fixture suites that spawn unregistered files'],
-]);
+const NODE_TEST_SPAWN = /(?:^|[;&|(`!]|\$\(|\b(?:if|elif|while|until|then|do|else|exec|command|env|nice|time)\b|\btimeout(?:[ \t]+-\S+)*[ \t]+\S+)[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*(?:node|"?\$\{?NODE[A-Za-z0-9_]*\}?"?)(?:[ \t]+(?!--test(?![\w-]))\S+)*[ \t]+--test(?![\w-])/;
+const GRADE_CALL = /^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*unit_grade\b/;
 const REGIONS = ['totals', 'section-4'];
 
 const exitCodes = { pass: 0, verdict: 1, plumbing: 2 };
@@ -130,7 +129,30 @@ function loadRegistry(root, registryFile) {
   return { entries: doc.files, errors };
 }
 
+function gitListedUnitFiles(root) {
+  const git = (args) => execFileSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  let listing;
+  try {
+    const top = git(['rev-parse', '--show-toplevel']).trim();
+    if (!top || path.relative(fs.realpathSync(top), fs.realpathSync(root)) !== '') return null;
+    listing = git(['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'tests']);
+  } catch {
+    return null;
+  }
+  const found = new Set();
+  for (const file of listing.split('\0')) {
+    if (file.endsWith('.test.js') && !file.split('/').includes('node_modules') && fs.existsSync(path.join(root, file))) found.add(file);
+  }
+  return [...found].sort();
+}
+
 function walkUnitFiles(root) {
+  const listed = gitListedUnitFiles(root);
+  if (listed) return listed;
   const found = [];
   const visit = (relative) => {
     let names;
@@ -178,7 +200,7 @@ function census(root, registryFile) {
       continue;
     }
     if (NESTED_REGISTRATION.test(source)) {
-      problems.push(`${entry.path}: registers a case below column 0; register every case with a column-0 test( call so the static count holds`);
+      problems.push(`${entry.path}: registers a case below column 0, as a subtest, or through describe or it; register every case with a column-0 test( call so the static count holds`);
       continue;
     }
     const registered = staticRegistrations(source);
@@ -282,7 +304,7 @@ function driverLabel(driver) {
 }
 
 function renderSection4(entries) {
-  const rows = [...entries].sort((a, b) => a.path.localeCompare(b.path)).map((entry) => {
+  const rows = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((entry) => {
     const skips = entry.skips
       ? HOST_CLASSES.filter((host) => entry.skips[host]).map((host) => `${host} ${entry.skips[host]}`).join(', ')
       : '–';
@@ -368,11 +390,12 @@ function driverProblems(root, registryFile) {
     if (!sources.has(relative)) sources.set(relative, fs.readFileSync(path.join(root, relative), 'utf8'));
     return sources.get(relative);
   };
+  const code = (relative) => read(relative).split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
   for (const [driver, files] of drivers) {
     const source = read(driver);
     const reachedBy = ciSuites.has(driver)
       ? driver
-      : [...ciSuites].find((suite) => read(suite).includes(driver.slice('tests/'.length)));
+      : [...ciSuites].find((suite) => code(suite).includes(driver.slice('tests/'.length)));
     if (!reachedBy) problems.push(`${driver}: no CI structure suite runs it; add it to ciStructureTests or drive it from one`);
     if (!/lib-unit-registry\.sh/.test(source)) problems.push(`${driver}: does not source tests/structure/lib-unit-registry.sh`);
     for (const file of files) {
@@ -382,7 +405,7 @@ function driverProblems(root, registryFile) {
     const firstUnit = source.search(UNIT_CALL);
     if (firstUnit >= 0) {
       const before = source.slice(0, firstUnit);
-      const early = /^exit 0\b.*$/m.exec(before);
+      const early = /^[ \t]*exit 0\b.*$/m.exec(before);
       if (early) problems.push(`${driver}: "${early[0].trim()}" at line ${lineOf(source, early.index)} comes before its first unit call at line ${lineOf(source, firstUnit)}; drive the unit files first`);
     }
   }
@@ -391,10 +414,10 @@ function driverProblems(root, registryFile) {
     ...drivers.keys(),
   ]);
   for (const suite of [...scanned].sort()) {
-    if (PRIVATE_SPAWN_EXEMPT.has(suite)) continue;
-    const source = read(suite);
-    const spawns = source.split('\n').some((line) => !/^\s*#/.test(line) && NODE_TEST_SPAWN.test(line));
-    if (spawns && !/\bunit_grade\b/.test(source)) problems.push(`${suite}: spawns node --test itself; run unit files through unit_run, or grade its own run through unit_grade`);
+    const lines = code(suite).split('\n');
+    const spawns = lines.filter((line) => NODE_TEST_SPAWN.test(line)).length;
+    const grades = lines.filter((line) => GRADE_CALL.test(line)).length;
+    if (spawns > grades) problems.push(`${suite}: spawns node --test itself ${spawns} time(s) but calls unit_grade ${grades} time(s); run unit files through unit_run, or grade each run through unit_grade`);
   }
   return problems;
 }

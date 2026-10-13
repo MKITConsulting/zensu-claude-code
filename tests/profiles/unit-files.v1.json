@@ -179,9 +179,9 @@
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },
     {
-      "path": "tests/structure/unit-registry.test.js", "registered": 16,
+      "path": "tests/structure/unit-registry.test.js", "registered": 22,
       "runs": [{ "driver": "tests/structure/test-unit-registry.sh" }],
-      "summary": "The unit-file registry: load errors, the census, TAP grading against an entry and the rendered overview regions."
+      "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
     },
     {
       "path": "tests/structure/verify-browser-config.test.js", "registered": 21,

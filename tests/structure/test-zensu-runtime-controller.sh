@@ -5,50 +5,11 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONTROLLER="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 SUPERVISOR_TEST="$ROOT/tests/structure/process-supervisor.test.js"
 . "$(dirname "$0")/lib-unit-registry.sh"
-
-TMP="$(mktemp -d -t zensu-runtime-controller-XXXXXX)"
-STUBS="$TMP/stubs"
-WORKTREE="$TMP/worktree"
-RUN_PARENT="$WORKTREE/.zensu/verify-feature-runs"
-RUN_DIR="$RUN_PARENT/run-ok"
-DOCKER_STATE="$TMP/docker"
-EVENTS="$TMP/events"
 PASS=0; FAIL=0
-
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    echo "  PASS  native Windows local-adapter runtime skipped (macOS/Linux/WSL required)"
-    echo "----"
-    echo "test-zensu-runtime-controller: 1 PASS / 0 FAIL"
-    exit 0
-    ;;
-esac
-
-cleanup() {
-  if [ -d "$RUN_DIR" ]; then
-    env PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" \
-      ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY" \
-      bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$TMP"
-}
-trap cleanup EXIT INT TERM HUP
 
 check() {
   if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS + 1));
   else echo "  FAIL  $1"; FAIL=$((FAIL + 1)); fi
-}
-
-wait_for_file() {
-  for ((attempt=0; attempt<200; attempt++)); do
-    [ -f "$1" ] && return 0
-    sleep 0.05
-  done
-  return 1
-}
-
-json_field() {
-  node -e 'const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(value[process.argv[2]]));' "$1" "$2" 2>/dev/null
 }
 
 LOOPBACK_AVAILABLE=0
@@ -70,6 +31,47 @@ if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
 else
   unit_check "process supervisor authenticates status/stop and terminates its child group" "$SUPERVISOR_TEST"
 fi
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "native Windows local-adapter runtime skipped (macOS/Linux/WSL required)" PASS
+    unit_check_done "every unit file the registry gives this suite was graded"
+    echo "----"
+    echo "test-zensu-runtime-controller: $PASS PASS / $FAIL FAIL"
+    [ "$FAIL" -eq 0 ] && exit 0
+    exit 1
+    ;;
+esac
+
+TMP="$(mktemp -d -t zensu-runtime-controller-XXXXXX)"
+STUBS="$TMP/stubs"
+WORKTREE="$TMP/worktree"
+RUN_PARENT="$WORKTREE/.zensu/verify-feature-runs"
+RUN_DIR="$RUN_PARENT/run-ok"
+DOCKER_STATE="$TMP/docker"
+EVENTS="$TMP/events"
+
+cleanup() {
+  if [ -d "$RUN_DIR" ]; then
+    env PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" \
+      ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY" \
+      bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT INT TERM HUP
+
+wait_for_file() {
+  for ((attempt=0; attempt<200; attempt++)); do
+    [ -f "$1" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
+json_field() {
+  node -e 'const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(String(value[process.argv[2]]));' "$1" "$2" 2>/dev/null
+}
 
 mkdir -p "$STUBS" "$RUN_DIR" "$DOCKER_STATE" "$WORKTREE/backend/cmd/zensu" \
   "$WORKTREE/frontend/node_modules"

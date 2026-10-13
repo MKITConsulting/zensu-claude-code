@@ -43,6 +43,8 @@ esac
 UNIT_MODE="$MODE"
 UNIT_RUN_TEE=1
 . "$(dirname "$0")/lib-unit-registry.sh"
+UNIT_RUN_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/zensu-windows-ci-contract-XXXXXX")" || exit 2
+trap 'rm -f "$UNIT_RUN_OUTPUT"' EXIT INT TERM HUP
 
 RC=0
 for UNIT in "$@"; do
