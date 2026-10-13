@@ -1,37 +1,9 @@
 ---
 name: doctor
 description: >
-  [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
-  hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
-  tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, whether playwright-cli is installed and its version, and the
-  browser consent gate's registration on the Bash matcher), plugin integrity
-  (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
-  sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
-  string is silently ignored by strict === checks, and whether the permission rules
-  in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
-  before any chain has wedged), and session state (state dir writable, canonical
-  CAS workflow documents valid, whether THIS session's own workflow document is
-  there and usable and whether it was rebuilt rather than restored, whether this
-  session's recorded project root was re-created by a restore rather than being the
-  one that was there before, each review
-  chain's shape plus any wedged chain and
-  its recovery command, any open chain not owned by this session, any chain this
-  session owns that has ended many turns at implementing, any nonterminal durable
-  Autopilot run holding a working tree, who holds the Autopilot project lease — its
-  owner pid, whether that pid is alive, whether a process start identity was recorded,
-  its created_at, and whether a stale lock artifact or recovery sentinel is removable —
-  whether this session's app-managed worktree
-  carries the desktop-pool keep marker, still sits on its recorded branch and holds a nested
-  repository that keeps the marker after the session ends, any reviewer spawn
-  the host permission layer refused, any claim this session audited against a root
-  that is not the anchor, this session's recorded delivery route, expired pending-review
-  surfaced).
-  The only write is an explicit, user-confirmed cleanup of one
-  expired pending-review.json — CAS workflow documents are never deleted. Use
-  when the user asks to "diagnose zensu", "check my zensu
-  setup", "why is a zensu hook/gate not firing", "zensu doctor", or the slash
-  command /zensu:doctor.
+  [Zensu] Read-only diagnostics for the Zensu plugin: CLI, plugin integrity,
+  config and session state. Use when the user asks to "diagnose zensu" or why a
+  hook or gate is not firing, or /zensu:doctor.
 ---
 
 # /zensu:doctor
@@ -48,6 +20,34 @@ valid. It prints one four-block ✅/⚠️/❌ table and changes nothing — the
 exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 > One command to see why something is not firing. Nothing is changed unless you say so.
+
+## What it checks
+
+- **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
+  its auth resolved from the repo's provider, whether playwright-cli is installed and its
+  version, and the browser consent gate's registration on the Bash matcher.
+- **Plugin integrity** — hooks.json wired to files on disk, and plugin.json ↔
+  marketplace.json version sync.
+- **Config** — valid JSON, the quoted-boolean trap where "true"/"false" as a string is
+  silently ignored by strict === checks, and whether the permission rules in
+  ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal before any chain
+  has wedged.
+- **Session state** — the state dir is writable; canonical CAS workflow documents are valid;
+  whether THIS session's own workflow document is there and usable and whether it was rebuilt
+  rather than restored; whether this session's recorded project root was re-created by a
+  restore rather than being the one that was there before; each review chain's shape plus any
+  wedged chain and its recovery command; any open chain not owned by this session; any chain
+  this session owns that has ended many turns at implementing; any nonterminal durable
+  Autopilot run holding a working tree; who holds the Autopilot project lease — its owner pid,
+  whether that pid is alive, whether a process start identity was recorded, its created_at,
+  and whether a stale lock artifact or recovery sentinel is removable; whether this session's
+  app-managed worktree carries the desktop-pool keep marker, still sits on its recorded branch
+  and holds a nested repository that keeps the marker after the session ends; any reviewer
+  spawn the host permission layer refused; any claim this session audited against a root that
+  is not the anchor; this session's recorded delivery route; and an expired pending review.
+
+The only write is an explicit, user-confirmed cleanup of one expired `pending-review.json`;
+CAS workflow documents are never deleted.
 
 ## When to Use
 
@@ -426,19 +426,19 @@ classifier will refuse a spawn, not only when the whole table is green.
   ships, which the run-config helper refuses unless it is the measured one. Never install it on
   their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
-  set when Claude Code started and passes the policy contract, so it governs every browser
-  origin and the consent prompt never fires this session; the browser consent gate navigates only
-  its target origins, and every route on them, and lets pages request the policy's network-only
-  origins, if it declares any, without ever navigating them. Nothing to do.
+  set when Claude Code started and passes the policy contract. Its target origins pass without a
+  prompt in every permission mode, every route on them; pages may request its network-only
+  origins, if any, but no navigation command may open one. Other origins are asked, or denied
+  under bypass permissions or dontAsk. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
   registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
-  `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
-  session that reaches a new loopback origin asks the user through the permission prompt, and
-  every further route on an approved origin then proceeds without one; remote targets still
-  need the policy.
+  `.zensu/autopilot.yaml`) is present. The permission prompt asks the user once per session for
+  each new loopback origin of a `zensu-verify` session, and at every browser start for a remote
+  HTTPS origin, which under bypass permissions or dontAsk needs the policy.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
-  recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+  recipe with the user, or `--attach=<loopback-origin>` for an application they already run. A
+  remote run needs no recipe.
 - **❌ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)** → a
   parent-environment policy IS set, but its value does not satisfy the policy contract, so the
   browser consent gate denies every `zensu-verify` navigation. The parenthesis names the rule it

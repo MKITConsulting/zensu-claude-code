@@ -15,8 +15,9 @@ UNIT="$ROOT/tests/structure/finding-verify-v1.test.js"
 # why the count matters and why it is not hand-copied here).
 . "$(dirname "$0")/lib-unit-summary.sh"
 
-TDD_MD="$ROOT/skills/tdd/SKILL.md"
-PR_MD="$ROOT/skills/pr-team-review/SKILL.md"
+source "$ROOT/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
+PR_MD="$(skill_text_file "$ROOT/skills/pr-team-review")"
 PR_RULES="$ROOT/skills/pr-team-review/rules/workflow.md"
 PLAN_MD="$ROOT/skills/plan-review/SKILL.md"
 DELEGATE="$ROOT/hooks/post-review-tdd-delegate.sh"
@@ -52,12 +53,18 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # ── P1 the model-free grader ─────────────────────────────────────────
+P1_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
 if node --test "$UNIT" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_registered_floor "$WORK/unit.out" 28; then
+  && unit_cases_registered_floor "$WORK/unit.out" "$P1_FLOOR"; then
   check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 28 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= ${P1_FLOOR:-<no overview row>} registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
+fi
+if P1_OVERVIEW="$(unit_overview_check "$UNIT")"; then
+  check "P1-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($P1_FLOOR)" PASS
+else
+  check "P1-overview $P1_OVERVIEW" FAIL
 fi
 
 mkdir -p "$WORK/repo/src"
@@ -309,6 +316,7 @@ else
   check "P6 this suite is registered in the run-all classification inventory" FAIL
 fi
 
+rm -f "$TDD_MD" "$PR_MD"
 echo "----"
 echo "test-finding-verification: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

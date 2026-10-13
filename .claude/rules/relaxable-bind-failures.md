@@ -139,7 +139,10 @@ scopes, listed above the emitter in `zensu-session.sh`. Two of them — `incompa
 and `pruned-plugin-root` — take the two versions as their first positional arguments, the
 adoption token as `$4` and the audience as `$5`; `adoption-incomplete` takes the token
 and the audience alone, because a lost race establishes no version pair (see
-`.claude/rules/automatic-adoption.md`). FIVE gates can deny
+`.claude/rules/automatic-adoption.md`). The (default) and `narrowed` scopes take the optional
+token as `$2` and the audience as `$3`, and `orphaned-project-root` the dead path as `$2` and
+the audience as `$3`: every scope but `damaged-runtime` has a `child` form that names the
+cause and no command a non-main principal cannot run. FIVE gates can deny
 in either state — the source-write gate only while `hooks.bashWriteGate` is `true`, because its
 config check sits ahead of its bind: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the

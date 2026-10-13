@@ -47,6 +47,7 @@ REPORT_JS="$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"
 # The ADOPT report, which owns RESTORE_REMEDY. Never require REPORT_JS: that
 # renderer has no require.main guard and runs the whole doctor on import.
 ADOPT_REPORT="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js"
+. "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -68,18 +69,22 @@ expect_eq() {
 # that a unit driver at the tail is the first thing a timeout drops.
 #
 # The floor is asserted because `node --test` exits 0 for a file that registers zero
-# cases, so a rename or a lost require would otherwise pass silently. RAISE IT with the
-# file: it stood at 33 against 48 registered cases for a release, which is a floor that
-# still catches a lost require and no longer catches anything else. R13 backstops the
+# cases, so a rename or a lost require would otherwise pass silently. R13 backstops the
 # declared-versus-registered pair in tests/SUITE-OVERVIEW.md, so the two move together.
-R0_UNIT="$(node --test "$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js" 2>&1)"
+R0_FILE="$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js"
+R0_FLOOR="$(unit_overview_declared "${R0_FILE##*/}")"
+R0_UNIT="$(node --test "$R0_FILE" 2>&1)"
 R0_RC=$?
-R0_PASS="$(printf '%s' "$R0_UNIT" | awk '/^. pass /{print $3}' | tail -1)"
-if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 62 ]; then
-  check "R0  restore-root-render-cases.test.js: $R0_PASS cases" PASS
+if [ "$R0_RC" -eq 0 ] && unit_cases_registered_floor_text "$R0_UNIT" "$R0_FLOOR"; then
+  check "R0  restore-root-render-cases.test.js: $(unit_cases_report_text "$R0_UNIT")" PASS
 else
-  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 62)" FAIL
+  check "R0  restore-root-render-cases.test.js: rc=$R0_RC $(unit_cases_report_text "$R0_UNIT") (floor ${R0_FLOOR:-<no overview row>})" FAIL
   printf '%s\n' "$R0_UNIT" | tail -20
+fi
+if R0_OVERVIEW="$(unit_overview_check "$R0_FILE")"; then
+  check "R0-overview the SUITE-OVERVIEW Blocks cell matches what ${R0_FILE##*/} registers ($R0_FLOOR)" PASS
+else
+  check "R0-overview $R0_OVERVIEW" FAIL
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -109,24 +114,32 @@ ladder() {
   '
 }
 
+nat() {
+  node -e 'const path = require("path"); process.stdout.write(path.join(path.resolve(process.argv[1]), ...process.argv.slice(2)))' "$@"
+}
+
 L1="$STATE_DIR/ladder"; mkdir -p "$L1/here"
 expect_eq "R1a  one missing component below a real directory" \
-  "ok 1 $L1/here" "$(ladder "$L1/here/gone")"
+  "ok 1 $(nat "$L1" here)" "$(ladder "$(nat "$L1" here gone)")"
 
 expect_eq "R1b  the recorded root itself is present" \
-  "root-present $L1/here" "$(ladder "$L1/here")"
+  "root-present $(nat "$L1" here)" "$(ladder "$(nat "$L1" here)")"
 
 mkdir -p "$L1/real"
 ln -s "$L1/real" "$L1/link"
-expect_eq "R1c  a symlinked nearest-existing ancestor is refused" \
-  "unsafe-ancestor $L1/link" "$(ladder "$L1/link/gone")"
+if [ -L "$L1/link" ]; then
+  expect_eq "R1c  a symlinked nearest-existing ancestor is refused" \
+    "unsafe-ancestor $(nat "$L1" link)" "$(ladder "$(nat "$L1" link gone)")"
+else
+  check "R1c  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+fi
 
 : > "$L1/afile"
 expect_eq "R1d  a non-directory nearest-existing ancestor is refused" \
-  "unsafe-ancestor $L1/afile" "$(ladder "$L1/afile/gone")"
+  "unsafe-ancestor $(nat "$L1" afile)" "$(ladder "$(nat "$L1" afile gone)")"
 
 expect_eq "R1e  a deep gap is counted rather than refused by the ladder" \
-  "ok 5 $L1/here" "$(ladder "$L1/here/a/b/c/d/e")"
+  "ok 5 $(nat "$L1" here)" "$(ladder "$(nat "$L1" here a b c d e)")"
 
 # A non-absence errno is NOT absence, and the candidate it fires on has NOT been proven
 # to exist — lstat just failed on it. Reporting it as `nearest existing` sends the
@@ -564,8 +577,10 @@ else check "R6m2 docs/session-control.md no longer asserts the retracted claim o
 # R13c — ONE population, ONE table, TWO greps. R13B_ROWS and R13_ROWS derive the unit-file
 # row set through different character classes, so an underscore-named unit file would be
 # graded by R13 and uncounted by R13b — silently, which is the failure R13b exists to catch.
-R13C_A="$(grep -o "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$0" | sort -u | tr '\n' ' ')"
-if [ "$(printf '%s' "$R13C_A" | tr ' ' '\n' | grep -c .)" = "1" ]; then
+R13C_LIB="$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+R13C_A="$(grep -ho "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$0" "$R13C_LIB" | sort -u | tr '\n' ' ')"
+if [ "$(printf '%s' "$R13C_A" | tr ' ' '\n' | grep -c .)" = "1" ] \
+  && grep -q "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$R13C_LIB"; then
   check "R13c both unit-file row derivations share one character class" PASS
 else check "R13c the unit-file row derivations use different character classes: $R13C_A" FAIL; fi
 R13B_ROWS="$(grep -cE '^\| `[a-z0-9._-]+\.test\.js` \|' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | tr -d ' ')"
@@ -820,7 +835,7 @@ r8_decide() {
     # shellcheck disable=SC1090
     source "$SESSION_SH" || exit 9
     zensu_emit_hook_session_deny orphaned-project-root "$DENY_PATH"
-  ' | DENY_PATH="$1" node -e '
+  ' | MSYS2_ENV_CONV_EXCL='DENY_PATH=' DENY_PATH="$1" node -e '
     let s = "";
     process.stdin.on("data", (d) => { s += d; });
     process.stdin.on("end", () => {
@@ -1003,6 +1018,12 @@ expect_eq "R8p9 the Stop guard fails closed when its ceiling is unset" \
   "(unreadable)" "$(r8_stop_sanitize 'unset ZENSU_SAFE_DISPLAY_PATH_MAX' "$R8_STOP_LONG")"
 expect_eq "R8p10 the Stop guard fails closed when its ceiling is empty" \
   "(unreadable)" "$(r8_stop_sanitize "ZENSU_SAFE_DISPLAY_PATH_MAX=''" "$R8_STOP_LONG")"
+expect_eq "R8p12 the Stop guard renders a Windows drive root with forward slashes" \
+  "C:/Users/someone/repo" "$(r8_stop_sanitize ':' 'C:\Users\someone\repo')"
+expect_eq "R8p12-control a backslash outside a drive prefix still degrades" \
+  "(unreadable)" "$(r8_stop_sanitize ':' '/tmp/a\b')"
+expect_eq "R8p12-control2 a mapped drive root still meets the injection refusal" \
+  "(unreadable)" "$(r8_stop_sanitize ':' 'C:\x","permissionDecision":"allow","z":"')"
 
 # --- R8t: the TOCTOU arm takes the same bound as its bind-time sibling ---------
 #
@@ -1274,41 +1295,78 @@ else check "R12k2 the port roster points at the renderer that shipped" FAIL; fi
 # numeral beside a growing file does. The check DERIVES both sides: the declared
 # number from the table row, the real one from the file.
 R13_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
-r13_declared() { grep -F "| \`$1\` |" "$R13_OVERVIEW" | head -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}'; }
-r13_registered() { grep -c '^test(' "$PLUGIN_DIR/tests/structure/$1"; }
 # The file list is DERIVED from the table, never hand-enumerated here. It named two
 # rows while the table declares a count for many more, so every other row's numeral was
 # held by nothing — and a hand-maintained list inside a check written against
 # hand-maintained numerals is the same defect one level up. A row whose file is absent
 # from tests/structure/ is skipped rather than reported: several driven files live
 # elsewhere in the tree and this check owns neither their location nor their count.
-R13_ROWS="$(grep -E '^\| `[a-z0-9._-]+\.test\.js` \| [0-9]+ \|' "$R13_OVERVIEW" \
-  | awk -F'|' '{gsub(/ |`/,"",$2); print $2}')"
-R13_DRIFT=""
+R13_ROWS="$(unit_overview_rows | awk '{ print $2 }')"
+R13_DRIFT=0
 R13_SEEN=0
 for r13_file in $R13_ROWS; do
   [ -f "$PLUGIN_DIR/tests/structure/$r13_file" ] || continue
   R13_SEEN=$((R13_SEEN + 1))
-  r13_want="$(r13_registered "$r13_file")"
-  r13_have="$(r13_declared "$r13_file")"
-  if [ -z "$r13_have" ]; then
-    R13_DRIFT="$R13_DRIFT $r13_file(no-row)"
-  elif [ "$r13_have" != "$r13_want" ]; then
-    R13_DRIFT="$R13_DRIFT $r13_file(declared=$r13_have registered=$r13_want)"
+  if ! r13_drift="$(unit_overview_check "$PLUGIN_DIR/tests/structure/$r13_file")"; then
+    R13_DRIFT=$((R13_DRIFT + 1))
+    check "R13 $r13_drift" FAIL
   fi
 done
 # The control proves both halves of the derivation resolve; without it a broken awk
 # field or a renamed file would make every comparison vacuously agree on empty. The
 # row FLOOR is the half that matters now the list is derived: a table whose format
 # changed yields an empty list, and an empty loop reports no drift.
-if [ "$(r13_registered restore-root-render-cases.test.js)" -gt 0 ] \
-  && [ -n "$(r13_declared restore-root-render-cases.test.js)" ] \
-  && [ "$R13_SEEN" -ge 10 ]; then
-  check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" PASS
-else check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" FAIL; fi
-if [ -z "$R13_DRIFT" ]; then
+R13_PROBE="$STATE_DIR/r13-probe"
+mkdir -p "$R13_PROBE"
+R13_PROBE_DECLARED="$(unit_overview_declared restore-root-render-cases.test.js)"
+R13_PROBE_LINE="$(grep -nF '| `restore-root-render-cases.test.js` |' "$R13_OVERVIEW" | head -1 | cut -d: -f1)"
+r13_i=0
+while [ "$r13_i" -le "${R13_PROBE_DECLARED:-0}" ]; do
+  printf "test('probe %s', () => {});\n" "$r13_i"
+  r13_i=$((r13_i + 1))
+done > "$R13_PROBE/restore-root-render-cases.test.js"
+R13_PROBE_GOT="$(unit_overview_check "$R13_PROBE/restore-root-render-cases.test.js")"
+R13_PROBE_RC=$?
+R13_PROBE_WANT="tests/SUITE-OVERVIEW.md:$R13_PROBE_LINE: restore-root-render-cases.test.js declares $R13_PROBE_DECLARED, registers $((R13_PROBE_DECLARED + 1)); edit that Blocks cell"
+if [ "$R13_SEEN" -ge 10 ] && [ -n "$R13_PROBE_DECLARED" ] && [ -n "$R13_PROBE_LINE" ] \
+  && [ "$R13_PROBE_RC" -ne 0 ] && [ "$R13_PROBE_GOT" = "$R13_PROBE_WANT" ]; then
+  check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared; a drifted copy is reported at line $R13_PROBE_LINE)" PASS
+else check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared; drifted copy rc=$R13_PROBE_RC: $R13_PROBE_GOT)" FAIL; fi
+: > "$R13_PROBE/r13-unlisted.test.js"
+if R13_UNLISTED="$(unit_overview_check "$R13_PROBE/r13-unlisted.test.js")"; then
+  check "R13-control2 a unit file without a row is reported, not passed (rc=0)" FAIL
+elif [ "$R13_UNLISTED" = "tests/SUITE-OVERVIEW.md: r13-unlisted.test.js has no §4 row; add one with its Blocks cell" ]; then
+  check "R13-control2 a unit file without a row is reported, not passed" PASS
+else check "R13-control2 a unit file without a row is reported, not passed (got: $R13_UNLISTED)" FAIL; fi
+R13_FLOOR_OUT="$R13_PROBE/r13-floor.out"
+printf '# tests 5\n# pass 5\n' > "$R13_FLOOR_OUT"
+R13_FLOOR_BAD=""
+r13_floor_probe() {
+  local label="$1" err rc
+  shift
+  err="$("$@" 2>&1 >/dev/null)"
+  rc=$?
+  [ "$rc" -eq 2 ] && [ -z "$err" ] || R13_FLOOR_BAD="$R13_FLOOR_BAD $label(rc=$rc${err:+ with stderr})"
+}
+r13_floor_probe meet-empty unit_cases_meet_floor "$R13_FLOOR_OUT" ""
+r13_floor_probe meet-word unit_cases_meet_floor "$R13_FLOOR_OUT" x1
+r13_floor_probe meet-pass-word unit_cases_meet_floor "$R13_FLOOR_OUT" 1 x1
+r13_floor_probe meet-total-empty unit_cases_meet_floor "$R13_FLOOR_OUT" "" 1
+r13_floor_probe meet-total-word unit_cases_meet_floor "$R13_FLOOR_OUT" x1 1
+r13_floor_probe registered-empty unit_cases_registered_floor "$R13_FLOOR_OUT" ""
+r13_floor_probe registered-word unit_cases_registered_floor "$R13_FLOOR_OUT" x1
+r13_floor_probe meet-text-empty unit_cases_meet_floor_text "$(cat "$R13_FLOOR_OUT")" ""
+r13_floor_probe registered-text-word unit_cases_registered_floor_text "$(cat "$R13_FLOOR_OUT")" x1
+unit_cases_registered_floor "$R13_FLOOR_OUT" 5 && unit_cases_meet_floor "$R13_FLOOR_OUT" 5 4 \
+  || R13_FLOOR_BAD="$R13_FLOOR_BAD numeric-floor-refused"
+unit_cases_registered_floor "$R13_FLOOR_OUT" 6
+[ "$?" -eq 1 ] || R13_FLOOR_BAD="$R13_FLOOR_BAD floor-above-count-not-refused"
+if [ -z "$R13_FLOOR_BAD" ]; then
+  check "R13-control3 the floor helpers refuse a floor that is not a number with rc=2 and no shell error" PASS
+else check "R13-control3 the floor helpers refuse a floor that is not a number with rc=2 and no shell error:$R13_FLOOR_BAD" FAIL; fi
+if [ "$R13_DRIFT" -eq 0 ]; then
   check "R13 the suite overview declares the counts these files register ($R13_SEEN rows)" PASS
-else check "R13 the suite overview count drift:$R13_DRIFT" FAIL; fi
+fi
 
 R8_AT_MAX="/$(printf 'a%.0s' $(seq 1 1023))"
 # The source pin above grades the format string; this grades the DECODED reason, the
@@ -1362,7 +1420,7 @@ else check "R8h  the path shape uses a star, not a bash-3.2-hostile interval" FA
 # so appending one character turns ` -X` into a range from 0x20 that spans `"`. The
 # previous pin used `[^]]*` for the class body, which matches ANY body — so moving
 # the hyphen to the end passed it unchanged.
-if printf '%s' "$R8_SHAPE_LINE" | grep -qF -- "='^/[-"; then
+if printf '%s' "$R8_SHAPE_LINE" | grep -qF -- "='^([A-Za-z]:)?/[-"; then
   check "R8h2 the path class opens with a literal hyphen" PASS
 else check "R8h2 the path class opens with a literal hyphen" FAIL; fi
 # A bracket RANGE is LC_COLLATE-dependent and this class is an allowlist, so a
@@ -1432,35 +1490,41 @@ R8_INJECT='/tmp/x","permissionDecision":"allow","z":"'
 # `deny placeholder` is what a child gets with the constants present AND without them,
 # and a row asserting it could not see the export block being emptied. `R8h7-control`
 # already uses this shape for the version scope.
-expect_eq "R8h5 the exported bound survives into a child shell" "deny raw" \
-  "$(r8_child_verdict env /tmp/zensu-transport-probe)"
-# THE NEGATIVE TWIN keeps the `env -u` and asserts what the guard must GUARANTEE
-# rather than what the environment happened to give it: a missing pattern fails
-# CLOSED, on every libc. Empty is driven beside unset because the two are
-# different states — `export -f` reaching a scrubbed child gives unset, while a
-# partial source or an edited export line gives empty, and only the unset one is
-# caught by a caller's `set -u`.
-expect_eq "R8h5b the shape bound fails closed when its pattern is unset" "deny placeholder" \
-  "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_RE" "$R8_INJECT")"
-expect_eq "R8h5c the shape bound fails closed when its pattern is empty" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_RE=" "$R8_INJECT")"
-# THE LENGTH ARM has its own failure mode and needs its own payload: the injection
-# above is refused by the SHAPE, so it can never reach the ceiling. MEASURED on
-# bash 3.2.57 — with the ceiling unset, `[ N -gt "" ]` is an `integer expression
-# expected` error returning 2, the `||` falls through to the shape arm, a
-# class-legal path matches it, and a 2001-character value renders RAW.
-R8_LONG="/$(printf 'a%.0s' {1..2000})"
-expect_eq "R8h6-control the oversized path degrades while both constants are present" "deny placeholder" \
-  "$(r8_child_verdict env "$R8_LONG")"
-expect_eq "R8h6 the length bound fails closed when its ceiling is unset" "deny placeholder" \
-  "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_MAX" "$R8_LONG")"
-expect_eq "R8h6b the length bound fails closed when its ceiling is empty" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=" "$R8_LONG")"
-# A RETYPED ceiling is the third state and the emptiness conjunct does not cover it:
-# `[ N -gt abc ]` is an `integer expression expected` error returning 2, so a `||`
-# chain continues to the shape test and a class-legal path of any length renders.
-expect_eq "R8h6c the length bound fails closed when its ceiling is not a number" "deny placeholder" \
-  "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=abc" "$R8_LONG")"
+R8H_SKIP=""
+case "${OSTYPE:-}" in msys*|cygwin*|mingw*|win32*) R8H_SKIP="zensu-session.sh exports no bound to a child shell on this host" ;; esac
+if [ -z "$R8H_SKIP" ]; then
+  expect_eq "R8h5 the exported bound survives into a child shell" "deny raw" \
+    "$(r8_child_verdict env /tmp/zensu-transport-probe)"
+  # THE NEGATIVE TWIN keeps the `env -u` and asserts what the guard must GUARANTEE
+  # rather than what the environment happened to give it: a missing pattern fails
+  # CLOSED, on every libc. Empty is driven beside unset because the two are
+  # different states — `export -f` reaching a scrubbed child gives unset, while a
+  # partial source or an edited export line gives empty, and only the unset one is
+  # caught by a caller's `set -u`.
+  expect_eq "R8h5b the shape bound fails closed when its pattern is unset" "deny placeholder" \
+    "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_RE" "$R8_INJECT")"
+  expect_eq "R8h5c the shape bound fails closed when its pattern is empty" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_RE=" "$R8_INJECT")"
+  # THE LENGTH ARM has its own failure mode and needs its own payload: the injection
+  # above is refused by the SHAPE, so it can never reach the ceiling. MEASURED on
+  # bash 3.2.57 — with the ceiling unset, `[ N -gt "" ]` is an `integer expression
+  # expected` error returning 2, the `||` falls through to the shape arm, a
+  # class-legal path matches it, and a 2001-character value renders RAW.
+  R8_LONG="/$(printf 'a%.0s' {1..2000})"
+  expect_eq "R8h6-control the oversized path degrades while both constants are present" "deny placeholder" \
+    "$(r8_child_verdict env "$R8_LONG")"
+  expect_eq "R8h6 the length bound fails closed when its ceiling is unset" "deny placeholder" \
+    "$(r8_child_verdict "env -u ZENSU_SAFE_DISPLAY_PATH_MAX" "$R8_LONG")"
+  expect_eq "R8h6b the length bound fails closed when its ceiling is empty" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=" "$R8_LONG")"
+  # A RETYPED ceiling is the third state and the emptiness conjunct does not cover it:
+  # `[ N -gt abc ]` is an `integer expression expected` error returning 2, so a `||`
+  # chain continues to the shape test and a class-legal path of any length renders.
+  expect_eq "R8h6c the length bound fails closed when its ceiling is not a number" "deny placeholder" \
+    "$(r8_child_verdict "env ZENSU_SAFE_DISPLAY_PATH_MAX=abc" "$R8_LONG")"
+else
+  check "R8h5-R8h6c skipped: $R8H_SKIP" PASS
+fi
 # ...and an UNSET forgery constant must not abort the function under `set -u`. The
 # caller loses the whole decision object there, not just the path — every reachable
 # caller of this emitter runs `set -u`.
@@ -1476,12 +1540,16 @@ expect_eq "R8h8 an unset forgery constant still yields a decision object" "deny 
 # The two VERSION scopes share the shape one constant over, so they share the
 # guarantee. Both versions here are LEGAL, so a placeholder can only come from the
 # emptiness precondition — never from the shape test happening to refuse them.
-expect_eq "R8h7-control a legal version pair renders while the pattern is present" "deny raw" \
-  "$(r8_child_version env "0.21.1" "0.22.0")"
-expect_eq "R8h7 the version bound fails closed when its pattern is unset" "deny placeholder" \
-  "$(r8_child_version "env -u ZENSU_SAFE_VERSION_RE" "0.21.1" "0.22.0")"
-expect_eq "R8h7b the version bound fails closed when its pattern is empty" "deny placeholder" \
-  "$(r8_child_version "env ZENSU_SAFE_VERSION_RE=" "0.21.1" "0.22.0")"
+if [ -z "$R8H_SKIP" ]; then
+  expect_eq "R8h7-control a legal version pair renders while the pattern is present" "deny raw" \
+    "$(r8_child_version env "0.21.1" "0.22.0")"
+  expect_eq "R8h7 the version bound fails closed when its pattern is unset" "deny placeholder" \
+    "$(r8_child_version "env -u ZENSU_SAFE_VERSION_RE" "0.21.1" "0.22.0")"
+  expect_eq "R8h7b the version bound fails closed when its pattern is empty" "deny placeholder" \
+    "$(r8_child_version "env ZENSU_SAFE_VERSION_RE=" "0.21.1" "0.22.0")"
+else
+  check "R8h7-R8h7b skipped: $R8H_SKIP" PASS
+fi
 if grep -qF 'ZENSU_SAFE_DISPLAY_PATH_MAX' "$SESSION_SH"; then
   check "R8i  the length bound is its own named test" PASS
 else check "R8i  the length bound is its own named test" FAIL; fi
@@ -1845,19 +1913,28 @@ real_dir() {
   ' 2>&1
 }
 R9D="$STATE_DIR/realdir"; mkdir -p "$R9D/plain"
-expect_eq "R9f  a real canonical directory is usable" "present real" "$(real_dir "$R9D/plain")"
-expect_eq "R9g  an absent name is absent" "absent unusable" "$(real_dir "$R9D/nothing")"
+expect_eq "R9f  a real canonical directory is usable" "present real" "$(real_dir "$(nat "$R9D" plain)")"
+expect_eq "R9g  an absent name is absent" "absent unusable" "$(real_dir "$(nat "$R9D" nothing)")"
 : > "$R9D/afile"
-expect_eq "R9h  a regular file is present and unusable" "present unusable" "$(real_dir "$R9D/afile")"
+expect_eq "R9h  a regular file is present and unusable" "present unusable" "$(real_dir "$(nat "$R9D" afile)")"
 ln -s "$R9D/plain" "$R9D/alink"
-expect_eq "R9i  a symlink to a real directory is present and unusable" \
-  "present unusable" "$(real_dir "$R9D/alink")"
-mkdir -p "$R9D/plain/below"
-expect_eq "R9j  a directory reached through a symlinked parent is unusable" \
-  "present unusable" "$(real_dir "$R9D/alink/below")"
+if [ -L "$R9D/alink" ]; then
+  expect_eq "R9i  a symlink to a real directory is present and unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" alink)")"
+  mkdir -p "$R9D/plain/below"
+  expect_eq "R9j  a directory reached through a symlinked parent is unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" alink below)")"
+else
+  check "R9i  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+  check "R9j  skipped: this filesystem made no symlink, so ln -s copied the directory" PASS
+fi
 ln -s "$R9D/nothing" "$R9D/dangling"
-expect_eq "R9k  a dangling symlink is present and unusable" \
-  "present unusable" "$(real_dir "$R9D/dangling")"
+if [ -L "$R9D/dangling" ]; then
+  expect_eq "R9k  a dangling symlink is present and unusable" \
+    "present unusable" "$(real_dir "$(nat "$R9D" dangling)")"
+else
+  check "R9k  skipped: this filesystem made no dangling symlink" PASS
+fi
 
 echo "=== R10: the SessionStart self-heal reports the same cause the confirmed path does ==="
 

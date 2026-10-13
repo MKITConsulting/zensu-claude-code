@@ -24,6 +24,21 @@ routes, route coverage or a route-level `ask` describes the retired design.
 origins the application's pages request but that no navigation command may open. Consent mode
 gained no such class: the decision, its trade-off and the security analysis are §11.
 
+**Remote consent was added on 2026-10-09.** A remote HTTPS origin outside a policy is now
+approved at the permission prompt in a session that can show one, and asked again at every
+browser start; a session that cannot show it (bypass permissions, `dontAsk`, no mode reported)
+still needs the policy. A policy pre-approves its targets in every mode and stays the whole
+allowlist only where the session cannot show the prompt. The reason AC-018 gave for refusing remote targets — that
+a remote origin approved mid-session could not be pinned — does not hold, because the pin is
+written before `open` and the prompt is raised at that same `open`. AC-018 is amended in place,
+and §12 records the decisions.
+
+**The bundled monorepo adapter was removed on 2026-10-12.** The plugin serves projects whose
+users cannot see the Zensu monorepo, so it no longer carries a start script for it. Phase 2
+resolves the candidate recipe and otherwise offers the guided setup, and a repository is verified
+through its own checked-in `.zensu/runtime.yaml`. AC-010 is amended in place; every statement
+below about the monorepo adapter, its markers or its controller describes the retired design.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)
@@ -403,7 +418,7 @@ session can write.
 | AC-007 | **deprecated** — replaced by AC-018. The first approved navigation locks the session to local or remote; a later navigation of the other class is refused with a reason naming the lock. | spec §6.2 |
 | AC-008 | `/zensu:verify-feature` with no recipe and no `--attach` offers setup instead of ending PARTIAL, and a declined offer ends PARTIAL with the same missing-facts list as today. | spec §6.6 |
 | AC-009 | Setup writes `.zensu/runtime.yaml` only after one `AskUserQuestion` round, every proposed value names its evidence file, and a value setup could not derive is left empty and reported rather than invented. | spec §6.6 |
-| AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, then the monorepo adapter, in that order, and records which one was selected. | spec §6.7 |
+| AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, in that order, and records which one was selected. Amended 2026-10-12: the monorepo adapter that followed them was removed. | spec §6.7 |
 | AC-011 | `--attach=<loopback-origin>` boots no runtime, runs no `down` command, and the report states "worktree identity proven" only when the listening process's working directory equals the worktree. | spec §6.8 |
 | AC-012 | The report carries a `Consent` block listing every `(origin, route, decidedBy)` record of the run. | spec §6.4 |
 | AC-013 | `/zensu:doctor` renders exactly one verify-feature row, and every state it can reach renders differently from the others — the shipped set is larger than §6.9's four. | spec §6.9 |
@@ -411,7 +426,7 @@ session can write.
 | AC-015 | The hook pair has no config off-switch; `ESCAPE_STEMS` and `ZENSU_BYPASS_GATE_ALLOWLIST` are unchanged. | spec §6.3 |
 | AC-016 | `docs/configuration.md` hook count, every `#hooks-N` anchor and the `docs/gates.md` gate count match the registered hooks. | spec §7 step 7 |
 | AC-017 | The SessionStart banner prints one consent-mode line when no policy is present in the environment AND the hook pair plus the decision module are present in the plugin root — it does NOT read `hooks.json`, and its own text points at `/zensu:doctor` for the registration. Silenceable by `hooks.sessionBanner` like its siblings. | spec §6.9 |
-| AC-018 | Consent mode admits loopback origins only — a loopback IP or, since 2026-09-28, the exact name `localhost`, which Chromium resolves to `[::1]` and `127.0.0.1` itself; a run config that pins `localhost` to an address is refused. A remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. | spec §6.2 |
+| AC-018 | Consent mode admits loopback origins — a loopback IP or, since 2026-09-28, the exact name `localhost`, which Chromium resolves to `[::1]` and `127.0.0.1` itself; a run config that pins `localhost` to an address is refused. Since 2026-10-09 it admits a remote HTTPS origin too, under the floor of a policy target (public answers only, a resolver pin, an exact hostname): asked at every `open` in a session that can show the prompt, and denied with a named remedy in one that cannot (§12). Replaces AC-007. | spec §6.2, §12 |
 | FR-001 | The floor predicates exist in exactly one module required by both the broker and the hook. | spec §7 step 1 |
 | FR-002 | The consent decision and prompt text exist in exactly one module with a `node --test` driver. | spec §6.3 |
 | FR-003 | **deprecated** — replaced by FR-005. The port reservation helper ships under `scripts/` and the eval imports it from there. | spec §7 step 5 |
@@ -454,7 +469,7 @@ them as targets, which made an API origin navigable and evidence-eligible.
 
 | # | Decision | Chosen |
 |---|---|---|
-| D1 | Contract | Optional top-level `networkOnlyOrigins` in contract version `1`, not a version `2`. Every existing policy stays valid byte for byte; an installation that predates the key refuses a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than reading B as a target. |
+| D1 | Contract | Optional top-level `networkOnlyOrigins` in contract version `1`, not a version `2`. Every existing policy stays valid byte for byte unless a target host carries a pattern character, which D3 refuses; an installation that predates the key refuses a policy carrying it (`policy contains unknown or missing keys`), so it fails closed rather than reading B as a target. |
 | D2 | Shape | 1 to 8 origin strings, each without credentials, path, query or fragment, unique after canonicalization, never also a target. A non-string, a duplicate, an empty list or an overlap invalidates the whole policy. |
 | D3 | Hostname rule | One rule for both lists: an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only. It also closes a gap in the target list: playwright-core turns each allowed origin into the URL glob `<origin>/**`, so a target such as `https://*.example.com`, which the parser accepted until now, was a browser-side wildcard. A policy carrying a pattern character in a target host becomes invalid. |
 | D4 | Floor | Remote policy: every network-only origin is non-loopback HTTPS, a literal address must be globally routable, and each hostname gets a resolver pin. Local policy: a loopback origin, or a non-loopback HTTPS origin under the remote floor, with a pin. |
@@ -464,7 +479,7 @@ them as targets, which made an API origin navigable and evidence-eligible.
 | D8 | Consent memory | No record for a network-only origin, and `DECIDED_BY` is unchanged: a record would let a later consent-mode call treat that origin as remembered and navigable. |
 | D9 | Recipe | `validate.networkOnly: { appOrigin, origins: [...] }`. In remote mode `appOrigin` must equal the origin derived from the validated base URL, as `auth.appOrigin` must, or the run stops PARTIAL before `open`. `auth.baseUrl` keeps its meaning: the navigable authentication origin. |
 | D10 | Redirect rule | Unchanged and still prose: a `Page URL` on a network-only origin ends the scenario, with no snapshot, screenshot, console or request output read from it. |
-| D11 | Version | No manual bump; an `### Upgrade notes` entry under `## [Unreleased]`. Recommended `version_type`: `patch`, by the argument `.claude/rules/browser-consent-gate.md` records for the route retirement: the policy is read from the launch environment, which no runtime writes, and this installation accepts a superset of what an older one accepted. A releaser who reads the strict-key-set entry by the letter picks `minor`. |
+| D11 | Version | No manual bump; an `### Upgrade notes` entry under `## [Unreleased]`. Recommended `version_type`: `patch`, by the argument `.claude/rules/browser-consent-gate.md` records for the route retirement: the policy is read from the launch environment, which no runtime writes, and this installation accepts every policy an older one accepted except one whose target host carries a pattern character, which D3 now refuses. That narrowing makes it no superset, and a releaser who reads the strict-key-set entry by the letter picks `minor`. |
 | D12 | WebSockets | Measured on 2026-09-30 with playwright-cli 0.1.21 and Chrome 154.0.8037.92: `network.allowedOrigins` does not fence a `WebSocket`, while `fetch`, `<img>` and `sendBeacon` to an origin outside the run config fail with `net::ERR_BLOCKED_BY_CLIENT`. The docs this change touches now say "every HTTP(S) request"; fencing WebSockets is a separate change. |
 
 ### 11.3 Security analysis
@@ -479,11 +494,96 @@ them as targets, which made an API origin navigable and evidence-eligible.
   address; and a remote policy cannot name a loopback origin, so a deployed page cannot be
   pointed at local services. The same data flow already existed for a same-origin API and for
   `auth.baseUrl`.
-- **What stays denied.** Every CLI navigation command aimed at a network-only origin; every origin
-  in neither list; every HTTP(S) request to an origin outside the run config; `eval`, `run-code`,
-  request-detail and storage commands; any network-only origin in consent mode.
+- **What stays denied.** `open`, `goto` and `tab-new` aimed at a network-only origin, the
+  navigation commands that name a URL; every origin in neither list; every HTTP(S) request to an
+  origin outside the run config other than a server redirect the browser follows; `eval`,
+  `run-code`, request-detail and storage commands; any network-only origin in consent mode.
 - **Residuals, named.** The browser has one class of allowed origin, so a page can navigate itself
   onto a network-only origin — measured: a link click to a second allowed origin was followed,
-  and the `click` output printed that page's URL and title before the skill could stop. WebSockets
+  and the `click` output printed that page's URL and title before the skill could stop. A server
+  redirect onto a network-only origin is followed the same way. `go-back`, `go-forward`, `reload`
+  and `tab-select` name no URL, so the gate never judges where they land. A click can open a popup
+  tab on a network-only origin. The skill's `Page URL` check and its `tab-list` and `tab-close`
+  rules answer these in prose only. A frame a navigable page embeds from a network-only origin
+  renders inside that page, so its content reaches that page's snapshot and screenshot; the skill
+  reads it as that page's content, the same exposure as the data the page fetches, and only a page
+  the browser lands on at a network-only origin is never evidence. WebSockets
   are outside the fence for every origin (D12). The run config is still read twice, by the gate at
   `open` and by the CLI at launch.
+
+## 12. Remote consent (2026-10-09)
+
+A live check of a deployed feature stopped at Phase 0: consent mode admitted loopback origins
+only, and every remote target needed `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the launch
+environment. In the desktop app that variable can come only from the global `env` block of
+`~/.claude/settings.json`, which pre-approves the origin for every session and, because a policy
+was local XOR remote, switched off local consent everywhere.
+
+- **Remote consent.** A remote origin outside a policy passes the floor a policy target passes —
+  HTTPS, public DNS answers only, a resolver pin, an exact hostname — and is approved at the
+  permission prompt. The pin is written by the run-config helper before `open`, and the prompt is
+  raised at that same `open`, so no origin is approved without its pin.
+- **Unforgeable at `open`.** `judgeCall` stamps a remote run-config origin `asked` unless a policy
+  names it, so the consent memory, which the session can write, is never read for it there: a
+  remote origin is asked at every browser start. A `goto` or `tab-new` to a remote origin recorded
+  in this session passes, bounded by the run config the browser was launched with. Measured
+  with playwright-cli 0.1.21: `goto` and `tab-new` without a prior `open` start no browser.
+- **One prompt per `open`** for all its new origins, with a remote and a mixed text: the origin as
+  the URL parser renders it, punycode included; that the model may read and interact with every
+  page there, pages behind the user's own login included; and that a remote origin is asked again
+  at every browser start. The loopback text is unchanged.
+- **Mode guard.** The gate reads `permission_mode` from the hook payload. `default`,
+  `acceptEdits`, `auto` and `plan` count as able to show the prompt; `bypassPermissions`,
+  `dontAsk` and a missing or unknown value deny a remote origin outside a policy, with a remedy
+  that names both the desktop and the CLI spelling. Without a policy a loopback origin is asked in
+  every mode, as before; how the host resolves that prompt under bypass permissions or `dontAsk`
+  was not measured. Measured on Claude Code 2.1.293 in the desktop app's Auto mode: the gate's `ask` reached the
+  user, recorded as `permissionDecision.source: user_temporary`, while the classifier's approvals
+  in the same session read `reasonType: classifier`. That PreToolUse and PostToolUse payloads
+  carry `permission_mode` was read in the same binary.
+- **Policy semantics.** Valid targets pass silently in every mode. Where the prompt can be shown, a
+  non-target is asked rather than denied, and `--check-policy` answers `consent` instead of
+  refusing with `navigation policy mode does not match`; where it cannot, a present policy stays
+  the whole allowlist. There an origin of the policy's kind is denied `origin is not a target of
+  the navigation policy`, and one of the other kind `origin is not of the kind the navigation
+  policy names`, whose remedy never asks the user to add an origin the policy could not hold. The
+  helper cannot see the permission mode, so its `consent` answer is not a promise that the prompt
+  will be shown: whenever a present policy leaves an origin to the prompt, `--check-policy` and the
+  run-config write add a note on stderr that a session which cannot show it is denied that origin
+  at `open`. An invalid policy still denies every gated navigation. Settled trade-off:
+  under a policy in a session that can show the prompt, a forged loopback record now skips the
+  prompt too, the exposure consent mode always had, bounded by the floor to loopback.
+- **Shared shape rules.** `runConfigShape` requires a resolver pin for every `https` or `wss`
+  origin whose host is neither an IP literal nor local, and the exact-hostname rule, `isExactHost`
+  in the floor, binds every remote hostname of a navigation, a run config and a policy, so one Yes
+  can never approve `https://*.example.com`.
+- **No schema change.** The memory record and the `decidedBy` vocabulary are unchanged, and an
+  approved remote `open` is recorded `asked`. No hook, matcher, config key or attestation moves, so
+  the release is a `patch`.
+- **Split-origin apps.** A deployed app's API or identity origin is passed as one more `--origin`,
+  asked in the same prompt and never navigated to by the skill. A network-only role without a
+  policy remains a follow-up.
+- **Residuals.**
+  - The run config is read three times — by the gate, by the CLI at launch and by the recorder —
+    so a swapped file can admit an unapproved origin and make the report's `Consent` block wrong;
+    with a forged consent record beside it, a remote origin the swapped file admits is reached by
+    a `goto` or `tab-new` that is never asked.
+  - The browser follows a server redirect, to an identity provider for example, before the skill's
+    `Page URL` check stops the scenario.
+  - Under bypass permissions, or past the Auto-mode classifier, the model can still write the
+    settings `env` block and grant itself a policy for the next session; pinning the launch-time
+    policy in the Session Control record is a schema change for a separate change.
+  - The gate cannot tell a person from a program. How the host resolves a hook `ask` in a headless
+    `-p` run, with `--permission-prompt-tool`, in an SDK host with a `canUseTool` callback, and
+    under bypass permissions or `dontAsk` was not measured. A session in the default, Accept edits,
+    Plan or Auto mode whose prompts a program answers counts as able to answer, and that program
+    decides every origin the policy does not name; an unattended run therefore belongs in
+    `dontAsk` or bypass permissions, with a policy that names every origin it needs.
+  - "Asked again at every browser start" assumes that no stored choice answers a later hook `ask`.
+    Whether a persistent choice in the host dialog or a `Bash(playwright-cli:*)` allow rule does
+    was not measured.
+  - The preflight cannot see the permission mode, so a session that
+    cannot show the prompt may boot a whole runtime for an origin the gate then denies at `open`.
+    The stderr note is the early signal, and the skill's rules stop on it in such a session; that
+    is prose, not a gate.
+  - WebSockets stay unfenced (D12).

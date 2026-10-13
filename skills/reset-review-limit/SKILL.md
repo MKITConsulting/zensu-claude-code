@@ -1,12 +1,9 @@
 ---
 name: reset-review-limit
 description: >
-  [Zensu] Grant another auto-fix budget to the CURRENT session's exhausted review chain.
-  Standalone chains use the one-shot ticket CAS; durable Autopilot chains use the central
-  exact session/run/attempt/chain/ticket-bound composite, which safely chooses same-chain
-  rearm or blocked-generation retirement. Never scans or mutates sibling sessions. Use
-  after the max-rounds directive for the task still in progress, or via
-  /zensu:reset-review-limit. No network or API key. Do not use to bypass findings.
+  [Zensu] Grant another auto-fix budget to this session's exhausted review
+  chain. Use when the max-rounds directive arrives while work is still in
+  progress, or via /zensu:reset-review-limit.
 ---
 
 # /zensu:reset-review-limit

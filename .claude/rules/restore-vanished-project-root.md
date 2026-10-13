@@ -21,7 +21,7 @@ _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLA
 §"Adopting a Record Across a Lineage Break" answers "this runtime may not SERVE the record".
 §"Workflow-Baseline Repair" answers "it serves it fine and the workflow DOCUMENT is gone".
 This one answers "it serves it fine and the DIRECTORY the record anchors is gone" — the
-ordinary shape after `git worktree remove`, which `skills/session-trail/SKILL.md` measures at
+ordinary shape after `git worktree remove`, which one machine measured at
 **498 of 657** archived worktree-sessions. There `readContext` throws,
 `readOrphanedProjectRootContext` succeeds, reads still work, and `Edit`, `Write` and `MultiEdit`
 deny — a Bash write too, but only while the opt-in source-write gate is on.
@@ -136,10 +136,10 @@ and `THREE bounded exceptions`, so a maintainer who edits only the three code ro
 turns a suite red with nothing naming it — the UNOBVIOUS-direction coupling this file
 records for G12.
 
-**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (frontmatter, §"When to Use", the
-`--restore-root` section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
-state bullets this feature added (the RE-CREATED row, its not-checked arm, and the frontmatter
-`session state` clause, which reads as a complete inventory of the block and therefore goes
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` (§"When to Use", the `--restore-root`
+section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
+state bullets this feature added (the RE-CREATED row, its not-checked arm, and the `Session state`
+bullet of §"What it checks", which reads as a complete inventory of the block and therefore goes
 stale silently) — `docs/session-control.md` §"Unbindable sessions", `docs/gates.md`,
 `docs/operations.md` and `docs/tdd-manager-workflow.md`. That bullet list is TIGHT: every other
 bullet in the block follows its predecessor with no blank line, and the two blanks this feature
@@ -163,7 +163,12 @@ restore, and nothing points at it from the side that changes. `R13` in
 `tests/SUITE-OVERVIEW.md` and compares every declared registration count against the file that
 registers it, so adding or removing a `test()` in ANY driven `tests/structure/*.test.js`, or
 reformatting that table, reddens this suite; when it was first derived rather than
-hand-enumerated it found SEVEN stale counts at once. And the `R12` family grades COMMENT PROSE
+hand-enumerated it found SEVEN stale counts at once. The comparison and the row reader live in
+`tests/structure/lib-unit-summary.sh` (`unit_overview_check`, `unit_overview_declared`), and
+every driver that sources it and drives a file with a row reads its floor from that row and
+calls the check beside it, so the same edit also reddens the file's own driver, and a
+reformatted table reddens every one of those drivers, not only this suite. And the `R12`
+family grades COMMENT PROSE
 inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
 comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
 comment in the core reddens it too. `R13b` widens that direction again: it measures
@@ -447,7 +452,12 @@ same class as the reader's own `UNSAFE_PATH_CHARACTERS`, which every value reach
 `printf` has already passed, while what the reader does NOT reject is `"` or `\`, both
 legal in a POSIX directory name. Reusing `ZENSU_SAFE_VERSION_RE` is the opposite trap: it
 forbids `/`, so every real path would degrade to `(unreadable)`. The bound is therefore
-`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own.
+`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own. It admits one Windows
+form too: a value that opens with a drive letter, a colon and either separator has its
+backslashes rendered as forward slashes before any test, because a Windows host records
+every root that way and the POSIX-only class degraded each of them to `(unreadable)`. A
+backslash anywhere else still degrades the value; `R8p12` and its two controls pin both
+halves and the injection refusal after the mapping.
 
 **EVERY arm of this emitter tests its constants for EMPTINESS first, and that — not the
 export block — is what makes the bound a guarantee.** `[[ x =~ $EMPTY ]]` answers
@@ -499,7 +509,8 @@ root resolved — deliberately does NOT, because `restoreRootVerdict` would answ
 `root-present` there and the adopt invocation it would prescribe is itself a Bash call
 that same branch denies. `pre-write-secret-scan.sh` is NOT the same case and must not be
 described as one: it rules the state out in order to ALLOW the scan, carries no
-bind-state remedy at all, and its non-main arm still falls to the generic deny.
+bind-state remedy at all, and its non-main arm emits the generic deny's `child` form, which
+names the cause and no command.
 Do not "fix" the asymmetry by removing their guards — that costs them the specific message.
 The reachable callers are `pre-edit-tdd-reminder.sh` and `pre-bash-zensu-gate.sh`.
 
@@ -527,9 +538,11 @@ names an existing store, reaches the conjunct, and the conjunct is the producer.
 input that conjunct is defence in depth and on the other it holds the boundary, which is
 why `R2g2` pins the measurement and `R2g3` grades the comment that used to get it wrong.
 What remains open: `not-served-by-executing-runtime` is driven by `R2e`, which is what makes the adopt-then-restore ORDER a refusal
-rather than advice; and the `pre-bash-zensu-gate.sh` call site has no
-`zensu_hook_is_main_principal` guard, so the remedy reaches a read-only principal there —
-pre-existing for the two older scopes and widened by this one.
+rather than advice. CLOSED: the `pre-bash-zensu-gate.sh` call site still has no
+`zensu_hook_is_main_principal` guard, but the router now derives the audience for the orphan
+arm and the generic fallback as well, so a read-only principal gets the `child` form — the
+cause, no `--restore-root`, no path — and `O28c` in `tests/structure/test-orphaned-project-root.sh`
+drives both audiences through that gate.
 
 **TWO couplings this feature created that the roster above does not name, and both
 were found by review rather than by a grep.** First, the DISPLAY RULE now has three

@@ -78,7 +78,10 @@ disables the gate for a deliberate one-off — honored both as a session env and
 (`ZENSU_MCP_GATE=off zensu …`). The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
-meaningless. A structure test (`tests/structure/test-skill-workflow-markers.sh`)
+meaningless. A subagent's mutation is denied even while a window is open, because a child never
+borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
+report the operation to the main thread, which runs it through the matching skill. A structure
+test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
 `--workflow-end` markers, so a new skill cannot silently regress the contract.
 
@@ -203,7 +206,7 @@ decides the anchor only for a **fresh** source — `--fork-session`, or a sessio
 pruned — and there it matters: compare the `WORKTREE` and `CWD` rows and start in `WORKTREE` if they
 differ, or the forked session anchors *inside* the worktree and, while the gate is enabled, still
 cannot commit at its root.
-Flow 3 of `skills/session-trail/SKILL.md` carries the routing rule and is the authority.
+Flow 3 of the session-trail skill, in `skills/session-trail/references/takeover.md`, carries the routing rule and is the authority.
 
 ## Secret Scan
 
@@ -244,7 +247,8 @@ instruction that cannot succeed until its cap releases the guard.
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
   `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
-  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names, and then filtered
+  `reviewer-readonly-v1` and `evidence-worker-v1` — restricted to the plugin-scoped `zensu:`
+  names, and then filtered
   again at decision time: `confinedByFrontmatter` reads each candidate's `agents/<stem>.md`
   and keeps only those whose `tools:` line is exactly `Read`/`Grep`/`Glob`, so a member added
   to those sets for principal reasons cannot acquire a classifier-free spawn by name alone.
@@ -253,12 +257,16 @@ instruction that cannot succeed until its cap releases the guard.
 - **What bounds the CHILD is in this tree, not an assumption about the host.**
   `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
   tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
-  report tool, admitted only with one string `message` field (see
+  report tool, admitted only with one string `message` field, and the workflow result tool
+  `StructuredOutput` (see
   [Session Control](session-control.md)) — and confines its reads to the project
-  root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
+  root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
+  instead: the read trio on leased paths only, and no report tool.
+  It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
-  backstop this grant has.
+  backstop this grant has; for the two evidence workers that backstop is the lease's
+  `toolViolation`.
 - **The grant covers the CALL, not only the identity.** Only `tool_name` and
   `tool_input.subagent_type` are examined; every other input field travels unexamined,
   including `prompt` and `isolation: "worktree"` — and that last one is a host-performed
@@ -410,8 +418,9 @@ mere mention included, is denied. A known wrapper, a package launcher, a CLI pat
 environment assignment is refused only on a `zensu-verify` session.
 The pair exists so that `/zensu:verify-feature` can run without
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
-is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
-before launch, and a restart per change — and the desktop app has no shell prefix at all.
+costs every user a shell prefix, a port fixed before launch, and a restart per change — and the
+desktop app has no shell prefix at all, so there it can come only from the `env` block of
+`~/.claude/settings.json`, which applies it to every session.
 
 **Why a Bash gate.** `/zensu:verify-feature` used to drive a bundled Playwright MCP server
 behind a capability broker. Claude Code started that server once per session, and each start
@@ -493,25 +502,40 @@ session is prose, not a boundary.
 **The floor holds regardless of consent.** A hostname other than `localhost` in local mode —
 `app.localhost`, `localhost.` and `/etc/hosts` aliases included — a non-loopback `http` origin, a
 private, link-local, loopback-mapped or documentation address, credentials in the URL, and a
-query or fragment in a navigation are all refused. Consent mode admits **loopback origins only**:
-a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with `[::1]`
-and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it, and the
-gate refuses a run config that pins `localhost` to an address. A remote target needs the parent policy: the run-config
-helper resolves each hostname once, refuses a non-public or mixed answer, and writes the pin the
-gate then requires, because an origin approved mid-session could not be pinned. The browser
+query or fragment in a navigation are all refused. The one exception in local mode is a
+network-only origin a local policy declares (below), which may be a public `https://` origin, its
+hostname resolved and pinned like a remote target's. A local run admits **loopback origins
+only**: a loopback IP or the exact name `localhost`. The browser answers `localhost` itself, with
+`[::1]` and `127.0.0.1`, before any HOSTS-file or DNS lookup, so no resolver pin travels with it,
+and the gate refuses a run config that pins `localhost` to an address. A remote origin, whether a
+policy target or one the human approves at the prompt, is HTTPS with its host named exactly: the
+run-config helper resolves each hostname once, refuses a non-public or mixed answer, and writes
+the pin the gate then requires at `open` for every `https` or `wss` origin whose host is neither
+an IP literal nor local, so a run config without that pin, or with a pattern host, never opens. The browser
 itself refuses every HTTP(S) request to an origin outside `network.allowedOrigins`; it does NOT
 fence a WebSocket connection — measured with playwright-cli 0.1.21, an open gap. Nor does it refuse a
 server redirect to another origin — measured, not assumed — so the skill reads the `Page URL`
-line after every navigating call and stops a scenario that left the approved set. In neither mode
-does anything enforce routes: the evidence boundary is the origin, which the human approves in
-consent mode and the launch policy names in policy mode, and an approved origin covers every page
-on it, at any path.
+line after every navigating call and stops a scenario that left the approved set. Nothing
+enforces routes: the evidence boundary is the origin, which the launch policy names or the human
+approves at the prompt, and an approved origin covers every page on it, at any path.
 
-**Consent and memory.** With no parent policy the PreToolUse hook returns
-`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
-first call that reaches each new loopback origin. Consent is per ORIGIN: once an origin is
-approved, every route on it passes silently for the rest of the session, which is what the
-prompt says; the prompt names no route, and no recipe input reaches it. The PostToolUse hook
+**Consent and memory.** For an origin no policy names, the PreToolUse hook returns
+`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — once per
+`open` for all of its new origins, and for a `goto` or `tab-new` to an origin not yet approved.
+Consent is per ORIGIN; the prompt names no route, and no recipe input reaches it. A loopback
+origin, once approved, passes silently for the rest of the session. A remote origin is asked at
+every `open`: `judgeCall` stamps its run-config entry `asked`, so the consent memory is never
+consulted for it there and a record written into the memory cannot skip that prompt, while a
+`goto` or `tab-new` to a remote origin already recorded passes, bounded by the run config the
+browser was opened with. The prompt says which of the two applies. The hook reads
+`permission_mode` from the hook payload, and only `default`, `acceptEdits`, `auto` and `plan`
+count as able to show the prompt. Under `bypassPermissions`, `dontAsk`, or a mode that is missing
+or unknown, it denies a remote origin outside a policy with
+`remote-target-needs-parent-environment-policy` and a remedy that names both the desktop and the
+CLI spelling; a loopback origin asks as before. Measured on Claude Code 2.1.293 in the desktop
+app's Auto mode: the gate's `ask` reached the user, and the transcript recorded the answer with
+`permissionDecision.source: user_temporary`, while the classifier's approvals in the same session
+read `reasonType: classifier`. The PostToolUse hook
 records an executed call as `(origin, route, decidedBy, at)` in
 `<project>/.zensu/state/verify-consent-<session-key>.json`,
 written by `O_EXCL` temp plus rename, contained to that directory, and never through a symlink.
@@ -519,14 +543,24 @@ The decision, the prompt text and the memory rules live in `hooks/lib/verify-con
 address, URL and policy predicates live in `hooks/lib/verify-navigation-floor-v1.js`, which the
 run-config helper uses too, so there is one floor, not two.
 
-**With a parent policy present the gate asks nothing.** It admits only the policy's target
-origins, every route on them, and a remote hostname only when the run config pins it; a
+**With a parent policy present** its target origins pass without a prompt in every permission
+mode, every route on them; the policy's network-only origins (below) are admitted in the run
+config at `open` while every navigation command that names one is denied, and a remote hostname
+is accepted only when the run config pins it; a
 `routes` list a policy written for the earlier contract still carries is accepted when well
-formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. A policy that fails its
-contract denies every `zensu-verify` navigation, with the broken rule named. Every origin in the
-policy names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`, `.`, `-` and `_` —
-because the browser turns an allowed origin into a URL glob and would read `*` or `{a,b}` as a
-pattern.
+formed and then ignored. The PostToolUse hook records `decidedBy: policy-mode`. Any other origin
+is asked as above where the session can show the prompt. Where it cannot, an origin of the
+policy's own kind is denied with `origin is not a target of the navigation policy`, and one of the
+other kind — a loopback origin under a remote policy, a remote one under a local policy — with
+`origin is not of the kind the navigation policy names`, whose remedy does not tell the user to add
+an origin the policy could not hold; so there the policy stays the whole allowlist. The
+`--check-policy` preflight cannot see the permission mode: it prints `consent` for such an origin
+and notes on stderr that a session which cannot show the prompt is denied it at `open`. A policy
+that fails its contract denies every `zensu-verify` navigation in every
+mode, with the broken rule named. Every origin in the policy, and every remote origin of a run
+config or a navigation, names its host exactly — an IP literal, or a hostname of `a-z`, `0-9`,
+`.`, `-` and `_` — because the browser turns an allowed origin into a URL glob and would read `*`
+or `{a,b}` as a pattern, so one Yes can never approve a wildcard.
 
 **Network-only origins.** A policy may also list, in `networkOnlyOrigins`, up to 8 origins the
 pages request but no navigation command may open: a REST API, an OIDC issuer, a token endpoint.
@@ -536,8 +570,9 @@ host, and plans no consent record for it; `open <url>`, `goto` and `tab-new` aim
 with `NETWORK_ONLY_NAVIGATION`, a final reason. A remote policy accepts only non-loopback HTTPS
 there; a local policy accepts a loopback origin or a pinned public HTTPS one. Consent mode has no
 such class, so the run-config helper refuses `--network-only-origin` without a policy. A page can
-still navigate itself onto a network-only origin, because the browser knows one class of allowed
-origin: the `Page URL` check ends that scenario.
+still navigate itself onto a network-only origin, by a link, a form, a script or a server
+redirect, because the browser knows one class of allowed origin: the `Page URL` check ends that
+scenario. The residuals below name what else reaches such an origin unjudged.
 
 **The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
 no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
@@ -600,17 +635,32 @@ through Bash.
   run-config helper's follow the host's own matcher rule as read out of the Claude Code 2.1.280
   binary, and report a matcher the host may read two ways as undetermined, never as missing.
 - **The consent memory is a file in a directory the session can write** through a Bash
-  redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
-  other loopback services.
+  redirect, so a forged record skips the prompt for a loopback origin, and the floor bounds the
+  damage to other loopback services. A forged record never skips the prompt of a remote origin at
+  `open`; it does skip the one of a `goto` or `tab-new`, which the run config the browser was
+  launched with bounds. Where a prompt can be shown, a forged loopback record now skips it under
+  a policy too.
 - **`localhost` rests on a browser property no suite exercises.** Admitting it relies on the
   browser answering `localhost` itself before any HOSTS-file or DNS lookup. That was read in
   Chromium's source and measured on one Chrome build, and no suite drives a real browser, so a
   Chromium that stopped serving `localhost` itself would let `/etc/hosts` steer it with every
   check green. `*.localhost` stays refused although the same Chromium code resolves it to
   loopback too.
-- **The run config is read twice.** The gate reads it when it judges `open`, and the CLI reads
-  it again when it starts the browser, so a file swapped in between is followed. The run
-  directory sits under the project, where the session can write.
+- **The run config is read three times.** The gate reads it when it judges `open`, the CLI
+  reads it again when it starts the browser, and the recorder reads it a third time, so a file
+  swapped in between is followed, can admit an origin the human never approved, and can make the
+  report's `Consent` block wrong. With a forged consent record beside it, a remote origin such a
+  swapped config admits is reached by a `goto` or `tab-new` that is never asked. The run directory
+  sits under the project, where the session can write.
+- **The gate judges a URL only where a command names one.** It reads the URL of `open`, `goto`
+  and `tab-new`; `go-back`, `go-forward`, `reload` and `tab-select` name none, so where they land
+  is never judged. The browser also follows a server redirect to another origin, a network-only
+  one included, and a page-initiated navigation onto a network-only origin, and a click can open a
+  popup tab on such an origin. The skill's `Page URL` check, its `tab-list` before every
+  `tab-select` and its rule to close such a tab with `tab-close` answer these, and they are prose,
+  not a boundary. A frame a target page embeds from a network-only origin renders inside that
+  page, so its content reaches that page's snapshot and screenshot, where the skill reads it as
+  that page's content, like data the page fetched.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
   `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
@@ -655,9 +705,34 @@ through Bash.
   knows them — the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
   a command, and the global `cli.config.json` — so a new environment or config channel of a
   later CLI is unjudged.
-- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
-  run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
-  prompt.
+- **The permission mode is the host's report, and the gate cannot tell a person from a
+  program.** Auto mode was measured once, on Claude Code 2.1.293 in the desktop app: the gate's
+  `ask` reached the user. How the host resolves a hook `ask` in a headless `-p` run, with or
+  without `--permission-prompt-tool`, in an SDK host with a `canUseTool` callback, and under
+  bypass permissions or `dontAsk` was not measured. Under the last two the gate itself denies a
+  remote origin outside a policy and, while a policy is present, every origin it does not name;
+  without a policy it still asks for a loopback origin there. A run in the default, Accept edits,
+  Plan or Auto mode whose prompts a program answers counts as able to answer, and that program
+  decides every origin the policy does not name, so an unattended run that relies on the policy
+  as its whole allowlist belongs in `dontAsk` or bypass permissions. The live eval runs in policy
+  mode precisely so it never depends on a prompt.
+- **"Asked again at every browser start" assumes that no stored choice answers a later hook
+  `ask`.** Claude Code's hook documentation says an `ask` forces a permission prompt; whether a
+  persistent choice in the host dialog or a `Bash(playwright-cli:*)` allow rule satisfies a later
+  hook `ask` was not measured.
+- **The model can still grant itself a policy.** Under bypass permissions a session can write
+  the `env` block of `~/.claude/settings.json`, and in Auto mode only the classifier judges that
+  write. The next session starts with it; whether the host also applies an edited block to the
+  running session was not measured. Pinning the launch-time policy in the Session Control record
+  would be a schema change and is left to a separate change.
+- **A session that cannot show the prompt may boot a whole runtime before it is refused.** The preflight
+  cannot see the permission mode, so under bypass permissions or
+  `dontAsk` a policy that does not name the run's origin is answered `consent` with a stderr
+  note, the runtime starts, and `open` is denied. The skill stops before booting when it sees
+  that note in such a session; nothing enforces it.
+- **A deployed app's API or identity origin has no network-only role without a policy.** It is
+  passed as one more `--origin`, asked in the same prompt and never navigated to by the skill,
+  but the gate would admit a navigation to it.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.
@@ -675,10 +750,12 @@ cause is ordinary: a git worktree deleted and re-created loses the document, bec
 `.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
 minting a new one.
 
-- **The deny names the cause and the command** — `/zensu:adopt-session` for the diagnosis and
-  `/zensu:adopt-session --confirm` to rebuild — instead of the generic `immutable context
-  revalidation failed`, which is accurate and names no way out. Both commands stay reachable,
-  because the Bash recognizer admits them in every bind failure.
+- **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`
+  for the diagnosis and `/zensu:adopt-session --confirm` to rebuild — instead of the generic
+  `immutable context revalidation failed`, which is accurate and names no way out. Both
+  commands stay reachable on macOS and Linux, because the Bash recognizer admits them in every
+  bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
+  child gets the cause and is told to report it to the main thread rather than retry.
 - **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
   unreadable keeps the generic wording: something is at that path, and offering a rebuild
   there would tell the user to build over the evidence.
@@ -819,8 +896,8 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
   them to report to the main thread rather than retry. A reviewer and a PLM subagent can do
-  that: their `SubagentHandback` report resolves no path and is decided before the `cwd` is
-  examined. A neutral child's handback still passes that resolution and is denied with the
+  that: their `SubagentHandback` report and their `StructuredOutput` result resolve no path
+  and are decided before the `cwd` is examined. A neutral child's handback still passes that resolution and is denied with the
   rest.
 
 Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the
@@ -886,10 +963,19 @@ plan must carry a usable `## Requirements` table.
 - **Refusal wording is typed.** A missing or placeholder-only table refuses as a verdict about
   the plan; an unreadable path, a usage error, or a missing library refuses with "could not
   judge the plan" instead — a load fault must never be reported as a judged table.
-- **Scope.** A resolvable git HEAD plus a non-empty change set. That is NARROWER than the
-  receipt gate above it, which multi-repo stage 1 also arms on a logged claim, so a zero-change
-  chain whose work landed in another repository is gated there and not here. A chain that
-  changed nothing has no plan claim to check. **Known gap, stated rather than
+- **Scope.** A non-empty change set. That is NARROWER than the receipt gate above it, which
+  multi-repo stage 1 also arms on a logged claim, so a zero-change chain whose work landed in
+  another repository is gated there and not here. A chain that changed nothing has no plan
+  claim to check. Both preconditions take the change count from the
+  helper the unqualified `--chain-done` uses, so they share its reading of git. A host without
+  `git`, a project root git reports as outside any work tree, and a repository whose HEAD names
+  no commit yet cannot be evaluated and count as no change. Any other git failure — a
+  `safe.directory` "dubious ownership" refusal, a HEAD lookup git aborts, a listing that fails —
+  refuses `--tdd-complete` with exit 1 before either precondition runs, because a count git
+  could not produce is not zero changes; the refusal names `git diff --name-only HEAD` as the
+  way to see git's error. Only with both `ZENSU_EDIT_LANDING_GATE=off` and
+  `ZENSU_REQUIREMENTS_GATE=off` does the verb complete over such a failure, and it then records
+  both escapes in the bypass ledger. **Known gap, stated rather than
   implied:** a bound Autopilot chain that produced zero file changes therefore passes this gate
   untested, still travels its return stage into CONVERGE — the only edge into `OPEN_PR` — and
   converge then mtime-resolves the plan Phase 2 wrote anyway and takes its legacy stop. "The
@@ -931,7 +1017,10 @@ reads the newest record, never a claim in the run log.
   of the newest finished run has no run on its current tree.
 - **Where it applies.** The ticket-bound standalone terminus (`--chain-done
   --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
-  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
+  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. A
+  self-review ticket the Stop hook minted for a chain no reviewer saw (prefix `zc_`) does not
+  reach the gate while the worktree reports a changed file: the terminus refuses it and reopens
+  the review first. Outcome
   `max-rounds` prints `FULL SUITE — not checked` and never blocks, because the post-review hook
   drives that call with its output discarded. `--tdd-complete` is not gated: review rounds
   change the tree anyway.
@@ -1035,7 +1124,8 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   cause says whether the run's VALIDATE stage validates every criterion, whether the run was
   started with `--no-validate` so nothing was validated, or whether the option could not be read.
   Its other outcomes print nothing. The unqualified zero-change terminus is exempt and prints
-  nothing, and a wrong ticket never reaches the verdict. A max-rounds close with
+  nothing, and a wrong ticket never reaches the verdict. Neither does a minted `zc_`
+  self-review ticket on a changed tree, which the terminus refuses before either gate runs. A max-rounds close with
   `hooks.selfReview` off is never blocked by this gate or the full-suite gate: a standalone chain
   runs no terminus there, and a bound one discards the terminus output. The chain-end summary
   then shows both as not checked.

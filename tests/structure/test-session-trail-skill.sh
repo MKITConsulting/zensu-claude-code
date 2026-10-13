@@ -39,6 +39,14 @@ SKILL_DIR="$PLUGIN_DIR/skills/session-trail"
 # reason: T10c scans it for unsandboxed invocations of the script under test.
 SELF_SUITE_FILE="$PLUGIN_DIR/tests/structure/test-session-trail-skill.sh"
 SKILL_MD="$SKILL_DIR/SKILL.md"
+REF_DIR="$SKILL_DIR/references"
+REF_COMMANDS="$REF_DIR/commands.md"
+REF_TAKEOVER="$REF_DIR/takeover.md"
+REF_HANDOFF="$REF_DIR/handoff.md"
+REF_ARCHIVE="$REF_DIR/archive.md"
+REF_LIMITS="$REF_DIR/limits.md"
+REF_GOTCHAS="$REF_DIR/gotchas.md"
+REF_DISCLOSURE="$REF_DIR/disclosure.md"
 TRAIL_MJS="$SKILL_DIR/scripts/trail.mjs"
 LEDGER_MJS="$SKILL_DIR/scripts/session-lineage-v1.mjs"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
@@ -143,12 +151,15 @@ GIT_WORKTREE_WRITE_RE="$GIT_CALL_RE[^]]*\[[[:space:]]*'worktree',[[:space:]]*'(r
 # Files the write-channel guard must cover: every executable the skill ships,
 # not just the one script it ships today.
 SCRIPT_INCLUDES=(--include='*.mjs' --include='*.js' --include='*.cjs')
-# The two bare vetoes the takeover doctrine replaced. They are pinned by their
-# ABSENCE (T23), because a takeover the user asked for is never refused — the
-# verdict reports a hazard and costs at most one up-front question. Both get a
+# The bare vetoes and asks the takeover doctrine replaced. They are pinned by their
+# ABSENCE (T23, T35b), because a takeover the user asked for is never refused — the
+# verdict reports a hazard and costs no question of its own. Each gets a
 # control line in the T0 fixture block, like every other negative check here.
 OLD_DOC_VETO='stop. Read-only follow'
 OLD_SCRIPT_VETO='Do NOT edit this worktree'
+OLD_GO_NO_GO='go/no-go'
+OLD_ROUTE_ASK='ask before assuming'
+OLD_MOVE_ATTESTATION='will not be continued'
 
 PASS=0; FAIL=0; SKIP=0
 check() {
@@ -161,7 +172,11 @@ skip() { echo "  SKIP  $1"; SKIP=$((SKIP+1)); }
 # section_of <heading> — the body of one '## ' section, so a pin cannot be
 # satisfied by the same words appearing anywhere else in the file.
 section_of() {
-  awk -v h="$1" '$0==h{f=1;next} /^## /{f=0} f' "$SKILL_MD"
+  awk -v h="$1" '$0==h{f=1;next} /^## /{f=0} f' "${2:-$SKILL_MD}"
+}
+
+all_md() {
+  cat "$SKILL_MD" "$REF_DIR"/*.md
 }
 
 if [ ! -f "$SKILL_MD" ]; then
@@ -281,12 +296,18 @@ if [ -n "$CTRL_DIR" ]; then
   grep -qF "$HOME_SKILL_PATH" "$CTRL_DIR/home-path.md" || CTRL_BAD="$CTRL_BAD home-path"
   grep -qF "$BARE_COMMAND_REF" "$CTRL_DIR/bare-ref.md" || CTRL_BAD="$CTRL_BAD bare-ref"
 
-  # The two retired vetoes, in the exact shapes they had before the doctrine
-  # change: one SKILL.md table cell, one script directive line.
+  # The retired vetoes and asks, in the exact shapes they had before each doctrine
+  # change: SKILL.md and reference lines, and script directive lines.
   printf '%s\n' '| `BUSY` | it wrote within the last 15 min | stop. Read-only follow, or ask the user to park that window. |' > "$CTRL_DIR/old-veto.txt"
   printf '%s\n' "  if (v.level === 'BUSY') print('         Do NOT edit this worktree. Read-only follow.');" >> "$CTRL_DIR/old-veto.txt"
   grep -qF "$OLD_DOC_VETO" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-doc-veto"
   grep -qF "$OLD_SCRIPT_VETO" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-script-veto"
+  printf '%s\n' '| `BUSY` | a turn is in flight | take a single go/no-go via `AskUserQuestion` |' >> "$CTRL_DIR/old-veto.txt"
+  printf '%s\n' '2. Pick the route by **how the user actually works** — ask before assuming:' >> "$CTRL_DIR/old-veto.txt"
+  printf '%s\n' '   **One ALTERNATIVE to every present-directory row, and only you can authorize it.** If you KNOW the taken-over session will not be continued — you switched accounts' >> "$CTRL_DIR/old-veto.txt"
+  grep -qiF "$OLD_GO_NO_GO" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-go-no-go"
+  grep -qF "$OLD_ROUTE_ASK" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-route-ask"
+  grep -qF "$OLD_MOVE_ATTESTATION" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-move-attestation"
 
   if [ -z "$CTRL_BAD" ]; then
     check "T0 every branch of every negative-check pattern bites a derived control" PASS
@@ -613,11 +634,11 @@ else
 fi
 
 # T17 — the six numbered workflows survived the move.
-WF_N="$(grep -cE '^### [1-6]\. ' "$SKILL_MD")"
+WF_N="$(section_of '## Workflows' | grep -cE '^[1-6]\. \*\*')"
 if [ "$WF_N" = "6" ]; then
-  check "T17 all six numbered workflow sections are present" PASS
+  check "T17 the router lists all six numbered workflows" PASS
 else
-  check "T17 all six numbered workflow sections are present (found $WF_N)" FAIL
+  check "T17 the router lists all six numbered workflows (found $WF_N)" FAIL
 fi
 
 # T18 — the takeover verdict vocabulary, pinned in BOTH directions like T16:
@@ -627,7 +648,7 @@ EMITTED="$(grep -oE "level: '[A-Z_]+'" "$TRAIL_MJS" | sed "s/.*'\(.*\)'/\1/" | s
 EMITTED_N="$(printf '%s\n' "$EMITTED" | grep -c .)"
 VERDICT_UNDOC=""; VERDICT_UNEMITTED=""
 for v in $EMITTED; do
-  grep -qF "\`$v\`" "$SKILL_MD" || VERDICT_UNDOC="$VERDICT_UNDOC $v"
+  all_md | grep -qF "\`$v\`" || VERDICT_UNDOC="$VERDICT_UNDOC $v"
 done
 for v in FREE PROBABLY_FREE BUSY; do
   printf '%s\n' "$EMITTED" | grep -qxF "$v" || VERDICT_UNEMITTED="$VERDICT_UNEMITTED $v"
@@ -647,9 +668,17 @@ fi
 
 # T19 — the sections that carry the measured findings and the safety contract.
 SECTION_MISS=""
-for section in "## Data sources" "## The tool" "## Workflows" "## Limits of what this can know" "## Safety" "## Verified gotchas"; do
-  grep -qxF "$section" "$SKILL_MD" || SECTION_MISS="$SECTION_MISS [$section]"
-done
+while IFS='|' read -r section_file section; do
+  [ -n "$section" ] || continue
+  grep -qxF "$section" "$section_file" || SECTION_MISS="$SECTION_MISS [$section]"
+done <<EOF
+$SKILL_MD|## Data sources
+$SKILL_MD|## The tool
+$SKILL_MD|## Workflows
+$SKILL_MD|## Safety
+$REF_LIMITS|## Limits of what this can know
+$REF_GOTCHAS|## Verified gotchas
+EOF
 if [ -z "$SECTION_MISS" ]; then
   check "T19 all six content sections survived the move" PASS
 else
@@ -682,13 +711,13 @@ fi
 # T21 — the limits, pinned the same way. Each one is a measured divergence
 # between what the script does and what a reader would otherwise assume, so the
 # guarantee has to survive, not merely the keyword.
-LIMITS="$(section_of '## Limits of what this can know')"
+LIMITS="$(section_of '## Limits of what this can know' "$REF_LIMITS")"
 LIMIT_MISS=""
 while IFS='|' read -r label clause; do
   [ -n "$label" ] || continue
   printf '%s\n' "$LIMITS" | grep -qF "$clause" || LIMIT_MISS="$LIMIT_MISS [$label]"
 done <<'LIMIT_PINS'
-config-dir|`CLAUDE_CONFIG_DIR` is honoured now
+config-dir|`CLAUDE_CONFIG_DIR` is honoured
 platform|macOS-verified and elsewhere a guess
 dirname-scoping|transcript-directory name
 third-party-content|enters this conversation
@@ -733,10 +762,10 @@ GUARD_PINS
 # than turning the enumeration into a quiet falsehood.
 TEMP_FAMILIES="$(grep -cE '\.[a-z]+-\$\{process\.pid\}' "$LEDGER_MJS")"
 SKILL_FAMILIES=0
-grep -qF '`.edge-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
-grep -qF '`.labels-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
+all_md | grep -qF '`.edge-*.tmp`' && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
+all_md | grep -qF '`.labels-*.tmp`' && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
 if [ "$TEMP_FAMILIES" = "2" ] && [ "$SKILL_FAMILIES" = "2" ] \
-  && grep -qF 'no delete or rename outside its own two temp families' "$SKILL_MD"; then
+  && all_md | grep -qF 'no delete or rename outside its own two temp families'; then
   check "T22a the write-channel enumeration names every temp family the ledger mints ($SKILL_FAMILIES/$TEMP_FAMILIES)" PASS
 else
   check "T22a write-channel enumeration drift: module mints $TEMP_FAMILIES temp families, SKILL.md names $SKILL_FAMILIES" FAIL
@@ -849,7 +878,7 @@ fi
 # the defect; nothing here enforces exclusivity, and a registry entry is a
 # registration, not a claim. The behavioural half — what the script actually
 # decides — is test-session-trail-verdict.sh, which this suite cannot observe.
-WORKFLOWS="$(section_of '## Workflows')"
+WORKFLOWS="$(section_of '## Workflows'; cat "$REF_TAKEOVER" "$REF_HANDOFF" "$REF_ARCHIVE")"
 DOCTRINE_MISS=""
 while IFS='|' read -r label clause; do
   [ -n "$label" ] || continue
@@ -857,14 +886,27 @@ while IFS='|' read -r label clause; do
 done <<'DOCTRINE_PINS'
 not-a-gate|hazard report, never a permission gate
 never-refused|is never refused
-up-front|before the first edit
-one-question|take a single go/no-go
+up-front|before anything durable is written
+one-question|exactly one question, the plan confirmation
 contested-no-reask|never ask again
-no-question-unless-unmeasured|neither does `PROBABLY_FREE` unless its reason says the queue could not be measured
-quota-green-light-unless-unmeasured|a green light — unless its reason says the queue could not be measured
+no-question-of-its-own|no verdict costs a question of its own
+quota-green-light-even-unmeasured|a green light, and so is one whose reason says the queue could not be measured
+route-not-asked|do not ask which route
+route-in-confirmation|put that choice inside the plan confirmation rather than into a question of its own
+release-is-the-go|the takeover they confirmed, is the go, so ask nothing
+quota-release-is-the-go|the user's confirmation is the go
+later-text-not-acted-on|is named to the user in one line and not acted on
 DOCTRINE_PINS
-grep -qF "$OLD_DOC_VETO" "$SKILL_MD" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-doc-veto-is-back]"
+all_md | grep -qF "$OLD_DOC_VETO" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-doc-veto-is-back]"
 grep -qF "$OLD_SCRIPT_VETO" "$TRAIL_MJS" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-script-veto-is-back]"
+all_md | grep -qiF "$OLD_GO_NO_GO" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-go-no-go-is-back]"
+all_md | grep -qF "$OLD_ROUTE_ASK" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-route-ask-is-back]"
+H5_FLOW="$(awk '/^## 5\./{f=1;next} /^## /{f=0} f' "$REF_HANDOFF")"
+[ -n "$H5_FLOW" ] || DOCTRINE_MISS="$DOCTRINE_MISS [handoff-flow5-not-extracted]"
+printf '%s\n' "$H5_FLOW" | grep -qF '`takeover <selector> --all --no-record`' || DOCTRINE_MISS="$DOCTRINE_MISS [handoff-flow5-plan-pass-records]"
+H5_CONFIRM_AT="$(printf '%s\n' "$H5_FLOW" | grep -nF "wait for the user's confirmation" | head -1 | cut -d: -f1)"
+H5_RECORD_AT="$(printf '%s\n' "$H5_FLOW" | grep -nF '`takeover <selector> --all --force`' | head -1 | cut -d: -f1)"
+{ [ -n "$H5_CONFIRM_AT" ] && [ -n "$H5_RECORD_AT" ] && [ "$H5_CONFIRM_AT" -lt "$H5_RECORD_AT" ]; } || DOCTRINE_MISS="$DOCTRINE_MISS [handoff-flow5-records-before-confirming]"
 # The script carries its OWN copy of the doctrine in the lines it prints, and at
 # runtime that copy is what the reader acts on — SKILL.md is only read when the
 # skill is loaded. Pinning the SKILL.md clauses positively while pinning the
@@ -878,6 +920,8 @@ grep -qF "$OLD_SCRIPT_VETO" "$TRAIL_MJS" && DOCTRINE_MISS="$DOCTRINE_MISS [retir
 # not an emission, and a `// print('…')` would otherwise satisfy the pin with the
 # live call deleted.
 TRAIL_CODE="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$TRAIL_MJS")"
+printf '%s\n' "$TRAIL_CODE" | grep -qiF "$OLD_GO_NO_GO" && DOCTRINE_MISS="$DOCTRINE_MISS [script:retired-go-no-go-is-back]"
+[ "$(printf '%s\n' "$TRAIL_CODE" | grep -cE "code: 'source-(busy|unmeasured)', text: .*is the go\.")" = "2" ] || DOCTRINE_MISS="$DOCTRINE_MISS [script:release-blockers-ask]"
 # Two anchors, because the doctrine now has two shapes in the script. The
 # per-level advice lives in the single-owner `ADVICE` table (T18 asserts every
 # emitted level has an entry); the brief-only clauses are still written at their
@@ -890,12 +934,14 @@ while IFS='|' read -r label clause; do
   printf '%s\n' "$ADVICE_BLOCK" | grep -qF "$clause" || DOCTRINE_MISS="$DOCTRINE_MISS [advice:$label]"
 done <<'ADVICE_DOCTRINE_PINS'
 not-a-refusal|hazard report, not a refusal
-one-go-no-go|take a single
-force-is-the-escape|re-run with --force
+no-question-of-its-own|never as a question of its own
+force-is-the-escape|take it over with takeover --force
 contested-authorized|Authorized. Take it over
 free-nothing-holds|Nothing holds this worktree
 probably-free-proceed|Proceed, but tell the user not to type
-probably-free-unmeasured-asks|Its queue was not measured, so this costs the same single go/no-go BUSY does
+probably-free-unmeasured-discloses|Its queue was not measured. State that in one line inside the plan confirmation, never as a
+free-one-confirmation|Take it over: the plan confirmation is the one question,
+probably-free-in-confirmation|Put that in one line inside the plan confirmation; on yes run takeover --force
 ADVICE_DOCTRINE_PINS
 while IFS='|' read -r label clause; do
   [ -n "$label" ] || continue
@@ -903,7 +949,7 @@ while IFS='|' read -r label clause; do
 done <<'SCRIPT_DOCTRINE_PINS'
 hazard-not-veto|Hazard, not a veto
 no-exclusivity|Nothing enforces exclusivity
-unmeasured-go-no-go|Its queue was not measured, so state that to the user
+unmeasured-one-line|Its queue was not measured, so state that to the user
 SCRIPT_DOCTRINE_PINS
 # The table must actually be RENDERED, not merely present.
 printf '%s\n' "$TRAIL_CODE" | grep -qE 'ADVICE\[v\.level\]' || DOCTRINE_MISS="$DOCTRINE_MISS [script:advice-not-rendered]"
@@ -921,7 +967,7 @@ fi
 # independent literals, the obvious repair for a threshold change (edit the number
 # the check named) re-greens the suite while the prose stays stale — which is the
 # drift this exists to catch.
-GOTCHAS="$(section_of '## Verified gotchas')"
+GOTCHAS="$(section_of '## Verified gotchas' "$REF_GOTCHAS")"
 THRESH_MISS=""
 BUSY_N="$(sed -n 's/^const BUSY_IDLE_MIN = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
 GRACE_N="$(sed -n 's/^const ACTIVE_GRACE_MIN = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
@@ -1017,42 +1063,26 @@ fi
 if [ -n "$DELIVERY_REACH" ]; then
   printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "\`QUEUE_DELIVERY_REACH\` ($DELIVERY_REACH)" || WITHDRAW_MISS="$WITHDRAW_MISS [reach-constant-not-quoted-with-its-value]"
   printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "At least $DELIVERY_REACH records must follow" || WITHDRAW_MISS="$WITHDRAW_MISS [reach-rule-not-stated-with-its-value]"
-  FARTHEST="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*the farthest \([0-9][0-9]*\) records before its `remove` and \([0-9][0-9]*\) after it.*/\1 \2/p')"
-  FAR_BEFORE="${FARTHEST%% *}"
-  FAR_AFTER="${FARTHEST##* }"
   SCRIPT_FARTHEST="$(sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' "$TRAIL_MJS" | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' || true)"
   SCRIPT_PAIRS="$(printf '%s\n' "$SCRIPT_FARTHEST" | grep -c . || true)"
-  SCRIPT_PAIR="$(printf '%s\n' "$SCRIPT_FARTHEST" | sed -n 's/^the farthest sat \([0-9][0-9]*\) records before its .remove. and \([0-9][0-9]*\) after it$/\1 \2/p')"
+  FARTHEST="$(printf '%s\n' "$SCRIPT_FARTHEST" | sed -n 's/^the farthest sat \([0-9][0-9]*\) records before its .remove. and \([0-9][0-9]*\) after it$/\1 \2/p')"
+  FAR_BEFORE="${FARTHEST%% *}"
+  FAR_AFTER="${FARTHEST##* }"
   EP_PAIRS="$(awk '/^function queueWithdrawals\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
-  BULLET_PAIRS="$(printf '%s\n' "$WITHDRAWAL_BULLET" | grep -oE 'the farthest [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
-  if [ -z "$FARTHEST" ]; then
-    WITHDRAW_MISS="$WITHDRAW_MISS [measured-farthest-pair-unreadable]"
-  elif [ "$BULLET_PAIRS" != "1" ]; then
-    WITHDRAW_MISS="$WITHDRAW_MISS [bullet-states-the-measured-pair-$BULLET_PAIRS-times-not-once]"
-  elif [ "$SCRIPT_PAIRS" != "1" ]; then
+  if [ "$SCRIPT_PAIRS" != "1" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-states-the-measured-pair-$SCRIPT_PAIRS-times-not-once]"
   elif [ "$EP_PAIRS" != "1" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [the-measured-pair-is-not-stated-inside-the-queueWithdrawals-comment]"
-  elif [ "$SCRIPT_PAIR" != "$FARTHEST" ]; then
-    WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-pair-${SCRIPT_PAIR% *}-${SCRIPT_PAIR#* }-disagrees-with-bullet-pair-$FAR_BEFORE-$FAR_AFTER]"
+  elif [ -z "$FARTHEST" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [measured-farthest-pair-unreadable]"
   elif [ "$DELIVERY_REACH" -lt "$FAR_BEFORE" ] || [ "$DELIVERY_REACH" -lt "$FAR_AFTER" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [reach-$DELIVERY_REACH-below-the-measured-farthest-pair-$FAR_BEFORE-before-$FAR_AFTER-after]"
   fi
 else
   WITHDRAW_MISS="$WITHDRAW_MISS [script-delivery-reach-unreadable]"
 fi
-MEASURE_COMMENT="$(awk '/^function queueWithdrawals\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ')"
-MEASURE_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*Measured \([0-9][0-9-]*\) on this machine over \([0-9][0-9]*\) transcripts, \([0-9][0-9]*\) attachments paired that way.*/\1 \2 \3/p')"
-MEASURE_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.*Measured on \([0-9][0-9-]*\) over \([0-9][0-9]*\) local transcripts, \([0-9][0-9]*\) attachments paired that way.*/\1 \2 \3/p')"
-BUILDS_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.* \([0-9][0-9]*\) of those transcripts span more than one build.*/\1/p')"
-BUILDS_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.* \([0-9][0-9]*\) of those transcripts span more than one build.*/\1/p')"
-VETO_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*the text veto closed \([0-9][0-9]*\) builds in \([0-9][0-9]*\) of those transcripts and prevented \([a-z0-9][a-z0-9]*\) withdrawal.*/\1 \2 \3/p')"
-VETO_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.*the text veto closed \([0-9][0-9]*\) builds in \([0-9][0-9]*\) of those transcripts and prevented \([a-z0-9][a-z0-9]*\) withdrawal.*/\1 \2 \3/p')"
-[ -n "$MEASURE_BULLET" ] && [ "$MEASURE_BULLET" = "$MEASURE_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [measurement-date-corpus-or-pair-count-disagree:bullet=($MEASURE_BULLET)-comment=($MEASURE_SCRIPT)]"
-[ -n "$BUILDS_BULLET" ] && [ "$BUILDS_BULLET" = "$BUILDS_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [multi-build-count-disagrees:bullet=($BUILDS_BULLET)-comment=($BUILDS_SCRIPT)]"
-[ -n "$VETO_BULLET" ] && [ "$VETO_BULLET" = "$VETO_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [text-veto-closures-unstated-or-disagree:bullet=($VETO_BULLET)-comment=($VETO_SCRIPT)]"
 if [ -z "$WITHDRAW_MISS" ]; then
-  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the queueWithdrawals comment, and identically, together with one measurement both carriers state alike: its date, corpus and pair count ($MEASURE_BULLET), the transcripts that span more than one build ($BUILDS_BULLET), and the builds the text veto closed ($VETO_BULLET)" PASS
+  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the gotchas bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the queueWithdrawals comment states once ($FAR_BEFORE records before its remove, $FAR_AFTER after it)" PASS
 else
   check "T24d withdrawal vocabulary drift:$WITHDRAW_MISS" FAIL
 fi
@@ -1111,7 +1141,7 @@ UNMEASURED_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oE 'QUEUE_UNMEASURED([^A
 [ "$UNMEASURED_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [QUEUE_UNMEASURED-spelled-$UNMEASURED_USES-times-not-2]"
 printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF '`takeover.queueMeasured: false`' || ROUTER_MISS="$ROUTER_MISS [table-probably-free-row-lacks-the-field]"
 if [ -z "$ROUTER_MISS" ]; then
-  check "T24e all three routers of an unmeasured PROBABLY_FREE — show's advice, the takeover brief's step 4 and release's go/no-go gate — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
+  check "T24e all three routers of an unmeasured PROBABLY_FREE — show's advice, the takeover brief's step 4 and release's --force gate — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
 else
   check "T24e unmeasured-queue routing drift:$ROUTER_MISS" FAIL
 fi
@@ -1178,8 +1208,8 @@ fi
 ANSWERED_MISS=""
 FORCE_HEAD='**`--force` writes nothing and forces nothing on disk.**'
 ROUTING_HEAD='`STATUS LIVE` on its own is **not** a reason to refuse'
-FORCE_PARA="$(grep -F -- "$FORCE_HEAD" "$SKILL_MD" || true)"
-FORCE_PARA_N="$(grep -cF -- "$FORCE_HEAD" "$SKILL_MD" || true)"
+FORCE_PARA="$(grep -F -- "$FORCE_HEAD" "$REF_COMMANDS" || true)"
+FORCE_PARA_N="$(grep -cF -- "$FORCE_HEAD" "$REF_COMMANDS" || true)"
 ROUTING_LINE="$(printf '%s\n' "$WORKFLOWS" | grep -F -- "$ROUTING_HEAD" || true)"
 ROUTING_N="$(printf '%s\n' "$WORKFLOWS" | grep -cF -- "$ROUTING_HEAD" || true)"
 [ "$FORCE_PARA_N" = "1" ] || ANSWERED_MISS="$ANSWERED_MISS [force-paragraph-found-$FORCE_PARA_N-times]"
@@ -1197,7 +1227,7 @@ done
 printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF -- 'the level stays `PROBABLY_FREE`' || ANSWERED_MISS="$ANSWERED_MISS [row-does-not-say-the-level-stays]"
 printf '%s\n' "$ROUTING_LINE" | grep -qF -- '`CONTESTED`, or `takeover.authorized: true` on that `PROBABLY_FREE`, means that one was already answered' || ANSWERED_MISS="$ANSWERED_MISS [routing-sentence-names-only-contested-as-answered]"
 if [ -z "$ANSWERED_MISS" ]; then
-  check "T24j the answered go/no-go of an unmeasured PROBABLY_FREE has one spelling in three places: the --force paragraph, the PROBABLY_FREE row and the routing sentence each name takeover.authorized: true as the recorded answer, the row says the level stays PROBABLY_FREE, and the routing sentence counts it beside CONTESTED as already answered" PASS
+  check "T24j the answered plan confirmation of an unmeasured PROBABLY_FREE has one spelling in three places: the --force paragraph, the PROBABLY_FREE row and the routing sentence each name takeover.authorized: true as the recorded answer, the row says the level stays PROBABLY_FREE, and the routing sentence counts it beside CONTESTED as already answered" PASS
 else
   check "T24j answered unmeasured PROBABLY_FREE drift:$ANSWERED_MISS" FAIL
 fi
@@ -1225,9 +1255,10 @@ else
   check "T24k withdrawal comment carrier drift:$CARRIER_MISS" FAIL
 fi
 
-BRIEF_CAUTION="$(printf '%s\n' "$SAFETY" | grep -E '^- \*\*The briefs embed untrusted text unfenced' || true)"
-SHOW_JSON_PARA="$(printf '%s\n' "$SAFETY" | grep -E '^\*\*`show --json` discloses more than `show` does\.\*\*' || true)"
-TAKEOVER_PARA="$(printf '%s\n' "$SAFETY" | grep -E '^The `takeover` brief embeds the target session' || true)"
+DISCLOSURE="$(cat "$REF_DISCLOSURE")"
+BRIEF_CAUTION="$(printf '%s\n' "$DISCLOSURE" | grep -E '^- \*\*The briefs embed untrusted text unfenced' || true)"
+SHOW_JSON_PARA="$(printf '%s\n' "$DISCLOSURE" | grep -E '^\*\*`show --json` discloses more than `show` does\.\*\*' || true)"
+TAKEOVER_PARA="$(printf '%s\n' "$DISCLOSURE" | grep -E '^The `takeover` brief embeds the target session' || true)"
 WD_HEADING_DOC="$(sed -n "s/^const WITHDRAWN_HEADING = '\(.*\)';$/\1/p" "$TRAIL_MJS")"
 WD_HEADING_LEAD="${WD_HEADING_DOC%% — *}"
 WDDOC_MISS=""
@@ -1257,7 +1288,7 @@ else
   check "T24l withdrawn-prompt carrier documentation drift:$WDDOC_MISS" FAIL
 fi
 
-HANDOFF_FLOW="$(awk '/^### 4\. Handoff brief/{f=1;next} /^###? /{f=0} f' "$SKILL_MD")"
+HANDOFF_FLOW="$(awk '/^## 4\. Handoff brief/{f=1;next} /^## /{f=0} f' "$REF_HANDOFF")"
 HANDOFF_STEP3="$(printf '%s\n' "$HANDOFF_FLOW" | grep -E '^3\. Write it with the \*\*Write tool\*\*' || true)"
 RECEIVING_PARA="$(printf '%s\n' "$HANDOFF_FLOW" | grep -E '^When \*receiving\* a handoff' || true)"
 BDC_DOC_MISS=""
@@ -1288,7 +1319,7 @@ fi
 # required to be exactly one of the two spellings, and both sets are counted.
 FORCE_MISS=""
 grep -qF "a === '--force'" "$TRAIL_MJS" || FORCE_MISS="$FORCE_MISS [not-parsed]"
-TOOL_SECTION="$(section_of '## The tool')"
+TOOL_SECTION="$(cat "$REF_COMMANDS")"
 printf '%s\n' "$TOOL_SECTION" | grep -qF '`--force`' || FORCE_MISS="$FORCE_MISS [not-documented]"
 printf '%s\n' "$TOOL_SECTION" | grep -qF 'writes nothing' || FORCE_MISS="$FORCE_MISS [no-write-contract]"
 printf '%s\n' "$TOOL_SECTION" | grep -qF 'selector-less' || FORCE_MISS="$FORCE_MISS [survey-rule-undocumented]"
@@ -1326,20 +1357,13 @@ fi
 # surfaces only at `git commit`, after the work is done. These pins hold the
 # disclosure and the route in the file, since prose is the entire fix.
 
-# flow_of <heading> — one '### ' sub-section of Workflows, so a flow-3 pin cannot
-# be satisfied by the same words appearing in a sibling flow. Same purpose as
-# section_of above, one level down.
-flow_of() {
-  awk -v h="$1" 'index($0,h)==1{f=1;next} /^###? /{f=0} f' "$SKILL_MD"
-}
-
 # One spelling per needle, consumed by BOTH the negative arm and its control —
 # the idiom HOME_SKILL_PATH/BARE_COMMAND_REF already establish in this file. Two
 # independent literals let a narrowed arm keep a control that fences the old one.
 ESCAPE_LITERAL='ZENSU_BASH_WRITE_GATE'
 ORDINAL_NEEDLE='Flow 3 step'
 
-FLOW3="$(flow_of '### 3. Take over')"
+FLOW3="$(cat "$REF_TAKEOVER")"
 ANCHOR_MISS=""
 [ -n "$FLOW3" ] || ANCHOR_MISS="$ANCHOR_MISS [flow-3-heading-not-found]"
 printf '%s\n' "$FLOW3" | grep -qF 'anchored to that worktree' || ANCHOR_MISS="$ANCHOR_MISS [route-rule-missing]"
@@ -1421,10 +1445,10 @@ else
   check "T26b the escape-literal pattern no longer matches its control fixture — T26's negative arm is inert" FAIL
 fi
 # The whole file, not just flow 3: the Limits bullet carried the literal too.
-if grep -qF "$ESCAPE_LITERAL" "$SKILL_MD"; then
-  check "T26c no escape literal survives anywhere in SKILL.md" FAIL
+if all_md | grep -qF "$ESCAPE_LITERAL"; then
+  check "T26c no escape literal survives anywhere in the skill's markdown" FAIL
 else
-  check "T26c no escape literal survives anywhere in SKILL.md" PASS
+  check "T26c no escape literal survives anywhere in the skill's markdown" PASS
 fi
 
 # T27 — the script's own line is a CONVENIENCE with a stated caveat, not the
@@ -1527,7 +1551,7 @@ fi
 # T28 — the Limits bullet. The asymmetry is the part that gets rediscovered: a
 # maintainer who reads only "the gate blocks foreign worktrees" would expect the
 # edits to fail too, and they do not.
-LIMITS_SECTION="$(section_of '## Limits of what this can know')"
+LIMITS_SECTION="$(section_of '## Limits of what this can know' "$REF_LIMITS")"
 LIMITS_MISS=""
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'but not commit it' || LIMITS_MISS="$LIMITS_MISS [asymmetry-bullet-missing]"
 printf '%s\n' "$LIMITS_SECTION" | grep -qF 'With the opt-in source-write gate on' || LIMITS_MISS="$LIMITS_MISS [asymmetry-not-bounded-to-the-opt-in]"
@@ -1677,8 +1701,8 @@ else
   # PLAIN-TEXT bound did not.
   case "$CONTROL_CLASS" in *'p{Cf}'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-the-format-block($CONTROL_CLASS)]" ;; esac
   # `briefPath` belongs here too, and its absence was the defect: it bounded with
-  # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
-  # was the only one of the three not covered by the shared class.
+  # `oneLine` alone, whose `/\s+/` missed ESC/C0/DEL/C1 at the time — so the
+  # PERSISTED carrier was the only one of the three not covered by the shared class.
   for helper in flatPath briefShellArg briefPath; do
     printf '%s\n' "$TRAIL_CODE" | grep -A2 "^function ${helper}(" | grep -qF 'CONTROL_RUN' \
       || CAUTION_MISS="$CAUTION_MISS [${helper}-does-not-use-CONTROL_RUN]"
@@ -1694,8 +1718,8 @@ fi
 # twice: first the `- worktree:` bullets, then the `- branch:` and touched-file
 # rows. The alternation is the roster of values that come out of ANOTHER session's
 # records — its transcript, its `~/.claude/sessions/` registry entry, or the
-# desktop store. (It already contains `r.app.instance`, which is desktop-store
-# derived, so "transcript" alone never described the class.) A NEW one has to be
+# desktop store. (The `r.app` config fields are desktop-store derived, so
+# "transcript" alone never described the class.) A NEW one has to be
 # added here, because nothing derives it.
 #
 # `grep -E` deliberately, matching every other alternation in this file — a BRE
@@ -1708,15 +1732,14 @@ fi
 # unbounded, which is why the control below asserts the pattern in BOTH directions.
 # The trailing class after each name is a hand-rolled word boundary: `\b` is a GNU
 # extension, and without it `r.cwd` also matches the innocuous `r.cwdExists`.
-# `r.title` and the three `r.app` config fields joined this roster with the same
+# `r.title` and the three `r.app` config fields are on this roster with the same
 # argument the others carry: they come from the SAME third-party stores — another
-# session's registry and the desktop app's `local_*.json` — as `r.app.instance`,
-# which sits one line away from them in `cmdShow` and was already listed.
+# session's registry and the desktop app's `local_*.json`.
 # The `s.` spellings are the SAME fields from the SAME store, rendered by
 # `cmdInstances` under a different binding — an `r.`-anchored roster could not see
 # them, which is how three unbounded carriers survived a round that hardened their
 # `cmdShow` twins one line apart.
-BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(instance|model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
+BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
 # `oneLine(` and `basename(` are deliberately NOT here: neither swaps a backtick,
 # so exempting them would certify a carrier that still closes a code span — the
 # very property this check asserts two paragraphs above. Nothing in the tree
@@ -1747,9 +1770,13 @@ RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . 
 # is compared, not clipped); `briefPath`/`oneLine` also remove a line break.
 # `oneLine\(` is NOT a compliant wrapper here, and admitting it was the structural
 # cause of two separate leaks. This roster is the only check that scans plain-text
-# print carriers for an unbounded third-party value, and `oneLine` collapses
-# `/\s+/` ONLY — JS `\s` excludes ESC, the rest of C0, DEL and C1, which is the
-# class that can overwrite a row the reader already trusted. While `oneLine(` sat
+# print carriers for an unbounded third-party value, and it certifies a SPELLING:
+# every accepted one routes through `CONTROL_RUN`, which T29 checks above, or
+# prints only text this tool computes. `oneLine` strips that class too, but only
+# through its delegation to `boundText` in the ledger module, which this roster
+# does not check. Before that delegation it collapsed `/\s+/` ONLY — JS `\s`
+# excludes ESC, the rest of C0, DEL and C1, which is the class that can overwrite
+# a row the reader already trusted. While `oneLine(` sat
 # in this alternation, every carrier still using it was invisible here: the BRANCH
 # row and the STATUS/CONFIG rows both passed for that reason alone, one line below
 # an OWNER row that had been moved to `flatPath` precisely because of this class.
@@ -1866,14 +1893,14 @@ NESTED_GAP='  L.push(`- x: ${r.wt ? `a ${z}` : ""}`);'
   || RAW_CTL_BAD="$RAW_CTL_BAD nested-outer-text-now-seen-update-the-stated-gap"
 # A weaker wrapper must NOT be accepted: `oneLine` clips but never neutralizes a
 # backtick, so an `oneLine`-wrapped carrier inside a code span is still a leak.
-# `r.app.instance` has no incidental cover: unlike `r.title`, its interpolation
+# `r.app.model` has no incidental cover: unlike `r.title`, its interpolation
 # carries no other roster name, so the scan could not see it unwrapped.
-APP_INSTANCE_CONTROL='  L.push(`- owning desktop instance: ${r.app.instance}`);'
-APP_INSTANCE_ANTICONTROL='  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);'
-[ "$(printf '%s\n' "$APP_INSTANCE_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
-  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-carrier-not-seen"
-[ "$(printf '%s\n' "$APP_INSTANCE_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
-  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-wrapped-carrier-flagged"
+APP_FIELD_CONTROL='  L.push(`- model: ${r.app.model}`);'
+APP_FIELD_ANTICONTROL='  L.push(`- model: ${briefPath(r.app.model)}`);'
+[ "$(printf '%s\n' "$APP_FIELD_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-field-carrier-not-seen"
+[ "$(printf '%s\n' "$APP_FIELD_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-field-wrapped-carrier-flagged"
 # Two-direction control for the plain-text scan, same convention as the brief one.
 PRINT_CONTROL='  print(`WORKTREE ${r.wt}`);'
 PRINT_ANTICONTROL='  print(`WORKTREE ${flatPath(r.wt)}`);'
@@ -1938,18 +1965,18 @@ if [ "${T31_N:-0}" -lt 5 ]; then
   T31_BAD="$T31_BAD reasonCode-set-not-extractable(found=${T31_N:-0})"
 else
   for c in $T31_CODES; do
-    grep -qF "\`$c\`" "$SKILL_MD" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
+    all_md | grep -qF "\`$c\`" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
   done
 fi
 # The branchable field must be NAMED as such, and the prose field marked as not one.
-grep -qF 'Branch on `writes.reasonCode`' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
-grep -qF 'do not match on it' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
+all_md | grep -qF 'Branch on `writes.reasonCode`' || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
+all_md | grep -qF 'do not match on it' || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
 # The fail-safe reading, which is the one a consumer gets wrong by writing the
 # natural `=== false`.
-grep -qF 'Treat `null` as denied' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
+all_md | grep -qF 'Treat `null` as denied' || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
 # `sourceTrusted` exists so the soundness downgrade stops being keyed on a display
 # label at two independent sites; a consumer needs to know which way it reads.
-grep -qF 'writes.sourceTrusted' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
+all_md | grep -qF 'writes.sourceTrusted' || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
 # Control: the extraction must find the codes it is meant to check, or the loop
 # above passes by iterating over nothing.
 case "$T31_CODES" in *weak-channel*) ;; *) T31_BAD="$T31_BAD extraction-missed-a-known-code" ;; esac
@@ -1972,7 +1999,7 @@ T32_MISS=""
 # transcript and the desktop record -- a file-wide negative would fail on three
 # correct rows and force them to be reworded to satisfy a check about a different
 # file entirely.
-LEDGER_CLAIMS="$(grep -E 'edge|ledger|lineage --json' "$SKILL_MD" | grep -vE '^\| `<config root>/(sessions|projects)|^\| `~/Library')"
+LEDGER_CLAIMS="$(all_md | grep -E 'edge|ledger|lineage --json' | grep -vE '^\| `<config root>/(sessions|projects)|^\| `~/Library')"
 printf '%s' "$LEDGER_CLAIMS" | grep -qE '`cwd`|absolute .?cwd.?' && T32_MISS="$T32_MISS [cwd-still-listed]"
 printf '%s' "$LEDGER_CLAIMS" | grep -qE '`title`|session title' && T32_MISS="$T32_MISS [title-still-listed]"
 printf '%s' "$LEDGER_CLAIMS" | grep -q 'sessionId`, `accountUuid`, `appPid`, `pid`, `worktree` and `branch`' || T32_MISS="$T32_MISS [current-field-list-absent]"
@@ -1993,15 +2020,15 @@ fi
 # one that can. Both halves are documented, because the removal path is what makes
 # the permanence claim survivable.
 T33_MISS=""
-grep -q 'lineage --forget' "$SKILL_MD" || T33_MISS="$T33_MISS [forget-undocumented]"
-grep -q 'label --remove' "$SKILL_MD" || T33_MISS="$T33_MISS [label-remove-undocumented]"
+all_md | grep -q 'lineage --forget' || T33_MISS="$T33_MISS [forget-undocumented]"
+all_md | grep -q 'label --remove' || T33_MISS="$T33_MISS [label-remove-undocumented]"
 # The ORDERED vocabulary, not the bare word. `grep -q 'confidence'` was satisfied
 # by the term appearing anywhere in a 239-line file, so the paragraph could lose a
 # tier or the order and stay green -- and the paragraph it nominally guards is
 # exactly the one a review found contradicted by the code.
-grep -qF '`confirmed` > `provisional` > `inferred`' "$SKILL_MD" || T33_MISS="$T33_MISS [tier-order-undocumented]"
+all_md | grep -qF '`confirmed` > `provisional` > `inferred`' || T33_MISS="$T33_MISS [tier-order-undocumented]"
 for tier in confirmed provisional inferred; do
-  grep -qF "\`$tier\`" "$SKILL_MD" || T33_MISS="$T33_MISS [tier-$tier-undocumented]"
+  all_md | grep -qF "\`$tier\`" || T33_MISS="$T33_MISS [tier-$tier-undocumented]"
 done
 if [ -z "$T33_MISS" ]; then
   check "T33 SKILL.md documents the removal path and the confidence tier" PASS
@@ -2013,10 +2040,10 @@ fi
 # performs it must say so where the decision is taken, not only in a Safety
 # section the reader may reach afterwards.
 T34_MISS=""
-FLOW3="$(awk '/^### 3\. Take over/{f=1;next} /^### /{f=0} f' "$SKILL_MD")"
+FLOW3="$(cat "$REF_TAKEOVER")"
 printf '%s' "$FLOW3" | grep -q 'no Write-tool hook' || T34_MISS="$T34_MISS [flow3-ungated-write]"
 printf '%s' "$FLOW3" | grep -q -- '--no-record' || T34_MISS="$T34_MISS [flow3-opt-out]"
-grep -q 'confidential' "$SKILL_MD" || T34_MISS="$T34_MISS [confidential-worktree]"
+all_md | grep -q 'confidential' || T34_MISS="$T34_MISS [confidential-worktree]"
 if [ -z "$T34_MISS" ]; then
   check "T34 the take-over flow states the ungated write and its opt-out where the decision is made" PASS
 else
@@ -2083,7 +2110,7 @@ T35_EXPECT=20
 # and `mktemp` both occur in unrelated passages (the write-anchor discussion names a
 # symlink as a cause of an ambiguous spelling), so a whole-file grep there passes while
 # the recipe's own rationale is gone.
-STEP4="$(awk '/^4\. \*\*Decide WHERE to continue/{f=1} f{print} /^### 4\. Handoff brief/{f=0}' "$SKILL_MD")"
+STEP4="$(awk '/^4\. \*\*Decide WHERE to continue/{f=1} f{print}' "$REF_TAKEOVER")"
 T35B_MISS=""
 # The slice has a guarded START and, until now, an unguarded END: a reworded opening
 # sentence yields an empty slice and fails loudly, while a reworded TERMINATOR yields a
@@ -2103,9 +2130,9 @@ printf '%s\n' "$ADVICE_SRC" | grep -q '^const WORKTREE_ADVICE_COMMAND' && ADVICE
 # That is the exact failure mode the anchor above had.
 grep -q '^const WORKTREE_ADVICE_COMMAND' "$TRAIL_MJS" || ADVICE_UNBOUNDED=2
 STEP4_UNBOUNDED=0
-printf '%s' "$STEP4" | grep -q '^### 5\.' && STEP4_UNBOUNDED=1
+printf '%s' "$STEP4" | grep -q '^#' && STEP4_UNBOUNDED=1
 if [ -z "$STEP4" ]; then
-  check "T35b-control flow 3 step 4 could not be extracted from SKILL.md, so both the command and the rationale scans are vacuous" FAIL
+  check "T35b-control flow 3 step 4 could not be extracted from references/takeover.md, so both the command and the rationale scans are vacuous" FAIL
 elif [ "$STEP4_UNBOUNDED" = "1" ]; then
   check "T35b-control the flow 3 step 4 slice ran past its terminator into a later section, so both scans are whole-file again" FAIL
 elif [ "$ADVICE_UNBOUNDED" = "1" ]; then
@@ -2192,7 +2219,7 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'including the one you just created as a sibling' || T35B_MISS="$T35B_MISS [route-vs-rule-paragraph]"
   printf '%s' "$STEP4" | grep -qF 'but it still decides the `-b`' || T35B_MISS="$T35B_MISS [recorded-subdirectory-paragraph]"
   # The MOVE alternative's prose. `T35` above pins its COMMAND and nothing else, so without
-  # these the attestation and the whole cost paragraph are deletable with both suites green,
+  # these the authorization and the whole cost paragraph are deletable with both suites green,
   # leaving a bare fenced command that relocates another session's worktree with no
   # condition beside it. Each needle is unique to the paragraph it defends — the emitted
   # copy is pinned separately by the `WT8v`/`WT8w` move-route family in the verdict suite, and the two carriers
@@ -2207,7 +2234,7 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'while a Zensu chain is armed' || T35B_MISS="$T35B_MISS [move-ledger-bound]"
   printf '%s' "$STEP4" | grep -qF 'never spelled, and never prescribed' || T35B_MISS="$T35B_MISS [move-escape-not-prescribed]"
   printf '%s' "$STEP4" | grep -qF 'and only when that session has the opt-in gate on' || T35B_MISS="$T35B_MISS [move-gate-opt-in-bound]"
-  printf '%s' "$STEP4" | grep -qF 'the refusal no longer names it either' || T35B_MISS="$T35B_MISS [move-refusal-names-no-escape]"
+  printf '%s' "$STEP4" | grep -qF 'the refusal does not name it either' || T35B_MISS="$T35B_MISS [move-refusal-names-no-escape]"
   printf '%s' "$STEP4" | grep -qF 'The refusal itself carries' && T35B_MISS="$T35B_MISS [move-refusal-still-carries-the-prefix]"
   # The CONSEQUENCE of taking the escape anyway, which the two needles above do not reach:
   # they pin that the gate judges both operands and that the escape is not prescribed, and
@@ -2217,8 +2244,8 @@ EOF
   # The MOVE route's OWN stop condition and its fsmonitor disclosure, both in the `**Before you
   # run it:**` bar and both unpinned on EITHER carrier until now. The move route has FIVE
   # sibling paragraphs in this flow — the `**One ALTERNATIVE**` lead, the same-branch bound, the
-  # human-attestation one, the cost one and the three-gate-claims one — and FOUR of them got
-  # needles; the attestation paragraph got none, which the third needle below repairs. The bar
+  # arm-predicate one, the cost one and the three-gate-claims one — and FOUR of them got
+  # needles; the arm-predicate paragraph got none, which the third needle below repairs. The bar
   # guards the one rendered command this flow calls "the one rendered command in this flow that
   # writes to the source worktree with no refusal standing in front of it", and it DECLARES its
   # own obligation in as many words: "`T35` pins only the command literal, so this prose half
@@ -2226,7 +2253,7 @@ EOF
   # `WT8v11`/`WT8v11b` in the verdict suite — a FAMILY rather than an enumeration, because the
   # three that shipped with these needles (`WT8v10c`, `WT8v10d`, `WT8v11b`) were missing from
   # the enumeration on the day it was written, which is the census drift this block repairs
-  # one paragraph up — NOT `WT8v3`, which pins the attestation
+  # one paragraph up — NOT `WT8v3`, which pins the authorization
   # sentence and reaches neither half of this bar. Note the fsmonitor needle already present at
   # the top of this block matches the CARRY-OVER bullet's `fsmonitor` hook rationale, not this
   # bar's `-c core.fsmonitor=false` disclosure, so it does not cover this.
@@ -2241,8 +2268,9 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'if it is a tree you would not `cd` into, stop and take the create route instead' || T35B_MISS="$T35B_MISS [move-stop-condition]"
   printf '%s' "$STEP4" | grep -qF '**Before you run it:** `<their worktree>` is a repository you have not vetted' || T35B_MISS="$T35B_MISS [move-unvetted-tree]"
   printf '%s' "$STEP4" | grep -qF 'deliberately not an arm predicate' || T35B_MISS="$T35B_MISS [move-attestation-not-a-predicate]"
+  printf '%s' "$STEP4" | grep -qF 'it is offered whatever the other session is doing' || T35B_MISS="$T35B_MISS [move-offered-whatever-the-activity]"
+  printf '%s' "$STEP4" | grep -qF "$OLD_MOVE_ATTESTATION" && T35B_MISS="$T35B_MISS [move-attestation-is-back]"
   printf '%s' "$STEP4" | grep -qF '`worktree move` **does** consult that config' || T35B_MISS="$T35B_MISS [move-fsmonitor-consulted]"
-  printf '%s' "$STEP4" | grep -qF 'a control proving the hook fires' || T35B_MISS="$T35B_MISS [move-fsmonitor-control]"
   printf '%s' "$STEP4" | grep -qF 'is not a working tree' || T35B_MISS="$T35B_MISS [move-same-repo-enforced]"
   # The CARRY-OVER escape sentence, which no needle here covered: T35 pins two-space command
   # literals and this is prose, so the SKILL.md half of the stop condition could be deleted
@@ -2394,11 +2422,6 @@ fi
 # only the spec reproduces the exact defect this change already hit once: the HTML twin of
 # a sentence corrected in the spec was missed, and stayed wrong for a full round with every
 # suite green. One carrier graded is one carrier that drifts silently.
-#
-# Row 3's regex carries its own line NUMBER, because the spec cites SKILL.md twice and a
-# generic `SKILL\.md:[0-9]+` cannot tell the two apart. So when that citation is
-# re-derived, the regex here moves with it — that is the one row where fixing the doc is
-# not enough.
 T36_MISS=""
 T36_ROWS=0
 t36_cite() { # <cited-file> <needle> <citing-file> <citation-regex>
@@ -2437,11 +2460,10 @@ T36_SPEC="$PLUGIN_DIR/docs/multi-repo-chains-spec.md"
 T36_HTML="$PLUGIN_DIR/docs/multi-repo-chains-overview.html"
 t36_cite "$TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
 t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
-t36_cite "$SKILL_MD" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/SKILL\.md:77'
-t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/SKILL\.md:3[0-9]+'
+t36_cite "$REF_COMMANDS" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/references/commands\.md:[0-9]+'
+t36_cite "$REF_LIMITS" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/references/limits\.md:[0-9]+'
 # For THESE three the HTML spells each citation as its own `<p class="src">` line, so the
-# two trail.mjs rows need distinguishing regexes exactly as the spec's two SKILL.md rows
-# do. That is not a property of the document — elsewhere it puts two citations on one
+# two trail.mjs rows need distinguishing regexes. That is not a property of the document — elsewhere it puts two citations on one
 # `<p class="src">` line separated by a middot, which is what the match-count guard above
 # exists to catch if a future row lands on such a line.
 #
@@ -2467,7 +2489,7 @@ t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-
 # clothes. A LOWER BOUND with an open top is what survives growth; it costs the ability to tell
 # this citation from a future third one above 3000, which is a trade to re-take if one lands.
 t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
-t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:3[0-9]+'
+t36_cite "$REF_LIMITS" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/references/limits\.md:[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
 # docs grew that no row covers — a `session-lineage-v1.mjs:NNN` would be graded by
@@ -2496,7 +2518,7 @@ fi
 T37_LABELS="$(awk '/const candidates = \[/{f=1} f{print} f&&/\];/{exit}' "$TRAIL_MJS" \
   | grep -oE "label: '[A-Za-z:_-]+'" | sed "s/label: '//; s/'$//" | sed 's/^env://; s/^flag://' | sort -u)"
 T37_ABSOLUTE='**only** when `ZENSU_PROJECT_ROOT` or `CLAUDE_PROJECT_DIR` is present in its own environment'
-T37_LINE="$(grep -F 'answers `allowed` or `denied here`' "$SKILL_MD" | head -1)"
+T37_LINE="$(grep -F 'answers `allowed` or `denied here`' "$REF_TAKEOVER" | head -1)"
 T37_MISS=""
 [ -n "$T37_LINE" ] || T37_MISS="$T37_MISS writes-sentence-not-found"
 [ -n "$T37_LABELS" ] || T37_MISS="$T37_MISS candidate-labels-not-derived"
@@ -2532,7 +2554,7 @@ esac
 # loudly rather than silently taking the whole file as its slice.
 T38_MISS=""
 t38_slice() { # <opening literal>
-  awk -v pat="$1" 'index($0, pat) { f = 1 } f { if (f > 1 && $0 ~ /^[[:space:]]*$/) exit; print; f = 2 }' "$SKILL_MD"
+  awk -v pat="$1" 'index($0, pat) { f = 1 } f { if (f > 1 && $0 ~ /^[[:space:]]*$/) exit; print; f = 2 }' "${2:-$SKILL_MD}"
 }
 t38_need() { # <label> <slice> <needle...>
   local label="$1" slice="$2"; shift 2
@@ -2542,14 +2564,14 @@ t38_need() { # <label> <slice> <needle...>
     case "$slice" in *"$n"*) ;; *) T38_MISS="$T38_MISS [$label:$n]" ;; esac
   done
 }
-T38_ROW="$(t38_slice '| `adopt <selector>` |')"
-T38_STEP6="$(t38_slice 'Read the guidance it prints')"
-T38_DISCLOSE="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more')"
+T38_ROW="$(t38_slice '| `adopt <selector>` |' "$REF_COMMANDS")"
+T38_STEP6="$(t38_slice 'Read the guidance it prints' "$REF_HANDOFF")"
+T38_DISCLOSE="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more' "$REF_DISCLOSURE")"
 # The Safety slice opens on a literal unique to THAT bullet, never on the needle it is about to
 # assert. Opening it on `ZENSU_SESSION_LINEAGE=off` matched the FIRST occurrence — flow 3 step 0's
 # decline list, a different passage — and then re-asserted its own opening literal, so the arm
 # could only ever report `slice-empty` and the Safety bullet was pinned by nothing.
-T38_SAFETY="$(t38_slice 'The ledger write is the one persistence this skill performs')"
+T38_SAFETY="$(t38_slice 'The ledger write is the one persistence this skill performs' "$REF_DISCLOSURE")"
 t38_need adopt-row "$T38_ROW" 'carry-over recipe' 'worktreeAdvice'
 t38_need flow5-step6 "$T38_STEP6" 'WHERE' 'carry-over' 'recorded directory is gone'
 t38_need disclosure "$T38_DISCLOSE" 'WHERE' 'worktreeAdvice'
@@ -2559,7 +2581,7 @@ t38_need safety-bullet "$T38_SAFETY" 'ZENSU_SESSION_LINEAGE=off' '--no-record'
 # Destination section, and the three renderer pins in code. T35's slice is anchored on flow 3
 # STEP 4, which begins below this line, so nothing reached it and the enumeration could drift
 # back to two with every suite green.
-grep -qF 'which `handoff`, `takeover` and `adopt` render' "$SKILL_MD" \
+all_md | grep -qF 'which `handoff`, `takeover` and `adopt` render' \
   || T38_MISS="$T38_MISS [renderer-trio-enumeration]"
 # The `--json` KEY, pinned across both carriers. The table row tells a consumer the field is
 # called `worktreeAdvice`; nothing compared that against the producer, so a rename left the
@@ -2570,21 +2592,21 @@ grep -qF 'worktreeAdvice: worktreeAdvice(row)' "$TRAIL_MJS" \
 # consumer that matched the success token unanchored now reads a refused handover as a
 # recorded one. The suites anchor at line start and say why in test prose; nothing stated it
 # where a consumer of the command would look.
-grep -qF 'anchor it at the start of the line' "$SKILL_MD" \
+all_md | grep -qF 'anchor it at the start of the line' \
   || T38_MISS="$T38_MISS [receipt-slot-collision-undisclosed]"
 # The BOUNDED carry-over claim. Flow 5 step 6 serves the hand-resume route, and a hand-resume
 # lands the taker IN the source worktree -- where the patch step snapshots their own edits too.
 # "Still fully actionable" was unsound on the very route the paragraph documents.
-grep -qF 'only while you have written nothing into that tree yourself' "$SKILL_MD" \
+all_md | grep -qF 'only while you have written nothing into that tree yourself' \
   || T38_MISS="$T38_MISS [carry-over-claim-unbounded]"
-case "$(cat "$SKILL_MD")" in
+case "$(all_md)" in
   *"The carry-over half is still fully actionable"*) T38_MISS="$T38_MISS [unbounded-claim-returned]" ;;
 esac
 # The PID clause, stated by PRODUCER. The leading clause scoped the pid disclosure to the
 # present leg and attributed it to both producers, and the sentence after it said that exact
 # scoping was wrong -- two opposite answers in adjacent sentences, in the disclosure section a
 # reader consults to decide what `adopt` leaks.
-grep -qF 'on the present leg from the snapshot caution, and on either leg from the live arm' "$SKILL_MD" \
+all_md | grep -qF 'on the present leg from the snapshot caution, and on either leg from the live arm' \
   || T38_MISS="$T38_MISS [pid-clause-not-stated-by-producer]"
 if [ -z "$T38_MISS" ]; then
   check "T38 the four adopt-advice carriers, the renderer trio and the receipt-slot collision are pinned" PASS
@@ -2601,18 +2623,18 @@ t39_need() {
     case "$slice" in *"$n"*) ;; *) T39_MISS="$T39_MISS [$label:$n]" ;; esac
   done
 }
-t39_need selector-paragraph "$(t38_slice '`<selector>` is resolved in this order')" \
+t39_need selector-paragraph "$(t38_slice '`<selector>` is resolved in this order' "$REF_COMMANDS")" \
   'Your own session is never picked by the last five' '`CLAUDE_CODE_SESSION_ID`' '(this is your own session)' '`selfSkipped`' 'a session never adopts itself'
-t39_need flow4-step1 "$(t38_slice 'trail.mjs" handoff <selector>`')" \
+t39_need flow4-step1 "$(t38_slice 'with `handoff <selector>`' "$REF_HANDOFF")" \
   '`"$CLAUDE_CODE_SESSION_ID"`' 'never resolves to the session running the command'
-t39_need busy-row "$(t38_slice 'newest user or assistant record was written within the last 2 min')" \
+t39_need busy-row "$(t38_slice 'newest user or assistant record was written within the last 2 min' "$REF_TAKEOVER")" \
   'non-turn record written since does not count'
-t39_need activity-gotcha "$(t38_slice "**A session's activity")" \
+t39_need activity-gotcha "$(t38_slice "**A session's activity" "$REF_GOTCHAS")" \
   'lastTurn.at' 'lastTurn.activityAt' '`lastActivity`' '(file last written' '`--days` scan window' 'lineage --backfill' \
   'a tool call writes its result record only when it returns'
-t39_need show-json-disclosure "$(t38_slice '**`show --json` discloses more than `show` does.**')" \
+t39_need show-json-disclosure "$(t38_slice '**`show --json` discloses more than `show` does.**' "$REF_DISCLOSURE")" \
   '`selfSkipped` describes this session too'
-T39_ADOPT="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more')"
+T39_ADOPT="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more' "$REF_DISCLOSURE")"
 T39_DOC_KEYS="$(printf '%s\n' "$T39_ADOPT" | grep -oE '`\{recorded: null[^}]*\}`' | head -1 | sed -E 's/^`\{//; s/\}`$//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
 T39_CODE_KEYS="$(grep -F 'print(JSON.stringify({ recorded: null, file: null, error: why,' "$TRAIL_MJS" | head -1 | sed -E 's/.*JSON\.stringify\(\{ //; s/ \}, null, 2\).*//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
 T39_COUNT_WORD="$(printf '%s\n' "$T39_ADOPT" | grep -oE '`\{recorded: null[^}]*\}` — [a-z]+ fields' | head -1 | sed -E 's/.* — ([a-z]+) fields$/\1/')"

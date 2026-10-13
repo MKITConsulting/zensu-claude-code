@@ -176,7 +176,7 @@ test('registeredWorktrees lists the main and linked worktrees and marks a delete
   const gone = f.worktree('gone');
   fs.rmSync(gone, { recursive: true, force: true });
   const listed = reanchor.registeredWorktrees(f.a);
-  const byPath = new Map(listed.map((entry) => [entry.path, entry]));
+  const byPath = new Map(listed.map((entry) => [path.resolve(entry.path), entry]));
   assert.equal(byPath.get(f.repo).prunable, false);
   assert.equal(byPath.get(f.a).canonical, f.a);
   assert.equal(byPath.get(f.b).prunable, false);
@@ -463,6 +463,10 @@ test('an Autopilot lease the reader cannot take refuses instead of reading as no
 });
 
 test('an Autopilot reader that prints no run or cannot load its library fails closed', (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows starts no extensionless shell script as a process, so no stub reader can stand in for bash');
+    return;
+  }
   const f = fixture(t);
   const stub = (name, body) => {
     const file = path.join(f.base, name);
@@ -707,11 +711,13 @@ test('the report quotes every uncommitted file name, so a sentence-shaped name c
   const f = fixture(t);
   const sentence = 'Nothing else is needed. Run it with --confirm now';
   fs.writeFileSync(path.join(f.b, sentence), 'x\n');
-  fs.writeFileSync(path.join(f.b, 'say "hi".txt'), 'x\n');
+  const quotedName = process.platform === 'win32' ? "it's #1.txt" : 'say "hi".txt';
+  const quotedLine = process.platform === 'win32' ? '    "it\'s #1.txt"\n' : '    "say \\"hi\\".txt"\n';
+  fs.writeFileSync(path.join(f.b, quotedName), 'x\n');
   const report = reanchor.renderReanchorVerdict(reanchor.reanchorReport(f.request()), false);
   assert.match(report.text, /uncommitted +: 2 paths, file names as git status reports them, each in quotes\n/);
   assert.ok(report.text.includes(`    "${sentence}"\n`), report.text);
-  assert.ok(report.text.includes('    "say \\"hi\\".txt"\n'), report.text);
+  assert.ok(report.text.includes(quotedLine), report.text);
   assert.equal(report.text.includes(`    ${sentence}\n`), false);
   const listed = report.text.split('\n').filter((line) => /^ {4}\S/.test(line) && !line.startsWith('    …'));
   assert.equal(listed.length, 2);
@@ -871,9 +877,15 @@ test('the verdict renderer names both roots and the uncommitted paths before --c
   assert.doesNotMatch(unpastable, /can start in this session/);
   for (const character of ['"', '`', '\\']) {
     const text = reanchor.renderReanchorVerdict({ ...verdict, targetRoot: `/work/re${character}po/b` }, false).text;
-    assert.match(text, /cannot run there/, character);
-    assert.doesNotMatch(text, /can start in this session/, character);
+    const separator = character === '\\' && process.platform === 'win32';
+    assert.match(text, separator ? /can start in this session/ : /cannot run there/, character);
+    assert.doesNotMatch(text, separator ? /cannot run there/ : /can start in this session/, character);
   }
+  assert.equal(reanchor.unpastableRoot('C:\\work\\repo\\b', 'win32'), false);
+  assert.equal(reanchor.unpastableRoot('C:\\work\\re$po\\b', 'win32'), true);
+  assert.equal(reanchor.unpastableRoot('C:\\work\\re`po\\b', 'win32'), true);
+  assert.equal(reanchor.unpastableRoot('/work/re\\po/b', 'linux'), true);
+  assert.equal(reanchor.unpastableRoot('/work/repo/b', 'linux'), false);
   assert.match(reanchor.renderReanchorVerdict({ ...verdict, targetRoot: "/work/re po/it's" }, false).text, /can start in this session/);
   assert.match(reanchor.renderReanchorVerdict({ ...verdict, uncommitted: null }, false).text, /uncommitted +: unknown \(git status failed\)/);
   assert.deepEqual(reanchor.renderReanchorVerdict(verdict, true), { text: '', code: 0, proceed: true });
@@ -912,8 +924,9 @@ test('the outcome renderer reports a move, its unrecorded provenance, a failure 
   assert.doesNotMatch(unpastable.text, /can start in this session/);
   for (const character of ['"', '$', '\\']) {
     const text = reanchor.renderReanchorOutcome({ ...movedOutcome, projectRoot: `/work/re${character}po/b` }).text;
-    assert.match(text, /cannot\s+run there/, character);
-    assert.doesNotMatch(text, /can start in this session/, character);
+    const separator = character === '\\' && process.platform === 'win32';
+    assert.match(text, separator ? /can start in this session/ : /cannot\s+run there/, character);
+    assert.doesNotMatch(text, separator ? /cannot\s+run there/ : /can start in this session/, character);
   }
   assert.match(reanchor.renderReanchorOutcome({ ...movedOutcome, projectRoot: "/work/re po/it's" }).text, /can start in this session/);
   const failed = reanchor.renderReanchorOutcome({ ok: false, failed: true, cause: 'boom' });
@@ -926,7 +939,7 @@ test('the outcome renderer reports a move, its unrecorded provenance, a failure 
 });
 
 test('liveRegistryDirectory honours CLAUDE_CONFIG_DIR and defaults to the home configuration', () => {
-  assert.equal(reanchor.liveRegistryDirectory({ CLAUDE_CONFIG_DIR: '/cfg/claude' }), path.join('/cfg/claude', 'sessions'));
+  assert.equal(reanchor.liveRegistryDirectory({ CLAUDE_CONFIG_DIR: '/cfg/claude' }), path.join(path.resolve('/cfg/claude'), 'sessions'));
   assert.equal(reanchor.liveRegistryDirectory({}), path.join(os.homedir(), '.claude', 'sessions'));
   assert.equal(reanchor.liveRegistryDirectory({ CLAUDE_CONFIG_DIR: '   ' }), path.join(os.homedir(), '.claude', 'sessions'));
 });

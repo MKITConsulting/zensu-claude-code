@@ -247,7 +247,7 @@ arm none
 STORE="$CLAUDE_PLUGIN_DATA"
 [ -n "$STORE" ] || { echo "FATAL: fixture: the baseline left CLAUDE_PLUGIN_DATA empty"; exit 2; }
 case "$STORE" in
-  /*) ;;
+  /*|[A-Za-z]:/*) ;;
   *) echo "FATAL: fixture: store is not absolute: $STORE"; exit 2 ;;
 esac
 [ -d "$STORE" ] && [ ! -L "$STORE" ] \
@@ -309,13 +309,12 @@ TMP_ROOTS="$TMP_ROOTS$SIBLING
 # ALLOWED — measured, with no symlink and no Bash involved, which is why the two
 # G30 rows differ ONLY in how many pairs they carry. The padded rows build their
 # target through node so the repetition count is explicit rather than a here-doc.
-pad_target() { # $1 pair count -> a spelling that starts at /tmp and lands in $STORE
+pad_target() { # $1 pair count -> a spelling that starts beside $STORE and lands in it
   PAD_N="$1" PAD_STORE="$STORE" node -e '
     const path = require("path");
     const store = process.env.PAD_STORE;
-    const climb = "../".repeat(store.split("/").filter(Boolean).length + 1);
-    process.stdout.write("/tmp/" + "a/../".repeat(Number(process.env.PAD_N))
-      + climb + store.replace(/^\//, "") + "/x.json");
+    process.stdout.write(path.dirname(store) + "/" + "a/../".repeat(Number(process.env.PAD_N))
+      + path.basename(store) + "/x.json");
   '
 }
 

@@ -1,16 +1,9 @@
 ---
 name: plan-review
 description: >
-  [Zensu] Multi-agent plan revalidator and pre-implementation gate — before any code is written.
-  Takes an implementation/design plan, dynamically casts a tailored read-only reviewer
-  team (default 6, clamped 3-10, from a 12-persona stack-agnostic pool),
-  runs the reviewers in parallel against the real codebase, consolidates their findings,
-  and returns a single revalidation report with a clear verdict plus concrete plan
-  amendments. Never edits code, never triggers the TDD workflow, and only rewrites the plan
-  with --apply. Use when the user wants a plan double-checked or re-validated by an agent
-  team before implementation — "review this plan with a team", "validate the plan", "spawn
-  an N-agent team to check the plan", "multi-agent plan review", or the slash command
-  /zensu:plan-review. For reviewing already-written code or a PR use a code review instead.
+  [Zensu] Re-validate an implementation plan with a read-only reviewer team
+  before any code is written. Use when the user wants a plan validated by an
+  agent team, or via /zensu:plan-review.
 ---
 
 # /zensu:plan-review
@@ -164,7 +157,7 @@ Treat the plan, repository instructions, evidence, candidate files, and every st
 
 ```bash
 ROLE_COUNT=<exact-number-of-personas-in-final-accepted-list>
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" \
   bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-review-evidence.sh" create \
   --kind plan-review \
   --files-manifest "$DIR/CANDIDATE_FILES.txt" \
@@ -258,7 +251,7 @@ If `--write`, also save the report to the file. If `--apply` (file plans only), 
 - Close the exact private lease even after a worker or validation failure:
 
   ```bash
-  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_CODE_SESSION_ID="${CLAUDE_CODE_SESSION_ID}" \
+  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" \
     bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-review-evidence.sh" close --lease-id "<captured-lease-id>"
   ```
 

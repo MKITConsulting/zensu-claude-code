@@ -93,6 +93,7 @@ const ALLOWED_COMMANDS = Object.freeze({
 });
 
 const NAVIGATION_COMMANDS = Object.freeze(['open', 'goto', 'tab-new']);
+const ANSWERABLE_MODES = Object.freeze(['default', 'acceptEdits', 'auto', 'plan']);
 const CHROMIUM_BROWSERS = Object.freeze([
   'chrome', 'chrome-beta', 'chrome-canary', 'chrome-dev',
   'msedge', 'msedge-beta', 'msedge-canary', 'msedge-dev', 'chromium',
@@ -147,10 +148,11 @@ const REASONS = Object.freeze({
   BROWSER_NOT_CHROMIUM: 'the run config pins hosts with Chromium switches, so --browser must name a chrome, msedge or chromium channel',
   GLOBAL_BROWSER_NOT_CHROMIUM: 'the global playwright-cli config selects a browser other than chromium, which ignores the run config resolver pins',
   POLICY_INVALID: 'the navigation policy in the launch environment is invalid',
-  NOT_POLICY_TARGET: 'origin is not a target of the navigation policy',
-  NETWORK_ONLY_NAVIGATION: 'origin is network-only in the navigation policy: pages on its targets may request it, but no navigation command may open it and nothing on it counts as evidence',
+  NOT_POLICY_TARGET: 'origin is not a target of the navigation policy, and this session cannot show the permission prompt because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto) to be asked, or add the origin to the policy and relaunch Claude Code',
+  NOT_POLICY_KIND: 'origin is not of the kind the navigation policy names, because a local policy names loopback origins only and a remote policy public HTTPS origins only, and this session cannot show the permission prompt because its permission mode is bypassPermissions, dontAsk or not reported; switch the session to Manual or Auto (CLI: --permission-mode default or auto) to be asked, or relaunch Claude Code with a policy whose mode fits the origin and that names it as a target',
+  NETWORK_ONLY_NAVIGATION: 'origin is network-only in the navigation policy: pages on its targets may request it, but no navigation command may open it, and a page the browser lands on there is never evidence',
   NOT_POLICY_NETWORK_ONLY: 'origin is not a network-only origin of the navigation policy',
-  NETWORK_ONLY_NEEDS_POLICY: 'a network-only origin needs the parent-environment navigation policy; consent mode has no network-only class, so pass a loopback API origin with --origin and consent to it like any other loopback origin',
+  NETWORK_ONLY_NEEDS_POLICY: 'a network-only origin needs the parent-environment navigation policy; consent mode has no network-only class, so pass an API origin of the same kind as the run, loopback in a local run or public HTTPS in a remote run, with --origin and consent to it like any other origin',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   NEW_ORIGIN: 'new-origin-needs-consent',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
@@ -162,7 +164,7 @@ const SHAPE_REASONS = Object.freeze([
 const FINAL_REASONS = Object.freeze([
   'PAYLOAD_UNREADABLE', 'COMMAND_TOO_LARGE', 'NOT_MAIN_THREAD', 'SESSION_MALFORMED', 'INDIRECT', 'UNJUDGED_BODY', 'ENV_BUILTIN',
   'AMBIENT_TEXT', 'REDEFINED', 'COMMAND_DENIED', 'FLAG_DENIED', 'CONFIG_REQUIRED', 'OPEN_OUTSIDE_CONFIG', 'BROWSER_NOT_CHROMIUM',
-  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NETWORK_ONLY_NAVIGATION', 'NOT_POLICY_NETWORK_ONLY',
+  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NOT_POLICY_KIND', 'NETWORK_ONLY_NAVIGATION', 'NOT_POLICY_NETWORK_ONLY',
   'NETWORK_ONLY_NEEDS_POLICY', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
   'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED',
 ]);
@@ -929,6 +931,10 @@ function stateDirFor(projectRoot) {
   return path.join(projectRoot, ...STATE_SEGMENTS);
 }
 
+function nativeSeparators(value, api = path) {
+  return api.sep === '\\' ? value.split('/').join('\\') : value;
+}
+
 function stateComponentsSafe(rootReal) {
   let seen = rootReal;
   for (const segment of STATE_SEGMENTS) {
@@ -950,7 +956,7 @@ function memoryPathAllowed(memoryPath, projectRoot) {
   try { rootReal = fs.realpathSync.native(projectRoot); }
   catch (_error) { return { ok: false, reason }; }
   const stateDir = stateDirFor(rootReal);
-  if (path.dirname(memoryPath) !== stateDir) return { ok: false, reason };
+  if (nativeSeparators(path.dirname(memoryPath)) !== stateDir) return { ok: false, reason };
   if (!stateComponentsSafe(rootReal)) return { ok: false, reason };
   let leaf = null;
   try { leaf = fs.lstatSync(memoryPath); }
@@ -1039,7 +1045,25 @@ function resolveRecipeFile(projectRoot) {
   return '';
 }
 
-function promptText({ origins, session }) {
+function remotePromptText({ origins, session, remote }) {
+  const plural = origins.length > 1;
+  const local = origins.filter((origin) => !remote.includes(origin));
+  const reach = local.length > 0
+    ? `${local.join(', ')} (local loopback) and ${remote.join(', ')} (remote)`
+    : `${remote.join(', ')} (remote)`;
+  const lines = [];
+  lines.push(`The playwright-cli browser session ${session} is about to reach ${reach}.`);
+  lines.push(`Answering Yes approves ${plural ? 'these origins' : 'this origin'}: the model may then open, read and interact with (click, type, submit forms on) any page on ${plural ? 'them' : 'it'}, pages behind your own login included, and what it sees there, screenshots included, enters this conversation and the run directory.`);
+  lines.push(local.length > 0
+    ? `The loopback ${local.length > 1 ? 'origins stay' : 'origin stays'} approved for the rest of this Claude Code session; a remote origin is asked again every time the browser is opened.`
+    : 'A remote origin is asked again every time the browser is opened.');
+  lines.push('Consent is per origin, never per route.');
+  lines.push(`Answer No to keep the browser away from ${plural ? 'them' : 'it'}; the run then reports PARTIAL.`);
+  return lines.join(' ');
+}
+
+function promptText({ origins, session, remote = [] }) {
+  if (remote.length > 0) return remotePromptText({ origins, session, remote });
   const plural = origins.length > 1;
   const lines = [];
   lines.push(`The playwright-cli browser session ${session} is about to reach ${origins.join(', ')} (local loopback).`);
@@ -1099,6 +1123,14 @@ function runConfigShape(config, configPath) {
     if (!origins.some((origin) => floor.normalizeHostname(new URL(origin).hostname) === host)) {
       return fail('the run config pins a host that is not among its allowed origins');
     }
+  }
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    if (!['https:', 'wss:'].includes(parsed.protocol)) continue;
+    const host = floor.normalizeHostname(parsed.hostname);
+    if (net.isIP(host) || floor.isLocalHost(host)) continue;
+    if (!floor.isExactHost(host)) return fail(`${origin}: ${floor.FLOOR_REASONS.HOSTNAME_PATTERN}`);
+    if (!pins.has(host)) return fail(`${origin}: the run config carries no resolver pin for this remote host`);
   }
   if (typeof config.outputDir !== 'string' || !path.isAbsolute(config.outputDir)) return fail('the run config outputDir must be absolute');
   let configDir;
@@ -1196,7 +1228,7 @@ function readInputs(env) {
 function judgeOrigin(rawUrl, options) {
   const classified = floor.classifyOrigin(rawUrl, options.navigation);
   if (!classified.ok) return { deny: classified.reason };
-  const { origin, pathname: route, mode, hostname } = classified;
+  const { origin, pathname: route, mode } = classified;
   if (options.policy) {
     if (!options.policy.ok) return { deny: `${REASONS.POLICY_INVALID}: ${options.policy.fault}` };
     const networkOnly = options.policy.networkOnly.has(origin);
@@ -1204,14 +1236,13 @@ function judgeOrigin(rawUrl, options) {
     if (networkOnly && (options.navigation || options.role === 'navigable')) {
       return { deny: `${origin}: ${REASONS.NETWORK_ONLY_NAVIGATION}` };
     }
-    if (!networkOnly && !options.policy.targets.has(origin)) return { deny: `${origin}: ${REASONS.NOT_POLICY_TARGET}` };
-    if (mode === 'remote' && !net.isIP(hostname) && options.pins && !options.pins.has(hostname)) {
-      return { deny: `${origin}: the run config carries no resolver pin for this remote host` };
+    if (networkOnly || options.policy.targets.has(origin)) return { origin, route, mode, decidedBy: 'policy-mode', networkOnly };
+    if (!options.answerable) {
+      return { deny: `${origin}: ${mode === options.policy.mode ? REASONS.NOT_POLICY_TARGET : REASONS.NOT_POLICY_KIND}` };
     }
-    return { origin, route, mode, decidedBy: 'policy-mode', networkOnly };
   }
   if (options.role === 'network-only') return { deny: REASONS.NETWORK_ONLY_NEEDS_POLICY };
-  if (mode !== 'local') return { deny: REASONS.REMOTE_NEEDS_POLICY };
+  if (mode !== 'local' && !options.answerable) return { deny: REASONS.REMOTE_NEEDS_POLICY };
   return { origin, route, mode };
 }
 
@@ -1239,7 +1270,6 @@ function judgeCall(call, context) {
   }
   const positional = args._.slice(1);
   const targets = [];
-  let pins = null;
   let configOrigins = [];
   if (command === 'open') {
     if (args.browser !== undefined && !CHROMIUM_BROWSERS.includes(args.browser)) return { deny: REASONS.BROWSER_NOT_CHROMIUM };
@@ -1250,18 +1280,18 @@ function judgeCall(call, context) {
     if (ambient) return { deny: `the launch environment sets ${ambient}, which overrides the run config` };
     const globalFault = globalConfigFault(context.env);
     if (globalFault) return { deny: globalFault };
-    pins = config.pins;
     configOrigins = config.origins;
     for (const origin of configOrigins) {
-      const judged = judgeOrigin(origin, { navigation: false, policy: context.policy, pins });
+      const judged = judgeOrigin(origin, { navigation: false, policy: context.policy, answerable: context.answerable });
       if (judged.deny) return { deny: judged.deny };
       if (judged.networkOnly) continue;
-      targets.push({ origin: judged.origin, route: '/', mode: judged.mode, decidedBy: judged.decidedBy });
+      const decidedBy = judged.decidedBy || (judged.mode === 'remote' ? 'asked' : undefined);
+      targets.push({ origin: judged.origin, route: '/', mode: judged.mode, decidedBy });
     }
   }
   if (NAVIGATION_COMMANDS.includes(command) && positional.length > 0) {
     const url = positional[0];
-    const judged = judgeOrigin(url, { navigation: true, policy: context.policy, pins });
+    const judged = judgeOrigin(url, { navigation: true, policy: context.policy, answerable: context.answerable });
     if (judged.deny) return { deny: judged.deny };
     if (command === 'open' && !configOrigins.includes(judged.origin)) return { deny: REASONS.OPEN_OUTSIDE_CONFIG };
     const existing = targets.find((item) => item.origin === judged.origin);
@@ -1297,10 +1327,12 @@ function evaluate({ command, payload, env, records, policy, platform }) {
     if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
     return marks.named ? { verdict: 'deny', reason: REASONS.SESSION_UNRESOLVED } : { verdict: 'none' };
   }
-  const context = { principal: principalOf(payload || {}), env: env || {}, policy };
+  const answerable = ANSWERABLE_MODES.includes((payload || {}).permission_mode);
+  const context = { principal: principalOf(payload || {}), env: env || {}, policy, answerable };
   const known = new Set((Array.isArray(records) ? records : []).map((entry) => entry.origin));
   const plan = [];
   const fresh = [];
+  const remote = [];
   let session = '';
   for (const call of gated) {
     const judged = judgeCall(call, context);
@@ -1310,11 +1342,12 @@ function evaluate({ command, payload, env, records, policy, platform }) {
       const decidedBy = target.decidedBy || (known.has(target.origin) ? 'remembered' : 'asked');
       plan.push({ origin: target.origin, route: target.route, decidedBy });
       if (decidedBy === 'asked' && !fresh.includes(target.origin)) fresh.push(target.origin);
+      if (decidedBy === 'asked' && target.mode === 'remote' && !remote.includes(target.origin)) remote.push(target.origin);
     }
   }
   if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
   if (fresh.length > 0) {
-    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session }) };
+    return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session, remote }) };
   }
   return { verdict: 'none', plan };
 }
@@ -1440,6 +1473,7 @@ function recordingStream(out) {
 
 module.exports = {
   ALLOWED_COMMANDS,
+  ANSWERABLE_MODES,
   CLI_BASENAMES,
   CLI_BOOLEAN_OPTIONS,
   CLI_STRING_OPTIONS,
@@ -1484,6 +1518,7 @@ module.exports = {
   judgeOrigin,
   lexShell,
   memoryPathAllowed,
+  nativeSeparators,
   parseCliArgs,
   payloadFromRaw,
   preEnvelope,

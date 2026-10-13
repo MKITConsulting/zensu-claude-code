@@ -253,7 +253,7 @@ else
   check "P27 SKILL.md pins journey creation after ghost apply" FAIL
 fi
 
-# P28 — Phase 5b removed: the ghost-scan SKILL no longer drives a client-side create_revision baseline (now minted server-side by ghost_apply, zensu-monorepo #266)
+# P28 — Phase 5b removed: the ghost-scan SKILL no longer drives a client-side create_revision baseline (now minted server-side by ghost_apply)
 if grep -qF 'create_revision' "$SKILL_MD"; then
   check "P28 SKILL.md has no client create_revision (baseline is server-side)" FAIL
 else

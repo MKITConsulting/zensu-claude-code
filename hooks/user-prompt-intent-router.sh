@@ -31,7 +31,30 @@ PROMPT="$(PAYLOAD="$INPUT" node -e '
 
 [ -n "$PROMPT" ] || exit 0
 
-printf '%s' "$PROMPT" | grep -qiE '(^|[^[:alnum:]])(zensu|product|feature|roadmap|milestone|bootstrap|ghost.?scan|journey|tier)(s|es|ing|ed)?([^[:alnum:]]|$)' || exit 0
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
+case "$(zensu_prompt_origin "$PROMPT" "$INPUT")" in
+  task-notification|ci-monitor-event|bash-input|slash-command) exit 0 ;;
+esac
+
+KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '
+  {
+    out = ""
+    for (i = 1; i <= NF; i++) {
+      t = $i
+      if (skip) { skip = 0; continue }
+      if (t == "--repo") { skip = 1; continue }
+      if (index(t, "--repo=") == 1) continue
+      if (index(t, "/") || index(t, "\\")) continue
+      l = tolower(t)
+      sub(/^[^a-z0-9]+/, "", l)
+      if (l ~ /^zensu:[a-z0-9]/) continue
+      out = out " " t
+    }
+    print out
+  }
+')"
+
+printf '%s' "$KEYWORD_TEXT" | grep -qiE '(^|[^[:alnum:]])(zensu|product|feature|roadmap|milestone|bootstrap|ghost.?scan|journey|tier)(s|es|ing|ed)?([^[:alnum:]]|$)' || exit 0
 
 cat <<'JSON'
 {

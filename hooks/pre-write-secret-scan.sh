@@ -100,7 +100,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # shellcheck disable=SC1090
   source "$ZENSU_AGENT_CONTEXT_LIB"
   if ! zensu_hook_is_main_principal "$INPUT" PreToolUse; then
-    zensu_emit_hook_session_deny
+    zensu_emit_hook_session_deny "" "" child
     exit 0
   fi
 fi

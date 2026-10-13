@@ -68,10 +68,16 @@ else
   sed -n '1,80p' "$WORK/unit.out"
 fi
 
-if unit_cases_meet_floor "$WORK/unit.out" 28; then
-  check "C1a the unit suite registered at least 28 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
+if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
+  check "C1a the unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "C1a the unit suite registered at least 28 passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "C1a the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+fi
+if C1B="$(unit_overview_check "$UNIT")"; then
+  check "C1b the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
+else
+  check "C1b $C1B" FAIL
 fi
 
 SKILL_OK=PASS
@@ -91,7 +97,7 @@ printf '{"evidence":{"fullSuiteCommand":"echo full-suite-ok"}}\n' > "$ZENSU_CONF
 source "$TDD_LIB"
 
 mkdir -p "$WORK/bin"
-FIXTURE_DIR="$WORK/bin" node <<'NODE'
+FIXTURE_DIR="$WORK/bin" GH_STUB_LIB="$PLUGIN_DIR/tests/structure/fixtures/gh-api-stub.js" node <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const dir = process.env.FIXTURE_DIR;
@@ -107,17 +113,11 @@ const map = {
 const fixture = path.join(dir, 'fixture.json');
 const calls = path.join(dir, 'calls.log');
 fs.writeFileSync(fixture, JSON.stringify(map));
-fs.writeFileSync(path.join(dir, 'gh'), [
-  `#!${process.execPath}`,
-  "const fs = require('fs');",
-  `const map = JSON.parse(fs.readFileSync(${JSON.stringify(fixture)}, 'utf8'));`,
-  'const endpoint = process.argv[3];',
-  `fs.appendFileSync(${JSON.stringify(calls)}, endpoint + '\\n');`,
-  "if (!Object.prototype.hasOwnProperty.call(map, endpoint)) { process.stderr.write('HTTP 404: Not Found\\n'); process.exit(1); }",
-  'process.stdout.write(JSON.stringify(map[endpoint]));',
-  '',
-].join('\n'), { mode: 0o755 });
+const stub = require(process.env.GH_STUB_LIB).writeGhStub(dir, fixture, calls);
+fs.writeFileSync(path.join(dir, 'gh-stub-env.json'), JSON.stringify(stub.env));
 NODE
+GH_STUB_NODE_OPTIONS="$(node -e 'process.stdout.write(require(process.argv[1]).NODE_OPTIONS || "")' "$WORK/bin/gh-stub-env.json")"
+[ -z "$GH_STUB_NODE_OPTIONS" ] || export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }$GH_STUB_NODE_OPTIONS"
 export PATH="$WORK/bin:$PATH"
 CALLS="$WORK/bin/calls.log"
 

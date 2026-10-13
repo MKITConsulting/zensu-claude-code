@@ -9,13 +9,12 @@ set -u
 # (names, path, additive-only contract, trust boundary, example overlay).
 # NEGATIVE guards: stable mandatory-phase sentences of each skill stay
 # present, so an overlay-motivated edit weakening enforcement fails the suite.
-# Also guards the tdd 433-line cap (same constant pinned by
-# test-review-personas.sh and test-tdd-manager-patches.sh — bump all three).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
-PRTR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PRTR_MD="$(skill_text_file "$PLUGIN_DIR/skills/pr-team-review")"
 REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
 PASS=0; FAIL=0
@@ -107,13 +106,8 @@ if grep -qF 'Mandatory `### Test Coverage` section.' "$PRTR_MD"; then
 else
   check "P3c pr-team-review mandatory coverage sentence intact" FAIL
 fi
-LINES="$(wc -l < "$TDD_MD" | tr -d '[:space:]')"
-if [ "$LINES" -le 433 ]; then
-  check "P3d tdd skill stays under the 433-line cap (actual: $LINES)" PASS
-else
-  check "P3d tdd skill stays under the 433-line cap (actual: $LINES)" FAIL
-fi
 
+rm -f "$TDD_MD" "$PRTR_MD"
 echo "----"
 echo "test-skill-overlays: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

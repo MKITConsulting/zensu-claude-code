@@ -18,13 +18,19 @@ check() {
 }
 
 if [ -f "$UNIT" ]; then
+  FLOOR="$(unit_overview_declared "${UNIT##*/}")"
   OUT="$(node --test "$UNIT" 2>&1)"
   RC=$?
-  if [ "$RC" -eq 0 ] && unit_cases_registered_floor_text "$OUT" 24; then
+  if [ "$RC" -eq 0 ] && unit_cases_registered_floor_text "$OUT" "$FLOOR"; then
     check "workflow dispatch-input suite passes ($(unit_cases_report_text "$OUT"))" PASS
   else
-    check "workflow dispatch-input suite passes (rc=$RC, $(unit_cases_report_text "$OUT"))" FAIL
+    check "workflow dispatch-input suite passes (rc=$RC, $(unit_cases_report_text "$OUT"), want >= ${FLOOR:-<no overview row>} registered)" FAIL
     printf '%s\n' "$OUT" | tail -60
+  fi
+  if OVERVIEW="$(unit_overview_check "$UNIT")"; then
+    check "the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($FLOOR)" PASS
+  else
+    check "$OVERVIEW" FAIL
   fi
 else
   check "workflow dispatch-input suite exists" FAIL

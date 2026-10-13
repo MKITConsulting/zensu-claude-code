@@ -64,14 +64,12 @@ spawns the whole panel, so a narrowed panel is always a proven reduction rather 
 therefore ask "is EVERY file X", never "is SOME file X": one production file restores the panel.
 
 **Every reduction DISCLOSES.** A skipped aspect logs `ASPECT SKIPPED — <aspect> (<reason>)` and a
-failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns all five. A panel that
+failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns the whole panel. A panel that
 shrank silently is indistinguishable from one that was never spawned, which is the failure this
 repository treats as worse than the cost it removes.
 
-**Coupled sites that move together:** the two libs and their exports; `skills/tdd/SKILL.md`
-step 3 (activation) and step 10 (delta scoping) — both edited INSIDE existing long lines because
-`P3e` in `tests/structure/test-review-personas.sh` caps that file at **433 lines** and it is AT
-the cap; BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
+**Coupled sites that move together:** the two libs and their exports; `skills/tdd/references/review-chain.md`
+step 3 (activation) and the step 10 fix-round paragraph (delta scoping); BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
 contract (`P3b` in `test-finding-verification.sh` counts `step 4c Finding Verification Gate`
 exactly twice, so a one-sided edit there fails in a suite named for something else); the two
 config keys in `config.example.json`; and the operator accounts in `docs/configuration.md`,

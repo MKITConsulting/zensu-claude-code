@@ -121,8 +121,28 @@ if command -v node >/dev/null 2>&1; then
   # node notice was concatenated onto the sentinel and reported as directive
   # DRIFT — a false red naming the wrong cause — while the rc branch, added to
   # preserve that output, printed none of it.
+  P8_TMP="$(mktemp -d -t zenp8-none-XXXXXX)"
+  P8_NONE="$(
+    export CLAUDE_PLUGIN_DATA="$P8_TMP/plugin-data"
+    mkdir -p "$CLAUDE_PLUGIN_DATA" "$P8_TMP/project"
+    node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"startup",session_id:process.argv[1],cwd:process.argv[2]}))' "zenp8-$$" "$P8_TMP/project" \
+      | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+        bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null 2>&1
+    node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:"where are we?"}))' "zenp8-$$" \
+      | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P8_TMP/project" ZENSU_CONFIG="$P8_TMP/no-such-config.json" \
+        bash "$HOOK" 2>/dev/null \
+      | node -e '
+        let s = "";
+        process.stdin.on("data", (c) => { s += c; });
+        process.stdin.on("end", () => {
+          try { process.stdout.write(String((JSON.parse(s).hookSpecificOutput || {}).additionalContext || "")); }
+          catch (_) {}
+        });
+      ' 2>/dev/null
+  )"
+  rm -rf "$P8_TMP"
   P8_ERR="$(mktemp -t zenp8-XXXXXX)"
-  DRIFT="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" node -e '
+  DRIFT="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" NONE_DIRECTIVE="$P8_NONE" node -e '
     const fs = require("fs");
     const path = require("path");
     let hook;
@@ -152,6 +172,10 @@ if command -v node >/dev/null 2>&1; then
     } catch (_) { process.stdout.write("anchor-module-unloadable"); process.exit(0); }
     if (!producible.length) { process.stdout.write("anchor-module-produced-no-token"); process.exit(0); }
     const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);
+    const noneWant = norm(process.env.NONE_DIRECTIVE || "");
+    const noneHead = noneWant.includes(MARKER) ? noneWant.slice(0, noneWant.indexOf(MARKER) + MARKER.length) : "";
+    if (!noneHead) { process.stdout.write("hook-none-variant-not-captured"); process.exit(0); }
+    if (noneHead === head) { process.stdout.write("hook-none-variant-still-carries-the-anchor-clause"); process.exit(0); }
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.DIR).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { process.stdout.write("scenarios-dir-unreadable"); process.exit(0); }
@@ -173,9 +197,15 @@ if command -v node >/dev/null 2>&1; then
       let text;
       try { text = fs.readFileSync(p, "utf8"); } catch (_) { bad.push(f + ":unreadable"); continue; }
       const flat = norm(text);
-      if (!flat.includes(head)) { bad.push(f); continue; }
-      const rest = flat.slice(flat.indexOf(head) + head.length).trim();
-      if (!producible.some((t) => rest.startsWith(t))) bad.push(f + ":anchor-token-not-producible");
+      if (flat.includes(head)) {
+        const rest = flat.slice(flat.indexOf(head) + head.length).trim();
+        if (!producible.some((t) => t !== "none" && rest.startsWith(t))) bad.push(f + ":anchor-token-not-producible");
+      } else if (flat.includes(noneHead)) {
+        const rest = flat.slice(flat.indexOf(noneHead) + noneHead.length).trim();
+        if (!/^none(?:\s|<|$)/.test(rest)) bad.push(f + ":none-variant-carries-a-token");
+      } else {
+        bad.push(f);
+      }
     }
     // A POSITIVE sentinel, not an empty string. With `bad.join(",")` alone,
     // "nothing drifted" and "the program threw before it could decide" are the

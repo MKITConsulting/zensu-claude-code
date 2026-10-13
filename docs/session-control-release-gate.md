@@ -80,14 +80,17 @@ never run in GitHub Actions.
   successful `Read` of the
   wrapper-owned neutral marker. Its agent definition and the capability gate
   both restrict it to `Read`, `Grep`, and `Glob`, the gate adding only the
-  host's `SubagentHandback` report tool; it receives neither `main-v1`
+  host's `SubagentHandback` report tool and the workflow result tool
+  `StructuredOutput`; it receives neither `main-v1`
   nor Session Control selectors.
-- Every other neutral `host-profile-v1` child is denied all shell/command tool
-  aliases before command contents are considered. This is a capability rule,
-  not a token denylist: `env`, expansion, obfuscated protected paths/helpers,
-  and nested interpreters cannot regain command execution. Non-command host
-  tools remain available subject to the child definition and the remaining
-  protected-path and mutating-Zensu checks.
+- Every other neutral `host-profile-v1` child is denied every tool outside the
+  capability gate's allowlist — all shell/command tool aliases and every MCP
+  tool outside its named read-only list — before command contents are
+  considered. This is a capability rule, not a token denylist: `env`,
+  expansion, obfuscated protected paths/helpers, nested interpreters and
+  command-executing MCP servers cannot regain command execution. Allowlisted
+  host tools remain available subject to the child definition and the
+  remaining protected-path and mutating-Zensu checks.
 - Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
   subtree. The gate denies both protected roots and ancestors that could
   recursively expose them, uses canonical `cwd` when a traversal path is
@@ -106,9 +109,10 @@ never run in GitHub Actions.
   makes exactly one `Bash {command:"env"}` probe. The real capability gate must
   return its exact structured command-denial reason. Extra calls, seeded
   context, wrong marker/principal/command, reordered results, a failed Read, or
-  a successful command all fail evidence validation. Agent/Task availability
-  remains governed by the child's frontmatter and Claude host permissions; the
-  plugin gate adds no separate nesting restriction.
+  a successful command all fail evidence validation. `Agent` is on the neutral
+  allowlist, so a nested spawn stays governed by the child's frontmatter and
+  Claude host permissions; the legacy `Task` name and `Workflow` are outside that
+  list and denied.
 - The all-tool `PreToolUse` boundary treats canonical `cwd` as trusted host
   location metadata, not as a session authenticator, and resolves relative tool
   paths against the current directory even after `CwdChanged`. Session identity
