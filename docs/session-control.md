@@ -163,11 +163,16 @@ expose arbitrary local execution such as `ctx_execute` or `run_in_terminal`, so 
 newly connected MCP server never widens a neutral child. `Bash` is granted only
 to a child that reports a usable `agent_type`, and a usable `agent_id` whenever
 it reports one, and that is not a `zensu-review-*` persona. `hooks.subagentShell`
-withdraws the grant when it is `false` in any config layer, when a config file
-that exists cannot be read or parsed, when a layer path is relative or spans
-lines, and when neither `ZENSU_CONFIG`, `HOME` nor `CLAUDE_PROJECT_DIR` names a
-layer; a config file that does not exist withdraws nothing, so the grant is on
-by default. A refused grant
+withdraws the grant when it is `false` in a config file the gate consults: the
+`ZENSU_CONFIG` file alone while that variable is set, otherwise
+`$HOME/.zensu/config.json` and the `.zensu/config.json` overlay of
+`CLAUDE_PROJECT_DIR`. It also withdraws the grant when a consulted file exists
+but cannot be read or parsed, or its top level or `hooks` value is not a JSON
+object; when a consulted path is relative or spans lines; and when neither
+`ZENSU_CONFIG`, `HOME` nor `CLAUDE_PROJECT_DIR` is set. A consulted file that
+does not exist withdraws nothing, so the grant is on by default. While
+`ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is
+not read and does not withdraw the grant. A refused grant
 denies `Bash` before its command is considered. A granted command must still
 pass the accident guard in `hooks/lib/subagent-shell-guard-v1.js`, which parses
 it as shell and denies, among other rules, protected paths, `.zensu`

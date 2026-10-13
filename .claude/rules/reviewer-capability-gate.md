@@ -81,8 +81,9 @@ admits a tool only when it is in `HOST_PROFILE_TOOLS`, is named in
 `HOST_PROFILE_MCP_READ_TOOLS`, or is a Zensu MCP read tool (`/^mcp__.*zensu/i` plus
 `ZENSU_MCP_READ_RE`, kept from before); every other tool is denied, with one exception. `Bash`
 is granted to a named neutral child that is not a `zensu-review-*` persona, behind an accident
-guard, unless `hooks.subagentShell` withdraws it (`false` in a config layer, or a layer that
-cannot be read): `hostProfileToolViolation` routes it through `shellViolation` before the `COMMAND_TOOLS`
+guard, unless `hooks.subagentShell` withdraws it (`false` in a consulted config file, or a
+consulted file that cannot be read; the consulted files are the `ZENSU_CONFIG` file alone while it
+is set, else the global file and the project overlay): `hostProfileToolViolation` routes it through `shellViolation` before the `COMMAND_TOOLS`
 deny, and `.claude/rules/subagent-shell-guard.md` documents the grant, the guard and their gaps.
 The guard prevents accidents and is not a sandbox. `Monitor` is not part of that grant and stays
 denied with every other tool outside the list. The six-name

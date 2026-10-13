@@ -88,16 +88,23 @@ run in, it checks, in this order:
 - a selector assignment in front of the command;
 - every word and redirection target, resolved against that directory, in its spelled and its
   resolved form (the longest existing prefix through `realpath`): inside a protected form, equal
-  to a protected parent, an unquoted glob whose literal prefix lies below `HOME` and leads into
-  one, or an unquoted dot-glob that matches `.zensu`;
+  to a protected parent, an unquoted glob that can expand to a protected form or parent or to a
+  path inside one (`globReach` matches it segment by segment from its literal directory, with
+  the leading-dot rule, and a `..` after a glob segment drops that segment), or an unquoted
+  dot-glob that matches `.zensu`. A glob that reaches a protected form is `protectedPath`, one
+  that reaches only a protected parent `protectedParent`;
 - the command rules, after `env`, `sudo`, `nohup`, `xargs`, `timeout` and their kin are
   unwrapped, with `env -C` and `sudo -D` moving the inner command's directory: `setsid`,
   `disown` and `coproc`, an `eval` body, a Zensu helper name outside `READ_ONLY_COMMANDS`, a
-  shell's `-c` body, heredoc or here-string, interpreter code that dumps the environment or reads
+  shell's `-c` body (also when the outer shell expands part of it: the reparse keeps such a part
+  unknown, and a quoted `$PWD`, `$(pwd)` or `$(git rev-parse --show-toplevel)` after a blank or
+  an operator keeps its spelling), heredoc or here-string, interpreter code that dumps the environment or reads
   a selector (`node`/`bun -e|-p`, `python -c`, `ruby` and `perl -e`, `php -r`, `deno eval`,
   `pwsh -c`, an `awk` or `jq` program, and the heredoc or here-string an interpreter reads as its
   script), a selector builtin or `test -v`, an environment dump (also redirected into a file), a
-  destructive git operation, `claude plugin`, `rm`, `rmdir`, `unlink` or `mv` of the project
+  destructive git operation (a whole-tree `checkout`, `restore` or `rm` also through an operand
+  that resolves to the project root or a parent from the `-C` directory), `claude plugin`, `rm`,
+  `rmdir`, `unlink` or `mv` of the project
   root or a parent (a glob is matched segment by segment against the root's components), and a
   `find` that deletes from the root without a name or path test that filters (a negated test or a
   match-all pattern does not);
@@ -137,6 +144,12 @@ directory. A command whose set grows past 64 directories is denied (`directories
   for a subagent leaves the prefix out, and the guard also denies that assignment.
 - `mcpGate: false` and a host-environment `ZENSU_MCP_GATE=off` switch the CLI gate off for the
   subagent too. The operator chose that; the guard does not re-implement the CLI map.
+- The CLI gate reads command words through `commandInvocations`, this module's walker over
+  `parseScript`: reserved words, assignments, `WRAPPERS` with their options, `-c` bodies, a
+  heredoc or here-string a shell reads, `eval` and substitutions resolve the same way in both
+  hooks, on the main thread too, and an assignment in front of a wrapper or a shell reaches the
+  command inside it. The gate runs the walker only when the command holds `zensu` as a word of
+  its own, and it keeps its own token scan as the fallback when the module cannot load.
 - Guidance stays conservative. Skill text keeps every gate, every test whose result counts as
   evidence, every commit and every `zensu` call with the main thread, because the grant can be
   switched off, the guard can refuse, and the guard's helper rule refuses a subagent
@@ -165,6 +178,9 @@ directory. A command whose set grows past 64 directories is denied (`directories
   `evals/session-control/scenarios/catalog.yaml`. The same contract drives the guard deny for
   environment, selector and helper commands, the two documented obfuscation gaps as allowed, and
   the allowlist deny for unlisted tools.
+- `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 and B39 in
+  `tests/structure/test-bash-zensu-gate.sh` drive it and the fallback, and the walker test in
+  `subagent-shell-guard-v1.test.js` pins what it finds.
 - `tests/structure/test-gauntlet-loop-skill.sh`: G0 requires the guard module, G8 pairs the
   skill's guarded-`Bash` claim and its two conditions with `isShellCall`, `CONFIG_KEY` and the
   `agent_type` refusal, G15 pins the allowlist bound, and G16 and G19 hold the skill's and the
@@ -199,9 +215,13 @@ directory. A command whose set grows past 64 directories is denied (`directories
   accepts both deny reasons, so it does not measure this either.
 - No banner or `/zensu:doctor` row discloses the grant.
 - Windows spellings are unit-tested with a stub filesystem only.
+- The CLI gate does not see a `zensu` name assembled from variables, a call made from interpreter
+  code, a `find -exec` command, a pipe into a shell or a command read from a file, and its token
+  fallback misses wrapped, loop and `-c` forms.
 
-**Version: `minor`.** A named neutral child gains `Bash`, and the gates deny more in two places:
-a neutral child's file edit of a Zensu config layer, and a subagent's `zensu` CLI mutation behind
-the inline `ZENSU_MCP_GATE=off` prefix. A gate that refuses more changes the capability set of
+**Version: `minor`.** A named neutral child gains `Bash`, and the gates deny more in three places:
+a neutral child's file edit of a Zensu config layer, a subagent's `zensu` CLI mutation behind
+the inline `ZENSU_MCP_GATE=off` prefix, and a `zensu` mutation the CLI gate now finds behind a
+wrapper, in a loop or `-c` body or in `eval`, on the main thread too. A gate that refuses more changes the capability set of
 every session a newer installation would serve, which `.claude/rules/runtime-lineage.md` makes
 breaking. No persisted shape, strict key set or hook registration changes.

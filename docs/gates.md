@@ -49,7 +49,13 @@ security-review conventions the skills enforce. Reads and telemetry are always a
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
 name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
-source of truth. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
+source of truth. It reads the command with the shell model of the subagent accident guard
+(`hooks/lib/subagent-shell-guard-v1.js`): an invocation behind a wrapper such as `timeout`,
+`nice -n`, `env -i` or `xargs`, in a loop or `if` body, in a `bash -c` body or a heredoc a shell
+reads, in `eval` or in a command substitution counts, and text that only names one, such as a
+search pattern or a heredoc fed to `cat`, does not. When that module cannot load, a token scan
+that sees fewer forms takes over. A command name assembled from variables, a call made from
+interpreter code and a `find -exec` command are not seen. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
 is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
 conventions, not a security control (the same role, and the same `ZENSU_MCP_GATE=off` escape, as
 the MCP write-gate it replaced).
