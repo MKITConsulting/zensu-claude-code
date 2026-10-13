@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **verify-feature**: Remove the bundled Zensu monorepo adapter (#430)
 - **work-order**: Name zensu-cli 0.8.0 as the first CLI with zensu work (#432)
 - **changelog**: Add the upgrade note for the neutral-subagent tool allowlist (#431)
 - **tests**: File the session-hub-receipt suite in the suite overview (#429)
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **session-trail**: Drop the takeover brief's dead owning-instance line (#436)
 - **verify-feature**: Wait for PostgreSQL and drop the fixed metrics port in the monorepo adapter (#385)
 - **verify-feature**: Keep the monorepo backend's blob store inside the run directory (#425)
 - **chain**: Refuse --tdd-complete when git cannot list the changes (#423)
