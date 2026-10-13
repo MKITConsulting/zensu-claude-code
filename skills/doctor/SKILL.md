@@ -556,13 +556,13 @@ whether browser verification is enforced, not only when a row is red.
   fresh session is the only way forward, and `executing-runtime-older` means the
   running installation is a downgrade, so the newer version has to be
   re-installed.
-  Adoption re-binds the session from the next tool call onward — do NOT tell the
+  Adoption re-binds the session from the next tool call on — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
-  clears the lineage break while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes with no
+  clears the lineage break while a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes with no
   usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. This row is reachable in that state — the doctor
-  falls back to it whenever the third-fact probe cannot answer — so offering the
-  remedy without the clause would promise something this check did not establish.
+  falls back to it when the third-fact probe cannot answer — so the remedy
+  without the clause would promise what this check did not establish.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
   recorded project root … is gone and the running Zensu installation declares an
   incompatible lineage** → both of the two rows above at once, and it is its own

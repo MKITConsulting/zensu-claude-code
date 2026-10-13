@@ -12,10 +12,10 @@
 # either:
 #   (A) the file already exists and is git-tracked inside the project (clobbering
 #       real tracked source), or
-#   (B) the resolved path escapes the session root (the recorded project root) into
-#       a sibling or main checkout — the cross-session contamination vector.
-# Relative targets resolve against a cwd that tracks `cd` across the command, so
-# `cd ../main && printf ... >> src/x.rs` is caught by (B).
+#   (B) the resolved path escapes the session root (the recorded project root, or the
+#       host's CLAUDE_PROJECT_DIR when unbound) into a sibling or main checkout — the
+#       cross-session contamination vector. Relative targets resolve against a cwd
+#       that tracks each `cd`, so `cd ../main && printf ... >> src/x.rs` is caught by (B).
 #
 # (C) closes the same contamination vector for git itself, which reaches it
 # without naming a write target at all: a working-tree-mutating subcommand whose
@@ -225,7 +225,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     case "$UNBOUND_TARGETS" in
       ''|__bypass__*) exit 0 ;;
     esac
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands other than a zensu CLI call still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command

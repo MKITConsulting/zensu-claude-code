@@ -295,7 +295,7 @@ function createRenderers(core) {
     const recorded = safeVersion(adoption && adoption.recorded);
     const kept = keptName(adoption);
     const orphan = adoption && adoption.orphanedProjectRoot
-      ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and, while the opt-in source-write gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, any Bash command it can attribute as a write stay denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports whether it can be re-created in place, now that this installation serves the record.'
+      ? ' The recorded project root is still gone, so a zensu CLI call, Edit, Write, MultiEdit and, while the opt-in source-write gate is on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains, any Bash command it can attribute as a write stay denied until that exact directory is re-created; /zensu:adopt-session --restore-root reports whether it can be re-created in place, now that this installation serves the record.'
       : '';
     const closing = denied ? deniedClosing : (orphan ? 'nothing else to do for the adoption itself' : 'nothing else to do');
     return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${provenanceText(adoption)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; ${closing}.`;

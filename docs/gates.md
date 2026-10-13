@@ -80,7 +80,9 @@ The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creat
 updating features, security classifications, tiers, journeys, revisions, …) run directly
 on the main thread is **denied by default** — it must run inside a skill that declared its
 work, so "freelance" writes cannot bypass the dedup, user-journey, baseline-revision and
-security-review conventions the skills enforce. Reads and telemetry are always allowed.
+security-review conventions the skills enforce. Reads and telemetry are always allowed in a session
+that binds; the gate binds before it classifies, so when the Session Control binding fails it denies
+every `zensu <noun> <verb>` call it parses, reads included.
 
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
@@ -104,7 +106,7 @@ the MCP write-gate it replaced).
 
 ```mermaid
 flowchart TD
-    A["zensu CLI command<br/>(Bash or PowerShell, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
+    A["zensu CLI command<br/>(Bash or PowerShell, main thread, bound session)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
@@ -130,7 +132,7 @@ it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh
 denies one it cannot read: a call another command starts, a noun or verb built at run time, an
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
-*real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
+*real tracked product*), so it also never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to

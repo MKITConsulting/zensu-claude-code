@@ -191,12 +191,12 @@ lived under that root and is not reachable from this record; if it was moved rat
 than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
-in the ordinary orphaned-project-root state, so Bash and the read-only
-diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, and so does any Bash command that
-WRITES while the opt-in source-write gate is on (`hooks.bashWriteGate: true`), until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
-announcing an unqualified success, or the user walks straight into a deny they
-were just told was fixed. The adoption never re-creates the deleted directory —
-`--restore-root` is the mode that does, and it is a SEPARATE run.
+in the ordinary orphaned-project-root state, so Bash (except a `zensu` CLI call) and the
+diagnostics work again while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write
+the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
+announcing an unqualified success, or the user meets a deny they
+were told was fixed. Adoption never re-creates the deleted directory;
+`--restore-root --confirm` does, in a SEPARATE run.
 
 ### `--restore-root` — re-creating a vanished recorded project root
 
@@ -570,5 +570,5 @@ do not upgrade it to the rebuild recommendation, which is for the other shape.
 After a successful adoption, do not tell the user to restart — and when the
 recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
 as does any Bash write the opted-in source-write gate attributes with no usable
-`CLAUDE_PROJECT_DIR` left, until it is re-created — read-only Bash and diagnostics run — rather than
-reporting an unqualified success.
+`CLAUDE_PROJECT_DIR` left, until it is re-created, and that Bash (except a `zensu` CLI call) and
+diagnostics run, rather than reporting an unqualified success.
