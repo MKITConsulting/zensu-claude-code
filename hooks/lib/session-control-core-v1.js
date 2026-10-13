@@ -821,6 +821,10 @@ const WIN32_FILETIME_UNIX_EPOCH_MS = 11644473600000n;
 const OWNER_START_SKEW_MS = 1000;
 const OWNER_START_PROBE_INTERVAL_MS = 2000;
 const OWNER_START_PROBE_LIMIT = 256;
+const HOLDER_MARKER_EXCLUSIVE_OPEN = 0x10000000;
+const HOLDER_MARKER_UNLINK_ATTEMPTS = 5;
+const HOLDER_MARKER_UNLINK_RETRY_MS = 10;
+const HOLDER_MARKER_UNLINK_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 
 function linuxBootTimeMs() {
   const match = /^btime ([0-9]{1,15})$/m.exec(fs.readFileSync('/proc/stat', 'utf8'));
@@ -931,6 +935,135 @@ function liveOwnerStartedAfterRecord(owner) {
   return replaced;
 }
 
+const heldHolderMarkers = new Map();
+
+function holderMarkersApply() {
+  return process.platform === 'win32';
+}
+
+function holderMarkerPath(file, token) {
+  return path.join(path.dirname(file), `.${path.basename(file)}.${token}.marker`);
+}
+
+function holderMarkerNameFree(marker) {
+  try {
+    fs.unlinkSync(marker);
+  } catch (error) {
+    return error.code === 'ENOENT';
+  }
+  return true;
+}
+
+function holderMarkerExclusive(marker) {
+  let probe;
+  try {
+    probe = fs.openSync(marker, 'r');
+  } catch (error) {
+    return error.code === 'EBUSY';
+  }
+  try {
+    fs.closeSync(probe);
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function openHolderMarker(file, token) {
+  const marker = holderMarkerPath(file, token);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(
+      marker,
+      fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | HOLDER_MARKER_EXCLUSIVE_OPEN,
+      0o600,
+    );
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    return holderMarkerNameFree(marker);
+  }
+  if (holderMarkerExclusive(marker)) {
+    heldHolderMarkers.set(token, descriptor);
+    return true;
+  }
+  fs.closeSync(descriptor);
+  return holderMarkerNameFree(marker);
+}
+
+function closeHolderMarker(token) {
+  const descriptor = heldHolderMarkers.get(token);
+  if (descriptor === undefined) return false;
+  heldHolderMarkers.delete(token);
+  try {
+    fs.closeSync(descriptor);
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+function removeHolderMarker(file, token) {
+  if (!holderMarkersApply()) return;
+  const marker = holderMarkerPath(file, token);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.unlinkSync(marker);
+      return;
+    } catch (error) {
+      if (!HOLDER_MARKER_UNLINK_RETRY_CODES.has(error.code)) return;
+      if (attempt >= HOLDER_MARKER_UNLINK_ATTEMPTS) return;
+    }
+    sleep(HOLDER_MARKER_UNLINK_RETRY_MS, { bestEffort: true });
+  }
+}
+
+function retireHolderMarker(file, token) {
+  closeHolderMarker(token);
+  removeHolderMarker(file, token);
+}
+
+function abandonHolderMarker(file, token) {
+  if (!closeHolderMarker(token)) return;
+  let current;
+  try {
+    current = lockOwner(file);
+  } catch {
+    return;
+  }
+  if (current === null && fs.existsSync(file)) return;
+  if (current && current.owner && current.owner.token === token) return;
+  removeHolderMarker(file, token);
+}
+
+function holderMarkerState(file, owner) {
+  if (!holderMarkersApply() || typeof file !== 'string') return 'not-applicable';
+  let descriptor;
+  try {
+    descriptor = fs.openSync(holderMarkerPath(file, owner.token), 'r');
+  } catch (error) {
+    if (error.code === 'EBUSY') return 'held';
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 'absent';
+    return 'unreadable';
+  }
+  let released = false;
+  try {
+    const stat = fs.fstatSync(descriptor);
+    released = stat.isFile() && stat.size === 0 && stat.nlink === 1;
+  } catch {
+    released = false;
+  }
+  try {
+    fs.closeSync(descriptor);
+  } catch {
+    return 'unreadable';
+  }
+  return released ? 'released' : 'unreadable';
+}
+
+function lockRecordCreatedAt() {
+  return new Date(Math.max(Date.now(), Math.ceil(performance.timeOrigin))).toISOString();
+}
+
 function lockOwner(file) {
   let snapshot = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -983,7 +1116,7 @@ function lockOwner(file) {
       )
     )
   ) owner = null;
-  return { stat: snapshot.stat, owner };
+  return { stat: snapshot.stat, owner, file };
 }
 
 function processIsAlive(pid) {
@@ -1036,6 +1169,7 @@ function removeArtifactIfSame(file, snapshot) {
     return false;
   }
   fs.unlinkSync(quarantine);
+  if (snapshot.owner) retireHolderMarker(file, snapshot.owner.token);
   return true;
 }
 
@@ -1081,7 +1215,7 @@ function createOwnedArtifact(
     pid: ownerPid,
     token,
     kind,
-    created_at: nowIso(),
+    created_at: lockRecordCreatedAt(),
     process_start_identity: ownerIdentity,
   };
   if (releaseTokenDigest !== null) owner.release_token_digest = releaseTokenDigest;
@@ -1091,6 +1225,7 @@ function createOwnedArtifact(
   let descriptor;
   let temporaryCreated = false;
   let linked = false;
+  let published = false;
   let expectedArtifact = null;
   try {
     if (tokenSink) tokenSink(token);
@@ -1103,6 +1238,9 @@ function createOwnedArtifact(
     expectedArtifact = { stat: fs.fstatSync(descriptor), owner };
     fs.closeSync(descriptor);
     descriptor = undefined;
+    if (ownerPid === process.pid && holderMarkersApply() && !openHolderMarker(file, token)) {
+      return null;
+    }
     assertDirectoryIdentity(directory, expectedDirectory);
     fs.linkSync(temporary, file);
     linked = true;
@@ -1111,6 +1249,7 @@ function createOwnedArtifact(
     if (!snapshot || !snapshot.owner || snapshot.owner.token !== token) {
       fail('new lock identity could not be verified');
     }
+    published = true;
     return snapshot;
   } catch (error) {
     if (linked && expectedArtifact) {
@@ -1119,6 +1258,10 @@ function createOwnedArtifact(
     if (error.code === 'EEXIST' && !linked) return null;
     throw error;
   } finally {
+    if (!published && heldHolderMarkers.has(token)) {
+      if (linked) abandonHolderMarker(file, token);
+      else retireHolderMarker(file, token);
+    }
     if (descriptor !== undefined) fs.closeSync(descriptor);
     if (temporaryCreated) {
       try {
@@ -1131,17 +1274,24 @@ function createOwnedArtifact(
 }
 
 function artifactStaleness(snapshot) {
-  if (!snapshot) return { stale: false, alive: false, identity: null, startedAfterRecord: false };
+  if (!snapshot) {
+    return { stale: false, alive: false, identity: null, startedAfterRecord: false, marker: 'not-applicable' };
+  }
   if (!snapshot.owner) {
     return {
       stale: Date.now() - snapshot.stat.mtimeMs > LOCK_STALE_MS,
       alive: false,
       identity: null,
       startedAfterRecord: false,
+      marker: 'not-applicable',
     };
   }
   if (!processIsAlive(snapshot.owner.pid)) {
-    return { stale: true, alive: false, identity: null, startedAfterRecord: false };
+    return { stale: true, alive: false, identity: null, startedAfterRecord: false, marker: 'not-applicable' };
+  }
+  const marker = holderMarkerState(snapshot.file, snapshot.owner);
+  if (marker === 'held' || marker === 'released') {
+    return { stale: marker === 'released', alive: true, identity: null, startedAfterRecord: false, marker };
   }
   if (snapshot.owner.process_start_identity) {
     const actual = snapshot.owner.pid === process.pid
@@ -1153,11 +1303,12 @@ function artifactStaleness(snapshot) {
         alive: true,
         identity: actual,
         startedAfterRecord: false,
+        marker,
       };
     }
   }
   const startedAfterRecord = liveOwnerStartedAfterRecord(snapshot.owner);
-  return { stale: startedAfterRecord, alive: true, identity: null, startedAfterRecord };
+  return { stale: startedAfterRecord, alive: true, identity: null, startedAfterRecord, marker };
 }
 
 function artifactIsStale(snapshot) {
@@ -1184,8 +1335,12 @@ function withRecoverySentinel(lockDirectory, key, callback, expectedDirectory = 
   try {
     return callback();
   } finally {
-    if (!removeArtifactIfSame(recoveryFile, recovery)) {
-      fail('recovery sentinel ownership changed');
+    try {
+      if (!removeArtifactIfSame(recoveryFile, recovery)) {
+        fail('recovery sentinel ownership changed');
+      }
+    } finally {
+      abandonHolderMarker(recoveryFile, recovery.owner.token);
     }
   }
 }
@@ -1200,15 +1355,19 @@ function recoverStaleLock(lockDirectory, key, lockFile, expectedDirectory = null
 }
 
 function releaseOwnedLock(lockDirectory, key, lockFile, acquired, expectedDirectory = null) {
-  return withRecoverySentinel(lockDirectory, key, () => {
-    const current = lockOwner(lockFile);
-    if (!sameArtifact(current, acquired)) {
-      fail('lock ownership changed before release');
-    }
-    if (!removeArtifactIfSame(lockFile, acquired)) {
-      fail('lock identity changed during release');
-    }
-  }, expectedDirectory);
+  try {
+    return withRecoverySentinel(lockDirectory, key, () => {
+      const current = lockOwner(lockFile);
+      if (!sameArtifact(current, acquired)) {
+        fail('lock ownership changed before release');
+      }
+      if (!removeArtifactIfSame(lockFile, acquired)) {
+        fail('lock identity changed during release');
+      }
+    }, expectedDirectory);
+  } finally {
+    abandonHolderMarker(lockFile, acquired.owner.token);
+  }
 }
 
 // A lock that could not be acquired carries a CODE, so the automatic adopter can
@@ -1372,6 +1531,7 @@ function inspectLockArtifact(file) {
     identityRecorded: Boolean(snapshot.owner.process_start_identity),
     identityCurrent: staleness.identity,
     startedAfterRecord: staleness.startedAfterRecord,
+    marker: staleness.marker,
     createdAtMs: Date.parse(snapshot.owner.created_at),
   };
 }
@@ -1439,9 +1599,9 @@ function externalArtifactNeedsRecovery(snapshot, attempt) {
   if (!snapshot.owner || !processIsAlive(snapshot.owner.pid)) {
     return artifactIsStale(snapshot);
   }
-  // A live PID cannot become a different process without first going dead.
-  // Probe at 0, 1, 3, and 7 seconds during the bounded ten-second wait. This
-  // remains conservative while avoiding a /bin/ps burst on every 50 ms poll.
+  const marker = holderMarkerState(snapshot.file, snapshot.owner);
+  if (marker === 'held') return false;
+  if (marker === 'released') return true;
   return externalIdentityProbeAttempt(attempt) && artifactIsStale(snapshot);
 }
 
@@ -3600,7 +3760,7 @@ function renderHostContext(contextInput) {
     `project_root=${JSON.stringify(context.project_root)}`,
     `runtime_digest=${context.runtime_digest}`,
     'principal=host-profile-v1.',
-    'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool, so Bash, every shell alias, and every other MCP tool are unavailable.',
+    'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool but Bash, so every shell alias, Monitor and every other MCP tool are unavailable. A named neutral agent may run Bash behind an accident guard unless hooks.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-* persona and a read-only Zensu agent hold no shell.',
     'Grep and Glob must name a concrete safe subtree; an omitted path or project/plugin/plugin-data ancestor is denied because it could traverse protected state.',
     'Session selectors are not authority: this neutral agent must not access Session Control or workflow-root state, claim main-v1, or mutate Zensu workflow state.',
   ].join(' ');

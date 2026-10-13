@@ -4207,6 +4207,7 @@ var LEASE_WORDS = {
     blocks: 'every lease acquisition fails while it stays',
     busy: 'a lease is being taken or released right now',
     taker: 'the process that took the lease',
+    held: 'the lease',
     role: 'the lock keeper',
     shapes: 'A live lock keeper is either the node lock keeper that a Zensu hook or zensu-log.sh starts under'
       + ' bash 4 or later, whose command line names session-control-core-v1.js and this project\'s'
@@ -4218,6 +4219,7 @@ var LEASE_WORDS = {
     blocks: 'every lease acquisition and release fails while it stays',
     busy: 'a lease is being recovered or released right now',
     taker: 'the process that took the recovery sentinel',
+    held: 'the recovery sentinel',
     role: 'the holder of the recovery sentinel',
     shapes: 'A process that holds the recovery sentinel is a node process whose command line names'
       + ' session-control-core-v1.js.',
@@ -4246,10 +4248,37 @@ function leaseResolveCause(error) {
   return 'the Session Control core refused the lease path';
 }
 
+var LEASE_MARKER_FACTS = {
+  held: 'held open',
+  released: 'free',
+  absent: 'absent',
+  unreadable: 'unreadable',
+};
+
+function leaseMarkerFact(artifact) {
+  return Object.prototype.hasOwnProperty.call(LEASE_MARKER_FACTS, artifact.marker)
+    ? LEASE_MARKER_FACTS[artifact.marker]
+    : null;
+}
+
 function leaseFacts(artifact) {
+  var marker = leaseMarkerFact(artifact);
   return 'owner pid ' + artifact.pid + ' (' + (artifact.alive ? 'alive' : 'not alive') + '), process start identity '
-    + (artifact.identityRecorded ? 'recorded' : 'not recorded') + ', created_at '
+    + (artifact.identityRecorded ? 'recorded' : 'not recorded')
+    + (marker ? ', holder marker ' + marker : '') + ', created_at '
     + new Date(artifact.createdAtMs).toISOString();
+}
+
+function leaseMarkerClause(artifact) {
+  if (artifact.marker === 'absent') {
+    return ' No holder marker exists for this record, so a runtime from before holder markers, or a holder that'
+      + ' could not create one, wrote it.';
+  }
+  if (artifact.marker === 'unreadable') {
+    return ' Something exists at its holder marker\'s name that the core cannot judge, so it proves nothing either'
+      + ' way.';
+  }
+  return '';
 }
 
 function leaseCheck(pid) {
@@ -4310,6 +4339,14 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
       + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
     return;
   }
+  if (artifact.stale && artifact.marker === 'released') {
+    line(WARN, 'autopilot lease: pid ' + pid + ' no longer holds ' + words.held + ' — ' + facts
+      + ', and no process holds the record\'s holder marker open any more, so ' + words.taker + ' has let it'
+      + ' go: it exited, or gave it up after its own release failed. '
+      + (kind === 'lock' ? 'The artifact ' : 'The sentinel ') + parenthesizedPath(file, ' is')
+      + ' is removable; the next lease acquisition reclaims it on its own, and the doctor never deletes it.');
+    return;
+  }
   if (artifact.stale) {
     line(WARN, 'autopilot lease: pid ' + pid + ' is alive but is not ' + words.taker + ' — ' + facts
       + (artifact.startedAfterRecord
@@ -4330,10 +4367,14 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
   var since = age >= 0 ? 'for ' + leaseDuration(age) : 'since a created_at that lies in the future';
   var unknown = age >= 0 ? ''
     : ' The clock moved back or the record was edited, so how long it has been held is unknown.';
-  if (artifact.identityRecorded && artifact.identityCurrent !== null) {
+  var markerHeld = artifact.marker === 'held';
+  if (markerHeld || (artifact.identityRecorded && artifact.identityCurrent !== null)) {
     if (kind === 'lock') {
-      line(WARN, 'autopilot lease: held ' + since + ' by a live lock keeper — ' + facts + ', and pid ' + pid
-        + ' still carries the recorded start identity, so the artifact ' + parenthesizedPath(file, ' is')
+      line(WARN, 'autopilot lease: held ' + since + ' by a live lock keeper — ' + facts + ', and '
+        + (markerHeld
+          ? 'a process still holds the record\'s holder marker open, normally the lock keeper itself'
+          : 'pid ' + pid + ' still carries the recorded start identity')
+        + ', so the artifact ' + parenthesizedPath(file, ' is')
         + ' is NOT removable.' + (age >= 0
           ? ' While a lease is held this long every other lease acquisition gives up waiting and its Autopilot'
             + ' state read fails.'
@@ -4346,7 +4387,11 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
         + ' runs its critical section, and never its coprocess shell alone, which releases nothing.');
     } else {
       line(WARN, 'autopilot lease: the recovery sentinel ' + parenthesizedPath(file, ' has') + ' has been held '
-        + since + ' by pid ' + pid + ', which still carries the recorded start identity — ' + facts + '. The'
+        + since + ' by pid ' + pid
+        + (markerHeld
+          ? ', whose holder marker a process still holds open, normally the holder of the sentinel itself — '
+          : ', which still carries the recorded start identity — ')
+        + facts + '. The'
         + ' sentinel is NOT removable, and while it stays every lease acquisition waits on it and gives up, so'
         + ' every Autopilot state read that needs the lease fails.' + unknown + ' ' + words.shapes + ' '
         + leaseCheck(pid) + ' If it is one and hung, end it; the next lease acquisition then reclaims the'
@@ -4363,13 +4408,18 @@ function leaseOwnedRow(kind, words, artifact, file, staleAfterMs, inspectedAtMs)
       ? 'Its current start identity could not be read, and nothing shows that the process holding pid ' + pid
         + ' started after the record was written, so the core keeps treating ' + words.noun + ' as live'
         + ' and does not reclaim it while that holds.'
-      : 'Without a recorded start identity the core reclaims ' + words.noun + ' only once the process holding'
-        + ' pid ' + pid + ' provably started after the record was written, and nothing shows that; it clears'
-        + ' only when that process releases it or exits.')
+      : 'Without a recorded start identity the core reclaims ' + words.noun + ' only once '
+        + (artifact.marker === 'unreadable' ? 'its holder marker is free or ' : '')
+        + 'the process holding pid ' + pid + ' provably started more than a second after the record was written,'
+        + ' and nothing shows that now. Every lease acquisition checks again, so it clears as soon as that shows,'
+        + ' or when that process releases it or exits.')
+    + leaseMarkerClause(artifact)
     + ' The doctor cannot establish whether pid ' + pid + ' is still ' + words.role + '. ' + words.shapes + ' '
     + leaseCheck(pid) + ' If pid ' + pid + ' is not such a process, ' + words.taker + ' is gone and its pid was'
-    + ' reused: nothing reclaims ' + words.noun + (kind === 'lock' ? ' ' + parenthesizedPath(file, ' while') : '')
-    + ' while pid ' + pid + ' lives, and only a removal by hand clears it. The doctor never deletes it.');
+    + ' reused in a way the core cannot prove: a process that took pid ' + pid + ' within a second of the record'
+    + ' keeps ' + words.noun + (kind === 'lock' ? ' ' + parenthesizedPath(file, ' while') : '')
+    + ' while it lives, and only a removal by hand clears it. Run /zensu:doctor again first, and remove it only'
+    + ' while it still names pid ' + pid + ' and the same created_at. The doctor never deletes it.');
 }
 
 function leaseArtifactRow(kind, artifact, file, staleAfterMs, inspectedAtMs) {

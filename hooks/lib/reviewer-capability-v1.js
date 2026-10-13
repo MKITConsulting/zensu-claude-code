@@ -9,6 +9,7 @@ const principals = require('./claude-principal-v1.js');
 const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
 const doctorInvocation = require('./zensu-doctor-invocation.js');
+const shellGuard = require('./subagent-shell-guard-v1.js');
 
 // A consumer of the `recorded`/`executing` pair outside the shell family that
 // shares its degradation policy. `zensu_emit_hook_session_deny`,
@@ -208,6 +209,7 @@ function servedSweepNotice(servedSweep) {
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const REVIEWER_READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
 const COMMAND_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
+const COMMAND_TOOL_DENY = 'host-profile-v1 cannot invoke command-execution tools';
 const MUTATING_FILE_TOOLS = new Set([
   'Write',
   'Edit',
@@ -646,9 +648,58 @@ function hostProfileAllowance() {
   return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
 }
 
+function foldedPath(value) {
+  return process.platform === 'darwin' || process.platform === 'win32' ? value.toLowerCase() : value;
+}
+
+function lexicalCandidate(base, value) {
+  if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) return null;
+  return path.resolve(base, hostPaths.normalizeHostPathInput(value, 'tool path'));
+}
+
+function attempt(operation) {
+  try {
+    return operation();
+  } catch {
+    return null;
+  }
+}
+
+function configLayerForms(trusted) {
+  const declaredProject = typeof process.env.CLAUDE_PROJECT_DIR === 'string' && process.env.CLAUDE_PROJECT_DIR !== ''
+    ? attempt(() => path.resolve(hostPaths.normalizeHostPathInput(process.env.CLAUDE_PROJECT_DIR, 'project directory')))
+    : null;
+  const bases = [...new Set([trusted.projectRoot, trusted.toolCwd, declaredProject].filter(Boolean))];
+  const forms = new Set();
+  for (const value of shellGuard.configAuthorities()) {
+    for (const base of bases) {
+      for (const resolve of [lexicalCandidate, canonicalCandidate]) {
+        const form = attempt(() => resolve(base, value));
+        if (form) forms.add(foldedPath(form));
+      }
+    }
+  }
+  return [...forms];
+}
+
+function configLayerViolation(payload, trusted, candidates) {
+  const roots = configLayerForms(trusted);
+  const requested = pathInputs(payload.tool_input, payload.tool_name)
+    .map((value) => lexicalCandidate(trusted.toolCwd, value));
+  return [...requested, ...candidates].some((candidate) => candidate
+    && roots.some((root) => isInside(root, foldedPath(candidate))));
+}
+
 function hostProfileToolViolation(payload, trusted, protectedRoots) {
   const tool = payload.tool_name;
-  const commandViolation = () => `host-profile-v1 cannot invoke command-execution tools. ${searchRemedy(trusted, protectedRoots)}`;
+  const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)}`;
+  if (shellGuard.isShellCall(payload)) {
+    const shell = shellGuard.shellViolation(payload, trusted);
+    if (!shell) return null;
+    return shell.kind === 'grant'
+      ? `${COMMAND_TOOL_DENY}: ${shell.reason} ${searchRemedy(trusted, protectedRoots)} ${shellGuard.GRANT_TAIL}`
+      : shell.reason;
+  }
   if (COMMAND_TOOLS.has(tool)) return commandViolation();
   if (tool.startsWith('mcp__')) {
     if (HOST_PROFILE_MCP_READ_TOOLS.has(tool)) return null;
@@ -690,12 +741,6 @@ function neutralViolation(payload, trusted) {
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
   ].map((value) => path.resolve(value));
 
-  // A shell is an arbitrary-code capability. Inspecting its source text for
-  // protected words cannot establish confinement: environment enumeration,
-  // variables, substitutions, aliases, or an interpreter can reconstruct any
-  // selector/path after PreToolUse. Neutral children therefore receive no
-  // command-execution tool at all. Main remains unchanged, while exact
-  // reviewer/PLM identities are already restricted to Read/Grep/Glob above.
   const toolViolation = hostProfileToolViolation(payload, trusted, protectedRoots);
   if (toolViolation) return toolViolation;
 
@@ -716,6 +761,13 @@ function neutralViolation(payload, trusted) {
       && immutableRuntimeRoots.some((root) => isInside(root, candidate)))
   ) {
     return 'host-profile-v1 cannot mutate the installed plugin runtime or private plugin data';
+  }
+
+  if (
+    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    && configLayerViolation(payload, trusted, candidates)
+  ) {
+    return 'host-profile-v1 cannot change a Zensu configuration layer, because the layers decide the subagent shell grant; report the need to the main thread instead';
   }
 
   // realpath cannot distinguish hard links. A project-local hard link can

@@ -413,14 +413,18 @@ function genericReviewWorker(events, expectedAgent, markerFileInput) {
     fail('generic review-worker did not issue the exact command-denial probe');
   }
 
-  const expectedReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
+  const expectedReasons = [
+    'reviewer-capability-v1 deny: host-profile-v1 shell guard: the command prints the inherited environment',
+    'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools',
+  ];
+  const carriesReason = (value) => expectedReasons.some((reason) => value.includes(reason));
   const commandResult = results.find((entry) => entry.block.tool_use_id === commandUse.block.id);
   let denied = false;
   if (commandResult) {
     denied = commandResult.ordinal > commandUse.ordinal
       && commandResult.ordinal < spawn.result.ordinal
       && commandResult.block.is_error === true
-      && resultText(commandResult.block.content).includes(expectedReason);
+      && carriesReason(resultText(commandResult.block.content));
   } else {
     const permissionDenials = [];
     for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
@@ -432,7 +436,7 @@ function genericReviewWorker(events, expectedAgent, markerFileInput) {
           entry?.permission_decision_reason,
           entry?.reason,
           entry?.message,
-        ].find((value) => typeof value === 'string' && value.includes(expectedReason));
+        ].find((value) => typeof value === 'string' && carriesReason(value));
         if (entry?.tool_use_id === commandUse.block.id && entry?.tool_name === 'Bash' && reason) {
           permissionDenials.push({ eventIndex });
         }
