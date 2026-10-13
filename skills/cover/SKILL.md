@@ -112,19 +112,23 @@ For each plan item, in the project's own idiom:
      → write it as `xfail`/skip, record the bug, and move on. **Report-only — never patch
      production here.**
 
-Independent items across layers may fan out via parallel workflows where the probe says it is
-safe (a shared test DB or fixed port serializes them).
+Only test **authoring** (step 1) may fan out: parallel workflows or agents may write the tests
+of independent items across layers. A worker can run no command, so the main thread runs every
+authored test, the RED/GREEN triage and any executed mutation check itself, and runs them one
+at a time where the probe reports a shared test DB or a fixed port.
 
 ### Phase 3 — Quality gate + review chain
 
 1. Run the target suite green (except intentional `xfail` bug flags).
 2. Apply the `rules/quality.md` gate: determinism, isolation, no over-mocking, meaningful
    assertions.
-3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn the
-   **five** `zensu:review-aspect` agents in one parallel batch (`conventions`, `bugs`,
-   `architecture`, `tests` (emphasized), `security`) over the changed test files, merge their
-   findings in this thread, consolidate through a single `zensu:code-reviewer` spawn, and fix
-   the findings in-thread. `--no-review` skips this (degrade + note).
+3. **Reuse the Zensu review chain** exactly like `/zensu:tdd`'s review stage — spawn one
+   `zensu:review-aspect` agent per perspective of the configured panel in one parallel batch
+   (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
+   `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
+   `security`) over the changed test files, merge their findings in this thread, consolidate
+   through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. `--no-review`
+   skips this (degrade + note).
 
 **Not TDD — no phase-gate, no deferred marker.** cover **does not arm the phase-gate** (it
 never runs `--tdd-begin`) and records **no** `--pending-review` marker. It drives the review

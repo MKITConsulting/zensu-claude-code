@@ -457,9 +457,9 @@ function toolBlock() {
 
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
-  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate navigates only its target origins, and every route on them, and lets pages request its network-only origins, if any, while it denies every navigation command that names one');
-  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per new loopback origin of a zensu-verify playwright-cli session and then admits every route on it, and a runtime recipe is present');
-  else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits its target origins, and every route on them, without a prompt in every permission mode, and lets pages request its network-only origins, if any, while it denies every navigation command that names one; any other origin is asked at the permission prompt where one can be shown and denied under bypass permissions or dontAsk');
+  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per session for each new loopback origin of a zensu-verify playwright-cli session and at every browser start for a remote HTTPS origin, then admits every route on an approved origin; under bypass permissions or dontAsk a remote origin needs the policy; a runtime recipe is present');
+  else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run; a remote run needs no recipe');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
   else if (v === 'policy-invalid') line(BAD, 'verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the browser consent gate denies every zensu-verify navigation until you fix that value or unset it to fall back to consent mode');
   else if (v === 'policy-unchecked') line(WARN, 'verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked (' + (safeVerifyReason(vr) || 'reason unknown') + ') — this is a missing check rather than an invalid policy, and this report cannot say whether the browser consent gate accepts it; reinstall the plugin if it repeats');
@@ -2960,6 +2960,14 @@ function autopilotExactKeys(value, want) {
     return Object.prototype.hasOwnProperty.call(value, key);
   });
 }
+var AUTOPILOT_WORK_ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+var AUTOPILOT_WORK_ORDER_SPEC_RE = /^[a-f0-9]{64}$/;
+function autopilotWorkOrderBinding(value) {
+  return autopilotExactKeys(value, ['orderId', 'attempt', 'specHash'])
+    && typeof value.orderId === 'string' && AUTOPILOT_WORK_ORDER_ID_RE.test(value.orderId)
+    && Number.isSafeInteger(value.attempt) && value.attempt > 0
+    && AUTOPILOT_WORK_ORDER_SPEC_RE.test(String(value.specHash));
+}
 var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
 function autopilotOwnerNonEmpty(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -3041,7 +3049,8 @@ function autopilotRun(file, stem, projectRoot) {
   var shapeReject = AUTOPILOT_TERMINAL.indexOf(looseStage) !== -1
     ? AUTOPILOT_TERMINAL_UNSHAPED : null;
   if (!autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS)
-    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']))) return shapeReject;
+    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']))
+    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot', 'workOrder']))) return shapeReject;
   // The owner refuses on the VALUE too, and a record it refuses fails the whole
   // project's inventory closed — so describing it here as an ordinary run would
   // pair a description with a remedy that cannot execute.
@@ -3161,6 +3170,8 @@ function autopilotRun(file, stem, projectRoot) {
     && Array.isArray(parsed.bypasses) && parsed.bypasses.length <= 128
     && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
       || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX))
+    && (!Object.prototype.hasOwnProperty.call(parsed, 'workOrder')
+      || autopilotWorkOrderBinding(parsed.workOrder))
     && (parsed.approvedPlanSha256 === null
       || autopilotSha256(parsed.approvedPlanSha256));
   if (ownerWouldAccept) {

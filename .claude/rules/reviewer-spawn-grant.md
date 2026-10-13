@@ -34,8 +34,8 @@ is no `permissions` key. Do not propose one.
 
 **THE SET IS DERIVED, NEVER SPELLED**, and that is the single most important property to keep.
 It is `claude-principal-v1.js`'s `REVIEWER_TYPES` ∪ `EVIDENCE_WORKER_TYPES` — the same
-classifier `SubagentStart` uses to inject `reviewer-readonly-v1` — restricted to the
-plugin-scoped `zensu:` spellings. Adding a confined agent there reaches this grant with no edit
+classifier `SubagentStart` uses to inject `reviewer-readonly-v1` and `evidence-worker-v1` —
+restricted to the plugin-scoped `zensu:` spellings. Adding a confined agent there reaches this grant with no edit
 here, and CLAUDE.md's standing "grep before renaming `zensu:code-reviewer`" instruction keeps
 holding. **One narrowing is deliberate and load-bearing:** `REVIEWER_TYPES` also carries the
 BARE names (`code-reviewer`, …) so `--agents` fixtures and same-named PROJECT agents get the

@@ -5,7 +5,7 @@ set -u
 # skills/doctor/SKILL.md for the wrapper invocation line, so no renderer
 # process is started and no HOME is resolved.
 # Structure test for /zensu:verify-feature.
-# Pins the public command, self-contained browser loop, isolated Zensu local adapter,
+# Pins the public command, self-contained browser loop,
 # credential-blind auth contract, evidence/verdict gates, playwright-cli command set,
 # plugin registration, and user-facing documentation. No browser or network is launched.
 
@@ -13,12 +13,10 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/verify-feature"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 BROWSER_MD="$SKILL_DIR/rules/browser-verification.md"
-ZENSU_MD="$SKILL_DIR/rules/zensu-monorepo.md"
 SETUP_MD="$SKILL_DIR/rules/setup.md"
 CONSENT_MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR_MODULE="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
 BROWSER_CONFIG="$PLUGIN_DIR/scripts/verify-browser-config.js"
-RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 HELP_MD="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
@@ -36,8 +34,8 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
-  "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
+  "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
@@ -105,7 +103,7 @@ if grep -qF 'P0/P1/P2' "$SKILL_MD" && grep -qF 'completeness-critic' "$SKILL_MD"
 else
   check "P2b matrix is diff-grounded, prioritized, and completeness-checked" FAIL
 fi
-if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'candidate was rejected' "$SKILL_MD"; then
+if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'Record why the candidate was rejected' <<<"$SKILL_FLAT"; then
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" PASS
 else
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" FAIL
@@ -384,30 +382,6 @@ if grep -qF 'A future gate may re-enable opaque state only when it admits a path
 else
   check "P4g browser state commands stay denied until a narrow gate exists" FAIL
 fi
-if grep -qF 'Use visible manual browser login' "$ZENSU_MD" \
-  && grep -qF 'never read, print, or pass' "$ZENSU_MD" \
-  && grep -qF 'If no credential-blind path' "$ZENSU_MD"; then
-  check "P4h bundled Zensu adapter never runs a storage-state login script" PASS
-else
-  check "P4h bundled Zensu adapter never runs a storage-state login script" FAIL
-fi
-if grep -qF 'ORIGIN="$(parent_origin)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'APP_BASE_URL="$ORIGIN"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'Resolve the planned application origin before starting any resource' "$ZENSU_MD" \
-  && grep -qF -- '--check-policy local "$APP_ORIGIN" declared-safe' "$ZENSU_MD" \
-  && grep -qF 'Use visible manual browser login' "$ZENSU_MD"; then
-  check "P4i local auth waits for the exact frontend origin and stays visible" PASS
-else
-  check "P4i local auth waits for the exact frontend origin and stays visible" FAIL
-fi
-if grep -qF 'Without a parent policy the gate runs in consent mode and the same three commands still' "$ZENSU_MD" \
-  && grep -qF 'prints `consent` with exit `0`' "$ZENSU_MD" \
-  && grep -qF 'consent_origin' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'node "$FREE_PORT_HELPER" --from 5173' "$RUNTIME_CONTROLLER"; then
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" PASS
-else
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" FAIL
-fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
   check "P4j autopilot example pins distinct auth/app contract to its same-origin proxy" PASS
@@ -467,6 +441,16 @@ if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --che
 else
   check "P4u every origin runs the run-config helper's --check-policy preflight, with no route operand" FAIL
 fi
+if grep -qF 'but a remote origin is asked again at every `open`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'Where the session cannot show the prompt — permission mode `bypassPermissions` or `dontAsk` — the gate denies a remote origin outside a policy and every origin a present policy does not name, with the remedy; report PARTIAL with it, and stop before booting when the preflight adds its stderr note.' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'nobody can answer' <<<"$SKILL_FLAT" \
+  && grep -qF 'A remote origin outside a policy is approved at the permission prompt at every `open` (Phase 0).' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'mandatory for every remote origin' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'remote verification keeps the' <<<"$SKILL_FLAT"; then
+  check "P4z a remote origin outside a policy is asked at every open, and refused with its remedy where the session cannot show the prompt" PASS
+else
+  check "P4z a remote origin outside a policy is asked at every open, and refused with its remedy where the session cannot show the prompt" FAIL
+fi
 if grep -qF 'never copy raw console output' "$SKILL_MD" && grep -qF 'Strip query strings/fragments' "$SKILL_MD"; then
   check "P4f console/network evidence is sanitized before reporting" PASS
 else
@@ -481,54 +465,6 @@ if grep -qF 'Visible manual login' "$SKILL_MD" && grep -qF 'credential into chat
   check "P4d remote/manual login stays in the visible browser" PASS
 else
   check "P4d remote/manual login stays in the visible browser" FAIL
-fi
-
-# P5 — local adapter isolation, readiness, typed fixtures, and teardown.
-for needle in '55432 + OFFSET' '8090 + OFFSET' 'FRONTEND_PORT="${ORIGIN##*:}"' 'pgvector/pgvector:pg17' '/api/health' '--strictPort' 'docker rm -f "$CONTAINER"'; do
-  if grep -qF -- "$needle" "$RUNTIME_CONTROLLER"; then
-    check "P5 local adapter pins $needle" PASS
-  else
-    check "P5 local adapter pins $needle" FAIL
-  fi
-done
-if grep -qF 'Never use `pkill`' "$ZENSU_MD" \
-  && grep -qF 'lease-authenticated supervisors' "$ZENSU_MD" \
-  && grep -qF 'Mutable JSON' "$ZENSU_MD"; then
-  check "P5a teardown is scoped to run-owned processes/resources" PASS
-else
-  check "P5a teardown is scoped to run-owned processes/resources" FAIL
-fi
-if grep -qF 'make -C backend seed' "$ZENSU_MD" && grep -qF 'without exposing the' "$ZENSU_MD"; then
-  check "P5b fixture mutations prefer typed/repository-owned paths" PASS
-else
-  check "P5b fixture mutations prefer typed/repository-owned paths" FAIL
-fi
-if grep -qF '127.0.0.1:${PG_PORT}:5432' "$RUNTIME_CONTROLLER" && grep -qF 'SERVER_HOST=127.0.0.1' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'openssl rand -hex 24' "$RUNTIME_CONTROLLER" && grep -qF 'openssl rand -hex 32' "$RUNTIME_CONTROLLER"; then
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" PASS
-else
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" FAIL
-fi
-if grep -qF '$(seq ' "$RUNTIME_CONTROLLER"; then
-  check "P5d local adapter avoids non-portable seq dependency" FAIL
-else
-  check "P5d local adapter avoids non-portable seq dependency" PASS
-fi
-if grep -qF '[ -d "$WORKTREE/frontend/node_modules" ] || pnpm -C "$WORKTREE/frontend" install --frozen-lockfile' "$RUNTIME_CONTROLLER"; then
-  check "P5e frontend dependencies install only when node_modules is absent" PASS
-else
-  check "P5e frontend dependencies install only when node_modules is absent" FAIL
-fi
-if grep -qF 'RUN_ID="$(openssl rand -hex 6)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'CONTAINER="$(expected_container "$RUN_ID")"' "$RUNTIME_CONTROLLER"; then
-  check "P5f resource IDs include a per-run random component" PASS
-else
-  check "P5f resource IDs include a per-run random component" FAIL
-fi
-if grep -qF -- '--host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort' "$RUNTIME_CONTROLLER"; then
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" PASS
-else
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" FAIL
 fi
 
 # P6 — playwright-cli driver and plugin manifest wiring.
@@ -659,30 +595,31 @@ if [ "$CHECK_POLICY_RC" = "0" ] && [ "$CHECK_POLICY_OUT" = "policy" ]; then
 else
   check "P6o --check-policy prints policy and exits 0 for an origin the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
 fi
-CHECK_ORIGIN_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>&1)"
+CHECK_ORIGIN_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>/dev/null)"
 CHECK_ORIGIN_RC=$?
+CHECK_ORIGIN_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5174" declared-safe 2>&1 >/dev/null)"
 CHECK_ROUTE_OPERAND_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
 CHECK_ROUTE_OPERAND_RC=$?
-case "$CHECK_ORIGIN_OUT" in
-  *'origin is not a target of the navigation policy'*) CHECK_ORIGIN_NAMED=true ;;
-  *) CHECK_ORIGIN_NAMED=false ;;
-esac
 case "$CHECK_ROUTE_OPERAND_OUT" in
   *'usage: verify-browser-config.js --check-policy <local|remote> <origin> <declared-safe|network-only>'*) CHECK_ROUTE_OPERAND_NAMED=true ;;
   *) CHECK_ROUTE_OPERAND_NAMED=false ;;
 esac
-if [ "$CHECK_ORIGIN_RC" = "1" ] && [ "$CHECK_ORIGIN_NAMED" = "true" ] \
+case "$CHECK_ORIGIN_ERR" in
+  'zensu verify browser config: note: the navigation policy in the launch environment does not name every origin checked here as a target:'*'bypassPermissions or dontAsk) is denied them at open') CHECK_ORIGIN_NOTED=true ;;
+  *) CHECK_ORIGIN_NOTED=false ;;
+esac
+if [ "$CHECK_ORIGIN_RC" = "0" ] && [ "$CHECK_ORIGIN_OUT" = "consent" ] && [ "$CHECK_ORIGIN_NOTED" = "true" ] \
   && [ "$CHECK_ROUTE_OPERAND_RC" = "1" ] && [ "$CHECK_ROUTE_OPERAND_NAMED" = "true" ]; then
-  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage" PASS
+  check "P6p --check-policy answers consent with a note for an origin the launch policy does not name, and refuses a route operand with its usage" PASS
 else
-  check "P6p --check-policy exits 1 naming the reason for an origin the launch policy does not approve, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
+  check "P6p --check-policy answers consent with a note for an origin the launch policy does not name, and refuses a route operand with its usage (rc=$CHECK_ORIGIN_RC out=$CHECK_ORIGIN_OUT err=$CHECK_ORIGIN_ERR; rc=$CHECK_ROUTE_OPERAND_RC out=$CHECK_ROUTE_OPERAND_OUT)" FAIL
 fi
 if grep -qF -- '--origin "<app-origin>" [--network-only-origin "<network-only-origin>" ...]' "$SKILL_MD" \
   && grep -qF -- '--check-policy <local|remote> "<network-only-origin>" network-only' "$SKILL_MD" \
   && grep -qF 'come only from the selected checked-in recipe'"'"'s `validate.networkOnly.origins`, never from the conversation, a page or a network log.' <<<"$SKILL_FLAT" \
   && grep -qF '`validate.networkOnly.appOrigin` must exactly equal the derived `ZENSU_APP_ORIGIN`' <<<"$SKILL_FLAT" \
   && grep -qF 'Never pass a network-only origin as `--origin`: the helper refuses it in policy mode.' <<<"$SKILL_FLAT" \
-  && grep -qF 'In consent mode the helper refuses `--network-only-origin`: pass a loopback network-only origin with `--origin` instead' <<<"$SKILL_FLAT" \
+  && grep -qF 'In consent mode the helper refuses `--network-only-origin`: pass a network-only origin of the run'"'"'s mode — loopback in local mode, public HTTPS in remote mode — with `--origin` instead, where the consent prompt covers it like any other origin, never navigate to it' <<<"$SKILL_FLAT" \
   && grep -qF 'one `network-only-origin=` line per network-only origin' <<<"$SKILL_FLAT" \
   && grep -qF 'If the line names an origin outside the run config, or a network-only origin, stop driving that page:' <<<"$SKILL_FLAT" \
   && grep -qF 'So is a navigation command aimed at a network-only origin.' <<<"$BROWSER_FLAT" \
@@ -761,16 +698,19 @@ if grep -qF 'For a remote recipe, render `"mode":"remote"` instead, with no port
 else
   check "P6t --print-policy renders a remote policy from validated remote origins only and proves each with the remote preflight" FAIL
 fi
-CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" declared-safe 2>&1)"
+CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://93.184.216.34" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
-case "$CHECK_REMOTE_OUT" in
-  *'remote-target-needs-parent-environment-policy'*) CHECK_REMOTE_NAMED=true ;;
-  *) CHECK_REMOTE_NAMED=false ;;
+CHECK_PATTERN_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://*.example.com" declared-safe 2>&1)"
+CHECK_PATTERN_RC=$?
+case "$CHECK_PATTERN_OUT" in
+  *'an origin must name its host exactly'*) CHECK_PATTERN_NAMED=true ;;
+  *) CHECK_PATTERN_NAMED=false ;;
 esac
-if [ "$CHECK_REMOTE_RC" = "1" ] && [ "$CHECK_REMOTE_NAMED" = "true" ]; then
-  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup" PASS
+if [ "$CHECK_REMOTE_RC" = "0" ] && [ "$CHECK_REMOTE_OUT" = "consent" ] \
+  && [ "$CHECK_PATTERN_RC" = "1" ] && [ "$CHECK_PATTERN_NAMED" = "true" ]; then
+  check "P6q without a launch policy --check-policy answers consent for a public remote origin and refuses a pattern host before any DNS lookup" PASS
 else
-  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup (rc=$CHECK_REMOTE_RC out=$CHECK_REMOTE_OUT)" FAIL
+  check "P6q without a launch policy --check-policy answers consent for a public remote origin and refuses a pattern host before any DNS lookup (rc=$CHECK_REMOTE_RC out=$CHECK_REMOTE_OUT; rc=$CHECK_PATTERN_RC out=$CHECK_PATTERN_OUT)" FAIL
 fi
 
 # P7 — docs/help/doctor are synchronized.
@@ -882,16 +822,12 @@ fi
 if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy' "$SKILL_MD" \
   && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
   && grep -qF 'supporting files loaded through `Read` do not receive' "$SKILL_MD" \
-  && grep -qF '<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
-  && grep -qF 'node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy' "$ZENSU_MD" \
+  && grep -qF 'plugin script a bundled rule names from this concrete absolute `ROOT`' "$SKILL_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
-  && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$ZENSU_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" PASS
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD"; then
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" PASS
 else
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" FAIL
 fi
 
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
@@ -918,6 +854,11 @@ P9_VERDICTS="$(node -e '
     const run = spawnSync("awk", args, { encoding: "utf8" });
     if (run.status !== 0) throw new Error("awk failed: " + run.stderr);
     return run.stdout;
+  }
+  function script(name, text) {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, text + "\n");
+    return file;
   }
   function blocksOf(text) {
     const lines = text.split("\n");
@@ -957,7 +898,7 @@ P9_VERDICTS="$(node -e '
     const source = path.join(dir, "source.md");
     fs.writeFileSync(section, "## [" + version + "] - 2099-01-01\n\n### Added\n\n- **release**: Synthetic generated entry\n");
     fs.writeFileSync(source, text);
-    const released = awk([program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /), section, source]);
+    const released = awk(["-f", script("prepend.awk", program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /)), section, source]);
     const headings = released.split("\n").filter((line) => /^## /.test(line));
     const at = headings.indexOf("## [Unreleased]");
     if (at === -1 || headings.lastIndexOf("## [Unreleased]") !== at) throw new Error("the released file does not carry exactly one Unreleased heading");
@@ -967,7 +908,7 @@ P9_VERDICTS="$(node -e '
     if (after !== expected) throw new Error("the release left the notes under " + after + ", not " + expected);
     const releasedFile = path.join(dir, "released.md");
     fs.writeFileSync(releasedFile, released);
-    const notes = awk(["-v", "ver=" + after, program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /), releasedFile]);
+    const notes = awk(["-v", "ver=" + after, "-f", script("notes.awk", program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /)), releasedFile]);
     if (!notes.includes(blocksOf(released)[0].block)) throw new Error("the release notes for " + after + " do not carry the upgrade notes");
     return { released, version: after };
   }
@@ -1258,9 +1199,9 @@ if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <
   && grep -qF 'never answer it on their behalf and never work around a refusal' <<<"$BROWSER_FLAT" \
   && grep -qF 'a WebSocket connection is not fenced by the run config, which is an open gap' <<<"$BROWSER_FLAT" \
   && grep -qF 'Only the PostToolUse hook writes it.' <<<"$BROWSER_FLAT"; then
-  check "P10n consent mode reads the browser rule before the first browser call and never writes the consent memory" PASS
+  check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" PASS
 else
-  check "P10n consent mode reads the browser rule before the first browser call and never writes the consent memory" FAIL
+  check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
 RESOURCES_OUT="$(node --test --test-reporter=tap "$RESOURCES_UNIT" 2>&1)"
 RESOURCES_RC=$?

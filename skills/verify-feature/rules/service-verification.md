@@ -1,10 +1,10 @@
 # Service verification rules (`api`, `async`, `iac`)
 
 Loaded for rows whose driver is `api`, `async` or `iac`. The runtime comes from `SKILL.md` Phase 2:
-an accepted recipe or the bundled monorepo adapter starts the services on a run-specific loopback
-port, or `--attach` names a loopback origin the user already runs, with the same identity rule.
-The recipe's `up` and `down`, or the adapter's lease, own the services they start; every other
-resource the run creates goes through the run-resource helper (`rules/drivers.md` section 5).
+an accepted recipe starts the services on a run-specific loopback port, or `--attach` names a
+loopback origin the user already runs, with the same identity rule. The recipe's `up` and `down`
+own the services they start; every other resource the run creates goes through the run-resource
+helper (`rules/drivers.md` section 5).
 
 ## 1. `api`
 

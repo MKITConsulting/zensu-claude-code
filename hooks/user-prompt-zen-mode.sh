@@ -35,7 +35,7 @@
 # The identity check itself exits 2, matching every other hook in this plugin.
 #
 # ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 20` on this
-# hook`s `hooks.json` registration is SIZED, not inherited from the 7 sibling entries
+# hook`s `hooks.json` registration is SIZED, not inherited from the 8 sibling entries
 # that carry 10: three `zensu_run_bounded` children are reachable in SERIES on one
 # invocation - the merged prompt-and-anchor child, the prompt-only RECOVERY child,
 # and the off-phrase marker write, 5 s each - on top of the `node` spawns paid
@@ -773,7 +773,7 @@ if [ "$ZEN_OFF" -eq 1 ]; then
   # collision would turn one crash into a permanent refusal of the in-band exit -
   # but the consequence of randomness is that every killed write leaks a DISTINCT
   # file. `-mmin +5` leaves a write that is still in flight alone.
-  if mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null; then
+  if mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || { [ -d "$ZEN_STATE_DIR" ] && [ ! -L "$ZEN_STATE_DIR" ]; }; then
     find "$ZEN_STATE_DIR" -maxdepth 1 -type f -name "$(basename "$MARKER").tmp-*" -mmin +5 \
       -exec rm -f {} + 2>/dev/null || true
   fi

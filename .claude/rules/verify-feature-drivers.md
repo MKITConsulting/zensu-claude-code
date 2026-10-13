@@ -37,9 +37,9 @@ is read or on every run: the `--driver` row, the in-memory remote refusal of ste
 the matrix's `Driver` column, the Phase 4 teardown and the verdict rules. Everything a
 non-`browser` row does in each phase is in section 8. Two browser blocks moved out for the same
 budget, both free of `${CLAUDE_PLUGIN_ROOT}` and of line pins: attach mode to `rules/attach.md`
-(`P10m`), and the consent-mode details to `rules/browser-verification.md` section 1, which a
-consent-mode run reads before its first browser call (`P10n`). `SKILL.md` keeps the sentence that
-the consent memory is never written.
+(`P10m`), and the consent details to `rules/browser-verification.md` section 1, which a
+consent-mode run reads before its first browser call (`P10n`). `SKILL.md` keeps the consent
+sentences `P4z` pins and the rule that the consent memory is never written.
 
 **Only the `browser` driver is gated, and that is a decision.** The consent gate exists because a
 browser session renders arbitrary origin content, cookies and storage into the model. The other
@@ -48,11 +48,13 @@ the host's Bash prompts and the per-app or per-device grants of host tools. A Pr
 can ask or deny for them would be a `minor` release under §"Runtime Lineage" and would still be
 textual; it is the named follow-up, not an omission.
 
-**Remote mode stays browser-only.** Remote API verification needs a policy check that works
-without `playwright-cli`: `checkReadiness` in `scripts/verify-browser-config.js` runs first in
-`--check-policy` and refuses without the measured CLI and both consent hooks. Until a check exists
-that does not require them, a non-browser row in remote mode is PARTIAL, and `--driver` other than
-`browser` with `--mode=remote` stops in memory in step 0.
+**Remote mode stays browser-only.** A remote origin is approved by the launch-time policy or at
+the consent gate's permission prompt, and both paths belong to the browser: the gate asks only for
+a `playwright-cli` call on a `zensu-verify` session, and `checkReadiness` in
+`scripts/verify-browser-config.js` runs first in `--check-policy` and refuses without the measured
+CLI and both consent hooks. Until a non-browser call has an approval path of its own, a
+non-browser row in remote mode is PARTIAL, and `--driver` other than `browser` with
+`--mode=remote` stops in memory in step 0.
 
 **The run-resource helper is the one fail-closed part, because teardown is where the new drivers
 can destroy something that is not the run's**: a user's simulator or emulator, a cluster behind
@@ -83,8 +85,8 @@ The ledger is validated when it is written as well as when it is read (`validEnt
 symlinked or non-physical run directory is refused. The lock file holds the holder's pid, so a
 lock left by a killed call is named as stale instead of blocking silently. The helper is not a
 boundary: a resource started outside it is outside its reach, and nothing stops a Bash call from
-deleting a device directly. The services a recipe starts keep the recipe's `down`, and the
-monorepo adapter keeps its lease; the helper never records them. It carries no platform check for
+deleting a device directly. The services a recipe starts keep the recipe's `down`; the helper
+never records them. It carries no platform check for
 simulators, on purpose: a missing `xcrun` is the refusal, which keeps the unit file runnable on
 Linux CI with stub binaries. `start` refuses on native Windows, which has no POSIX process groups,
 and the mobile and desktop rule files turn that refusal into a named PARTIAL.
@@ -134,8 +136,8 @@ with `cp -Rc` into the run directory and passes `-clonedSourcePackagesDirPath` w
   `tests/structure/verify-run-resources.test.js`, which `test-verify-feature-skill.sh` runs with
   an exact case count that its `tests/SUITE-OVERVIEW.md` row must equal.
 - `scripts/process-supervisor.js` (its lease variable, its ready-file JSON, `status`, `stop` and
-  the arity of `start`) is consumed by the helper and by
-  `skills/verify-feature/scripts/zensu-monorepo-runtime.sh`.
+  the arity of `start`) is consumed by the helper through its CLI; `harness/launcher.js`
+  requires the module for `signalGroup` and `waitForGroupExit` only.
 - The recipe inputs `ZENSU_VERIFY_RUN_DIR`, `ZENSU_VERIFY_PORT` and `ZENSU_VERIFY_DEVICE` ↔ the
   "Driver blocks and recipe inputs" subsection of `config.md` ↔ `rules/drivers.md` §2 ↔ the
   `${NAME:?}` spelling in the `rules/setup.md` examples ↔ the "Run-owned devices under autopilot"
@@ -180,4 +182,4 @@ new strict shape (`version`, `runKey`, and `validEntry` over `LEDGER_KINDS`): ad
 shape an older installation reads, so it is not a breaking change. A later change to it is judged
 as one, because a run directory kept after an incomplete teardown can be retried by a newer
 installation of the same lineage. `process-supervisor.js start` now accepts a command without
-arguments; that relaxes a refusal, and `zensu-monorepo-runtime.sh` always passes arguments.
+arguments; that relaxes a refusal and changes no call it accepted before.

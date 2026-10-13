@@ -51,8 +51,8 @@ out somewhere.
 
 **ONE ALTERNATIVE exists and it is NOT an arm, which is the whole reason it took this
 long to ship.** `MOVE_ALTERNATIVE` offers `git worktree move` on the PRESENT leg, and the
-create recipe stays the default because it is the only route that needs no judgement from
-the reader. **Everything that can change the reader's mind sits ABOVE the fenced line, and the
+create recipe stays the default because it is the only route that takes nothing from the
+other session. **Everything that can change the reader's mind sits ABOVE the fenced line, and the
 rule is a SHAPE rather than a count of members** — a count here went stale inside a single
 review round, which is the drift this file records about itself everywhere else. Members today:
 the unvetted-tree stop, the `-c core.fsmonitor=false` non-carry, the same-repository bound, the
@@ -84,13 +84,13 @@ bar, the `core.fsmonitor` non-carry and the same-repository bound against the co
 member added to the bar needs an anchor added there too or it is graded by nothing. The emitted
 carrier is graded positionally by `worktree-advice-v1.test.js`, on the stop condition alone.
 
-The move's condition is a HUMAN ATTESTATION — the reader KNOWS that session
-will not be continued, after an account switch, a usage limit or an abandoned window —
-and it is deliberately keyed on NO predicate at all. That is measured rather than
-cautious: the run that prompted it had a registered LIVE pid on a session its human had
-abandoned, so `archived`, `live` and the whole four-way ladder answer the wrong question,
-and keying the route on any of them would offer it exactly where it is unsafe and withhold
-it exactly where it is right. A pid is a process, not an intention. **The rule above is
+The move is offered WHATEVER the other session is doing: that session's activity is the
+user's responsibility, and the user chooses the route inside the one plan confirmation of
+a takeover. It is deliberately keyed on NO predicate at all, and that is measured rather
+than cautious: the run that prompted it had a registered LIVE pid on a session its human
+had abandoned, so `archived`, `live` and the whole four-way ladder answer the wrong
+question, and keying the route on any of them would withhold from the user a choice that
+is theirs. A pid is a process, not an intention. **The rule above is
 unchanged and still holds** — every arm still returns a `git worktree add` line, so `WT8k`
 is untouched; the move is an alternative, never a replacement.
 
@@ -194,7 +194,7 @@ across four constant headers: create, then move, then the live caution, then the
 `WT8v1`/`WT8v2` grade presence on the present leg and ABSENCE on the gone one — `WT8v1`'s
 needle carries the `git -C` anchor for the reason `WT8L`'s does for `-b`, and `WT8v2`'s
 forbidden needle is command-shaped because the gone-leg `live` leads legitimately discuss
-moving worktrees. `WT8v3`/`WT8v4` grade the attestation, `WT8v5` the cost to the other
+moving worktrees. `WT8v3`/`WT8v4` grade the user's authorization of the route, `WT8v5` the cost to the other
 session, `WT8v6`/`WT8v6b`/`WT8v7`/`WT8v7b` the four bounded gate-and-escape claims, and
 `WT8v9` the same-repository bound. The measured pid is `WT8w1`/`WT8w2`, on its OWN stem
 rather than as a fourth `WT8v7` suffix: a suffix means "sibling of the same subject" in this
@@ -253,7 +253,7 @@ run alone leaves the fences split, so the ordering case beside it is what holds 
 run. `WT8v8` loops `WT8k`'s roster — accumulated in THAT
 loop rather than a second one, which saved 16 node spawns — and asserts no arm spells the
 prefix. `T35b` gained needles for the doc carrier's prose, because `T35` pins the COMMAND alone
-and the attestation and cost paragraphs were otherwise deletable with both suites green.
+and the authorization and cost paragraphs were otherwise deletable with both suites green.
 Two further unit cases pin that the survey drops the route and that the two axes are
 independent. **Adding the command cost BOTH hand-maintained counters in the same change** —
 `WT8_PRESENT_EXPECT` and `T35_EXPECT`, whose sum invariant this section's own roster already

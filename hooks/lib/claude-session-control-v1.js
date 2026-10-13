@@ -263,8 +263,8 @@ function main() {
   const payload = readPayload();
   // SessionStart also carries agent_type for top-level `claude --agent`
   // sessions. Use the same trusted-payload classifier as PreToolUse so only a
-  // host session with neither agent field receives main-v1. Exact reviewers
-  // stay read-only and every other explicit or partial identity stays neutral.
+  // host session with neither agent field receives main-v1. Exact reviewer and
+  // evidence-worker identities stay confined; any other identity stays neutral.
   const principal = payload.hook_event_name === 'SubagentStart'
     ? principals.classifySubagent(payload.agent_type, payload.agent_id)
     : principals.classifyPreToolPayload(payload);

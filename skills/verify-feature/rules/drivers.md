@@ -11,7 +11,7 @@ is read as `desktop`.
 
 | Driver | Verifies | Rule file | Drives with | Remote |
 |---|---|---|---|---|
-| `browser` | web apps, PWAs, server-rendered pages | `rules/browser-verification.md` and the browser sections of `SKILL.md` | `playwright-cli` on a `zensu-verify` session behind the consent gate | yes, under the launch-time policy |
+| `browser` | web apps, PWAs, server-rendered pages | `rules/browser-verification.md` and the browser sections of `SKILL.md` | `playwright-cli` on a `zensu-verify` session behind the consent gate | yes, at the permission prompt or under a launch-time policy |
 | `api` | REST, GraphQL, gRPC, WebSocket, SSE and webhook endpoints of a run-owned service | `rules/service-verification.md` | `curl`, `grpcurl`, a WebSocket client, or the project's own client | no |
 | `cli` | commands, scripts, batch jobs, terminal UIs | `rules/cli-verification.md` | the built entry point; a TUI through `tmux` on a run socket, else `expect` | no |
 | `library` | packages, SDKs, modules without an entry point | `rules/cli-verification.md` | a throwaway consumer in `$RUN_DIR` that depends on the worktree by path | no |
@@ -114,8 +114,8 @@ the criterion.
 
 Every device, process, cluster, container and terminal server that a driver rule file starts goes
 through the run-resource helper, and so does its teardown. The services a recipe starts keep the
-recipe's own `down`, and the bundled monorepo adapter keeps its lease (`SKILL.md` Phase 4): the
-helper neither records nor stops those. Replace `<absolute-plugin-root>` with the concrete `ROOT`
+recipe's own `down` (`SKILL.md` Phase 4): the helper neither records nor stops those. Replace
+`<absolute-plugin-root>` with the concrete `ROOT`
 from `SKILL.md`:
 
 ```bash

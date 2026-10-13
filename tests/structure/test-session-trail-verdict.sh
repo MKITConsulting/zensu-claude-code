@@ -965,7 +965,7 @@ fi
 
 # V11b — the appended clause states PROVENANCE, not a conclusion. The script
 # cannot see a user: `--force` is a token its caller types, and this sentence is
-# persisted into briefs that tell the next instance never to ask again. Asserting
+# persisted into briefs a different instance opens and confirms for itself, so
 # "the user authorized this" there would be a claim with no evidence behind it.
 V11B_BAD=""
 case "$FORCED_REASON" in *"--force was passed"*) ;; *) V11B_BAD="$V11B_BAD provenance-not-stated" ;; esac
@@ -1078,6 +1078,9 @@ case "$TAKEOVER_MEASURED_LINE" in *"**BUSY**"*) ;; *) V11F_BAD="$V11F_BAD takeov
 case "$TAKEOVER_MEASURED_LINE" in *"--force was passed"*) V11F_BAD="$V11F_BAD takeover-md-measured-line-carries-the-authorization" ;; esac
 case "$TAKEOVER_MD" in *"an authorization was recorded at"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-authorization-note" ;; esac
 case "$TAKEOVER_MD" in *"cannot carry it forward"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-bound-warning" ;; esac
+case "$TAKEOVER_MD" in *"re-measures and confirms its own plan with its own user before editing"*) ;; *) V11F_BAD="$V11F_BAD takeover-md-later-reader-not-sent-to-its-own-user" ;; esac
+case "$TAKEOVER_MD" in *[Gg]"o/no-go"*) V11F_BAD="$V11F_BAD takeover-md-asks-a-go-no-go" ;; esac
+case "$HANDOFF_MD" in *[Gg]"o/no-go"*) V11F_BAD="$V11F_BAD handoff-md-asks-a-go-no-go" ;; esac
 case "$MEASURED_LINE" in *"**BUSY**"*) ;; *) V11F_BAD="$V11F_BAD handoff-measured-level" ;; esac
 case "$MEASURED_LINE" in *"--force was passed"*) V11F_BAD="$V11F_BAD handoff-measured-line-carries-the-authorization" ;; esac
 case "$HANDOFF_MD" in *"An authorization was recorded at"*) ;; *) V11F_BAD="$V11F_BAD handoff-authorization-note" ;; esac
@@ -1871,23 +1874,28 @@ UNM_BRIEF_FORCED="$(trailrun takeover 1a1a1a1a-0000-0000-0000-000000000023 --all
 PF_BRIEF="$(trailrun takeover aaaaaaaa-0000-0000-0000-000000000001 --all --no-record 2>/dev/null)"
 V19W_BAD=""
 case "$UNM_SHOW" in *"TAKEOVER PROBABLY_FREE"*"queue could not be measured"*) ;; *) V19W_BAD="$V19W_BAD fixture-is-not-an-unmeasured-probably-free" ;; esac
-case "$UNM_SHOW" in *"Its queue was not measured, so this costs the same single go/no-go BUSY does"*) ;; *) V19W_BAD="$V19W_BAD show-go-no-go-advice-missing" ;; esac
+case "$UNM_SHOW" in *"Its queue was not measured. State that in one line inside the plan confirmation, never as a"*"question of its own. On yes, take it over with takeover --force, not show --force."*) ;; *) V19W_BAD="$V19W_BAD show-unmeasured-advice-missing" ;; esac
 case "$UNM_SHOW" in *"Proceed, but tell the user not to type"*) V19W_BAD="$V19W_BAD show-prints-the-proceed-advice" ;; esac
 case "$UNM_SHOW_FORCED" in *"TAKEOVER PROBABLY_FREE"*) ;; *) V19W_BAD="$V19W_BAD forced-level-changed" ;; esac
 case "$UNM_SHOW_FORCED" in *"Proceed, but tell the user not to type"*) ;; *) V19W_BAD="$V19W_BAD forced-show-proceed-advice-missing" ;; esac
-case "$UNM_SHOW_FORCED" in *"Its queue was not measured, so this costs"*) V19W_BAD="$V19W_BAD forced-show-asks-again" ;; esac
-case "$UNM_BRIEF" in *"Its queue was not measured, so state that to the user in one line and take a single go/no-go before the first edit; on yes, re-run this command with"*) ;; *) V19W_BAD="$V19W_BAD brief-go-no-go-missing" ;; esac
+case "$UNM_SHOW_FORCED" in *"Its queue was not measured. State that"*) V19W_BAD="$V19W_BAD forced-show-repeats-the-unmeasured-advice" ;; esac
+case "$UNM_BRIEF" in *"Its queue was not measured, so state that to the user in one line and put that line in the plan confirmation of step 3, never in a question of its own. Then take it over"*) ;; *) V19W_BAD="$V19W_BAD brief-unmeasured-disclosure-missing" ;; esac
+case "$UNM_BRIEF" in *"Once the user confirms, run takeover again with"*) ;; *) V19W_BAD="$V19W_BAD brief-record-step-missing" ;; esac
+case "$UNM_BRIEF_FORCED" in *"Once the user confirms, run takeover again with"*) V19W_BAD="$V19W_BAD forced-brief-asks-to-record-again" ;; esac
 case "$UNM_BRIEF" in *"Taking over is fine"*) V19W_BAD="$V19W_BAD brief-says-taking-over-is-fine" ;; esac
-case "$UNM_BRIEF_FORCED" in *"Its queue was not measured, so state that to the user in one line and take a single go/no-go before the first edit — the authorization above was given when this brief was written, not here"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-authorization-bound-missing" ;; esac
+case "$UNM_BRIEF_FORCED" in *"Its queue was not measured, so state that to the user in one line and ask nothing about it: the session that ran this command with"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-reopens-the-confirmation" ;; esac
+case "$UNM_BRIEF_FORCED" in *"already took it and does not ask again"*) ;; *) V19W_BAD="$V19W_BAD forced-brief-step3-reasks" ;; esac
+case "$UNM_BRIEF" in *"already took it"*) V19W_BAD="$V19W_BAD unforced-brief-claims-a-confirmation" ;; esac
+case "$UNM_BRIEF" in *"before the user has confirmed the plan in step 3"*) ;; *) V19W_BAD="$V19W_BAD brief-step1-runs-before-the-confirmation" ;; esac
 case "$SHOW_PF" in *"Its queue was not measured"*) V19W_BAD="$V19W_BAD control-show-asks" ;; esac
 case "$PF_BRIEF" in *"Taking over is fine"*) ;; *) V19W_BAD="$V19W_BAD control-brief-proceed-missing" ;; esac
 case "$PF_BRIEF" in *"Its queue was not measured"*) V19W_BAD="$V19W_BAD control-brief-asks" ;; esac
 SILENT_SHOW="$(trailrun show 11111111-0000-0000-0000-000000000015 --all --no-git 2>/dev/null)"
 case "$SILENT_SHOW" in *"TAKEOVER PROBABLY_FREE"*"has been silent for"*"queue could not be measured"*) ;; *) V19W_BAD="$V19W_BAD silent-fixture-is-not-an-unmeasured-probably-free" ;; esac
-case "$SILENT_SHOW" in *"Its queue was not measured, so this costs the same single go/no-go BUSY does"*) ;; *) V19W_BAD="$V19W_BAD silent-branch-show-go-no-go-advice-missing" ;; esac
+case "$SILENT_SHOW" in *"Its queue was not measured. State that in one line inside the plan confirmation, never as a"*"question of its own. On yes, take it over with takeover --force, not show --force."*) ;; *) V19W_BAD="$V19W_BAD silent-branch-show-unmeasured-advice-missing" ;; esac
 case "$SILENT_SHOW" in *"Proceed, but tell the user not to type"*) V19W_BAD="$V19W_BAD silent-branch-show-prints-the-proceed-advice" ;; esac
 if [ -z "$V19W_BAD" ]; then
-  check "V19w a PROBABLY_FREE whose reason says its queue could not be measured costs BUSY's go/no-go in show's advice on the ended-turn and on the silent branch and in the takeover brief's step 4, --force answers it without changing the level, and a measured PROBABLY_FREE still proceeds (control)" PASS
+  check "V19w a PROBABLY_FREE whose reason says its queue could not be measured is disclosed in one line inside the plan confirmation in show's advice on the ended-turn and on the silent branch and in the takeover brief's step 4, never as a question of its own; the unforced brief tells its reader to record with --force after the confirmation and the forced one neither repeats that nor reopens the confirmation, --force swaps in the proceed advice without changing the level, and a measured PROBABLY_FREE still proceeds (control)" PASS
 else
   check "V19w unmeasured-queue PROBABLY_FREE advice:$V19W_BAD" FAIL
 fi
@@ -3483,7 +3491,7 @@ fi
 
 # W12 — the BRIEF carriers must bound the same control class as the plain-text
 # ones. `flatPath` and `briefShellArg` both route through `CONTROL_RUN`;
-# `briefPath` routed only through `oneLine`, whose `/\s+/` covers the line-break
+# `briefPath` routed only through `oneLine`, whose `/\s+/` covered the line-break
 # class and nothing else — JS `\s` excludes ESC (), the rest of C0, DEL and
 # all of C1. So the exact class `flatPath`'s own header names as its reason for
 # existing ("a CSI sequence moves the cursor and overwrites a row the reader
@@ -3544,20 +3552,20 @@ else
   check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
 fi
 
-# W13 — the desktop instance id, on both renderers that print it. `appTag` used
-# `oneLine(app.instance, 8)`, which gets BOTH halves wrong: `oneLine` collapses
-# `/\s+/` only, so a CSI sequence survives into a row a reader trusts, and its clip
-# returns `slice(0, n - 1) + '…'` — SEVEN characters plus an ellipsis, where
-# `cmdInstances` renders `flatPath(i).slice(0, 8)`, eight raw ones. The ONLY purpose
-# of an 8-character prefix is correlating a `list`/`show` row with an `instances`
-# row, so two spellings of one id defeat the field entirely. `cmdShow`'s OWNER row
-# carried the same defect at width 64.
+# W13 — the desktop store's account UUID, on `list`'s `appTag` row and `show`'s
+# OWNER row. `appTag` used `oneLine(app.instance, 8)`, which got BOTH halves wrong:
+# `oneLine` then collapsed `/\s+/` only, so a CSI sequence survived into a row a
+# reader trusts, and its clip returns `slice(0, n - 1) + '…'` — SEVEN characters
+# plus an ellipsis, where `cmdInstances` rendered `flatPath(i).slice(0, 8)`, eight
+# raw ones. The ONLY purpose of an 8-character prefix is correlating a `list`/`show`
+# row with an `instances` row, so two spellings of one id defeat the field entirely.
+# `cmdShow`'s OWNER row carried the same defect at width 64.
 #
 # The ellipsis arm IS scoped to this fixture's own row — `grep -a 'account inst-A'`
 # cannot match the `archive()` fixture, which renders a different account name.
-# That is sufficient: this fixture's instance name is fifteen characters, well past
-# the eight-character prefix, so the clip is exposed here. An earlier wording
-# claimed the arm covered every long instance name in the suite; it does not.
+# That is sufficient: this fixture's account directory name is fifteen characters,
+# well past the eight-character prefix, so the clip is exposed here. An earlier
+# wording claimed the arm covered every long account name in the suite; it does not.
 W13_SID=abababab-0000-0000-0000-0000000000b1
 W13_ESC="$(printf '\033')"
 W13_INST="inst-A${W13_ESC}[2K-0001"
@@ -4769,16 +4777,20 @@ wt_case "WT8v1 a present arm offers the worktree-move alternative, anchored at t
   "$WT8_ADOPT" 'git -c core.fsmonitor=false worktree move' 'cannot run against it as printed'
 wt_case "WT8v2 a gone arm offers no move — the recorded directory is not there to move" \
   "$WT8_ADOPT_GONE" 'cannot run against it as printed' "worktree move '<their worktree>'"
-# The CONDITION is a human attestation and must never read as a verdict this tool reached.
+# The ROUTE is the user's choice and must never read as a verdict this tool reached.
 # The run that prompted this route had a registered LIVE pid on a session its human had
 # abandoned after an account switch, so `archived`, `live` and the whole four-way ladder
-# answer the wrong question. Keying the route on any of them would offer it exactly where
-# it is unsafe and withhold it exactly where it is right, which is why the text states the
-# condition as the reader's and says so.
-wt_case "WT8v3 the move route states the condition as the reader's to attest" \
+# answer the wrong question. Keying the route on any of them would withhold from the user
+# a choice that is theirs whatever the other session is doing, which is why the text states
+# the choice as the user's and says so.
+wt_case "WT8v3 the move route states the route as the user's to authorize" \
   "$WT8_ADOPT" 'only you can authorize it' 'cannot run against it as printed'
-wt_case "WT8v4 the move route says why no predicate here can establish that condition" \
+wt_case "WT8v4 the move route says why no predicate here decides that choice" \
   "$WT8_ADOPT" 'A registered pid is a process, not an intention' 'cannot run against it as printed'
+wt_case "WT8v13 the move route is offered whatever the other session is doing" \
+  "$WT8_ADOPT" 'It is offered whatever that session is doing' 'If you KNOW that session'
+wt_case "WT8v14 no verdict withholds the move route" \
+  "$WT8_ADOPT" 'no verdict withholds this route' 'If you KNOW that session'
 # The COST half. Without it the route reads as a free upgrade over the create recipe, and
 # that reading is exactly how someone else's live worktree gets moved out from under them.
 # Each claim gets its own pin, and the three gate claims are pinned in their BOUNDED form
@@ -4820,10 +4832,10 @@ wt_case "WT8v9 the same-repository bound is enforced by git, not by the reader's
   "$WT8_ADOPT" 'is refused outright with "is not a working' 'cannot run against it as printed'
 # The move route's OWN STOP CONDITION and its fsmonitor disclosure — the emitted twins of
 # SKILL.md's, both of which were unpinned on EITHER carrier until this round while every
-# sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the attestation,
+# sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the authorization,
 # `WT8v5` the cost, `WT8v6`/`WT8v6b`/`WT8v7`/`WT8v7b` the gate claims, `WT8v9` the branch
 # bound). The doc carrier is NOT symmetrical with that and the skill suite's own comment says
-# so: its attestation paragraph had no needle at all until this round. This is the sentence
+# so: its arm-predicate paragraph had no needle at all until this round. This is the sentence
 # guarding the one rendered command in this flow that writes to the SOURCE worktree with no
 # refusal standing in front of it — "refusal standing", never "gate refusal": the renderer
 # refusals are what is absent here, while the write gate, when opted in, DOES judge this command, so naming
@@ -5358,6 +5370,7 @@ else
   # textconv, diff.external or fsmonitor driver executing, `--binary`, `mktemp`, and
   # the symlink check positioned between the diff and the apply.
   case "$C_READY" in *"\`CARRY_OVER\`"*) ;; *) WC1_BAD="$WC1_BAD no-carry-over-pointer" ;; esac
+  case "$C_READY" in *"takeover --no-record"*) ;; *) WC1_BAD="$WC1_BAD plan-pass-pointer-records" ;; esac
   WC1_REINLINED="$(recipe_reinlined "$C_READY" | head -3 | tr '\n' '|')"
   [ -z "$WC1_REINLINED" ] || WC1_BAD="$WC1_BAD recipe-reauthored:$WC1_REINLINED"
   # The two operands `CARRY_OVER` ships as placeholders and cannot compute. Without
@@ -6367,6 +6380,11 @@ case "$V21J_ROW" in
   *" 3h "*"m ago"*) check "V21j limited ages a stalled row from its turn records, not from a later metadata write" PASS ;;
   *) check "V21j limited row age ('${V21J_ROW:-<no row>}')" FAIL ;;
 esac
+V21T_NEXT="$(trailrun limited --all --no-git 2>/dev/null | grep -E '^next: ' | head -1)"
+case "$V21T_NEXT" in
+  *" takeover <session-id> --no-record") check "V21t limited points at the read-only plan pass, takeover --no-record" PASS ;;
+  *) check "V21t limited next step ('${V21T_NEXT:-<none>}')" FAIL ;;
+esac
 
 V21K_SID=3e7a0005-0000-0000-0000-0000000000b5
 V21K_CWD="$FAKE/work/plan-checkout"
@@ -7174,7 +7192,9 @@ else
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'Its process is still registered — measured: pid' || WR_BAD="$WR_BAD no-process-line"
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'too recent to judge' || WR_BAD="$WR_BAD no-measured-reason"
   wr_json "$WR_FORCED" 'o.message' | grep -qF 'in the middle of a turn' && WR_BAD="$WR_BAD unmeasured-cause"
-  [ -z "$WR_BAD" ] && check "WR8 a busy source blocks the release until --force records the go/no-go, and the archive line then names its process with the measured reason" PASS || check "WR8 busy source:$WR_BAD" FAIL
+  wr_json "$WR_OUT" 'o.blockers.map((b) => b.text).join(" ")' | grep -qF 'their request to release, or the takeover they confirmed, is the go' || WR_BAD="$WR_BAD blocker-text-not-the-go"
+  wr_json "$WR_OUT" 'o.blockers.map((b) => b.text).join(" ")' | grep -qiF 'go/no-go' && WR_BAD="$WR_BAD blocker-text-asks"
+  [ -z "$WR_BAD" ] && check "WR8 a busy source blocks the release until --force records the authorization, its blocker names the user's request or confirmation as the go and asks nothing, and the archive line then names its process with the measured reason" PASS || check "WR8 busy source:$WR_BAD" FAIL
   wr_rel "$WR_SRC" "$WR_SRC_WT" "$WR_DEAD" 7200 "$WR_ACCT"
 
   wr_anchor "$WR_SRC" 60 >/dev/null
@@ -7250,6 +7270,375 @@ else
   { [ "$(wr_json "$WR_OUT" 'o.verdict + ":" + o.source.layout')" = "ready:gone" ] && wr_json "$WR_OUT" 'o.message' | grep -qF 'Nothing is left at its recorded worktree'; } \
     && check "WR12 after a whole-tree move the old session is ready at once, because nothing is left at its recorded path" PASS \
     || check "WR12 gone layout: $(wr_json "$WR_OUT" 'o.verdict + " " + o.source.layout')" FAIL
+fi
+
+CH_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-chips/ws-0001"
+CH_SID=cdcdcdcd-0000-0000-0000-0000000000c1
+CH_EMPTY_SID=cdcdcdcd-0000-0000-0000-0000000000c2
+CH_NONE_SID=cdcdcdcd-0000-0000-0000-0000000000c3
+mkdir -p "$CH_STORE"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, full, empty, none] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+for (const sid of [full, empty, none]) {
+  const wt = path.join(home, "work", `wt-chips-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+}
+const esc = String.fromCharCode(27);
+const tick = "```";
+fs.writeFileSync(path.join(store, `local_${full}.json`), JSON.stringify({
+  sessionId: `local_${full}`, cliSessionId: full, isArchived: false, title: "chips fixture",
+  backgroundTaskSuggestions: [
+    { id: "task_00000001", title: "First chip", tldr: "Why the first chip matters.", prompt: `Fix it.\n${tick}js\nx()\n${tick}\nDone${esc}[2K.`, createdAt: 1 },
+    { id: "task_00000002", title: "Offer card", tldr: "An offer.", prompt: "Offer prompt.", createdAt: 2, offer: true },
+    { id: "task_00000003", title: "Second chip", tldr: "Why the second chip matters.", prompt: "Second prompt.", cwd: "/tmp/elsewhere-chip", createdAt: 3 },
+  ],
+}));
+fs.writeFileSync(path.join(store, `local_${empty}.json`), JSON.stringify({ sessionId: `local_${empty}`, cliSessionId: empty, isArchived: false, title: "no chips fixture" }));
+' "$FAKE" "$CH_STORE" "$CH_SID" "$CH_EMPTY_SID" "$CH_NONE_SID" 2>/dev/null
+
+CH_GOT="$(trailrun takeover "$CH_SID" --all --no-record --no-git --json 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s).openChips; } catch { process.stdout.write("unparseable"); return; }
+  const esc = String.fromCharCode(27);
+  const tick = "```";
+  const bad = [];
+  if (!o || o.measured !== true) bad.push("not-measured");
+  const chips = (o && o.chips) || [];
+  if (chips.map((c) => c.title).join("|") !== "First chip|Second chip") bad.push(`titles=${chips.map((c) => c.title).join("|")}`);
+  if (!chips[0] || chips[0].prompt !== `Fix it.\n${tick}js\nx()\n${tick}\nDone[2K.`) bad.push("prompt-not-verbatim");
+  if (chips.some((c) => (c.title + c.tldr + c.prompt).includes(esc))) bad.push("esc-survived");
+  if (!chips[1] || chips[1].cwd !== "/tmp/elsewhere-chip") bad.push("cwd-lost");
+  if (chips[0] && chips[0].cwd !== null) bad.push("cwd-invented");
+  process.stdout.write(bad.join(" "));
+});
+')"
+[ -z "$CH_GOT" ] && check "CH1 takeover --json lists the open chips of the desktop record verbatim, minus control characters, and leaves offers out" PASS || check "CH1 takeover --json openChips:$CH_GOT" FAIL
+
+CH_MD="$(trailrun takeover "$CH_SID" --all --no-record --no-git 2>/dev/null)"
+CH_BAD=""
+printf '%s\n' "$CH_MD" | grep -qxF '## Open task chips' || CH_BAD="$CH_BAD section-absent"
+printf '%s\n' "$CH_MD" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'exactly once, after the user has confirmed the plan and takeover has run with `--force`' || CH_BAD="$CH_BAD trigger-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'one `spawn_task` call per chip' || CH_BAD="$CH_BAD tool-absent"
+printf '%s\n' "$CH_MD" | grep -qxF '````text' || CH_BAD="$CH_BAD fence-not-widened"
+printf '%s\n' "$CH_MD" | grep -qxF '/tmp/elsewhere-chip' || CH_BAD="$CH_BAD cwd-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'Offer card' && CH_BAD="$CH_BAD offer-rendered"
+case "$CH_MD" in *"$(printf '\033')"*) CH_BAD="$CH_BAD esc-survived" ;; esac
+CH_AT_CHIPS="$(printf '%s\n' "$CH_MD" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+CH_AT_RECENT="$(printf '%s\n' "$CH_MD" | grep -nF '## Recent instructions' | head -1 | cut -d: -f1)"
+[ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_RECENT" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_RECENT" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_RECENT"
+[ -z "$CH_BAD" ] && check "CH2 the takeover brief carries every open chip in a fence its prompt cannot close, with the instruction to re-create each one once" PASS || check "CH2 takeover brief chips:$CH_BAD" FAIL
+
+CH_EMPTY_MD="$(trailrun takeover "$CH_EMPTY_SID" --all --no-record --no-git 2>/dev/null)"
+printf '%s\n' "$CH_EMPTY_MD" | grep -qxF '_the session had no open task chips_' \
+  && check "CH3 a desktop record without chips says so in the takeover brief" PASS \
+  || check "CH3 empty record: $(printf '%s\n' "$CH_EMPTY_MD" | grep -A1 -xF '## Open task chips' | tail -1)" FAIL
+
+CH_NONE_GOT="$(trailrun takeover "$CH_NONE_SID" --all --no-record --no-git --json 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const o = JSON.parse(s).openChips; process.stdout.write(`${o.measured}:${o.reason}:${o.chips.length}`); } catch { process.stdout.write("unparseable"); }
+});
+')"
+CH_NONE_MD="$(trailrun takeover "$CH_NONE_SID" --all --no-record --no-git 2>/dev/null)"
+if [ "$CH_NONE_GOT" = "false:Claude Desktop holds no record for this session:0" ] \
+  && printf '%s\n' "$CH_NONE_MD" | grep -qF '_Not read: Claude Desktop holds no record for this session.'; then
+  check "CH4 a session without a desktop record reports its chips as not read instead of as none" PASS
+else
+  check "CH4 missing record: $CH_NONE_GOT" FAIL
+fi
+
+CH_HO="$(trailrun handoff "$CH_SID" --all 2>/dev/null)"
+CH_BAD=""
+printf '%s\n' "$CH_HO" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_HO" | grep -qF 'exactly once, after the user has confirmed your plan' || CH_BAD="$CH_BAD trigger-absent"
+CH_AT_CHIPS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 | cut -d: -f1)"
+[ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_THREADS" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_THREADS" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_THREADS"
+[ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
+
+CH_REF="$PLUGIN_DIR/skills/session-trail/references/takeover.md"
+CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
+CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH_AT_RELEASE" ] \
+  && grep -qF 'mcp__ccd_session__spawn_task' "$CH_REF" \
+  && grep -qF 'how many open task chips the brief lists' "$CH_REF"; then
+  check "CH6 references/takeover.md carries the chips before the release step and names the tool and the plan confirmation line" PASS
+else
+  check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
+fi
+
+DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
+DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"
+DR_ARCH_SID=d0d0d0d0-0000-0000-0000-0000000000d1
+DR_OPEN_SID=d0d0d0d0-0000-0000-0000-0000000000d2
+DR_NONE_SID=d0d0d0d0-0000-0000-0000-0000000000d3
+DR_ARCHIVED_LINE='- **ARCHIVED** in the desktop app: its process was stopped and the worktree may have been cleaned up'
+mkdir -p "$DR_STORE"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, archived, open, none] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+for (const sid of [archived, open, none]) {
+  const wt = path.join(home, "work", `wt-dr-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+}
+for (const [sid, isArchived] of [[archived, true], [open, false]]) {
+  fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({ sessionId: `local_${sid}`, cliSessionId: sid, isArchived, title: "desktop record fixture", model: "opus", effort: "high", permissionMode: "default" }));
+}
+' "$FAKE" "$DR_STORE" "$DR_ARCH_SID" "$DR_OPEN_SID" "$DR_NONE_SID" 2>/dev/null
+
+dr_markdown() {
+  printf '%s\n' "$1" | awk '/^--- BEGIN [A-Z]+ MARKDOWN ---$/{f=1;next} /^--- END [A-Z]+ MARKDOWN ---$/{f=0} f'
+}
+dr_source_bad() {
+  local src got
+  src="$(dr_markdown "$2" | awk '$0=="## Source"{f=1;next} /^## /{f=0} f')"
+  if [ -z "$src" ]; then printf ' %s:source-absent' "$1"; return; fi
+  printf '%s\n' "$src" | grep -qF '(unknown)' && printf ' %s:unknown-rendered' "$1"
+  printf '%s\n' "$2" | grep -qF 'owning desktop instance' && printf ' %s:instance-line-rendered' "$1"
+  got="$(printf '%s\n' "$src" | grep -cxF -- "$DR_ARCHIVED_LINE")"
+  [ "$got" = "$3" ] || printf ' %s:archived-bullets=%s-want-%s' "$1" "$got" "$3"
+}
+DR_ARCH_MD="$(trailrun takeover "$DR_ARCH_SID" --all --no-record --no-git 2>/dev/null)"
+DR_BAD="$(dr_source_bad archived "$DR_ARCH_MD" 1)"
+DR_BAD="$DR_BAD$(dr_source_bad open "$(trailrun takeover "$DR_OPEN_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+DR_BAD="$DR_BAD$(dr_source_bad no-record "$(trailrun takeover "$DR_NONE_SID" --all --no-record --no-git 2>/dev/null)" 0)"
+[ -z "$DR_BAD" ] \
+  && check "DR1 the takeover brief's Source section renders no (unknown) and no desktop-instance line, with or without a desktop record, and carries the ARCHIVED bullet exactly when the record is archived" PASS \
+  || check "DR1 takeover Source section:$DR_BAD" FAIL
+
+DR_BAD=""
+DR_PREFIX="$(printf '%s' "$DR_ACCT" | cut -c1-8)"
+[ "$(field "$DR_ARCH_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD archived-record-account-not-resolved"
+[ "$(field "$DR_OPEN_SID" app.accountUuid)" = "$DR_ACCT" ] || DR_BAD="$DR_BAD open-record-account-not-resolved"
+for DR_VERB in takeover handoff; do
+  if [ "$DR_VERB" = takeover ]; then DR_MD="$(dr_markdown "$DR_ARCH_MD")"; else DR_MD="$(dr_markdown "$(trailrun handoff "$DR_ARCH_SID" --all 2>/dev/null)")"; fi
+  if [ -z "$DR_MD" ]; then DR_BAD="$DR_BAD $DR_VERB-brief-absent"; continue; fi
+  printf '%s\n' "$DR_MD" | grep -qF -- "$DR_PREFIX" && DR_BAD="$DR_BAD $DR_VERB-brief-names-the-account"
+done
+DR_REF="$PLUGIN_DIR/skills/session-trail/references/disclosure.md"
+grep -qF 'NEITHER brief carries an account-adjacent value at all' "$DR_REF" || DR_BAD="$DR_BAD disclosure-claim-gone"
+grep -qF 'never its account' "$DR_REF" || DR_BAD="$DR_BAD disclosure-source-sentence-gone"
+[ -z "$DR_BAD" ] \
+  && check "DR2 neither brief names the account the desktop store resolves for the session, as references/disclosure.md states" PASS \
+  || check "DR2 brief account disclosure:$DR_BAD" FAIL
+
+dr_field_scan() {
+  node -e '
+const fs = require("node:fs");
+const code = `${fs.readFileSync(process.argv[1], "utf8")}\n${process.argv[2]}`.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+const start = code.indexOf("function ccdIndex() {");
+const body = start < 0 ? "" : code.slice(start, code.indexOf("\n}\n", start));
+const lit = /map\.set\(o\.cliSessionId, \{([\s\S]*?)\}\);/.exec(body);
+const stored = new Set(lit ? [...lit[1].matchAll(/^\s*([A-Za-z_$][\w$]*):/gm)].map((m) => m[1]) : []);
+const read = new Set([...code.matchAll(/[^\w$]app\??\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+process.stdout.write(`${[...stored].sort().join(",")}|${[...read].filter((f) => !stored.has(f)).sort().join(",")}`);
+' "$TRAIL_MJS" "${1:-}"
+}
+DR_SCAN="$(dr_field_scan)"
+DR_STORED="${DR_SCAN%%|*}"
+DR_CTRL="$(dr_field_scan '  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);')"
+DR_BAD=""
+case ",$DR_STORED," in *,accountUuid,*archived,*) ;; *) DR_BAD="$DR_BAD stored-keys-not-derived($DR_STORED)" ;; esac
+[ -z "${DR_SCAN#*|}" ] || DR_BAD="$DR_BAD reads-unstored:${DR_SCAN#*|}"
+[ "${DR_CTRL#*|}" = "instance" ] || DR_BAD="$DR_BAD control-read-not-reported(${DR_CTRL#*|})"
+[ -z "$DR_BAD" ] \
+  && check "DR3 every desktop-record field trail.mjs reads through an app binding is one ccdIndex stores ($DR_STORED), and the same scan reports a read of an unstored field" PASS \
+  || check "DR3 desktop-record field reads:$DR_BAD" FAIL
+
+RO_HOME="$(cd "$FAKE" && pwd -P)/readonly-git"
+RO_REPO="$RO_HOME/repo"
+RO_HOOK="$RO_HOME/fsmonitor-hook"
+RO_LOG="$RO_HOME/fsmonitor.log"
+RO_SID=ab0ab0ab-0000-0000-0000-000000000071
+mkdir -p "$RO_HOME"
+cat > "$RO_HOOK" <<RO_HOOK_BODY
+#!/bin/sh
+echo ran >> "$RO_LOG"
+exit 1
+RO_HOOK_BODY
+ro_prime() {
+  node -e '
+const fs = require("node:fs");
+const [file, index, log, step] = process.argv.slice(1);
+const touched = new Date(Date.UTC(2021, 0, 1, 0, Number(step)));
+fs.utimesSync(file, touched, touched);
+const old = new Date(Date.UTC(2020, 0, 1));
+fs.utimesSync(index, old, old);
+fs.writeFileSync(log, "");
+' "$RO_REPO/stat-only.txt" "$RO_REPO/.git/index" "$RO_LOG" "$1"
+}
+ro_index_mtime() { node -e 'process.stdout.write(String(require("node:fs").statSync(process.argv[1]).mtimeMs))' "$RO_REPO/.git/index" 2>/dev/null; }
+ro_hook_runs() { if [ -s "$RO_LOG" ]; then wc -l < "$RO_LOG" | tr -d ' '; else echo 0; fi; }
+ro_trail() { ( unset GIT_OPTIONAL_LOCKS; trailrun "$@" ); }
+
+RO_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO_HOOK" \
+  && git init -q "$RO_REPO" >/dev/null 2>&1 \
+  && printf 'stat only\n' > "$RO_REPO/stat-only.txt" \
+  && printf 'base\n' > "$RO_REPO/edited.txt" \
+  && git -C "$RO_REPO" add stat-only.txt edited.txt >/dev/null 2>&1 \
+  && git -C "$RO_REPO" -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && git -C "$RO_REPO" config core.fsmonitor "$RO_HOOK" >/dev/null 2>&1 \
+  && printf 'base\nedited\n' > "$RO_REPO/edited.txt" \
+  && fix "$RO_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO_REPO"; then
+  RO_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO* git is not on PATH — the read-only git checks need a real repository and are unverified in this run"
+elif [ "$RO_OK" != 1 ]; then
+  check "RO-fixture the read-only git fixture (a stat-dirty tracked file, an edited one and a logging fsmonitor hook) could not be built" FAIL
+else
+  RO_BAD=""
+  RO_STEP=0
+  for RO_VERB in takeover show handoff; do
+    RO_STEP=$((RO_STEP + 1))
+    ro_prime "$RO_STEP"
+    RO_BEFORE="$(ro_index_mtime)"
+    if [ "$RO_VERB" = takeover ]; then
+      RO_OUT="$(ro_trail takeover "$RO_SID" --all --no-record --json 2>/dev/null)"; RO_RC=$?
+      RO_SEEN="$(printf '%s' "$RO_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const files = (o.git && o.git.dirtyFiles) || [];
+  const diff = (o.diff && o.diff.uncommitted) || "";
+  const ok = o.git && o.git.dirty === 1 && files.some((f) => f.endsWith("edited.txt")) && /^\+edited$/m.test(diff) && !diff.includes("stat-only.txt");
+  process.stdout.write(ok ? "ok" : `dirty=${o.git && o.git.dirty} files=${files.join(",")}`);
+});
+')"
+    else
+      RO_OUT="$(ro_trail "$RO_VERB" "$RO_SID" --all 2>/dev/null)"; RO_RC=$?
+      if printf '%s' "$RO_OUT" | grep -qF 'edited.txt' && ! printf '%s' "$RO_OUT" | grep -qF 'stat-only.txt'; then RO_SEEN=ok; else RO_SEEN=edited-file-not-listed; fi
+    fi
+    [ "$RO_RC" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:rc=$RO_RC"
+    [ "$RO_SEEN" = ok ] || RO_BAD="$RO_BAD $RO_VERB:git-state-not-read($RO_SEEN)"
+    { [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" = "$(ro_index_mtime)" ]; } || RO_BAD="$RO_BAD $RO_VERB:index-rewritten"
+    [ "$(ro_hook_runs)" = 0 ] || RO_BAD="$RO_BAD $RO_VERB:fsmonitor-hook-ran"
+  done
+  if [ -z "$RO_BAD" ]; then
+    check "RO1 takeover, show and handoff read the source worktree's git state without rewriting its index or running its fsmonitor hook" PASS
+  else
+    check "RO1 read-only git in the source worktree:$RO_BAD" FAIL
+  fi
+
+  RO_STEP=$((RO_STEP + 1))
+  ro_prime "$RO_STEP"
+  RO_BEFORE="$(ro_index_mtime)"
+  ( unset GIT_OPTIONAL_LOCKS; git -C "$RO_REPO" status --porcelain >/dev/null 2>&1 )
+  RO_AFTER="$(ro_index_mtime)"
+  RO_RUNS="$(ro_hook_runs)"
+  if [ -n "$RO_BEFORE" ] && [ "$RO_BEFORE" != "$RO_AFTER" ] && [ "$RO_RUNS" != 0 ]; then
+    check "RO1-control a plain git status in the same fixture rewrites the index and runs the fsmonitor hook, so RO1 measured both" PASS
+  else
+    check "RO1-control a plain git status left the index at ${RO_AFTER:-?} (was ${RO_BEFORE:-?}) and ran the hook $RO_RUNS times, so RO1 proved nothing here" FAIL
+  fi
+fi
+
+RO2_HOME="$(cd "$FAKE" && pwd -P)/diff-drivers"
+RO2_REPO="$RO2_HOME/repo"
+RO2_TEXTCONV="$RO2_HOME/textconv"
+RO2_EXTERNAL="$RO2_HOME/external-diff"
+RO2_TEXTCONV_LOG="$RO2_HOME/textconv.log"
+RO2_EXTERNAL_LOG="$RO2_HOME/external-diff.log"
+RO2_SID=ab0ab0ab-0000-0000-0000-000000000072
+mkdir -p "$RO2_HOME"
+cat > "$RO2_TEXTCONV" <<RO2_TEXTCONV_BODY
+#!/bin/sh
+echo ran >> "$RO2_TEXTCONV_LOG"
+tr 'a-z' 'A-Z' < "\$1"
+RO2_TEXTCONV_BODY
+cat > "$RO2_EXTERNAL" <<RO2_EXTERNAL_BODY
+#!/bin/sh
+echo ran >> "$RO2_EXTERNAL_LOG"
+echo EXTERNAL-DIFF-DRIVER-OUTPUT
+RO2_EXTERNAL_BODY
+ro2_reset() { : > "$RO2_TEXTCONV_LOG"; : > "$RO2_EXTERNAL_LOG"; }
+ro2_runs() { if [ -s "$1" ]; then wc -l < "$1" | tr -d ' '; else echo 0; fi; }
+ro2_git() { ( unset GIT_EXTERNAL_DIFF; git -C "$RO2_REPO" "$@" ); }
+
+RO2_OK=0
+if command -v git >/dev/null 2>&1 \
+  && chmod +x "$RO2_TEXTCONV" "$RO2_EXTERNAL" \
+  && git init -q "$RO2_REPO" >/dev/null 2>&1 \
+  && ro2_git symbolic-ref HEAD refs/heads/main >/dev/null 2>&1 \
+  && printf '*.conv diff=logconv\n' > "$RO2_REPO/.gitattributes" \
+  && printf 'alpha\nbeta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add .gitattributes notes.conv >/dev/null 2>&1 \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -m base >/dev/null 2>&1 \
+  && ro2_git checkout -q -b feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git -c user.email=t@example.invalid -c user.name=t commit -q -am feature >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git add notes.conv >/dev/null 2>&1 \
+  && printf 'alpha\nbeta\ngamma\ndelta\nepsilon\n' > "$RO2_REPO/notes.conv" \
+  && ro2_git config diff.logconv.textconv "$RO2_TEXTCONV" >/dev/null 2>&1 \
+  && ro2_git config diff.external "$RO2_EXTERNAL" >/dev/null 2>&1 \
+  && fix "$RO2_SID" "$DEAD_PID" "$FRESH_IDLE" end_turn none "$RO2_REPO"; then
+  RO2_OK=1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "RO2* git is not on PATH — the diff-driver checks need a real repository and are unverified in this run"
+elif [ "$RO2_OK" != 1 ]; then
+  check "RO2-fixture the diff-driver fixture (a logging textconv driver, a logging diff.external driver, and a committed, a staged and an unstaged edit of one file) could not be built" FAIL
+else
+  ro2_reset
+  RO2_OUT="$( ( unset GIT_EXTERNAL_DIFF; trailrun takeover "$RO2_SID" --all --no-record --json ) 2>/dev/null)"; RO2_RC=$?
+  RO2_SEEN="$(printf '%s' "$RO2_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const d = o.diff || {};
+  const raw = (key, line) => {
+    const lines = (typeof d[key] === "string" ? d[key] : "").split("\n");
+    return lines.includes("diff --git a/notes.conv b/notes.conv") && lines.includes(line);
+  };
+  const missing = [["uncommitted", "+epsilon"], ["staged", "+delta"], ["branchDiff", "+gamma"]].filter(([key, line]) => !raw(key, line)).map(([key]) => key);
+  process.stdout.write(missing.length ? `raw-line-missing-in:${missing.join(",")}` : "ok");
+});
+')"
+  RO2_BAD=""
+  [ "$RO2_RC" = 0 ] || RO2_BAD="$RO2_BAD rc=$RO2_RC"
+  [ "$RO2_SEEN" = ok ] || RO2_BAD="$RO2_BAD $RO2_SEEN"
+  [ "$(ro2_runs "$RO2_TEXTCONV_LOG")" = 0 ] || RO2_BAD="$RO2_BAD textconv-driver-ran"
+  [ "$(ro2_runs "$RO2_EXTERNAL_LOG")" = 0 ] || RO2_BAD="$RO2_BAD diff.external-driver-ran"
+  if [ -z "$RO2_BAD" ]; then
+    check "RO2 takeover --json carries the source worktree's uncommitted, staged and branch diffs raw, without running its textconv driver or its diff.external driver" PASS
+  else
+    check "RO2 diff drivers in the source worktree:$RO2_BAD" FAIL
+  fi
+
+  ro2_reset
+  ro2_git diff >/dev/null 2>&1
+  RO2_EXTERNAL_RUNS="$(ro2_runs "$RO2_EXTERNAL_LOG")"
+  ro2_reset
+  ro2_git diff --no-ext-diff >/dev/null 2>&1
+  RO2_TEXTCONV_RUNS="$(ro2_runs "$RO2_TEXTCONV_LOG")"
+  if [ "$RO2_EXTERNAL_RUNS" != 0 ] && [ "$RO2_TEXTCONV_RUNS" != 0 ]; then
+    check "RO2-control a plain git diff in the same fixture runs the diff.external driver, and once --no-ext-diff stops that one it runs the textconv driver, so RO2 measured both" PASS
+  else
+    check "RO2-control a plain git diff ran the diff.external driver $RO2_EXTERNAL_RUNS times and git diff --no-ext-diff ran the textconv driver $RO2_TEXTCONV_RUNS times, so RO2 proved nothing here" FAIL
+  fi
 fi
 
 report

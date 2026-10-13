@@ -448,10 +448,12 @@ zensu_emit_named_bind_deny() {
   # pre-edit-tdd-reminder.sh and pre-bash-zensu-gate.sh.
   local dead_root
   if dead_root="$(zensu_session_orphaned_project_root "$payload")" && [ -n "$dead_root" ]; then
-    zensu_emit_hook_session_deny orphaned-project-root "$dead_root"
+    [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
+    zensu_emit_hook_session_deny orphaned-project-root "$dead_root" "$audience"
     return
   fi
-  zensu_emit_hook_session_deny ${fallback:+"$fallback"}
+  [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
+  zensu_emit_hook_session_deny "$fallback" "" "$audience"
 }
 
 # Sources the agent-context library beside this file. ONE loader for the two
@@ -474,7 +476,7 @@ _zensu_load_agent_context() {
 # main principal — so a reviewer, an evidence worker or a neutral child handed that
 # command is pointed at a write every gate refuses it. The `.*` gate has always
 # split its wording on this; the shell scopes did not, and handed the remedy to
-# every principal. Asked only on a deny that renders an adoption sentence.
+# every principal. Asked only on the deny path.
 #
 # `main` whenever the principal cannot be established, and that direction is
 # deliberate: a child shown the main wording still cannot run the command, while
@@ -658,7 +660,8 @@ zensu_doctor_allowed() {
 #                     supplies the same version pair and refusal token; the
 #                     remedy is the same, the cause is a different one
 #   orphaned-project-root  the caller POSITIVELY identified that the recorded
-#                     project root is gone, and supplies THAT PATH as $2 — a
+#                     project root is gone, and supplies THAT PATH as $2 and the
+#                     audience as $3 — a
 #                     path, not a version, so it is bounded by
 #                     ZENSU_SAFE_DISPLAY_PATH_RE and never by
 #                     ZENSU_SAFE_VERSION_RE, which forbids `/` and would
@@ -678,10 +681,10 @@ zensu_doctor_allowed() {
 # left the reader with two surfaces telling different stories. With a shape-valid
 # token they append one sentence naming it; with none they read exactly as before.
 #
-# The LAST argument of every adoption-bearing scope is the AUDIENCE, `main` or
-# `child` (see _zensu_deny_audience). `child` keeps the cause, the attempt and the
-# token and withholds every command: the repair writes the immutable record and
-# is the main thread's alone.
+# The LAST argument of every adoption-bearing scope, and of `orphaned-project-root`,
+# is the AUDIENCE, `main` or `child` (see _zensu_deny_audience). `child` keeps the
+# cause, the attempt and the token and withholds every command: the diagnosis and
+# the repair are the main thread's alone.
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -767,6 +770,7 @@ _zensu_adoption_tail() {
 # plain retry by the child itself is the remedy, and telling it that the repair
 # "is not available here" would be false.
 ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.'
+ZENSU_BIND_CHILD_CLOSE='The diagnosis and the repair are reserved for the main thread, so neither is available here — report this to the main thread rather than retrying.'
 
 # The SAME rule for the one interpolated value that is a path rather than a
 # version, and it must be its own constant: ZENSU_SAFE_VERSION_RE forbids `/`,
@@ -785,8 +789,8 @@ ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserv
 # orphaned state reviewer-capability-v1.js returns early for the main principal,
 # so this deny is the ONLY thing refusing an Edit there.
 #
-# Leading `/` is required rather than optional, so an empty value fails the
-# shape and takes the placeholder without a second arm.
+# A `/` is required after the optional drive prefix rather than optional, so an
+# empty value fails the shape and takes the placeholder without a second arm.
 #
 # The length bound is a SEPARATE `${#dead}` test and deliberately NOT an ERE
 # interval, because an interval here does not work on the shell this plugin
@@ -815,7 +819,7 @@ ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserv
 # value is rendered last — so a maintainer checking only this file would find no
 # reason for the exclusion and could reopen it for the other consumer.
 ZENSU_SAFE_DISPLAY_PATH_MAX=1024
-ZENSU_SAFE_DISPLAY_PATH_RE='^/[-0-9A-Za-z._+@:/ ,~#=!&;]*$'
+ZENSU_SAFE_DISPLAY_PATH_RE='^([A-Za-z]:)?/[-0-9A-Za-z._+@:/ ,~#=!&;]*$'
 
 # The value is not only a JSON string, it is PROSE a model reads and acts on, so
 # the two STRUCTURAL guards `hooks/lib/zensu-safe-display-v1.js` ships for this same
@@ -887,6 +891,9 @@ zensu_safe_display_path() {
   # that widens a range widens what an ALLOWLIST admits, and it makes ${#value} a byte
   # count, which is what a 1024-BYTE ceiling means.
   local LC_ALL=C
+  case "$value" in
+    ([A-Za-z]:[\\/]*) value="${value//\\//}" ;;
+  esac
   case "$value" in
     (*"${ZENSU_FORGERY_DOUBLE_SPACE:-}"*|*"${ZENSU_FORGERY_PAIR_SPACE_COLON:-}"*|*"${ZENSU_FORGERY_PAIR_COLON_SPACE:-}"*)
       printf '(unreadable)'
@@ -972,6 +979,11 @@ zensu_emit_hook_session_deny() {
   fi
   if [ "$scope" = orphaned-project-root ]; then
     local dead="${2:-}"
+    if [ "${3:-main}" = child ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable and this installation serves it — the disagreement is that the project root it records no longer exists, which a deleted or recycled worktree causes. The workflow document lived under that directory, so no write can be attributed to a project that is not there. %s"}}\n' \
+        "$ZENSU_BIND_CHILD_CLOSE"
+      return
+    fi
     # Same degradation policy as the two version scopes: substitute, keep the
     # wording. Losing the path is a worse message; losing the remedy — or the
     # decision — is a wrong one. See ZENSU_SAFE_DISPLAY_PATH_RE for why this is
@@ -1024,12 +1036,24 @@ zensu_emit_hook_session_deny() {
     fi
   fi
   if [ "$scope" = narrowed ]; then
+    if [ "${3:-main}" = child ]; then
+      [ -n "$appended" ] || appended=" $ZENSU_BIND_CHILD_CLOSE"
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. A Zensu plugin change that landed while this session was running is not that cause on its own any more: a compatible upgrade keeps serving the record, and a breaking one is adopted automatically when the persisted schemas are equal — reaching this deny means the record disagrees for a reason adoption does not admit.%s"}}\n' \
+        "$appended"
+      return
+    fi
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. A Zensu plugin change that landed while this session was running is not that cause on its own any more: a compatible upgrade keeps serving the record, and a breaking one is adopted automatically when the persisted schemas are equal — reaching this deny means the record disagrees for a reason adoption does not admit. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
       "$appended"
     return
   fi
   if [ "$scope" = damaged-runtime ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no usable Session Control binding — either no record at all, or a record whose recorded project root no longer exists — which alone would still leave the interactive thread able to run /zensu:doctor, but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
+    return
+  fi
+  if [ "${3:-main}" = child ]; then
+    [ -n "$appended" ] || appended=" $ZENSU_BIND_CHILD_CLOSE"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. The cause is one of three: this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit.%s"}}\n' \
+      "$appended"
     return
   fi
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
@@ -1163,7 +1187,7 @@ zensu_memoize_project_dir() {
 case "${OSTYPE:-}" in
   msys*|cygwin*|mingw*|win32*) ;;
   *)
-    export ZENSU_SAFE_VERSION_RE ZENSU_SAFE_REFUSAL_RE ZENSU_ADOPTION_CHILD_CLOSE \
+    export ZENSU_SAFE_VERSION_RE ZENSU_SAFE_REFUSAL_RE ZENSU_ADOPTION_CHILD_CLOSE ZENSU_BIND_CHILD_CLOSE \
       ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
       ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE \
       2>/dev/null || true

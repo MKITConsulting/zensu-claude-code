@@ -258,9 +258,9 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   carry it into `## Open` and claim NO test verdict. The runner's own summary line
   is this run's verdict. Then
   invoke the `/zensu:tdd` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
-  when that procedure is not already in your context (this stage is often forced
-  cold), `Read` it from `${CLAUDE_PLUGIN_ROOT}/skills/tdd/SKILL.md` rather than
-  improvising it; re-invoking the `/zensu:tdd` skill is forbidden below —
+  when that procedure is not in your context, `Read` it from
+  `${CLAUDE_PLUGIN_ROOT}/skills/tdd/references/audit.md`, whose `{plugin_root}` is
+  `${CLAUDE_PLUGIN_ROOT}`; re-invoking the `/zensu:tdd` skill is forbidden below —
   writing its mandatory start marker as `EDIT LANDING AUDIT STARTED — round
   self-review` (a label disjoint from `phase6` and `fix-{N}`, so its
   round-scoped window covers exactly this round's claims). Re-derive the inputs here — this stage can be forced cold by the
@@ -397,14 +397,14 @@ second row for an id already listed — plus the `FINDINGS LEDGER PARTIAL` or
 or `FULL SUITE UNRESOLVED` line, and one row per advisory `FULL SUITE —` line that
 did not pass, carrying that line verbatim under this escaping rule, applied in this order: first write every `\`
 as `\\`, then every `|` as `\|`. An unescaped pipe splits the row and the
-renderer drops the cells past the third, which is exactly the verdict clause the
-row exists to surface; doing it in the other order turns an already-escaped `\|`
+renderer drops the cells past the third, the very verdict clause the row
+exists to surface; the other order turns an already-escaped `\|`
 inside a shell command back into a delimiter. The same rule applies to every
 carried line in this report — the `Full suite`, `Acceptance` and `Edit landing`
 verdict cells in `## What I built`. Add one row per advisory `ACCEPTANCE —` line that did
-not pass, carrying it verbatim under the same rule. Write the single line `Nothing open.` only when that table has
-no rows at all — a carried line is always a row, so `Nothing open.` can never stand
-above one.
+not pass and one per `EXTERNAL REVIEW DEGRADED — …` line, each verbatim under the same rule.
+Write the single line `Nothing open.` only when that table has
+no rows at all, because a carried line is always a row.
 
 Always render the bypass-ledger audit line next, in both cases — whether or not
 the table has rows: run

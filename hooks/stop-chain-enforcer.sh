@@ -674,6 +674,49 @@ reviewer_spawn_denied() {
   [ "$REVIEWER_DENIAL_STATUS" = "blocked" ]
 }
 
+external_review_workflow_wait() {
+  local lib data verdict word count max workflows names exclusions pending claim
+  EXTERNAL_REVIEW_WAIT_COUNT=""
+  EXTERNAL_REVIEW_WAIT_MAX=""
+  EXTERNAL_REVIEW_WAIT_WORKFLOWS=""
+  EXTERNAL_REVIEW_WAIT_NAMES=""
+  case "$INPUT" in
+    *'"background_tasks"'*'"workflow"'*) ;;
+    *) zensu_external_review_wait_reset "$SESSION_ID"; return 1 ;;
+  esac
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/external-review-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  zensu_hook_enabled externalReviewImport || return 1
+  if reviewer_spawn_denied; then return 1; fi
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  [ "$(tdd_get_counter "$STATE_FILE" reviewRound)" = "0" ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_XR_PLUGIN_DATA 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_XR_PLUGIN_DATA="$data" \
+    ZENSU_XR_SESSION_KEY="$SESSION_ID" zensu_run_bounded node "$lib" stop-wait 2>/dev/null)" || return 1
+  read -r word count max workflows names <<<"$verdict"
+  [ "$word" = "wait" ] || return 1
+  count="${count#count=}"
+  max="${max#max=}"
+  workflows="${workflows#workflows=}"
+  names="${names#names=}"
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  case "$max" in ''|*[!0-9]*) return 1 ;; esac
+  case "$workflows" in ''|*[!0-9]*) return 1 ;; esac
+  case "$names" in ''|*[!A-Za-z0-9._:,\(\)-]*) names="(unnamed)" ;; esac
+  EXTERNAL_REVIEW_WAIT_COUNT="$count"
+  EXTERNAL_REVIEW_WAIT_MAX="$max"
+  EXTERNAL_REVIEW_WAIT_WORKFLOWS="$workflows"
+  EXTERNAL_REVIEW_WAIT_NAMES="$names"
+  return 0
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1267,6 +1310,7 @@ if outer_is_stop_terminal; then
 fi
 
 ADOPT_ELIGIBLE=false
+DEFERRED_ADOPTED=false
 if [ "$OUTER_PRESENT" = false ]; then
   if [ "$SESSION_ACTIVE" != "true" ]; then
     ADOPT_ELIGIBLE=true
@@ -1287,7 +1331,7 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   fi
   if autopilot_adopt_pending_review "$PROJECT_ROOT" "$SESSION_ID" \
       "$VANILLA_SEED" "$(zensu_pending_review_ttl_hours)" "$DEFERRED_OWNER_PID"; then
-    :
+    DEFERRED_ADOPTED=true
   else
     ADOPT_RC=$?
     case "$ADOPT_RC" in
@@ -1639,6 +1683,14 @@ if [ "$SESSION_ACTIVE" != "true" ]; then reviewer_denial_note_clear; outer_finis
 if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; zensu_impl_stop_nudge; exit 0; fi
 if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
 
+if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    echo "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence." >&2
+  fi
+  exit 0
+fi
+
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
@@ -1756,9 +1808,9 @@ if [ "$BLOCKS" -gt "$CAP" ]; then
     exit 0
   fi
   if [ "$(tdd_code_review_done "$STATE_FILE")" = "true" ]; then
-    echo "zensu chain-enforcer: terminal self-review did not converge after ${BLOCKS} nudges (cap ${CAP}); releasing the standalone Inner guard. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
+    echo "zensu chain-enforcer: terminal self-review did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
   else
-    echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); releasing the standalone Inner guard. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Run /zensu:doctor (or /zensu:recover-chain) to read the chain shape and the command it names; only otherwise re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
+    echo "zensu chain-enforcer: review chain did not converge after ${CAP} blocked Stops, the Stop cap for this whole chain (autoFixMaxRounds + 3); releasing the standalone Inner guard. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Run /zensu:doctor (or /zensu:recover-chain) to read the chain shape and the command it names; only otherwise re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
     # The refusal diagnosis itself is emitted above, before the bound arms, so
     # every cap sub-path carries it rather than the standalone one alone.
   fi
@@ -1859,7 +1911,11 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   SELF_REVIEW_TICKET="$(tdd_ensure_self_review_ticket "$SESSION_ID" 2>/dev/null)" || SELF_REVIEW_TICKET=""
   if _tdd_review_ticket_shape_ok "$SELF_REVIEW_TICKET"; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
-    REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
+    SELF_REVIEW_STATE="The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run."
+    if _tdd_zero_change_ticket "$SELF_REVIEW_TICKET"; then
+      SELF_REVIEW_STATE="No reviewer ran in this chain: its review mark (codeReviewDone) is the unqualified one, which stands only while the worktree reports no changed file, and the terminal self-review stage has not run. On a changed tree its terminus refuses and reopens the review instead of closing the chain."
+    fi
+    REASON="STOP intercepted by zensu chain-enforcer. ${SELF_REVIEW_STATE} Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
   else
     REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. /zensu:reset-review-limit cannot repair this state either — it rebinds a RETAINED consumed ticket, which is exactly what is missing here. FIRST read the chain shape with: ${LOG_COMMAND} --chain-status. Act on it ONLY if it reports shape=wedged-stale-rearm with recoverable=true — then /zensu:recover-chain repairs exactly that and the chain can continue. For this state it will normally report shape=self-review-unbindable, whose own next step is the fresh generation below. Re-enter /zensu:tdd for the current task, whose fresh --tdd-begin resets this session's review ticket, round counter, and chain flags in one transition, so the reviewer chain can run again and its terminus can bind."
   fi
@@ -1990,7 +2046,7 @@ else
     INNER_EXCEPTION_LEAD="Only valid exception:"
     INNER_EXCEPTION_SECOND=""
   fi
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the review panel's zensu:review-aspect agents over the changed files ('git diff --name-only HEAD') — or, on the first review and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished external review workflow covered this change: it runs zensu-log.sh --external-review, always runs the zensu:review-judge and spawns one aspect per GAP line the judge names — merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
   REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
 fi
 

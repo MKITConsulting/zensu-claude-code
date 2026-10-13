@@ -452,7 +452,12 @@ same class as the reader's own `UNSAFE_PATH_CHARACTERS`, which every value reach
 `printf` has already passed, while what the reader does NOT reject is `"` or `\`, both
 legal in a POSIX directory name. Reusing `ZENSU_SAFE_VERSION_RE` is the opposite trap: it
 forbids `/`, so every real path would degrade to `(unreadable)`. The bound is therefore
-`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own.
+`ZENSU_SAFE_DISPLAY_PATH_RE`, a positive allowlist of its own. It admits one Windows
+form too: a value that opens with a drive letter, a colon and either separator has its
+backslashes rendered as forward slashes before any test, because a Windows host records
+every root that way and the POSIX-only class degraded each of them to `(unreadable)`. A
+backslash anywhere else still degrades the value; `R8p12` and its two controls pin both
+halves and the injection refusal after the mapping.
 
 **EVERY arm of this emitter tests its constants for EMPTINESS first, and that — not the
 export block — is what makes the bound a guarantee.** `[[ x =~ $EMPTY ]]` answers
@@ -504,7 +509,8 @@ root resolved — deliberately does NOT, because `restoreRootVerdict` would answ
 `root-present` there and the adopt invocation it would prescribe is itself a Bash call
 that same branch denies. `pre-write-secret-scan.sh` is NOT the same case and must not be
 described as one: it rules the state out in order to ALLOW the scan, carries no
-bind-state remedy at all, and its non-main arm still falls to the generic deny.
+bind-state remedy at all, and its non-main arm emits the generic deny's `child` form, which
+names the cause and no command.
 Do not "fix" the asymmetry by removing their guards — that costs them the specific message.
 The reachable callers are `pre-edit-tdd-reminder.sh` and `pre-bash-zensu-gate.sh`.
 
@@ -532,9 +538,11 @@ names an existing store, reaches the conjunct, and the conjunct is the producer.
 input that conjunct is defence in depth and on the other it holds the boundary, which is
 why `R2g2` pins the measurement and `R2g3` grades the comment that used to get it wrong.
 What remains open: `not-served-by-executing-runtime` is driven by `R2e`, which is what makes the adopt-then-restore ORDER a refusal
-rather than advice; and the `pre-bash-zensu-gate.sh` call site has no
-`zensu_hook_is_main_principal` guard, so the remedy reaches a read-only principal there —
-pre-existing for the two older scopes and widened by this one.
+rather than advice. CLOSED: the `pre-bash-zensu-gate.sh` call site still has no
+`zensu_hook_is_main_principal` guard, but the router now derives the audience for the orphan
+arm and the generic fallback as well, so a read-only principal gets the `child` form — the
+cause, no `--restore-root`, no path — and `O28c` in `tests/structure/test-orphaned-project-root.sh`
+drives both audiences through that gate.
 
 **TWO couplings this feature created that the roster above does not name, and both
 were found by review rather than by a grep.** First, the DISPLAY RULE now has three

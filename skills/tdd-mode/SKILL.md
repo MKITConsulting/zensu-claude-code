@@ -22,7 +22,7 @@ The mode decides how `/zensu:tdd` implements: **strict** writes a failing test
 first and drives every step through RED → IMPL → GREEN under the PreToolUse
 phase-gate; **vanilla** implements directly, with tests at the agent's discretion.
 Both keep everything else — the plan, the evidence audits, the review chain, and
-the Stop-hook chain guarantee. Only the implementation ceremony differs.
+the bounded Stop-hook chain backstop. Only the implementation ceremony differs.
 
 Out of the box `hooks.tddImplementation` is `false`, so a project runs vanilla.
 This skill is how a user turns the full discipline on for the work in front of

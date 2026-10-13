@@ -39,11 +39,16 @@ check "E0 node and git are available" PASS
 WORK="$(mktemp -d 2>/dev/null)" || { check "E0 scratch dir" FAIL; finish; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
+if node --test --test-reporter=tap "$UNIT" >"$WORK/unit.out" 2>&1; then
   check "E1 the unit suite passes (node --test evidence-run-v1.test.js)" PASS
 else
   check "E1 the unit suite passes (node --test evidence-run-v1.test.js)" FAIL
-  sed -n '1,60p' "$WORK/unit.out"
+  if grep -q '^not ok ' "$WORK/unit.out"; then
+    awk '/^not ok /{show=1} /^# Subtest: /{show=0} show' "$WORK/unit.out" | head -n 200
+    grep -E '^# (tests|pass|fail|cancelled|skipped) ' "$WORK/unit.out"
+  else
+    sed -n '1,60p' "$WORK/unit.out"
+  fi
 fi
 
 UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"

@@ -1615,6 +1615,11 @@ _tdd_review_ticket_shape_ok() {
   return 0
 }
 
+_tdd_zero_change_ticket() {
+  case "${1:-}" in (zc_?*) return 0 ;; esac
+  return 1
+}
+
 _tdd_issue_review_ticket_critical() {
   local state_file="$1" session_id="$2" ticket="$3" tmp native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
@@ -1894,13 +1899,15 @@ tdd_mark_autopilot_max_round_handoff() {
 }
 
 _tdd_mark_review_converged_critical() {
-  local state_file="$1" session_id="$2" ticket="$3" key="$4" tmp
-  local native_state_file native_tmp
+  local state_file="$1" session_id="$2" ticket="$3" key="$4" change_count="${5:-}" tmp node_rc
+  local native_state_file native_tmp zero_change=false
+  _tdd_zero_change_ticket "$ticket" && zero_change=true
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
   native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
-  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" KEY="$key" node -e '
+  STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" KEY="$key" \
+    ZERO_CHANGE="$zero_change" CHANGE_COUNT="$change_count" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1925,36 +1932,64 @@ _tdd_mark_review_converged_critical() {
     if (!valid) process.exit(3);
     if (key === "codeReviewDone" && s.codeReviewDone !== false) process.exit(3);
     if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
+    if (key === "chainDone" && process.env.ZERO_CHANGE === "true") {
+      const linkKeys = [
+        "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+      ];
+      const standalone = linkKeys.every(linkKey => !Object.prototype.hasOwnProperty.call(s, linkKey))
+        && !Object.prototype.hasOwnProperty.call(s, "reviewRearm");
+      const count = process.env.CHANGE_COUNT;
+      if (!standalone || count === "") process.exit(3);
+      if (count !== "0" && count !== "unknown") {
+        s.codeReviewDone = false;
+        s.selfReviewFixed = false;
+        s.reviewTicket = "";
+        s.reviewTicketConsumed = true;
+        s.reviewRound = 0;
+        fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+        process.exit(10);
+      }
+    }
     s[key] = true;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  ' "$native_tmp" 2>/dev/null; then
-    rm -f "$tmp" 2>/dev/null
-    return 1
-  fi
+  ' "$native_tmp" 2>/dev/null
+  node_rc=$?
+  case "$node_rc" in
+    (0|10) ;;
+    (*) rm -f "$tmp" 2>/dev/null; return 1 ;;
+  esac
 
   [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
   _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
     || { rm -f "$tmp"; return 1; }
+  [ "$node_rc" -eq 0 ] || return 4
 }
 
 # Every reviewer/self-review terminus after the one-shot claim is bound to the
 # same consumed ticket. A concurrent --tdd-begin therefore invalidates stale
 # PASS, max-round, latch, and terminal writes as one generation boundary.
 tdd_mark_review_converged() {
-  local session_id="${1:-}" ticket="${2:-}" key="${3:-}" state_file state_dir
+  local session_id="${1:-}" ticket="${2:-}" key="${3:-}" change_count="${4:-}" state_file state_dir
   _tdd_review_ticket_shape_ok "$ticket" || return 1
   case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  if [ -n "$change_count" ]; then
+    [ "$key" = "chainDone" ] || return 1
+    case "$change_count" in
+      (unknown|unavailable) ;;
+      (*[!0-9]*|0?*) return 1 ;;
+    esac
+  fi
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")"
   state_dir="$(dirname "$state_file")"
   _tdd_state_storage_safe "$state_file" || return 1
   _tdd_path_safe "$state_file" regular "$state_dir" || return 1
   _tdd_locked_run "$state_file" \
-    _tdd_mark_review_converged_critical "$state_file" "$session_id" "$ticket" "$key"
+    _tdd_mark_review_converged_critical "$state_file" "$session_id" "$ticket" "$key" "$change_count"
 }
 
 _tdd_mark_unclaimed_review_critical() {
-  local state_file="$1" session_id="$2" key="$3" tmp native_state_file native_tmp
+  local state_file="$1" session_id="$2" key="$3" change_count="${4:-}" tmp native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
   native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
@@ -1985,6 +2020,10 @@ _tdd_mark_unclaimed_review_critical() {
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
+  case "$key:$change_count" in
+    (chainDone:0|chainDone:unknown|codeReviewDone:0|codeReviewDone:unknown|selfReviewFixed:) ;;
+    (*) rm -f "$tmp" 2>/dev/null; return 4 ;;
+  esac
   _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
     || { rm -f "$tmp"; return 1; }
 }
@@ -1993,14 +2032,23 @@ _tdd_mark_unclaimed_review_critical() {
 # ticket was issued/consumed, every terminus must carry that ticket; an
 # unqualified stale command is then rejected instead of closing a new chain.
 tdd_mark_unclaimed_review() {
-  local session_id="${1:-}" key="${2:-}" state_file state_dir
+  local session_id="${1:-}" key="${2:-}" change_count="${3:-}" state_file state_dir
   [ -n "$session_id" ] || return 1
-  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  case "$key" in
+    codeReviewDone|chainDone)
+      case "$change_count" in
+        unknown|unavailable) ;;
+        ''|*[!0-9]*|0?*) return 1 ;;
+      esac
+      ;;
+    selfReviewFixed) [ -z "$change_count" ] || return 1 ;;
+    *) return 1 ;;
+  esac
   state_file="$(tdd_state_file "$session_id")"
   state_dir="$(dirname "$state_file")"
   _tdd_path_safe "$state_file" regular "$state_dir" || return 1
   _tdd_locked_run "$state_file" _tdd_mark_unclaimed_review_critical \
-    "$state_file" "$session_id" "$key"
+    "$state_file" "$session_id" "$key" "$change_count"
 }
 
 _tdd_ensure_self_review_ticket_critical() {
@@ -2050,8 +2098,8 @@ tdd_ensure_self_review_ticket() {
   state_file="$(tdd_state_file "$session_id")"
   state_dir="$(dirname "$state_file")"
   _tdd_path_safe "$state_file" regular "$state_dir" || return 1
-  candidate="$(node -e 'process.stdout.write("rt_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
-  _tdd_review_ticket_shape_ok "$candidate" || return 1
+  candidate="$(node -e 'process.stdout.write("zc_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
+  _tdd_review_ticket_shape_ok "$candidate" && _tdd_zero_change_ticket "$candidate" || return 1
   result_file="$(mktemp "${state_file}.self-review-ticket.XXXXXX" 2>/dev/null)" || return 1
   if _tdd_locked_run "$state_file" _tdd_ensure_self_review_ticket_critical \
       "$state_file" "$session_id" "$candidate" "$result_file"; then
@@ -2819,8 +2867,8 @@ ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this se
 # changed worktree, never wall time. Not addressed here; a turn counter is a
 # workflow-state field and therefore a MINOR release under §"Runtime Lineage".
 #
-# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/SKILL.md`
-# Phase 6, before any hook directive exists, and that carrier deliberately does not
+# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/references/review-chain.md`
+# (Phase 6 step 10), before any hook directive exists, and that carrier deliberately does not
 # repeat this text — the skill body is in context only because the workflow was
 # invoked, and a third unpinned copy is the drift class CLAUDE.md warns about. So a
 # session that withholds the very first fan-out learns this only after one blocked
@@ -3051,6 +3099,22 @@ zensu_pending_review_claim_file() {
     pending_file="$(zensu_pending_review_file)" || return 1
   fi
   echo "${pending_file}.claim"
+}
+
+zensu_external_review_wait_file() {
+  local key="${1:-}"
+  command -v zensu_session_key_canonical >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  zensu_session_key_canonical "$key" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  printf '%s/external-review/v1/waits/%s.json' "$CLAUDE_PLUGIN_DATA" "$key"
+}
+
+zensu_external_review_wait_reset() {
+  local file
+  file="$(zensu_external_review_wait_file "${1:-}")" || return 0
+  if [ -e "$file" ] || [ -L "$file" ]; then rm -f -- "$file" 2>/dev/null; fi
+  return 0
 }
 
 _tdd_write_pending_review_critical() {
@@ -3797,7 +3861,7 @@ case "${OSTYPE:-}" in
     # must never fall back to an inherited ZENSU_* module path.
     export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

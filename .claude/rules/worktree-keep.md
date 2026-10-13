@@ -280,7 +280,7 @@ measured (a target without one is refused as `expected-stamp-missing`, a refresh
 `changed-since-listing`), `endedAt` set and the record kept as the baseline, and the marker
 reconciled with `create: false` and `reap: false`. Everything that decides WHETHER to call it
 lives in `cmdRelease`, not in the module: the registry-completeness, caller and live-session
-checks, the go/no-go for a BUSY or an unmeasured source, the owner attribution of each live
+checks, the --force gate for a BUSY or an unmeasured source, the owner attribution of each live
 anchor, the root-mismatch and nested-repository refusals, and the post-apply re-listing that
 reports `released` only when no live anchor and no marker are left. `nestedRepositories` is the
 module's scan for that refusal and for the hold below. It walks in name order, never follows a

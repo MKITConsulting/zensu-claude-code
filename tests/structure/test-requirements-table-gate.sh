@@ -39,6 +39,7 @@ export CLAUDE_PROJECT_DIR="$PROJ"
 # realpathSync.native, so every containment bound below compares against this value
 # and never "$PROJ". R0pre asserts the two really do name one directory.
 PROJ_REAL="$(cd -P -- "$PROJ" && pwd -P)" || exit 1
+PROJ_HOST="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$PROJ")" || exit 1
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
 SUITE_TMP="$(mktemp -d)" || exit 1
 cleanup() {
@@ -202,11 +203,12 @@ check "L8 an AC row under a LATER '## ' section is not counted" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/filled.md" 2>/dev/null | grep -qF 'PLAN REQUIREMENTS OK'
 check "L9 the verdict line names the outcome in one line" "$(verdict $?)"
 # CRLF must not hide the heading behind an unmatched `$`.
-sed $'s/$/\r/' "$FIX/filled.md" > "$FIX/filled-crlf.md"
+node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[2], fs.readFileSync(process.argv[1], "utf8").replace(/\n/g, "\r\n"))' \
+  "$FIX/filled.md" "$FIX/filled-crlf.md"
 # Confirm the fixture really carries CRLF before asserting anything about it: a
-# sed that treated the replacement literally would give `## Requirementsr`, and
-# L10 would then fail on a premise unrelated to the contract it names.
-grep -q $'\r$' "$FIX/filled-crlf.md"
+# writer that dropped the carriage returns would leave an LF plan, and L10 would
+# then pass without judging a CRLF plan at all.
+node -e 'process.exitCode = require("fs").readFileSync(process.argv[1]).includes("\r\n") ? 0 : 1' "$FIX/filled-crlf.md"
 check "L10pre the CRLF fixture really contains carriage returns" "$(verdict $?)"
 bash "$REQ" --plan "$FIX/filled-crlf.md" >/dev/null 2>&1
 check "L10 a CRLF plan is judged the same as an LF plan" "$(verdict $?)"
@@ -470,11 +472,10 @@ check "Z2 the gate really invokes the validation library" "$(verdict $?)"
 # from it rather than from a second one, and that all four consumers conjoin on one of
 # the two — an escape from a gate that never ran is not an escape either way.
 [ "$(grep -c '_tc_changes="\$(' "$LOG")" -eq 1 ] \
-  && [ "$(grep -c '\${_tc_changes:-0}" -gt 0' "$LOG")" -eq 3 ] \
+  && [ "$(grep -c '"\$_tc_changes" != 0' "$LOG")" -eq 3 ] \
   && [ "$(grep -c '"\$_tc_armed" -eq 1' "$LOG")" -eq 2 ]
 check "Z3 one change count: this gate and its ledger conjoin on it, the receipt gate through _tc_armed" "$(verdict $?)"
-# The count is computed UNCONDITIONALLY once a git HEAD resolves — not gated on
-# either switch. Gating it on "either gate armed" left the count at 0 when BOTH
+# The count is computed UNCONDITIONALLY — not gated on either switch. Gating it on "either gate armed" left the count at 0 when BOTH
 # were off, and the two bypass-ledger records conjoin on it, so neither escape
 # was recorded while both docs promise the recording unconditionally.
 # Line ORDER, not a proximity window: a distance window has to be widened every
@@ -483,10 +484,9 @@ check "Z3 one change count: this gate and its ledger conjoin on it, the receipt 
 ARM_LN="$(grep -n '^      --tdd-complete)' "$LOG" | head -1 | cut -d: -f1)"
 COUNT_LN="$(grep -n '_tc_changes="\$(' "$LOG" | head -1 | cut -d: -f1)"
 SWITCH_LN="$(awk -v start="${ARM_LN:-0}" 'NR > start && /ZENSU_(EDIT_LANDING|REQUIREMENTS)_GATE:-on/ { print NR; exit }' "$LOG")"
-HEAD_LN="$(grep -n 'if _tc_git -C "\$_tc_root" rev-parse --verify --quiet HEAD' "$LOG" | head -1 | cut -d: -f1)"
-[ -n "$ARM_LN" ] && [ -n "$COUNT_LN" ] && [ -n "$SWITCH_LN" ] && [ -n "$HEAD_LN" ] \
-  && [ "$ARM_LN" -lt "$HEAD_LN" ] && [ "$HEAD_LN" -lt "$COUNT_LN" ] && [ "$COUNT_LN" -lt "$SWITCH_LN" ]
-check "Z4 the change count is computed on a resolvable HEAD BEFORE any switch is consulted" "$(verdict $?)"
+[ -n "$ARM_LN" ] && [ -n "$COUNT_LN" ] && [ -n "$SWITCH_LN" ] \
+  && [ "$ARM_LN" -lt "$COUNT_LN" ] && [ "$COUNT_LN" -lt "$SWITCH_LN" ]
+check "Z4 the change count is computed BEFORE any switch is consulted" "$(verdict $?)"
 ! awk '/--tdd-complete\)/,/^        ;;/' "$LOG" \
   | grep -qF 'ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] || [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off"'
 check "Z4b the count is no longer conditioned on either switch being armed" "$(verdict $?)"
@@ -497,15 +497,25 @@ check "Z5 the change set is measured on the session-bound root" "$(verdict $?)"
 # prefix zero the count and disarm both gates AND both ledger records at once.
 # The DEFINITION alone proves nothing — reverting only the call sites to bare
 # `git -C` would leave a definition-only pin green while restoring the defect. Pin
-# that all three scope calls go through the wrapper, and that none is bare.
-awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE'
+# that the verb counts through the shared helper, that the helper's three scope
+# calls go through the wrapper, and that none is bare.
+DEF_LN="$(grep -nF '_tc_git() { (' "$LOG" | cut -d: -f1)"
+[ "$(printf '%s\n' "$DEF_LN" | grep -c .)" -eq 1 ] && grep -qxF '_tc_git() { (' "$LOG" \
+  && [ -n "$ARM_LN" ] && [ "$DEF_LN" -lt "$ARM_LN" ] \
+  && awk -v s="$DEF_LN" 'NR >= s { print } NR > s && index($0, "git \"$@\"") { exit }' "$LOG" \
+    | grep -qF 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE'
 Z6DEF=$?
-[ "$(awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -c '_tc_git -C "\$_tc_root"')" -eq 3 ]
+Z6_HELPER="$(awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG")"
+[ "$(awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -c '_zensu_unqualified_change_count "\$_tc_root"')" -eq 1 ] \
+  && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" rev-parse --verify --quiet HEAD' \
+  && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" diff --name-only HEAD' \
+  && printf '%s\n' "$Z6_HELPER" | grep -qF '_tc_git -C "$root" ls-files --others --exclude-standard'
 Z6USE=$?
-! awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qE '(^|[^_])git -C "\$_tc_root"'
+! { awk '/--tdd-complete\)/,/^        ;;/' "$LOG"; printf '%s\n' "$Z6_HELPER"; } \
+  | grep -qE '(^|[^_])git -C "\$(_tc_root|root)"'
 Z6BARE=$?
 [ "$Z6DEF" -eq 0 ] && [ "$Z6USE" -eq 0 ] && [ "$Z6BARE" -eq 0 ]
-check "Z6 all three scope git calls go through the environment-scrubbing wrapper" "$(verdict $?)"
+check "Z6 the verb counts through the shared helper, whose three scope git calls go through the environment-scrubbing wrapper" "$(verdict $?)"
 
 echo "== Session fixtures =="
 git init -q --template= "$PROJ" >/dev/null 2>&1
@@ -525,7 +535,7 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-explicit-outside rq-explicit-stem rq-relative-log rq-outside-log \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
            rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
-           rq-legacy-v1; do
+           rq-legacy-v1 rq-git-refused rq-git-refused-off; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -592,7 +602,7 @@ stage() {  # stage <session> <stem> <plan-body-file|->
   fi
   mkdir -p "$(dirname "$rp")"
   printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
-    "$sid" "$PROJ/.zensu/logs/${stem}.log" > "$rp"
+    "$sid" "$PROJ_HOST/.zensu/logs/${stem}.log" > "$rp"
 }
 BODIES="$(mktemp -d)" || exit 1
 cat > "$BODIES/filled.md" <<'PLAN'
@@ -807,6 +817,58 @@ ERR_SU="$(ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --tdd-complete --session "$SID
 [ $? -eq 0 ] && printf '%s' "$ERR_SU" | grep -qF 'REQUIREMENTS GATE STEM UNCHECKED'
 check "E7 with the receipt gate off the stem bound is dropped AND disclosed" "$(verdict $?)"
 
+echo "== A git refusal is not a zero change count =="
+RG_HOME="$SUITE_TMP/rg-home"
+RG_SAFE_HOME="$SUITE_TMP/rg-safe-home"
+mkdir -p "$RG_HOME" "$RG_SAFE_HOME"
+printf '[safe]\n\tdirectory = *\n' > "$RG_SAFE_HOME/.gitconfig"
+foreign_owner() {
+  HOME="$RG_HOME" XDG_CONFIG_HOME="$RG_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+foreign_owner_excepted() {
+  HOME="$RG_SAFE_HOME" XDG_CONFIG_HOME="$RG_SAFE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$@"
+}
+RG_ERR="$(foreign_owner env LC_ALL=C git -C "$PROJ" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+RG_RC=$?
+[ "$RG_RC" -ne 0 ] && printf '%s\n' "$RG_ERR" | grep -qF 'dubious ownership'
+check "RG0 real git refuses this suite's project as owned by another user" "$(verdict $?)"
+SID_RG="rq-git-refused"
+activate_session "$SID_RG"
+stage "$SID_RG" "2026-01-01-2323_tdd-git-refused" "$BODIES/none.md"
+ERR_RG="$(foreign_owner bash "$LOG" --tdd-complete --session "$SID_RG" 2>&1 >/dev/null)"
+RC_RG=$?
+[ "$RC_RG" -eq 1 ] && printf '%s' "$ERR_RG" | grep -qF 'git could not list this worktree' \
+  && printf '%s' "$ERR_RG" | grep -qF 'git diff --name-only HEAD' \
+  && ! printf '%s' "$ERR_RG" | grep -qF 'PLAN REQUIREMENTS' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_RG")" implComplete)" != "true" ]
+check "RG1 a safe.directory refusal refuses --tdd-complete instead of reading zero changes" "$(verdict $?)"
+ERR_RGX="$(foreign_owner_excepted bash "$LOG" --tdd-complete --session "$SID_RG" 2>&1 >/dev/null)"
+RC_RGX=$?
+[ "$RC_RGX" -ne 0 ] && printf '%s' "$ERR_RGX" | grep -qF 'PLAN REQUIREMENTS MISSING' \
+  && ! printf '%s' "$ERR_RGX" | grep -qF 'git could not list this worktree'
+check "RG1a once a safe.directory exception clears the refusal, the same chain meets the requirements gate" "$(verdict $?)"
+ERR_RGL="$(foreign_owner env ZENSU_EDIT_LANDING_GATE=off bash "$LOG" --tdd-complete --session "$SID_RG" 2>&1 >/dev/null)"
+RC_RGL=$?
+ERR_RGR="$(foreign_owner env ZENSU_REQUIREMENTS_GATE=off bash "$LOG" --tdd-complete --session "$SID_RG" 2>&1 >/dev/null)"
+RC_RGR=$?
+[ "$RC_RGL" -eq 1 ] && printf '%s' "$ERR_RGL" | grep -qF 'git could not list this worktree' \
+  && [ "$RC_RGR" -eq 1 ] && printf '%s' "$ERR_RGR" | grep -qF 'git could not list this worktree' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_RG")" implComplete)" != "true" ]
+check "RG2 switching off only one of the two gates still refuses on a git refusal" "$(verdict $?)"
+SID_RGO="rq-git-refused-off"
+activate_session "$SID_RGO"
+bash "$LOG" --tdd-begin --session "$SID_RGO" >/dev/null 2>&1
+foreign_owner env ZENSU_EDIT_LANDING_GATE=off ZENSU_REQUIREMENTS_GATE=off \
+  bash "$LOG" --tdd-complete --session "$SID_RGO" >/dev/null 2>&1
+RC_RGO=$?
+BYPASSES_RGO="$(tdd_bypasses "$(tdd_state_file "$SID_RGO")" 2>/dev/null)"
+[ "$RC_RGO" -eq 0 ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_RGO")" implComplete)" = "true" ] \
+  && printf '%s' "$BYPASSES_RGO" | grep -qF 'ZENSU_REQUIREMENTS_GATE' \
+  && printf '%s' "$BYPASSES_RGO" | grep -qF 'ZENSU_EDIT_LANDING_GATE'
+check "RG3 with both gates switched off a git refusal completes and records both escapes" "$(verdict $?)"
+
 echo "== Derivation branches =="
 # Nothing was asserted about where the plan is and nothing could be derived, so
 # there is no claim to hold against the chain — but the gate must SAY what it
@@ -818,7 +880,7 @@ bash "$LOG" --tdd-begin --session "$SID_N" >/dev/null 2>&1
 RP_N="$(receipt_for "$SID_N")"
 mkdir -p "$(dirname "$RP_N")"
 printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
-  "$SID_N" "$PROJ/.zensu/logs/never-written.log" > "$RP_N"
+  "$SID_N" "$PROJ_HOST/.zensu/logs/never-written.log" > "$RP_N"
 ERR_N="$(bash "$LOG" --tdd-complete --session "$SID_N" 2>&1 >/dev/null)"
 [ $? -eq 0 ]
 check "N1 a receipt whose log has no sibling plan does not refuse" "$(verdict $?)"
@@ -902,11 +964,10 @@ check "G1 a live clean-tree chain is not gated, even with an unusable plan stage
 printf 'v3\n' > "$PROJ/tracked.txt"
 # The other half of the scope rule — no resolvable git HEAD — cannot be staged
 # against a Session-Control-bound project from here, so it is pinned at its
-# source: the same guard the receipt gate relies on.
-# Scoped through the verb window: the same string also appears in the --chain-done
-# gate, so a file-wide grep would stay green with this verb's guard deleted.
-awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'rev-parse --verify --quiet HEAD'
-check "G2 the scope still requires a resolvable git HEAD" "$(verdict $?)"
+# source: the shared helper answers `unknown` for it, and the verb maps that to zero.
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF '[ "$_tc_changes" = unknown ] && _tc_changes=0' \
+  && awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG" | grep -qF "(1) printf 'unknown'; return 0 ;;"
+check "G2 a HEAD that names no commit still reads as not evaluable, so the gate stays out of scope" "$(verdict $?)"
 
 echo "== Directory-level symlink guards and the unconditional stem bound =="
 # The two DIRECTORY guards are what keep a plan anchored to the project; L13
@@ -1023,7 +1084,7 @@ case "$RP_V1" in
   *) check "WS1d fixture: receipt_for did not resolve to a keyed path under a state dir ($RP_V1)" FAIL; RP_V1="" ;;
 esac
 [ -n "$RP_V1" ] && printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
-  "$SID_V1" "$PROJ/.zensu/logs/${V1_STEM}.log" > "$RP_V1"
+  "$SID_V1" "$PROJ_HOST/.zensu/logs/${V1_STEM}.log" > "$RP_V1"
 ERR_V1="$(bash "$LOG" --tdd-complete --session "$SID_V1" 2>&1 >/dev/null)"
 [ $? -ne 0 ] && printf '%s' "$ERR_V1" | grep -qF 'PLAN REQUIREMENTS MISSING'
 check "WS1d a legacy edit-landing-v1 receipt still drives the derivation (mid-upgrade sessions stay served)" "$(verdict $?)"
@@ -1110,13 +1171,16 @@ RW_STUB_OUT="$(zensu_session_key_canonical() { return 0; }
 check "RW2e an inherited zensu_session_key_canonical never stands in for the one the library defines" "$(verdict $?)"
 # A receipt-plumbing failure is an ENVIRONMENT error (exit 2), never the claim
 # verdict (exit 1) — a caller reads exit 1 as "an edit did not land". Staged by
-# making the destination unwritable while the claim itself really landed.
+# putting a file where the destination directory belongs while the claim itself
+# really landed.
 RW_GOOD2="scv1_$(printf 'b%.0s' $(seq 64))"
-chmod 500 "$RW_PROJ/.zensu/state"
+mv "$RW_PROJ/.zensu/state" "$RW_PROJ/.zensu/state-kept"
+: > "$RW_PROJ/.zensu/state"
 /bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
   --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
 RW_RC_PLUMBING=$?
-chmod 700 "$RW_PROJ/.zensu/state"
+rm -f "$RW_PROJ/.zensu/state"
+mv "$RW_PROJ/.zensu/state-kept" "$RW_PROJ/.zensu/state"
 [ "$RW_RC_PLUMBING" -eq 2 ]
 check "RW3 a receipt-plumbing failure exits 2 (environment), not 1 (a claim did not land)" "$(verdict $?)"
 # Discrimination for RW3, in BOTH directions: the same fixture with a writable

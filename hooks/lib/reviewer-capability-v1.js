@@ -110,6 +110,7 @@ const adoptionTail = (reason) => {
 // rewording one arm alone left the pin green. HAND COPY of
 // ZENSU_ADOPTION_CHILD_CLOSE in hooks/lib/zensu-session.sh, pinned for equality.
 const ADOPTION_CHILD_CLOSE = 'The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.';
+const BIND_CHILD_CLOSE = 'The diagnosis and the repair are reserved for the main thread, so neither is available here — report this to the main thread rather than retrying.';
 
 // The two CAUSES and the two limit clauses the typed arm and the fallback arms below
 // both render. Spelled once here, because the typed and fallback copies had already
@@ -610,6 +611,7 @@ function protectedAccessViolation(payload, trusted) {
     path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.pluginData, 'ci-contract'),
     path.join(trusted.pluginData, 'acceptance-verify'),
+    path.join(trusted.pluginData, 'external-review'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
@@ -671,6 +673,7 @@ function neutralViolation(payload, trusted) {
     path.join(trusted.pluginData, 'evidence-run'),
     path.join(trusted.pluginData, 'ci-contract'),
     path.join(trusted.pluginData, 'acceptance-verify'),
+    path.join(trusted.pluginData, 'external-review'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
@@ -740,6 +743,7 @@ function neutralViolation(payload, trusted) {
 }
 
 const HOST_HANDBACK_TOOL = 'SubagentHandback';
+const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 
 function handbackViolation(payload, profile) {
@@ -752,7 +756,7 @@ function handbackViolation(payload, profile) {
 
 function readOnlyViolation(payload, trusted, profile) {
   if (!REVIEWER_READ_TOOLS.has(payload.tool_name)) {
-    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} to deliver the final report`;
+    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} or ${WORKFLOW_RESULT_TOOL} to deliver the final report`;
   }
   const violation = protectedAccessViolation(payload, trusted);
   return violation ? `${profile} ${violation}` : null;
@@ -979,7 +983,12 @@ function main() {
       // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
       // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
       // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
-      denyBind("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
+      const cause = "this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied.";
+      if (callerIsMain) {
+        denyBind(`${cause} Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.`);
+        return;
+      }
+      denyBind(`${cause} ${BIND_CHILD_CLOSE}`);
       return;
     }
     // A typed refusal that established no named state — record-unreadable,
@@ -1045,6 +1054,7 @@ function judgePrincipal(payload, bound, principal) {
   if (payload.tool_name === HOST_HANDBACK_TOOL && HANDBACK_PROFILES.has(profile)) {
     return handbackViolation(payload, profile) || null;
   }
+  if (payload.tool_name === WORKFLOW_RESULT_TOOL && HANDBACK_PROFILES.has(profile)) return null;
   try {
     trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
   } catch (error) {

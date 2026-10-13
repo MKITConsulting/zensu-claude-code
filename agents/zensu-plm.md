@@ -185,7 +185,7 @@ Use the `/zensu:ghost-scan` skill workflow:
 4. Create ghost scan with the refined candidates
 5. Batch review (approve/reject)
 6. Apply approved candidates as features (`--enrich-existing` when the product already has features)
-7. **After apply, discover user journeys:** map drafted journeys to the new feature IDs and create them with `zensu journeys create` + `zensu journeys step`, then `zensu journeys health` — brownfield imports need journeys to pass the release gate. Flag features with zero docs for `/zensu:implement` (ghost-scan links existing docs, never generates new ones). The v1 build-out baseline is minted server-side by `zensu ghost apply` (zensu-monorepo #266) — no client revision step here.
+7. **After apply, discover user journeys:** map drafted journeys to the new feature IDs and create them with `zensu journeys create` + `zensu journeys step`, then `zensu journeys health` — brownfield imports need journeys to pass the release gate. Flag features with zero docs for `/zensu:implement` (ghost-scan links existing docs, never generates new ones). The v1 build-out baseline is minted server-side by `zensu ghost apply` — no client revision step here.
 
 ### When the project has both built code and a forward plan (hybrid)
 A brownfield repo whose plan/vision doc *also* describes not-yet-built features:

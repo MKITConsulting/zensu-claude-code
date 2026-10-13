@@ -222,20 +222,36 @@ and the operator accounts listed below. **Version for this delta: `patch`** — 
 set, hook, matcher, config key or attestation moves; the gate asks where it denied, and relaxing an
 existing deny is not on the breaking list.
 
-**Consent mode** (no policy in the environment) admits loopback origins only and returns
-`permissionDecision: "ask"` for the first call that reaches each new origin — the host's prompt,
-which the model cannot answer. Consent is per ORIGIN. The gate reads no recipe and `promptText`
+**Consent** covers every origin no valid policy target names: the gate returns
+`permissionDecision: "ask"` — the host's prompt, which the model cannot answer — once per `open`
+for all its new origins, and for a `goto` or `tab-new` to an origin not yet approved. A loopback
+origin is asked once per session. A remote HTTPS origin passes the floor of a policy target
+(public answers, a resolver pin, an exact hostname) and is asked at EVERY `open`: `judgeCall`
+stamps its run-config entry `asked`, so `evaluate` never reads the forgeable memory for it there;
+a `goto` or `tab-new` to a recorded remote origin passes, bounded by the run config the browser
+was launched with. The gate reads `permission_mode` from the payload (`ANSWERABLE_MODES`:
+`default`, `acceptEdits`, `auto`, `plan`); in any other mode, a missing one included, it denies a
+remote origin outside a policy with `REMOTE_NEEDS_POLICY`, whose remedy names Manual/Auto and
+`--permission-mode default|auto`. Without a policy, loopback verdicts are the same in every mode;
+how the host resolves that ask under `bypassPermissions` or `dontAsk` is unmeasured. Consent is per
+ORIGIN. The gate reads no recipe and `promptText`
 names no route. The post hook records every executed gated call as
 `(origin, route, decidedBy, at)` in `<project>/.zensu/state/verify-consent-<session key>.json`
 (`O_EXCL` temp plus rename, contained by `memoryPathAllowed`, never through a symlink). `decidedBy`
 names an OBSERVATION — `asked`, `remembered`, `policy-mode` — never a human decision: PostToolUse
 carries no evidence of how the prompt was answered, and the host fires no PostToolUse event for a
-failed Bash call, so a failed navigation is never recorded and asks again. **Policy mode** asks
-nothing: it navigates policy target origins only, every route on them, admits the policy's
+failed Bash call, so a failed navigation is never recorded and asks again. **A policy**
+pre-approves its target origins, every route on them, in every permission mode, admits its
 network-only origins in the run config at `open` while it denies every navigation command that
-names one, and accepts a
-remote hostname only with its pin; an invalid policy denies every gated navigation with the
-broken rule named.
+names one, and accepts a remote hostname only with its pin. Any other origin is asked where the
+mode can show the prompt. Where it cannot, an origin of the policy's kind is denied
+`NOT_POLICY_TARGET` and one of the other kind `NOT_POLICY_KIND`, whose remedy never asks for an
+origin the policy could not hold, so there the policy is the whole allowlist. An invalid policy
+denies every gated navigation, in every mode, with the broken rule named. The helper's `--check-policy` prints `policy` only for a target and `consent`
+for any other admitted origin; `run` prints `mode=policy` only when every navigable origin is a
+target. The helper cannot see the permission mode, so whenever a present policy leaves an origin
+to the prompt both print `POLICY_CONSENT_NOTE` on stderr, which says a session that cannot show
+the prompt is denied that origin at `open`; stdout stays one token or the config lines.
 
 **The evidence boundary is the ORIGIN in both modes; the route gate is retired.** An approved
 origin — a consent-prompt Yes, or a policy target with `evidenceMode: declared-safe` — covers
@@ -244,7 +260,7 @@ identifiers minted on every run (`/teams/:teamId/sprints/:sprintId`) could never
 exactly, so every protected scenario on them ended PARTIAL. What was removed: the gate's
 `NOT_POLICY_ROUTE` refusal, the recipe route reader behind the prompt's route line
 (`declaredRoutesFromRecipe`, `readRecipeRoutes`, `promptRoutes`), the route operand of
-`--check-policy`, the monorepo controller's `/`-in-routes requirement, and the exact-route
+`--check-policy`, and the exact-route
 coverage the skill demanded of `validate.evidenceSafety`, which is now an optional
 data-classification declaration that gates nothing. Do not reintroduce routes as prompt context
 either: a listed route reads to the human as a limit nothing enforces. **Compatibility is
@@ -497,11 +513,37 @@ retirement's, rides the same mechanism with no check of its own.
   stopped serving `localhost` itself would let `/etc/hosts` steer it with every check green.
   `*.localhost` stays refused although the same Chromium code resolves it to loopback too.
 - **The consent memory is forgeable:** a record written through a Bash redirect skips the prompt for
-  that origin; the floor bounds the damage to loopback services.
-- **The run config is read twice** — by the gate at `open` and by the CLI at launch — so a file
-  swapped in between is followed. It lives under the project, where the session can write.
-- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run
-  is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a prompt.
+  a loopback origin, under a policy too where the mode can show the prompt, and the floor bounds
+  the damage to loopback services. It never skips a remote origin's prompt at `open`; it skips
+  the one of a `goto` or `tab-new`, which the run config the browser was launched with bounds.
+- **The run config is read three times** — by the gate at `open`, by the CLI at launch and by
+  the recorder — so a file swapped in between is followed, can admit an origin the human never
+  approved, and can make the report's `Consent` block wrong. Together with a forged consent
+  record, a remote origin such a swapped config admits is reached by a `goto` or `tab-new` that is
+  never asked. It lives under the project, where the session can write.
+- **The permission mode is the host's report, and the gate cannot tell a person from a
+  program.** Auto mode was measured once (Claude Code 2.1.293, desktop: the gate's `ask` reached
+  the user, transcript `permissionDecision.source: user_temporary`). UNVERIFIED: how the host
+  resolves a hook `ask` in a headless `-p` run, with `--permission-prompt-tool`, under an SDK
+  `canUseTool` callback, and under `bypassPermissions` or `dontAsk`. A run in an answerable mode
+  whose prompts a program answers lets that program decide every origin the policy does not name,
+  so the docs send an unattended run to `dontAsk` or `bypassPermissions` with a policy. The live
+  eval runs in policy mode so it never depends on a prompt.
+- **"Asked again at every `open`" assumes no stored choice answers a later hook `ask` (M3).**
+  Whether a persistent choice in the host dialog or a `Bash(playwright-cli:*)` allow rule
+  satisfies a later hook `ask` was not measured; if one does, drop that sentence from
+  `remotePromptText` and add a doctor finding for the allow rule.
+- **A session that cannot show the prompt may boot a whole runtime before `open` is denied.** The preflight
+  cannot see the permission mode, so a policy that does not name the run's
+  origin is answered `consent` plus `POLICY_CONSENT_NOTE`, the runtime starts, and the gate then
+  denies. The skill's rules stop before booting on that note in such a session; that is prose.
+- **The model can still grant itself a policy** through the `env` block of
+  `~/.claude/settings.json` under bypass permissions or past the Auto-mode classifier. Pinning the
+  launch-time policy digest in the Session Control record is a schema change (`minor`) for a
+  separate PR.
+- **A consent-mode network-only role does not exist.** A deployed app's API or identity origin is
+  passed as one more `--origin`, asked in the same prompt; the skill never navigates to it, but
+  the gate would admit a navigation.
 - **The gate is textual.** It judges what the command TEXT names. A CLI or session name assembled
   at run time — from a file, a variable set by an earlier Bash call, a program's output, an
   ANSI-C escape inside a name (`$'playwright\x2dcli'`), or an expansion inside `playwright-cli` or
@@ -567,6 +609,26 @@ retirement's, rides the same mechanism with no check of its own.
   first, as the library does, closes it; `V68` pins the docs sentence that states the gap and
   must change with that fix.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
-  spellings, but no Windows run has driven a real `playwright-cli` through the gate.
+  spellings, but no Windows run has driven a real `playwright-cli` through the gate. On Git Bash
+  both hooks hand node the memory path in the MSYS-converted `C:/…` spelling while the state
+  directory node derives reads `C:\…`, so `memoryPathAllowed` compares the directory after
+  `nativeSeparators`; nothing collapses a `..` segment, so one still refuses.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
   re-decide whether its host fires a pre-tool hook on its shell tool and can render an `ask`.
+
+**Remote consent (2026-10-09).** Remote HTTPS origins are approved at the host prompt in consent
+mode; the decisions and their trade-offs are §12 of `docs/verify-feature-consent-spec.md`.
+Load-bearing points: the `asked` stamp in `judgeCall` is what keeps the forgeable memory out of the
+remote `open` decision, so never let a remote run-config target fall through to the
+`known.has(...)` expression in `evaluate`; `isExactHost` in the floor is the ONE exact-hostname
+predicate, used by `classifyOrigin`, `policyFloorFault` and `runConfigShape`; and the pin check
+for remote hosts lives in `runConfigShape` alone, after its pin-to-origin loop, so the helper and
+the gate refuse an unpinned or pattern host with the same text. Sites that move together:
+`ANSWERABLE_MODES`, `REASONS.REMOTE_NEEDS_POLICY` / `NOT_POLICY_TARGET` / `NOT_POLICY_KIND` and
+their `FINAL_REASONS` entries, `floor.CONSENT_REMOTE_REASON`, `remotePromptText`, the `answerable`
+option of `judgeOrigin`, the helper's `policyVerdict` / `checkPolicy` / `run` and its exported
+`POLICY_CONSENT_NOTE` (pinned by `P6p` and the unit file), the banner line, the doctor's
+policy, consent and consent-no-recipe rows, and the operator accounts listed above. **Version:
+`patch`** — the gate asks where it denied, the new refusals hit only inputs denied before, and no
+schema field, `decidedBy` value, key set, hook, matcher, config key or attestation moves; a new
+`decidedBy` value would force `minor`.

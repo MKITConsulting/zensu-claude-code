@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const core = require('../../../hooks/lib/session-control-core-v1.js');
+const capability = require('../../../hooks/lib/reviewer-capability-v1.js');
 const common = require('./attestation-common.js');
 const evidenceWorkerContract = require('./evidence-worker-contract.js');
 
@@ -346,9 +347,9 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: 'Write',
         tool_input: { file_path: 'ATTACK.txt', content: 'attack' },
-      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report');
+      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report');
       if (denied.hookSpecificOutput.permissionDecisionReason
-          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report') {
+          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report') {
         throw new Error(`${agentType} Write denial was not exact`);
       }
       const exactTraversalReason = 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 traversal root may reach protected Session Control or workflow state';
@@ -499,6 +500,8 @@ function provePrincipalAndPreToolContracts(options) {
       ['model binder function', 'Bash', { command: 'zensu_bind_model_session' }],
       ['model binder source', 'Bash', { command: `source ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'zensu-session.sh'))}` }],
       ['private binder CLI', 'Bash', { command: `node ${JSON.stringify(path.join(pluginRoot, 'hooks', 'lib', 'claude-hook-session-v1.js'))} model-bind` }],
+      ['context-mode execute', 'mcp__plugin_context-mode_context-mode__ctx_execute', { language: 'shell', code: 'env' }],
+      ['terminal MCP', 'mcp__terminal__run_in_terminal', { command: 'env' }],
     ]) {
       const denied = assertDenied(invokeRuntime(gate, {
         hook_event_name: 'PreToolUse',
@@ -511,6 +514,32 @@ function provePrincipalAndPreToolContracts(options) {
       }, environment), `general-purpose ${label}`, 'command-execution tools');
       if (!remediedReason(denied.hookSpecificOutput.permissionDecisionReason, exactCommandReason)) {
         throw new Error(`general-purpose ${label} denial was not exact`);
+      }
+    }
+
+    const neutralAllowance = `a neutral subagent may use only ${[...capability.HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...capability.HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
+    for (const [toolName, toolInput] of [
+      ['Skill', { skill: 'zensu:doctor' }],
+      ['Monitor', { command: 'sleep 1', description: 'wait for a process' }],
+      ['TaskStop', { task_id: 'contract-task' }],
+      ['EnterWorktree', { name: 'contract-worktree' }],
+      ['Workflow', { script: 'export const meta = { name: "contract", description: "contract" }' }],
+      ['Task', { subagent_type: 'Explore', prompt: 'Inspect an ordinary code path.' }],
+      ['mcp__plugin_playwright_playwright__browser_navigate', { url: 'http://localhost:3000' }],
+      ['mcp__plugin_context-mode_context-mode__ctx_search', { queries: ['review'] }],
+    ]) {
+      const denied = assertDenied(invokeRuntime(gate, {
+        hook_event_name: 'PreToolUse',
+        session_id: sessionId,
+        cwd: externalCwd,
+        agent_id: agentId,
+        agent_type: agentType,
+        tool_name: toolName,
+        tool_input: toolInput,
+      }, environment), `general-purpose unlisted ${toolName}`, `cannot invoke ${toolName};`);
+      if (denied.hookSpecificOutput.permissionDecisionReason
+          !== `reviewer-capability-v1 deny: host-profile-v1 cannot invoke ${toolName}; ${neutralAllowance}`) {
+        throw new Error(`general-purpose unlisted ${toolName} denial was not exact`);
       }
     }
 
@@ -562,7 +591,7 @@ function provePrincipalAndPreToolContracts(options) {
         throw new Error(`general-purpose ${label} denial was not exact`);
       }
     }
-    return ['Contract:GeneralPurpose:host-profile-v1:OrdinaryNonCommandToolsAllowed:AllCommandToolsDenied'];
+    return ['Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:CommandAndUnlistedToolsDenied'];
   }
 
   const denyScenarios = [

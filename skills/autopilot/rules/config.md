@@ -153,15 +153,18 @@ Bash-matcher hook pair that judges each `playwright-cli` call whose command text
 and a `zensu-verify` session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one) and
 by `scripts/verify-browser-config.js`. It is never a command the model may set during the run: a
-child-process export reaches neither the hooks nor the browser. Every selected
-application/authentication origin must be present exactly or navigation remains PARTIAL; a
-target covers every route on its origin, so no route list is declared. A policy written for an
-earlier contract may still carry a `routes` list: it is accepted when well formed and then
-ignored, so it narrows nothing. A dynamically chosen origin cannot be authorized from inside an
-already-running Claude session: launch the session with the exact origin policy first, or use a
-separate discovery run and restart with that policy. Without the variable
-`/zensu:verify-feature` runs in consent mode, which admits loopback origins only and
-asks the user once per new origin; the key is optional there and honoured when present.
+child-process export reaches neither the hooks nor the browser. A selected
+application/authentication origin the policy names passes without a prompt; any other is asked
+at the permission prompt where one can be shown, and stays PARTIAL where none can
+(`bypassPermissions`, `dontAsk`). A target covers every route on its origin, so no route list is
+declared. A policy written for an earlier contract may still carry a `routes` list: it is
+accepted when well formed and then ignored, so it narrows nothing. A dynamically chosen origin
+cannot be added to the policy from inside an already-running Claude session: where nobody can
+answer a prompt, launch the session with the exact origin policy first, or use a separate
+discovery run and restart with that policy. Without the variable `/zensu:verify-feature` runs in
+consent mode, which asks the user once per session for each new loopback origin and at every
+browser start for a public HTTPS origin of a remote run; the key is optional there and honoured
+when present.
 
 In `local` mode every target must use `http` or `https` with a loopback IP or the exact name
 `localhost`, which the browser resolves to loopback itself, and so must every network-only origin
@@ -177,12 +180,13 @@ refuses every HTTP(S) request to an origin outside the run config — a WebSocke
 not fenced by it, which is an open gap — and the gate reapplies the
 credential/query/fragment rule to every navigation command. A server
 redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
-every navigation. Missing/invalid declarations, mode mismatches, unsupported evidence modes, or
-unsupported policy versions fail closed, and so does a hostname that is not exact: every origin
+every navigation. Missing/invalid declarations, unsupported evidence modes, or unsupported policy
+versions fail closed, and so does a hostname that is not exact: every origin
 in either list must name an IP literal or a hostname of `a-z`, `0-9`, `.`, `-` and `_` only,
 because the browser turns each allowed origin into a URL glob and would read `*`, `{` or `,` as
 a pattern. Each target approves its own origin only, so an approval never carries over to
-another origin.
+another origin. An origin the policy does not name, of either kind, is asked at the permission
+prompt where one can be shown and denied where none can.
 Contract v1 supports only `declared-safe`; content on an origin that is not approved remains
 PARTIAL before navigation.
 
@@ -206,10 +210,10 @@ contract has a second, separate class: **network-only origins**.
   either a loopback origin, as a local target, or a non-loopback HTTPS origin under that same
   remote floor with a pin, so a local application can reach a hosted API or identity provider.
 - **Consent mode has no network-only class.** Without a policy the run-config helper refuses
-  `--network-only-origin`, and a non-loopback origin stays refused. A loopback API origin is then
-  passed as an ordinary `--origin` and consented to like any other loopback origin. Trade-off: a
-  local application that calls a non-loopback API needs the launch-time policy and a restart;
-  there is no prompt path for it.
+  `--network-only-origin`. An API origin of the run's own mode — loopback in a local run, public
+  HTTPS in a remote run — is then passed as an ordinary `--origin`, consented to like any other
+  origin, and never navigated to. Trade-off: a local application that calls a non-loopback API
+  needs the launch-time policy and a restart; there is no prompt path for it.
 - **Recipe.** `validate.networkOnly` associates the origins with the selected deployment, as
   `auth.baseUrl` is associated today. `origins` lists them exactly as the policy does. In remote
   mode `appOrigin` must equal the origin derived from the validated base URL, exactly as
@@ -225,8 +229,9 @@ contract has a second, separate class: **network-only origins**.
 
 What the class adds is an exfiltration surface: page code on a navigable origin can send data —
 including text the verifier types into a form — to every declared network-only origin. That is
-accepted because the list is declared by a human in the parent environment, which the model
-cannot write, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
+accepted because the list is declared by a human in the parent environment, which the model can
+reach only through the settings `env` block under bypass permissions or past the Auto-mode
+classifier, it is bounded at 8 exact origins with no pattern, and in remote mode every entry is
 public HTTPS pinned to an approved address, so no entry reaches a private, metadata or loopback
 address. `docs/verify-feature-consent-spec.md` holds the full analysis.
 
@@ -245,12 +250,13 @@ When present it is read as follows; `contractVersion` must be the literal intege
 - `routes` is no longer part of the contract. A recipe written for an earlier contract may still
   carry it; it is ignored and restricts nothing.
 
-## Concrete instance — the zensu-monorepo (verified values)
+## Concrete instance — a Go API behind a Vite dev server
 
-This is the autopilot recipe the probe resolves for the Zensu monorepo, using real values from
-that repo's `backend/Makefile`, `backend/internal/config/config.go`, and
-`frontend/vite.config.ts`. It is an autopilot example, not a `/zensu:verify-feature`-compatible
-live recipe: the verifier uses its bundled collision-safe, lease-owned adapter instead.
+An illustrative autopilot recipe for a repository with a Go backend in `backend/`, a pnpm
+frontend in `frontend/` whose Vite dev server proxies `/api` to the backend, and a Compose
+PostgreSQL. Every command and port stands in for the project's own. It is an autopilot example,
+not a `/zensu:verify-feature`-compatible live recipe: its fixed ports and shared Compose database
+fail the verifier's per-run isolation rules.
 
 ```yaml
 version: 1
@@ -261,21 +267,21 @@ services:
     up:    "make -C backend db-up"            # docker compose postgres :5432
     ready: "pg_isready -h localhost -p 5432"
   - name: backend
-    up:    "make -C backend migrate && make -C backend dev"   # air hot-reload, :8080
+    up:    "make -C backend migrate && make -C backend dev"   # hot reload, :8080
     ready: "curl -fs http://localhost:8080/<health>"          # exact path resolved by probe
-    env:   { EMAIL_PROVIDER: noop, NOTIFICATION_PROVIDER: noop }
+    env:   { EMAIL_PROVIDER: noop }
   - name: frontend
     up:    "pnpm -C frontend dev"             # vite :5173, proxies /api → :8080
     ready: "curl -fs http://localhost:5173"
 
 gates:
-  - "make -C backend check"                   # fmt + vet + lint + test + migrations-integration
+  - "make -C backend check"                   # fmt + vet + lint + test
   - "pnpm -C frontend exec vitest run --coverage"
-coverageMinPerFile: 90                        # repo rule 16
+coverageMinPerFile: 90
 
 auth:
   mode:        login-script
-  loginScript: "make -C backend e2e-session"  # NEW small target — see prerequisite below
+  loginScript: "make -C backend e2e-session"  # small project target — see prerequisite below
   artifact:    storageState
   baseUrl:     "http://localhost:5173" # same-origin /api proxy
   appOrigin:   "http://localhost:5173" # exact browser/storage-state origin
@@ -289,20 +295,19 @@ validate:
 
 ## Login-script prerequisite a project supplies
 
-For the monorepo this is the only thing autopilot needs that does not exist yet: a small
-`make e2e-session` target (the consumer-side login script) that
+The `loginScript` above is a small target the project adds itself, for example
+`make e2e-session`, that
 
-1. runs the existing seed (the monorepo's `backend/cmd/seed/main.go` already creates an
-   email-confirmed `admin@zensu.dev` owner user, idempotent + RLS-safe),
-2. logs that user in against `ZENSU_AUTH_BASE_URL` (`POST /api/auth/login`),
+1. runs the project's seed, which creates an email-confirmed test user idempotently,
+2. logs that user in against `ZENSU_AUTH_BASE_URL` (for example `POST /api/auth/login`),
 3. writes `storageState.json` for `ZENSU_APP_ORIGIN` (cookies/localStorage) beneath the supplied
    `ZENSU_AUTH_ARTIFACT_DIR`,
 4. prints exactly `STORAGE_STATE=<path>` and nothing else.
 
 The credentials stay **inside that target**. The skill runs it and reads only the
 `STORAGE_STATE=` line — it never sees the password. This is the login-script convention
-from `auth.md` applied to one concrete repo; any project provides the equivalent for its
-own stack (an API-login script, a headless-form script, or a seed+login target), and the
+from `auth.md` applied to one stack; every project provides the equivalent for its own
+stack (an API-login script, a headless-form script, or a seed+login target), and the
 orchestration is identical.
 
 ## Notes
