@@ -203,12 +203,47 @@ test('the census names an unregistered file, a nested registration and a stale c
   assert.match(registry.census(root)[0], /registers a case below column 0/);
 });
 
-test('the census refuses a subtest and a describe or it registration, which the static count cannot see', (t) => {
+test('the census refuses a subtest on a case context and a describe or it imported from node:test', (t) => {
   const root = makeRoot(t);
+  const refused = /registers a case below column 0, as a subtest, or through describe or it/;
   fs.writeFileSync(path.join(root, UNIT), `${cases(2)}test('case 3', async (t) => {\n  await t.test('inner', () => {});\n});\n`);
-  assert.match(registry.census(root)[0], /registers a case below column 0, as a subtest, or through describe or it/);
-  fs.writeFileSync(path.join(root, UNIT), `${cases(3)}describe('group', () => {\n  it('member', () => {});\n});\n`);
-  assert.match(registry.census(root)[0], /registers a case below column 0, as a subtest, or through describe or it/);
+  assert.match(registry.census(root)[0], refused);
+  fs.writeFileSync(path.join(root, UNIT), `${cases(2)}test('case 3', async (t) => {\n  for (const name of ['a']) {\n    await t.test(name, () => {});\n  }\n});\n`);
+  assert.match(registry.census(root)[0], refused);
+  fs.writeFileSync(path.join(root, UNIT), `const { describe, it } = require('node:test');\n${cases(3)}describe('group', () => {\n  it('member', () => {});\n});\n`);
+  assert.match(registry.census(root)[0], refused);
+});
+
+test('the census leaves a regex test, a fixture that spells describe and an unimported describe alone', (t) => {
+  const root = makeRoot(t);
+  const source = [
+    cases(3).trimEnd(),
+    "const TOKEN_RE = /^[0-9A-F]+$/;",
+    'const fixture = `',
+    "describe('cart', () => {",
+    "  it('adds an item', () => {});",
+    '});',
+    '`;',
+    'function check(value) {',
+    '  return (',
+    "    TOKEN_RE.test('9B2C')",
+    '  );',
+    '}',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(root, UNIT), source);
+  assert.deepEqual(registry.census(root), []);
+});
+
+test('the grade names the column-0 rule when node counts a case the static count cannot see', (t) => {
+  const root = makeRoot(t, { unitSource: `${cases(3)}for (const n of [4]) test('case ' + n, () => {});\n` });
+  assert.deepEqual(registry.census(root), []);
+  const run = runNode(root, UNIT);
+  const output = path.join(root, 'out.tap');
+  fs.writeFileSync(output, run.text);
+  const graded = captureMain(['verify', '--root', root, '--cwd', root, '--path', UNIT, '--output', output, '--rc', String(run.rc), '--driver', DRIVER, '--mode', '', '--host', 'linux']);
+  assert.equal(graded.code, 1);
+  assert.equal(graded.text, `${UNIT}: node registered 4 but the file's column-0 test( calls number 3, which the registry declares; register every case with its own column-0 test( call so both counts agree\n`);
 });
 
 test('in a git work tree the census skips ignored files and still names an untracked unregistered one', (t) => {
@@ -223,6 +258,17 @@ test('in a git work tree the census skips ignored files and still names an untra
   assert.deepEqual(registry.census(root), []);
   fs.writeFileSync(path.join(root, 'tests', 'structure', 'other.test.js'), cases(1));
   assert.deepEqual(registry.census(root), ['tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
+});
+
+test('a work tree git cannot read makes the census say that it walked tests/ instead', (t) => {
+  const root = makeRoot(t);
+  fs.writeFileSync(path.join(root, '.git'), `gitdir: ${path.join(root, 'missing-gitdir')}\n`);
+  assert.deepEqual(registry.census(root), []);
+  fs.writeFileSync(path.join(root, 'tests', 'structure', 'other.test.js'), cases(1));
+  const problems = registry.census(root);
+  assert.equal(problems.length, 2);
+  assert.equal(problems[0], 'tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one');
+  assert.match(problems[1], /^tests: git could not list this work tree \(.+\), so the census walked tests\/ and may name files that git ignores$/);
 });
 
 test('the rendered regions round-trip and a hand edit is reported with the render command', (t) => {
@@ -311,7 +357,7 @@ test('every node --test spawn needs its own unit_grade call, and a check label n
   ]);
 });
 
-test('only a CI suite line outside a comment reaches a driver that is not itself a CI suite', (t) => {
+test('only a CI suite that runs it with bash reaches a driver that is not itself a CI suite', (t) => {
   const inner = 'tests/inner/run.sh';
   const root = makeRoot(t, {
     files: [entry({ runs: [{ driver: inner }] })],
@@ -326,8 +372,57 @@ test('only a CI suite line outside a comment reaches a driver that is not itself
     '',
   ].join('\n'));
   assert.match(registry.driverProblems(root).join('\n'), /tests\/inner\/run\.sh: no CI structure suite runs it/);
+  fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'INNER="$ROOT/tests/inner/run.sh"', 'printf "%s\\n" "$INNER"', ''].join('\n'));
+  assert.match(registry.driverProblems(root).join('\n'), /tests\/inner\/run\.sh: no CI structure suite runs it/);
+  fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'INNER="$ROOT/tests/inner/run.sh"', 'bash "$INNER" 2>&1 | tee "$OUT"', ''].join('\n'));
+  assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
   fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'bash "$ROOT/tests/inner/run.sh"', ''].join('\n'));
   assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
+});
+
+test('a check label or a heredoc that names node --test is no spawn, and a spawn inside a command substitution counts', (t) => {
+  const quiet = [
+    '#!/bin/bash',
+    '. "$(dirname "$0")/lib-unit-registry.sh"',
+    'unit_check "S1 the driver fails if node --test exits non-zero (node --test)" tests/structure/sample.test.js',
+    "cat > \"$WORK/fixture.sh\" <<'FIXTURE'",
+    'node --test "$DIR/fixture.test.js"',
+    'FIXTURE',
+    'check "every time node --test runs" PASS',
+    'unit_check_done "S2"',
+    '',
+  ];
+  const root = makeRoot(t, { driverSource: quiet.join('\n') });
+  assert.deepEqual(registry.driverProblems(root), []);
+  const spawning = [...quiet.slice(0, 7), 'OUT="$(cd "$ROOT" && timeout 60 node --test tests/structure/sample.test.js 2>&1)"', ...quiet.slice(7)];
+  fs.writeFileSync(path.join(root, DRIVER), spawning.join('\n'));
+  assert.deepEqual(registry.driverProblems(root), [
+    `${DRIVER}: spawns node --test itself 1 time(s) but calls unit_grade 0 time(s); run unit files through unit_run, or grade each run through unit_grade`,
+  ]);
+});
+
+test('the shell reader blanks quoted text and comments, keeps expansions and substitutions, and skips heredoc bodies', () => {
+  const lines = registry.shellLines([
+    'echo "a $X b" \'c d\' # note',
+    'echo ${#list} $# "$(printf "%s" "$Y")"',
+    "cat <<-'EOF'",
+    '\tnode --test hidden',
+    '\tEOF',
+    "printf $'it\\'s' && exit 0",
+    "MULTI='first",
+    "second' rest",
+  ].join('\n'));
+  assert.deepEqual(lines.map((line) => line.code), [
+    'echo "  $X  " \'   \' ',
+    'echo ${#list} $# "$(printf "  " "$Y")"',
+    "cat <<-'EOF'",
+    '',
+    '',
+    "printf $'     ' && exit 0",
+    "MULTI='     ",
+    "      ' rest",
+  ]);
+  assert.equal(lines[0].text, 'echo "a $X b" \'c d\' ');
 });
 
 test('verify refuses a caller that is not a registered driver and owned names what was never graded', (t) => {

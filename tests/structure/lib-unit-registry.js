@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const REGISTRY_REL = 'tests/profiles/unit-files.v1.json';
 const MANIFEST_REL = 'tests/profiles/promptfoo-local-only.v1.json';
@@ -15,11 +15,18 @@ const UNIT_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.test\.js$/;
 const DRIVER_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.sh$/;
 const MODE = /^[a-z][a-z0-9-]*$/;
 const REGISTRATION = /^test(?:\.(?:skip|todo|only))?\(/gm;
-const NESTED_REGISTRATION = /^[ \t]+test(?:\.(?:skip|todo|only))?\(|^[ \t]*(?:await[ \t]+)?[A-Za-z_$][\w$]*\.test\([ \t]*['"`]|^[ \t]*(?:describe|it)(?:\.(?:skip|todo|only))?\(/m;
+const INDENTED_REGISTRATION = /^[ \t]+test(?:\.(?:skip|todo|only))?\(/m;
+const CONTEXT_PARAMETER = /(?:\(\s*([A-Za-z_$][\w$]*)\s*\)|([A-Za-z_$][\w$]*))\s*=>\s*\{?\s*$|\bfunction\b[^(]*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{?\s*$/;
+const SUITE_IMPORT = /(?:\{([^}]*)\}\s*=\s*require\(\s*['"]node:test['"]\s*\)|import\s*\{([^}]*)\}\s*from\s*['"]node:test['"])/g;
 const UNIT_CALL = /\bunit_(?:run|check|grade|not_run)\b/;
 const DONE_CALL = /\bunit_(?:registry_done|check_done)\b/;
-const NODE_TEST_SPAWN = /(?:^|[;&|(`!]|\$\(|\b(?:if|elif|while|until|then|do|else|exec|command|env|nice|time)\b|\btimeout(?:[ \t]+-\S+)*[ \t]+\S+)[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*(?:node|"?\$\{?NODE[A-Za-z0-9_]*\}?"?)(?:[ \t]+(?!--test(?![\w-]))\S+)*[ \t]+--test(?![\w-])/;
+const COMMAND_POSITION = '(?:^|[;&|(`!]|\\$\\(|\\b(?:if|elif|while|until|then|do|else|exec|command|env|nice|time)\\b|\\btimeout(?:[ \\t]+-\\S+)*[ \\t]+\\S+)[ \\t]*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*[ \\t]+)*';
+const NODE_TEST_SPAWN = new RegExp(`${COMMAND_POSITION}(?:node|"?\\$\\{?NODE[A-Za-z0-9_]*\\}?"?)(?:[ \\t]+(?!--test(?![\\w-]))\\S+)*[ \\t]+--test(?![\\w-])`);
+const SHELL_CALL = new RegExp(`${COMMAND_POSITION}(?:bash|sh)\\b`);
+const SOURCE_CALL = /(?:^|[;&|]|\b(?:then|do|else)\b)[ \t]*(?:\.|source)[ \t]+/;
+const ASSIGNMENT = /^[ \t]*(?:(?:local|export|readonly|declare)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=/;
 const GRADE_CALL = /^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*unit_grade\b/;
+const EARLY_EXIT = /^[ \t]*exit 0\b/;
 const REGIONS = ['totals', 'section-4'];
 
 const exitCodes = { pass: 0, verdict: 1, plumbing: 2 };
@@ -130,29 +137,38 @@ function loadRegistry(root, registryFile) {
 }
 
 function gitListedUnitFiles(root) {
-  const git = (args) => execFileSync('git', ['-C', root, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  let listing;
-  try {
-    const top = git(['rev-parse', '--show-toplevel']).trim();
-    if (!top || path.relative(fs.realpathSync(top), fs.realpathSync(root)) !== '') return null;
-    listing = git(['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'tests']);
-  } catch {
-    return null;
+  const git = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const failure = (run) => {
+    if (run.error) return run.error.code || run.error.message;
+    if (run.status === 0) return null;
+    return String(run.stderr || '').trim().split('\n')[0] || `git exited ${run.status}`;
+  };
+  const top = git(['rev-parse', '--show-toplevel']);
+  let reason = failure(top);
+  if (!reason) {
+    let same = false;
+    try {
+      same = path.relative(fs.realpathSync.native(top.stdout.trim()), fs.realpathSync.native(root)) === '';
+    } catch {
+      same = false;
+    }
+    if (!same) return { files: null, gitFailure: null };
+    const listing = git(['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'tests']);
+    reason = failure(listing);
+    if (!reason) {
+      const found = new Set();
+      for (const file of listing.stdout.split('\0')) {
+        if (file.endsWith('.test.js') && !file.split('/').includes('node_modules') && fs.existsSync(path.join(root, file))) found.add(file);
+      }
+      return { files: [...found].sort(), gitFailure: null };
+    }
   }
-  const found = new Set();
-  for (const file of listing.split('\0')) {
-    if (file.endsWith('.test.js') && !file.split('/').includes('node_modules') && fs.existsSync(path.join(root, file))) found.add(file);
-  }
-  return [...found].sort();
+  return { files: null, gitFailure: fs.existsSync(path.join(root, '.git')) ? reason : null };
 }
 
 function walkUnitFiles(root) {
   const listed = gitListedUnitFiles(root);
-  if (listed) return listed;
+  if (listed.files) return listed;
   const found = [];
   const visit = (relative) => {
     let names;
@@ -169,7 +185,7 @@ function walkUnitFiles(root) {
     }
   };
   visit('tests');
-  return found.sort();
+  return { files: found.sort(), gitFailure: listed.gitFailure };
 }
 
 function countMessage(unitPath, registered, declared, source) {
@@ -183,13 +199,44 @@ function staticRegistrations(source) {
   return (source.match(REGISTRATION) || []).length;
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function nestedRegistration(source) {
+  if (INDENTED_REGISTRATION.test(source)) return true;
+  const contexts = new Set();
+  for (const line of source.split('\n')) {
+    if (!/^test(?:\.(?:skip|todo|only))?\(/.test(line)) continue;
+    const parameter = CONTEXT_PARAMETER.exec(line.replace(/\r$/, ''));
+    if (parameter) contexts.add(parameter[1] || parameter[2] || parameter[3]);
+  }
+  for (const name of contexts) {
+    if (new RegExp(`^[ \\t]*(?:(?:await|return|void)[ \\t]+)?${escapeRegExp(name)}\\.test\\(`, 'm').test(source)) return true;
+  }
+  const imported = new Set();
+  for (const match of source.matchAll(SUITE_IMPORT)) {
+    for (const binding of (match[1] || match[2]).split(',')) {
+      const [exported, local = exported] = binding.split(/:|\s+as\s+/).map((part) => part.trim());
+      if (['describe', 'it', 'suite'].includes(exported)) imported.add(local);
+    }
+  }
+  for (const name of imported) {
+    if (new RegExp(`^[ \\t]*${escapeRegExp(name)}(?:\\.(?:skip|todo|only))?\\(`, 'm').test(source)) return true;
+  }
+  return false;
+}
+
 function census(root, registryFile) {
   const { entries, errors } = loadRegistry(root, registryFile);
   const problems = [...errors];
   if (!entries) return problems;
   const listed = new Set(entries.filter(isPlainObject).map((entry) => entry.path));
-  for (const unitPath of walkUnitFiles(root)) {
-    if (!listed.has(unitPath)) problems.push(`${unitPath}: no entry in ${REGISTRY_REL}; add one`);
+  const { files, gitFailure } = walkUnitFiles(root);
+  const unlisted = files.filter((unitPath) => !listed.has(unitPath));
+  for (const unitPath of unlisted) problems.push(`${unitPath}: no entry in ${REGISTRY_REL}; add one`);
+  if (gitFailure && unlisted.length) {
+    problems.push(`tests: git could not list this work tree (${gitFailure}), so the census walked tests/ and may name files that git ignores`);
   }
   for (const entry of entries) {
     if (!isPlainObject(entry) || typeof entry.path !== 'string' || !isInteger(entry.registered, 1)) continue;
@@ -199,7 +246,7 @@ function census(root, registryFile) {
     } catch {
       continue;
     }
-    if (NESTED_REGISTRATION.test(source)) {
+    if (nestedRegistration(source)) {
       problems.push(`${entry.path}: registers a case below column 0, as a subtest, or through describe or it; register every case with a column-0 test( call so the static count holds`);
       continue;
     }
@@ -241,7 +288,7 @@ function isFileLevelOnly(points, summary, unitPath) {
   return name === unitPath || name === base || name.endsWith(`/${base}`);
 }
 
-function verify(entry, text, rc, host) {
+function verify(entry, text, rc, host, staticCount) {
   const unitPath = entry.path;
   const { summary, points } = parseTap(text);
   if (summary.tests === undefined || summary.pass === undefined || summary.fail === undefined) {
@@ -255,6 +302,12 @@ function verify(entry, text, rc, host) {
     return { ok: false, message: `${unitPath}: registers no case of its own; node counted the file itself, so the file is empty or failed to load` };
   }
   if (summary.tests !== entry.registered) {
+    if (staticCount === entry.registered) {
+      return {
+        ok: false,
+        message: `${unitPath}: node registered ${summary.tests} but the file's column-0 test( calls number ${staticCount}, which the registry declares; register every case with its own column-0 test( call so both counts agree`,
+      };
+    }
     return { ok: false, message: countMessage(unitPath, summary.tests, entry.registered, 'node registered') };
   }
   const skipped = (summary.skipped || 0) + (summary.todo || 0);
@@ -368,8 +421,146 @@ function writeOverview(overviewText, regions) {
   return { problems: [], text };
 }
 
-function lineOf(source, index) {
-  return source.slice(0, index).split('\n').length;
+function shellLines(source) {
+  const result = [];
+  const stack = [{ kind: 'code', depth: 0, closer: null }];
+  let heredoc = null;
+  for (const raw of source.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    if (heredoc) {
+      result.push({ code: '', text: '' });
+      if ((heredoc.strip ? line.replace(/^\t+/, '') : line) === heredoc.word) heredoc = null;
+      continue;
+    }
+    let code = '';
+    let end = line.length;
+    let opened = null;
+    for (let index = 0; index < line.length; index += 1) {
+      const top = stack[stack.length - 1];
+      const char = line[index];
+      const next = line[index + 1];
+      if (top.kind === 'single' || top.kind === 'ansi') {
+        if (top.kind === 'ansi' && char === '\\' && next !== undefined) {
+          code += '  ';
+          index += 1;
+        } else if (char === "'") {
+          stack.pop();
+          code += char;
+        } else {
+          code += ' ';
+        }
+        continue;
+      }
+      if (top.kind === 'double') {
+        if (char === '\\' && next !== undefined) {
+          code += '  ';
+          index += 1;
+          continue;
+        }
+        if (char === '"') {
+          stack.pop();
+          code += char;
+          continue;
+        }
+        if (char === '$' && next === '(') {
+          stack.push({ kind: 'code', depth: 0, closer: ')' });
+          code += '$(';
+          index += 1;
+          continue;
+        }
+        if (char === '`') {
+          stack.push({ kind: 'code', depth: 0, closer: '`' });
+          code += char;
+          continue;
+        }
+        const expansion = /^\$(?:\{[^}"]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/.exec(line.slice(index));
+        if (expansion) {
+          code += expansion[0];
+          index += expansion[0].length - 1;
+          continue;
+        }
+        code += ' ';
+        continue;
+      }
+      if (char === '\\' && next !== undefined) {
+        code += char + next;
+        index += 1;
+        continue;
+      }
+      if (char === '`' && top.closer === '`') {
+        stack.pop();
+        code += char;
+        continue;
+      }
+      if (char === "'") {
+        stack.push({ kind: 'single' });
+        code += char;
+        continue;
+      }
+      if (char === '$' && next === "'") {
+        stack.push({ kind: 'ansi' });
+        code += "$'";
+        index += 1;
+        continue;
+      }
+      if (char === '"') {
+        stack.push({ kind: 'double' });
+        code += char;
+        continue;
+      }
+      if (char === '`') {
+        stack.push({ kind: 'code', depth: 0, closer: '`' });
+        code += char;
+        continue;
+      }
+      if (char === '#' && (index === 0 || /[\s;&|()]/.test(line[index - 1]))) {
+        end = index;
+        break;
+      }
+      if (char === '$' && next === '(') {
+        stack.push({ kind: 'code', depth: 0, closer: ')' });
+        code += '$(';
+        index += 1;
+        continue;
+      }
+      if (top.closer === ')' && char === '(') top.depth += 1;
+      if (top.closer === ')' && char === ')') {
+        if (top.depth === 0) {
+          stack.pop();
+          code += char;
+          continue;
+        }
+        top.depth -= 1;
+      }
+      if (char === '<' && next === '<' && line[index + 2] !== '<') {
+        const marker = /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(line.slice(index));
+        if (marker) {
+          opened = { strip: marker[1] === '-', word: marker[3] };
+          code += marker[0];
+          index += marker[0].length - 1;
+          continue;
+        }
+      }
+      code += char;
+    }
+    result.push({ code, text: line.slice(0, end) });
+    if (opened) heredoc = opened;
+  }
+  return result;
+}
+
+function runsScript(lines, relative) {
+  const names = new Set();
+  for (const { code, text } of lines) {
+    const assigned = ASSIGNMENT.exec(code);
+    if (assigned && text.slice(assigned[0].length).includes(relative)) names.add(assigned[1]);
+  }
+  return lines.some(({ code, text }) => {
+    const call = SHELL_CALL.exec(code);
+    if (!call) return false;
+    const rest = text.slice(call.index + call[0].length);
+    return rest.includes(relative) || [...names].some((name) => new RegExp(`\\$\\{?${name}(?![A-Za-z0-9_])`).test(rest));
+  });
 }
 
 function driverProblems(root, registryFile) {
@@ -390,23 +581,31 @@ function driverProblems(root, registryFile) {
     if (!sources.has(relative)) sources.set(relative, fs.readFileSync(path.join(root, relative), 'utf8'));
     return sources.get(relative);
   };
-  const code = (relative) => read(relative).split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  const lexed = new Map();
+  const shell = (relative) => {
+    if (!lexed.has(relative)) lexed.set(relative, shellLines(read(relative)));
+    return lexed.get(relative);
+  };
   for (const [driver, files] of drivers) {
     const source = read(driver);
+    const lines = shell(driver);
     const reachedBy = ciSuites.has(driver)
       ? driver
-      : [...ciSuites].find((suite) => code(suite).includes(driver.slice('tests/'.length)));
-    if (!reachedBy) problems.push(`${driver}: no CI structure suite runs it; add it to ciStructureTests or drive it from one`);
-    if (!/lib-unit-registry\.sh/.test(source)) problems.push(`${driver}: does not source tests/structure/lib-unit-registry.sh`);
+      : [...ciSuites].find((suite) => runsScript(shell(suite), driver.slice('tests/'.length)));
+    if (!reachedBy) problems.push(`${driver}: no CI structure suite runs it; add it to ciStructureTests or run it with bash from one`);
+    const sourced = lines.some(({ code, text }) => {
+      const call = SOURCE_CALL.exec(code);
+      return Boolean(call) && /lib-unit-registry\.sh/.test(text.slice(call.index + call[0].length));
+    });
+    if (!sourced) problems.push(`${driver}: does not source tests/structure/lib-unit-registry.sh`);
     for (const file of files) {
       if (!source.includes(path.posix.basename(file))) problems.push(`${driver}: never names ${file}, which the registry says it runs`);
     }
-    if (!DONE_CALL.test(source)) problems.push(`${driver}: never calls unit_registry_done or unit_check_done`);
-    const firstUnit = source.search(UNIT_CALL);
+    if (!lines.some(({ code }) => DONE_CALL.test(code))) problems.push(`${driver}: never calls unit_registry_done or unit_check_done`);
+    const firstUnit = lines.findIndex(({ code }) => UNIT_CALL.test(code));
     if (firstUnit >= 0) {
-      const before = source.slice(0, firstUnit);
-      const early = /^[ \t]*exit 0\b.*$/m.exec(before);
-      if (early) problems.push(`${driver}: "${early[0].trim()}" at line ${lineOf(source, early.index)} comes before its first unit call at line ${lineOf(source, firstUnit)}; drive the unit files first`);
+      const early = lines.slice(0, firstUnit).findIndex(({ code }) => EARLY_EXIT.test(code));
+      if (early >= 0) problems.push(`${driver}: "${lines[early].text.trim()}" at line ${early + 1} comes before its first unit call at line ${firstUnit + 1}; drive the unit files first`);
     }
   }
   const scanned = new Set([
@@ -414,9 +613,9 @@ function driverProblems(root, registryFile) {
     ...drivers.keys(),
   ]);
   for (const suite of [...scanned].sort()) {
-    const lines = code(suite).split('\n');
-    const spawns = lines.filter((line) => NODE_TEST_SPAWN.test(line)).length;
-    const grades = lines.filter((line) => GRADE_CALL.test(line)).length;
+    const lines = shell(suite);
+    const spawns = lines.filter(({ code }) => NODE_TEST_SPAWN.test(code)).length;
+    const grades = lines.filter(({ code }) => GRADE_CALL.test(code)).length;
     if (spawns > grades) problems.push(`${suite}: spawns node --test itself ${spawns} time(s) but calls unit_grade ${grades} time(s); run unit files through unit_run, or grade each run through unit_grade`);
   }
   return problems;
@@ -513,8 +712,14 @@ function main(argv, out = process.stdout) {
       out.write(`${unitPath}: the captured output is unreadable (${error.code || error.message})\n`);
       return exitCodes.plumbing;
     }
+    let staticCount = null;
+    try {
+      staticCount = staticRegistrations(fs.readFileSync(path.join(root, unitPath), 'utf8'));
+    } catch {
+      staticCount = null;
+    }
     const rc = Number(options.rc);
-    const verdict = verify(entry, text, Number.isInteger(rc) ? rc : -1, options.host || hostClass());
+    const verdict = verify(entry, text, Number.isInteger(rc) ? rc : -1, options.host || hostClass(), staticCount);
     out.write(`${verdict.message}\n`);
     return verdict.ok ? exitCodes.pass : exitCodes.verdict;
   }
@@ -536,6 +741,7 @@ module.exports = {
   checkOverview,
   writeOverview,
   driverProblems,
+  shellLines,
   owned,
   main,
 };

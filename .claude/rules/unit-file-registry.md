@@ -27,24 +27,30 @@ from it and from the suite manifest, never edited by hand.
   entry names a missing file, or an entry's `registered` differs from the file's column-0
   `test(` registrations. Inside a git work tree it lists unit files through `git ls-files`,
   tracked and untracked with ignored files excluded, so a gitignored fixture under `tests/` needs
-  no entry; outside one it walks `tests/`. A file that registers a case below column 0, as a
-  subtest (`t.test(`) or through `describe` or `it` is refused, because the static count cannot
-  see it.
+  no entry; outside one it walks `tests/`. When git fails inside a work tree, it walks too and
+  says so beside any file it names, because the walk also finds files git ignores. It refuses a
+  file whose source shows a case the static count cannot see: an indented `test(`, a `.test(`
+  call that starts a line on a column-0 case's context parameter (`t.test(`, any title), or a
+  `describe` or `it` imported from `node:test`. A registration it cannot see, such as a
+  one-line loop, fails the driver's grade instead, and that message names the column-0 rule.
 - Every driver grades each run through `tests/structure/lib-unit-registry.sh`. `unit_run`, or
   `unit_grade` for a run the driver spawned itself as `tests/session-control/run.sh` does,
   checks node's exact total from the TAP summary, refuses an emptied file even at
   `registered: 1`, and applies the host's skip ceiling and the guards. `unit_registry_done`
   fails a driver that never ran a file the registry gives it. A failing grade replays each
-  `not ok` line with its YAML diagnostics on stderr, or node's last 40 lines when none is
-  present. Without `UNIT_RUN_OUTPUT` or `UNIT_RUN_TEE`, `unit_run` creates its temp file only
-  after node has exited, so an interrupted node run leaves none behind.
+  `not ok` line on stderr with the diagnostics node printed before it and its YAML block, or
+  node's last 40 lines when none is present; a file that fails to load therefore shows its
+  exception. Without `UNIT_RUN_OUTPUT`, `unit_run` creates its temp file only after node has
+  exited, so an interrupted node run leaves none behind, and it refuses `UNIT_RUN_TEE` without a
+  driver-owned `UNIT_RUN_OUTPUT`.
 - `tests/structure/test-unit-registry.sh`, a `ciStructureTests` member, runs the census and the
   driver audit over `tests/structure/test-*.sh` and every registered driver. Each driver is
-  reached by CI (it is a CI suite, or a CI suite names it outside a comment), sources the
-  library, names its files, calls the done check and has no line starting with `exit 0` before
-  its first unit call. No scanned suite spawns `node --test` more often than a line of it starts
-  with a `unit_grade` call. It also holds the generated overview regions against the renderer
-  and carries mutation controls on a real entry.
+  reached by CI (it is a CI suite, or a CI suite runs it with `bash` or `sh`, by its path or
+  through a variable assigned that path), sources the library, names its files, calls the done
+  check and has no line starting with `exit 0` before its first unit call. No scanned suite
+  spawns `node --test` more often than a line of it starts with a `unit_grade` call. It also
+  holds the generated overview regions against the renderer and carries mutation controls on a
+  real entry.
 
 **Adding a unit file** means adding its entry in the same commit, with skip counts measured on
 every host class that runs it, and then running
@@ -63,11 +69,13 @@ whose code can skip on win32. Replace those from a green Windows Safety run.
   real count. A count derived from the file under test agrees with whatever the file says, so
   the runtime grade compares node's total with the declared one; the census compares the static
   count only so the preflight can refuse before any suite runs.
-- The driver audit is textual and catches the forms the tree uses, not every shell spelling.
-  An `exit 0` behind `||` or `;` passes the drive-first rule, and only `node` or a `$NODE…`
-  variable at a command position counts as a spawn, so a check label that names `node --test`
-  is no spawn. A broader early-exit pattern was measured and refused: it flagged the
-  node-unavailable exits of four suites and a check label in a fifth.
+- The driver audit reads each suite through `shellLines`, a small shell reader: quoted text,
+  comments and heredoc bodies never count, while parameter expansions and command
+  substitutions do. A check label or a heredoc fixture that names `node --test` is therefore no
+  spawn. Only `node` or a `$NODE…` variable at a command position, with `--test` on the same
+  line, counts as one. An `exit 0` that does not start its line, behind `||`, `&&` or `;` or
+  in a one-line case arm, passes the drive-first rule. A broader early-exit pattern was
+  measured and refused: it flagged the node-unavailable exits of four suites.
 - One node process per file per driver, because a summed multi-file run cannot attribute a
   count to a file. `test-windows-ci-contract.sh` keeps its pinned case arms and loops over them.
 - Paths reach node as argv and never inside a file, because MSYS converts argv on Windows and

@@ -81,9 +81,11 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
   A new structure test that nobody classified fails the run rather than being skipped.
 - **Preflight unit-file census** — every `*.test.js` under `tests/` that git does not ignore must
   have exactly one valid entry in `tests/profiles/unit-files.v1.json`, and each entry's
-  `registered` must equal the file's column-0 `test(` registrations. A file that registers a case
-  below column 0, as a subtest or through `describe` or `it` is refused, because that static count
-  cannot see it. Otherwise the run refuses to start and names each path.
+  `registered` must equal the file's column-0 `test(` registrations. A file with an indented
+  `test(`, a subtest on a case's context parameter (`t.test(`) or a `describe` or `it` imported
+  from `node:test` is refused too, because that static count cannot see such a case. Otherwise the
+  run refuses to start and names each path; a case the census cannot see fails its driver's grade
+  instead.
 - **Per-suite watchdog** — `ZENSU_SUITE_TIMEOUT` (default 3600 s), portable pid poll
   (no GNU `timeout` on macOS). A suite that never returns is reported `HANG`, not `FAIL`.
 - **Output to a file, never a command substitution** — so a suite leaving a background
@@ -401,7 +403,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/session-hub-receipt-v1.test.js` | 12 | – | `test-session-hub-receipt.sh` | The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields. |
 | `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
 | `structure/session-reanchor-v1.test.js` | 67 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
-| `structure/unit-registry.test.js` | 22 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
+| `structure/unit-registry.test.js` | 27 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
 | `structure/verify-browser-config.test.js` | 21 | – | `test-verify-consent.sh` | The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run. |
 | `structure/verify-consent-v1.test.js` | 125 | win32 2 | `test-verify-consent.sh` | The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection. |
 | `structure/verify-feature-transcript-check.test.js` | 26 | – | `test-eval-harness-units.sh` | The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session. |
@@ -426,8 +428,9 @@ uid 0, `win32`), and the guarded titles that must pass. An emptied file fails ev
 `registered: 1`, because node then counts the file itself as its only test. `unit_grade` grades
 a run a driver spawned itself, which `tests/session-control/run.sh` does to keep its timeout and
 progress diagnostic, and `unit_registry_done` fails a driver that never ran a file the registry
-gives it. A failing grade replays each `not ok` line with its YAML diagnostics on stderr, or the
-last 40 lines of node's output when no case reported `not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
+gives it. A failing grade replays each `not ok` line on stderr with the diagnostics node printed
+before it and its YAML block, or the last 40 lines of node's output when no case reported
+`not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
 in the same commit, followed by `node tests/structure/lib-unit-registry.js render --write`.
 
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by

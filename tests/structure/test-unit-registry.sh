@@ -49,7 +49,7 @@ else
 fi
 
 if U2_OUT="$(node "$LIB_JS" drivers 2>&1)"; then
-  check "U2 every registered driver is reached by CI, sources the library, names its files, calls the done check and drives its unit files before any exit 0 that starts a line, and no suite spawns node --test more often than it calls unit_grade" PASS
+  check "U2 every registered driver is run with bash by CI, sources the library, names its files, calls the done check and drives its unit files before any exit 0 that starts a line, and no suite spawns node --test more often than it calls unit_grade" PASS
 else
   check "U2 drivers: $(unit_one_line "$U2_OUT")" FAIL
 fi
@@ -272,6 +272,76 @@ if cmp -s "$WORK/no-fail.want" "$WORK/no-fail.got"; then
   check "U10b without a not ok line the failure excerpt is the last 40 lines of node's output" PASS
 else
   check "U10b failure excerpt without a not ok line: got '$(unit_one_line "$(cat "$WORK/no-fail.got")")'" FAIL
+fi
+
+U10C_STATUS="$(
+  UNIT_DRIVER="$PROBE_DRIVER"
+  UNIT_GRADED=""
+  status=0
+  unit_grade "$ROOT/$PROBE_UNIT" "$WORK/failing.tap" 1 2>"$WORK/graded.err" || status=$?
+  printf '%s' "$status"
+)"
+if [ "$U10C_STATUS" = 1 ] && cmp -s "$WORK/failing.want" "$WORK/graded.err"; then
+  check "U10c a grade that fails on a not ok case replays that case with its YAML diagnostics on stderr" PASS
+else
+  check "U10c failing grade: status '$U10C_STATUS', stderr '$(unit_one_line "$(cat "$WORK/graded.err" 2>/dev/null)")'" FAIL
+fi
+
+cat > "$WORK/load-failure.tap" <<'TAP'
+TAP version 13
+# stdout before the throw
+# Error: boom at load
+#     at Object.<anonymous> (/probe/load.test.js:4:7)
+# Node.js v20.20.2
+# Subtest: /probe/load.test.js
+not ok 1 - /probe/load.test.js
+  ---
+  duration_ms: 141.407
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 1
+# pass 0
+# fail 1
+TAP
+cat > "$WORK/load-failure.want" <<'TAP'
+# stdout before the throw
+# Error: boom at load
+#     at Object.<anonymous> (/probe/load.test.js:4:7)
+# Node.js v20.20.2
+not ok 1 - /probe/load.test.js
+  ---
+  duration_ms: 141.407
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+TAP
+unit_failure_excerpt "$WORK/load-failure.tap" > "$WORK/load-failure.got"
+if cmp -s "$WORK/load-failure.want" "$WORK/load-failure.got"; then
+  check "U10d a file that fails to load keeps the diagnostics node printed before its file-level not ok" PASS
+else
+  check "U10d load-failure excerpt: got '$(unit_one_line "$(cat "$WORK/load-failure.got")")'" FAIL
+fi
+
+U10E_RESULT="$(
+  UNIT_RUN_TEE=1
+  UNIT_RUN_OUTPUT=""
+  UNIT_DRIVER="$PROBE_DRIVER"
+  UNIT_GRADED=""
+  status=0
+  unit_run "$ROOT/$PROBE_UNIT" >/dev/null 2>&1 || status=$?
+  printf '%s|%s' "$status" "$UNIT_RUN_VERDICT"
+)"
+U10E_WANT="2|$PROBE_UNIT: UNIT_RUN_TEE needs UNIT_RUN_OUTPUT, a file the driver creates and removes"
+if [ "$U10E_RESULT" = "$U10E_WANT" ]; then
+  check "U10e unit_run refuses UNIT_RUN_TEE without a driver-owned UNIT_RUN_OUTPUT before node runs" PASS
+else
+  check "U10e tee without an output file: got '$U10E_RESULT', want '$U10E_WANT'" FAIL
 fi
 
 unit_check_done "U9 every unit file the registry gives this driver was graded"

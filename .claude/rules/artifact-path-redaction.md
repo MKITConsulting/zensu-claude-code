@@ -220,8 +220,10 @@ rule and the `msysSpelling` inverse are therefore exercised on POSIX only
 (`tests/SUITE-OVERVIEW.md` carries that decision and its reasoning);
 and the mechanism-2 consumer list in the header of
 `tests/structure/test-msys-special-plugin-module-boundaries.sh`, which stays true
-only while a new module-transport consumer is added to it. The suite totals in
-`tests/SUITE-OVERVIEW.md` follow that manifest but break LOUDLY: they are generated, and
+only while a new module-transport consumer is added to it.
+
+**A test-side coupling that breaks LOUDLY, named apart from that list:** the suite totals in
+`tests/SUITE-OVERVIEW.md` follow the manifest, but they are generated, and
 `test-unit-registry.sh` fails until `node tests/structure/lib-unit-registry.js render --write`
 regenerates them.
 

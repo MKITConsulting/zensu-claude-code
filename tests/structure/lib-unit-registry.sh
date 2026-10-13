@@ -30,15 +30,26 @@ unit_one_line() {
 
 unit_failure_excerpt() {
   awk '
+    function emit(line) {
+      if (printed < 200) { print line; printed++ }
+    }
     { ring[NR % 40] = $0 }
     /^not ok / {
       found = 1
+      for (i = 0; i < held; i++) emit(pending[i])
+      held = 0
       show = 1
-      if (printed < 200) { print; printed++ }
+      emit($0)
       next
     }
-    show && (/^ok [0-9]/ || /^# Subtest: / || /^1\.\./ || /^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) /) { show = 0 }
-    show && printed < 200 { print; printed++ }
+    /^ok / || /^1\.\./ || /^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) / { show = 0; held = 0; next }
+    /^# Subtest: / { show = 0; next }
+    show {
+      emit($0)
+      if ($0 == "  ...") show = 0
+      next
+    }
+    /^# / { if (held < 40) pending[held++] = $0 }
     END {
       if (!found) {
         start = NR > 40 ? NR - 39 : 1
@@ -65,12 +76,18 @@ unit_grade() {
 }
 
 unit_run() {
-  local given="${1:-}" abs out own=0 rc=0 status=0 text=""
+  local given="${1:-}" abs out rc=0 status=0 text=""
   [ "$#" -gt 0 ] && shift
   [ "${1:-}" = "--" ] && shift
   abs="$(unit_abs_path "$given")"
   out="${UNIT_RUN_OUTPUT:-}"
-  if [ -z "$out" ] && [ "${UNIT_RUN_TEE:-0}" != 1 ]; then
+  if [ -z "$out" ] && [ "${UNIT_RUN_TEE:-0}" = 1 ]; then
+    UNIT_RUN_VERDICT="${abs#"$UNIT_REGISTRY_ROOT"/}: UNIT_RUN_TEE needs UNIT_RUN_OUTPUT, a file the driver creates and removes"
+    UNIT_GRADED="$UNIT_GRADED$abs
+"
+    return 2
+  fi
+  if [ -z "$out" ]; then
     if text="$(cd "$UNIT_REGISTRY_ROOT" && exec node --test --test-reporter=tap ${1+"$@"} "$abs" 2>&1)"; then
       rc=0
     else
@@ -87,15 +104,6 @@ unit_run() {
     rm -f "$out"
     return "$status"
   fi
-  if [ -z "$out" ]; then
-    out="$(mktemp "${TMPDIR:-/tmp}/zensu-unit-run-XXXXXX")" || {
-      UNIT_RUN_VERDICT="${abs#"$UNIT_REGISTRY_ROOT"/}: cannot create a temp file for node's output"
-      UNIT_GRADED="$UNIT_GRADED$abs
-"
-      return 2
-    }
-    own=1
-  fi
   if [ "${UNIT_RUN_TEE:-0}" = 1 ]; then
     if (cd "$UNIT_REGISTRY_ROOT" && exec node --test --test-reporter=tap ${1+"$@"} "$abs") 2>&1 | tee "$out"; then
       rc=${PIPESTATUS[0]}
@@ -110,7 +118,6 @@ unit_run() {
     fi
   fi
   unit_grade "$abs" "$out" "$rc" || status=$?
-  [ "$own" = 0 ] || rm -f "$out"
   return "$status"
 }
 

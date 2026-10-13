@@ -1219,7 +1219,7 @@ esac
 # skipped fixture would otherwise leave this suite green while measuring less
 # than it claims. BOTH floors sit at the MEASURED counts, not below them, so a
 # deleted row fails the floor it exists to protect; raise them with every added
-# row. Note the three rows below are registered AFTER this count is taken.
+# row. Note the four rows below are registered AFTER this count is taken.
 #
 # The REGISTERED floor counts skips, so it survives a host without real
 # symlinks. On its own it is defeated by exactly the failure it exists to
