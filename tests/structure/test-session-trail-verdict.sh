@@ -7851,7 +7851,7 @@ process.stdout.write([(read(pinOut).recovered || []).length, (read(ctrlOut).reco
 ' "$FAKE/tl-mem-pin.json" "$FAKE/tl-mem-ctrl.json" "$FAKE/tl-pin.out" "$FAKE/tl-ctrl.out" 2>/dev/null)"
 TL8_DELTA="${TL8##*:}"
 case "$TL8" in
-  4:0:*) if node -e 'process.exit(Number(process.argv[1]) < 3 ? 0 : 1)' "$TL8_DELTA"; then
+  4:0:*) if node -e 'process.exit(Number(process.argv[1]) < 3 ? 0 : 1)' -- "$TL8_DELTA"; then
       check "TL8 four recovered 3 MiB transcripts keep no transcript text alive after the index is built (retained delta ${TL8_DELTA} MiB against a control without the API error)" PASS
     else
       check "TL8 recovered transcripts stay pinned after forced GC: retained delta ${TL8_DELTA} MiB (limit 3)" FAIL

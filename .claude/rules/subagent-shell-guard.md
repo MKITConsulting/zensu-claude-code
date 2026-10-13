@@ -236,7 +236,15 @@ grows past 64 directories is denied (`directories`).
   type `workflow-subagent` (read on 2026-10-11), which suggests the payload carries one. L04
   accepts both deny reasons, so it does not measure this either.
 - No banner or `/zensu:doctor` row discloses the grant.
-- Windows spellings are unit-tested with a stub filesystem only.
+- The unit file runs natively on the Windows CI shard; on POSIX hosts its Windows spellings are
+  tested with a stub filesystem only.
+- On Windows the guard resolves `/` through `realpathSync.native`, which answers the root of the
+  drive its own process runs on: under the gate, the drive of the installed plugin's `hooks/lib`.
+  So `rm -rf /` counts as a parent of the project only when the project sits on that drive. The
+  unit file asserts that drive rule, on the host and through a stub filesystem for both drives,
+  instead of an unconditional deny. Its shell-reader differential runs the no-HOME scenario on
+  POSIX hosts only, because Git Bash may supply a HOME the test did not pass; that was not
+  measured.
 - The CLI gate does not see a `zensu` name assembled from variables, a call made from interpreter
   code, a `find -exec` command, a pipe into a shell or a command read from a file. It sees a call
   that `ssh`, `su`, `docker exec` or `kubectl exec` runs only when a separator such as `&&`

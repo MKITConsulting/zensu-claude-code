@@ -59,6 +59,18 @@ function verdict(fixture, command, options = {}) {
   return guard.accidentReason(bash(command), fixture.trusted, fixture.env, options) ? 'deny' : 'allow';
 }
 
+function driveRoot(value) {
+  try {
+    return path.parse(fs.realpathSync.native(value)).root.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function rootRemovalReason(projectRoot) {
+  return driveRoot('/') === driveRoot(projectRoot) ? guard.REASONS.projectRoot : null;
+}
+
 const ALLOWED = [
   'git status --short',
   'npm test',
@@ -243,7 +255,6 @@ const DENIED = [
   ['rm -rf $(pwd)', guard.REASONS.projectRoot],
   ['rm -rf "$PWD"', guard.REASONS.projectRoot],
   ['rm -rf ~', guard.REASONS.projectRoot],
-  ['rm -rf /', guard.REASONS.projectRoot],
   ['mv . ../elsewhere', guard.REASONS.projectRoot],
   ['rmdir ../project', guard.REASONS.projectRoot],
   ['rm -rf "$(git rev-parse --show-toplevel)"', guard.REASONS.projectRoot],
@@ -336,6 +347,7 @@ test('absolute spellings of the project root and its parents are denied', () => 
     assert.equal(guard.accidentReason(bash(command), fixture.trusted, fixture.env), guard.REASONS.projectRoot, command);
   }
   assert.equal(verdict(fixture, `rm -rf ${projectRoot}/src/*`), 'allow');
+  assert.equal(guard.accidentReason(bash('rm -rf /'), fixture.trusted, fixture.env), rootRemovalReason(projectRoot));
   assert.equal(verdict(fixture, `ls ${fixture.trusted.pluginData}`), 'deny');
   const git = (operation) => `the command runs a git operation that removes or reverts work (${operation})`;
   assert.equal(guard.accidentReason(bash(`git restore ${projectRoot}`), fixture.trusted, fixture.env), git('git restore over the whole tree'));
@@ -355,6 +367,7 @@ test('the project overlay under HOME leaves globs that cannot reach protected st
   for (const [command, reason] of DENIED) {
     assert.equal(guard.accidentReason(bash(command), fixture.trusted, env), reason, command);
   }
+  assert.equal(guard.accidentReason(bash('rm -rf /'), fixture.trusted, env), rootRemovalReason(fixture.trusted.projectRoot));
   assert.equal(guard.accidentReason(bash('cat .zens*/config.json'), fixture.trusted, env), guard.REASONS.protectedPath);
   assert.equal(guard.accidentReason(bash('rm -rf ~/.claude/plug*'), fixture.trusted, env), guard.REASONS.protectedParent);
   assert.equal(guard.accidentReason(bash('ls ~/.claude/plugins/*/zensu-zensu'), fixture.trusted, env), guard.REASONS.protectedPath);
@@ -582,11 +595,12 @@ test('the strict flag reader agrees with zensu_hook_enabled_strict', () => {
     ['no hooks object', { global: '{"x":1}' }, {}],
     ['explicit file says false', { explicit: '{"hooks":{"subagentShell":false}}' }, {}],
     ['explicit file is absent', { explicitAbsent: true }, {}],
-    ['no candidate at all', {}, { noHome: true }],
+    ['no candidate at all', {}, { noHome: true, posixOnly: true }],
     ['directory at the config path', { directory: true }, {}],
     ['explicit path with a line break', { explicitBroken: true }, {}],
   ];
   for (const [label, files, flags] of scenarios) {
+    if (flags.posixOnly && process.platform === 'win32') continue;
     for (const file of [globalFile, projectFile]) fs.rmSync(file, { recursive: true, force: true });
     if (files.global) fs.writeFileSync(globalFile, files.global);
     if (files.project) fs.writeFileSync(projectFile, files.project);
@@ -628,8 +642,8 @@ test('the config authorities name every layer, a superset of the strict candidat
 });
 
 test('the strict candidates mirror the shell reader', () => {
-  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }), ['/x/c.json']);
-  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
+  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }, 'linux'), ['/x/c.json']);
+  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }, 'linux'), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
   assert.deepEqual(guard.strictCandidates({ HOME: '' }), []);
   assert.deepEqual(guard.strictCandidates({ HOME: '/c/Users/dev' }, 'win32'), ['C:/Users/dev/.zensu/config.json']);
 });
@@ -655,6 +669,17 @@ test('Windows spellings reach the same rules', () => {
   assert.equal(reason('type .ZENSU\\state\\x.json'), guard.REASONS.workflowDirectory);
   assert.equal(reason('git.exe clean -fd'), 'the command runs a git operation that removes or reverts work (git clean)');
   assert.equal(reason('ls src'), null);
+  const rootOn = (drive) => ({
+    realpathSync: {
+      native(value) {
+        if (value === '/') return `${drive}:\\`;
+        throw new Error('no filesystem in this test');
+      },
+    },
+  });
+  const rootRemoval = (drive) => guard.accidentReason(bash('rm -rf /'), trusted, env, { platform: 'win32', fs: rootOn(drive) });
+  assert.equal(rootRemoval('C'), guard.REASONS.projectRoot);
+  assert.equal(rootRemoval('D'), null);
   const spaced = {
     pluginData: 'C:\\Users\\John Doe\\.claude\\plugins\\data\\zensu-zensu',
     pluginRoot: 'C:\\Users\\John Doe\\.claude\\plugins\\cache\\zensu\\zensu\\9.9.9',
