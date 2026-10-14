@@ -69,7 +69,9 @@ that Zensu took the lease away from the earlier one.
 `rate_limited` comes from a `system/api_retry` message whose `error` is `rate_limit` or whose
 `error_status` is 429, with `retry_delay_ms` turned into `reset_at`. It also sets
 `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` for the session, because the gate judges Bash commands only and
-refuses the PowerShell tool in a bound session (`H4p`, and the gate case in `work-order-v1.test.js`).
+refuses the PowerShell tool in a bound session (`H4p`, and the gate case in `work-order-v1.test.js`);
+the post case there pins that a PowerShell `zensu work ask` ends nothing, because the ask branch
+reads Bash only.
 
 **`harness/` is outside the Session Control runtime digest.** The launcher runs in the worker's
 process, never inside a bound session, and it loads the digested runtime from `hooks/lib/`.

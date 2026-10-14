@@ -25,6 +25,10 @@ const ESCAPES = Object.freeze({
   t: String.fromCharCode(9),
   v: String.fromCharCode(11),
 });
+const LEGACY_ESCAPES = Object.freeze(Object.fromEntries(Object.entries(ESCAPES).filter(([key]) => key !== 'e')));
+const VERSION_ESCAPE_RE = /`(?:e|u\{)/;
+const CMD_OPERATOR_RE = /[&|<>^]/;
+const CMD_VARIABLE_RE = /%[^%\s]+%/;
 
 const KEYWORDS = new Set([
   'begin', 'break', 'catch', 'class', 'clean', 'configuration', 'continue', 'data', 'default', 'define',
@@ -205,6 +209,16 @@ const ALIASES = Object.freeze({
   wjb: 'wait-job',
   write: 'write-output',
 });
+
+const UNIX_ALIASES = new Set([
+  '%', '?', 'cd', 'chdir', 'clc', 'clhy', 'cli', 'clp', 'cls', 'clv', 'copy', 'cpi', 'cvpa', 'dbp', 'del', 'dir', 'ebp',
+  'echo', 'epal', 'epcsv', 'erase', 'etsn', 'exsn', 'fc', 'fl', 'foreach', 'ft', 'fw', 'gal', 'gbp', 'gc', 'gci', 'gcm',
+  'gcs', 'gdr', 'gerr', 'ghy', 'gi', 'gjb', 'gl', 'gm', 'gmo', 'gp', 'gps', 'gpv', 'group', 'gsn', 'gu', 'gv', 'h',
+  'history', 'icm', 'iex', 'ihy', 'ii', 'ipal', 'ipcsv', 'ipmo', 'irm', 'iwr', 'md', 'measure', 'mi', 'move', 'mp',
+  'nal', 'ndr', 'ni', 'nmo', 'nsn', 'nv', 'oh', 'popd', 'pushd', 'pwd', 'r', 'rbp', 'rcjb', 'rcsn', 'rd', 'rdr', 'ren',
+  'ri', 'rjb', 'rmo', 'rni', 'rnp', 'rp', 'rsn', 'rv', 'rvpa', 'sajb', 'sal', 'saps', 'sbp', 'select', 'set', 'si',
+  'sl', 'sls', 'sp', 'spjb', 'spps', 'sv', 'type', 'where', 'wjb',
+]);
 
 const READ_ONLY_COMMANDS = new Set([
   'clear-host', 'compare-object', 'convert-path', 'convertfrom-csv', 'convertfrom-json', 'convertfrom-stringdata',
@@ -500,7 +514,7 @@ function scanEscape(state, value) {
   const text = state.text;
   const next = text[state.pos + 1];
   if (next === undefined) fault('an unterminated string');
-  if (next === 'u' && text[state.pos + 2] === '{') {
+  if (next === 'u' && text[state.pos + 2] === '{' && !state.legacy) {
     const close = text.indexOf('}', state.pos + 3);
     if (close === -1) fault('an unterminated escape sequence');
     const code = parseInt(text.slice(state.pos + 3, close), 16);
@@ -508,7 +522,8 @@ function scanEscape(state, value) {
     return value + (Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '');
   }
   state.pos += 2;
-  return value + (Object.prototype.hasOwnProperty.call(ESCAPES, next) ? ESCAPES[next] : next);
+  const table = state.legacy ? LEGACY_ESCAPES : ESCAPES;
+  return value + (Object.prototype.hasOwnProperty.call(table, next) ? table[next] : next);
 }
 
 function scanExpandable(state, depth, here) {
@@ -687,7 +702,7 @@ function scanPrimary(state, depth, word, first) {
 }
 
 function peekLiteralArgument(state) {
-  const probe = { text: state.text, pos: state.pos };
+  const probe = { text: state.text, pos: state.pos, legacy: state.legacy };
   try {
     skipBlank(probe);
     const ch = probe.text[probe.pos];
@@ -975,7 +990,7 @@ function scanTypeOperand(state, depth) {
   return word;
 }
 
-function scanExpression(state, closer, depth) {
+function scanExpression(state, closer, depth, keyed = false) {
   const text = state.text;
   let target = null;
   for (;;) {
@@ -1000,7 +1015,7 @@ function scanExpression(state, closer, depth) {
     const assignment = assignmentLength(text, state.pos);
     if (assignment) {
       state.pos += assignment;
-      recordAssignment(state, target);
+      if (!keyed || assignment !== 1) recordAssignment(state, target);
       return 'assign';
     }
     if (ch === '[') {
@@ -1132,6 +1147,7 @@ function scanCommand(state, closer, depth, invocation) {
     args: [],
     redirections: [],
     stopParsing: false,
+    alias: null,
     depth,
   });
   skipSpace(state);
@@ -1143,7 +1159,10 @@ function scanCommand(state, closer, depth, invocation) {
   const word = scanWord(state, depth);
   record.display = displayText(word.raw);
   if (word.scriptBlock && word.parts === 1) record.scriptBlock = true;
-  else if (word.literal) record.name = normalizeCommandName(word.value);
+  else if (word.literal) {
+    record.name = normalizeCommandName(word.value);
+    record.alias = commandAlias(word.value);
+  }
   return scanArguments(state, closer, depth, record);
 }
 
@@ -1184,8 +1203,10 @@ function scanElement(state, closer, depth) {
 
 function scanStatement(state, closer, kind, depth) {
   let commandPosition = kind !== 'hash' && kind !== 'bracket' && kind !== 'typebody';
+  let keyed = kind === 'hash';
   for (;;) {
-    const end = commandPosition ? scanElement(state, closer, depth) : scanExpression(state, closer, depth);
+    const end = commandPosition ? scanElement(state, closer, depth) : scanExpression(state, closer, depth, keyed);
+    keyed = false;
     if (end === 'pipe' || end === 'assign') {
       commandPosition = true;
       continue;
@@ -1206,9 +1227,10 @@ function scanBlock(state, closer, kind, depth) {
   }
 }
 
-function analyze(text) {
+function analyze(text, options = {}) {
   const state = {
     text: String(text),
+    legacy: options.legacy === true,
     pos: 0,
     records: 0,
     commands: [],
@@ -1242,7 +1264,7 @@ function analyze(text) {
   };
 }
 
-function normalizeCommandName(value) {
+function commandBase(value) {
   const raw = String(value);
   const segments = raw.split(/[\\/]/);
   const moduleQualified = segments.length === 2 && !raw.includes('/') && /^[A-Za-z_][\w.]*$/.test(segments[0]);
@@ -1252,8 +1274,25 @@ function normalizeCommandName(value) {
   name = name.toLowerCase().replace(/[. ]+$/, '');
   const dot = name.lastIndexOf('.');
   if (dot > 0 && EXTENSIONS.has(name.slice(dot + 1))) name = name.slice(0, dot).replace(/[. ]+$/, '');
-  if (!hasPath && Object.prototype.hasOwnProperty.call(ALIASES, name)) return ALIASES[name];
-  return name;
+  return { name, hasPath };
+}
+
+function commandAlias(value) {
+  const base = commandBase(value);
+  return !base.hasPath && Object.prototype.hasOwnProperty.call(ALIASES, base.name) ? base.name : null;
+}
+
+function normalizeCommandName(value) {
+  const alias = commandAlias(value);
+  return alias === null ? commandBase(value).name : ALIASES[alias];
+}
+
+function readings(source) {
+  return VERSION_ESCAPE_RE.test(source) ? [false, true] : [false];
+}
+
+function analyses(source) {
+  return readings(source).map((legacy) => analyze(source, { legacy }));
 }
 
 function escapeRegExp(text) {
@@ -1268,6 +1307,15 @@ const CONCATENATION_RE = /['"\u2018-\u201e]\s*\+\s*['"\u2018-\u201e]/g;
 
 function joinConcatenations(text) {
   return flatten(text).replace(CONCATENATION_RE, '');
+}
+
+function spellingsOf(source, readList) {
+  return [source, flatten(source), joinConcatenations(source), ...readList.flatMap((analysis) => analysis.literals)].join('\n');
+}
+
+function spellings(text) {
+  const source = String(text);
+  return spellingsOf(source, analyses(source));
 }
 
 function namesZensu(text) {
@@ -1405,7 +1453,19 @@ function argumentValues(args) {
 }
 
 function opaqueValues(args) {
-  return args.map((argument) => (argument.literal ? argument.verbatim || argument.value : OPAQUE_ARGUMENT));
+  return args.map((argument) => (argument.literal && argument.value !== '' ? argument.verbatim || argument.value : OPAQUE_ARGUMENT));
+}
+
+function nativeArgumentReason(args) {
+  for (const argument of args) {
+    if (!argument.literal) continue;
+    const value = argument.value;
+    if (value.includes('"')) return 'an argument with a double quote, which Windows PowerShell 5.1 can split into more arguments';
+    if (CMD_VARIABLE_RE.test(value) || (CMD_OPERATOR_RE.test(value) && !value.includes(' '))) {
+      return 'an argument that cmd.exe reads as a command when zensu is a batch file';
+    }
+  }
+  return '';
 }
 
 function nestedShellReason(name, args, options, level, strict = false) {
@@ -1541,24 +1601,26 @@ function methodControlReason(method, options, level) {
 function controlVerdict(text, options = {}, level = 0) {
   const source = String(text);
   if (level > MAX_VERDICT_DEPTH) return 'it nests more command text than the check reads';
-  const analysis = analyze(source);
+  const readList = analyses(source);
   const joined = joinConcatenations(source);
-  const spellings = [source, flatten(source), joined, ...analysis.literals].join('\n');
+  const all = spellingsOf(source, readList);
   for (const name of options.names || []) {
-    if (namesWord(spellings, name)) return `it names the protected Session Control input ${name}`;
+    if (namesWord(all, name)) return `it names the protected Session Control input ${name}`;
   }
-  if (typeof options.refersToEnvFile === 'function' && options.refersToEnvFile(spellings)) {
+  if (typeof options.refersToEnvFile === 'function' && options.refersToEnvFile(all)) {
     return 'it names the file behind CLAUDE_ENV_FILE';
   }
-  if (analysis.fault) return `it could not be read (${analysis.fault})`;
   const envMentioned = envDriveMentioned(source) || envDriveMentioned(joined);
-  for (const command of analysis.commands) {
-    const reason = commandControlReason(command, envMentioned, options, level);
-    if (reason) return reason;
-  }
-  for (const method of analysis.methods) {
-    const reason = methodControlReason(method, options, level);
-    if (reason) return reason;
+  for (const analysis of readList) {
+    if (analysis.fault) return `it could not be read (${analysis.fault})`;
+    for (const command of analysis.commands) {
+      const reason = commandControlReason(command, envMentioned, options, level);
+      if (reason) return reason;
+    }
+    for (const method of analysis.methods) {
+      const reason = methodControlReason(method, options, level);
+      if (reason) return reason;
+    }
   }
   if (START_ENVIRONMENT_RE.test(flatten(source))) return 'it changes the environment of a process it starts';
   if (/processstartinfo/i.test(flatten(source))) return 'it builds a ProcessStartInfo, which this check does not read';
@@ -1605,8 +1667,16 @@ function refusal(reason) {
   return { readOnly: false, reason };
 }
 
-function readOnlyVerdict(text) {
-  const analysis = analyze(text);
+function readOnlyVerdict(text, options = {}) {
+  const platform = options.platform || process.platform;
+  for (const analysis of analyses(String(text))) {
+    const verdict = readOnlyReading(analysis, platform);
+    if (!verdict.readOnly) return verdict;
+  }
+  return { readOnly: true, reason: '' };
+}
+
+function readOnlyReading(analysis, platform) {
   if (analysis.fault) return refusal(`it could not be read (${analysis.fault})`);
   for (const command of analysis.commands) {
     if (command.stopParsing) return refusal(`${command.display} passes text through the stop-parsing token --%`);
@@ -1614,6 +1684,9 @@ function readOnlyVerdict(text) {
     if (command.name === null) {
       if (command.scriptBlock) continue;
       return refusal(`it runs a command whose name is built at run time (${command.display})`);
+    }
+    if (platform !== 'win32' && command.alias !== null && !UNIX_ALIASES.has(command.alias)) {
+      return refusal(`${command.display} runs the native ${command.alias} program, because PowerShell defines no ${command.alias} alias outside Windows`);
     }
     if (!READ_ONLY_COMMANDS.has(command.name)) return refusal(`${command.display} is not a read-only command`);
     if (command.name === 'foreach-object') {
@@ -1651,7 +1724,10 @@ function nestedZensu(command, level) {
       invocations.push(...nested.invocations);
     }
     if (code.file && !code.file.path.includes(OPAQUE_ARGUMENT) && normalizeCommandName(code.file.path) === 'zensu') {
-      invocations.push({ envp: {}, rest: opaqueValues(command.args.slice(code.file.argsFrom)) });
+      const rest = command.args.slice(code.file.argsFrom);
+      const reason = nativeArgumentReason(rest);
+      if (reason) return unjudged(`${command.display} passes zensu ${reason}`);
+      invocations.push({ envp: {}, rest: opaqueValues(rest) });
     }
     return { unjudged: '', invocations };
   }
@@ -1662,10 +1738,25 @@ function nestedZensu(command, level) {
 function zensuInvocations(text, level = 0) {
   const source = String(text);
   if (level > MAX_VERDICT_DEPTH) return unjudged('it nests more command text than the check reads');
-  const analysis = analyze(source);
-  if (!namesZensu(source) && !namesZensu(joinConcatenations(source)) && !namesZensu(analysis.literals.join('\n'))) {
-    return { unjudged: '', invocations: [] };
+  const readList = analyses(source);
+  if (!namesZensu(spellingsOf(source, readList))) return { unjudged: '', invocations: [] };
+  const invocations = [];
+  const seen = new Set();
+  for (const analysis of readList) {
+    const reading = zensuReading(analysis, level);
+    if (reading.unjudged) return reading;
+    const keys = new Set();
+    for (const invocation of reading.invocations) {
+      const key = JSON.stringify(invocation.rest);
+      keys.add(key);
+      if (!seen.has(key)) invocations.push(invocation);
+    }
+    for (const key of keys) seen.add(key);
   }
+  return { unjudged: '', invocations };
+}
+
+function zensuReading(analysis, level) {
   if (analysis.fault) return unjudged(`the command could not be read (${analysis.fault})`);
   const invocations = [];
   for (const command of analysis.commands) {
@@ -1675,6 +1766,8 @@ function zensuInvocations(text, level = 0) {
     }
     if (command.name === 'zensu') {
       if (command.invocation === 'dot') return unjudged('it dot-sources zensu');
+      const reason = nativeArgumentReason(command.args);
+      if (reason) return unjudged(`it passes zensu ${reason}`);
       invocations.push({
         envp: {},
         rest: opaqueValues(command.args),
@@ -1708,10 +1801,12 @@ module.exports = {
   OPAQUE_ARGUMENT,
   READ_ONLY_COMMANDS: Object.freeze([...READ_ONLY_COMMANDS]),
   SAFE_METHODS: Object.freeze([...SAFE_METHODS]),
+  UNIX_ALIASES: Object.freeze([...UNIX_ALIASES]),
   analyze,
   controlVerdict,
   namesZensu,
   normalizeCommandName,
   readOnlyVerdict,
+  spellings,
   zensuInvocations,
 };

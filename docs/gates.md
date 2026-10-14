@@ -46,24 +46,30 @@ Windows for claude.ai and Console accounts, and opt-in elsewhere through
 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
 the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
 judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
-analyzer, `hooks/lib/powershell-command-v1.js`.
+analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
+when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
+differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
+for both readings.
 
 | Gate | A PowerShell command |
 |---|---|
-| CLI write-gate | Judged like a Bash command. A `zensu` call that another command starts, that builds its noun or verb at run time, or that the analyzer cannot read is denied. There is no inline escape. |
+| CLI write-gate | Judged like a Bash command. A `zensu` call that another command starts, that builds its noun or verb at run time, or that the analyzer cannot read is denied, and so is one whose argument holds a double quote, which Windows PowerShell 5.1 can split, or a cmd.exe operator or `%name%` reference, which cmd.exe reads as code when `zensu` is a batch file. An empty argument counts as built at run time, because Windows PowerShell 5.1 drops it. There is no inline escape. |
 | Session Control check | Denied when it names a protected input such as `ZENSU_SESSION_KEY` in any spelling, writes the Environment provider under a name built at run time, turns text built at run time into code, or cannot be read. |
-| Source-write rules (A), (B), (C) | While `hooks.bashWriteGate` is on, only a provably read-only command passes. |
+| Source-write rules (A), (B), (C) | While `hooks.bashWriteGate` is on, only a provably read-only command passes. Outside Windows, a name that PowerShell 7 leaves to a native program, such as `sort` or `ls`, counts as that program. |
 | Secret scan | The whole command text is scanned. |
-| Browser consent gate | A `zensu-verify` `playwright-cli` call is refused. |
+| Browser consent gate | A `zensu-verify` `playwright-cli` call is refused, in every spelling the analyzer decodes: backtick escapes, Unicode escapes and joined string literals. |
 | Artifact redaction | Runs as after a Bash command. |
 | Work-order gate | Refused in a work-order session; the launcher turns the PowerShell tool off. |
 
-Every refusal tells the main thread to use the Bash tool, or Edit and Write, and a subagent to
-report to the main thread. The session banner names the commands to run through the Bash tool
-while the PowerShell tool may be active, and the `shell tools:` row of `/zensu:doctor` warns
-when a hook fires for `Bash` but not for `PowerShell`, or when the analyzer does not load.
-Names built at run time from variables or character codes, script files and interpreter code
-stay unread, as they do in Bash.
+Every refusal of a command a gate cannot judge tells the main thread to use the Bash tool, or Edit
+and Write, and a subagent to report to the main thread; a judged `zensu` mutation is refused as
+in Bash, with the skill to run instead. The session banner names the commands to run through the
+Bash tool while the PowerShell tool may be active. While that tool may be active, the
+`shell tools:` row of `/zensu:doctor` warns when a hook fires for `Bash` but not for
+`PowerShell`; once every such hook covers `PowerShell`, it warns when the analyzer does not load.
+Names built at run time from variables, character codes or subexpressions, script files,
+interpreter code, and a `zensu` call that cmd.exe finds in an argument of another batch file stay
+unread, as names built at run time do in Bash.
 To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`; see
 [Platform Support](operations.md#platform-support).
 
@@ -120,8 +126,9 @@ disables the gate for a deliberate one-off — honored both as a session env and
 ignores it on a subagent's command, and a PowerShell command has none. A PowerShell command is
 read by the shared analyzer, which finds a literal `zensu` call in every spelling PowerShell runs
 it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`) and
-denies one it cannot read: a call another command starts, a noun or verb built at run time, or
-text it cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
+denies one it cannot read: a call another command starts, a noun or verb built at run time, an
+argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
+cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
@@ -443,7 +450,9 @@ chain states.
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
 (`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
 PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
-those calls through the Bash tool. The gate is
+those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
+decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
+starts `node` for a PowerShell call that names `wright` and `verify` or holds a Unicode escape. The gate is
 textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
 text names the CLI and that session, or names the CLI while the hook environment's
@@ -652,7 +661,7 @@ an absent or symlinked module, or a module failure denies with a stderr note, an
 skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
 JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
 a backslash-newline or backslash-CR-LF line continuation and one `LC_ALL=C tr -d` pass removes
-quotes and backslashes, with the raw payload as the fallback when either pass fails: stripping them in pure bash
+quotes, backslashes and backticks, with the raw payload as the fallback when either pass fails: stripping them in pure bash
 was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
 `tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
 prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The

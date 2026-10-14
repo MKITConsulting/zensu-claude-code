@@ -59,12 +59,28 @@ are seen. A word keeps its `verbatim` spelling beside the dash-normalized `value
 PowerShell hands a Unicode dash to a native program unchanged. The name checks run once over all
 spellings joined by line breaks, never once per literal: per literal, a 1 MiB command of 520,000
 words took 1040 ms in `controlVerdict`, and joined it takes about 120 ms on the development Mac.
+
+Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is not installed (the tools
+reference, read 2026-10-13), and 5.1 decodes `` `e `` as `e` and `` `u{…} `` as the letter `u` followed
+by literal text, where PowerShell 7 decodes an escape character and a code point. When the text
+holds either sequence (`VERSION_ESCAPE_RE`), every verdict analyzes it twice, once per reading
+(`analyze(text, { legacy: true })` is the 5.1 one), and holds only when it holds for both: a
+quoted `` z`ensu `` is a `zensu` call under 5.1. `spellings()` joins the raw text, its flattened and
+joined forms and the literals of both readings; the Session Control name checks and the consent
+gate's markers read it. Inside a hashtable literal the first `=` of each entry initializes a key
+and is no assignment, so `@{Path='.'}` and a calculated property pass `readOnlyVerdict`.
+
 Three verdicts:
 
 - `zensuInvocations` for the CLI gate: each literal `zensu` call with its verbatim words, a word
   built at run time as `OPAQUE_ARGUMENT` (NUL). It answers `unjudged`, never "no call", when the text names
   `zensu` and holds a dynamic call target, a launcher, a definition, an unsafe method call, a
-  fault, or a nested shell it cannot read.
+  fault, or a nested shell it cannot read. A literal argument that Windows PowerShell 5.1 or
+  cmd.exe would hand to `zensu` differently (`nativeArgumentReason`) is unjudged too: a double
+  quote, which 5.1 can split into more arguments, and, because a batch-file `zensu` goes through
+  cmd.exe, a `%name%` reference or a cmd.exe operator (`&`, `|`, `<`, `>`, `^`) in an argument
+  without a space, which PowerShell passes unquoted. An empty argument becomes `OPAQUE_ARGUMENT`,
+  because 5.1 drops it and shifts the noun and verb.
 - `controlVerdict` for the Session Control check: any spelling of a `CONTROL_BINDINGS` name or of
   the env file, an Environment provider write under a dynamic name, a move into `env:`, a
   `New-PSDrive` on that provider, `SetEnvironmentVariable` with a dynamic name, code built at run
@@ -74,7 +90,10 @@ Three verdicts:
   `.ForEach` and `.Where` with a script block, redirections to `$null`, and assignments to plain
   variables. A property or element assignment is refused, because a setter such as
   `.IsReadOnly` or `.LastWriteTime` changes the file. A missing alias causes a false deny, never
-  an allow.
+  an allow. Outside Windows an alias resolves only when `UNIX_ALIASES` holds it: PowerShell 7
+  leaves `sort`, `ls`, `cat`, `man` and the other `#if !UNIX` aliases of `InitialSessionState.cs`
+  to the native program, and `sort -o` writes a file. The platform comes from `options.platform`,
+  else `process.platform` of the hook, which runs where PowerShell runs.
 
 Nested shells are judged by how they read code. A PowerShell host reads `-Command`,
 `-EncodedCommand` (always refused), `-File` and standard input (refused); `pwsh` reads its first
@@ -95,20 +114,21 @@ shell is refused.
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |
-| `pre-browser-navigation-consent.sh` | A call carrying both consent markers is refused (`POWERSHELL_NOT_JUDGED`). |
+| `pre-browser-navigation-consent.sh` | A call carrying both consent markers in any spelling `spellings()` decodes is refused (`POWERSHELL_NOT_JUDGED`), and a call that reaches node while the analyzer cannot load is refused too. The prefilter forwards a PowerShell payload that names `wright` and `verify` or holds `u{`, because a backtick, Unicode or concatenated spelling never names `playwright-cli` literally. |
 | `post-browser-navigation-consent.sh` | Skipped (`powershell-call`), because the pre hook refused every marked call. |
 | `post-artifact-redact.sh` | Parity: the sweep runs as after Bash. |
 | `pre-work-order-gate.sh` | Refused in a bound work-order session; `harness/launcher.js` starts Claude with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. |
-| `post-work-order.sh` | Runs for every tool; its `zensu work ask` branch reads Bash only, which the pre gate leaves as the only shell. |
+| `post-work-order.sh` | Runs for every tool; its `zensu work ask` branch reads Bash only, which the pre gate leaves as the only shell. The `postToolUpdate` PowerShell case in `work-order-v1.test.js` pins that a PowerShell ask ends nothing. |
 | `pre-reviewer-capability-gate.sh` | Unchanged: the allowlists deny PowerShell for every non-main principal, and the neutral grant covers `Bash` alone. |
 
 ## Steering and diagnostics
 
 `shellCoverage(manifest)` walks the tool events through `hostMatcherCovers`, the one reader of the
-host's matcher rule. With gaps, the banner warns above the `hooks.sessionBanner` gate and the
-doctor's `shell tools:` row warns; without gaps, the banner prints `STEER` below the gate while the
-tool may run, and the row is green only when `powershell-command-v1.js` loads and reads a probe
-command. A missing analyzer turns every PowerShell command into a Session Control deny, so a
+host's matcher rule. While the tool may run and gaps exist, the banner warns above the
+`hooks.sessionBanner` gate and the doctor's `shell tools:` row warns; a gap while the tool is off
+or absent is reported without a warning. Without gaps, the banner prints `STEER` below the gate
+while the tool may run, and the row checks the analyzer only then: it is green only when
+`powershell-command-v1.js` loads and reads a probe command. A missing analyzer turns every PowerShell command into a Session Control deny, so a
 green row would be a false all-clear.
 
 ## Coupled sites
@@ -119,8 +139,15 @@ green row would be a false all-clear.
   `hostMatcherCovers`; never compare the matcher string.
 - The sibling loads: `bash-source-write-parse.js` requires the analyzer lazily and only for a
   PowerShell payload; `pre-bash-zensu-gate.sh` loads it through `cd -P` into its own `hooks/lib`
-  with `ZPS`, which stays empty when the `cd` fails, so a project file can never load; the doctor
-  report requires it. PC5a and PC5b pin the two hook loads, and P2p9 the doctor's.
+  with `ZPS`, which stays empty when the `cd` fails, so a project file can never load; the consent
+  module requires it lazily for `spellings()`; the doctor report requires it. PC5a, PC5b and PC5c
+  pin the three hook loads, and P2p9 the doctor's. A failed load in the source-write parser is
+  caught and denies with its own text (WP17); in the consent module it refuses the call.
+- `UNIX_ALIASES` is the `BuiltInAliases` list of PowerShell's `InitialSessionState.cs` without
+  its `#if !UNIX` and `#if !CORECLR` entries (read on `master`, 2026-10-14). The conformance case
+  checks on a non-Windows host that each entry exists there.
+- The consent prefilter's PowerShell arm and its `tr -d` set, which now strips backticks, and
+  `strippedText` in the consent module move together; the hook fallbacks strip backticks too.
 - `OPAQUE_ARGUMENT` and the `__unjudged__` line between the gate's inline node and its shell side.
 - The disposition table in `tests/structure/test-powershell-tool-coverage.sh`: PC3 fails for a
   hook on a shell matcher without a row, PC4 for a row whose suite lost its PowerShell case.
@@ -136,17 +163,25 @@ red team found: property setters, `.ForEach` with a method name, literal concate
 Unicode dash before `-h`. Its conformance case parses the
 corpus with `[System.Management.Automation.Language.Parser]::ParseInput`, requires every
 `CommandAst` name among the analyzer's commands and every `Get-Alias` entry in `ALIASES`; it is
-required on win32 and skipped where no PowerShell is installed. Its driver
+required on win32 and skipped where no PowerShell is installed. It reads the host's major version
+and analyzes in the matching reading, so a 5.1 host is held to the 5.1 decoding. Its driver
 `tests/structure/test-powershell-tool-coverage.sh` runs on `windows-shard-3`. The per-hook
-PowerShell cases are B40-B41, WP1-WP17, F8p-F8p6, V70-V70d, R7p-R7pd, PS1-PS6, the work-order
-gate test and the PowerShell payloads of `test-vanished-session-cwd.sh`; the surfaces are B16 and
+PowerShell cases are B40-B41 (B40x2-B40x7 for the 5.1 readings and the native arguments),
+WP1-WP17, F8p-F8p6, V70-V70g, H17g5-H17g6, R7p-R7pd, PS1-PS6, the work-order gate and post
+cases and the PowerShell payloads of `test-vanished-session-cwd.sh`; the surfaces are B16 and
 P2p1-P2p9.
 
 ## Known gaps
 
-- A name or provider path built at run time from anything but string literals passes, as its
-  Bash equivalent passes in Bash: a value from an earlier call (`Set-Item -Path $p`) or a
-  character code (`& ([char]0x7A + 'ensu')`).
+- A name or provider path built at run time from anything but joined string literals passes, as
+  its Bash equivalent passes in Bash: a value from an earlier call (`Set-Item -Path $p`), a
+  character code (`& ([char]0x7A + 'ensu')`) or a subexpression (`& "zen$('su')"`).
+- Another batch file hands its arguments to cmd.exe too, so `npm run x '&zensu …'` runs a
+  `zensu` call the gate never sees. Only `zensu`'s own arguments are checked for cmd.exe text.
+- Outside Windows the opt-in rules refuse `ls`, `cat` and the other names PowerShell 7 leaves to
+  native programs, because only cmdlets are on the read-only list.
+- A project path that names `wright` and `verify` makes the consent prefilter start `node` for
+  every PowerShell call there.
 - A pure variable in the option position of a POSIX shell (`bash $flags $code`) counts as the
   script path.
 - Script files, interpreter code (`node -e`, `python -c`), and an alias, function or variable an

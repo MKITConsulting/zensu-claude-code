@@ -1567,6 +1567,17 @@ test('runPre writes nothing for a non-Bash or unrelated call and denies an unrea
   const ambient = sink();
   assert.equal(consent.runPre(powershell('PLAYWRIGHT-CLI snapshot'), { PLAYWRIGHT_CLI_SESSION: SESSION }, ambient, err), true);
   assert.equal(JSON.parse(ambient.text()).hookSpecificOutput.permissionDecisionReason, `${DENIED}${REASONS.POWERSHELL_NOT_JUDGED}`);
+  const BT = String.fromCharCode(96);
+  for (const spelling of [
+    `play${BT}wright-cli -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `& ('play' + 'wright-cli') -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `& "pla${BT}u{79}wright-cli" -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `playwright-cli -s=("zensu-" + "${SESSION.slice('zensu-'.length)}") goto http://127.0.0.1:4200/`,
+  ]) {
+    const decoded = sink();
+    assert.equal(consent.runPre(powershell(spelling), {}, decoded, err), true, spelling);
+    assert.deepEqual(JSON.parse(decoded.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }), spelling);
+  }
   assert.equal(err.text(), '');
 });
 

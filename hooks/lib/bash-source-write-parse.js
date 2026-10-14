@@ -653,8 +653,28 @@ const POWERSHELL_CONTROL_CHILD =
   "the file behind CLAUDE_ENV_FILE, and it refuses a PowerShell command it cannot rule out doing either. " +
   "Do not retry it; report the need to the main thread instead.";
 
+const POWERSHELL_UNLOADED =
+  "the PowerShell analyzer hooks/lib/powershell-command-v1.js could not be loaded";
+
+function powershellUnloadedVerdict(mode, child) {
+  if (mode === "control") {
+    return "Blocked a PowerShell command because " + POWERSHELL_UNLOADED + ", so this check cannot rule out that " +
+      "the command rebinds a Session Control input. " +
+      (child ? "Do not retry it; report the need to the main thread instead."
+        : "Run the command through the Bash tool, and reinstall the plugin to restore the check.");
+  }
+  if (mode === "targets") return "WRITE-TARGET (unevaluated: " + POWERSHELL_UNLOADED + ")";
+  return "Blocked a PowerShell command because " + POWERSHELL_UNLOADED + ". " +
+    "Run it through the Bash tool, or change files with Edit or Write, and reinstall the plugin." + OPT_IN_NOTE;
+}
+
 function powershellVerdict(cmd, mode, child) {
-  const powershell = require("./powershell-command-v1.js");
+  let powershell = null;
+  try {
+    powershell = require("./powershell-command-v1.js");
+  } catch (_error) {
+    return powershellUnloadedVerdict(mode, child);
+  }
   if (mode === "control") {
     const envFile = process.env.CLAUDE_ENV_FILE || "";
     const reason = powershell.controlVerdict(cmd, {

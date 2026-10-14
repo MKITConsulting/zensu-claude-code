@@ -44,7 +44,13 @@ file the browser is opened with, written by `scripts/verify-browser-config.js`.
 
 **A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
 carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
-tool, and the recorder skips a PowerShell call (`powershell-call`). V70 to V70d pin both halves.
+tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are read over
+`spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and Unicode escapes
+and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7 reading, and a
+call that reaches node while that module cannot load is refused. For a PowerShell payload the
+prefilter also forwards a text that names `wright` and `verify` or holds `u{`, because those
+spellings never name `playwright-cli` literally, and the pre hook's fallback counts any of
+`wright`, `verify` or `u{` as marked. V70 to V70g and H17g5-H17g6 pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
@@ -60,7 +66,8 @@ and the skill's instruction to use only the printed session is prose, not a boun
    normalizes the payload with ONE `LC_ALL=C sed` pass that first pairs every JSON-escaped
    backslash — so an escaped backslash before `n` is never read as a line break — and then joins
    a JSON-encoded backslash-newline or backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d`
-   pass that removes every quote, backslash and pairing sentinel, then matches case-insensitively.
+   pass that removes every quote, backslash, backtick and pairing sentinel, then matches
+   case-insensitively.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
    CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
@@ -70,7 +77,7 @@ and the skill's instruction to use only the printed session is prose, not a boun
    only. **When the library cannot be sourced**, or sourcing it defines no
    `zensu_browser_consent_marked`, each wrapper falls back to its own test: one `LC_ALL=C sed`
    pass drops the JSON escapes `\n`, `\r` and `\t` WITHOUT first pairing escaped backslashes, one
-   `LC_ALL=C tr -d` pass removes quotes and backslashes, and EITHER marker alone — `playwright` or
+   `LC_ALL=C tr -d` pass removes quotes, backslashes and backticks, and EITHER marker alone — `playwright` or
    `zensu-verify`, in any letter case, in that text or in the raw payload — counts as marked. That
    text is the whole hook payload, not only the command, so a working directory that names either
    marker marks every Bash call of that project. The pre hook then

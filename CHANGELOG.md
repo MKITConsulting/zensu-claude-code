@@ -43,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hooks.bashWriteGate` is on, the source-write rules pass only a read-only PowerShell command.
   The secret scan reads the whole command, the browser consent gate refuses a `zensu-verify`
   browser call, and a work-order session refuses the tool. A PowerShell command has no inline gate
-  escape. Every refusal names the Bash tool, which works as before, so
-  `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` is no longer required and stays an option. The
+  escape. Every refusal of a command a gate cannot judge names the Bash tool, which works as
+  before, so `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` is no longer required and stays an option.
+  Because Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is missing, the
+  analyzer reads a string escape the two versions decode differently both ways. The
   `shell tools:` row of `/zensu:doctor` reports the coverage.
 
 ## [0.26.0] - 2026-10-12

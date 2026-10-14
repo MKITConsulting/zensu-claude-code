@@ -174,7 +174,7 @@ const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwr
 const SHAPE_TEXTS = new Set(SHAPE_REASONS.map((key) => REASONS[key]));
 
 function strippedText(text) {
-  return String(text).replace(/\\\r?\n/g, '').replace(/['"\\]/g, '');
+  return String(text).replace(/\\\r?\n/g, '').replace(/['"\\`]/g, '');
 }
 
 function normalizedText(text) {
@@ -1373,6 +1373,17 @@ function commandOf(payload) {
   return input && typeof input === 'object' && typeof input.command === 'string' ? input.command : null;
 }
 
+function powershellMarked(text, env) {
+  let spelled;
+  try {
+    spelled = require('./powershell-command-v1.js').spellings(text);
+  } catch (_error) {
+    return true;
+  }
+  const marks = commandMarkers(spelled, env);
+  return marks.cli && marks.session;
+}
+
 function runPre(payload, env, out, err) {
   if (!payload || typeof payload !== 'object' || typeof payload.tool_name !== 'string') {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE })));
@@ -1381,8 +1392,7 @@ function runPre(payload, env, out, err) {
   if (payload.tool_name === 'PowerShell') {
     const input = payload.tool_input;
     const text = input && typeof input === 'object' && typeof input.command === 'string' ? input.command : '';
-    const marks = commandMarkers(text, env);
-    if (!marks.cli || !marks.session) return false;
+    if (!powershellMarked(text, env)) return false;
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED })));
     return true;
   }

@@ -467,6 +467,17 @@ case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_JOINED" 2
   *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" PASS ;;
   *) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" FAIL ;;
 esac
+nolib_powershell() {
+  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' \
+    | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
+}
+case "$(nolib_powershell "& ('pla' + 'ywright-cli') -s=('zensu-' + 'ver' + 'ify-nolib') snapshot")" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g5 without the prefilter library a PowerShell call that joins both markers from string literals is still denied" PASS ;;
+  *) check "H17g5 without the prefilter library a PowerShell call that joins both markers from string literals is still denied" FAIL ;;
+esac
+[ -z "$(nolib_powershell 'Get-ChildItem -Recurse')" ] \
+  && check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" PASS \
+  || check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" FAIL
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -1535,6 +1546,16 @@ post_run "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ"
 [ "$(memory_count)" = "$PS_MEMORY_BEFORE" ] \
   && check "V70d the recorder writes no consent record for a PowerShell call" PASS \
   || check "V70d the recorder writes no consent record for a PowerShell call (before=$PS_MEMORY_BEFORE after=$(memory_count))" FAIL
+PS_BT='`'
+[ "$(pre_verdict "play${PS_BT}wright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70e the real pre hook denies a PowerShell call that splits playwright-cli with a backtick" PASS \
+  || check "V70e the real pre hook denies a PowerShell call that splits playwright-cli with a backtick" FAIL
+[ "$(pre_verdict "& ('play' + 'wright-cli') -s=('zensu-' + 'verify-vc') goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70f the real pre hook denies a PowerShell call that joins both markers from string literals" PASS \
+  || check "V70f the real pre hook denies a PowerShell call that joins both markers from string literals" FAIL
+[ "$(pre_verdict "& \"pla${PS_BT}u{79}wright-cli\" -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" PASS \
+  || check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" FAIL
 
 echo "----"
 if [ "$SKIP" -gt 0 ]; then

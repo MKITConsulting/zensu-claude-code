@@ -16,6 +16,7 @@ const NAMES = [
 const ENV_FILE_RE = /c:[\\/]work[\\/]\.claude-env/i;
 const OPTIONS = { names: NAMES, refersToEnvFile: (text) => ENV_FILE_RE.test(text) };
 const BT = String.fromCharCode(96);
+const ESC = String.fromCharCode(27);
 const EN_DASH = String.fromCodePoint(0x2013);
 const OPAQUE = ps.OPAQUE_ARGUMENT;
 
@@ -29,8 +30,8 @@ function control(text) {
   return ps.controlVerdict(text, OPTIONS) ? 'DENY' : 'PASS';
 }
 
-function readOnly(text) {
-  return ps.readOnlyVerdict(text).readOnly ? 'READ' : 'WRITE';
+function readOnly(text, platform = 'win32') {
+  return ps.readOnlyVerdict(text, { platform }).readOnly ? 'READ' : 'WRITE';
 }
 
 function table(cases, judge) {
@@ -53,6 +54,10 @@ const ZENSU_LITERAL = [
   ['zensu --% features create', ['<opaque>']],
   ['zensu features create ' + EN_DASH + 'h', ['features create ' + EN_DASH + 'h']],
   ['zensu ' + EN_DASH + 'name x', [EN_DASH + 'name x']],
+  ['& "z' + BT + 'ensu" security classify f1', ['security classify f1']],
+  ['zensu "s' + BT + 'ecurity" classify f1', ['s' + ESC + 'curity classify f1', 'security classify f1']],
+  ["zensu '' security classify f1", ['<opaque> security classify f1']],
+  ["zensu features get 'a & b'", ['features get a & b']],
 ];
 
 const ZENSU_MENTIONS = [
@@ -118,6 +123,11 @@ const ZENSU_UNJUDGED = [
   'zensu features list | bash',
   '& ("zen" + "su") features create',
   "& ('zen' + 'su') features create",
+  '& "Invok' + BT + 'e-Expression" "zensu features list"',
+  "zensu features get 'a\"b'",
+  "zensu features get 'x&zensu'",
+  'zensu features list --filter %USERPROFILE%',
+  'pwsh -File C:\\npm\\zensu.ps1 features "a&b"',
 ];
 
 test('a literal zensu call is found in every spelling PowerShell runs it', () => {
@@ -168,6 +178,7 @@ const CONTROL_DYNAMIC = [
   ['New-Object Diagnostics.ProcessStartInfo', 'DENY'],
   ["[Diagnostics.Process]::Start('pwsh', $a)", 'DENY'],
   ['$x = "unterminated', 'DENY'],
+  ['& "Invok' + BT + 'e-Expression" $code', 'DENY'],
 ];
 
 const CONTROL_SHELLS = [
@@ -259,7 +270,31 @@ test('a name or provider path built at run time from anything but string literal
   assert.equal(control('Set-Item -Path $p -Value 1'), 'PASS');
   assert.equal(control("$n = [char]0x5A + 'ENSU_SESSION_KEY'; [Environment]::GetEnvironmentVariable($n)"), 'PASS');
   assert.deepEqual(zensu("& ([char]0x7A + 'ensu') features create"), []);
+  assert.deepEqual(zensu("& \"zen$('su')\" features create"), []);
   assert.deepEqual(zensu('Write-Output ("zen" + "su")'), []);
+});
+
+test('a string escape that Windows PowerShell 5.1 and PowerShell 7 read differently is judged in both readings', () => {
+  const names = (text, options) => ps.analyze(text, options).commands.map((command) => command.name);
+  assert.deepEqual(names('& "z' + BT + 'ensu" x'), ['z' + ESC + 'nsu']);
+  assert.deepEqual(names('& "z' + BT + 'ensu" x', { legacy: true }), ['zensu']);
+  assert.deepEqual(names('& "zen' + BT + 'u{73}u" x'), ['zensu']);
+  assert.deepEqual(names('& "zen' + BT + 'u{73}u" x', { legacy: true }), ['zenu{73}u']);
+  const spelled = ps.spellings('play' + BT + 'wright-cli -s=("zensu-" + "verify-x")');
+  assert.match(spelled, /playwright-cli/);
+  assert.match(spelled, /zensu-verify-x/);
+  assert.match(ps.spellings('& "pla' + BT + 'u{79}wright-cli"'), /playwright-cli/);
+});
+
+test('outside Windows a name PowerShell 7 leaves to a native program is not read as an alias', () => {
+  for (const platform of ['linux', 'darwin']) {
+    assert.equal(readOnly('sort -o src/app.ts src/app.ts', platform), 'WRITE', platform);
+    assert.equal(readOnly('ls', platform), 'WRITE', platform);
+    assert.equal(readOnly('gci | ? { $_.Length -gt 1 } | % Name', platform), 'READ', platform);
+    assert.match(ps.readOnlyVerdict('sort -o x x', { platform }).reason, /runs the native sort program/);
+  }
+  assert.equal(readOnly('sort -o src/app.ts src/app.ts', 'win32'), 'READ');
+  for (const alias of ps.UNIX_ALIASES) assert.ok(Object.prototype.hasOwnProperty.call(ps.ALIASES, alias), alias);
 });
 
 test('a deny names the reason the check refused the command', () => {
@@ -312,6 +347,10 @@ const READ_CASES = [
   ['[int]$n = 5', 'READ'],
   ['$a, $b = 1, 2', 'READ'],
   ['$x += 1', 'READ'],
+  ["$p = @{Path='.'}; Get-ChildItem @p", 'READ'],
+  ["Get-ChildItem | Select-Object @{Name='N';Expression={$_.Length}}", 'READ'],
+  ['$x = @{a=1; b=2}', 'READ'],
+  ['@{ k = (Remove-Item x) }', 'WRITE'],
 ];
 
 test('the read-only verdict passes only allowlisted reads and refuses everything else', () => {
@@ -360,6 +399,7 @@ const CONFORMANCE_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   '$utf8 = [System.Text.UTF8Encoding]::new($false)',
   '$out = [System.Collections.Generic.List[string]]::new()',
+  "$out.Add('V ' + $PSVersionTable.PSVersion.Major)",
   'foreach ($line in [System.IO.File]::ReadAllLines($env:ZENSU_PS_CORPUS, $utf8)) {',
   '  $text = $utf8.GetString([System.Convert]::FromBase64String($line))',
   '  $tokens = $null',
@@ -416,13 +456,16 @@ test('every command the PowerShell parser finds is one the analyzer reports, and
       const [, name, definition = ''] = line.split(' ');
       return { name, definition };
     });
+    const major = Number((lines.find((line) => line.startsWith('V ')) || 'V 0').slice(2));
+    assert.ok(major >= 5, `${HOST} reported PowerShell ${major}`);
+    const legacy = major < 6;
     assert.equal(cases.length, CONFORMANCE_CORPUS.length);
     assert.ok(aliases.length > 100, `${HOST} listed ${aliases.length} built-in aliases`);
     const misses = [];
     cases.forEach((entry, index) => {
       if (entry.errors > 0) return;
       const text = CONFORMANCE_CORPUS[index];
-      const analysis = ps.analyze(text);
+      const analysis = ps.analyze(text, { legacy });
       if (analysis.fault) {
         misses.push(`${JSON.stringify(text)}: the analyzer faulted (${analysis.fault}) on text PowerShell parses`);
         return;
@@ -437,6 +480,12 @@ test('every command the PowerShell parser finds is one the analyzer reports, and
       const key = String(alias.name).toLowerCase();
       const command = String(alias.definition).toLowerCase().replace(/\.exe$/, '');
       if (ps.ALIASES[key] !== command) misses.push(`alias ${alias.name} -> ${alias.definition} is not in ALIASES (has ${ps.ALIASES[key]})`);
+    }
+    if (process.platform !== 'win32') {
+      const hostAliases = new Set(aliases.map((alias) => String(alias.name).toLowerCase()));
+      for (const alias of ps.UNIX_ALIASES) {
+        if (!hostAliases.has(alias)) misses.push(`UNIX_ALIASES holds ${alias}, which ${HOST} on ${process.platform} does not define`);
+      }
     }
     assert.deepEqual(misses, []);
   } finally {

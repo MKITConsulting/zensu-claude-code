@@ -87,7 +87,7 @@ PreToolUse	pre-browser-navigation-consent.sh	test-verify-consent.sh	"V70 the rea
 PostToolUse	post-browser-navigation-consent.sh	test-verify-consent.sh	"V70d the recorder writes no consent record for a PowerShell call
 PostToolUse	post-artifact-redact.sh	test-artifact-redaction.sh	"hand-rolled PowerShell log write"
 PreToolUse	pre-work-order-gate.sh	work-order-v1.test.js	payload('PowerShell', 'Get-ChildItem')
-PostToolUse	post-work-order.sh	work-order-v1.test.js	payload('PowerShell', 'Get-ChildItem')
+PostToolUse	post-work-order.sh	work-order-v1.test.js	postToolUpdate(context, { tool_name: 'PowerShell'
 PreToolUse	pre-reviewer-capability-gate.sh	test-reviewer-capability-gate.sh	"PS1 a named neutral agent's PowerShell command
 EOF
 TABLE_KEYS="$(printf '%s\n' "$DISPOSITIONS" | awk -F'\t' '{print $1 " " $2}' | sort)"
@@ -121,6 +121,9 @@ grep -qF 'require("./powershell-command-v1.js")' "$PLUGIN_DIR/hooks/lib/bash-sou
 grep -qF 'ZPS=./powershell-command-v1.js' "$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh" \
   && check "PC5b the CLI gate loads the analyzer from its own hooks/lib" PASS \
   || check "PC5b the CLI gate loads the analyzer from its own hooks/lib" FAIL
+grep -qF "require('./powershell-command-v1.js').spellings(" "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" \
+  && check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" PASS \
+  || check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" FAIL
 
 echo "----"
 echo "test-powershell-tool-coverage: $PASS PASS / $FAIL FAIL"

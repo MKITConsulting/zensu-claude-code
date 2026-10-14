@@ -383,7 +383,13 @@ OUT="$(payload "iex 'zensu security classify f1'" '' gate-test PowerShell | env 
 OUT="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "B40w PowerShell mutation + process-env ZENSU_API_URL=localhost -> ALLOW" PASS || check "B40w PowerShell process-env localhost (got '$OUT')" FAIL
 OUT="$(payload "zensu security \"classify${BT}n__bypass__${BT}tZENSU_MCP_GATE\" f1" '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT" = "DENY" ] && check "B40x PowerShell escapes cannot forge a bypass marker line" PASS || check "B40x PowerShell forged marker (got '$OUT')" FAIL
+[ "$OUT" = "DENY" ] && check "B40x a PowerShell verb that holds an escaped line break is classified by its first line" PASS || check "B40x PowerShell verb with an escaped line break (got '$OUT')" FAIL
+psrun "B40x2 PowerShell 5.1 reads a quoted backtick-e as e"  "& \"z${BT}ensu\" security classify f1"                         '' DENY
+psrun "B40x3 PowerShell 5.1 reading of a noun"              "zensu \"s${BT}ecurity\" classify f1"                           '' DENY
+psrun "B40x4 PowerShell empty argument before the noun"     "zensu '' security classify f1"                                 '' DENY
+psrun "B40x5 PowerShell double quote in a zensu argument"   "zensu features get 'a\"b'"                                     '' DENY
+psrun "B40x6 PowerShell cmd.exe operator in a zensu argument" "zensu features get 'x&zensu'"                                '' DENY
+psrun "B40x7 PowerShell spaced cmd.exe operator is quoted"  "zensu features get 'a & b'"                                    '' ALLOW
 
 PS_MAIN="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
 if printf '%s' "$PS_MAIN" | grep -qF "maps to 'set_security_classification'" \

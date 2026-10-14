@@ -1445,8 +1445,11 @@ WP_MISSING="$(payload "Get-ChildItem" "$PROJ" PowerShell | env CLAUDE_PLUGIN_ROO
 WP_MISSING_BASH="$(payload "ls" "$PROJ" | env CLAUDE_PLUGIN_ROOT="$WP_COPY" CLAUDE_PROJECT_DIR="$PROJ" \
   ZENSU_CONFIG="$CFG_OFF" bash "$WP_COPY/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
 { [ ! -e "$WP_COPY/hooks/lib/powershell-command-v1.js" ] \
-  && printf '%s' "$WP_MISSING" | grep -qF 'could not validate protected Session Control bindings' && [ -z "$WP_MISSING_BASH" ]; } \
-  && check "WP17 without the analyzer every PowerShell call denies and a Bash call is unaffected" PASS \
+  && printf '%s' "$WP_MISSING" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$WP_MISSING" | grep -qF 'powershell-command-v1.js could not be loaded' \
+  && printf '%s' "$WP_MISSING" | grep -qF 'Run the command through the Bash tool, and reinstall the plugin' \
+  && ! printf '%s' "$WP_MISSING" | grep -qF 'retry in a fresh session' && [ -z "$WP_MISSING_BASH" ]; } \
+  && check "WP17 without the analyzer every PowerShell call denies with the Bash tool and a reinstall named, and a Bash call is unaffected" PASS \
   || check "WP17 analyzer-less copy (powershell='$WP_MISSING' bash='$WP_MISSING_BASH')" FAIL
 rm -rf "$WP_COPY"
 

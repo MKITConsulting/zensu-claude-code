@@ -458,8 +458,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
   `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
   hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
-  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
-  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  does not register the GATE or the RECORDER on a matcher that covers Bash and PowerShell, a
+  registration there could not be determined, or the pair's registration probe did not complete.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run

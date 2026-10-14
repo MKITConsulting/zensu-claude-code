@@ -398,7 +398,7 @@ instead, where the consent prompt covers it like any other origin, never navigat
 report the rows that need another one PARTIAL, because it needs the launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
 `mode=consent|policy`, one `origin=` line per navigable origin and one `network-only-origin=`
 line per network-only origin, or exits `1` with a named reason and writes nothing. It refuses unless
-`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
+`hooks/hooks.json` demonstrably registers both consent hooks for Bash and PowerShell, the
 installed `playwright-cli` manifest names the measured version, and no empty or relative PATH
 entry comes before or holds `playwright-cli`; then report PARTIAL with its
 reason, and never open a browser without the run config it writes. Copy the printed session
