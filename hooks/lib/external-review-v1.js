@@ -887,7 +887,12 @@ function progressCounts(progress) {
   return { started: latest.size, finished, failed: latest.size - finished, lost: 0 };
 }
 
-function currentTree(root) {
+function projectStateExclusion(root, projectRoot) {
+  if (typeof projectRoot !== 'string' || projectRoot === root || !isInside(root, projectRoot)) return [];
+  return [`${path.relative(root, projectRoot).split(path.sep).join('/')}/.zensu`];
+}
+
+function currentTree(root, projectRoot) {
   let evidence;
   try {
     evidence = require('./evidence-run-v1.js');
@@ -897,7 +902,7 @@ function currentTree(root) {
   let scratch = null;
   try {
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-xr-'));
-    return evidence.computeTree(root, scratch);
+    return evidence.computeTree(root, scratch, undefined, projectStateExclusion(root, projectRoot));
   } catch {
     return { tree: null, reason: 'tree-scratch' };
   } finally {
@@ -1008,7 +1013,7 @@ function stageTemplate(options, limits = LIMITS) {
   const root = placed.root;
   const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
   if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return stageUnavailable('session');
-  const current = (options.treeOf || currentTree)(root);
+  const current = (options.treeOf || currentTree)(root, projectRoot);
   if (!current || typeof current.tree !== 'string' || !TREE_ID_RE.test(current.tree)) {
     return stageUnavailable(token(current && current.reason));
   }
@@ -1045,7 +1050,7 @@ function judgeResult(record, options, limits) {
   const problem = validateReviewResult(run.result, limits);
   if (problem) return { status: 'unavailable', reason: 'foreign-shape', detail: problem };
   const result = run.result;
-  const current = (options.treeOf || currentTree)(options.root);
+  const current = (options.treeOf || currentTree)(options.root, options.projectRoot);
   let treeState = 'unverified';
   if (current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)) {
     if (current.tree !== result.tree) {
@@ -1146,7 +1151,7 @@ function check(options, limits = LIMITS) {
     return { status: 'unavailable', lines };
   }
   const head = `launches=${fresh.length}/${valid.length} selected=${launchLabel(selected.record)} id=${selected.id} last-change=${iso(changes.newest)} ${counts}`;
-  const verdict = judgeResult(selected.record, { ...options, root, changedPaths: parsed.paths }, limits);
+  const verdict = judgeResult(selected.record, { ...options, root, projectRoot: canonicalDirectoryOrNull(options.projectRoot), changedPaths: parsed.paths }, limits);
   if (verdict.status !== 'ok' && verdict.status !== 'degraded') {
     lines[0] = `${LOG_PREFIX} status=${verdict.status} reason=${verdict.reason} ${head}${verdict.detail ? ` detail=${token(verdict.detail)}` : ''}`;
     return { status: verdict.status, lines };
@@ -1293,7 +1298,7 @@ function main(argv, env = process.env, io = {}) {
         if (placed.layout) {
           line = `${LOG_PREFIX} tree=unavailable ${rootRefusal(placed)}`;
         } else {
-          const current = currentTree(placed.root);
+          const current = currentTree(placed.root, canonicalDirectoryOrNull(env.ZENSU_XR_PROJECT_ROOT));
           line = current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)
             ? `${LOG_PREFIX} tree=${current.tree}`
             : `${LOG_PREFIX} tree=unavailable reason=${token(current && current.reason)}`;

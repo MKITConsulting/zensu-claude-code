@@ -130,7 +130,8 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   worktree of another repository, `nested-in-folder` for a repository inside a project folder
   that is not a git work tree, `outside` for a sibling, `enclosing` for a directory above the
   work tree, `subdirectory` for one below its top level, `unresolved-root` or
-  `unresolved-project-root` for a path that is not a symlink-free existing directory, and
+  `unresolved-project-root` for a path that is missing, is not a directory or ends in a symbolic
+  link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
   `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
   aspect panel reviews this change, and a workflow review of the other work tree imports only in
   a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run

@@ -73,8 +73,8 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
 - `tree` — `zensu-log.sh --external-review --tree --root <top>` prints `tree=<id>` from the same
   `computeTree` the import compares, or `tree=unavailable reason=<reason>`. With the import or
   the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, and it applies
-  the import's root rule with the same `reason=root layout=<layout>` line, so the skill never
-  launches a template whose result could not be imported.
+  the import's root rule with the same `reason=root layout=<layout>` line. Step 3 takes the tree
+  id from `stage`, so `tree` is the operator's probe of the same answer.
 - `stage` — `zensu-log.sh --external-review --stage --root <top>`, the launch preparation of
   step 3. It answers like `tree` while the import or the judge is off and for every root the
   import's root rule refuses, then needs a valid session key and a tree id. It reads
@@ -181,8 +181,10 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   the project root: `/`, a parent folder outside git, or an origin checkout whose ignored
   `.claude/worktrees/` holds the session's worktree, whose tree never moves while freshness
   stats the origin's copies of the changed paths. A subdirectory root that still contained the
-  project root fingerprinted only that subtree. Identity is the split `runDirectory` in
-  `evidence-run-v1.js` already draws: work-tree identity first, path identity only outside git.
+  project root fingerprinted only that subtree. The rule asks in the order `runDirectory` in
+  `evidence-run-v1.js` already uses, git's answer first and the path only outside git, but it is
+  stricter outside git: it takes the project root itself, where `runDirectory` keeps any
+  directory inside it.
 - **A nested or sibling root is refused, not imported.** A chain has one root. The change set,
   the finding-verification gate and the round scope are `$TOP`-relative, and the reviewer
   capability gate confines every reviewer, the template's agents included, to the session's
@@ -228,9 +230,12 @@ of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.m
 The root rule asks git through `workTreeTop` beside `workTree`, `runDirectory` and
 `fingerprintRoot` in `evidence-run-v1.js`, which keeps the scrubbed `git()` and the
 no-work-tree split in one module. `check`, the tree mode and the stage mode all place the root
-through `resolveRoot` and print its refusal through `rootRefusal`. The layout sentences are
-spelled in `ROOT_ADVICE`, in the unit file's `*_ADVICE` constants and in `X9d` and `X11` to
-`X11e` of the shell suite, and `docs/review-chain.md` names the layouts for the operator.
+through `resolveRoot` and print its refusal through `rootRefusal`, and all three fingerprint
+through `currentTree`, which passes `computeTree` the recorded project root's `.zensu` when that
+root lies below the fingerprinted one (`projectStateExclusion`; `X11f` and the
+subdirectory-session unit case). The layout sentences are spelled in `ROOT_ADVICE`, in the unit
+file's `*_ADVICE` constants and in `X9d` and `X11` to `X11e` of the shell suite, and
+`docs/review-chain.md` names the layouts for the operator.
 The result shape is spelled twice: the object the template returns and the `RESULT_*_KEYS`,
 `DROPPED_KINDS`, `VERIFICATION_STATUSES` and `VOTE_OUTCOMES` the module validates. The unit file
 runs the template in a sandbox and validates its output with the module, so a one-sided edit
@@ -305,8 +310,12 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
   launch answers `foreign-script` and costs the Workflow review, never a silent pass; step 3
   forbids the edit and the next `--stage` overwrites it.
 - The tree fingerprint and the freshness check exclude `.zensu`, so the copy moves neither the
-  tree id nor a freshness verdict. A consuming repository that does not ignore `.zensu/` sees
-  the copy as an untracked file.
+  tree id nor a freshness verdict. For a session started in a subdirectory the fingerprinted
+  root is the work tree's top level while the copy and the session's state live in the
+  subdirectory's `.zensu/`, so `currentTree` hands `computeTree` that path as well
+  (`projectStateExclusion`); without it a repository whose `.zensu/*` ignore is anchored at the
+  top saw the copy move the tree and answered `stale reason=tree` on the first import. A
+  consuming repository that does not ignore `.zensu/` sees the copy as an untracked file.
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard,
   and no staged copy was launched on Windows.
 

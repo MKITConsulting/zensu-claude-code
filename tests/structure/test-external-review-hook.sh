@@ -467,6 +467,32 @@ else
   check "X11d folder session (out=$OUT tree=$TREE_OUT own=$OWN_TREE)" FAIL
 fi
 
+SUBTOP="$WORK/subdirectory-session"
+mkdir -p "$SUBTOP/pkg/src"
+git -C "$SUBTOP" init -q
+git -C "$SUBTOP" config user.email t@example.invalid
+git -C "$SUBTOP" config user.name tester
+printf '.zensu/*\n.session-control-test/\n' > "$SUBTOP/.gitignore"
+printf 'one\n' > "$SUBTOP/pkg/src/a.js"
+git -C "$SUBTOP" add -A
+git -C "$SUBTOP" -c commit.gpgsign=false commit -qm baseline
+export ZENSU_TEST_PLUGIN_DATA="$WORK/subdirectory-data"
+export CLAUDE_PROJECT_DIR="$SUBTOP/pkg"
+cd "$SUBTOP/pkg" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "external-review-subdirectory" || { check "X11f subdirectory session baseline" FAIL; finish; exit 1; }
+SUB_TREE="$(bash "$LOG" --external-review --tree --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_ID="$(printf '%s\n' "$SUB_TREE" | sed -n 's/^EXTERNAL REVIEW — tree=\([0-9a-f][0-9a-f]*\)$/\1/p')"
+SUB_STAGE="$(bash "$LOG" --external-review --stage --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_COPY="$SUBTOP/pkg/.zensu/state/zensu-review-v1-$ZENSU_SESSION_KEY.js"
+SUB_AFTER="$(bash "$LOG" --external-review --tree --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_VISIBLE="$(git -C "$SUBTOP" ls-files --others --exclude-standard -- pkg/.zensu)"
+if [ "${#SUB_ID}" -ge 40 ] && [ "$SUB_STAGE" = "EXTERNAL REVIEW — stage=ok tree=$SUB_ID script=$SUB_COPY" ] \
+  && cmp -s "$SUB_COPY" "$TEMPLATE_FILE" && [ "$SUB_AFTER" = "$SUB_TREE" ] && [ -n "$SUB_VISIBLE" ]; then
+  check "X11f a session started in a subdirectory stages into its own .zensu/state, which git sees, while the tree of the top level stays put" PASS
+else
+  check "X11f subdirectory session (tree=$SUB_TREE stage=$SUB_STAGE after=$SUB_AFTER visible=$SUB_VISIBLE)" FAIL
+fi
+
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 reason() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){}});'; }
 

@@ -982,20 +982,22 @@ test('a fault while placing either root answers undetermined, and an unusable pr
 });
 
 test('a host without a git binary places the project root outside git', { skip: process.platform === 'win32' }, () => {
-  const folder = project();
+  const folder = commitAll(project());
+  const projectRoot = path.join(folder, 'src');
   const evidence = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
   const saved = process.env.PATH;
   let placed;
   let verdict;
   try {
     process.env.PATH = folder;
-    placed = evidence.workTreeTop(folder);
-    verdict = xr.resolveRoot({ projectRoot: folder, root: folder });
+    placed = evidence.workTreeTop(projectRoot);
+    verdict = xr.resolveRoot({ projectRoot, root: projectRoot });
   } finally {
     process.env.PATH = saved;
   }
   assert.deepEqual(placed, { top: null, reason: null });
-  assert.deepEqual(verdict, { root: folder });
+  assert.deepEqual(verdict, { root: projectRoot });
+  assert.deepEqual(xr.resolveRoot({ projectRoot, root: projectRoot }), { layout: 'subdirectory', rerun: TOP_RERUN.replace('re-run with --root set to ', '') });
 });
 
 test('a real git refusal to place either root answers undetermined with the refusal git printed', { skip: process.platform === 'win32' }, () => {
@@ -1104,6 +1106,7 @@ test('stage sweeps the copies other sessions left idle past the idle window and 
   const now = Date.now();
   setMtime(idle, now - xr.LIMITS.idleSessionMs - 60000);
   setMtime(unrelated, now - xr.LIMITS.idleSessionMs - 60000);
+  setMtime(recent, now - 60000);
   const staged = xr.stageTemplate(stageOptions(root, { now }));
   assert.equal(staged.status, 'ok');
   assert.equal(fs.existsSync(idle), false);
@@ -1180,6 +1183,39 @@ test('the stage mode prints the tree id the tree mode prints, and its copy moves
   delete options.treeOf;
   const imported = xr.check(options);
   assert.equal(imported.status, 'ok');
+  assert.match(imported.lines[0], / tree=match /);
+});
+
+test('a session started in a subdirectory keeps its own state out of the tree it stages, prints and imports', () => {
+  const top = tempDir('subdirectory-session');
+  const projectRoot = path.join(top, 'pkg');
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(top, '.gitignore'), '.zensu/*\n');
+  fs.writeFileSync(path.join(projectRoot, 'src', 'a.js'), 'module.exports = 1;\n');
+  commitAll(top);
+  const env = { ZENSU_XR_ENABLED: '1', ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_PROJECT_ROOT: projectRoot, ZENSU_XR_ROOT: top };
+  const written = [];
+  const write = (text) => written.push(text);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  assert.equal(xr.main(['stage'], env, { write }), 0);
+  fs.writeFileSync(path.join(projectRoot, '.zensu', 'state', 'tdd-phase-x.json'), '{"phase":"IMPL"}\n');
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  const tree = /^EXTERNAL REVIEW — tree=([0-9a-f]{40,64})\n$/.exec(written[0]);
+  assert.ok(tree, written[0]);
+  const script = path.join(projectRoot, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  assert.equal(written[1], `EXTERNAL REVIEW — stage=ok tree=${tree[1]} script=${script}\n`);
+  assert.equal(written[2], written[0]);
+  const data = tempDir('data');
+  setMtime(path.join(projectRoot, 'src', 'a.js'), BASE);
+  const run = launchedRun(data, BASE + 120000, {
+    args: { tree: tree[1], lenses: ['correctness', 'security'], changedFiles: ['pkg/src/a.js'] },
+    script: fs.readFileSync(script, 'utf8'),
+    result: reviewResult({ tree: tree[1] }),
+  }, { tool_input: { scriptPath: script } });
+  const options = checkOptions(data, top, { projectRoot, resultFile: run.outputFile, templateFile: TEMPLATE, changedText: 'pkg/src/a.js\n' });
+  delete options.treeOf;
+  const imported = xr.check(options);
+  assert.equal(imported.status, 'ok', imported.lines.join('\n'));
   assert.match(imported.lines[0], / tree=match /);
 });
 
