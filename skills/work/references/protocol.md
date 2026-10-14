@@ -144,8 +144,10 @@ shorten.
 
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
 file when it is new or changed, pushes through the push verb, sends an artifact event of kind
-`plan` with the path, the commit, a summary without markup and, for a GitHub or GitLab repository,
-the blob link built from the `host/owner/name` Zensu stores, then sends `--blocked plan_approval`. Zensu ends the session there; the helper
+`plan` with the path, the commit, a one-line summary behind a fixed `Implementation plan.` prefix
+with no markup, tags, brackets or quotes and, for a GitHub or GitLab repository, the blob link built
+from the `host/owner/name` Zensu stores, then sends `--blocked plan_approval`. When Zensu refuses
+the summary as prose, the artifact goes once more with `Implementation plan for this work order.`. Zensu ends the session there; the helper
 records a successful outcome. When Zensu answers the block with `plan_approval_not_required`, the
 order's policy approves plans itself: the helper exits 8, and the session continues with
 `--bind-spec`.

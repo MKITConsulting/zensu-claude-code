@@ -9,8 +9,60 @@ const CALLS_FILE = process.env.FAKE_ZENSU_CALLS;
 const STAGE_RANK = { claimed: 0, planning: 1, implementing: 2, pr_open: 3, reviewing: 4, validating: 5, ready_for_merge: 6 };
 const BRANCH_PREFIX = 'wo-';
 const GIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
-const COMMAND_WORDS = new Set(['git', 'npm', 'npx', 'yarn', 'go', 'make', 'docker', 'kubectl', 'curl', 'bash', 'sh',
-  'node', 'python', 'rm', 'cd', 'ls', 'cat', 'echo', 'export', 'zensu', 'gh', 'glab', 'claude', 'sudo']);
+const COMMAND_WORDS = new Set(['sudo', 'git', 'npm', 'pnpm', 'npx', 'yarn', 'go', 'make', 'docker', 'docker-compose', 'kubectl',
+  'helm', 'terraform', 'curl', 'wget', 'pip', 'pip3', 'python', 'python3', 'node', 'deno', 'bun', 'bash', 'sh', 'zsh', 'cd', 'ls',
+  'cat', 'rm', 'mv', 'cp', 'chmod', 'chown', 'psql', 'mysql', 'sqlite3', 'redis-cli', 'brew', 'apt', 'apt-get', 'yum', 'dnf',
+  'cargo', 'rustc', 'javac', 'java', 'mvn', 'gradle', 'ssh', 'scp', 'rsync', 'tar', 'grep', 'sed', 'awk', 'find', 'xargs',
+  'export', 'source', 'eval', 'echo', 'printf', 'claude', 'zensu', 'gh', 'glab', 'aws', 'gcloud', 'az']);
+const PACKAGE_VERBS = ['install', 'i', 'run', 'add', 'exec', 'test', 'ci', 'publish', 'remove', 'update'];
+const SUBCOMMAND_PAIRS = {
+  git: ['push', 'pull', 'commit', 'checkout', 'rebase', 'merge', 'reset', 'clone', 'log', 'diff', 'status', 'add', 'fetch', 'stash',
+    'cherry-pick', 'revert', 'tag', 'branch', 'switch', 'restore'],
+  npm: PACKAGE_VERBS,
+  pnpm: PACKAGE_VERBS,
+  yarn: PACKAGE_VERBS,
+  go: ['test', 'build', 'run', 'vet', 'mod', 'get', 'install', 'generate'],
+  docker: ['run', 'exec', 'build', 'compose', 'push', 'pull', 'rm', 'stop', 'start', 'logs'],
+  kubectl: ['get', 'apply', 'exec', 'logs', 'delete', 'describe', 'port-forward', 'rollout', 'edit'],
+  helm: ['install', 'upgrade', 'uninstall', 'template'],
+  terraform: ['plan', 'apply', 'init', 'destroy', 'import'],
+  cargo: ['build', 'run', 'test', 'install'],
+  pip: ['install', 'uninstall'],
+  pip3: ['install', 'uninstall'],
+  brew: ['install', 'upgrade', 'uninstall'],
+  apt: ['install', 'remove', 'purge', 'update', 'upgrade'],
+  'apt-get': ['install', 'remove', 'purge', 'update', 'upgrade'],
+  yum: ['install', 'remove', 'update', 'upgrade'],
+  dnf: ['install', 'remove', 'update', 'upgrade'],
+  gh: ['pr', 'issue', 'api', 'repo', 'run', 'release'],
+  glab: ['pr', 'issue', 'api', 'repo', 'run', 'release'],
+  claude: ['-p', '--print', 'mcp', 'config'],
+  zensu: ['work', 'plan', 'auth', 'features', 'pulse', 'worker'],
+};
+const PROSE_FOLLOWERS = new Set(['the', 'a', 'an', 'ahead', 'sure', 'out', 'it', 'that', 'this', 'these', 'those', 'all', 'any', 'some',
+  'why', 'how', 'what', 'where', 'when', 'which', 'who', 'whether', 'if', 'and', 'or', 'to', 'for', 'in', 'on', 'of',
+  'with', 'by', 'from', 'into', 'up', 'our', 'your', 'their', 'its', 'my', 'we', 'you', 'they', 'them', 'us', 'me',
+  'each', 'every', 'no', 'not']);
+const SHELL_MARKERS = ['|', '&&', '||', ';', '>', '<', '$(', '`', '~/', './', '../'];
+const RE2_SPACE = '[\\t\\n\\f\\r ]';
+const DIFF_LINE_RES = [/^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/, /^diff --git /, /^index [0-9a-f]{7,}\.\.[0-9a-f]{7,}/, /^(--- a\/|\+\+\+ b\/|--- \/dev\/null|\+\+\+ \/dev\/null)/];
+const STACK_HEADER_RES = [/goroutine \d+ \[/, /^panic: /, new RegExp(`^${RE2_SPACE}*File ".+", line \\d+`)];
+const STACK_FRAME_RES = [
+  new RegExp(`^${RE2_SPACE}+at [^\\t\\n\\f\\r ].*\\(.*:\\d+(:\\d+)?\\)${RE2_SPACE}*$`),
+  new RegExp(`^${RE2_SPACE}+at [^\\t\\n\\f\\r ]+\\.[^\\t\\n\\f\\r ]+\\([A-Za-z0-9_$]+\\.java:\\d+\\)`),
+  new RegExp(`^${RE2_SPACE}+[^\\t\\n\\f\\r ]+\\.go:\\d+( \\+0x[0-9a-f]+)?${RE2_SPACE}*$`),
+  new RegExp(`^${RE2_SPACE}+from [^\\t\\n\\f\\r ]+:\\d+:in `),
+  new RegExp(`^#\\d+${RE2_SPACE}+0x[0-9a-f]+ in `),
+];
+const HTML_CODE_TAG_RE = new RegExp(`<(pre|code)(${RE2_SPACE}|>)`, 'i');
+const FENCE_LINE_RE = /^ {0,3}(```|~~~)/;
+const INLINE_CODE_RE = /`([^`\n]+)`/g;
+const WINDOWS_PROMPT_RE = new RegExp(`^(PS [A-Za-z]:\\\\[^>]*>|[A-Za-z]:\\\\>)${RE2_SPACE}*[^\\t\\n\\f\\r ]`);
+const FLAG_TOKEN_RE = new RegExp(`${RE2_SPACE}--?[A-Za-z]`);
+const MAKE_TARGET_RE = /^make [a-z][a-z0-9_-]*$/;
+const SCRIPT_FILE_RE = /^[\w.-]+\.(py|js|mjs|cjs|ts|sh|bash|zsh|rb|pl|php|go|jar|sql)$/;
+const LEADING_MARKER_RE = /^(?:>[ \t]*|(?:[-*+\u2022]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)/;
+const FIELD_SPLIT_RE = new RegExp(`${RE2_SPACE}+`);
 const CLI_VERSION = '0.8.0-fake';
 const DEFAULT_API_URL = 'https://api.zensu.dev';
 const PLAN_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
@@ -117,9 +169,9 @@ function parseFlags(args) {
   return flags;
 }
 
-function injected(command) {
+function injected(command, flags = {}) {
   const queue = Array.isArray(state.failNext) ? state.failNext : [];
-  const index = queue.findIndex((entry) => entry.command === command);
+  const index = queue.findIndex((entry) => entry.command === command && (!entry.flag || flags[entry.flag] !== undefined));
   if (index < 0) return;
   const entry = queue[index];
   entry.times = (entry.times || 1) - 1;
@@ -190,22 +242,99 @@ function decisionLog() {
   return (state.questions || []).filter((question) => question.work_plan_id === state.order.work_plan_id && question.scope === 'plan' && isAnswered(question));
 }
 
-function guardProse(field, text, required) {
-  if (typeof text !== 'string' || text.trim() === '') {
-    if (required) apiFail(422, 'invalid_detail', `${field} is required`);
-    return;
+function hasDiff(lines) {
+  return lines.some((line) => DIFF_LINE_RES.some((pattern) => pattern.test(line)));
+}
+
+function hasStackTrace(text, lines) {
+  if (text.includes('Traceback (most recent call last)') || text.includes('Exception in thread "')) return true;
+  let frames = 0;
+  for (const line of lines) {
+    if (STACK_HEADER_RES.some((pattern) => pattern.test(line))) return true;
+    if (STACK_FRAME_RES.some((pattern) => pattern.test(line))) frames += 1;
   }
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) apiFail(422, 'content_not_allowed', `content_not_allowed: ${field}: control_characters`);
-  if (Buffer.byteLength(text) > 2048) apiFail(422, 'content_not_allowed', `content_not_allowed: ${field}: too_long`);
-  if (/```/.test(text) || /`[^`]*`/.test(text) && /`(git|zensu|npm|gh|bash) /.test(text)) {
-    apiFail(422, 'content_not_allowed', `content_not_allowed: ${field}: code_block`);
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const words = line.trim().split(/\s+/);
-    if (words.length >= 2 && COMMAND_WORDS.has(words[0]) && /^[-a-z]/.test(words[1]) && !['the', 'a', 'an', 'and', 'to'].includes(words[1])) {
-      apiFail(422, 'content_not_allowed', `content_not_allowed: ${field}: command_line`);
+  return frames >= 2;
+}
+
+function hasCodeBlock(text, lines) {
+  if (HTML_CODE_TAG_RE.test(text)) return true;
+  let indented = 0;
+  for (const line of lines) {
+    if (FENCE_LINE_RE.test(line)) return true;
+    if ((line.startsWith('\t') || line.startsWith('    ')) && line.trim() !== '') {
+      indented += 1;
+      if (indented >= 3) return true;
+      continue;
     }
+    indented = 0;
   }
+  return false;
+}
+
+function looksLikeCommand(line) {
+  if (WINDOWS_PROMPT_RE.test(line)) return true;
+  for (const prompt of ['$ ', '% ', '>>> ']) {
+    if (line.startsWith(prompt) && line.slice(prompt.length).trim() !== '') return true;
+  }
+  if (line.startsWith('# ')) {
+    const fields = line.slice(2).trim().split(FIELD_SPLIT_RE);
+    return COMMAND_WORDS.has(fields[0]);
+  }
+  const fields = line.trim().split(FIELD_SPLIT_RE);
+  if (!COMMAND_WORDS.has(fields[0])) return false;
+  if (fields[0] === 'make' && MAKE_TARGET_RE.test(line.trim())) return true;
+  if (fields.length >= 2) {
+    if ((SUBCOMMAND_PAIRS[fields[0]] || []).includes(fields[1])) return true;
+    if (fields[0] === 'sudo') return true;
+  }
+  const rest = line.slice(fields[0].length).trim();
+  if (rest === '') return false;
+  if (FLAG_TOKEN_RE.test(` ${rest}`)) return true;
+  if (SHELL_MARKERS.some((marker) => rest.includes(marker))) return true;
+  if (PROSE_FOLLOWERS.has(String(fields[1] || '').toLowerCase())) return false;
+  return fields.slice(1).some((field) => field.includes('/') || SCRIPT_FILE_RE.test(field));
+}
+
+function isCommand(raw) {
+  let line = raw.replace(/^[ \t]+/, '');
+  while (line !== '') {
+    if (looksLikeCommand(line)) return true;
+    const prefix = LEADING_MARKER_RE.exec(line);
+    if (!prefix || prefix[0] === '') return false;
+    line = line.slice(prefix[0].length);
+  }
+  return false;
+}
+
+function hasCommandLine(text, lines) {
+  if (lines.some(isCommand)) return true;
+  for (const match of text.matchAll(INLINE_CODE_RE)) {
+    if (isCommand(match[1])) return true;
+  }
+  return false;
+}
+
+function proseViolation(text, maxBytes = 2048) {
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) return 'control_characters';
+  if (Buffer.byteLength(text) > maxBytes) return 'too_long';
+  const normalized = text.replace(/\r\n|\r|\u0085|\u2028|\u2029/g, '\n');
+  const lines = normalized.split('\n');
+  if (hasDiff(lines)) return 'diff_hunk';
+  if (hasStackTrace(normalized, lines)) return 'stack_trace';
+  if (hasCodeBlock(normalized, lines)) return 'code_block';
+  if (hasCommandLine(normalized, lines)) return 'command_line';
+  return null;
+}
+
+function guardProse(field, text, required, maxBytes = 2048) {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!trimmed) {
+    if (required) apiFail(422, 'missing_field', `${field} is required`);
+    return '';
+  }
+  const reason = proseViolation(trimmed, maxBytes);
+  if (reason) apiFail(422, 'content_not_allowed', `content_not_allowed: ${field}: ${reason}; send metadata and short prose only, never code, commands, logs or diffs`);
+  return trimmed;
 }
 
 function recordEvent(fields) {
@@ -409,7 +538,7 @@ function workEvent(flags) {
   if (flags.blocked !== undefined && !flags.reason) usage('--blocked needs --reason');
   requireSessionToken('work event');
   requireOrder(flags._[0]);
-  injected('event');
+  injected('event', flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   flags['client-event-id'] = clientEventId;
   const type = selected[0];
@@ -433,16 +562,11 @@ function validateQuestion(flags) {
   if (options.length > 10) apiFail(422, 'invalid_options', 'at most 10 options');
   const seen = new Set();
   options.forEach((option, index) => {
-    const trimmed = option.trim();
-    if (!trimmed) apiFail(422, 'missing_field', `options[${index}] is required`);
-    if (Buffer.byteLength(trimmed) > 300) apiFail(422, 'content_not_allowed', `content_not_allowed: options[${index}]: too_long; send metadata and short prose only, never code, commands, logs or diffs`);
-    guardProse(`options[${index}]`, trimmed, true);
+    const trimmed = guardProse(`options[${index}]`, option, true, 300);
     if (seen.has(trimmed)) apiFail(422, 'invalid_options', 'options must be distinct');
     seen.add(trimmed);
   });
-  const fallback = String(flags['default-option'] || '').trim();
-  if (Buffer.byteLength(fallback) > 300) apiFail(422, 'content_not_allowed', 'content_not_allowed: defaultOption: too_long; send metadata and short prose only, never code, commands, logs or diffs');
-  if (fallback) guardProse('defaultOption', fallback, false);
+  const fallback = guardProse('defaultOption', flags['default-option'], false, 300);
   if (!flags.blocking && !fallback) apiFail(422, 'default_required', 'a non-blocking question needs the default the session continues with');
   if (fallback && options.length > 0 && !seen.has(fallback)) apiFail(422, 'invalid_default', 'defaultOption must be one of the options');
   const requirements = flags.requirement || [];
@@ -510,8 +634,7 @@ function workFollowup(flags) {
   const prior = state.events.find((event) => event.client_event_id === clientEventId);
   if (prior) printJson({ event: prior, replay: true });
   requireLive();
-  if (Buffer.byteLength(flags.title.trim()) > 200) apiFail(422, 'content_not_allowed', 'content_not_allowed: title: too_long; send metadata and short prose only, never code, commands, logs or diffs');
-  guardProse('title', flags.title, true);
+  guardProse('title', flags.title, true, 200);
   guardProse('rationale', flags.rationale, true);
   state.followups = state.followups || [];
   if (state.followups.length >= 20) apiFail(409, 'followup_limit_reached', 'an attempt reports at most 20 follow-ups');
@@ -591,4 +714,5 @@ function main() {
   process.exit(0);
 }
 
-main();
+if (require.main === module) main();
+else module.exports = { proseViolation };

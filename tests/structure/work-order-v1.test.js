@@ -787,6 +787,24 @@ test('a plan-approval block that Zensu does not need sends the session back to -
   assert.equal(wo.readState(context.files.ended), null);
 });
 
+test('a plan artifact whose summary Zensu refuses is sent once more with the fixed summary', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 } });
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget list.\n');
+  box.mutate((state) => { state.failNext = [{ command: 'event', flag: 'artifact', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: detail.summary: code_block; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const artifacts = box.fake().events.filter((event) => event.event_type === 'artifact');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].detail.summary, 'Implementation plan for this work order.');
+  assert.equal(artifacts[0].detail.url, `https://github.com/acme/widgets/blob/${artifacts[0].detail.sha}/.zensu/plans/${ORDER}.md`);
+  assert.equal(box.fake().order.blocked_kind, 'plan_approval');
+});
+
 test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [
@@ -1157,6 +1175,31 @@ test('the plan summary carries no markup, command line or control character', ()
   assert.ok(!/[`*#<>\u0000-\u001f]/.test(summary), summary);
   assert.ok(summary.length <= 400);
   assert.match(summary, /^Implementation plan\./);
+  const { proseViolation } = require(FAKE);
+  for (const plan of [
+    '# Plan: Highlight <code> blocks\nWrap logs in <pre> tags.\nTraceback (most recent call last) stays visible.',
+    'Exception in thread "main" is logged\u2028goroutine 7 [running]\u0085panic: boom',
+    'npm install x\n$ make\n- git push origin main\n    indented\n    twice\n    thrice',
+    'diff --git a/x b/x\n@@ -1,2 +1,2 @@\n--- a/x\n+++ b/x',
+  ]) {
+    const text = wo.planSummary(plan);
+    assert.equal(proseViolation(text), null, text);
+    assert.doesNotMatch(text, /<(pre|code)|Traceback \(|Exception in thread "|goroutine \d+ \[/);
+  }
+});
+
+test('the fake guards prose with the service rules in both directions and with the per-field caps', () => {
+  const { proseViolation } = require(FAKE);
+  for (const text of ['pnpm install fails', '$ make', '<code>x</code>', 'Traceback (most recent call last)', '- npm install x', 'Run `git push --force` now', 'C:\\> dir']) {
+    assert.notEqual(proseViolation(text), null, text);
+  }
+  for (const text of ['go ahead with the default', 'node version 20', 'make test fails', 'Use ``` fences in docs', 'make sure the index exists']) {
+    assert.equal(proseViolation(text), null, text);
+  }
+  assert.equal(proseViolation('x'.repeat(201), 200), 'too_long');
+  assert.equal(proseViolation('x'.repeat(301), 300), 'too_long');
+  assert.equal(proseViolation('tab\there', 300), null);
+  assert.equal(proseViolation('bell\u0007', 300), 'control_characters');
 });
 
 test('the order-bound review key matches the state library helper and differs per order and head', () => {

@@ -2134,12 +2134,15 @@ function refusedProse(outcome, failure, again) {
   return { said: text ? `: ${text}` : '', next };
 }
 
+const PLAN_SUMMARY_FALLBACK = 'Implementation plan for this work order.';
+
 function planSummary(text) {
-  const lines = String(text || '').split('\n')
-    .map((line) => line.replace(/[`*_#>|]/g, ' ').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter((line) => line && !/^[-=]{3,}$/.test(line) && !/^<!--/.test(line));
+  const lines = String(text || '').split(/\r\n|\r|\n|\u0085|\u2028|\u2029/)
+    .filter((line) => !/^\s*<!--/.test(line))
+    .map((line) => line.replace(/[`*_#>|<()[\]"]/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !/^[-=]{3,}$/.test(line));
   const summary = lines.slice(0, 6).join(' ').slice(0, 360).trim();
-  return summary ? `Implementation plan. ${summary}` : 'Implementation plan for this work order.';
+  return summary ? `Implementation plan. ${summary}` : PLAN_SUMMARY_FALLBACK;
 }
 
 function blobLink(repository, sha, file) {
@@ -2193,13 +2196,16 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const pushed = push(context, { env, now });
   if (pushed.exit !== EXIT.OK) return pushed;
   const sha = pushed.value.head;
-  const args = ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', planSummary(planText),
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha)];
   const snapshot = safeRead(context.files.order).value;
   const order = snapshot && isObject(snapshot.order) ? snapshot.order : {};
   const link = blobLink(order.repository || context.marker.repository, sha, file);
-  if (link) args.push('--url', link);
-  const artifact = sendEvent(context, args, { env, now });
+  const sendArtifact = (summary) => sendEvent(context, ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', summary,
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha), ...(link ? ['--url', link] : [])], { env, now });
+  const summary = planSummary(planText);
+  let artifact = sendArtifact(summary);
+  if (artifact.verdict === VERDICTS.FINAL && artifact.failure && artifact.failure.code === 'content_not_allowed' && summary !== PLAN_SUMMARY_FALLBACK) {
+    artifact = sendArtifact(PLAN_SUMMARY_FALLBACK);
+  }
   if (artifact.verdict !== VERDICTS.OK) {
     if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
     if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)}); finish with --reason` };
