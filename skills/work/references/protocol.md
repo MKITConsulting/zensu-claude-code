@@ -30,7 +30,7 @@ key. Each is written to a temporary file and renamed into place.
 | `outbox-` | `--autopilot-begin`, `--drain` | the bound Autopilot run id and the highest stage rank Zensu accepted |
 | `answers-` | renewals | answers to non-blocking questions not yet shown to the model |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
-| `ended-` | the first terminal outcome | outcome, kind, whether Zensu accepted it; created once |
+| `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
 | `stop-` | the Stop hook | stops in a row without a new ledger event |
 
 ## Stages
@@ -75,7 +75,9 @@ file at that commit with the plan file in the working tree. A difference blocks 
 `HEAD` to the current branch with `--force-with-lease=refs/heads/<branch>:<recorded head>`, where
 the recorded head is the head Zensu last stored for the order (none for the first push). A remote
 branch that already holds the local head is not pushed again. After the push it sends a stage event
-with the current stage and `--head`, so Zensu records the new head.
+with the current stage and `--head`, so Zensu records the new head. Its `client_event_id` is derived
+from the order, the attempt, the stage and the head, so the same head reported again at a later stage
+is a new event, and a repeat at the same stage replays.
 
 Zensu accepts an order branch only when it starts with the spec's `branch_prefix` (`wo-` today) and
 refuses any other with `422 invalid_branch`. The runtime names a fresh order's branch from that
@@ -124,7 +126,9 @@ exits 6. `--followup` sends `zensu work followup` the same way; Zensu takes at m
 file when it is new or changed, pushes through the push verb, sends an artifact event of kind
 `plan` with the path, the commit, a summary without markup and, for a GitHub or GitLab repository,
 the blob link, then sends `--blocked plan_approval`. Zensu ends the session there; the helper
-records a successful outcome.
+records a successful outcome. When Zensu answers the block with `plan_approval_not_required`, the
+order's policy approves plans itself: the helper exits 8, and the session continues with
+`--bind-spec`.
 
 ## Work-order hooks
 
@@ -139,7 +143,8 @@ Outside work-order mode all three print nothing and exit 0.
   the lease when due, and once the lease is lost or the session ended it denies every `gh`, `glab`
   and `zensu-vcs.sh` call. It never allows anything.
 - `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
-  answers to the model, and ends the session when a direct `zensu work ask` blocked the order.
+  answers to the model, and ends the session when a direct `zensu work ask` blocked the order. It
+  tells the model to stop when the lease is lost, naming the code, and when Zensu refused a stage.
 - `stop-work-order.sh` blocks a Stop until the order reported an outcome.
 
 The gate reads command text; a command assembled at run time, such as a script file the model wrote,
@@ -172,9 +177,18 @@ network, flag or validation error — is retried inside the retry budget like a 
 A heartbeat that fails with a final answer is treated as a lost lease, because a lease Zensu does not
 renew cannot be relied on.
 
+A final answer to a stage stops the outbox at that stage. `--bind-spec` and `--plan-approval` exit 8
+and name the stage, and the post-tool hook tells the model to run `--finish --reason`. `--finish` on
+a DONE run whose earlier stage or whose `ready_for_merge` Zensu refused blocks the order with
+`worker_error` and a reason that names the stage and the code, so the order never waits for a report
+that cannot come. A `worker_error` block whose reason Zensu refuses with `content_not_allowed` or
+`missing_field` is sent once more with a fixed sentence under its own `client_event_id`. Any other
+final answer to a block writes no `ended-`, so a later `--finish` reports the block again, and the
+Stop hook still lets the session stop after its budget.
+
 ## Ending
 
-`--finish` reports the outcome and writes `ended-`. Zensu ends the session itself on
+`--finish` reports the outcome and writes `ended-` once Zensu accepted it or the lease is lost. Zensu ends the session itself on
 `ready_for_merge` and on every block, so a later call of any session route answers `401`; the
 ended marker keeps the helpers from treating that as a new failure. Every ending also cancels the
 local Autopilot run, so the Autopilot Stop guard releases the session.

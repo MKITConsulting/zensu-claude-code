@@ -525,6 +525,23 @@ function writeRun(box, stage, events) {
   fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({ runId: RUN, stage, events, evidence }));
 }
 
+const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+
+function gitProject(box, branch = `wo-${ORDER.slice(0, 8)}`) {
+  const remote = path.join(box.root, 'remote.git');
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '--bare', remote);
+  git('-C', box.project, 'init', '-q');
+  git('-C', box.project, 'config', 'user.name', 'Test');
+  git('-C', box.project, 'config', 'user.email', 'test@example.invalid');
+  git('-C', box.project, 'checkout', '-q', '-b', branch);
+  git('-C', box.project, 'remote', 'add', 'origin', remote);
+  fs.writeFileSync(path.join(box.project, 'README.md'), 'widgets\n');
+  git('-C', box.project, 'add', 'README.md');
+  git('-C', box.project, 'commit', '-q', '-m', 'init');
+  return (...args) => git('-C', box.project, ...args);
+}
+
 function ledger(...steps) {
   return steps.map(([eventType, toStage, payload = {}], index) => ({
     eventId: index === 0 ? 'start' : `e${index}`, eventType, payload, fromStage: null, toStage,
@@ -635,6 +652,103 @@ test('a BLOCKED run finishes without a reason and names its block code', () => {
   const result = wo.finish(context, { env: box.env });
   assert.equal(result.exit, wo.EXIT.ENDED, result.message);
   assert.match(box.fake().order.blocked_reason, /did not converge/);
+});
+
+test('a DONE run whose pr_open stage Zensu refuses ends blocked with worker_error naming the refusal', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the pr_open stage \(status 422, code invalid_pr_url\)/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /pr open stage with code invalid_pr_url/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 0);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('the post-tool update tells the model when Zensu refuses a stage, and names a lease lost on a drained event', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const refused = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(refused.additionalContext, /refused the pr_open stage/);
+  assert.match(refused.additionalContext, /--finish --reason/);
+  box.mutate((state) => { state.staleAttempt = true; });
+  const lost = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(lost.additionalContext, /is lost \(stale_attempt\)/);
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a block reason Zensu refuses as prose is sent once more as a safe sentence', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  const result = wo.finish(context, { env: box.env, reason: 'npm test fails on the integration branch, so the change cannot be validated.' });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.equal(order.blocked_reason, 'The session ended before its Autopilot run reached a ready pull request.');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'field_not_allowed', times: 1 }]; });
+  const reason = 'The gates fail on a missing database migration.';
+  const refused = wo.finish(context, { env: box.env, reason });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.equal(wo.readState(context.files.ended), null);
+  const delivered = wo.finish(context, { env: box.env, reason });
+  assert.equal(delivered.exit, wo.EXIT.ENDED, delivered.message);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a push of an unchanged head after a stage advance gets its own event id, and a refused head is final', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  gitProject(box);
+  const first = wo.push(context, { env: box.env });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  box.mutate((state) => { state.order.status = 'reviewing'; state.order.pr_url = 'https://github.com/acme/widgets/pull/7'; state.order.pr_number = 7; });
+  const again = wo.push(context, { env: box.env });
+  assert.equal(again.exit, wo.EXIT.OK, again.message);
+  const pushes = stageCalls(box).filter((call) => call.argv.includes('--head'));
+  assert.deepEqual(pushes.map((call) => call.stage), ['implementing', 'reviewing']);
+  assert.notEqual(pushes[0].id, pushes[1].id);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 409, code: 'client_event_id_reused', times: 1 }]; });
+  const refused = wo.push(context, { env: box.env });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.match(refused.message, /client_event_id_reused/);
+});
+
+test('a plan-approval block that Zensu does not need sends the session back to --bind-spec', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.REFUSED, result.message);
+  assert.match(result.message, /run --bind-spec/);
+  assert.equal(result.cancelRun, undefined);
+  assert.equal(wo.readState(context.files.ended), null);
 });
 
 test('the approved plan is the last plan artifact before the last approval of the spec hash', () => {

@@ -139,7 +139,8 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --finish
 ```
 
 - Autopilot run `DONE`: `--finish` sends the outstanding stages and then `ready_for_merge` with the
-  full head commit and the pull request, and exits 0.
+  full head commit and the pull request, and exits 0. When Zensu refuses one of those stages, it
+  blocks the order with `worker_error` and a sentence naming that stage instead, and exits 6.
 - Any other end: pass one plain sentence that says why the order cannot be finished here:
   `--finish --reason "<sentence>"`. The helper reports the order as `blocked` with `worker_error`
   and that sentence, cancels the local Autopilot run and exits 6. Write the sentence for the person
