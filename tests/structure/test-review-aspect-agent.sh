@@ -75,28 +75,31 @@ jq -e '.agents | index("./agents/review-aspect.md")' "$PLUGIN_JSON" >/dev/null 2
   && check "A11 plugin.json agents[] contains './agents/review-aspect.md'" PASS \
   || check "A11 plugin.json agents[] registration" FAIL
 
-# The security perspective traces every guarantee a query or call inherits instead of stating.
-SECURITY_LINE="$(grep -E '^   - security: ' "$AGENT_MD")"
-printf '%s' "$SECURITY_LINE" | grep -qF 'plus every guarantee a query or call inherits from session or connection state instead of stating it (row-level security, a tenant setting, the connecting role): name what enforces it instead of assuming it, check it under each connection mode the code still supports, fallbacks included, and check whether the query carries its own predicate' \
-  && check "A13 security perspective checks inherited guarantees under every supported connection mode" PASS \
-  || check "A13 security perspective checks inherited guarantees under every supported connection mode" FAIL
-
-# A defect behind a mode the code still supports is reported with its condition, and a refuter keeps it real.
-REVIEW_SECTION="$(awk '/^## Review$/{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
-printf '%s\n' "$REVIEW_SECTION" | grep -qxF '6. A defect reachable through a mode the code still supports (a fallback connection, a flag, an environment variable, a deployment option) is a finding: report it with the condition that reaches it. Committed configuration that disables that mode may lower its severity but never drops the finding, because the code still ships the mode and any deployment can enable it.' \
-  && check "A14 review step 6 reports a deployment-dependent defect with its condition and never drops it" PASS \
-  || check "A14 review step 6 reports a deployment-dependent defect with its condition and never drops it" FAIL
-VERIFY_SECTION="$(awk '/^## Verify mode$/{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
-printf '%s' "$VERIFY_SECTION" | grep -qF 'A failure that needs a mode the code still supports is `real` by step 6 of the review even when committed configuration disables that mode; that configuration may lower the severity you rate, never the outcome.' \
-  && check "A15 verify mode keeps a deployment-dependent finding real" PASS \
-  || check "A15 verify mode keeps a deployment-dependent finding real" FAIL
-
 # English-only (repo convention): no German umlauts / eszett.
 if node -e 'const t=require("fs").readFileSync(process.argv[1],"utf8");process.exit(/[äöüÄÖÜß]/.test(t)?1:0)' "$AGENT_MD"; then
   check "A12 review-aspect.md is English-only (no umlauts/eszett)" PASS
 else
   check "A12 review-aspect.md is English-only (no umlauts/eszett)" FAIL
 fi
+
+SECURITY_LINE="$(grep -E '^   - security: ' "$AGENT_MD")"
+printf '%s' "$SECURITY_LINE" | grep -qF -- 'plus every guarantee a query or call inherits from session or connection state instead of stating it (row-level security, a tenant setting, the connecting role): name what enforces it instead of assuming it, check it under each connection mode the code still supports, fallbacks included, and check whether the query or call states the guarantee itself (an account predicate, an explicit tenant or role); a missing one is a finding when a supported mode leaves the guarantee unenforced' \
+  && check "A13 security perspective checks inherited guarantees under every supported connection mode" PASS \
+  || check "A13 security perspective checks inherited guarantees under every supported connection mode" FAIL
+
+REVIEW_SECTION="$(awk '$0 == "## Review"{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
+printf '%s\n' "$REVIEW_SECTION" | grep -qxF -- '6. A defect reachable through a mode the code still supports (a fallback connection, a flag, an environment variable, a deployment option) is a finding: report it with the condition that reaches it. Committed configuration that disables that mode may lower its severity by one level, never below IMPORTANT, and never drops the finding, because the code still ships the mode and any deployment can enable it. This is the only case in which a defect that fits CRITICAL may be rated IMPORTANT.' \
+  && check "A14 review step 6 reports a deployment-dependent defect with its condition, at least IMPORTANT, never dropped" PASS \
+  || check "A14 review step 6 reports a deployment-dependent defect with its condition, at least IMPORTANT, never dropped" FAIL
+
+VERIFY_SECTION="$(awk '$0 == "## Verify mode"{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
+printf '%s' "$VERIFY_SECTION" | grep -qF -- 'A failure that needs a mode the code still supports is `real` by step 6 of the review even when committed configuration disables that mode; that configuration may lower the severity you rate by one level, never below IMPORTANT, and never the outcome.' \
+  && check "A15 verify mode keeps a deployment-dependent finding real and at least IMPORTANT" PASS \
+  || check "A15 verify mode keeps a deployment-dependent finding real and at least IMPORTANT" FAIL
+
+grep -qxF -- '- For `Grep`/`Glob`, always pass the smallest explicit safe repository subtree (for example `src` or `tests`) derived from `changed_files`, or from the code a check below traces from them (callers, entry points, connection setup, configuration, migrations); never omit `path` or search the repository root, because traversal ancestors of `.zensu` and Session Control are denied.' "$AGENT_MD" \
+  && check "A16 the search rule admits the subtrees an inherited-guarantee check traces, never the root" PASS \
+  || check "A16 the search rule admits the subtrees an inherited-guarantee check traces, never the root" FAIL
 
 echo "----"
 echo "test-review-aspect-agent: $PASS PASS / $FAIL FAIL"

@@ -22,9 +22,12 @@ the same question in different vocabularies; they are not mechanically mapped.
 A defect reachable only through a mode the code still supports (a fallback connection, a flag, an
 environment variable, a deployment option) is still a finding. `agents/review-aspect.md` and
 `agents/review-judge.md` report it with the condition that reaches it. Committed configuration that
-disables the mode may lower its severity but never drops the finding, and a refuter in the aspect
-agent's verify mode keeps such a finding `real`: the committed configuration describes one
-deployment, while the code still ships the mode to every other.
+disables the mode may lower its severity by one level, never below IMPORTANT, and never drops the
+finding; that is the only case in which a defect that fits CRITICAL is rated IMPORTANT. The floor
+keeps the finding fixed: by default an IMPORTANT finding is parked and `/zensu:self-review` fixes it,
+while a SUGGESTION is neither routed nor a self-review candidate. A refuter in the aspect agent's verify
+mode keeps such a finding `real`: the committed configuration describes one deployment, while the
+code still ships the mode to every other.
 
 <!-- zensu:review-severity -->
 > **Severity rubric (non-negotiable).** Rate every finding by its impact on the change under review, never by effort, taste or confidence.
