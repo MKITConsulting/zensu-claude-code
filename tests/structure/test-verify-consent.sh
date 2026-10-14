@@ -352,7 +352,9 @@ for _vc_case in "H16 quote-split CLI name|playwright-cl''i -s=$SESSION eval 1" \
   "H16m two line continuations inside the session name|playwright-cli -s zensu-verify\\${NL}\\${NL}-vc eval 1" \
   "H16n double-quote split of the CLI name|playwright-cl\"\"i -s=$SESSION eval 1" \
   "H16o backslash split of the CLI name|playwright-cl\\i -s=$SESSION eval 1" \
-  "H16p double-quote split of the session name|playwright-cli -s=zensu-ver\"\"ify-vc eval 1"; do
+  "H16p double-quote split of the session name|playwright-cli -s=zensu-ver\"\"ify-vc eval 1" \
+  "H16q backtick split of the CLI name|playwright-cl\`\`i -s=$SESSION eval 1" \
+  "H16r backtick split of the session name|playwright-cli -s=zensu-ver\`\`ify-vc eval 1"; do
   _vc_label="${_vc_case%%|*}"
   _vc_command="${_vc_case#*|}"
   _vc_verdict="$(pre_verdict "$_vc_command" "$SID" "$PROJ")"
@@ -403,7 +405,7 @@ while [ "$_vc_i" -lt "${#DIFF_COMMANDS[@]}" ]; do
   fi
   _vc_i=$((_vc_i + 1))
 done
-[ "${#DIFF_COMMANDS[@]}" -ge 24 ] && [ -z "$DIFF_MISSES" ] \
+[ "${#DIFF_COMMANDS[@]}" -ge 26 ] && [ -z "$DIFF_MISSES" ] \
   && check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included" PASS \
   || check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included (misses:${DIFF_MISSES})" FAIL
 

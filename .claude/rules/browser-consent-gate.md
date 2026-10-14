@@ -67,7 +67,9 @@ and the skill's instruction to use only the printed session is prose, not a boun
    backslash — so an escaped backslash before `n` is never read as a line break — and then joins
    a JSON-encoded backslash-newline or backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d`
    pass that removes every quote, backslash, backtick and pairing sentinel, then matches
-   case-insensitively.
+   case-insensitively. The backtick matters for Bash too: an empty command substitution splits a
+   marker without changing what runs, so ``` playwright-cl``i ``` runs `playwright-cli`; `H16q` and
+   `H16r` hold that through the real pre hook and the module-absent copy.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
    CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
