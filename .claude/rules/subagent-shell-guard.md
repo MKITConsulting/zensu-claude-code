@@ -99,15 +99,13 @@ run in, it checks, in this order:
   that reaches only a protected parent `protectedParent`;
 - the command rules, after `env`, `sudo`, `nohup`, `xargs`, `timeout` and their kin are
   unwrapped, with `env -C` and `sudo -D` moving the inner command's directory: `setsid`,
-  `disown` and `coproc`, a detached session (`startsDetachedSession`: a `tmux` command that
-  starts a process or types into a pane, by full name, alias or any prefix of a full name (tmux
-  runs an unambiguous prefix and rejects an ambiguous one), at a command position after the
-  global options or a word that ends in `;`, and a `screen` started with `-d` and `-m` or
-  driven with `-X stuff|screen|exec`), an `eval` body, a Zensu helper name outside
-  `READ_ONLY_COMMANDS` (`HELPER_RE` also finds one quoted or backquoted inside interpreter code,
-  such as `require('./hooks/lib/claude-hook-session-v1.js')`), a shell's `-c` body (also when
-  the outer shell expands part of it: the reparse keeps such a part unknown, and `$PWD` and `$(pwd)` arrive as the absolute directory the outer shell expanded them
-  in), heredoc or here-string, interpreter code that dumps the environment or reads
+  `disown` and `coproc`, a detached session (`startsDetachedSession`, below), an `eval` body, a
+  Zensu helper name outside `READ_ONLY_COMMANDS` (`HELPER_RE` also finds one between quotes or
+  backticks, such as `require('./hooks/lib/claude-hook-session-v1.js')`, and a JS helper
+  without its `.js` suffix), a shell's `-c` body (also when the outer shell expands part of it:
+  the reparse keeps such a part unknown, and `$PWD` and `$(pwd)` arrive as the absolute
+  directory the outer shell expanded them in), heredoc or here-string, interpreter code that
+  dumps the environment or reads
   a selector (`node`/`bun -e|-p`, `python -c`, `ruby` and `perl -e`, `php -r`, `deno eval`,
   `pwsh -c`, an `awk` or `jq` program, and the heredoc or here-string an interpreter reads as its
   script), a selector builtin or `test -v`, an environment dump (also redirected into a file), a
@@ -122,6 +120,23 @@ run in, it checks, in this order:
 The parameter expansions the parse records decide the selector rule, so a selector in single
 quotes or a quoted heredoc passes. A background job (`&`, a backgrounded subshell included)
 without a later `wait` in the same shell is a background shell, like `run_in_background`.
+
+**Detached sessions** (`startsDetachedSession`) are background shells too. For `tmux` the
+global options end getopt style (`-c`, `-f`, `-L`, `-S` and `-T` take an attached value or the
+next word, and `--` ends them); the first word after them, and every word after one that ends
+in an unescaped `;`, is a command position. A command there starts a process or types into a
+pane when it is `new-session`, `new-window`, `split-window`, `respawn-pane`, `respawn-window`,
+`run-shell`, `if-shell`, `pipe-pane`, `send-keys`, `paste-buffer` or `display-popup`, one of
+their aliases, or any prefix of one: tmux runs an unambiguous prefix and rejects an ambiguous
+one, and `display`, the exact alias of `display-message`, is exempt (`TMUX_INERT_ALIASES`). For
+`screen` the options follow screen's own parser (`screenOptions`): `-S`, `-s`, `-t`, `-k`, `-T`
+and `-h` take the next word while the letters after them in the same word still count, `-c`,
+`-e` and `-p` take an attached value or the next word, and `-r`, `-R` and `-x` take a following
+session name that does not start with `-`. A `screen` whose option letters hold both `d` and
+`m`, or `X` or `Q` followed by `screen`, `exec`, `stuff`, `eval`, `at`, `paste` or `process`,
+is refused; `-D -m` runs in the foreground and passes. `screen -Sdm <name> …` starting a
+detached session and `screen -x <name> -X …` reaching a running one were measured against GNU
+screen 4.00.03; the other option arities follow screen's manual.
 
 **The working directory** is a set of candidates, because a `cd` can fail. A `cd` or `pushd`
 joined by `&&` replaces the set for the rest of that list; any other separator adds the new
@@ -160,7 +175,12 @@ grows past 64 directories is denied (`directories`).
   such as `d=.zen; ls "$d"su/state` passes the guard. An OS sandbox is the real boundary.
 - A helper name counts only in a command outside `READ_ONLY_COMMANDS` (a `find` with `-exec` is
   outside it), so reading this repository's own hooks and writing a commit message that names one
-  stay allowed.
+  stay allowed. Outside that set it counts in every word, also between quotes or backticks and
+  without the `.js` suffix of a JS helper, so ``gh pr comment … --body '… `zensu-log.sh` …'``, a
+  JSON payload and a test filter that name a helper are refused too. Narrowing the quoted form to
+  the interpreters the guard models would pass `npx tsx -e`, `docker run … sh -c` and every
+  other program that runs code it does not model; a body that must name a helper goes through a
+  file (`--body-file`) or to the main thread.
 - Code-level environment dumps and selector accessors (`process.env`, `os.environ`, `%ENV`, …)
   are judged inside interpreter code only, so a search, a commit message or a file written
   through a heredoc may name `process.env`. A `/proc/<pid>/environ` path stays a text rule.
@@ -248,9 +268,12 @@ grows past 64 directories is denied (`directories`).
   deletes without a filtering name test.
 - Only `tmux` and `screen` count as detached sessions. A scheduler or service manager (`at`,
   `batch`, `systemd-run`, `launchctl`), a process manager such as `pm2`, a detached container
-  (`docker run -d`, `docker compose up -d`), `dtach`, `abduco` and a `tmux` command read from a
-  file (`source-file`) keep a process running past the subagent and pass, and the shell command
-  of `tmux -c` is not parsed.
+  (`docker run -d`, `docker compose up -d`), `dtach`, `abduco`, a `tmux` command read from a
+  file (`source-file`) and a `screen -X source` keep a process running past the subagent and
+  pass, and the shell command of `tmux -c` is not parsed.
+- A helper inside the program of a command in `READ_ONLY_COMMANDS`, such as
+  `awk 'BEGIN { system("bash hooks/lib/zensu-log.sh") }'`, passes, because the helper rule skips
+  those commands.
 - A protected parent is denied on a read too (`ls ~/.claude`), and a word that only looks like
   a path is resolved against the working directory like one.
 - A `${PWD…}` or `${HOME…}` whose operator can change the value (`%`, `#`, `/`, `:+`, a
