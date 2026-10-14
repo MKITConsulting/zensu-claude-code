@@ -14,6 +14,7 @@ const COMMAND_WORDS = new Set(['git', 'npm', 'npx', 'yarn', 'go', 'make', 'docke
 const CLI_VERSION = '0.8.0-fake';
 const DEFAULT_API_URL = 'https://api.zensu.dev';
 const PLAN_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
+const PR_PATH_RE = /^\/(?:pull|pulls|pull-requests|merge_requests|-\/merge_requests)\/([1-9][0-9]{0,9})$/;
 
 const argv = process.argv.slice(2);
 
@@ -206,7 +207,8 @@ function recordEvent(fields) {
     attempt: state.order.attempt,
     actor_kind: 'session',
     client_session_id: state.order.client_session_id,
-    occurred_at: iso(now()),
+    occurred_at: iso(now() + (Number.isFinite(state.clientSkewMs) ? state.clientSkewMs : 0)),
+    created_at: iso(now()),
     ...fields,
   };
   state.events.push(event);
@@ -232,6 +234,27 @@ function validClientEvent(flags) {
 
 function orderBranchPrefix() {
   return state.spec && typeof state.spec.branch_prefix === 'string' ? state.spec.branch_prefix : BRANCH_PREFIX;
+}
+
+function validatePrUrl(raw, prNumber) {
+  const fail = (message) => apiFail(422, 'invalid_pr_url', message);
+  if (raw.length > 2048) fail('prUrl is too long');
+  const parts = /^https:\/\/([^/?#@\s]+)(\/[^?#\s]*)$/i.exec(raw);
+  if (!parts) fail('prUrl must be an https link without credentials, query or fragment');
+  const rawPath = parts[2];
+  if (rawPath.includes('%') || rawPath.endsWith('/') || path.posix.normalize(rawPath) !== rawPath) {
+    fail('prUrl must not contain dot segments, doubled or encoded separators');
+  }
+  const hostPath = `${parts[1]}${rawPath}`.toLowerCase();
+  const prefix = String(state.order.repository || '').toLowerCase();
+  if (!hostPath.startsWith(`${prefix}/`)) fail("prUrl must point into the order's repository");
+  const match = PR_PATH_RE.exec(hostPath.slice(prefix.length));
+  if (!match) fail('prUrl must be the pull request link <repository>/pull/<number> or <repository>/-/merge_requests/<number>');
+  const number = Number(match[1]);
+  if (number > 1000000000) fail('prUrl names an invalid pull request number');
+  const expected = prNumber !== null ? prNumber : state.order.pr_number;
+  if (expected !== null && expected !== undefined && expected !== number) fail('prUrl and prNumber name different pull requests');
+  return `https://${prefix}${match[0]}`;
 }
 
 function validateBranch(branch) {
@@ -283,10 +306,7 @@ function applyStage(flags, clientEventId) {
   }
   if (flags.branch !== undefined) validateBranch(String(flags.branch));
   const prNumber = flags['pr-number'] !== undefined ? Number(flags['pr-number']) : null;
-  if (flags['pr-url'] !== undefined) {
-    const expected = `${state.order.repository}/pull/${prNumber}`;
-    if (flags['pr-url'] !== expected) apiFail(422, 'invalid_pr_url', 'the PR link must be the canonical link of the order repository');
-  }
+  const prUrl = flags['pr-url'] !== undefined ? validatePrUrl(String(flags['pr-url']), prNumber) : null;
   const current = state.order.status;
   const currentRank = STAGE_RANK[current];
   if (currentRank === undefined || current === 'ready_for_merge') apiFail(409, 'invalid_transition', `invalid work order transition from "${current}" to "${target}"`);
@@ -305,7 +325,7 @@ function applyStage(flags, clientEventId) {
   }
   if (flags['autopilot-run-id']) state.order.autopilot_run_id = flags['autopilot-run-id'];
   if (flags.branch) state.order.branch = flags.branch;
-  if (flags['pr-url']) state.order.pr_url = flags['pr-url'];
+  if (prUrl) state.order.pr_url = prUrl;
   if (prNumber !== null) state.order.pr_number = prNumber;
   if (flags.head) state.order.head_sha = flags.head;
   state.order.status = target;
@@ -474,7 +494,14 @@ function workEvents(flags) {
   requireOrder(flags._[0]);
   const page = Number(flags.page || 1);
   const perPage = Number(flags['per-page'] || 20);
-  const all = [...(state.historyEvents || []), ...state.events];
+  const key = (event) => [String(event.occurred_at || ''), String(event.created_at || ''), String(event.id || '')];
+  const all = [...(state.historyEvents || []), ...state.events].sort((left, right) => {
+    const [a, b] = [key(left), key(right)];
+    for (let index = 0; index < a.length; index += 1) {
+      if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+    }
+    return 0;
+  });
   printJson({ data: all.slice((page - 1) * perPage, page * perPage), total: all.length });
 }
 

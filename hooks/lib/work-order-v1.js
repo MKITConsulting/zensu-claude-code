@@ -987,13 +987,20 @@ function detailOf(event) {
 }
 
 function approvedPlanCommit(events, specHash) {
-  let lastPlan = null;
+  let approvedAttempt = null;
+  for (const event of events) {
+    const detail = detailOf(event);
+    if (event.event_type === 'approved' && detail.subject === 'implementation_plan' && detail.spec_hash === specHash
+        && Number.isSafeInteger(event.attempt)) {
+      approvedAttempt = event.attempt;
+    }
+  }
+  if (approvedAttempt === null) return null;
   let approvedPlan = null;
   for (const event of events) {
     const detail = detailOf(event);
-    if (event.event_type === 'artifact' && detail.kind === 'plan' && typeof detail.sha === 'string') lastPlan = detail;
-    if (event.event_type === 'approved' && detail.subject === 'implementation_plan' && detail.spec_hash === specHash && lastPlan) {
-      approvedPlan = lastPlan;
+    if (event.event_type === 'artifact' && event.attempt === approvedAttempt && detail.kind === 'plan' && typeof detail.sha === 'string') {
+      approvedPlan = detail;
     }
   }
   return approvedPlan;
@@ -1038,7 +1045,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   }
   const order = got.json;
   writeState(context.projectRoot, context.files.order, { order });
-  if (order.spec_hash !== context.marker.specHash) {
+  if (order.spec_hash !== context.marker.specHash || order.spec_stale === true) {
     const blocked = deliverBlocked(context, { env, now, reason: 'The order spec changed while the session ran, so its plan no longer matches the spec it was dispatched with.', eventKey: 'spec-changed' });
     return { exit: blockExit(blocked), message: 'the order spec changed during the session; the session ends' };
   }
@@ -2086,7 +2093,8 @@ function planSummary(text) {
 }
 
 function blobLink(repository, sha, file) {
-  const base = String(repository || '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const named = String(repository || '').trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  const base = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(named) ? named : `https://${named}`;
   if (!/^https:\/\/[^/\s]+\/\S+$/.test(base)) return null;
   const host = base.slice('https://'.length).split('/')[0].toLowerCase();
   if (host === 'github.com') return `${base}/blob/${sha}/${file}`;
@@ -2413,6 +2421,7 @@ module.exports = {
   ask,
   bindSpec,
   binding,
+  blobLink,
   branchPrefixOf,
   drain,
   existingPullRequest,

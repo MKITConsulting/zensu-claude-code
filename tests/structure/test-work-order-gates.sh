@@ -232,7 +232,6 @@ BRANCH_P="wo-bbbbbbbb"
   new_project planner
   source "$BASELINE" "$SESSION_P1" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER_P" "$SESSION_P1" required implement
-  wo_fake_set "$FAKE_ZENSU_STATE" 'state.order.repository = "https://github.com/acme/widgets"'
   bash "$WRAPPER" --start --order "$ORDER_P" >/dev/null 2>&1 || exit 91
   git -C "$PROJECT" checkout -q -b "$BRANCH_P"
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN_P1" --work-order "$ORDER_P" >/dev/null 2>&1 || exit 92
@@ -259,7 +258,7 @@ else
   check "G7 a required plan approval commits, pushes, attaches and blocks (rc=$RC bind=$(cat "$SBOX/plan-bind.rc" 2>/dev/null) plan=$(cat "$SBOX/plan.rc" 2>/dev/null) stage=$(cat "$SBOX/plan.stage" 2>/dev/null) $(cat "$SBOX/plan.err" 2>/dev/null))" FAIL
 fi
 
-wo_fake_set "$FAKE_ZENSU_STATE" 'state.approvals.push({ spec_hash: state.order.spec_hash }); state.events.push({ id: "approved-1", client_event_id: null, event_type: "approved", detail: { subject: "implementation_plan", spec_hash: state.order.spec_hash } }); state.mode = "live"; state.order.status = "claimed"; state.order.blocked_kind = null; state.order.blocked_reason = null; state.order.attempt = 2; state.order.client_session_id = "wo-gates-session-0004"'
+wo_fake_set "$FAKE_ZENSU_STATE" 'state.approvals.push({ spec_hash: state.order.spec_hash }); state.events.push({ id: "approved-1", client_event_id: null, event_type: "approved", attempt: state.order.attempt, occurred_at: new Date(Date.now() - 300000).toISOString(), created_at: new Date().toISOString(), detail: { subject: "implementation_plan", spec_hash: state.order.spec_hash } }); state.mode = "live"; state.order.status = "claimed"; state.order.blocked_kind = null; state.order.blocked_reason = null; state.order.attempt = 2; state.order.client_session_id = "wo-gates-session-0004"'
 SESSION_P2="wo-gates-session-0004"
 RUN_P2="run_gates_plan_2"
 (

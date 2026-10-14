@@ -55,7 +55,7 @@ function sandbox() {
       order: {
         id: ORDER,
         work_plan_id: '11111111-1111-4111-8111-111111111111',
-        repository: 'https://github.com/acme/widgets',
+        repository: 'github.com/acme/widgets',
         kind: 'implement',
         status: 'claimed',
         attempt: 1,
@@ -63,6 +63,7 @@ function sandbox() {
         claim_confirmed_at: new Date().toISOString(),
         lease_expires_at: Date.now() + 1800000,
         spec_hash: 'a'.repeat(64),
+        spec_stale: false,
         branch: null,
         pr_url: null,
         pr_number: null,
@@ -358,6 +359,25 @@ test('the fake refuses a stage branch outside the order branch prefix, as the se
   const accepted = wo.sendEvent(context, ['--stage', 'implementing', '--branch', `wo-${ORDER.slice(0, 8)}`, '--client-event-id', wo.clientEventId('r', 'bound-2')], { env: box.env, target: 'implementing' });
   assert.equal(accepted.verdict, wo.VERDICTS.OK);
   assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
+});
+
+test('the fake takes the pull request links the service takes and refuses the rest', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { repository: 'gitlab.com/acme/widgets', status: 'implementing' } });
+  const send = (url, number, key) => wo.sendEvent(context, ['--stage', 'pr_open', '--pr-url', url, '--pr-number', String(number),
+    '--client-event-id', wo.clientEventId('r', key)], { env: box.env, target: 'pr_open' });
+  for (const [url, number, key] of [
+    ['https://github.com/acme/widgets/pull/7', 7, 'other-host'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/7?x=1', 7, 'query'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/8', 7, 'mismatch'],
+    ['https://gitlab.com/acme/widgets/../widgets/-/merge_requests/7', 7, 'dot-segment'],
+  ]) {
+    const refused = send(url, number, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_pr_url', url);
+  }
+  assert.equal(send('https://GitLab.com/Acme/Widgets/-/merge_requests/7', 7, 'gitlab').verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.pr_url, 'https://gitlab.com/acme/widgets/-/merge_requests/7');
 });
 
 test('push refuses a working branch without the order branch prefix before any forge write', () => {
@@ -767,18 +787,61 @@ test('a plan-approval block that Zensu does not need sends the session back to -
   assert.equal(wo.readState(context.files.ended), null);
 });
 
-test('the approved plan is the last plan artifact before the last approval of the spec hash', () => {
+test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
-    { event_type: 'artifact', detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
-    { event_type: 'artifact', detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: spec } },
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
+    { event_type: 'artifact', attempt: 2, detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 3, detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
   ];
   assert.equal(wo.approvedPlanCommit(events, spec).sha, '2'.repeat(40));
   assert.equal(wo.approvedPlanCommit(events, 'd'.repeat(64)), null);
+  const fastClock = [
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '4'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'blocked', attempt: 1, detail: { blocked_kind: 'plan_approval' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(fastClock, spec).sha, '4'.repeat(40));
+  const recut = [
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '5'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'plan', sha: '6'.repeat(40), path: '.zensu/plans/x.md' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(recut, spec).sha, '6'.repeat(40));
+  assert.equal(wo.approvedPlanCommit([{ event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } }], spec), null);
+});
+
+test('bind-spec blocks an order Zensu marked spec_stale although its spec hash is unchanged', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({
+    runId: RUN, stage: 'PLANNING', events: DONE_LEDGER.slice(0, 1), evidence: {},
+    workOrder: { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) },
+  }));
+  box.mutate((state) => { state.order.spec_stale = true; });
+  const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /spec changed while the session ran/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'implementing').length, 0);
+});
+
+test('the plan blob link takes the scheme-less repository Zensu stores and an https one alike', () => {
+  const sha = 'e'.repeat(40);
+  const file = `.zensu/plans/${ORDER}.md`;
+  assert.equal(wo.blobLink('github.com/acme/widgets', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('https://github.com/acme/widgets.git', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('gitlab.com/group/project', sha, file), `https://gitlab.com/group/project/-/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('bitbucket.org/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('http://github.com/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('', sha, file), null);
 });
 
 test('the Stop decision blocks until three stops pass without progress, then ends the order', () => {

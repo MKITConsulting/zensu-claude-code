@@ -62,12 +62,16 @@ record. `--bind-spec --run <id>` then reads the order again, refuses a spec that
 records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. An order an
 earlier attempt already moved past `implementing` is bound without sending `implementing` again.
 The model cannot record `ORDER_SPEC_BOUND` through `--autopilot-event`, and a work-order run refuses
-`PLAN_APPROVED`.
+`PLAN_APPROVED`. Zensu marks a running order `spec_stale` when its feature changes and keeps the
+spec hash, so `--bind-spec` blocks a stale order with `worker_error` just like a changed hash. An
+edit after the bind is not caught; Zensu itself still accepts `ready_for_merge` then.
 
 With `plan_approval = required`, Zensu refuses `implementing` until a person approved the
 implementation plan for the current spec hash. An approved attempt reads the order timeline,
-takes the last `plan` artifact before the last approval of that spec hash, and compares the plan
-file at that commit with the plan file in the working tree. A difference blocks the order with
+takes the last approval of that spec hash and the last `plan` artifact of the attempt it approved,
+and compares the plan file at that commit with the plan file in the working tree. It pairs them by
+attempt, not by list position, because Zensu sorts the timeline by event time and the session's
+events carry the worker's clock while the approval carries the server's. A difference blocks the order with
 `worker_error`. The run's `approvedPlanSha256` is the SHA-256 of the approved plan file; with
 `plan_approval = auto` it is the order's spec hash.
 
@@ -132,7 +136,7 @@ shorten.
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
 file when it is new or changed, pushes through the push verb, sends an artifact event of kind
 `plan` with the path, the commit, a summary without markup and, for a GitHub or GitLab repository,
-the blob link, then sends `--blocked plan_approval`. Zensu ends the session there; the helper
+the blob link built from the `host/owner/name` Zensu stores, then sends `--blocked plan_approval`. Zensu ends the session there; the helper
 records a successful outcome. When Zensu answers the block with `plan_approval_not_required`, the
 order's policy approves plans itself: the helper exits 8, and the session continues with
 `--bind-spec`.
