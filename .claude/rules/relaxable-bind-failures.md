@@ -42,7 +42,7 @@ carries one column per state; keep exactly one roster and do not duplicate it he
 properties are easy to get wrong and cost the whole feature:
 
 - **A deny from ANY hook on a matcher wins.** `hooks.json` registers four PreToolUse
-  hooks on the `Bash` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+  hooks on the `Bash|PowerShell` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
   `pre-write-secret-scan.sh`, `pre-browser-navigation-consent.sh`) and one on `.*`
   (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`), and all five can
   deny. O21a enumerates the matcher, so a hook added there changes this roster. The consent gate exits before its bind for every command
@@ -50,7 +50,9 @@ properties are easy to get wrong and cost the whole feature:
   commands through `zensu_doctor_allowed` before its module runs, so on a POSIX host with `node`
   it never stands between a session and the doctor — the recognizer refuses on win32; it denies a `zensu-verify-*` call and a command that merely mentions
   both markers. `/zensu:doctor` runs through Bash, so it is reachable only
-  if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
+  if EVERY one of them allows. The recognizer reads the Bash spelling only, so a PowerShell call in
+  a bind failure gets the named deny; the doctor and adoption commands stay reachable through the
+  Bash tool, which is what `/zensu:doctor` uses. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.
   `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
   matcher from `hooks.json` and asserts every hook on it allows, so a hook added later is
@@ -181,7 +183,7 @@ table in `docs/session-control.md`, the Stop-binding section of
 `docs/tdd-manager-workflow.md`, and the
 binding rows in `skills/doctor/SKILL.md`.
 `tests/structure/test-orphaned-project-root.sh` pins the predicate truth table, the
-capability gate, every Bash-matcher hook, the Edit gate and the doctor rows;
+capability gate, every hook on the shell matcher, the Edit gate and the doctor rows;
 `tests/structure/test-stop-session-binding-recovery.sh` pins the Stop halves, where B4 is
 the discrimination test that a root which still EXISTS but no longer matches keeps
 blocking, and B1d that a second disagreement is never relaxed alongside the first.

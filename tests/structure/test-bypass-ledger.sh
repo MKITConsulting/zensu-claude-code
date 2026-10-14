@@ -429,6 +429,22 @@ if [ -n "$SBOX" ]; then
       ;;
   esac
 
+  start_session zinjps
+  run_log --tdd-begin --session zinjps >/dev/null 2>&1
+  INJECT_PS_PAYLOAD="$(node -e 'const bt = String.fromCharCode(96); process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:"zinjps",tool_name:"PowerShell",tool_input:{command:"zensu features \"get" + bt + "n__bypass__" + bt + "tZENSU_MCP_GATE\""}}))')"
+  OUT="$(printf '%s' "$INJECT_PS_PAYLOAD" | run_hook pre-bash-zensu-gate.sh)"
+  L7d="$(run_log --bypass-list --session zinjps 2>/dev/null)"
+  case "$OUT" in
+    *'"deny"'*) check "P5n3p a PowerShell word that decodes to a line break cannot forge a bypass record (unexpected deny)" FAIL ;;
+    *)
+      if [ "$L7d" = "none" ]; then
+        check "P5n3p a PowerShell word that decodes to a line break cannot forge a bypass record" PASS
+      else
+        check "P5n3p a PowerShell word that decodes to a line break cannot forge a bypass record (got: $L7d)" FAIL
+      fi
+      ;;
+  esac
+
   start_session hx
   OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Write","tool_input":{"file_path":"src/app.js","content":"const x = 1;"}}' | run_hook_env ZENSU_SECRET_SCAN pre-write-secret-scan.sh)"
   L8="$(run_log --bypass-list --session hx 2>/dev/null)"

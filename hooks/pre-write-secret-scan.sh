@@ -137,13 +137,25 @@ if [ "$VERDICT" = "__bypass__:ZENSU_SECRET_SCAN" ]; then
 fi
 [ -z "$VERDICT" ] && exit 0
 
-RULES="$VERDICT" node -e '
+SCAN_TOOL="$(printf '%s' "$INPUT" | node -e '
+  let s = "";
+  process.stdin.on("data", (d) => (s += d));
+  process.stdin.on("end", () => {
+    try { process.stdout.write(String(JSON.parse(s).tool_name || "")); } catch (_) {}
+  });
+' 2>/dev/null)"
+RULES="$VERDICT" SCAN_TOOL="$SCAN_TOOL" node -e '
+  const whole = process.env.SCAN_TOOL === "PowerShell"
+    ? "A PowerShell command is scanned as a whole, because this check does not trace where PowerShell writes; " +
+      "a value that only passes through a command and is never written to a file can go through the Bash tool, " +
+      "which scans only commands that write. "
+    : "";
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason:
-        "Blocked: the payload matches secret pattern(s): " + process.env.RULES + ". " +
+        "Blocked: the payload matches secret pattern(s): " + process.env.RULES + ". " + whole +
         "Real-looking credentials must not land in files. Legitimate fixture options: " +
         "for the Write/Edit tools, place it under a test(s)/, __tests__/, spec(s)/, testdata/, " +
         "evals/ or fixtures/ path or an *.example.* file; on any channel, append the " +

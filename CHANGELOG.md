@@ -34,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `bash -c` body, a heredoc a shell reads, `eval` or a command substitution inside a parameter
   expansion is now gated like a plain one, and every command the token scan denied before is still
   denied.
+- **PowerShell tool**: Zensu's shell hooks now also fire for Claude Code's PowerShell tool, which
+  is on by default on Windows for claude.ai and Console accounts. Each one judges a PowerShell
+  command or refuses it. The CLI write-gate judges a literal `zensu` call and denies one it cannot
+  read, such as a call another command starts or a noun or verb built at run time. The Session
+  Control check denies a command that names a protected input, writes the Environment provider
+  under a name built at run time or turns text built at run time into code. While
+  `hooks.bashWriteGate` is on, the source-write rules pass only a read-only PowerShell command.
+  The secret scan reads the whole command, the browser consent gate refuses a `zensu-verify`
+  browser call, and a work-order session refuses the tool. A PowerShell command has no inline gate
+  escape. Every refusal of a command a gate cannot judge names the Bash tool, which works as
+  before, so `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` is no longer required and stays an option.
+  Because Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is missing, the
+  analyzer reads a string escape the two versions decode differently both ways. The
+  `shell tools:` row of `/zensu:doctor` reports the coverage.
 
 ## [0.26.0] - 2026-10-12
 

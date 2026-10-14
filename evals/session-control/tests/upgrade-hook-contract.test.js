@@ -47,7 +47,7 @@ function withInode(stat, exactInode) {
   });
 }
 
-function fixture(preToolCommand = command('pre-reviewer-capability-gate.sh')) {
+function fixture(preToolCommand = command('pre-reviewer-capability-gate.sh'), bashMatcher = 'Bash') {
   const cacheParent = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-hook-contract-'));
   const root = path.join(cacheParent, '0.17.0');
   fs.mkdirSync(path.join(root, 'hooks'), { recursive: true, mode: 0o700 });
@@ -71,7 +71,7 @@ function fixture(preToolCommand = command('pre-reviewer-capability-gate.sh')) {
           }],
         },
         {
-          matcher: 'Bash',
+          matcher: bashMatcher,
           hooks: [
             hook('pre-bash-zensu-gate.sh'),
             hook('pre-bash-source-write-gate.sh'),
@@ -593,13 +593,15 @@ test('applies every evaluator-owned hook-contract selftest fault only in test mo
   ];
   try {
     process.env.ZENSU_UPGRADE_TEST_MODE = '1';
-    for (const [fault, expected] of cases) {
-      const root = fixture();
-      try {
-        assert.equal(injectCandidateHookContractFaultForTest(root, fault), true);
-        assert.throws(() => captureEvaluatorOwnedHookContract(root), expected);
-      } finally {
-        removeFixture(root);
+    for (const bashMatcher of ['Bash', 'Bash|PowerShell']) {
+      for (const [fault, expected] of cases) {
+        const root = fixture(undefined, bashMatcher);
+        try {
+          assert.equal(injectCandidateHookContractFaultForTest(root, fault), true, `${fault} on ${bashMatcher}`);
+          assert.throws(() => captureEvaluatorOwnedHookContract(root), expected, `${fault} on ${bashMatcher}`);
+        } finally {
+          removeFixture(root);
+        }
       }
     }
 

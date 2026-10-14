@@ -165,6 +165,13 @@
           "timeoutMs": 300000
         },
         {
+          "id": "powershell-tool-coverage",
+          "runner": "bash",
+          "path": "tests/structure/test-powershell-tool-coverage.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
           "id": "windows-profile-lifecycle-contract",
           "runner": "bash",
           "path": "tests/structure/test-windows-ci-contract.sh",

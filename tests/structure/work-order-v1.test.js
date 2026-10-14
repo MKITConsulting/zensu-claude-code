@@ -699,6 +699,7 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
+  assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
   const context = startedContext(box);
   for (const tool of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) {
@@ -711,6 +712,9 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
+  const powershell = wo.gateDecision(context, payload('PowerShell', 'Get-ChildItem'), { env: box.env });
+  assert.equal(powershell.code, 'powershell');
+  assert.match(powershell.reason, /judges Bash commands only\. Run the command through the Bash tool\.$/);
   wo.markLost(context, { code: 'stale_attempt', via: 'test', at: Date.now() });
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
@@ -773,6 +777,11 @@ test('the post-tool update hands answers over once and ends the session on a blo
   assert.match(first.additionalContext, /active ones only/);
   const second = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
   assert.equal(second.additionalContext, null);
+  const escalated = { stdout: JSON.stringify({ question: { id: 'q-3', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
+  const powershellAsk = wo.postToolUpdate(context, { tool_name: 'PowerShell', tool_input: { command: `zensu work ask ${ORDER} --category scope --question "x" --blocking --json` }, tool_response: escalated }, { env: box.env });
+  assert.equal(powershellAsk.cancelRun, null);
+  assert.equal(powershellAsk.additionalContext, null);
+  assert.equal(fs.existsSync(context.files.ended), false);
   wo.markerRun(context, RUN);
   writeRun(box, 'TDD_RUNNING', DONE_LEDGER.slice(0, 3));
   const response = { stdout: JSON.stringify({ question: { id: 'q-2', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
