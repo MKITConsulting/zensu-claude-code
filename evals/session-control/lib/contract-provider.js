@@ -508,7 +508,7 @@ function provePrincipalAndPreToolContracts(options) {
       }
     }
 
-    const neutralAllowance = `a neutral subagent may use only ${[...capability.HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...capability.HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
+    const neutralAllowance = `a neutral subagent may use only ${[...capability.HOST_PROFILE_TOOLS].join(', ')}, Bash behind an accident guard, the MCP tools ${[...capability.HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
     for (const [toolName, toolInput] of [
       ['Skill', { skill: 'zensu:doctor' }],
       ['Monitor', { command: 'sleep 1', description: 'wait for a process' }],

@@ -112,13 +112,6 @@
             "--test-name-pattern=attests exact hook identities beyond Number inode precision"
           ],
           "timeoutMs": 180000
-        },
-        {
-          "id": "versioned-plugin-upgrade",
-          "runner": "bash",
-          "path": "tests/structure/test-versioned-plugin-upgrade.sh",
-          "args": [],
-          "timeoutMs": 900000
         }
       ]
     },
@@ -329,6 +322,13 @@
       "platform": "win32",
       "profileTimeoutMs": 1800000,
       "suites": [
+        {
+          "id": "versioned-plugin-upgrade",
+          "runner": "bash",
+          "path": "tests/structure/test-versioned-plugin-upgrade.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
         {
           "id": "stop-enforcer-self-review-routing",
           "runner": "bash",

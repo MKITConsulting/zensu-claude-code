@@ -338,20 +338,20 @@ an unknown requirement. The SIBLING moved instead, to `windows-shard-8`, which m
 196 s job against the same 1800000 budget after `session-trail-lineage` came down to 154673 ms
 — the same rebalance-rather-than-add move this file records for that suite, and it costs no
 new CI job because a suite moving between existing profiles changes no key in
-`expectedProfiles`. `stop-enforcer-self-review-routing` now holds `windows-shard-7` ALONE at
+`expectedProfiles`. `stop-enforcer-self-review-routing` then held `windows-shard-7` ALONE at
 `timeoutMs: 1740000`, deliberately below the 1800000 profile budget so an overrun still
-surfaces as a visible suite `TIMED_OUT` rather than as a profile abort that truncates the
+surfaced as a visible suite `TIMED_OUT` rather than as a profile abort that truncated the
 tail silently.
 
-**The green figure arrived on the very next run and is now the one to budget against:
+**The green figure arrived on the very next run and was then the one to budget against:
 `PASSED stop-enforcer-self-review-routing (1482704ms)`**, alone on `windows-shard-7`, with
 the whole shard job at 1579 s. Two things about it are worth keeping. It is BELOW the
 1500000 cap the previous run breached at 1500157 ms, so the failure was the documented 29%
 spread landing on its slow side rather than a step change — which is exactly why a single
 sample must not be read as headroom. And 1482704 against 1740000 is **85% of cap**, the same
-share this section already called too tight at the old ceiling; the difference is that the
-suite now holds the shard alone, so the only other bound is the 1800000 profile budget it
-no longer shares. Treat further growth here as needing a shard of its own, not another
+share this section already called too tight at the old ceiling; the difference was that the
+suite then held the shard alone, so the only other bound was the 1800000 profile budget it
+no longer shared. Treat further growth here as needing a shard of its own, not another
 raise. The sibling measured `PASSED review-worker-evidence-lease (113321ms)` on
 `windows-shard-8`, whose two suites together came to roughly 265 s against 1800000.
 
@@ -381,8 +381,9 @@ a runner 29% slower than the green one was enough. Two changes landed together:
 - The note lifecycle — T23-T25, T27-T32 and T35 — moved to
   `tests/structure/test-stop-enforcer-reviewer-denial-note.sh`, on a new `windows-shard-9`
   that it held alone until `deferred-lease-refresh` joined it (see below). The routing file
-  keeps T1-T22, T26, T33-T34 and T36-T59, alone on `windows-shard-7`, and lost a trailing
-  `start_session` that no check read.
+  keeps T1-T22, T26, T33-T34 and T36-T59 on `windows-shard-7`, which it held alone until
+  `versioned-plugin-upgrade` joined it (see below), and lost a trailing `start_session` that
+  no check read.
 - T24 and T30 configure `autoFixMaxRounds: 1`, the floor `zensu-config.sh` accepts, so each
   reaches a cap of 4 in five Stops instead of a cap of 8 in nine. That is the idiom
   `test-deferred-review-claim.sh` and `test-autopilot-stop-enforcer.sh` already use for
@@ -404,12 +405,22 @@ cheaper check — never by a raise past its measured range.
 
 **The note part no longer has `windows-shard-9` to itself.** `deferred-lease-refresh` (cap
 900000 ms) moved in AHEAD of it when `windows-shard-1` ran out of room, so the 600 s of unspent
-envelope above now holds only for the routing part. That suite took 735535-780910 ms on the runs
+envelope above no longer holds for the note part. That suite took 735535-780910 ms on the runs
 that forced the move, which left the note part a grant just under 1019-1064 s against its own
 626985-713658 ms on the same runs. On shard 9 the envelope, not the 1200000 ms cap, therefore
 bounds the note part. It runs LAST because its cap is the larger one: an overrun of either suite
 surfaces as that suite's own `TIMED_OUT` instead of starving the other. The run ids and the shard
 sums are in `.claude/rules/windows-budget-best-solution-first.md`.
+
+**The routing part no longer has `windows-shard-7` to itself either.** `versioned-plugin-upgrade`
+(cap 900000 ms) moved in AHEAD of it when `windows-shard-2` ran out of room. On the 29 all-green
+runs from 38309344682 to 38432294025 that suite took 247-480 s and the routing part 383-630 s. So
+the 600 s of unspent envelope above no longer holds for the routing part either: a run of it to
+its cap would have left 120-353 s of the envelope on those runs. While that suite stays under
+600 s, the routing part's 1200000 ms cap still binds before the envelope. A run of that suite to
+its own cap, plus the up to 45 s `tests/run-profile.js` spends ending it, leaves the routing part
+about 855-900 s, still above its slowest figure. The routing part stays LAST because its cap is
+the larger one. The shard sums are in `.claude/rules/windows-budget-best-solution-first.md`.
 
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose

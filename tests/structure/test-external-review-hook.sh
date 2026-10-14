@@ -56,10 +56,10 @@ else
   check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
   sed -n '1,60p' "$WORK/unit.out"
 fi
-if unit_cases_registered_floor "$WORK/unit.out" 36; then
-  check "X0c the unit suite registered at least 36 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
+if unit_cases_registered_floor "$WORK/unit.out" 41; then
+  check "X0c the unit suite registered at least 41 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
 else
-  check "X0c the unit suite registered at least 36 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "X0c the unit suite registered at least 41 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
 fi
 if UNIT_OVERVIEW="$(unit_overview_check "$UNIT")"; then
   check "X0d the SUITE-OVERVIEW Blocks cell matches what external-review-v1.test.js registers" PASS
@@ -103,6 +103,15 @@ if grep -qF 'and an `EXT-<n>` finding the merge kept with the anchor `-` is neve
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" PASS
 else
   check "X26 the verification gate defers an unanchored imported finding to ## Open instead of neutralizing or routing it" FAIL
+fi
+if grep -qF 'first run `CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/hooks/lib/zensu-log.sh" --external-review --stage --root "$TOP"`, which copies the shipped template into this session'"'"'s `.zensu/state/` and verifies the copy'"'"'s digest' "$SKILL_FILE" \
+  && grep -qF 'Then launch the file its `script=` names (the rest of that line) through the Workflow `scriptPath`' "$SKILL_FILE" \
+  && grep -qF 'with `args` an object of `tree` (the `tree=` value of the same line)' "$SKILL_FILE" \
+  && ! grep -qF 'launch `{plugin_root}/templates/workflows/zensu-review-v1.js` through the Workflow `scriptPath`' "$SKILL_FILE" \
+  && grep -qF '`zensu-log.sh --external-review --stage --root <top>`, which copies the template into the' "$PLUGIN_DIR/docs/review-chain.md"; then
+  check "X27 step 3 and the operator account launch the copy --external-review --stage prints, never the template under the plugin root" PASS
+else
+  check "X27 step 3 and the operator account launch the copy --external-review --stage prints, never the template under the plugin root" FAIL
 fi
 rm -f "$SKILL_FILE"
 
@@ -217,13 +226,26 @@ else
   check "X7a tree (rc=$RC out=$TREE_LINE err=$(cat "$WORK/tree.err"))" FAIL
 fi
 
+TEMPLATE_FILE="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js"
+STAGE_LINE="$(bash "$LOG" --external-review --stage --root "$PROJ" </dev/null 2>"$WORK/stage.err")"; RC=$?
+STAGED_EXPECTED="$PROJ/.zensu/state/zensu-review-v1-$ZENSU_SESSION_KEY.js"
+TREE_AFTER="$(bash "$LOG" --external-review --tree --root "$PROJ" </dev/null 2>/dev/null)"
+if [ "$RC" -eq 0 ] && [ "$STAGE_LINE" = "EXTERNAL REVIEW — stage=ok tree=$TREE_ID script=$STAGED_EXPECTED" ] \
+  && cmp -s "$STAGED_EXPECTED" "$TEMPLATE_FILE" && [ "$TREE_AFTER" = "$TREE_LINE" ]; then
+  check "X7d --external-review --stage copies the template byte for byte into the session's .zensu/state and prints the tree and that path" PASS
+  LAUNCH_SCRIPT="$STAGED_EXPECTED"
+else
+  check "X7d stage (rc=$RC out=$STAGE_LINE tree-after=$TREE_AFTER err=$(cat "$WORK/stage.err"))" FAIL
+  LAUNCH_SCRIPT="$TEMPLATE_FILE"
+fi
+
 RUN_TASK="wabc1234"
 RUN_DIR="$WORK/runs/projects/session/subagents/workflows/wf_abc12345-run"
 RUN_RECORD="$WORK/runs/projects/session/workflows/wf_abc12345-run.json"
 RUN_OUTPUT="$WORK/runs/tasks/$RUN_TASK.output"
 mkdir -p "$RUN_DIR" "$WORK/runs/tasks" "$(dirname "$RUN_RECORD")"
 write_run_record() {
-  RUN_STATUS="$1" RUN_TREE="$TREE_ID" RUN_TASK="$RUN_TASK" RUN_RECORD="$RUN_RECORD" TEMPLATE_PATH="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js" node -e '
+  RUN_STATUS="$1" RUN_TREE="$TREE_ID" RUN_TASK="$RUN_TASK" RUN_RECORD="$RUN_RECORD" TEMPLATE_PATH="$LAUNCH_SCRIPT" node -e '
     const fs = require("fs");
     const finding = {
       id: "correctness-1", lens: "correctness", title: "Off-by-one in the loader", severity: "IMPORTANT", file: "src/a.js", line: 1,
@@ -258,7 +280,7 @@ RUN_DIR="$RUN_DIR" RUN_OUTPUT="$RUN_OUTPUT" node -e '
 write_run_record running
 
 sleep 1
-TEMPLATE_PATH="$PLUGIN_DIR/templates/workflows/zensu-review-v1.js" RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
+TEMPLATE_PATH="$LAUNCH_SCRIPT" RUN_TASK="$RUN_TASK" RUN_DIR="$RUN_DIR" launch_payload "$VERB_RAW" run | CLAUDE_PLUGIN_DATA="$VERB_DATA" bash "$HOOK" >/dev/null 2>&1
 OUT="$(verb $'src/a.js\n.zensu/state/x.json\n')"; RC=$?
 if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qE '^EXTERNAL REVIEW — status=unavailable reason=run-not-completed launches=1/1 selected=zensu-review-v1@[^ ]+ id=xr1_[0-9]{13}_[0-9a-f]{12} .* excluded=1 .* detail=run-status-running$' \
   && printf '%s' "$OUT" | grep -qE " task=$RUN_TASK fresh$" \
@@ -329,6 +351,20 @@ else
   check "X9c tree off (off=$TREE_OFF judge-off=$TREE_JUDGE_OFF)" FAIL
 fi
 
+TOP_RERUN="re-run with --root set to the top level that git -C <project root> rev-parse --show-toplevel prints"
+rm -f "$STAGED_EXPECTED"
+STAGE_OFF="$(ZENSU_CONFIG="$OFF_CONFIG" bash "$LOG" --external-review --stage --root "$PROJ" </dev/null 2>/dev/null)"
+STAGE_JUDGE_OFF="$(ZENSU_CONFIG="$JUDGE_OFF_CONFIG" bash "$LOG" --external-review --stage --root "$PROJ" </dev/null 2>/dev/null)"
+STAGE_SUBDIR="$(bash "$LOG" --external-review --stage --root "$PROJ/src" </dev/null 2>/dev/null)"
+if [ "$STAGE_OFF" = "EXTERNAL REVIEW — stage=unavailable reason=disabled" ] \
+  && [ "$STAGE_JUDGE_OFF" = "EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled" ] \
+  && [ "$STAGE_SUBDIR" = "EXTERNAL REVIEW — stage=unavailable reason=root layout=subdirectory — the review root lies below the root of this session's work tree, so its tree would cover only part of it; $TOP_RERUN" ] \
+  && [ ! -e "$STAGED_EXPECTED" ]; then
+  check "X9d --stage stages no copy while the import or the judge is off or the root is below the work tree's top level" PASS
+else
+  check "X9d stage off (off=$STAGE_OFF judge-off=$STAGE_JUDGE_OFF subdir=$STAGE_SUBDIR)" FAIL
+fi
+
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review 2>"$WORK/usage.err")"; RC=$?
 OUT2="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ" --bogus 2>/dev/null)"; RC2=$?
 OUT3="$(bash "$LOG" --external-review --tree --root "$PROJ" --result "$RUN_OUTPUT" </dev/null 2>"$WORK/usage3.err")"; RC3=$?
@@ -341,7 +377,15 @@ else
   check "X10 usage (rc=$RC rc2=$RC2 rc3=$RC3 rc4=$RC4)" FAIL
 fi
 
-TOP_RERUN="re-run with --root set to the top level that git -C <project root> rev-parse --show-toplevel prints"
+OUT5="$(bash "$LOG" --external-review --stage --root "$PROJ" --result "$RUN_OUTPUT" </dev/null 2>"$WORK/usage5.err")"; RC5=$?
+OUT6="$(bash "$LOG" --external-review --tree --stage --root "$PROJ" </dev/null 2>"$WORK/usage6.err")"; RC6=$?
+if [ "$RC5" -eq 2 ] && [ -z "$OUT5" ] && grep -qF -- '--stage takes only --root' "$WORK/usage5.err" \
+  && [ "$RC6" -eq 2 ] && [ -z "$OUT6" ] && grep -qF -- '--tree and --stage exclude each other' "$WORK/usage6.err"; then
+  check "X10b --stage with a result and --stage beside --tree are usage errors (exit 2)" PASS
+else
+  check "X10b stage usage (rc5=$RC5 rc6=$RC6 out5=$OUT5 out6=$OUT6)" FAIL
+fi
+
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ/src" 2>/dev/null)"; RC=$?
 OUT2="$(printf '../escape.js\n' | bash "$LOG" --external-review --root "$PROJ" 2>/dev/null)"
 if [ "$RC" -eq 0 ] && [ "$OUT" = "EXTERNAL REVIEW — status=unavailable reason=root layout=subdirectory — the review root lies below the root of this session's work tree, so its tree would cover only part of it; $TOP_RERUN" ] \
