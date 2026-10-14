@@ -552,12 +552,12 @@ on its own:
 | Profile | Suites | Members |
 |---|---|---|
 | `windows-shard-1` | 6 | autopilot-state-machine, installed-plugin-provisioner, tdd-no-flock-external-lease, upgrade-linux-sandbox-host-paths, windows-ci-metadata-contract, workflow-checkout-credentials |
-| `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
+| `windows-shard-2` | 7 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity |
 | `windows-shard-3` | 7 | autopilot-release-cli, deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
 | `windows-shard-4` | 3 | best-solution-first, deferred-claim-adoption, tdd-state-junction-safety |
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 6 | autopilot-bound-payload-windows, bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
-| `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
+| `windows-shard-7` | 2 | versioned-plugin-upgrade, stop-enforcer-self-review-routing |
 | `windows-shard-8` | 4 | deferred-review-fallback, session-trail-lineage, review-worker-evidence-lease, plan-payload-path-transport |
 | `windows-shard-9` | 2 | deferred-lease-refresh, stop-enforcer-reviewer-denial-note |
 

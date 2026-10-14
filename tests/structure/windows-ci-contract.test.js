@@ -28,7 +28,7 @@ const expectedProfiles = [
   'windows-shard-4',
   'windows-shard-5',
   'windows-shard-6',
-  // Shard 7 is solo for the same reason shard 8 is, and it got there the same way.
+  // Shard 7 was solo for the same reason shard 8 was, and it got there the same way.
   // `stop-enforcer-self-review-routing` carried a 1500000 ms cap against a measured
   // 1487825 ms (run 33433936017, green on main) — 99.2% of its own ceiling, which is
   // "budget AT the measurement", the error the shard-8 note below ends by naming. The
@@ -131,9 +131,11 @@ const expectedShardHomes = {
   'autopilot-bound-payload-windows': 'windows-shard-6',
   'deferred-review-fallback': 'windows-shard-8',
   'deferred-lease-refresh': 'windows-shard-9',
+  'versioned-plugin-upgrade': 'windows-shard-7',
 };
 const expectedShardTails = {
   'windows-shard-4': 'deferred-claim-adoption',
+  'windows-shard-7': 'stop-enforcer-self-review-routing',
   'windows-shard-8': 'plan-payload-path-transport',
   'windows-shard-9': 'stop-enforcer-reviewer-denial-note',
 };
