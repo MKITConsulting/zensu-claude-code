@@ -231,11 +231,13 @@ reason() {
 
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const reg=require(process.argv[2]);
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"") && z.timeout===60));
+  const covers=(e,tool)=>reg.hostMatcherCovers(e.matcher,tool)===reg.REGISTRATION.REGISTERED;
+  const ok=pres.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"") && z.timeout===60));
   process.exit(ok?0:1);
-' "$HOOKS_JSON" 2>/dev/null \
-  && check "W4 registered as PreToolUse Bash matcher with timeout 60" PASS || check "W4 registered as PreToolUse Bash matcher with timeout 60" FAIL
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null \
+  && check "W4 registered on a PreToolUse matcher covering Bash and PowerShell with timeout 60" PASS || check "W4 registered on a PreToolUse matcher covering Bash and PowerShell with timeout 60" FAIL
 
 { grep -qF 'zensu_hook_opted_in bashWriteGate || exit 0' "$HOOK" \
   && ! grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK"; } \
@@ -337,8 +339,8 @@ source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test \
   || { check "W0 session-control baseline bootstrap" FAIL; echo "----"; echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"; exit 1; }
 
 payload() {
-  CMD="$1" CWD="${2:-$PROJ}" node -e '
-    const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
+  CMD="$1" CWD="${2:-$PROJ}" TOOL="${3:-Bash}" node -e '
+    const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
     process.stdout.write(JSON.stringify(o));
   '
 }
@@ -1383,6 +1385,70 @@ OUT_UNBOUND_ESCAPE="$(payload "printf x >> src/app.rs" "$PROJ" | env CLAUDE_PLUG
 [ "$OUT_UNBOUND_ESCAPE" = "ALLOW" ] \
   && check "W89 unbound + process-env escape -> ALLOW" PASS \
   || check "W89 unbound process-env escape (got '$OUT_UNBOUND_ESCAPE')" FAIL
+
+psrun() {
+  local label="$1" cmd="$2" exp="$3" cfg="${4:-$CFG_ON}"
+  local out
+  out="$(payload "$cmd" "$PROJ" PowerShell | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+        -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+        CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
+        ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
+}
+psrun "WP1 PowerShell rebind of a Session Control input with the gate off"   "\$env:ZENSU_SESSION_KEY = 'x'"                      DENY "$CFG_OFF"
+psrun "WP2 PowerShell SetEnvironmentVariable under a run-time name"           "[Environment]::SetEnvironmentVariable(\$n, 'x')"     DENY "$CFG_OFF"
+psrun "WP3 PowerShell write to the CLAUDE_ENV_FILE path"                       "Add-Content -Path '$PROJ/.claude-env' -Value 'x'"   DENY "$CFG_OFF"
+psrun "WP4 PowerShell Environment provider path built at run time"           "Set-Item \"env:\$n\" 1"                             DENY "$CFG_OFF"
+psrun "WP5 PowerShell Invoke-Expression of text built at run time"           "iex \$code"                                        DENY "$CFG_OFF"
+psrun "WP6 PowerShell unrelated environment variable with the gate off"      "\$env:OTHER = 'x'; Get-ChildItem"                  ALLOW "$CFG_OFF"
+psrun "WP7 PowerShell write with the gate off"                               "Set-Content src/app.rs 'x'"                        ALLOW "$CFG_OFF"
+psrun "WP8 PowerShell read-only pipeline with the gate on"                   "Get-ChildItem -Recurse | Select-String fn"         ALLOW
+psrun "WP9 PowerShell write cmdlet with the gate on"                         "Set-Content src/app.rs 'x'"                        DENY
+psrun "WP10 PowerShell redirection into a file with the gate on"             "Get-Content src/app.rs > src/copy.rs"              DENY
+psrun "WP11 PowerShell native program with the gate on"                      "git status"                                        DENY
+psrun "WP12 PowerShell redirection to the null device with the gate on"      "Get-ChildItem 2>\$null"                            ALLOW
+WP_CONTROL="$(payload "\$env:ZENSU_SESSION_KEY = 'x'" "$PROJ" PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_OFF" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$WP_CONTROL" | grep -qF 'Blocked a PowerShell command because it names the protected Session Control input ZENSU_SESSION_KEY' \
+  && printf '%s' "$WP_CONTROL" | grep -qF 'run it through the Bash tool' \
+  && ! printf '%s' "$WP_CONTROL" | grep -qF 'hooks.bashWriteGate'; } \
+  && check "WP13 the PowerShell control deny names the input and the Bash tool" PASS \
+  || check "WP13 PowerShell control deny wording (got '$WP_CONTROL')" FAIL
+WP_CHILD="$(node -e 'process.stdout.write(JSON.stringify({tool_name:"PowerShell",agent_id:"a1",agent_type:"general-purpose",tool_input:{command:"iex $code"},cwd:"/tmp"}))' \
+  | BSWG_MODE=control PAYLOAD= node "$PARSER" 2>/dev/null)"
+{ printf '%s' "$WP_CHILD" | grep -qF 'report the need to the main thread' && ! printf '%s' "$WP_CHILD" | grep -qF 'Bash tool'; } \
+  && check "WP14 the PowerShell control deny sends a subagent to the main thread" PASS \
+  || check "WP14 PowerShell control deny for a subagent (got '$WP_CHILD')" FAIL
+WP_RULES="$(payload "Set-Content src/app.rs 'x'" "$PROJ" PowerShell | env -u ZENSU_PROJECT_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$WP_RULES" | grep -qF 'source-write rules cannot judge, because Set-Content is not a read-only command' \
+  && printf '%s' "$WP_RULES" | grep -qF 'Run it through the Bash tool, or change files with Edit or Write.' \
+  && printf '%s' "$WP_RULES" | grep -qF 'hooks.bashWriteGate is true' \
+  && ! printf '%s' "$WP_RULES" | grep -qF 'ZENSU_BASH_WRITE_GATE'; } \
+  && check "WP15 the PowerShell rules deny names the refused command, the Bash tool and the opt-in key" PASS \
+  || check "WP15 PowerShell rules deny wording (got '$WP_RULES')" FAIL
+WP_UNBOUND="$(payload "Set-Content src/never-created-here.rs 'x'" "$PROJ" PowerShell | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+WP_UNBOUND_READ="$(payload "Get-ChildItem -Recurse" "$PROJ" PowerShell | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$WP_UNBOUND" | grep -qF 'WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only' && [ -z "$WP_UNBOUND_READ" ]; } \
+  && check "WP16 unbound without CLAUDE_PROJECT_DIR a PowerShell write denies and a PowerShell read passes" PASS \
+  || check "WP16 unbound PowerShell (write='$WP_UNBOUND' read='$WP_UNBOUND_READ')" FAIL
+WP_COPY="$WORKROOT/powershell-module-missing"
+mkdir -p "$WP_COPY"
+cp -R "$PLUGIN_DIR/hooks" "$WP_COPY/hooks"
+rm -f "$WP_COPY/hooks/lib/powershell-command-v1.js"
+WP_MISSING="$(payload "Get-ChildItem" "$PROJ" PowerShell | env CLAUDE_PLUGIN_ROOT="$WP_COPY" CLAUDE_PROJECT_DIR="$PROJ" \
+  ZENSU_CONFIG="$CFG_OFF" bash "$WP_COPY/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
+WP_MISSING_BASH="$(payload "ls" "$PROJ" | env CLAUDE_PLUGIN_ROOT="$WP_COPY" CLAUDE_PROJECT_DIR="$PROJ" \
+  ZENSU_CONFIG="$CFG_OFF" bash "$WP_COPY/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
+{ [ ! -e "$WP_COPY/hooks/lib/powershell-command-v1.js" ] \
+  && printf '%s' "$WP_MISSING" | grep -qF 'could not validate protected Session Control bindings' && [ -z "$WP_MISSING_BASH" ]; } \
+  && check "WP17 without the analyzer every PowerShell call denies and a Bash call is unaffected" PASS \
+  || check "WP17 analyzer-less copy (powershell='$WP_MISSING' bash='$WP_MISSING_BASH')" FAIL
+rm -rf "$WP_COPY"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_UNSET" "$CFG_QUOTED"
 

@@ -59,8 +59,8 @@ done
   || check "V2b node --check passes for the four modules, both helpers and the five unit files" FAIL
 
 MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT_MATCHER))' "$MODULE" 2>/dev/null)"
-[ "$MATCHER" = "Bash" ] && check "V3 the module's CONSENT_MATCHER is Bash" PASS \
-  || check "V3 the module's CONSENT_MATCHER is Bash (got: ${MATCHER:-<none>})" FAIL
+[ "$MATCHER" = "Bash|PowerShell" ] && check "V3 the module's CONSENT_MATCHER is Bash|PowerShell" PASS \
+  || check "V3 the module's CONSENT_MATCHER is Bash|PowerShell (got: ${MATCHER:-<none>})" FAIL
 if node -e '
   const [file, matcher] = process.argv.slice(1);
   const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
@@ -1354,8 +1354,8 @@ if printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'When `hooks/lib/zensu-browser-cons
 else
   check "V60 both consent hook rows in docs/configuration.md state the prefilter-library fallback" FAIL
 fi
-if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Before it judges the target it runs the readiness check of the run-config helper: both consent hooks must be registered on a matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH` of the caller must name the measured version, and no empty or relative `PATH` entry may come before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that terminal.' \
-  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'both consent hooks must be registered on a matcher that covers `Bash`, and the `@playwright/cli` manifest' \
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Before it judges the target it runs the readiness check of the run-config helper: both consent hooks must be registered on a matcher that covers `Bash` and `PowerShell`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH` of the caller must name the measured version, and no empty or relative `PATH` entry may come before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that terminal.' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'both consent hooks must be registered on a matcher that covers `Bash` and `PowerShell`, and the `@playwright/cli` manifest' \
   && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF '| `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |'; then
   check "V61 the preflight section of docs/verify-feature.md names the readiness check that runs before the target is judged" PASS
 else
@@ -1518,6 +1518,23 @@ if [ -z "$SHELL_STATE_MISSING" ]; then
 else
   check "V66 the docs say a function is denied only when the command defines it, and the version is checked only when the helper runs (missing:$SHELL_STATE_MISSING)" FAIL
 fi
+
+PS_EXTRA='{"tool_name":"PowerShell"}'
+PS_MEMORY_BEFORE="$(memory_count)"
+[ "$(pre_verdict "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70 the real pre hook denies a PowerShell call that names playwright-cli and a zensu-verify session" PASS \
+  || check "V70 the real pre hook denies a PowerShell call that names playwright-cli and a zensu-verify session" FAIL
+case "$(pre_reason "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'a zensu-verify browser call runs through the Bash tool only'*'use the Grep tool or a message file'*) check "V70b the PowerShell deny names the Bash tool and the Grep tool" PASS ;;
+  *) check "V70b the PowerShell deny names the Bash tool and the Grep tool" FAIL ;;
+esac
+[ "$(pre_verdict "Get-ChildItem -Recurse" "$SID" "$PROJ" "$PS_EXTRA")" = "NONE" ] \
+  && check "V70c a PowerShell call without the markers reaches no decision" PASS \
+  || check "V70c a PowerShell call without the markers reaches no decision" FAIL
+post_run "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA" >/dev/null
+[ "$(memory_count)" = "$PS_MEMORY_BEFORE" ] \
+  && check "V70d the recorder writes no consent record for a PowerShell call" PASS \
+  || check "V70d the recorder writes no consent record for a PowerShell call (before=$PS_MEMORY_BEFORE after=$(memory_count))" FAIL
 
 echo "----"
 if [ "$SKIP" -gt 0 ]; then

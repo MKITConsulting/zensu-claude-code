@@ -165,8 +165,17 @@ case "$(PS_RUN "$PS_GAP_ROOT" startup 0)" in
   *) check "B16c CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the warning" PASS ;;
 esac
 case "$(PS_RUN "$PS_COVERED_ROOT" startup 1)" in
-  *'PowerShell tool'*) check "B16d a hook registered on Bash|PowerShell raises no warning" FAIL ;;
-  *) check "B16d a hook registered on Bash|PowerShell raises no warning" PASS ;;
+  *'zensu: ⚠ PowerShell tool'*) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" FAIL ;;
+  *'zensu: PowerShell tool — '*'judge PowerShell commands too'*'Use the Bash tool'*'hooks.bashWriteGate'*) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" PASS ;;
+  *) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" FAIL ;;
+esac
+case "$(PS_RUN "$PS_COVERED_ROOT" startup 1 "$PS_QUIET_CONFIG")" in
+  *'PowerShell tool'*) check "B16h the Bash-tool guidance sits below the sessionBanner gate" FAIL ;;
+  *) check "B16h the Bash-tool guidance sits below the sessionBanner gate" PASS ;;
+esac
+case "$(PS_RUN "$PS_COVERED_ROOT" startup 0)" in
+  *'PowerShell tool'*) check "B16h2 CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the Bash-tool guidance" FAIL ;;
+  *) check "B16h2 CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the Bash-tool guidance" PASS ;;
 esac
 PS_DEFAULT="$(PS_RUN "$PS_GAP_ROOT" startup unset)"
 if [ "$(node -p 'process.platform')" = "win32" ]; then
@@ -183,10 +192,11 @@ fi
 PS_EXPECTED="$(node -e '
   const m = require(process.argv[1]);
   const manifest = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
-  process.stdout.write(m.bannerLine(manifest, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, process.platform));
+  const environment = { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" };
+  process.stdout.write(m.bannerLine(manifest, environment, process.platform) || m.steerLine(manifest, environment, process.platform));
 ' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$HOOKS_JSON" 2>/dev/null)"
-PS_REAL="$(printf '%s' '{"source":"startup"}' | CLAUDE_CODE_USE_POWERSHELL_TOOL=1 bash "$BANNER" 2>/dev/null | grep -F 'zensu: ⚠ PowerShell tool' || true)"
-[ "$PS_REAL" = "$PS_EXPECTED" ] \
+PS_REAL="$(printf '%s' '{"source":"startup"}' | CLAUDE_CODE_USE_POWERSHELL_TOOL=1 bash "$BANNER" 2>/dev/null | grep -E '^zensu: (⚠ )?PowerShell tool' || true)"
+{ [ -n "$PS_EXPECTED" ] && [ "$PS_REAL" = "$PS_EXPECTED" ]; } \
   && check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json" PASS \
   || check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json (banner: $PS_REAL; module: $PS_EXPECTED)" FAIL
 if node -e '
@@ -201,6 +211,12 @@ if node -e '
     && m.bannerLine(both, {}, "win32") === ""
     && m.bannerLine(all, {}, "win32") === ""
     && m.bannerLine(null, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux").includes("could not read hooks/hooks.json")
+    && m.steerLine(both, {}, "win32").includes("Use the Bash tool")
+    && m.steerLine(both, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux") === m.steerLine(both, {}, "win32")
+    && m.steerLine(both, {}, "darwin") === ""
+    && m.steerLine(both, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" }, "win32") === ""
+    && m.steerLine(gap, {}, "win32") === ""
+    && m.steerLine(null, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux") === ""
     && m.shellCoverage({ hooks: [] }) === null
     && m.shellCoverage({}).gaps.length === 0;
   process.exit(ok ? 0 : 1);

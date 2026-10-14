@@ -123,7 +123,9 @@ WebSocket connection is not fenced by it, which is an open gap — blocks servic
 keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
-The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
+The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
+it refuses a PowerShell call that names the CLI and a `zensu-verify` session: run every browser
+call through the Bash tool. It is a textual gate: it judges a
 `playwright-cli` call on a `zensu-verify` session before it runs only when the command text
 names the CLI and that session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
@@ -329,7 +331,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <lo
 
 Each form judges its target as the gate judges that kind of origin, and starts no browser. Before it judges the target
 it runs the readiness check of the run-config helper: both consent hooks must be registered on a
-matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
+matcher that covers `Bash` and `PowerShell`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
 of the caller must name the measured version, and no empty or relative `PATH` entry may come
 before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
 terminal. Section 5 lists those refusals and their fixes. It prints `policy` when the policy

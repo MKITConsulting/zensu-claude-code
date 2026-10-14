@@ -210,10 +210,11 @@ starts Claude Code: without it, Zensu refuses every tool call. Zensu's hooks are
 bash scripts, which macOS and Linux run as they are. On Windows, run Claude Code
 inside WSL, or install Git for Windows so that Claude Code runs the hooks through
 Git Bash, whichever terminal you start `claude` from. Native Windows without Git
-Bash is not supported. With Git Bash, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`
-in the environment that starts Claude Code or in the `env` block of
-`~/.claude/settings.json`: Zensu's shell-command gates watch only the Bash tool,
-so a command Claude runs through the PowerShell tool skips them.
+Bash is not supported. With Git Bash, Claude Code may run shell commands through
+its PowerShell tool; Zensu's shell-command gates judge those too and refuse a
+PowerShell command they cannot judge, naming the Bash tool. To keep Claude on
+the Bash tool, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` in the environment that
+starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`

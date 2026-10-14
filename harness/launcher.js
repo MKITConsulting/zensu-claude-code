@@ -154,7 +154,7 @@ async function launch(argv, env = process.env) {
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, cancel);
   const child = spawn(options.claude || 'claude', claudeArguments(options), {
     cwd: projectRoot,
-    env,
+    env: { ...env, CLAUDE_CODE_USE_POWERSHELL_TOOL: '0' },
     detached: true,
     stdio: ['ignore', 'pipe', logFd === null ? 'ignore' : logFd],
   });

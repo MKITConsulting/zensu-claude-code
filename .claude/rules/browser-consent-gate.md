@@ -37,10 +37,14 @@ started for every session that loaded the plugin, and each start materialized a 
 of several hundred megabytes whether or not a browser was ever opened — that cost is the whole
 reason for this design, so do not reintroduce a plugin-scoped MCP server to "restore" a control.
 
-The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair on the `Bash`
+The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair on the `Bash|PowerShell`
 matcher (`hooks/pre-browser-navigation-consent.sh`, `hooks/post-browser-navigation-consent.sh`, both
 thin wrappers around `hooks/lib/verify-consent-v1.js` modes `pre`/`post`), and the per-run config
 file the browser is opened with, written by `scripts/verify-browser-config.js`.
+
+**A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
+carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
+tool, and the recorder skips a PowerShell call (`powershell-call`). V70 to V70d pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
@@ -347,7 +351,7 @@ version other than `PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the re
 read, renders WARN and names what was not measured against it; a difference is disclosed, never a
 failure. The verify-feature row runs its availability checks FIRST — hook pair, prefilter library,
 module and helper present, the module no symlink (both hooks refuse one) and loadable, the helper
-loadable, both hooks registered on a matcher that covers `Bash` — and reports `unavailable`
+loadable, both hooks registered on a matcher that covers `Bash` and `PowerShell` — and reports `unavailable`
 before it classifies a policy, so a valid policy over an
 unregistered recorder is not reported as ready. Each hook is named with its own state — "consent
 hook" is the PreToolUse gate, "consent recorder" the PostToolUse half — joined by `; ` when both
@@ -390,7 +394,7 @@ announces a prompt rather than a capability the plugin hands itself.
   derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
-- `CONSENT_MATCHER` (`'Bash'`) ↔ both registrations in `hooks/hooks.json` ↔
+- `CONSENT_MATCHER` (`'Bash|PowerShell'`) and `CONSENT_TOOLS` ↔ both registrations in `hooks/hooks.json` ↔
   `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
   doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
   start (…)` bullet in `skills/doctor/SKILL.md`, which must name every cause those reasons carry

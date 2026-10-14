@@ -1766,6 +1766,8 @@ function gateReason(orderId, finding) {
       return `${lead} The command is refused because ${finding.detail}. Never print, read, unset or override ${TOKEN_VARIABLE}; the helpers read it from the environment themselves.`;
     case 'lease':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
+    case 'powershell':
+      return `${lead} The PowerShell tool is not available here, because this gate judges Bash commands only. Run the command through the Bash tool.`;
     default:
       return `${lead} The command is not allowed in a work-order session.`;
   }
@@ -1781,6 +1783,7 @@ function gateDecision(context, payload, { env = process.env, now = Date.now } = 
   const tool = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   if (ASK_TOOLS.has(tool)) return { code: 'ask', reason: gateReason(orderId, bashFinding('ask', null)) };
   if (CHIP_TOOLS.has(tool)) return { code: 'chip', reason: gateReason(orderId, bashFinding('chip', null)) };
+  if (tool === 'PowerShell') return { code: 'powershell', reason: gateReason(orderId, bashFinding('powershell', null)) };
   let analysis = { deny: null, forge: false };
   if (tool === 'Bash') {
     analysis = analyzeBash(isObject(payload.tool_input) ? payload.tool_input.command : '');

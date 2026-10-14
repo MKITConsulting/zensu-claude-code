@@ -15,6 +15,7 @@ const RANK = Object.freeze({
   [REGISTRATION.REGISTERED]: 2,
 });
 const REMEDY = 'set CLAUDE_CODE_USE_POWERSHELL_TOOL=0 in your environment or in the env block of ~/.claude/settings.json, then start a new session';
+const STEER = "zensu: PowerShell tool — Zensu's shell hooks judge PowerShell commands too, and each refuses a PowerShell command it cannot judge. Use the Bash tool for a zensu CLI call that another command starts or that builds its noun or verb at run time, for a command that names a Session Control input such as ZENSU_SESSION_KEY or turns text built at run time into code, for zensu-verify playwright-cli calls, and for any command that is not read-only while hooks.bashWriteGate is on.";
 
 function powershellToolState(environment, platform) {
   const value = environment && typeof environment.CLAUDE_CODE_USE_POWERSHELL_TOOL === 'string'
@@ -96,10 +97,17 @@ function bannerLine(manifest, environment, platform) {
   return bannerText(state, coverage);
 }
 
+function steerLine(manifest, environment, platform) {
+  if (!mayRunPowerShell(powershellToolState(environment, platform))) return '';
+  const coverage = shellCoverage(manifest);
+  return coverage !== null && coverage.gaps.length === 0 ? STEER : '';
+}
+
 if (require.main === module) {
   const [mode, file] = process.argv.slice(2);
   if (mode === 'banner' && typeof file === 'string' && file !== '') {
-    const text = bannerLine(readManifest(file), process.env, process.platform);
+    const manifest = readManifest(file);
+    const text = bannerLine(manifest, process.env, process.platform) || steerLine(manifest, process.env, process.platform);
     if (text) process.stdout.write(`${text}\n`);
   }
 } else {
@@ -113,5 +121,6 @@ if (require.main === module) {
     mayRunPowerShell,
     powershellToolState,
     shellCoverage,
+    steerLine,
   };
 }

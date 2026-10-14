@@ -231,7 +231,7 @@ It prints `policy` and exits `0` only when the parent policy lists that origin i
 consent-mode run passes instead.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
-`pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
+`pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on both shell tools —
 judges a `playwright-cli` call on a `zensu-verify-*` session before it runs. It is a textual gate: it
 judges the calls whose command text names the CLI and that session, which is one more reason every
 call spells both literally. It denies every

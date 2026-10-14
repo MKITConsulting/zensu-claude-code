@@ -69,7 +69,9 @@ if _zensu_powershell_host && command -v node >/dev/null 2>&1; then
     cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 0
     node ./shell-tool-coverage-v1.js banner ../hooks.json 2>/dev/null
   )"
-  [ -n "$_ZENSU_POWERSHELL_LINE" ] && printf '%s\n' "$_ZENSU_POWERSHELL_LINE"
+  case "$_ZENSU_POWERSHELL_LINE" in
+    ('zensu: ⚠'*) printf '%s\n' "$_ZENSU_POWERSHELL_LINE"; _ZENSU_POWERSHELL_LINE="" ;;
+  esac
 fi
 
 # Whether the delivery-route question can actually be asked. Four conditions, all
@@ -189,6 +191,7 @@ if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/verify-consent-v1.js" ]; then
   echo "zensu: Browser verification — no navigation policy is set, so /zensu:verify-feature runs in consent mode: it drives playwright-cli, and its zensu-verify browser session asks you through the permission prompt once per session for each loopback origin and at every browser start for a remote HTTPS origin; under bypass permissions or dontAsk the prompt cannot be shown, so a remote target there needs the policy. /zensu:doctor checks playwright-cli, the hook registration and the runtime recipe."
 fi
+[ -n "${_ZENSU_POWERSHELL_LINE:-}" ] && printf '%s\n' "$_ZENSU_POWERSHELL_LINE"
 
 
 VERSION="?"

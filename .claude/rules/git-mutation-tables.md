@@ -252,8 +252,9 @@ parser RETURNS a deny reason, so an exception would exit non-zero and the hook's
 branch would deny every Bash call in the session rather than the one command — and
 `/var/folders/x`, a DEFAULT entry of the rule-(B) temp list, is one of the spellings that
 policy throws on. That is the whole reason the split exists; do not "simplify" the parser
-onto `normalizeHostPathInput`. This is the ONE sibling `require` in
-`bash-source-write-parse.js`, taken deliberately so a fourth `within()`↔`isInside()`-style
+onto `normalizeHostPathInput`. This is the one EAGER sibling `require` in
+`bash-source-write-parse.js` (the other, `./powershell-command-v1.js`, loads only for a
+PowerShell payload), taken deliberately so a fourth `within()`↔`isInside()`-style
 hand-copy never has to be maintained; if the module were missing the parser would fail to
 load and its hook would deny, which is the fail-closed direction. W3d pins the delegation,
 pins that no private copy reappears (the parser keeps exactly two `([A-Za-z])` rules of its

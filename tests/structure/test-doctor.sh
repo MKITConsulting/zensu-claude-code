@@ -404,6 +404,13 @@ case "$(shell_row "$SHELL_GAP" default "$SHELL_LONE/zensu-doctor-report.js")" in
   *'⚠️  shell tools: not checked — hooks/lib/shell-tool-coverage-v1.js could not be loaded'*) check "P2p7 a missing coverage module is a missing check, never an all-clear" PASS ;;
   *) check "P2p7 a missing coverage module is a missing check, never an all-clear" FAIL ;;
 esac
+SHELL_NOANALYZER="$SBOX/shell-noanalyzer/hooks/lib"
+mkdir -p "$SHELL_NOANALYZER"
+cp "$REPORT" "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" "$SHELL_NOANALYZER/"
+case "$(shell_row "$SHELL_COVERED" default "$SHELL_NOANALYZER/zensu-doctor-report.js")" in
+  *'⚠️  shell tools: all 1 hooks that fire for the Bash tool also fire for the PowerShell tool, but hooks/lib/powershell-command-v1.js could not be loaded'*'reinstall the plugin'*) check "P2p9 covered hooks without the PowerShell analyzer warn instead of reading green" PASS ;;
+  *) check "P2p9 covered hooks without the PowerShell analyzer warn instead of reading green" FAIL ;;
+esac
 SHELL_REAL_GAPS="$(node -e '
   const m = require(process.argv[1]);
   process.stdout.write(String(m.gapNames(m.shellCoverage(JSON.parse(require("fs").readFileSync(process.argv[2], "utf8")))).length));
@@ -442,8 +449,8 @@ case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not
 case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac
 for VF_UNAV_REASON in \
   'consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin' \
-  'consent hook not registered on the Bash matcher' \
-  'consent recorder not registered on the Bash matcher' \
+  'consent hook not registered on a matcher that covers Bash and PowerShell' \
+  'consent recorder not registered on a matcher that covers Bash and PowerShell' \
   'the consent decision module could not be loaded'
 do
   case "$(verify_row unavailable "$VF_UNAV_REASON")" in
@@ -533,12 +540,12 @@ vf_copy_doctor() { # $1 policy value (may be empty)
 }
 VF_NOREC_OUT="$(vf_copy_doctor)"
 case "$VF_NOREC_OUT" in
-  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
   *) check "P1vl an unregistered consent recorder is named rather than absorbed" FAIL ;;
 esac
 VF_VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}'
 case "$(vf_copy_doctor "$VF_VALID_POLICY")" in
-  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl1 a valid policy does not hide an unregistered consent recorder" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl1 a valid policy does not hide an unregistered consent recorder" PASS ;;
   *) check "P1vl1 a valid policy does not hide an unregistered consent recorder" FAIL ;;
 esac
 node -e '
@@ -561,7 +568,7 @@ node -e '
   && check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" PASS \
   || check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" FAIL
 case "$(vf_copy_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
+  *'❌  verify-feature: cannot start (consent hook not registered on a matcher that covers Bash and PowerShell; consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
   *) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" FAIL ;;
 esac
 rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
@@ -670,22 +677,22 @@ if node -e '
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   let widened = 0;
   for (const group of registry.hooks.PreToolUse || []) {
-    if (group.matcher === "Bash" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
-      group.matcher = "Bash|Read";
+    if (group.matcher === "Bash|PowerShell" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+      group.matcher = "Bash|PowerShell|Read";
       widened += 1;
     }
   }
   if (widened !== 1) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" PASS
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" PASS
 else
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" FAIL
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" FAIL
 fi
 case "$(vf_reg_doctor)" in
-  *'not registered on the Bash matcher'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
-  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" PASS ;;
-  *) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+  *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
+  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" PASS ;;
+  *) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
 esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 if node -e '
@@ -754,7 +761,7 @@ else
   check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" FAIL
 fi
 case "$(vf_reg_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder registration in hooks/hooks.json could not be determined)'*)
+  *'❌  verify-feature: cannot start (consent hook not registered on a matcher that covers Bash and PowerShell; consent recorder registration in hooks/hooks.json could not be determined)'*)
     check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" PASS ;;
   *) check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" FAIL ;;
 esac

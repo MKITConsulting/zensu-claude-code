@@ -699,6 +699,7 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
+  assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
   const context = startedContext(box);
   for (const tool of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) {
@@ -711,6 +712,9 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
+  const powershell = wo.gateDecision(context, payload('PowerShell', 'Get-ChildItem'), { env: box.env });
+  assert.equal(powershell.code, 'powershell');
+  assert.match(powershell.reason, /judges Bash commands only\. Run the command through the Bash tool\.$/);
   wo.markLost(context, { code: 'stale_attempt', via: 'test', at: Date.now() });
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
