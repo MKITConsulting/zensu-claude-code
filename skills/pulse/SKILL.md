@@ -46,7 +46,7 @@ Work as normal. Pulse captures the session at its boundaries (start in Phase 1, 
 **Privacy controls:**
 - Only structured data is recorded (session metadata, feature IDs, file paths)
 - Code content is never recorded
-- Error messages are only logged if the user has enabled `freetext_logging`
+- Error messages and other free text are never recorded
 - Users can disable tracking entirely via privacy settings
 
 ## Phase 3: Session End & Review
@@ -67,7 +67,7 @@ When wrapping up your coding session:
 Pulse is designed as "Your Developer Journal" — personal and private by default:
 
 - **Tracking**: Can be disabled entirely (no data recorded)
-- **Freetext**: Error messages stripped unless explicitly opted in
+- **Free text**: Never recorded, error messages included
 - **Team visibility**: Off by default — your sessions are only visible to you
 - **Retention**: Data auto-expires after 90 days (configurable)
 

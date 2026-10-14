@@ -186,8 +186,8 @@ The `zensu` CLI transmits **product and feature metadata** over HTTPS to
 classifications and OWASP tags, file paths, git SHAs and branch names, vision
 documents, and pulse session metadata.
 
-It does **not** transmit source code or file contents — only paths. Error
-messages are excluded unless `freetext_logging` is explicitly enabled for Pulse.
+It does **not** transmit source code or file contents — only paths. Pulse never
+records error messages or any other free text.
 Pulse sessions are retained for 90 days by default.
 
 ### Self-hosting
