@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data, the installed plugin, the session record, a Zensu config file or a `.zensu` directory, or
   that runs a Zensu session or workflow helper, reads or sets a Session Control selector variable,
   prints the environment, runs a destructive git operation or `claude plugin`, removes or moves
-  the project root, starts a background shell or asks to leave the host sandbox. It prevents
+  the project root, starts a background shell (a detached `tmux` or `screen` session included)
+  or asks to leave the host sandbox. It prevents
   accidents and is not a sandbox. Because it refuses the Zensu helpers, a worker still cannot
   record Zensu workflow state. A neutral subagent can no longer edit a Zensu config layer, and a
   subagent can no longer pass a `zensu` CLI mutation through the inline `ZENSU_MCP_GATE=off`
