@@ -510,6 +510,7 @@ test('the parser stays linear on adversarial input', () => {
     ['leading assignments', "guard.parseScript('a=1 '.repeat(100000), { platform: 'linux' })"],
     ['a long shell flag in the walker', "guard.commandInvocations('zensu features get f1; bash -' + 'c'.repeat(400000) + '1 x', { platform: 'linux' })"],
     ['a long shell flag in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'bash -' + 'c'.repeat(400000) + '1 x' }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
+    ['many comments in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'ls\\n' + '#x\\n'.repeat(600000) }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
   ];
   for (const [label, expression] of shapes) {
     const run = spawnSync(process.execPath, ['-e', `${setup}\n${expression};`], { encoding: 'utf8', timeout: 15000 });

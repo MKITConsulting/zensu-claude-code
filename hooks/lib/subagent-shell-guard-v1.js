@@ -1634,11 +1634,14 @@ function commandInvocations(text, options = {}) {
 }
 
 function withoutComments(text, context) {
-  let visible = text;
+  const parts = [];
+  let last = 0;
   for (const [start, end] of parseScript(text, parseOptions(context)).comments) {
-    visible = `${visible.slice(0, start)}${' '.repeat(end - start)}${visible.slice(end)}`;
+    parts.push(text.slice(last, start), ' '.repeat(end - start));
+    last = end;
   }
-  return visible;
+  parts.push(text.slice(last));
+  return parts.join('');
 }
 
 function textViolation(value, context) {
