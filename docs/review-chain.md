@@ -76,11 +76,15 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   `templates/workflows/zensu-review-v1.js`, the plugin's own review script. A real review on
   a private repository showed why: its model-authored script launched 116 agents and
   reported 22 of its 34 findings as rejected although no verifier had voted on them, because
-  it counted a dead verifier as a no. The main thread launches the template file through the
-  Workflow `scriptPath`, and the import answers `unavailable reason=foreign-script` for a
-  launch whose script is not that file byte for byte, so a copied or edited script is never
-  imported. Its `args` carry the tree id that
-  `zensu-log.sh --external-review --tree --root <top>` prints, the lenses (the active panel's
+  it counted a dead verifier as a no. The Workflow tool loads a `scriptPath` only from the
+  session's working directory or a directory the user added, so it refuses the template inside
+  the plugin's install directory. The main thread therefore runs
+  `zensu-log.sh --external-review --stage --root <top>`, which copies the template into the
+  session's `.zensu/state/` under the session key, verifies the copy's digest and prints the
+  tree id and the copy's path, and launches that copy through the Workflow `scriptPath`. The
+  import compares digests, not paths: it answers `unavailable reason=foreign-script` for a
+  launch whose script is not the template byte for byte, so an edited script is never
+  imported. Its `args` carry the tree id that `--stage` prints, the lenses (the active panel's
   perspectives plus `tests`), the changed files, the REVIEW PACKET v1 the panel would receive,
   an agent ceiling (default 10), a per-lens cap (default 8) and the known deferred findings.
   Its finders and refuters run as `zensu:review-aspect`, so the capability gate confines them

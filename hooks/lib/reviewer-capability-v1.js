@@ -644,8 +644,9 @@ function protectedAccessViolation(payload, trusted) {
   return null;
 }
 
-function hostProfileAllowance() {
-  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
+function hostProfileAllowance(shellGranted) {
+  const shell = shellGranted ? ', Bash behind an accident guard' : '';
+  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}${shell}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
 }
 
 function foldedPath(value) {
@@ -693,6 +694,7 @@ function configLayerViolation(payload, trusted, candidates) {
 function hostProfileToolViolation(payload, trusted, protectedRoots) {
   const tool = payload.tool_name;
   const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)}`;
+  const unlistedViolation = () => `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance(shellGuard.grantRefusal(payload) === null)}`;
   if (shellGuard.isShellCall(payload)) {
     const shell = shellGuard.shellViolation(payload, trusted);
     if (!shell) return null;
@@ -710,10 +712,10 @@ function hostProfileToolViolation(payload, trusted, protectedRoots) {
         : 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
     }
     if (MCP_COMMAND_SEGMENT_RE.test(segment)) return commandViolation();
-    return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+    return unlistedViolation();
   }
   if (HOST_PROFILE_TOOLS.has(tool)) return null;
-  return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+  return unlistedViolation();
 }
 
 function neutralViolation(payload, trusted) {

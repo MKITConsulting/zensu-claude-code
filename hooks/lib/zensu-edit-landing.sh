@@ -502,25 +502,23 @@ EXEMPT_VERIFIED=0
 
 emit() { printf '%s\n' "$1"; }
 
-# Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
-# nothing when it cannot be resolved unambiguously.
-normalize_claim() {
-  local raw="$1" p verdict kind
-  p="$(trim_claim "$raw")"
-  [ -n "$p" ] || return 1
+unredact_claim() {
+  local p="$1" stripped=0
+  UNREDACTED_CLAIM=""
   # The run log is REDACTED on the way in. `zensu-log.sh append` routes every
   # line through `zensu-artifact-redact-v1.js`, whose FIRST rule rewrites the
   # project root to the literal `<project>` — so an author who spells a claim
   # absolutely inside the anchor gets `<project>/src/x.ts` in the log, which has
-  # no leading `/`, never reaches `absolute_claim_verdict`, is in the union under
-  # no spelling, and used to fall through the `*/*` arm verbatim: `EDIT NOT
-  # LANDED` for an edit that DID land, `clean: false`, a refused `--tdd-complete`
-  # and a step 5b b) remedy — land it at the path the claim names — that cannot
-  # be performed. Stripping is sound HERE and only here: the placeholder denotes
-  # the root this run was handed, so the remainder is repo-relative by
-  # construction. Two bounds travel with it. The redactor's `projectRoot` accepts
+  # no leading `/`, never matches the `/*` arm of `normalize_claim`, is in the
+  # union under no spelling, and used to fall through the `*/*` arm verbatim:
+  # `EDIT NOT LANDED` for an edit that DID land, `clean: false`, a refused
+  # `--tdd-complete` and a step 5b b) remedy — land it at the path the claim
+  # names — that cannot be performed. Rebuilding is sound HERE and only here: the
+  # placeholder denotes the root this run was handed, so the claim is rebuilt
+  # under `PROJECT_ABS` and placed by `absolute_claim_verdict` exactly like its
+  # absolute spelling. Two bounds travel with it. The redactor's `projectRoot` accepts
   # an ARRAY and renders every member as the same `<project>`, so a log written
-  # against two roots is ambiguous and this strip silently picks the audited one.
+  # against two roots is ambiguous and this rebuild silently picks the audited one.
   # State that bound UNESTABLISHED rather than closed: an earlier revision said
   # `append` "forces the two authorities to agree through `expectedRoot`
   # whenever `CLAUDE_PROJECT_DIR` is set, which is the normal case", and
@@ -530,37 +528,46 @@ normalize_claim() {
   # word is unverified. This is the one transform in the file that can turn
   # `EDIT NOT LANDED` into `EDIT LANDED`, which is why the bound is stated
   # rather than assumed. And the `~` half is
-  # deliberately NOT stripped — `$HOME` names any home-rooted path, including a
-  # genuine sibling repository, so guessing there would relabel foreign work as
-  # in-anchor. That one stays a stated bound; X16/X16a pin it.
-  _nc_stripped=0
+  # deliberately NOT rebuilt — `$HOME` names any home-rooted path, including a
+  # genuine sibling repository, and nothing records the home the writer redacted
+  # against. That one stays a stated bound; X16/X16a pin it.
   case "$p" in
     '<project>'|'<home>') return 1 ;;
-    '<project>/'*) p="${p#<project>/}"; _nc_stripped=1 ;;
+    '<project>/'*) p="${p#<project>/}"; stripped=1 ;;
     # A literal backslash, written as an escaped character outside quotes: the
     # redactor's `rootSpellings` adds a backslash-separated form of every root,
     # so this is the second half of one rule rather than a second rule.
-    '<project>'\\*) p="${p#<project>\\}"; _nc_stripped=1 ;;
+    '<project>'\\*) p="${p#<project>\\}"; stripped=1 ;;
     # `<home>` is the redactor's THIRD rule and is NOT stripped. It stands for a
     # residual `/Users/<seg>`, `/home/<seg>` or `/root`, which names no
     # particular root this run can resolve — the same reason `~` is not
-    # stripped. Named here so the census is three rules rather than the two it
+    # rebuilt. Named here so the census is three rules rather than the two it
     # read as, and REFUSED rather than falling through to be graded relative.
     '<home>/'*|'<home>'\\*) return 1 ;;
   esac
-  if [ "$_nc_stripped" -eq 1 ]; then
+  if [ "$stripped" -eq 1 ]; then
     [ -n "$p" ] || return 1
     # Re-checked, and ONLY for a stripped remainder — an ordinary absolute claim
-    # is the next `case`'s business and must not be refused here. This is the
-    # one non-absolute spelling that can leave the anchor: `<project>/../../x`
-    # stays relative, so it never reaches `absolute_claim_verdict`, and the
-    # `[ -e "$REPO_ROOT/$p" ]` test below resolves `..` through the filesystem
-    # straight out of the tree. The test is ANCHORED, so a real file named
+    # is `normalize_claim`'s business and must not be refused here.
+    # `<project>/../../x` climbs out of the root the placeholder denotes, so it
+    # is refused rather than rebuilt. The test is ANCHORED, so a real file named
     # `..bak` inside the tree is inside it.
     case "$p" in
       /*|..|../*|*/../*|*/..) return 1 ;;
     esac
+    p="$PROJECT_ABS/$p"
   fi
+  UNREDACTED_CLAIM="$p"
+}
+
+# Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
+# nothing when it cannot be resolved unambiguously.
+normalize_claim() {
+  local raw="$1" p verdict kind
+  p="$(trim_claim "$raw")"
+  [ -n "$p" ] || return 1
+  unredact_claim "$p" || return 1
+  p="$UNREDACTED_CLAIM"
   case "$p" in
     /*)
       verdict="$(absolute_claim_verdict "$p")"
@@ -788,6 +795,8 @@ if [ "$INVENTORY" -eq 1 ]; then
     fi
     INV_CLAIMS=$((INV_CLAIMS + 1))
     INV_PATH="$(trim_claim "$raw")"
+    unredact_claim "$INV_PATH" || continue
+    INV_PATH="$UNREDACTED_CLAIM"
     case "$INV_PATH" in
       /*)
         [ -z "$GIT_FAULT" ] || continue
