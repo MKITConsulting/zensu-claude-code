@@ -64,8 +64,20 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `computeTree` the import compares, or `tree=unavailable reason=<reason>`. With the import or
   the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, so the skill
   never launches a template whose result could not be imported.
+- `stage` — `zensu-log.sh --external-review --stage --root <top>`, the launch preparation of
+  step 3. It answers like `tree` while the import or the judge is off and for a root that does
+  not hold the recorded project root, then needs a valid session key and a tree id. It reads
+  `TEMPLATE_FILE` bounded, writes it as `stagedTemplateName` (`zensu-review-v1-<scv1-key>.js`)
+  into `<recorded project root>/.zensu/state/` through the records' temp-then-rename writer
+  (missing components created at `0700`; a link or a non-directory component answers
+  `state-directory`), re-reads the copy with `O_NOFOLLOW` and compares its digest with the
+  template's (`digest-mismatch`), and sweeps copies of other sessions idle past
+  `idleSessionMs`. It prints `stage=ok tree=<id> script=<path>`, the path last because it may
+  hold spaces, or `stage=unavailable reason=<reason>`. The gate is unchanged: the import compares
+  the launch record's and the run record's script digest with `TEMPLATE_FILE`, so the copy is
+  imported because its bytes are the template's, and an edited copy answers `foreign-script`.
 - The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
-  through the Workflow `scriptPath`. Its finders and refuters run as `zensu:review-aspect` (a
+  through the Workflow `scriptPath` from the copy `stage` writes. Its finders and refuters run as `zensu:review-aspect` (a
   refuter in the agent's verify mode, with a `VERIFY FINDING` block whose values are
   JSON-quoted), so the reviewer capability gate confines them like the panel and admits only
   their `StructuredOutput` result beside the read trio. `args.packet` carries the step-2c
@@ -125,6 +137,22 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `degraded`: it did not review this change, so the panel runs.
 - No script block is printed. Only the template can be imported, so the block always repeated
   the same file; the judge receives the reviewed lenses instead.
+- The template is launched from a plugin-staged copy inside the working directory. Measured on
+  2026-10-14 in a Claude desktop session on 0.26.0 in auto mode: a `scriptPath` into the
+  installed plugin root was refused with `scriptPath must be a script path this tool returned,
+  or a file you can already read (the working directory or a directory you have added)`; the
+  same launch was refused again after a full `Read` of that file; a byte-identical copy at
+  `<working directory>/.zensu/state/` launched (zero agents, it failed on the missing `args`),
+  and both its launch record and its run record carried the template digest. The copy `stage`
+  writes launched the same way: `check` selected that launch by its task id, passed the launch
+  record's digest comparison and answered `run-not-completed`, and the run record's `script`
+  carried the template digest too. Reading first was
+  rejected because the tool decides by directory, not by read history. The inline `script`
+  input the refusal text suggests was rejected because a model would have to reproduce 15 KB
+  byte for byte, and the gate fails on the first changed character. A user-added directory was
+  rejected because the plugin cannot add one. The copy goes into the recorded project root,
+  not `<top>`, because the recorded root is where the session started, and it carries the
+  session key so that two sessions in one tree never launch each other's copy.
 - The run journal, not the result, is the runtime truth for the agent counts, and per label
   only the latest start counts, because a resumed run starts a label again.
 - The tree binding reuses `computeTree` of `evidence-run-v1.js`, the fingerprint the full-suite
@@ -159,7 +187,13 @@ runs the template in a sandbox and validates its output with the module, so a on
 fails there. The template's agent type and prompts move with the structured-result and
 `## Verify mode` paragraphs of `agents/review-aspect.md` and with `WORKFLOW_RESULT_TOOL` in
 `reviewer-capability-v1.js`. The template's `args` are built in step 3 of `skills/tdd/references/review-chain.md`
-and described in `docs/review-chain.md`; a renamed argument moves all three. The `degraded`
+and described in `docs/review-chain.md`; a renamed argument moves all three. The staged copy's
+location is spelled once, by `stagedTemplateName` over `core.WORKFLOW_STATE_SEGMENTS`. The
+`--stage` recipe is named in step 3, the `Subagent / Claude Code Workflow safety` bullet of
+`skills/tdd/SKILL.md`, `docs/review-chain.md`, the Workflow paragraph of
+`docs/session-control.md` and the `externalReviewImport` row of `docs/configuration.md`; `X27`
+pins the step-3 recipe and the `docs/review-chain.md` sentence, and `X7d`, `X9d` and `X10b`
+drive the verb, whose copy `X7` and `X7b` then launch and import. The `degraded`
 status lives in `STATUSES`, step 3's `On ok or degraded` and the docs. The output file reaches
 the module as `ZENSU_XR_RESULT`, which is in the MSYS exclusions, and `zensu-host-path.sh`
 converts only its directory. Four tests of the unit file sit in
@@ -170,7 +204,8 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
 
 - The PostToolUse `Workflow` payload (`tool_input.script`, `scriptPath`, `name`, `args`) and the
   Stop `background_tasks` entry of a running workflow follow the Claude Code hook and workflow
-  documentation; no live hook capture was taken. The `tool_response` fields the record keeps
+  documentation; the one live capture is the launch of 2026-10-14 below, and the Stop entry
+  was never captured. The `tool_response` fields the record keeps
   (`taskId`, `runId`, `transcriptDir`) were read from the `toolUseResult` of real launches in
   session transcripts, on the assumption that the hook receives the same object, and a text
   form is parsed as a fallback. The journal record kinds (`launched`, `started`, `result`,
@@ -192,11 +227,32 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
 - The wait counter is per session. It resets when a Stop sees no running workflow, when
   `--tdd-begin` arms a new chain and after 24 hours; a chain armed some other way, such as a
   deferred-review adoption, inherits the count, but such a chain never waits.
-- The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB).
-- Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard.
+- The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB) only
+  when `tool_input` carries no `script`. The measured `scriptPath` launch of 2026-10-14 reached
+  the shipped hook with the loaded text in `tool_input.script`: its record said
+  `source: script`, and its digest, `run_id`, `task_id` and `transcript_dir` matched the run
+  record, which also names the `scriptPath`.
+- The copy launches only where the recorded project root lies inside a directory the Workflow
+  tool accepts, which by its refusal text is the working directory or one the user added. A
+  session started in a subdirectory records that subdirectory, so its copy lands inside its
+  working directory. A session re-anchored to a sibling worktree records a root outside it, so
+  its copy would be refused, and step 3 then runs the panel at the cost of the Workflow review.
+  Only a session whose working directory was its recorded root was measured; the other two
+  cases are derived from the refusal text.
+- The copy lives in `.zensu/state/`, which the session can write, and the Workflow tool's
+  launch answer invites editing the script file it names. An edit between the stage and the
+  launch answers `foreign-script` and costs the Workflow review, never a silent pass; step 3
+  forbids the edit and the next `--stage` overwrites it.
+- The tree fingerprint and the freshness check exclude `.zensu`, so the copy moves neither the
+  tree id nor a freshness verdict. A consuming repository that does not ignore `.zensu/` sees
+  the copy as an untracked file.
+- Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard,
+  and no staged copy was launched on Windows.
 
 **Version: `patch`.** No context-record or workflow-state field, no hook removed or
 re-matched, and the added hook returns no decision and no output. `RECORD_KEYS` and the
 `RESULT_*_KEYS` are strict key sets, but both ship for the first time here, so no released
 reader or writer predates them; a later change to either is a `minor`. The new config key is
-read permissively.
+read permissively. The `stage` mode is a `patch` on the same walk: a new mode of an existing
+`zensu-log.sh` verb that writes one file per session into `.zensu/state/`, with no hook,
+matcher, schema field, key set or attestation change.
