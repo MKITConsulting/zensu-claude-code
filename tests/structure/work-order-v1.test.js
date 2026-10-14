@@ -51,7 +51,7 @@ function sandbox() {
       questions: [],
       followups: [],
       policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
-      plan: { base_branch: 'main', integration_branch: 'integration/widgets' },
+      plan: { base_branch: 'main', integration_branch: 'plan/widgets' },
       order: {
         id: ORDER,
         work_plan_id: '11111111-1111-4111-8111-111111111111',
@@ -319,7 +319,7 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(result.exit, wo.EXIT.OK, result.message);
   assert.equal(result.summary.action, 'implement');
-  assert.equal(result.summary.integrationBranch, 'integration/widgets');
+  assert.equal(result.summary.integrationBranch, 'plan/widgets');
   assert.equal(result.summary.pulse, 'linked');
   assert.equal(result.summary.leaseSeconds, 1800);
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
@@ -378,6 +378,49 @@ test('the fake takes the pull request links the service takes and refuses the re
   }
   assert.equal(send('https://GitLab.com/Acme/Widgets/-/merge_requests/7', 7, 'gitlab').verdict, wo.VERDICTS.OK);
   assert.equal(box.fake().order.pr_url, 'https://gitlab.com/acme/widgets/-/merge_requests/7');
+  const second = wo.sendEvent(context, ['--stage', 'reviewing', '--pr-url', 'https://gitlab.com/acme/widgets/-/merge_requests/8', '--pr-number', '8',
+    '--client-event-id', wo.clientEventId('r', 'second-pr')], { env: box.env, target: 'reviewing' });
+  assert.equal(second.verdict, wo.VERDICTS.FINAL);
+  assert.equal(second.failure.code, 'pr_mismatch');
+});
+
+test('the fake answers an expired lease with 401 and speaks the service response shapes', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const upper = 'C'.repeat(40);
+  assert.equal(wo.sendEvent(context, ['--stage', 'implementing', '--head', upper, '--client-event-id', wo.clientEventId('r', 'upper')], { env: box.env, target: 'implementing' }).verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.head_sha, 'c'.repeat(40));
+  const bad = wo.sendEvent(context, ['--stage', 'implementing', '--head', 'abc', '--client-event-id', wo.clientEventId('r', 'bad-head')], { env: box.env, target: 'implementing' });
+  assert.equal(bad.failure.code, 'invalid_sha');
+  const filed = wo.runZensu(['work', 'followup', ORDER, '--title', 'Cache the list', '--rationale', 'It is read on every request.', '--severity', 'low',
+    '--client-event-id', wo.clientEventId('f', 'shape'), '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(filed.json).sort(), ['event', 'order', 'replay']);
+  const pulse = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
+  assert.match(pulse.json.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(pulse.json.work_order_id, ORDER);
+  const events = wo.runZensu(['work', 'events', ORDER, '--page', '1', '--per-page', '50', '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(events.json).sort(), ['data', 'page', 'perPage', 'total']);
+  box.mutate((state) => { state.now = Date.now() + 3600000; });
+  for (const argv of [['work', 'heartbeat', ORDER, '--json'], ['work', 'get', ORDER, '--json'], ['work', 'events', ORDER, '--json'],
+    ['work', 'event', ORDER, '--stage', 'implementing', '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--client-event-id', wo.clientEventId('r', 'late'), '--json']]) {
+    const outcome = wo.runZensu(argv, { env: box.env });
+    assert.equal(outcome.status, 401, argv.join(' '));
+    assert.equal(outcome.code, 'invalid_session_token', argv.join(' '));
+  }
+});
+
+test('the fake counts follow-ups per attempt, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const seeded = (attempt) => Array.from({ length: 20 }, (_, index) => ({ title: `Follow-up ${index}`, rationale: 'r', severity: 'low', paths: [], attempt }));
+  box.mutate((state) => { state.followups = seeded(1); state.order.attempt = 2; });
+  const next = wo.followup(context, { env: box.env, title: 'Index widgets by owner', rationale: 'The owner filter scans the table.', severity: 'medium' });
+  assert.equal(next.exit, wo.EXIT.OK, next.message);
+  box.mutate((state) => { state.followups = [...seeded(1), ...seeded(2)]; });
+  const limited = wo.followup(context, { env: box.env, title: 'Paginate the widget list', rationale: 'Long lists load slowly.', severity: 'low' });
+  assert.equal(limited.exit, wo.EXIT.REFUSED);
+  assert.match(limited.message, /followup_limit_reached/);
+  assert.match(limited.message, /file no more follow-ups in this attempt/);
 });
 
 test('push refuses a working branch without the order branch prefix before any forge write', () => {

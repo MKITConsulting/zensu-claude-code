@@ -196,9 +196,13 @@ function requireOrder(id) {
   }
 }
 
+function sessionEnded() {
+  return state.mode === 'ended' || !(state.order.lease_expires_at > now());
+}
+
 function requireLive() {
-  if (state.mode === 'ended') apiFail(401, 'invalid_session_token', 'session token expired or revoked');
-  if (state.staleAttempt || !(state.order.lease_expires_at > now())) {
+  if (sessionEnded()) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
+  if (state.staleAttempt) {
     apiFail(409, 'stale_attempt', 'the order is held by another attempt or its lease expired; stop without further forge writes');
   }
 }
@@ -402,15 +406,27 @@ function validateBranch(branch) {
   if (malformed) apiFail(422, 'invalid_branch', 'branch is not a valid branch name');
 }
 
+function defaultSpec() {
+  return {
+    feature: { id: '55555555-5555-4555-8555-555555555555', reference: 'F-1', title: 'Fake order spec' },
+    revision: { id: '66666666-6666-4666-8666-666666666666', version: '1', scope_summary: 'Render the widget list.', acceptance_criteria: ['The widget list renders.'] },
+    repository: state.order.repository,
+    base_branch: state.plan.base_branch,
+    integration_branch: state.plan.integration_branch,
+    requirements: [{ id: 'AC-001', tags: ['ui'] }],
+    paths: [],
+  };
+}
+
 function workGet(flags) {
   requireSessionToken('work get');
-  if (state.mode === 'ended') apiFail(401, 'invalid_session_token', 'session token expired or revoked');
+  if (sessionEnded()) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
   requireOrder(flags._[0]);
   injected('get');
   const approved = (state.approvals || []).some((approval) => approval.spec_hash === state.order.spec_hash);
   printJson({
     ...publicOrder(),
-    spec: { branch_prefix: BRANCH_PREFIX, ...(state.spec || { title: 'Fake order spec', requirements: [] }) },
+    spec: { branch_prefix: BRANCH_PREFIX, ...(state.spec || defaultSpec()) },
     plan: state.plan,
     policy: state.policy,
     questions: (state.questions || []).filter((question) => question.work_order_id === state.order.id),
@@ -438,8 +454,9 @@ function applyStage(flags, clientEventId) {
   if (flags['autopilot-stage'] !== undefined && !/^[A-Z][A-Z0-9_]{0,39}$/.test(flags['autopilot-stage'])) {
     apiFail(422, 'invalid_autopilot_stage', 'autopilotStage must be an upper-case stage name');
   }
-  if (flags.head !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(flags.head)) {
-    apiFail(422, 'invalid_head_sha', 'headSha must be the full commit SHA');
+  if (flags.head !== undefined) {
+    flags.head = String(flags.head).toLowerCase();
+    if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(flags.head)) apiFail(422, 'invalid_sha', 'headSha must be the full commit SHA');
   }
   if (flags.branch !== undefined) validateBranch(String(flags.branch));
   const prNumber = flags['pr-number'] !== undefined ? Number(flags['pr-number']) : null;
@@ -632,21 +649,23 @@ function workFollowup(flags) {
   injected('followup');
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   const prior = state.events.find((event) => event.client_event_id === clientEventId);
-  if (prior) printJson({ event: prior, replay: true });
+  if (prior) printJson({ event: prior, order: publicOrder(), replay: true });
   requireLive();
   guardProse('title', flags.title, true, 200);
   guardProse('rationale', flags.rationale, true);
   state.followups = state.followups || [];
-  if (state.followups.length >= 20) apiFail(409, 'followup_limit_reached', 'an attempt reports at most 20 follow-ups');
-  state.followups.push({ title: flags.title, rationale: flags.rationale, severity: flags.severity, paths });
+  if (state.followups.filter((entry) => entry.attempt === state.order.attempt).length >= 20) {
+    apiFail(409, 'followup_limit_reached', 'an attempt reports at most 20 follow-ups');
+  }
+  state.followups.push({ title: flags.title, rationale: flags.rationale, severity: flags.severity, paths, attempt: state.order.attempt });
   const event = recordEvent({ client_event_id: clientEventId, event_type: 'followup', from_status: state.order.status, to_status: state.order.status, client_name: 'zensu-cli', client_version: CLI_VERSION, detail: { title: flags.title } });
   save(state);
-  printJson({ event, replay: false });
+  printJson({ event, order: publicOrder(), replay: false });
 }
 
 function workEvents(flags) {
   requireSessionToken('work events');
-  if (state.mode === 'ended') apiFail(401, 'invalid_session_token', 'session token expired or revoked');
+  if (sessionEnded()) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
   requireOrder(flags._[0]);
   const page = Number(flags.page || 1);
   const perPage = Number(flags['per-page'] || 20);
@@ -658,7 +677,7 @@ function workEvents(flags) {
     }
     return 0;
   });
-  printJson({ data: all.slice((page - 1) * perPage, page * perPage), total: all.length });
+  printJson({ data: all.slice((page - 1) * perPage, page * perPage), total: all.length, page, perPage });
 }
 
 function pulseStart(flags) {
@@ -666,13 +685,15 @@ function pulseStart(flags) {
     printJson({ id: 'pulse-local-session' });
   }
   requireSessionToken('pulse start --work-order');
-  if (state.mode === 'ended') apiFail(401, 'invalid_session_token', 'session token expired or revoked');
+  if (sessionEnded()) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
   requireOrder(flags['work-order']);
   injected('pulse');
   state.pulse = { attempt: state.order.attempt, clientName: flags['client-name'] || null, clientVersion: flags['client-version'] || null };
   save(state);
   if (state.trackingDisabled) printJson({ status: 'tracking_disabled' });
-  printJson({ id: `pulse-${state.order.attempt}` });
+  state.pulse.id = state.pulse.id || crypto.randomUUID();
+  save(state);
+  printJson({ id: state.pulse.id, work_order_id: state.order.id, attempt: state.order.attempt, created: true, started_at: iso(now()), ended_at: null });
 }
 
 function main() {

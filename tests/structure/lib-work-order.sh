@@ -36,7 +36,6 @@ wo_fake_seed() {
       followups: [],
       policy: { plan_approval: process.env.PLAN_APPROVAL, lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
       plan: { id: "11111111-1111-4111-8111-111111111111", base_branch: "main", integration_branch: "main", repository: "github.com/acme/widgets" },
-      spec: { title: "Fake order spec", requirements: [{ id: "AC-001", text: "The widget renders." }] },
       order: {
         id: process.env.ORDER_ID,
         work_plan_id: "11111111-1111-4111-8111-111111111111",

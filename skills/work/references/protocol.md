@@ -59,8 +59,10 @@ no `--client-name`.
 `--autopilot-begin --work-order <id>` stores the binding `{orderId, attempt, specHash}` in the run
 record. `--bind-spec --run <id>` then reads the order again, refuses a spec that changed since
 `--start`, reports `planning` and then `implementing`, and only after Zensu accepted `implementing`
-records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. An order an
-earlier attempt already moved past `implementing` is bound without sending `implementing` again.
+records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. Zensu claims only
+queued orders and starts every attempt at `claimed`, keeping the branch, the pull request and the
+head of the earlier attempt, so a new attempt reports `planning` and `implementing` again. An order
+already past `implementing` would be bound without sending a stage behind it.
 The model cannot record `ORDER_SPEC_BOUND` through `--autopilot-event`, and a work-order run refuses
 `PLAN_APPROVED`. Zensu marks a running order `spec_stale` when its feature changes and keeps the
 spec hash, so `--bind-spec` blocks a stale order with `worker_error` just like a changed hash. An
