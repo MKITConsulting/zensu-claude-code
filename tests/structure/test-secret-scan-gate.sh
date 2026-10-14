@@ -402,6 +402,26 @@ else
   check "F19 foreign-installation fixture could not be minted" FAIL
 fi
 
+F20_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "1048576")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+F20_PAYLOAD="$TMPD/oversized-bash.json"
+node -e '
+  const [file, total, cwd] = process.argv.slice(1);
+  const base = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo " }, session_id: "secret-scan-test", cwd };
+  base.tool_input.command += "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+  require("fs").writeFileSync(file, JSON.stringify(base));
+' "$F20_PAYLOAD" "$((F20_LIMIT + 1))" "$TMPD"
+OUT="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= \
+  STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" bash "$HOOK" < "$F20_PAYLOAD" 2>/dev/null)"
+if is_deny "$OUT" \
+  && printf '%s' "$OUT" | grep -qF "payload is $((F20_LIMIT + 1)) bytes, over the ${F20_LIMIT}-byte limit" \
+  && ! printf '%s' "$OUT" | grep -qF 'binding is unavailable or invalid'; then
+  check "F20 a Bash call one byte over the binder's payload limit is denied with a reason that names its size, not a broken binding" PASS
+else
+  check "F20 oversized Bash deny names its size (got '${OUT:0:240}')" FAIL
+fi
+
 echo "----"
 echo "test-secret-scan-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

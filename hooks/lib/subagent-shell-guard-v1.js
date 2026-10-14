@@ -519,36 +519,31 @@ function withoutMarkers(text) {
 }
 
 function braceSpan(value, mask) {
-  for (let open = 0; open < value.length; open += 1) {
-    if (value[open] !== '{' || mask[open] !== 'x') continue;
-    let depth = 0;
-    const commas = [];
-    for (let index = open + 1; index < value.length; index += 1) {
-      if (mask[index] !== 'x') continue;
-      const char = value[index];
-      if (char === '{') {
-        depth += 1;
-      } else if (char === ',' && depth === 0) {
-        commas.push(index);
-      } else if (char === '}') {
-        if (depth > 0) {
-          depth -= 1;
-          continue;
-        }
-        if (commas.length === 0) break;
-        const bounds = [open, ...commas, index];
-        const parts = [];
-        for (let part = 0; part + 1 < bounds.length; part += 1) {
-          parts.push({
-            value: value.slice(bounds[part] + 1, bounds[part + 1]),
-            mask: mask.slice(bounds[part] + 1, bounds[part + 1]),
-          });
-        }
-        return { open, close: index, parts };
-      }
+  const groups = [];
+  let best = null;
+  for (let index = 0; index < value.length; index += 1) {
+    if (mask[index] !== 'x') continue;
+    const char = value[index];
+    if (char === '{') {
+      groups.push({ open: index, commas: [] });
+    } else if (char === ',') {
+      if (groups.length > 0) groups[groups.length - 1].commas.push(index);
+    } else if (char === '}' && groups.length > 0) {
+      const group = groups.pop();
+      if (group.commas.length > 0 && (best === null || group.open < best.open)) best = { ...group, close: index };
+      if (best !== null && groups.length === 0) break;
     }
   }
-  return null;
+  if (best === null) return null;
+  const bounds = [best.open, ...best.commas, best.close];
+  const parts = [];
+  for (let part = 0; part + 1 < bounds.length; part += 1) {
+    parts.push({
+      value: value.slice(bounds[part] + 1, bounds[part + 1]),
+      mask: mask.slice(bounds[part] + 1, bounds[part + 1]),
+    });
+  }
+  return { open: best.open, close: best.close, parts };
 }
 
 function expandBraces(word, home) {
@@ -590,9 +585,13 @@ function parseScript(text, options = {}) {
   let pendingRedirect = null;
   let pendingHeredocs = [];
   let index = 0;
+  let leadingAssignments = true;
 
   const ensureCommand = () => {
-    if (!command) command = { kind: 'command', words: [], redirects: [], heredocs: [], nested: [], sep: null };
+    if (!command) {
+      command = { kind: 'command', words: [], redirects: [], heredocs: [], nested: [], sep: null };
+      leadingAssignments = true;
+    }
     return command;
   };
   const startWord = () => {
@@ -633,7 +632,9 @@ function parseScript(text, options = {}) {
       return;
     }
     const current = ensureCommand();
-    const assignment = ASSIGNMENT_RE.test(finished.raw) && current.words.every((prior) => ASSIGNMENT_RE.test(prior.raw));
+    const assignmentWord = ASSIGNMENT_RE.test(finished.raw);
+    const assignment = assignmentWord && leadingAssignments;
+    if (!assignmentWord) leadingAssignments = false;
     current.words.push(...(finished.mask.includes('x') && !assignment ? expandBraces(finished, home) : [finished]));
   };
   const endCommand = (sep) => {
@@ -1397,7 +1398,7 @@ function wordsViolation(words, item, context, depth) {
   if (!readOnly && words.slice(start).some((word) => HELPER_RE.test(word.value))) return REASONS.helper;
 
   if (SHELLS.has(name)) {
-    const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
+    const flag = rest.findIndex((word) => shortFlagsInclude(word.value, 'c'));
     const scripts = flag === -1
       ? item.shellInput
       : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
@@ -1612,7 +1613,7 @@ function commandInvocations(text, options = {}) {
       return;
     }
     if (SHELLS.has(name)) {
-      const flag = rest.findIndex((word) => /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
+      const flag = rest.findIndex((word) => shortFlagsInclude(word.value, 'c'));
       const scripts = flag === -1 ? stdinCode(item) : [rest[flag + 1]].filter(Boolean).map((script) => script.value);
       for (const script of scripts) visitScript(script, environment, depth + 1);
     }

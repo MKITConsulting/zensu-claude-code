@@ -122,6 +122,52 @@ else
   check "B40 oversized-payload mutation (got '$(printf '%s' "$LARGE_OUT" | cut -c1-160)')" FAIL
 fi
 
+PAYLOAD_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+[ -n "$PAYLOAD_LIMIT" ] && check "B41 the binder exports the payload limit it enforces" PASS \
+  || check "B41 the binder exports the payload limit it enforces" FAIL
+LIMIT="${PAYLOAD_LIMIT:-1048576}"
+sized_payload() {
+  node -e '
+    const [file, total, prefix, agent] = process.argv.slice(1);
+    const base = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: prefix + " && : " }, session_id: "gate-test", cwd: "/tmp" };
+    if (agent) { base.agent_id = "gate-subagent-1"; base.agent_type = agent; }
+    base.tool_input.command += "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+    require("fs").writeFileSync(file, JSON.stringify(base));
+  ' "$1" "$2" "$3" "${4:-}"
+}
+size_denied() {
+  printf '%s' "$1" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$1" | grep -qF "payload is $2 bytes, over the ${LIMIT}-byte limit" \
+    && ! printf '%s' "$1" | grep -qF 'binding is unavailable or invalid'
+}
+SIZED_AT="$PROJECT/sized-at-limit.json"
+SIZED_OVER="$PROJECT/sized-over-limit.json"
+SIZED_MUTATION="$PROJECT/sized-mutation.json"
+SIZED_SUBAGENT="$PROJECT/sized-subagent.json"
+SIZED_PLAIN="$PROJECT/sized-plain.json"
+sized_payload "$SIZED_AT" "$LIMIT" "zensu features get f1"
+sized_payload "$SIZED_OVER" "$((LIMIT + 1))" "zensu features get f1"
+sized_payload "$SIZED_MUTATION" "$((LIMIT + 150000))" "zensu security classify f1"
+sized_payload "$SIZED_SUBAGENT" "$((LIMIT + 150000))" "zensu security classify f1" general-purpose
+sized_payload "$SIZED_PLAIN" "$((LIMIT + 150000))" "echo hello"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_AT" 2>/dev/null | classify)"
+[ "$OUT" = ALLOW ] && check "B41a a read in a payload of exactly the limit is bound and allowed" PASS \
+  || check "B41a read at the payload limit (got '$OUT')" FAIL
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_OVER" 2>/dev/null)"
+size_denied "$OUT" "$((LIMIT + 1))" \
+  && check "B41b a read one byte over the limit is denied with a reason that names its size and the limit, not a broken binding" PASS \
+  || check "B41b read one byte over the limit (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_MUTATION" 2>/dev/null)"
+OUT_SUB="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_SUBAGENT" 2>/dev/null)"
+if size_denied "$OUT" "$((LIMIT + 150000))" && size_denied "$OUT_SUB" "$((LIMIT + 150000))"; then
+  check "B41c an oversized mutation gets the same size deny on the main thread and in a subagent" PASS
+else
+  check "B41c oversized mutation (main '$(printf '%s' "$OUT" | cut -c1-120)' subagent '$(printf '%s' "$OUT_SUB" | cut -c1-120)')" FAIL
+fi
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PLAIN" 2>/dev/null | classify)"
+[ "$OUT" = ALLOW ] && check "B41e an oversized command that names no zensu invocation stays outside this gate" PASS \
+  || check "B41e oversized non-zensu command (got '$OUT')" FAIL
+
 # B8 workflow-active (skill running) -> mutation in declared set ALLOW
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 tdd_workflow_begin gate-test "set_security_classification" "$(( $(date +%s) + 3600 ))" 2>/dev/null
@@ -136,6 +182,27 @@ else
   check "B40b oversized subagent payload (got '$(printf '%s' "$LARGE_OUT" | cut -c1-160)')" FAIL
 fi
 run "B27b out-of-scope mutation -> DENY"    "zensu link test f1 --test-type unit --file a.go"            '' DENY
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
+
+tdd_workflow_begin gate-test "set_security_classification,link_test" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+SHIM_DIR="$PROJECT/node-shim"
+mkdir -p "$SHIM_DIR"
+printf '#!/bin/bash\nprintf x >> "$NODE_SPAWN_LOG"\nexec %s "$@"\n' "$(printf '%q' "$(command -v node)")" > "$SHIM_DIR/node"
+chmod +x "$SHIM_DIR/node"
+node_spawns() {
+  local log="$PROJECT/node-spawns.log" decision
+  : > "$log"
+  decision="$(payload "$1" '' gate-test | env PATH="$SHIM_DIR:$PATH" NODE_SPAWN_LOG="$log" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+  printf '%s:%s' "$decision" "$(wc -c < "$log" | tr -d ' ')"
+}
+SPAWNS_ONE="$(node_spawns 'zensu security classify f1')"
+SPAWNS_THREE="$(node_spawns 'zensu security classify f1 && zensu link test f1 --test-type unit --file a && zensu security classify f2')"
+if [ "${SPAWNS_ONE%%:*}" = ALLOW ] && [ "${SPAWNS_THREE%%:*}" = ALLOW ] \
+   && [ "${SPAWNS_ONE#*:}" -gt 0 ] && [ "${SPAWNS_ONE#*:}" = "${SPAWNS_THREE#*:}" ]; then
+  check "B43 three workflow-allowed mutations of two tools spawn as many node children as one, so the workflow is read once per run" PASS
+else
+  check "B43 workflow read once per run (decision:node-spawns one=$SPAWNS_ONE three=$SPAWNS_THREE)" FAIL
+fi
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
 # B9 env escape; B10 default-on; B11 explicit false
@@ -282,6 +349,20 @@ fi
   || check "B39b module-less read (bound='$FALLBACK_BOUND' got '$FALLBACK_READ')" FAIL
 [ "$FALLBACK_BOUND" = "BOUND" ] && [ -z "$FALLBACK_WRAPPED" ] && check "B39c the token scan alone does not see a wrapped mutation, so the module was absent" PASS \
   || check "B39c module-less wrapped mutation (bound='$FALLBACK_BOUND' got '$FALLBACK_WRAPPED')" FAIL
+PARSER_SENTINEL="$FALLBACK_BASE/parser-loaded"
+node -e 'require("fs").writeFileSync(process.argv[1], "require(\"fs\").writeFileSync(" + JSON.stringify(process.argv[2]) + ", \"loaded\");\nmodule.exports = { commandInvocations: () => [] };\n")' \
+  "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js" "$PARSER_SENTINEL"
+FALLBACK_OVERSIZED="$(CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" < "$SIZED_OVER" 2>/dev/null)"
+PARSER_LOADED_OVERSIZED=no
+[ -e "$PARSER_SENTINEL" ] && PARSER_LOADED_OVERSIZED=yes
+payload 'zensu features get f1' '' parser-probe | env CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" >/dev/null 2>&1
+PARSER_LOADED_SMALL=no
+[ -e "$PARSER_SENTINEL" ] && PARSER_LOADED_SMALL=yes
+if size_denied "$FALLBACK_OVERSIZED" "$((LIMIT + 1))" && [ "$PARSER_LOADED_OVERSIZED" = no ] && [ "$PARSER_LOADED_SMALL" = yes ]; then
+  check "B41d the size is compared before the parser runs: an oversized payload never loads the shell-model module, an ordinary one does" PASS
+else
+  check "B41d size check before the parser (oversized loaded=$PARSER_LOADED_OVERSIZED small loaded=$PARSER_LOADED_SMALL got '$(printf '%s' "$FALLBACK_OVERSIZED" | cut -c1-120)')" FAIL
+fi
 rm -rf "$FALLBACK_BASE"
 
 # B30 --api-url <value> must not be misread as the subcommand
@@ -345,6 +426,47 @@ if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retr
   check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
 else
   check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
+fi
+
+parser_lines() {
+  node -e '
+    const fs = require("fs");
+    const { spawnSync } = require("child_process");
+    const [hook, binder, guard] = process.argv.slice(1);
+    const source = fs.readFileSync(hook, "utf8");
+    const begin = source.indexOf("INVOCATIONS=");
+    const open = begin < 0 ? -1 : source.indexOf("node -e \x27", begin);
+    const close = open < 0 ? -1 : source.indexOf("\n\x27 2>/dev/null)", open);
+    if (close < 0) { process.stdout.write("UNEXTRACTABLE"); process.exit(0); }
+    const command = fs.readFileSync(0, "utf8");
+    const run = spawnSync(process.execPath, ["-e", source.slice(open + "node -e \x27".length, close)], {
+      input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, session_id: "gate-test", cwd: "/tmp" }),
+      encoding: "utf8",
+      timeout: 15000,
+      maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, ZAPI: "", ZGUARD: guard, ZBIND: binder },
+    });
+    if (run.error || run.status !== 0) { process.stdout.write("NO-ANSWER " + (run.error ? run.error.code : run.status)); process.exit(0); }
+    process.stdout.write(run.stdout);
+  ' "$HOOK" "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" "${1:-$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js}"
+}
+TAB="$(printf '\t')"
+LINES_ONE="$(printf '%s' 'zensu features get f1' | parser_lines)"
+LINES_MIXED="$(printf '%s' 'zensu features get f1 && zensu features get f1 && zensu security classify f2' | parser_lines)"
+if [ "$LINES_ONE" = "features${TAB}get" ] && [ "$LINES_MIXED" = "features${TAB}get
+security${TAB}classify" ]; then
+  check "B42 the parser emits each distinct invocation once, although the walker and the token scan both find it" PASS
+else
+  check "B42 deduplicated invocation lines (one='$LINES_ONE' mixed='$LINES_MIXED')" FAIL
+fi
+NO_GUARD="$PROJECT/no-shell-model.js"
+LINES_TOKEN="$(node -e 'process.stdout.write("zensu features get f1; x" + "\x27".repeat(600000) + "y")' | parser_lines "$NO_GUARD")"
+LINES_PREFIX="$(node -e 'process.stdout.write("A=x" + "\x27".repeat(600000) + "y zensu features get f1")' | parser_lines "$NO_GUARD")"
+LINES_URL="$(node -e 'process.stdout.write("zensu --api-url x" + "\x27".repeat(600000) + "y features get f1")' | parser_lines "$NO_GUARD")"
+if [ "$LINES_TOKEN" = "features${TAB}get" ] && [ "$LINES_PREFIX" = "features${TAB}get" ] && [ "$LINES_URL" = "features${TAB}get" ]; then
+  check "B44 the token scan trims quotes in linear time: a 600000-quote command word, assignment value and --api-url value each finish within 15 s" PASS
+else
+  check "B44 linear quote trim (word='$LINES_TOKEN' prefix='$LINES_PREFIX' url='$LINES_URL')" FAIL
 fi
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
