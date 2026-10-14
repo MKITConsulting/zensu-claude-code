@@ -66,10 +66,13 @@ over:
 ## Questions and follow-ups
 
 The session asks Zensu, never a person. `--ask` sends a question with its options and the option
-the session continues with; a blocking question, a scope question or any question past the order's
-limit blocks the order and ends the session. `--followup` records an idea outside the order's scope
-as a follow-up. Answers that arrive while the session runs reach the model as context after its
-next tool call.
+the session continues with. A blocking question (`spec_change` when its category is `scope`) or any
+question past the order's limit (`escalated`) blocks the order and ends the session; a person's
+answer requeues a question or `spec_change` block, while an escalated order waits until a person
+requeues it. A non-blocking question, `scope` included, only records the assumption. `--followup`
+records an idea outside the order's scope as a follow-up. Answers that arrive while the session
+runs, and the decisions a person made for the whole plan, reach the model as context after its next
+tool call.
 
 ## The tool hooks
 

@@ -178,8 +178,16 @@ function publicOrder() {
   return order;
 }
 
+function isAnswered(question) {
+  return question.status === 'answered' || question.status === 'auto_answered';
+}
+
 function answered() {
-  return (state.questions || []).filter((question) => question.status === 'answered' || question.status === 'auto_answered');
+  return (state.questions || []).filter((question) => question.work_order_id === state.order.id && isAnswered(question));
+}
+
+function decisionLog() {
+  return (state.questions || []).filter((question) => question.work_plan_id === state.order.work_plan_id && question.scope === 'plan' && isAnswered(question));
 }
 
 function guardProse(field, text, required) {
@@ -276,8 +284,8 @@ function workGet(flags) {
     spec: { branch_prefix: BRANCH_PREFIX, ...(state.spec || { title: 'Fake order spec', requirements: [] }) },
     plan: state.plan,
     policy: state.policy,
-    questions: state.questions || [],
-    decision_log: [],
+    questions: (state.questions || []).filter((question) => question.work_order_id === state.order.id),
+    decision_log: decisionLog(),
     implementation_plan_approved: approved,
     lane: null,
   });
@@ -417,12 +425,38 @@ function workEvent(flags) {
   printJson({ event, order: publicOrder(), replay: false });
 }
 
+function validateQuestion(flags) {
+  const categories = ['clarification', 'technical_choice', 'product_decision', 'scope', 'risk', 'external'];
+  if (!categories.includes(flags.category)) apiFail(422, 'invalid_category', `category must be one of ${categories.join(', ')}`);
+  guardProse('question', flags.question, true);
+  const options = flags.option || [];
+  if (options.length > 10) apiFail(422, 'invalid_options', 'at most 10 options');
+  const seen = new Set();
+  options.forEach((option, index) => {
+    const trimmed = option.trim();
+    if (!trimmed) apiFail(422, 'missing_field', `options[${index}] is required`);
+    if (Buffer.byteLength(trimmed) > 300) apiFail(422, 'content_not_allowed', `content_not_allowed: options[${index}]: too_long; send metadata and short prose only, never code, commands, logs or diffs`);
+    guardProse(`options[${index}]`, trimmed, true);
+    if (seen.has(trimmed)) apiFail(422, 'invalid_options', 'options must be distinct');
+    seen.add(trimmed);
+  });
+  const fallback = String(flags['default-option'] || '').trim();
+  if (Buffer.byteLength(fallback) > 300) apiFail(422, 'content_not_allowed', 'content_not_allowed: defaultOption: too_long; send metadata and short prose only, never code, commands, logs or diffs');
+  if (fallback) guardProse('defaultOption', fallback, false);
+  if (!flags.blocking && !fallback) apiFail(422, 'default_required', 'a non-blocking question needs the default the session continues with');
+  if (fallback && options.length > 0 && !seen.has(fallback)) apiFail(422, 'invalid_default', 'defaultOption must be one of the options');
+  const requirements = flags.requirement || [];
+  if (requirements.length > 20) apiFail(422, 'invalid_requirements', 'at most 20 requirement IDs per question');
+  if (requirements.some((id) => !/^(AC|FR|IF)-[0-9]{3,6}$/.test(id))) apiFail(422, 'invalid_requirements', 'requirement IDs must look like AC-001, FR-001 or IF-001');
+}
+
 function workAsk(flags) {
   if (!flags.category || !flags.question) usage('--category and --question are required');
   if (!flags.blocking && !flags['default-option']) usage('--default-option is required unless --blocking is set');
   requireSessionToken('work ask');
   requireOrder(flags._[0]);
   injected('ask');
+  validateQuestion(flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   const prior = state.events.find((event) => event.client_event_id === clientEventId);
   if (prior) {
@@ -431,7 +465,6 @@ function workAsk(flags) {
     printJson({ question, order: publicOrder(), escalated: false, replay: true });
   }
   requireLive();
-  guardProse('question', flags.question, true);
   if (!flags.blocking) runtimeCap();
   const asked = state.questions.filter((entry) => entry.work_order_id === state.order.id).length;
   const question = {

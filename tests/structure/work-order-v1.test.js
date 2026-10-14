@@ -487,7 +487,7 @@ test('renew queues the answers of non-blocking questions', () => {
   box.seed();
   assert.equal(wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER }).exit, wo.EXIT.OK);
   box.mutate((state) => {
-    state.questions.push({ id: 'q-answered', category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
+    state.questions.push({ id: 'q-answered', work_order_id: ORDER, category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
   });
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
   const beat = wo.renew(context, { env: box.env, force: true });
@@ -994,6 +994,97 @@ test('ask continues with the default, and a blocking question ends the session',
   assert.equal(ended.outcome, 'success');
   assert.equal(ended.kind, 'blocked:question');
   assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' };
+  const cases = [
+    [{ defaultOption: 'pg-boss (recommended)' }, /--default-option must repeat one --option verbatim/],
+    [{ category: 'design' }, /--category must be one of clarification/],
+    [{ options: Array.from({ length: 11 }, (_, index) => `option ${index}`), defaultOption: 'option 0' }, /at most 10 times/],
+    [{ options: ['pg-boss', ' pg-boss '] }, /given twice/],
+    [{ options: ['pg-boss', 'x'.repeat(301)] }, /at most 300 bytes/],
+    [{ options: ['pg-boss', ' '] }, /every --option needs text/],
+    [{ requirements: ['AC-1'] }, /must look like AC-001/],
+    [{ requirements: ['AC-001,AC-002'] }, /one id per flag/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.ask(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+});
+
+test('the fake refuses a question the way the service does', () => {
+  const box = sandbox();
+  startedContext(box);
+  const ask = (extra) => wo.runZensu(['work', 'ask', ORDER, '--category', 'technical_choice', '--question', 'Which queue library should the worker use?',
+    '--client-event-id', wo.clientEventId('ask', JSON.stringify(extra)), ...extra, '--json'], { env: box.env });
+  const cases = [
+    [[...Array.from({ length: 11 }, (_, index) => ['--option', `option ${index}`]).flat(), '--default-option', 'option 0'], 'invalid_options'],
+    [['--option', 'a', '--option', 'a', '--default-option', 'a'], 'invalid_options'],
+    [['--option', 'x'.repeat(301), '--default-option', 'x'.repeat(301)], 'content_not_allowed'],
+    [['--option', 'a', '--option', 'b', '--default-option', 'c'], 'invalid_default'],
+    [['--option', 'a', '--default-option', 'a', '--requirement', 'AC-1'], 'invalid_requirements'],
+  ];
+  for (const [extra, code] of cases) {
+    const outcome = ask(extra);
+    assert.equal(outcome.status, 422, code);
+    assert.equal(outcome.code, code);
+  }
+  const category = wo.runZensu(['work', 'ask', ORDER, '--category', 'design', '--question', 'Which queue?', '--default-option', 'a', '--json'], { env: box.env });
+  assert.equal(category.code, 'invalid_category');
+  assert.equal(box.fake().questions.length, 0);
+});
+
+test('a question asked again as blocking is a new question, and only a blocking scope question blocks with spec_change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const scope = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', options: ['no', 'yes'], defaultOption: 'no' });
+  assert.equal(scope.exit, wo.EXIT.OK, scope.message);
+  assert.equal(scope.value.ended, false);
+  assert.equal(box.fake().order.status, 'claimed');
+  const escalated = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', blocking: true });
+  assert.equal(escalated.exit, wo.EXIT.ENDED, escalated.message);
+  assert.equal(escalated.value.replay, false);
+  assert.equal(box.fake().questions.length, 2);
+  assert.equal(box.fake().order.blocked_kind, 'spec_change');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:spec_change');
+});
+
+test('a question past the order limit escalates the order and ends the session', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 1, max_order_runtime_minutes: 240 } });
+  const first = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list paginate?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  const second = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list sort by name?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(second.exit, wo.EXIT.ENDED, second.message);
+  assert.equal(box.fake().order.blocked_kind, 'escalated');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
+});
+
+test('a decision a person made for the whole plan reaches the model as a plan-wide decision, and heartbeats carry only this order', () => {
+  const box = sandbox();
+  box.seed({
+    questions: [
+      { id: 'q-sibling', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'plan', category: 'product_decision', question: 'Which currency do prices use?', answer: 'Prices are in euro across the plan.', status: 'answered' },
+      { id: 'q-sibling-local', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'order', category: 'clarification', question: 'Which table holds sizes?', answer: 'The sizes table.', status: 'answered' },
+    ],
+  });
+  const started = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(started.exit, wo.EXIT.OK, started.message);
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const beat = wo.renew(context, { env: box.env, force: true });
+  assert.deepEqual(beat.answers, []);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Prices are in euro across the plan/);
+  assert.doesNotMatch(update.additionalContext, /sizes table/);
+  assert.doesNotMatch(update.additionalContext, /this order asked earlier/);
+  assert.equal(wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env }).additionalContext, null);
 });
 
 test('followup files once per title and the CLI parser collects repeated flags', () => {

@@ -123,10 +123,19 @@ the rest from the order and the forge:
 ## Questions, follow-ups and the plan approval
 
 `--ask` sends `zensu work ask` with a `client_event_id` derived from the order, the attempt, the
-category and the question, so a repeat replays. When Zensu answers with the order `blocked` — a
-blocking question, a scope question (`spec_change`) or any question past the order's limit
+category, the question, whether it blocks and its default, so a repeat replays and the same question
+asked again as blocking is a new question. It refuses with exit 2, before the CLI runs, a category
+outside the six, more than 10 options, an empty, repeated or over-300-byte option, a default that is
+not one of the options, and more than 20 requirement ids or one that is not `AC-`, `FR-` or `IF-`
+with three to six digits. When Zensu answers with the order `blocked` — a blocking question
+(`question`, or `spec_change` for category `scope`) or any question past the order's limit
 (`escalated`) — the helper writes `ended-` with a successful outcome, cancels the local run and
-exits 6. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
+exits 6. A person's answer requeues a `question` or `spec_change` block; an `escalated` order waits
+until a person requeues it. A non-blocking question, `scope` included, only records the default.
+
+`--start` and `--bind-spec` queue the answered entries of the order's `decision_log` — questions a
+person decided for the whole plan — beside the answers, and the post-tool hook hands them to the
+model as decisions that bind this order. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
 It refuses with exit 2, before the CLI runs, a severity other than `low`, `medium`, `high` or
 `critical`, a title over 200 bytes, a rationale over 2048 bytes, more than 20 paths, and a path that
 is not a clean relative file path: no `./`, no trailing slash, no `..`, no wildcard. A refusal of a

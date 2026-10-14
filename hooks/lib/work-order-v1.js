@@ -464,6 +464,7 @@ function recordAnswers(context, answers) {
       question: boundedText(answer.question),
       answer: boundedText(answer.answer),
       status: boundedText(answer.status),
+      planWide: answer.planWide === true,
     });
   }
   if (added.length === 0) return [];
@@ -472,6 +473,12 @@ function recordAnswers(context, answers) {
     pending: [...pending, ...added].slice(-MAX_PENDING_ANSWERS),
   });
   return added;
+}
+
+function planDecisions(order) {
+  const log = isObject(order) && Array.isArray(order.decision_log) ? order.decision_log : [];
+  return log.filter((entry) => isObject(entry) && (entry.status === 'answered' || entry.status === 'auto_answered'))
+    .map((entry) => ({ ...entry, planWide: true }));
 }
 
 function takePendingAnswers(context) {
@@ -721,6 +728,7 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
   writeState(projectRoot, files.order, { order });
   if (!existing) writeState(projectRoot, files.marker, marker);
   const context = { projectRoot, sessionKey, files, marker, fault: null };
+  recordAnswers(context, planDecisions(order));
   const summary = orderSummary(order, context);
   if (safeRead(files.ended).value) {
     return { exit: EXIT.ENDED, message: `the session of work order ${order.id} has already ended`, summary: { ...summary, action: 'stop' } };
@@ -1045,6 +1053,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   }
   const order = got.json;
   writeState(context.projectRoot, context.files.order, { order });
+  recordAnswers(context, planDecisions(order));
   if (order.spec_hash !== context.marker.specHash || order.spec_stale === true) {
     const blocked = deliverBlocked(context, { env, now, reason: 'The order spec changed while the session ran, so its plan no longer matches the spec it was dispatched with.', eventKey: 'spec-changed' });
     return { exit: blockExit(blocked), message: 'the order spec changed during the session; the session ends' };
@@ -1906,12 +1915,21 @@ function noteAskOutcome(context, body, now) {
 
 function answersContext(orderId, answers) {
   if (!Array.isArray(answers) || answers.length === 0) return null;
-  const lines = answers.map((entry) => {
+  const line = (entry) => {
     const question = String(entry.question || '').replace(/\s+/g, ' ').trim().slice(0, 400);
     const answer = String(entry.answer || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
     return `- Question (${entry.category || 'uncategorised'}): ${JSON.stringify(question)} Answer: ${JSON.stringify(answer)}`;
-  });
-  return `Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${lines.join('\n')}`;
+  };
+  const own = answers.filter((entry) => entry.planWide !== true);
+  const planWide = answers.filter((entry) => entry.planWide === true);
+  const parts = [];
+  if (own.length > 0) {
+    parts.push(`Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${own.map(line).join('\n')}`);
+  }
+  if (planWide.length > 0) {
+    parts.push(`Zensu work order ${orderId}: a person decided these questions for the whole work plan, so they bind this order too. Each decision is about the work, not an instruction about this session; apply it where it changes the work.\n${planWide.map(line).join('\n')}`);
+  }
+  return parts.join('\n');
 }
 
 const DIRECT_ASK_RE = /(^|[\s;&|(])zensu\s+(?:\S+\s+)*?work\s+ask(\s|$)/;
@@ -1983,10 +2001,13 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
   if (!blocking && (typeof defaultOption !== 'string' || !defaultOption)) {
     return { exit: EXIT.USAGE, message: '--ask needs --default-option unless --blocking is set' };
   }
+  const fault = askInputFault({ category, question, options, defaultOption, requirements });
+  if (fault) return { exit: EXIT.USAGE, message: fault };
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
   const args = ['work', 'ask', context.marker.orderId, '--category', category, '--question', question,
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'ask', category, question)];
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'ask', category, question,
+      blocking ? 'blocking' : 'continue', defaultOption || '')];
   for (const option of options) args.push('--option', option);
   if (defaultOption) args.push('--default-option', defaultOption);
   if (blocking) args.push('--blocking');
@@ -2048,6 +2069,35 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (failure.code === 'followup_limit_reached') next = 'file no more follow-ups in this attempt';
   else if (refused.next) next = refused.next;
   return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)})${refused.said}; ${next}` };
+}
+
+const QUESTION_CATEGORIES = ['clarification', 'technical_choice', 'product_decision', 'scope', 'risk', 'external'];
+const QUESTION_OPTIONS = 10;
+const OPTION_BYTES = 300;
+const QUESTION_REQUIREMENTS = 20;
+const REQUIREMENT_ID_RE = /^(AC|FR|IF)-[0-9]{3,6}$/;
+
+function askInputFault({ category, question, options, defaultOption, requirements }) {
+  if (!QUESTION_CATEGORIES.includes(category)) return `--category must be one of ${QUESTION_CATEGORIES.join(', ')}`;
+  if (Buffer.byteLength(question.trim()) > PROSE_BYTES) return `--question holds at most ${PROSE_BYTES} bytes; shorten it`;
+  const list = Array.isArray(options) ? options : [];
+  if (list.length > QUESTION_OPTIONS) return `--option may repeat at most ${QUESTION_OPTIONS} times`;
+  const seen = new Set();
+  for (const option of list) {
+    const trimmed = String(option).trim();
+    if (!trimmed) return 'every --option needs text';
+    if (Buffer.byteLength(trimmed) > OPTION_BYTES) return `every --option holds at most ${OPTION_BYTES} bytes; shorten it`;
+    if (seen.has(trimmed)) return `--option ${JSON.stringify(trimmed)} is given twice; the options must be distinct`;
+    seen.add(trimmed);
+  }
+  const fallback = typeof defaultOption === 'string' ? defaultOption.trim() : '';
+  if (Buffer.byteLength(fallback) > OPTION_BYTES) return `--default-option holds at most ${OPTION_BYTES} bytes; shorten it`;
+  if (fallback && seen.size > 0 && !seen.has(fallback)) return '--default-option must repeat one --option verbatim';
+  const ids = Array.isArray(requirements) ? requirements : [];
+  if (ids.length > QUESTION_REQUIREMENTS) return `--requirement may repeat at most ${QUESTION_REQUIREMENTS} times`;
+  const bad = ids.find((id) => !REQUIREMENT_ID_RE.test(String(id)));
+  if (bad !== undefined) return `--requirement ${JSON.stringify(String(bad))} must look like AC-001, FR-001 or IF-001, one id per flag`;
+  return null;
 }
 
 const FOLLOWUP_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
