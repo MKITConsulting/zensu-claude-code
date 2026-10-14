@@ -291,7 +291,7 @@ function classifyFailure(outcome) {
   if (outcome && outcome.exitCode === 0) return { verdict: VERDICTS.OK, status: null, code: null };
   const status = outcome ? outcome.status : null;
   const code = outcome ? outcome.code : null;
-  if (status === null) return { verdict: VERDICTS.TRANSIENT, status, code };
+  if (status === null) return { verdict: VERDICTS.TRANSIENT, status, code, message: outcome && typeof outcome.message === 'string' ? outcome.message : '' };
   if (status === 401) return { verdict: VERDICTS.LOST, status, code };
   if (code) {
     if (LOST_CODES.has(code)) return { verdict: VERDICTS.LOST, status, code };
@@ -306,7 +306,10 @@ function classifyFailure(outcome) {
 }
 
 function describeFailure(failure) {
-  if (!failure || failure.status === null) return 'no answer from Zensu';
+  if (!failure || failure.status === null) {
+    const said = failure && typeof failure.message === 'string' ? failure.message.replace(/\s+/g, ' ').trim() : '';
+    return said ? `the zensu CLI failed without a status: ${said}` : 'no answer from Zensu';
+  }
   return failure.code ? `status ${failure.status}, code ${failure.code}` : `status ${failure.status}`;
 }
 
@@ -652,6 +655,8 @@ function orderSummary(order, context) {
   };
 }
 
+const SESSION_TOKEN_SETUP_RE = /ZENSU_SESSION_TOKEN (?:needs the host|must hold)/;
+
 function probe({ env = process.env } = {}) {
   const outcome = runZensu(['work', '--help'], { env, timeoutMs: 15000 });
   if (outcome.missing) return { ok: false, reason: 'the zensu CLI is not on PATH; install zensu-cli 0.8.0 or later' };
@@ -674,6 +679,12 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
   const got = runZensu(['work', 'get', orderId, '--json'], { env });
   if (got.exitCode !== 0 || !isObject(got.json)) {
     const failure = classifyFailure(got);
+    if (failure.status === null && got.exitCode !== null && got.exitCode !== 0 && SESSION_TOKEN_SETUP_RE.test(got.message || '')) {
+      return {
+        exit: EXIT.NO_CLI,
+        message: `the zensu CLI cannot use the session token: ${got.message.replace(/\s+/g, ' ').trim()}; the worker must start the session with ZENSU_API_URL set to the Zensu host that issued the token`,
+      };
+    }
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY || failure.verdict === VERDICTS.OK) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not answer the order read (${describeFailure(failure)}); try again` };
     }
@@ -1444,7 +1455,8 @@ const SHELL_WRAPPERS = new Set(['command', 'builtin', 'exec', 'env', 'sudo', 'do
 const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 const VARIABLE_BUILTINS = new Set(['export', 'declare', 'typeset', 'readonly', 'local']);
 const SUDO_OPERAND_OPTIONS = new Set(['-u', '-g', '-h', '-p', '-C', '-T', '-r', '-t', '-D', '-R']);
-const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup', 'questions', 'list']);
+const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup']);
+const ORDER_FILE_WORK_VERBS = new Set(['list', 'questions']);
 const HELPER_WORK_VERBS = new Set(['event', 'heartbeat']);
 const HUMAN_PLAN_VERBS = new Set(['approve', 'finalize', 'abandon', 'confirm-merge']);
 const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
@@ -1795,10 +1807,12 @@ function analyzeBash(command, depth = 0) {
           result.deny = bashFinding('helper-verb', `zensu work ${verb}`);
           return result;
         }
-        const readOnly = SESSION_WORK_VERBS.has(verb)
-          || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list');
-        if (!readOnly) {
-          const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        if (ORDER_FILE_WORK_VERBS.has(verb) || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list')) {
+          result.deny = bashFinding('order-file', `zensu work ${verb}${scoped}`);
+          return result;
+        }
+        if (!SESSION_WORK_VERBS.has(verb)) {
           result.deny = bashFinding('human-gate', `zensu work ${verb}${scoped}`);
           return result;
         }
@@ -1831,6 +1845,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail} is sent by the work-order helper only. Use zensu-work-order.sh --drain for stages, --finish for the outcome and --renew for the lease.`;
     case 'human-gate':
       return `${lead} ${finding.detail} is a decision a person or the worker makes; a work-order session may not run it.`;
+    case 'order-file':
+      return `${lead} Zensu refuses ${finding.detail} for a session token. Read the order file that orderFile in the --start summary names instead: .order.questions holds the earlier questions with their answers and .order.policy the policy. Answers to non-blocking questions reach you through the work-order hooks.`;
     case 'token':
       return `${lead} The command is refused because ${finding.detail}. Never print, read, unset or override ${TOKEN_VARIABLE}; the helpers read it from the environment themselves.`;
     case 'lease':
@@ -1979,10 +1995,9 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
     }
-    const next = failure.code === 'content_not_allowed'
-      ? 'rewrite it as plain prose and ask again'
-      : 'continue with your default option, or finish with --reason when the work cannot go on';
-    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)}); ${next}` };
+    const refused = refusedProse(outcome, failure, 'ask again');
+    const next = refused.next || 'continue with your default option, or finish with --reason when the work cannot go on';
+    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})${refused.said}; ${next}` };
   }
   const body = outcome.json;
   const asked = isObject(body.question) ? body.question : {};
@@ -2003,6 +2018,8 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (typeof title !== 'string' || !title.trim() || typeof rationale !== 'string' || !rationale.trim()) {
     return { exit: EXIT.USAGE, message: '--followup needs --title and --rationale' };
   }
+  const fault = followupInputFault({ title, rationale, severity, paths });
+  if (fault) return { exit: EXIT.USAGE, message: fault };
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
   const args = ['work', 'followup', context.marker.orderId, '--title', title, '--rationale', rationale, '--severity', severity,
@@ -2019,10 +2036,45 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(failure)})` };
   }
+  const refused = refusedProse(outcome, failure, 'file it again');
   let next = 'continue without it';
   if (failure.code === 'followup_limit_reached') next = 'file no more follow-ups in this attempt';
-  else if (failure.code === 'content_not_allowed') next = 'rewrite it as plain prose and file it again';
-  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)}); ${next}` };
+  else if (refused.next) next = refused.next;
+  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)})${refused.said}; ${next}` };
+}
+
+const FOLLOWUP_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+const FOLLOWUP_TITLE_BYTES = 200;
+const FOLLOWUP_PATHS = 20;
+const PROSE_BYTES = 2048;
+const REPOSITORY_PATH_BYTES = 512;
+const REPOSITORY_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
+
+function cleanRepositoryPath(entry) {
+  if (typeof entry !== 'string' || entry === '' || entry === '.' || Buffer.byteLength(entry) > REPOSITORY_PATH_BYTES) return false;
+  if (entry.trim() !== entry || entry.startsWith('/') || entry.endsWith('/') || path.posix.normalize(entry) !== entry) return false;
+  if (entry.split('/').includes('..')) return false;
+  return REPOSITORY_PATH_RE.test(entry);
+}
+
+function followupInputFault({ title, rationale, severity, paths }) {
+  if (!FOLLOWUP_SEVERITIES.has(severity)) return '--severity must be one of low, medium, high, critical';
+  if (Buffer.byteLength(title.trim()) > FOLLOWUP_TITLE_BYTES) return `--title holds at most ${FOLLOWUP_TITLE_BYTES} bytes; shorten it`;
+  if (Buffer.byteLength(rationale.trim()) > PROSE_BYTES) return `--rationale holds at most ${PROSE_BYTES} bytes; shorten it`;
+  const list = Array.isArray(paths) ? paths : [];
+  if (list.length > FOLLOWUP_PATHS) return `--path may repeat at most ${FOLLOWUP_PATHS} times`;
+  const bad = list.find((entry) => !cleanRepositoryPath(entry));
+  if (bad !== undefined) return `--path ${JSON.stringify(String(bad))} must be a clean relative file path without wildcards, ./ or a trailing slash`;
+  return null;
+}
+
+function refusedProse(outcome, failure, again) {
+  const text = outcome && typeof outcome.message === 'string' ? outcome.message.replace(/\s+/g, ' ').trim() : '';
+  const tooLong = /^content_not_allowed: ([A-Za-z0-9_.]+): too_long\b/.exec(text);
+  let next = null;
+  if (tooLong) next = `shorten ${tooLong[1]} and ${again}`;
+  else if (failure.code === 'content_not_allowed') next = `rewrite it as plain prose and ${again}`;
+  return { said: text ? `: ${text}` : '', next };
 }
 
 function planSummary(text) {

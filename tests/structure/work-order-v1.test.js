@@ -30,6 +30,7 @@ function sandbox() {
     FAKE_ZENSU_STATE: stateFile,
     FAKE_ZENSU_CALLS: callsFile,
     ZENSU_SESSION_TOKEN: TOKEN,
+    ZENSU_API_URL: 'http://127.0.0.1:9',
     ZENSU_WORK_ORDER_RETRY_MS: '1',
     ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '50',
   };
@@ -390,6 +391,21 @@ test('start refuses without the token, without zensu work, and for an order of a
   assert.equal(foreign.exit, wo.EXIT.NOT_BOUND);
   assert.match(foreign.message, /another session/);
   assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+});
+
+test('start stops with exit 3 when the session environment names no Zensu host for the token', () => {
+  const box = sandbox();
+  box.seed();
+  const env = { ...box.env };
+  delete env.ZENSU_API_URL;
+  const result = wo.start({ env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.NO_CLI, result.message);
+  assert.match(result.message, /ZENSU_API_URL/);
+  assert.doesNotMatch(result.message, /did not answer/);
+  assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+  box.mutate((state) => { state.failNext = [{ command: 'get', status: 503, code: 'unavailable', times: 1 }]; });
+  const transient = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(transient.exit, wo.EXIT.TRANSIENT);
 });
 
 test('an unsupported kind ends with blocked(worker_error) naming the kind', () => {
@@ -819,6 +835,10 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'zensu auth login': 'auth',
     'zensu work approve 1234': 'human-gate',
     'zensu work policy set --plan-approval auto': 'human-gate',
+    'zensu work policy get --product p1': 'order-file',
+    'zensu work list': 'order-file',
+    'zensu work questions --plan p1': 'order-file',
+    'zensu work repositories list --product p1': 'order-file',
     'zensu plan approve abc': 'human-gate',
     'zensu work event 1234 --stage implementing': 'helper-verb',
     'zensu work heartbeat 1234': 'helper-verb',
@@ -845,7 +865,7 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
   const allowed = [
     'git status', 'git commit -m "do not git push here"', 'git log --oneline -3', 'printenv PATH', 'set -e',
     'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
-    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work policy get', 'gh pr view 7', 'echo hello',
+    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
     "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
@@ -922,6 +942,42 @@ test('followup files once per title and the CLI parser collects repeated flags',
   assert.equal(box.fake().followups.length, 1);
   assert.deepEqual(wo.parseArgs(['--option', 'a', '--option', 'b', '--blocking', '--question', 'q', '--requirement', 'AC-001']),
     { option: ['a', 'b'], blocking: true, question: 'q', requirement: ['AC-001'] });
+});
+
+test('followup refuses inputs the CLI or Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, title: 'Add an index on widgets.owner_id', rationale: 'The list query scans the table.', severity: 'medium' };
+  const cases = [
+    [{ severity: 'major' }, /--severity must be one of low, medium, high, critical/],
+    [{ paths: ['src/auth/'] }, /clean relative file path/],
+    [{ paths: ['./src/a.ts'] }, /clean relative file path/],
+    [{ paths: ['src/**'] }, /clean relative file path/],
+    [{ paths: Array.from({ length: 21 }, (_, index) => `src/file${index}.ts`) }, /at most 20 times/],
+    [{ title: 'x'.repeat(201) }, /--title holds at most 200 bytes/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.followup(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'followup').length, 0);
+  const filed = wo.followup(context, { ...base, paths: ['src/widgets/list.ts', '.github/workflows/ci.yml'] });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+});
+
+test('a refused question or follow-up names the rule Zensu gave and what to shorten', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  box.mutate((state) => { state.failNext = [{ command: 'followup', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: rationale: too_long; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const followup = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'The list is read on every request.', severity: 'low' });
+  assert.equal(followup.exit, wo.EXIT.REFUSED);
+  assert.match(followup.message, /content_not_allowed: rationale: too_long/);
+  assert.match(followup.message, /shorten rationale and file it again/);
+  const asked = wo.ask(context, { env: box.env, category: 'technical_choice', question: 'git checkout the old branch first?', options: ['yes', 'no'], defaultOption: 'no' });
+  assert.equal(asked.exit, wo.EXIT.REFUSED);
+  assert.match(asked.message, /question: command_line/);
+  assert.match(asked.message, /rewrite it as plain prose and ask again/);
 });
 
 test('the post-tool update hands answers over once and ends the session on a blocked direct ask', () => {

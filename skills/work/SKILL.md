@@ -38,7 +38,7 @@ skill needs a work order id.
 |---|---|---|
 | 0 | done | continue |
 | 2 | usage or internal fault | read stderr; fix the call once, else finish with `--reason` |
-| 3 | the `zensu` CLI lacks `zensu work` | stop: report the line, nothing else is possible |
+| 3 | the `zensu` CLI lacks `zensu work`, or cannot use the session token | stop: report the line, nothing else is possible |
 | 4 | the lease is lost | stop at once: no push, no pull request, no event; run `--finish` once and end |
 | 5 | not a work-order session, or bound to another order | stop and report |
 | 6 | the order is blocked, or waits for a person, and the session has ended | run `--finish` once, then end the session |
@@ -128,7 +128,8 @@ A follow-up idea outside the order's scope goes to Zensu, not into this work:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --followup --title "<title>" --rationale "<why it matters>" --severity medium
 ```
 
-`--severity` is `low`, `medium`, `high` or `critical`; `--path <file>` may repeat.
+`--severity` is `low`, `medium`, `high` or `critical`; `--path <file>` may repeat up to 20 times and
+names a clean relative file path. The title holds at most 200 bytes.
 
 ## Step 4 — Finish
 

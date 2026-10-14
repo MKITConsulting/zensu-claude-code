@@ -102,6 +102,7 @@ new_project alpha
 source "$BASELINE" "$SESSION" || { check "I1 test session binds" FAIL; finish; exit 1; }
 wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER" "$SESSION" auto implement
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 bash "$WRAPPER" --start --order "$ORDER" >"$SBOX/start.out" 2>"$SBOX/start.err"; RC=$?
 [ "$RC" -eq 0 ] && check "I1 a work-order session starts" PASS \
   || check "I1 a work-order session starts (rc=$RC $(cat "$SBOX/start.err"))" FAIL

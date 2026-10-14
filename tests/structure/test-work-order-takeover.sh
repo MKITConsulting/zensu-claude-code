@@ -175,6 +175,7 @@ wo_fake_set "$FAKE_ZENSU_STATE" "
 "
 printf '{"number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","headRefName":"%s","baseRefName":"main"}\n' "$BRANCH" > "$FAKE_GH_DIR/pr.json"
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 
 bash "$WRAPPER" --start --order "$ORDER" >"$SBOX/start.out" 2>"$SBOX/start.err"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(json_get "$SBOX/start.out" 'value.attempt')" = "2" ] \

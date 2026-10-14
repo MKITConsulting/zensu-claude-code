@@ -132,6 +132,7 @@ else
 fi
 
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 OUT_PRE="$(payload "$SESSION" AskUserQuestion | bash "$PRE_HOOK" 2>&1)"; RC_PRE=$?
 OUT_PUSH="$(payload "$SESSION" Bash 'git push origin main' | bash "$PRE_HOOK" 2>&1)"; RC_PUSH=$?
 OUT_POST="$(payload "$SESSION" Bash 'git status' | bash "$POST_HOOK" 2>&1)"; RC_POST=$?
@@ -179,6 +180,10 @@ printenv
 echo "$ZENSU_SESSION_TOKEN"
 git status
 zensu work get 1 --json
+zensu work list
+zensu work questions --plan p1
+zensu work policy get --product p1
+zensu work repositories list --product p1
 COMMANDS
   wo_fake_set "$FAKE_ZENSU_STATE" 'state.questions.push({ id: "q-answer-1", work_order_id: state.order.id, category: "scope", question: "Should archived widgets be listed?", status: "answered", answer: "List active widgets only." })'
   for lease in "$PROJECT"/.zensu/state/work-order/lease-*.json; do
@@ -201,9 +206,10 @@ else
   check "G4 in work-order mode the prompt tools and the chip tool are denied (rc=$RC $(cat "$SBOX/denials.txt" 2>/dev/null | cut -c1-200))" FAIL
 fi
 DENIED_BASH="$(grep -c "	deny	" "$SBOX/bash.txt" 2>/dev/null)"
-if [ "$DENIED_BASH" = "6" ] && grep -q "^git status	none" "$SBOX/bash.txt" && grep -q "^zensu work get 1 --json	none" "$SBOX/bash.txt" \
-  && grep '^git push origin HEAD' "$SBOX/bash.txt" | grep -qF 'zensu-work-order.sh --push'; then
-  check "G5 raw pushes, merges, human-gate verbs and token reads are denied while ordinary commands pass silently" PASS
+if [ "$DENIED_BASH" = "10" ] && grep -q "^git status	none" "$SBOX/bash.txt" && grep -q "^zensu work get 1 --json	none" "$SBOX/bash.txt" \
+  && grep '^git push origin HEAD' "$SBOX/bash.txt" | grep -qF 'zensu-work-order.sh --push' \
+  && [ "$(grep -c 'orderFile in the --start summary' "$SBOX/bash.txt")" = "4" ]; then
+  check "G5 raw pushes, merges, human-gate verbs, token reads and the verbs Zensu refuses a session token are denied while ordinary commands pass silently" PASS
 else
   check "G5 raw pushes, merges, human-gate verbs and token reads are denied (denied=$DENIED_BASH $(cut -c1-120 "$SBOX/bash.txt" 2>/dev/null | tr '\n' '|'))" FAIL
 fi

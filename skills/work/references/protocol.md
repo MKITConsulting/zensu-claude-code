@@ -50,7 +50,9 @@ a higher rank than the last accepted one is sent:
 `PR_OPEN_REQUESTED` maps to no stage, so `pr_open` never precedes the pull request. Every stage
 event carries `--client-name zensu-claude-code`, the plugin version, `--autopilot-stage`,
 `--autopilot-run-id` and a `client_event_id` of `zcc-` plus 40 hex digits of a SHA-256 over the run
-id and the ledger event id, so a repeated send replays instead of moving the order twice.
+id and the ledger event id, so a repeated send replays instead of moving the order twice. Questions
+and follow-ups name the CLI as their client, because `zensu work ask` and `zensu work followup` take
+no `--client-name`.
 
 ## Binding the spec
 
@@ -121,6 +123,11 @@ category and the question, so a repeat replays. When Zensu answers with the orde
 blocking question, a scope question (`spec_change`) or any question past the order's limit
 (`escalated`) — the helper writes `ended-` with a successful outcome, cancels the local run and
 exits 6. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
+It refuses with exit 2, before the CLI runs, a severity other than `low`, `medium`, `high` or
+`critical`, a title over 200 bytes, a rationale over 2048 bytes, more than 20 paths, and a path that
+is not a clean relative file path: no `./`, no trailing slash, no `..`, no wildcard. A refusal of a
+question or a follow-up quotes Zensu's message, and for a text that is too long names the field to
+shorten.
 
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
 file when it is new or changed, pushes through the push verb, sends an artifact event of kind
@@ -136,9 +143,10 @@ Outside work-order mode all three print nothing and exit 0.
 
 - `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
   `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
-  `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask`, `followup`,
-  `questions`, `list`, `policy get` and `repositories list`, the `zensu plan` approval verbs, and
-  every command that prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`. It reads commands
+  `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
+  `followup`, the `zensu plan` approval verbs, and every command that prints, reads, unsets or
+  overrides `ZENSU_SESSION_TOKEN`. Zensu refuses `zensu work list`, `questions`, `policy get` and
+  `repositories list` for a session token, so their denial points at the order file. It reads commands
   inside `bash -c`, `eval`, command substitutions and wrappers such as `env` or `sudo`. It renews
   the lease when due, and once the lease is lost or the session ended it denies every `gh`, `glab`
   and `zensu-vcs.sh` call. It never allows anything.
@@ -162,7 +170,8 @@ more context on the same line or on further lines, and under `--json` adds a las
 `{"error":{"status":…,"code":…,"message":…}}`. Every helper call passes `--json`. The runtime reads
 the JSON line first and the first `(status …)` group of the error text second; without a code it
 decides by status and, for a `409`, by one more `zensu work get`. A failure without a status — a
-network, flag or validation error — is retried inside the retry budget like a missing answer.
+network, flag or validation error — is retried inside the retry budget like a missing answer, and
+every message about it quotes the CLI's own line.
 
 | Answer | Handling |
 |---|---|
@@ -173,6 +182,7 @@ network, flag or validation error — is retried inside the retry budget like a 
 | `invalid_transition` on a stage | the stage is already behind the order; counted as delivered |
 | `409` without a code | probe the order: an unconfirmed claim retries, a missing plan approval reads as `plan_approval_required`, anything else as `invalid_transition` |
 | any other code or `4xx` | final; the helper exits 8 and names the code |
+| a CLI error without a status that names `ZENSU_SESSION_TOKEN`, at `--start` | setup error: the session has no host for the token, or the token is malformed; exit 3 with the CLI's line |
 
 A heartbeat that fails with a final answer is treated as a lost lease, because a lease Zensu does not
 renew cannot be relied on.

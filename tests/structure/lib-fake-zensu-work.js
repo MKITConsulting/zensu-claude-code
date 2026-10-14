@@ -11,6 +11,9 @@ const BRANCH_PREFIX = 'wo-';
 const GIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 const COMMAND_WORDS = new Set(['git', 'npm', 'npx', 'yarn', 'go', 'make', 'docker', 'kubectl', 'curl', 'bash', 'sh',
   'node', 'python', 'rm', 'cd', 'ls', 'cat', 'echo', 'export', 'zensu', 'gh', 'glab', 'claude', 'sudo']);
+const CLI_VERSION = '0.8.0-fake';
+const DEFAULT_API_URL = 'https://api.zensu.dev';
+const PLAN_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
 
 const argv = process.argv.slice(2);
 
@@ -31,7 +34,21 @@ function logCall() {
 
 function usage(message) {
   process.stderr.write(`error: ${message}\n`);
+  if (argv.includes('--json')) process.stderr.write(`${JSON.stringify({ error: { message } })}\n`);
   process.exit(1);
+}
+
+function apiUrlFlag() {
+  const index = argv.indexOf('--api-url');
+  if (index >= 0 && argv[index + 1]) return argv[index + 1];
+  const joined = argv.find((arg) => arg.startsWith('--api-url='));
+  return joined ? joined.slice('--api-url='.length) : '';
+}
+
+function validPlanPath(entry) {
+  if (entry === '' || entry === '.' || Buffer.byteLength(entry) > 512 || entry.trim() !== entry) return false;
+  if (entry.startsWith('/') || entry.endsWith('/') || path.posix.normalize(entry) !== entry || entry.split('/').includes('..')) return false;
+  return PLAN_PATH_RE.test(entry);
 }
 
 let state;
@@ -113,6 +130,10 @@ function injected(command) {
 function requireSessionToken(verb) {
   const token = process.env.ZENSU_SESSION_TOKEN || '';
   if (!token) usage(`zensu ${verb} runs inside a work order session; set ZENSU_SESSION_TOKEN to the session token of its claim`);
+  if (!token.startsWith('zst_')) usage('ZENSU_SESSION_TOKEN must hold a work order session token (zst_\u2026)');
+  if (!process.env.ZENSU_API_URL && !apiUrlFlag() && !state.storedApiUrl) {
+    usage(`ZENSU_SESSION_TOKEN needs the host that issued it: set ZENSU_API_URL or pass --api-url; a session token is never sent to the built-in default ${DEFAULT_API_URL}`);
+  }
   if (state.mode === 'revoked' || token !== state.token) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
 }
 
@@ -407,7 +428,7 @@ function workAsk(flags) {
     answer: null,
   };
   state.questions.push(question);
-  recordEvent({ client_event_id: clientEventId, event_type: 'question', from_status: state.order.status, to_status: state.order.status, detail: { question_id: question.id, blocking: question.blocking } });
+  recordEvent({ client_event_id: clientEventId, event_type: 'question', from_status: state.order.status, to_status: state.order.status, client_name: 'zensu-cli', client_version: CLI_VERSION, detail: { question_id: question.id, blocking: question.blocking } });
   let escalated = false;
   if (asked >= state.policy.max_questions_per_order) {
     endSession('blocked', 'escalated', 'underspecified');
@@ -424,6 +445,11 @@ function workAsk(flags) {
 function workFollowup(flags) {
   if (!flags.title || !flags.rationale) usage('--title and --rationale are required');
   if (!['low', 'medium', 'high', 'critical'].includes(flags.severity)) usage('--severity must be one of low, medium, high, critical');
+  const paths = flags.path || [];
+  if (paths.length > 20) usage('at most 20 --path values');
+  for (const entry of paths) {
+    if (!validPlanPath(entry)) usage(`--path ${JSON.stringify(entry)} must be a clean relative file path without wildcards`);
+  }
   requireSessionToken('work followup');
   requireOrder(flags._[0]);
   injected('followup');
@@ -431,12 +457,13 @@ function workFollowup(flags) {
   const prior = state.events.find((event) => event.client_event_id === clientEventId);
   if (prior) printJson({ event: prior, replay: true });
   requireLive();
+  if (Buffer.byteLength(flags.title.trim()) > 200) apiFail(422, 'content_not_allowed', 'content_not_allowed: title: too_long; send metadata and short prose only, never code, commands, logs or diffs');
   guardProse('title', flags.title, true);
   guardProse('rationale', flags.rationale, true);
   state.followups = state.followups || [];
   if (state.followups.length >= 20) apiFail(409, 'followup_limit_reached', 'an attempt reports at most 20 follow-ups');
-  state.followups.push({ title: flags.title, rationale: flags.rationale, severity: flags.severity, paths: flags.path || [] });
-  const event = recordEvent({ client_event_id: clientEventId, event_type: 'followup', from_status: state.order.status, to_status: state.order.status, detail: { title: flags.title } });
+  state.followups.push({ title: flags.title, rationale: flags.rationale, severity: flags.severity, paths });
+  const event = recordEvent({ client_event_id: clientEventId, event_type: 'followup', from_status: state.order.status, to_status: state.order.status, client_name: 'zensu-cli', client_version: CLI_VERSION, detail: { title: flags.title } });
   save(state);
   printJson({ event, replay: false });
 }
@@ -468,7 +495,7 @@ function pulseStart(flags) {
 function main() {
   logCall();
   if (argv[0] === '--version' || argv[0] === 'version') {
-    process.stdout.write('zensu 0.8.0-fake\n');
+    process.stdout.write(`zensu ${CLI_VERSION}\n`);
     process.exit(0);
   }
   state = load();
@@ -487,6 +514,14 @@ function main() {
       case 'ask': return workAsk(flags);
       case 'followup': return workFollowup(flags);
       case 'events': return workEvents(flags);
+      case 'list':
+        if (process.env.ZENSU_SESSION_TOKEN) return apiFail(403, 'session_order_mismatch', 'a session token reads only its own work order');
+        return apiFail(403, 'interactive_user_required', 'this decision needs a person signed in to Zensu');
+      case 'questions':
+      case 'policy':
+      case 'repositories':
+        if (process.env.ZENSU_SESSION_TOKEN) return apiFail(401, 'unauthorized', 'invalid token');
+        return apiFail(403, 'interactive_user_required', 'this decision needs a person signed in to Zensu');
       default:
         return apiFail(403, 'interactive_user_required', 'this decision needs a person signed in to Zensu');
     }
