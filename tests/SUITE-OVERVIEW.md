@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (171 = 164 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 164 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 171). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
+reconciled to that manifest (172 = 165 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 165 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 172). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
@@ -63,7 +63,7 @@ re-derived both; `test-work-order-gates.sh`, `test-work-order-takeover.sh` and
 again: `test-session-hub-receipt.sh` took `main` to 160 CI entries while the work-order branch
 independently reached 164, so merging `main` into it made 165.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 161 against 164 CI-classified suites, so THREE CI
+asserted away: its eleven CI group headers sum to 162 against 165 CI-classified suites, so THREE CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
 `test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -103,8 +103,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **171** — 164 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **164 structure suites + 5 offline evals = 169 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 171 − 164 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **172** — 165 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **165 structure suites + 5 offline evals = 170 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 172 − 165 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -116,8 +116,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 171 structure suites + 5 offline evals | none |
-| `--ci` | 164 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 172 structure suites + 5 offline evals | none |
+| `--ci` | 165 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -306,8 +306,8 @@ developer's real sessions.
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
 listed description at 220 chars with its "Use when"/"Use for" trigger in the first 150.
 
-### Prompt routing & payloads (9)
-`agent-context` · `best-solution-first` · `context-nudge-hook` ·
+### Prompt routing & payloads (10)
+`agent-context` · `best-solution-first` · `context-nudge-hook` · `hook-payload-stdin` ·
 `intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
 `session-hub-receipt` · `user-prompt-budget` · `zensu-plm-arg-guidance`
 
@@ -321,6 +321,29 @@ a distinct receipt for each failure mode).
 prompt is exactly the Session Hub's takeover command and stays silent for every other prompt,
 together with the session-trail handover contract that command is spelled in and the
 `--receipt` flag `trail.mjs` accepts.
+
+`hook-payload-stdin` is the one suite in this group that reads EVERY hook. It drives
+`tests/structure/hook-payload-stdin-scan.js` over `hooks/*.sh` and `hooks/lib/*.sh` and fails
+when a hook hands its payload to a child process through an environment prefix, an `export` or
+`declare -x`, or an argument. An environment string over the exec limit (131072 bytes per string
+on Linux, 1048576 bytes for argv plus environment on macOS) makes the exec fail with E2BIG, the
+child prints nothing, and a hook that reads the empty output as nothing to do fails open; that is
+how the CLI gate and the TDD phase gate once let oversized payloads through. The scanner lexes
+the shell itself (quotes, heredocs, `case` patterns, `[[ ]]`, command substitutions) and follows
+the payload from the `INPUT` name and from every whole-stdin read (`$(cat)`, `$(head …)`,
+`$(dd …)`, `read -d ''` outside a loop condition) through plain and `local` copies into the
+positional parameters of each function it reaches, resolved in the calling file first and then in
+`hooks/lib/`. A builtin or a known function may take the payload as an argument; every other
+command must get it over stdin, which is the remedy the failure names. A file the scanner cannot
+parse fails the check. The controls flag nine leak shapes, leave the safe shapes unflagged, and
+prove that the scan read every file and found the payload read in every hook script that reads
+stdin. The coupling runs in the unobvious direction, as for `bash32-portability`: an ordinary
+edit to any hook can turn this suite red, and the remedy is in the hook that changed. It does not
+follow a payload through `eval`, `source` or `set --` arguments, an indirect `${!name}`, or a
+variable other than `INPUT` that one file assigns and another reads; it does not read code held in
+a quoted string, such as a `trap` handler; and it does not track values derived from the payload,
+such as the prompt or command text a hook extracts. It is not in
+`windows-ci.v1.json`: it reads files and runs no hook, so it has no Windows dimension.
 
 ### VCS / forge integration (7)
 `valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
