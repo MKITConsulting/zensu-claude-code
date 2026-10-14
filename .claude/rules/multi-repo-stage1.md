@@ -396,22 +396,36 @@ exit-2 cause under its existing "did not complete" contract.
   the doctor topology row cannot fire for the topology the spec's own worked example uses. Roots
   outside BOTH `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` —
   survive redaction and the feature works correctly on them. Say WHICH HALF is universally live,
-  never that stage 1 detects cross-repository work in general. **The `<project>` direction was
-  the same interaction running the OTHER way and it is now CLOSED, which is why this bullet must
-  not be read as covering it.** Rule 1 of the redactor rewrites the project root to the literal
-  `<project>`, so an author who spelled an in-anchor claim absolutely got `<project>/src/x.ts` in
-  the run log: no leading `/`, so never `absolute_claim_verdict`; in the union under no spelling;
-  and the `*/*` arm returned it verbatim — `EDIT NOT LANDED` for an edit that DID land, a
-  `clean: false` receipt, a refused `--tdd-complete`, and a step 5b b) remedy (land it at the path
-  the claim names) that cannot be performed. `normalize_claim` strips that placeholder now, which
-  is sound HERE and only here because it denotes the root this run was handed. The `~` half stays
-  a stated bound for the opposite reason: `$HOME` names any home-rooted path, including a genuine
-  sibling repository, so guessing there would relabel foreign work as in-anchor. `X16`/`X16a` in
+  never that stage 1 detects cross-repository work in general. **The `<project>` direction is
+  the same interaction running the OTHER way, and it is closed by PLACING the claim, not by
+  stripping it, which is why this bullet must not be read as covering it.** Rule 1 of the
+  redactor rewrites the project root to the literal `<project>`, so a claim spelled absolutely
+  inside the anchor reaches the run log as `<project>/...`, with no leading `/`. `unredact_claim`
+  in `zensu-edit-landing.sh` strips the placeholder, refuses an empty, absolute or `..`-climbing
+  remainder, and rebuilds the claim under `PROJECT_ABS` before `absolute_claim_verdict` places
+  it, in `normalize_claim` and in the `--inventory` loop alike, so the redacted spelling gets the
+  verdict its absolute spelling gets. A stripped remainder graded as a bare relative path skips
+  two things the absolute arm does. It never reaches `nested_worktree_of`, so a claim into a
+  repository nested under the anchor grades `EDIT LANDED (untracked-by-design)` with exit 0 where
+  the anchor ignores that directory, `EDIT NOT LANDED` where it does not, and yields no
+  `foreign-root` line. And it resolves against git's top level, so in a session whose project root
+  sits below the repository top it names a DIFFERENT file: a dirty same-named file at the top
+  grades an unlanded claim `EDIT LANDED`. **The rebuild root is `PROJECT_ABS`, never `REPO_ROOT`**:
+  the placeholder denotes the root the writer derived from the log path, which is the `--project`
+  root in every shipped caller. In that subdirectory topology the audit can therefore accept a
+  claim it used to refuse, because it now grades the file the author named. `X16b`–`X16f` in
   `tests/structure/test-edit-landing-audit.sh` build their run log through the production writer
-  rather than `printf` and pin both directions; every other fixture in that file writes with
-  `printf`, which matches no redaction rule, which is why the suite was green against an input
-  shape the production writer rarely produces. The durable fix is to un-substitute
-  `<project>`/`<home>`/`~` against the same roots the redactor used, before classifying.
+  and pin the nested repository both ignored and not ignored, the in-anchor claim beside it and
+  the inventory line; `X16g` pins the rebuild root against a dirty same-named file at the
+  repository top. `X18`, `X27` and `X27b` pin the in-anchor strip, the backslash spelling and the
+  `..` refusal. The `~` half stays a stated bound: `$HOME` names any home-rooted path, including a
+  genuine sibling repository, and nothing records the home the writer redacted against.
+  `X16`/`X16a` pin it through the production writer too; every other fixture in that file writes
+  with `printf`, which matches no redaction rule, which is why the suite was green against an
+  input shape the production writer rarely produces. The durable fix for the rest is to
+  un-substitute `<home>` and `~` against the same roots the redactor used, before classifying, the
+  way `<project>` now is. **Version: `patch`**: no schema field, strict key set, hook, matcher,
+  config key or attestation moves, and the receipt keeps its shape.
 - **The no-bound-key topology row withholds the green summary.** It is `WARN`, and `line()`
   counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so any session
   whose binding does not resolve, in a project that has ever written an edit-landing receipt,
