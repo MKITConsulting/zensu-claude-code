@@ -29,7 +29,7 @@ check() {
 # synthetic install. These two pins need no fixture, no synthetic install and no
 # session lifecycle: they read $ROOT and compare two strings. They were the LAST
 # checks in the file, behind eleven full tree installs and five session lifecycles,
-# on a Windows ceiling CLAUDE.md records as UNMEASURED. That is the shape in which
+# on a Windows ceiling that was then unmeasured. That is the shape in which
 # the source-write-gate suite lost its tail at check ~210 and the plan-payload
 # suite at ~61 of 70, both green for everything before the kill. Same placement,
 # same reason, as the routing suite's unit driver.
@@ -2952,8 +2952,8 @@ fi
 # adopt. Without this refusal the adoption would be a way to re-mint a HEALTHY
 # session's record, which is the one thing immutability exists to prevent.
 # Graded off the call the row above already made with these exact five arguments —
-# a second identical node process buys nothing and this suite's Windows ceiling is
-# explicitly unmeasured.
+# a second identical node process buys nothing and only adds Windows wall clock
+# against this suite's 900000 ms cap.
 REASON_SERVED="$REASON_OWN_PROJECT"
 if [ "$REASON_SERVED" = already-served ]; then
   check "AC-C09 a record this installation already serves is not adoptable" PASS
@@ -5580,10 +5580,9 @@ wait_for_records_lock() {
   return 1
 }
 
-# The FIXTURE-FREE rows run first. This file is the last suite of windows-shard-2 and
-# its wall clock there is unmeasured since these rows grew, so a truncation takes the
-# TAIL — and the tail should be session-minting rows, not the only executed cases of
-# the shell emitter's scopes, their routing and their audience.
+# The FIXTURE-FREE rows run first. A Windows timeout truncates this file's TAIL, and
+# the tail should be session-minting rows, not the only executed cases of the shell
+# emitter's scopes, their routing and their audience.
 # AUTO-20 — the deny TEMPLATES no fixture reaches, driven at the emitter. The sixth
 # scope, `adoption-incomplete`, needs a bind that fails while a sibling adoption is
 # landing, which a suite can only force by holding the records lock past
@@ -6861,8 +6860,8 @@ fi
 # adoption can run, and the gate's pruned predicate names the state. That arm's MAIN
 # split was itself a fixed defect — it handed --confirm to every principal — and only
 # a source pin held it, which an inverted comparison would have passed. Reusing
-# AUTO-26's root costs one install instead of two on a suite whose Windows budget is
-# unmeasured.
+# AUTO-26's root costs one install instead of two against this suite's Windows
+# budget.
 AUTO_PRUNED_MINT_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
 AUTO_PRUNED_EXEC_ROOT="$AUTO_NOMOD_ROOT"
 AUTO_PRUNED_SESSION='versioned-upgrade-auto-pruned-no-module'
