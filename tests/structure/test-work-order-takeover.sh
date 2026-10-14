@@ -139,7 +139,7 @@ new_project() {
 ORDER="99999999-9999-4999-8999-999999999999"
 SESSION="wo-takeover-session-0001"
 RUN="run_take_0002"
-BRANCH="zensu/work-99999999"
+BRANCH="wo-99999999"
 STALE_OWNER="scv1_$(printf 'c%.0s' $(seq 1 64))"
 SPEC_HASH="$(printf 'a%.0s' $(seq 1 64))"
 
@@ -289,15 +289,15 @@ RUN2="run_take_fresh_0001"
 (
   new_project beta
   RUN="$RUN2"
-  git -C "$PROJECT" checkout -q -b "zensu/work-13131313"
+  git -C "$PROJECT" checkout -q -b "wo-13131313"
   printf 'x\n' > "$PROJECT/x.txt"
   git -C "$PROJECT" add x.txt
   git -C "$PROJECT" commit -q -m "feat: x"
   HEAD2="$(git -C "$PROJECT" rev-parse HEAD)"
-  git -C "$PROJECT" push -q origin "zensu/work-13131313"
+  git -C "$PROJECT" push -q origin "wo-13131313"
   source "$BASELINE" "$SESSION2" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER2" "$SESSION2" auto implement
-  wo_fake_set "$FAKE_ZENSU_STATE" "state.order.branch = 'zensu/work-13131313'; state.order.head_sha = '$HEAD2';"
+  wo_fake_set "$FAKE_ZENSU_STATE" "state.order.branch = 'wo-13131313'; state.order.head_sha = '$HEAD2';"
   rm -f "$FAKE_GH_DIR/pr.json" "$FAKE_GH_DIR/created"
   reviews_json "$(marker_for "$ORDER" "$REVIEW_HEAD")" > "$FAKE_GH_DIR/reviews.json"
   bash "$WRAPPER" --start --order "$ORDER2" >/dev/null 2>&1 || exit 91
@@ -343,19 +343,19 @@ RUN3="run_take_closed_0001"
 (
   new_project gamma
   RUN="$RUN3"
-  git -C "$PROJECT" checkout -q -b "zensu/work-14141414"
+  git -C "$PROJECT" checkout -q -b "wo-14141414"
   printf 'y\n' > "$PROJECT/y.txt"
   git -C "$PROJECT" add y.txt
   git -C "$PROJECT" commit -q -m "feat: y"
   HEAD3="$(git -C "$PROJECT" rev-parse HEAD)"
-  git -C "$PROJECT" push -q origin "zensu/work-14141414"
+  git -C "$PROJECT" push -q origin "wo-14141414"
   source "$BASELINE" "$SESSION3" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER3" "$SESSION3" auto implement
   wo_fake_set "$FAKE_ZENSU_STATE" "
-    state.order.attempt = 2; state.order.status = 'pr_open'; state.order.branch = 'zensu/work-14141414';
+    state.order.attempt = 2; state.order.status = 'pr_open'; state.order.branch = 'wo-14141414';
     state.order.pr_url = 'https://github.com/acme/widgets/pull/9'; state.order.pr_number = 9; state.order.head_sha = '$HEAD3';
   "
-  printf '{"number":9,"url":"https://github.com/acme/widgets/pull/9","state":"CLOSED","headRefName":"zensu/work-14141414","baseRefName":"main"}\n' > "$FAKE_GH_DIR/pr.json"
+  printf '{"number":9,"url":"https://github.com/acme/widgets/pull/9","state":"CLOSED","headRefName":"wo-14141414","baseRefName":"main"}\n' > "$FAKE_GH_DIR/pr.json"
   rm -f "$FAKE_GH_DIR/created"
   bash "$WRAPPER" --start --order "$ORDER3" >/dev/null 2>&1 || exit 91
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN3" --work-order "$ORDER3" --cover false --validate false >/dev/null 2>&1 || exit 92

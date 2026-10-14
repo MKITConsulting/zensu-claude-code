@@ -329,6 +329,52 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   assert.equal(again.exit, wo.EXIT.OK);
 });
 
+test('the work branch carries the branch prefix the order spec names', () => {
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'wo-' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'agents/wo-' } }), 'agents/wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: '../x' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'a..b' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({}), 'wo-');
+  const box = sandbox();
+  box.seed();
+  const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  assert.equal(result.summary.branchPrefix, 'wo-');
+  assert.equal(result.summary.workBranch, `wo-${ORDER.slice(0, 8)}`);
+  const recorded = sandbox();
+  recorded.seed({ order: { branch: 'wo-earlier1' } });
+  const resumed = wo.start({ env: recorded.env, projectRoot: recorded.project, sessionKey: recorded.sessionKey, orderId: ORDER });
+  assert.equal(resumed.summary.workBranch, 'wo-earlier1');
+});
+
+test('the fake refuses a stage branch outside the order branch prefix, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.equal(wo.sendEvent(context, ['--stage', 'planning', '--client-event-id', wo.clientEventId('r', 'start')], { env: box.env }).verdict, wo.VERDICTS.OK);
+  const refused = wo.sendEvent(context, ['--stage', 'implementing', '--branch', 'zensu/work-22222222', '--client-event-id', wo.clientEventId('r', 'bound')], { env: box.env, target: 'implementing' });
+  assert.equal(refused.verdict, wo.VERDICTS.FINAL);
+  assert.equal(refused.failure.code, 'invalid_branch');
+  const accepted = wo.sendEvent(context, ['--stage', 'implementing', '--branch', `wo-${ORDER.slice(0, 8)}`, '--client-event-id', wo.clientEventId('r', 'bound-2')], { env: box.env, target: 'implementing' });
+  assert.equal(accepted.verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
+});
+
+test('push refuses a working branch without the order branch prefix before any forge write', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const git = (...args) => execFileSync('git', ['-C', box.project, ...args], { encoding: 'utf8', env: gitEnv });
+  git('init', '-q');
+  git('checkout', '-q', '-b', 'feature/widgets');
+  fs.writeFileSync(path.join(box.project, 'a.txt'), 'a\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'init');
+  const pushed = wo.push(context, { env: box.env });
+  assert.equal(pushed.exit, wo.EXIT.REFUSED);
+  assert.match(pushed.message, /feature\/widgets does not start with wo-/);
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event').length, 0);
+});
+
 test('start refuses without the token, without zensu work, and for an order of another session', () => {
   const box = sandbox();
   box.seed();

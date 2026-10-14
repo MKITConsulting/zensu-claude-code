@@ -221,7 +221,7 @@ fi
 ORDER_P="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 SESSION_P1="wo-gates-session-0003"
 RUN_P1="run_gates_plan_1"
-BRANCH_P="zensu/work-bbbbbbbb"
+BRANCH_P="wo-bbbbbbbb"
 (
   new_project planner
   source "$BASELINE" "$SESSION_P1" || exit 90

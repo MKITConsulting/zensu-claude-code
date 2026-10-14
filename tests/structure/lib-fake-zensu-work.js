@@ -7,6 +7,8 @@ const crypto = require('crypto');
 const STATE_FILE = process.env.FAKE_ZENSU_STATE;
 const CALLS_FILE = process.env.FAKE_ZENSU_CALLS;
 const STAGE_RANK = { claimed: 0, planning: 1, implementing: 2, pr_open: 3, reviewing: 4, validating: 5, ready_for_merge: 6 };
+const BRANCH_PREFIX = 'wo-';
+const GIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 const COMMAND_WORDS = new Set(['git', 'npm', 'npx', 'yarn', 'go', 'make', 'docker', 'kubectl', 'curl', 'bash', 'sh',
   'node', 'python', 'rm', 'cd', 'ls', 'cat', 'echo', 'export', 'zensu', 'gh', 'glab', 'claude', 'sudo']);
 
@@ -207,6 +209,18 @@ function validClientEvent(flags) {
   if (!flags['client-name'] || !flags['client-version']) apiFail(422, 'invalid_client', 'clientName and clientVersion are required');
 }
 
+function orderBranchPrefix() {
+  return state.spec && typeof state.spec.branch_prefix === 'string' ? state.spec.branch_prefix : BRANCH_PREFIX;
+}
+
+function validateBranch(branch) {
+  const prefix = orderBranchPrefix();
+  if (!branch.startsWith(prefix)) apiFail(422, 'invalid_branch', `order branches must start with ${prefix}`);
+  const malformed = !GIT_REF_RE.test(branch) || branch.includes('..') || branch.includes('//') || branch.endsWith('/') || branch.endsWith('.')
+    || branch.split('/').some((component) => component.startsWith('.') || component.endsWith('.lock'));
+  if (malformed) apiFail(422, 'invalid_branch', 'branch is not a valid branch name');
+}
+
 function workGet(flags) {
   requireSessionToken('work get');
   if (state.mode === 'ended') apiFail(401, 'invalid_session_token', 'session token expired or revoked');
@@ -215,7 +229,7 @@ function workGet(flags) {
   const approved = (state.approvals || []).some((approval) => approval.spec_hash === state.order.spec_hash);
   printJson({
     ...publicOrder(),
-    spec: state.spec || { title: 'Fake order spec', requirements: [] },
+    spec: { branch_prefix: BRANCH_PREFIX, ...(state.spec || { title: 'Fake order spec', requirements: [] }) },
     plan: state.plan,
     policy: state.policy,
     questions: state.questions || [],
@@ -246,6 +260,7 @@ function applyStage(flags, clientEventId) {
   if (flags.head !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(flags.head)) {
     apiFail(422, 'invalid_head_sha', 'headSha must be the full commit SHA');
   }
+  if (flags.branch !== undefined) validateBranch(String(flags.branch));
   const prNumber = flags['pr-number'] !== undefined ? Number(flags['pr-number']) : null;
   if (flags['pr-url'] !== undefined) {
     const expected = `${state.order.repository}/pull/${prNumber}`;

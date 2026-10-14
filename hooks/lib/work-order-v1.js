@@ -12,6 +12,8 @@ const STATE_SEGMENTS = Object.freeze(['.zensu', 'state', 'work-order']);
 const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_PENDING_ANSWERS = 50;
 const MAX_ANSWER_CHARS = 4000;
+const DEFAULT_BRANCH_PREFIX = 'wo-';
+const BRANCH_PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,62}$/;
 const RENEW_CEILING_MS = 60000;
 const CLI_TIMEOUT_MS = 30000;
 const DEFAULT_RETRY_BASE_MS = 2000;
@@ -607,9 +609,16 @@ function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'wo
   return { ...sent, delivered };
 }
 
+function branchPrefixOf(order) {
+  const spec = isObject(order) && isObject(order.spec) ? order.spec : {};
+  const prefix = spec.branch_prefix;
+  return typeof prefix === 'string' && BRANCH_PREFIX_RE.test(prefix) && !prefix.includes('..') ? prefix : DEFAULT_BRANCH_PREFIX;
+}
+
 function orderSummary(order, context) {
   const policy = isObject(order.policy) ? order.policy : {};
   const plan = isObject(order.plan) ? order.plan : {};
+  const branchPrefix = branchPrefixOf(order);
   return {
     orderId: order.id,
     attempt: order.attempt,
@@ -619,7 +628,8 @@ function orderSummary(order, context) {
     baseBranch: plan.base_branch || null,
     integrationBranch: plan.integration_branch || null,
     branch: order.branch || null,
-    workBranch: order.branch || `zensu/work-${String(order.id || '').slice(0, 8).toLowerCase()}`,
+    branchPrefix,
+    workBranch: order.branch || `${branchPrefix}${String(order.id || '').slice(0, 8).toLowerCase()}`,
     prUrl: order.pr_url || null,
     prNumber: Number.isSafeInteger(order.pr_number) ? order.pr_number : null,
     headSha: order.head_sha || null,
@@ -784,6 +794,20 @@ function currentHead(projectRoot) {
   return head.ok && FULL_SHA_RE.test(value) ? value : null;
 }
 
+function orderBranchPrefix(context) {
+  const snapshot = safeRead(context.files.order).value;
+  return branchPrefixOf(snapshot && isObject(snapshot.order) ? snapshot.order : {});
+}
+
+function reportableBranch(context) {
+  const branch = currentBranch(context.projectRoot);
+  return branch && branch.startsWith(orderBranchPrefix(context)) ? branch : null;
+}
+
+function foreignBranchMessage(context, branch) {
+  return `the working branch ${branch} does not start with ${orderBranchPrefix(context)}, the branch prefix Zensu requires for this order; check out the workBranch named in the --start summary and run this step again`;
+}
+
 function readRunRecord(projectRoot, runId) {
   if (!RUN_ID_RE.test(String(runId || ''))) return null;
   const file = path.join(projectRoot, '.zensu', 'state', `autopilot-run-${runId}.json`);
@@ -853,7 +877,7 @@ function stageArgs(context, run, planned) {
     const head = fullSha(context.projectRoot, planned.pr.headSha);
     if (head) args.push('--head', head);
   }
-  const branch = currentBranch(context.projectRoot);
+  const branch = reportableBranch(context);
   if (branch && (planned.status === 'implementing' || planned.status === 'pr_open')) args.push('--branch', branch);
   return args;
 }
@@ -1021,9 +1045,10 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     return { exit: EXIT.OK, value: bindingValue };
   };
   if ((STAGE_RANK[order.status] || 0) > STAGE_RANK.implementing) return pastImplementing();
+  const branch = currentBranch(context.projectRoot);
+  if (branch && !branch.startsWith(branchPrefixOf(order))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const args = ['--stage', 'implementing', '--client-event-id', clientEventId(bound.runId, 'order-spec-bound'),
     '--autopilot-stage', 'AWAIT_TDD', '--autopilot-run-id', bound.runId];
-  const branch = currentBranch(context.projectRoot);
   if (branch) args.push('--branch', branch);
   const sent = sendEvent(context, args, { env, now, target: 'implementing' });
   if (sent.verdict === VERDICTS.FINAL && sent.failure && sent.failure.code === 'invalid_transition') return pastImplementing();
@@ -1113,7 +1138,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     const args = ['--stage', 'ready_for_merge', '--head', head, '--pr-url', String(pr.url), '--pr-number', String(pr.number),
       '--autopilot-stage', 'DONE', '--autopilot-run-id', run.runId,
       '--client-event-id', clientEventId(run.runId, deliveryEvent.eventId)];
-    const branch = currentBranch(context.projectRoot);
+    const branch = reportableBranch(context);
     if (branch) args.push('--branch', branch);
     const sent = sendEvent(context, args, { env, now, target: 'ready_for_merge', terminal: true });
     if (sent.verdict === VERDICTS.OK) {
@@ -1151,6 +1176,7 @@ function push(context, { env = process.env, now = Date.now } = {}) {
   const branch = currentBranch(context.projectRoot);
   const head = currentHead(context.projectRoot);
   if (!branch || !head) return { exit: EXIT.REFUSED, message: 'the working tree has no branch or no commit to push' };
+  if (!branch.startsWith(orderBranchPrefix(context))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const expect = beat.lease.recordedHead && FULL_SHA_RE.test(String(beat.lease.recordedHead).toLowerCase())
     ? String(beat.lease.recordedHead).toLowerCase() : '';
   const listed = git(context.projectRoot, ['ls-remote', 'origin', `refs/heads/${branch}`], env);
@@ -2272,6 +2298,7 @@ module.exports = {
   ask,
   bindSpec,
   binding,
+  branchPrefixOf,
   drain,
   existingPullRequest,
   finish,

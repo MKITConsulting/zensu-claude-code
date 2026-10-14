@@ -105,7 +105,7 @@ export ZENSU_SESSION_TOKEN="zst_fake_session_token"
 bash "$WRAPPER" --start --order "$ORDER" >"$SBOX/start.out" 2>"$SBOX/start.err"; RC=$?
 [ "$RC" -eq 0 ] && check "I1 a work-order session starts" PASS \
   || check "I1 a work-order session starts (rc=$RC $(cat "$SBOX/start.err"))" FAIL
-git -C "$PROJECT" checkout -q -b "zensu/work-55555555"
+git -C "$PROJECT" checkout -q -b "wo-55555555"
 
 bash "$LOG_HELPER" --autopilot-begin --run "$RUN" >/dev/null 2>"$SBOX/begin-plain.err"; RC=$?
 [ "$RC" -eq 4 ] && [ ! -e "$PROJECT/.zensu/state/autopilot-run-${RUN}.json" ] \
@@ -162,10 +162,10 @@ git -C "$PROJECT" add feature.txt
 git -C "$PROJECT" commit -q -m "feat: add the feature"
 LOCAL_HEAD="$(git -C "$PROJECT" rev-parse HEAD)"
 bash "$WRAPPER" --push >"$SBOX/push.out" 2>"$SBOX/push.err"; RC=$?
-REMOTE_HEAD="$(git -C "$REMOTE" rev-parse --verify --quiet refs/heads/zensu/work-55555555)"
+REMOTE_HEAD="$(git -C "$REMOTE" rev-parse --verify --quiet refs/heads/wo-55555555)"
 if [ "$RC" -eq 0 ] && [ "$REMOTE_HEAD" = "$LOCAL_HEAD" ] \
   && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.head_sha')" = "$LOCAL_HEAD" ] \
-  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.branch')" = "zensu/work-55555555" ]; then
+  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.branch')" = "wo-55555555" ]; then
   check "I9 --push pushes the branch and reports the new head with a same-status stage event" PASS
 else
   check "I9 --push pushes the branch and reports the new head (rc=$RC remote=$REMOTE_HEAD $(cat "$SBOX/push.err"))" FAIL
@@ -173,16 +173,16 @@ fi
 
 OTHER="$SBOX/alpha-other"
 git clone -q "$REMOTE" "$OTHER"
-git -C "$OTHER" checkout -q zensu/work-55555555
+git -C "$OTHER" checkout -q wo-55555555
 printf 'foreign\n' > "$OTHER/foreign.txt"
 git -C "$OTHER" add foreign.txt
 git -C "$OTHER" commit -q -m "feat: a foreign commit"
-git -C "$OTHER" push -q origin zensu/work-55555555
+git -C "$OTHER" push -q origin wo-55555555
 FOREIGN_HEAD="$(git -C "$OTHER" rev-parse HEAD)"
 printf 'more\n' >> "$PROJECT/feature.txt"
 git -C "$PROJECT" commit -q -am "feat: extend the feature"
 bash "$WRAPPER" --push >/dev/null 2>"$SBOX/push2.err"; RC=$?
-[ "$RC" -eq 8 ] && [ "$(git -C "$REMOTE" rev-parse refs/heads/zensu/work-55555555)" = "$FOREIGN_HEAD" ] \
+[ "$RC" -eq 8 ] && [ "$(git -C "$REMOTE" rev-parse refs/heads/wo-55555555)" = "$FOREIGN_HEAD" ] \
   && check "I10 --push refuses when the remote branch moved past the head Zensu recorded" PASS \
   || check "I10 --push refuses when the remote branch moved past the head Zensu recorded (rc=$RC)" FAIL
 
@@ -248,7 +248,7 @@ SESSION3="wo-implement-session-0003"
   source "$BASELINE" "$SESSION3" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER3" "$SESSION3" auto implement
   bash "$WRAPPER" --start --order "$ORDER3" >/dev/null 2>&1 || exit 91
-  git -C "$PROJECT" checkout -q -b "zensu/work-88888888"
+  git -C "$PROJECT" checkout -q -b "wo-88888888"
   wo_fake_set "$FAKE_ZENSU_STATE" 'state.order.status = "planning"'
   printf 'x\n' > "$PROJECT/x.txt"
   git -C "$PROJECT" add x.txt
@@ -256,7 +256,7 @@ SESSION3="wo-implement-session-0003"
   wo_fake_set "$FAKE_ZENSU_STATE" 'state.staleAttempt = true'
   bash "$WRAPPER" --push >/dev/null 2>"$SBOX/push3.err"
   echo "$?" > "$SBOX/push3.rc"
-  git -C "$REMOTE" rev-parse --verify --quiet refs/heads/zensu/work-88888888 > "$SBOX/push3.remote" || true
+  git -C "$REMOTE" rev-parse --verify --quiet refs/heads/wo-88888888 > "$SBOX/push3.remote" || true
   bash "$WRAPPER" --status > "$SBOX/push3.status" 2>/dev/null
 ); RC=$?
 if [ "$RC" -eq 0 ] && [ "$(cat "$SBOX/push3.rc")" = "4" ] && [ ! -s "$SBOX/push3.remote" ] \

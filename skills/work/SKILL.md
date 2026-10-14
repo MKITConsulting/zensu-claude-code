@@ -65,8 +65,11 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --start --order "<order-id
 order claimed for another session, writes this session's work-order marker, renews the lease,
 links the Pulse session and releases the local Autopilot run an earlier attempt of the order left
 in this checkout. Its stdout is a JSON summary: `orderId`, `attempt`, `kind`, `status`,
-`baseBranch`, `integrationBranch`, `branch`, `workBranch`, `prUrl`, `prNumber`, `headSha`,
-`specHash`, `planApproval`, `planApproved`, `orderFile`, `pulse` and `action`.
+`baseBranch`, `integrationBranch`, `branch`, `branchPrefix`, `workBranch`, `prUrl`, `prNumber`,
+`headSha`, `specHash`, `planApproval`, `planApproved`, `orderFile`, `pulse` and `action`.
+`workBranch` is the order's `branch`, else `branchPrefix` (the spec's `branch_prefix`, which Zensu
+enforces) followed by the first eight characters of the order id. Zensu refuses an order branch
+without that prefix, so `--bind-spec` and `--push` refuse to work on any other branch.
 
 Read the order itself from `orderFile`: `.order.spec` holds the specification, `.order.plan` the
 plan it belongs to, `.order.policy` the policy and `.order.questions` earlier questions with their

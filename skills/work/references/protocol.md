@@ -77,6 +77,11 @@ the recorded head is the head Zensu last stored for the order (none for the firs
 branch that already holds the local head is not pushed again. After the push it sends a stage event
 with the current stage and `--head`, so Zensu records the new head.
 
+Zensu accepts an order branch only when it starts with the spec's `branch_prefix` (`wo-` today) and
+refuses any other with `422 invalid_branch`. The runtime names a fresh order's branch from that
+prefix and the first eight characters of the order id. `--bind-spec` and `--push` refuse a working
+branch without the prefix before they send anything, and stage events leave such a branch out.
+
 `--open-pr --title <title> --body-file <path>` renews the lease, requires that Zensu recorded the
 current head, and opens the pull request against the plan's integration branch, else its base
 branch, through `zensu-vcs.sh`. It prints a JSON line with the URL and number. When the order names
