@@ -230,7 +230,9 @@ thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main
 **once over the aggregate diff**:
 
 - **The workflow reviewed the change (an Ultracode review, for example).** Run the review
-  through the plugin's template `templates/workflows/zensu-review-v1.js` and let it finish.
+  through the plugin's template `templates/workflows/zensu-review-v1.js`, launched from the
+  copy `zensu-log.sh --external-review --stage` writes into the session's `.zensu/state/`
+  (the Workflow tool loads no script from the plugin's install directory), and let it finish.
   Phase 6.10 step 3 of `/zensu:tdd` then imports it: `zensu-log.sh --external-review` confirms
   from the Workflow launch record that the review started after the newest change, reads the
   result from that run's own record, checks that the run completed the shipped template over
