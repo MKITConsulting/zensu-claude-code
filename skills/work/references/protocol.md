@@ -28,7 +28,8 @@ key. Each is written to a temporary file and renamed into place.
 | `order-` | `--start`, `--bind-spec` | the last `zensu work get` answer |
 | `lease-` | every successful renewal or event | lease seconds, last success time, recorded head, order status |
 | `outbox-` | `--autopilot-begin`, `--drain` | the bound Autopilot run id and the highest stage rank Zensu accepted |
-| `answers-` | renewals | answers to non-blocking questions not yet shown to the model |
+| `answers-` | renewals, `--start`, `--bind-spec`, the post-tool hook | answers to non-blocking questions not yet shown to the model, and the ids already shown |
+| `answer-keys-` | renewals, `--start`, `--bind-spec` | the key of the last answer queued for each question, or found already shown by a runtime from before this file, which never rewrites it |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
 | `stop-` | the Stop hook | stops in a row without a new ledger event |
@@ -137,7 +138,11 @@ until a person requeues it. A non-blocking question, `scope` included, only reco
 
 `--start` and `--bind-spec` queue the answered entries of the order's `decision_log` — questions a
 person decided for the whole plan — beside the answers, and the post-tool hook hands them to the
-model as decisions that bind this order. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
+model as decisions that bind this order. The hook hands each answer over once per id and
+`answered_at` (the SHA-256 of its text when `answered_at` is missing), so when a heartbeat carries a
+person's replacement of an automatic answer, the replacement reaches the model, in place of a
+still-pending automatic answer, and tells it that the automatic answer no longer holds.
+`--followup` sends `zensu work followup` the same way as `--ask`; Zensu takes at most 20 per attempt.
 It refuses with exit 2, before the CLI runs, a severity other than `low`, `medium`, `high` or
 `critical`, a title over 200 bytes, a rationale over 2048 bytes, more than 20 paths, and a path that
 is not a clean relative file path: no `./`, no trailing slash, no `..`, no wildcard. A refusal of a
