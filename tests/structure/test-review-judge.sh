@@ -15,6 +15,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 AGENT_MD="$PLUGIN_DIR/agents/review-judge.md"
+ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
 TDD_MD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 CONFIG_EX="$PLUGIN_DIR/config.example.json"
@@ -30,7 +31,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$AGENT_MD" "$TDD_MD" "$CONFIG_EX" "$PLUGIN_JSON" "$REVIEW_DOC" "$CONFIG_DOC" "$WORKFLOW_DOC"; do
+for f in "$AGENT_MD" "$ASPECT_MD" "$TDD_MD" "$CONFIG_EX" "$PLUGIN_JSON" "$REVIEW_DOC" "$CONFIG_DOC" "$WORKFLOW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -38,7 +39,7 @@ for f in "$AGENT_MD" "$TDD_MD" "$CONFIG_EX" "$PLUGIN_JSON" "$REVIEW_DOC" "$CONFI
     exit 1
   fi
 done
-check "P0 all six target files exist" PASS
+check "P0 all eight target files exist" PASS
 
 # P1 — agent frontmatter: name + read-only tool set (mirrors review-aspect)
 if grep -qE '^name: *review-judge *$' "$AGENT_MD"; then
@@ -93,6 +94,30 @@ if grep -qF 'Optional: `external_review`' "$AGENT_MD" \
 else
   check "P2m the external_review input is optional data and ## Gaps appears only with it" FAIL
 fi
+if grep -qF 'Optional: `judge_run: second`' "$AGENT_MD" \
+  && grep -qF 'whose result you never see' "$AGENT_MD" \
+  && grep -qF 'first read what the changed files depend on and what reaches them' "$AGENT_MD" \
+  && grep -qF 'Report findings only: never a `Panel-FP:` ruling, a ledger tag or a `## Gaps` section' "$AGENT_MD" \
+  && grep -qF 'Head your report `## Aspect: judge (second run)` and number your findings `JUDGE-B<n>`.' "$AGENT_MD" \
+  && grep -qF 'With an `external_review` input, except in a second run, end the report' "$AGENT_MD"; then
+  check "P2n a second judge run reads by another path and only adds JUDGE-B findings" PASS
+else
+  check "P2n a second judge run reads by another path and only adds JUDGE-B findings" FAIL
+fi
+INHERITED_CHECK='every guarantee a query or call inherits from session or connection state instead of stating it (row-level security, a tenant setting, the connecting role): name what enforces it instead of assuming it, check it under each connection mode the code still supports, fallbacks included, and check whether the query carries its own predicate'
+CHECK_ONLY_BLOCK="$(awk '/^3\. Check only:$/{f=1;next} f && /^4\. /{exit} f{print}' "$AGENT_MD")"
+if printf '%s\n' "$CHECK_ONLY_BLOCK" | grep -qxF "   - $INHERITED_CHECK"; then
+  check "P2o the Check only list traces inherited guarantees through every supported connection mode" PASS
+else
+  check "P2o the Check only list traces inherited guarantees through every supported connection mode" FAIL
+fi
+DEPLOY_RULE='6. A defect reachable through a mode the code still supports (a fallback connection, a flag, an environment variable, a deployment option) is a finding: report it with the condition that reaches it. Committed configuration that disables that mode may lower its severity but never drops the finding, because the code still ships the mode and any deployment can enable it.'
+if grep -qF "$DEPLOY_RULE" "$AGENT_MD" && grep -qF "$DEPLOY_RULE" "$ASPECT_MD" \
+  && grep -qF 'Such configuration is no ground for a `Panel-FP:` ruling either.' "$AGENT_MD"; then
+  check "P2p both agents report a deployment-dependent defect with its condition and never drop it" PASS
+else
+  check "P2p both agents report a deployment-dependent defect with its condition and never drop it" FAIL
+fi
 if grep -qF -- '--external-review --root "$TOP"' "$TDD_MD" \
   && grep -qF 'PANEL SKIPPED — external review <name> imported' "$TDD_MD" \
   && grep -qF 'a re-review never imports' "$TDD_MD" \
@@ -146,6 +171,23 @@ if grep -qF "zensu_hook_enabled reviewJudge" "$TDD_MD"; then
 else
   check "P3h flag resolved via the config-lib seam (real merge semantics)" FAIL
 fi
+if grep -qF 'Independent second run, first review only:' "$TDD_MD" \
+  && grep -qF 'when no post-review directive named a fix round, resolve the flag the same way with `zensu_hook_enabled reviewJudgeSecondRun`' "$TDD_MD" \
+  && grep -qF 'the tool message that spawns the judge also spawns a second `zensu:review-judge` with the identical input plus a last line `judge_run: second`' "$TDD_MD" \
+  && grep -qF "Neither run sees the other's deltas" "$TDD_MD" \
+  && grep -qF 'so on the import path the gap list and its fallback above stay the first run'"'"'s' "$TDD_MD" \
+  && grep -qF "Merge the union after the first run's deltas" "$TDD_MD" \
+  && grep -qF 'raises its severity when the second run rated it higher' "$TDD_MD" \
+  && grep -qF 'log `JUDGE SECOND RUN UNAVAILABLE — <reason>`' "$TDD_MD"; then
+  check "P3j the first review spawns an independent second judge run and merges the union" PASS
+else
+  check "P3j the first review spawns an independent second judge run and merges the union" FAIL
+fi
+if grep -qF "and the first review's two \`zensu:review-judge\` runs at once, is allowed" "$TDD_MD"; then
+  check "P3k the no-parallel rule sanctions the first review's judge pair" PASS
+else
+  check "P3k the no-parallel rule sanctions the first review's judge pair" FAIL
+fi
 
 # P4 — config example + registration
 if node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(c.hooks && c.hooks.reviewJudge===true?0:1)' "$CONFIG_EX" 2>/dev/null; then
@@ -157,6 +199,11 @@ if node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"
   check "P4b plugin.json agents[] registers ./agents/review-judge.md" PASS
 else
   check "P4b plugin.json agents[] registers ./agents/review-judge.md" FAIL
+fi
+if node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(c.hooks && c.hooks.reviewJudgeSecondRun===true?0:1)' "$CONFIG_EX" 2>/dev/null; then
+  check "P4c config.example.json ships hooks.reviewJudgeSecondRun:true" PASS
+else
+  check "P4c config.example.json ships hooks.reviewJudgeSecondRun:true" FAIL
 fi
 
 # P5 — reference docs + workflow doc
@@ -178,6 +225,13 @@ if grep -qF 'judge second pass' "$WORKFLOW_DOC" && grep -qF 'hooks.reviewJudge' 
 else
   check "P5c workflow doc names the judge stage + gate" FAIL
 fi
+if grep -qF '| `reviewJudgeSecondRun` |' "$CONFIG_DOC" \
+  && grep -qF 'When `false`, the first review runs one judge, as before. Default `true`.' "$CONFIG_DOC" \
+  && grep -qF '(`hooks.reviewJudgeSecondRun`, default on)' "$REVIEW_DOC"; then
+  check "P5d the configuration and review-chain docs describe the second judge run" PASS
+else
+  check "P5d the configuration and review-chain docs describe the second judge run" FAIL
+fi
 
 # P6 — recovery/re-round directives and the consume contract are judge-aware
 ENFORCER="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
@@ -197,6 +251,12 @@ if grep -qF 'JUDGE-*' "$CODE_REVIEWER_MD" && grep -qF 'Panel-FP-neutralized' "$C
   check "P6c code-reviewer consume contract documents judge deltas + neutralization" PASS
 else
   check "P6c code-reviewer consume contract documents judge deltas + neutralization" FAIL
+fi
+if grep -qF 'on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled' "$ENFORCER" \
+  && [ "$(grep -cF 'hooks.reviewJudgeSecondRun' "$DELEGATE")" -eq 0 ]; then
+  check "P6d a resumed first review spawns the judge pair while fix rounds keep one judge" PASS
+else
+  check "P6d a resumed first review spawns the judge pair while fix rounds keep one judge" FAIL
 fi
 
 # P7 — e2e-skills scenario ships (prompt + agent type + expected pattern)

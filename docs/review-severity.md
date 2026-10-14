@@ -19,6 +19,13 @@ taste to IMPORTANT, and every such finding opened another full review round.
 `/zensu:pr-team-review` keeps its own P1/P2/P3 scale for forge comments. The two scales answer
 the same question in different vocabularies; they are not mechanically mapped.
 
+A defect reachable only through a mode the code still supports (a fallback connection, a flag, an
+environment variable, a deployment option) is still a finding. `agents/review-aspect.md` and
+`agents/review-judge.md` report it with the condition that reaches it. Committed configuration that
+disables the mode may lower its severity but never drops the finding, and a refuter in the aspect
+agent's verify mode keeps such a finding `real`: the committed configuration describes one
+deployment, while the code still ships the mode to every other.
+
 <!-- zensu:review-severity -->
 > **Severity rubric (non-negotiable).** Rate every finding by its impact on the change under review, never by effort, taste or confidence.
 > - **CRITICAL** — blocks the merge: wrong behavior on a changed path, a security flaw, data loss or corruption, a broken contract or interface, a violated acceptance criterion or requirement, a crash.

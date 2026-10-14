@@ -75,6 +75,22 @@ jq -e '.agents | index("./agents/review-aspect.md")' "$PLUGIN_JSON" >/dev/null 2
   && check "A11 plugin.json agents[] contains './agents/review-aspect.md'" PASS \
   || check "A11 plugin.json agents[] registration" FAIL
 
+# The security perspective traces every guarantee a query or call inherits instead of stating.
+SECURITY_LINE="$(grep -E '^   - security: ' "$AGENT_MD")"
+printf '%s' "$SECURITY_LINE" | grep -qF 'plus every guarantee a query or call inherits from session or connection state instead of stating it (row-level security, a tenant setting, the connecting role): name what enforces it instead of assuming it, check it under each connection mode the code still supports, fallbacks included, and check whether the query carries its own predicate' \
+  && check "A13 security perspective checks inherited guarantees under every supported connection mode" PASS \
+  || check "A13 security perspective checks inherited guarantees under every supported connection mode" FAIL
+
+# A defect behind a mode the code still supports is reported with its condition, and a refuter keeps it real.
+REVIEW_SECTION="$(awk '/^## Review$/{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
+printf '%s\n' "$REVIEW_SECTION" | grep -qxF '6. A defect reachable through a mode the code still supports (a fallback connection, a flag, an environment variable, a deployment option) is a finding: report it with the condition that reaches it. Committed configuration that disables that mode may lower its severity but never drops the finding, because the code still ships the mode and any deployment can enable it.' \
+  && check "A14 review step 6 reports a deployment-dependent defect with its condition and never drops it" PASS \
+  || check "A14 review step 6 reports a deployment-dependent defect with its condition and never drops it" FAIL
+VERIFY_SECTION="$(awk '/^## Verify mode$/{f=1;next} f && /^## /{exit} f{print}' "$AGENT_MD")"
+printf '%s' "$VERIFY_SECTION" | grep -qF 'A failure that needs a mode the code still supports is `real` by step 6 of the review even when committed configuration disables that mode; that configuration may lower the severity you rate, never the outcome.' \
+  && check "A15 verify mode keeps a deployment-dependent finding real" PASS \
+  || check "A15 verify mode keeps a deployment-dependent finding real" FAIL
+
 # English-only (repo convention): no German umlauts / eszett.
 if node -e 'const t=require("fs").readFileSync(process.argv[1],"utf8");process.exit(/[äöüÄÖÜß]/.test(t)?1:0)' "$AGENT_MD"; then
   check "A12 review-aspect.md is English-only (no umlauts/eszett)" PASS
