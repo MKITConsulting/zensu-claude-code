@@ -170,9 +170,9 @@ while one is, because its rule 6 shrinks to one sentence when the anchor reads `
 they read the hook and never open this document, so the numbers written here are hand-derived
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
 out of this paragraph. A full-panel `/zensu:tdd` review round
-(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
+(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
-spawns three aspects and runs the judge on the first review only — more with repo-custom personas, and again per auto-fix
+spawns three aspects and runs the judge on the first review only, twice side by side while `hooks.reviewJudgeSecondRun` is on — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
 to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds a chain needs at

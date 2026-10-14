@@ -120,7 +120,7 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   receive the diff in their prompt.
 - The judge is the gap detector because it already re-reads every changed file fresh. The
   `## Gaps` section exists only with an `external_review` input, so the panel path renders
-  the judge exactly as before. A judge that fails falls back to the full panel.
+  the judge exactly as before. A first judge run that fails falls back to the full panel; the independent second run writes no gaps (`.claude/rules/cross-cutting-review.md`).
 - An unknown or absent task status gets no wait, so the guard blocks: the status vocabulary
   was never captured, and a wait is the one relaxation of the chain guarantee.
 - The wait bound has no environment override. A release that exits before the claim handoff
