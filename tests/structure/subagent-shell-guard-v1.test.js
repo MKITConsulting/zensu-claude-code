@@ -498,6 +498,30 @@ test('the command walker finds every simple command the shell would run', () => 
   );
 });
 
+test('the parser stays linear on adversarial input', () => {
+  const modulePath = path.join(ROOT, 'hooks', 'lib', 'subagent-shell-guard-v1.js');
+  const setup = [
+    `const guard = require(${JSON.stringify(modulePath)});`,
+    "const home = require('node:path').join(require('node:os').tmpdir(), 'shell-guard-linear-home');",
+    "const trusted = { pluginData: home + '/data', pluginRoot: home + '/root', contextFile: home + '/data/scv1_x.json', projectRoot: require('node:os').tmpdir(), toolCwd: require('node:os').tmpdir() };",
+  ].join('\n');
+  const shapes = [
+    ['unclosed braces', "guard.parseScript('echo ' + '{'.repeat(200000), { platform: 'linux' })"],
+    ['leading assignments', "guard.parseScript('a=1 '.repeat(100000), { platform: 'linux' })"],
+    ['a long shell flag in the walker', "guard.commandInvocations('zensu features get f1; bash -' + 'c'.repeat(400000) + '1 x', { platform: 'linux' })"],
+    ['a long shell flag in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'bash -' + 'c'.repeat(400000) + '1 x' }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
+    ['many comments in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'ls\\n' + '#x\\n'.repeat(600000) }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
+  ];
+  for (const [label, expression] of shapes) {
+    const run = spawnSync(process.execPath, ['-e', `${setup}\n${expression};`], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(run.status, 0, `${label}: ${run.signal || (run.error && run.error.code) || run.stderr}`);
+  }
+  const words = (word) => guard.parseScript(`echo ${word}`, { platform: 'linux' }).items[0].words.map((entry) => entry.value);
+  assert.deepEqual(words('{x{a,b}'), ['echo', '{xa', '{xb']);
+  assert.deepEqual(words('{a{b,c}}'), ['echo', '{ab}', '{ac}']);
+  assert.deepEqual(words('{x,{a,b}y}'), ['echo', 'x', 'ay', 'by']);
+});
+
 test('a symlinked config layer protects its target', { skip: process.platform === 'win32' }, () => {
   const fixture = layout();
   const target = path.join(fixture.base, 'dotfiles', 'zensu.json');
