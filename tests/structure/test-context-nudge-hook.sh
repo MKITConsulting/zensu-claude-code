@@ -332,6 +332,20 @@ else
 fi
 rm -rf "$P27"
 
+P28="$(mktemp -d -t ctxnudge-XXXXXX)"; T28="$P28/t.jsonl"; make_transcript "$T28" 600000
+payload "$T28" "s28-$$" >/dev/null
+LARGE28="$P28/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", transcript_path: process.argv[2], session_id: process.argv[3], prompt: "do a thing\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE28" "$T28" "s28-$$"
+PAD28=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD28="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT28="$(env PAD28_A="$PAD28" PAD28_B="$PAD28" PAD28_C="$PAD28" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P28" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE28" 2>/dev/null | classify)"
+[ "$OUT28" = "UserPromptSubmit|compact|60" ] \
+  && check "C28 a prompt in a payload over the exec size limit still gets the compaction nudge" PASS \
+  || check "C28 oversized prompt (got '$OUT28')" FAIL
+rm -rf "$P28"
+
 echo "----"
 echo "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

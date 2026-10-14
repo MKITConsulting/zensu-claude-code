@@ -230,6 +230,31 @@ else
 fi
 rm -rf "$P21"
 
+P22="$(mktemp -d -t introuter-XXXXXX)"
+LARGE22="$P22/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "Plan the product roadmap for this repository.\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE22"
+PAD22=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD22="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT22="$(env PAD22_A="$PAD22" PAD22_B="$PAD22" PAD22_C="$PAD22" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P22" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE22" 2>/dev/null | classify)"
+[ "$OUT22" = "UserPromptSubmit|main|triage|planmode" ] \
+  && check "C22 a planning prompt in a payload over the exec size limit still gets the routing" PASS \
+  || check "C22 oversized planning prompt (got '$OUT22')" FAIL
+rm -rf "$P22"
+
+C23_GROW="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8");
+  const start = src.indexOf("| awk \x27");
+  const end = start === -1 ? -1 : src.indexOf("\x27", start + 7);
+  if (start === -1 || end === -1) { process.stdout.write("no keyword scan found"); process.exit(0); }
+  const grow = src.slice(start + 7, end).split("\n").filter((line) => /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\1\s/.test(line));
+  process.stdout.write(grow.join("\n"));
+')"
+[ -z "$C23_GROW" ] \
+  && check "C23 the keyword scan prints each kept token instead of growing a line buffer, which is quadratic on a long single-line prompt" PASS \
+  || check "C23 keyword scan grows a buffer (${C23_GROW:0:120})" FAIL
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -42,9 +42,9 @@ zensu_context_nudge_enabled || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
 read_field() {
-  PAYLOAD="$INPUT" FIELD="$1" node -e '
+  printf '%s' "$INPUT" | FIELD="$1" node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const v = j[process.env.FIELD];
       process.stdout.write(typeof v === "string" ? v : "");
     } catch (_) { process.stdout.write(""); }
