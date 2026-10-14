@@ -30,6 +30,7 @@ function sandbox() {
     FAKE_ZENSU_STATE: stateFile,
     FAKE_ZENSU_CALLS: callsFile,
     ZENSU_SESSION_TOKEN: TOKEN,
+    ZENSU_API_URL: 'http://127.0.0.1:9',
     ZENSU_WORK_ORDER_RETRY_MS: '1',
     ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '50',
   };
@@ -50,11 +51,11 @@ function sandbox() {
       questions: [],
       followups: [],
       policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
-      plan: { base_branch: 'main', integration_branch: 'integration/widgets' },
+      plan: { base_branch: 'main', integration_branch: 'plan/widgets' },
       order: {
         id: ORDER,
         work_plan_id: '11111111-1111-4111-8111-111111111111',
-        repository: 'https://github.com/acme/widgets',
+        repository: 'github.com/acme/widgets',
         kind: 'implement',
         status: 'claimed',
         attempt: 1,
@@ -62,6 +63,7 @@ function sandbox() {
         claim_confirmed_at: new Date().toISOString(),
         lease_expires_at: Date.now() + 1800000,
         spec_hash: 'a'.repeat(64),
+        spec_stale: false,
         branch: null,
         pr_url: null,
         pr_number: null,
@@ -317,7 +319,7 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(result.exit, wo.EXIT.OK, result.message);
   assert.equal(result.summary.action, 'implement');
-  assert.equal(result.summary.integrationBranch, 'integration/widgets');
+  assert.equal(result.summary.integrationBranch, 'plan/widgets');
   assert.equal(result.summary.pulse, 'linked');
   assert.equal(result.summary.leaseSeconds, 1800);
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
@@ -327,6 +329,114 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   assert.equal(box.fake().pulse.clientVersion, wo.pluginVersion());
   const again = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(again.exit, wo.EXIT.OK);
+});
+
+test('the work branch carries the branch prefix the order spec names', () => {
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'wo-' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'agents/wo-' } }), 'agents/wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: '../x' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'a..b' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({}), 'wo-');
+  const box = sandbox();
+  box.seed();
+  const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  assert.equal(result.summary.branchPrefix, 'wo-');
+  assert.equal(result.summary.workBranch, `wo-${ORDER.slice(0, 8)}`);
+  const recorded = sandbox();
+  recorded.seed({ order: { branch: 'wo-earlier1' } });
+  const resumed = wo.start({ env: recorded.env, projectRoot: recorded.project, sessionKey: recorded.sessionKey, orderId: ORDER });
+  assert.equal(resumed.summary.workBranch, 'wo-earlier1');
+});
+
+test('the fake refuses a stage branch outside the order branch prefix, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.equal(wo.sendEvent(context, ['--stage', 'planning', '--client-event-id', wo.clientEventId('r', 'start')], { env: box.env }).verdict, wo.VERDICTS.OK);
+  const refused = wo.sendEvent(context, ['--stage', 'implementing', '--branch', 'zensu/work-22222222', '--client-event-id', wo.clientEventId('r', 'bound')], { env: box.env, target: 'implementing' });
+  assert.equal(refused.verdict, wo.VERDICTS.FINAL);
+  assert.equal(refused.failure.code, 'invalid_branch');
+  const accepted = wo.sendEvent(context, ['--stage', 'implementing', '--branch', `wo-${ORDER.slice(0, 8)}`, '--client-event-id', wo.clientEventId('r', 'bound-2')], { env: box.env, target: 'implementing' });
+  assert.equal(accepted.verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
+});
+
+test('the fake takes the pull request links the service takes and refuses the rest', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { repository: 'gitlab.com/acme/widgets', status: 'implementing' } });
+  const send = (url, number, key) => wo.sendEvent(context, ['--stage', 'pr_open', '--pr-url', url, '--pr-number', String(number),
+    '--client-event-id', wo.clientEventId('r', key)], { env: box.env, target: 'pr_open' });
+  for (const [url, number, key] of [
+    ['https://github.com/acme/widgets/pull/7', 7, 'other-host'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/7?x=1', 7, 'query'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/8', 7, 'mismatch'],
+    ['https://gitlab.com/acme/widgets/../widgets/-/merge_requests/7', 7, 'dot-segment'],
+  ]) {
+    const refused = send(url, number, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_pr_url', url);
+  }
+  assert.equal(send('https://GitLab.com/Acme/Widgets/-/merge_requests/7', 7, 'gitlab').verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.pr_url, 'https://gitlab.com/acme/widgets/-/merge_requests/7');
+  const second = wo.sendEvent(context, ['--stage', 'reviewing', '--pr-url', 'https://gitlab.com/acme/widgets/-/merge_requests/8', '--pr-number', '8',
+    '--client-event-id', wo.clientEventId('r', 'second-pr')], { env: box.env, target: 'reviewing' });
+  assert.equal(second.verdict, wo.VERDICTS.FINAL);
+  assert.equal(second.failure.code, 'pr_mismatch');
+});
+
+test('the fake answers an expired lease with 401 and speaks the service response shapes', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const upper = 'C'.repeat(40);
+  assert.equal(wo.sendEvent(context, ['--stage', 'implementing', '--head', upper, '--client-event-id', wo.clientEventId('r', 'upper')], { env: box.env, target: 'implementing' }).verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.head_sha, 'c'.repeat(40));
+  const bad = wo.sendEvent(context, ['--stage', 'implementing', '--head', 'abc', '--client-event-id', wo.clientEventId('r', 'bad-head')], { env: box.env, target: 'implementing' });
+  assert.equal(bad.failure.code, 'invalid_sha');
+  const filed = wo.runZensu(['work', 'followup', ORDER, '--title', 'Cache the list', '--rationale', 'It is read on every request.', '--severity', 'low',
+    '--client-event-id', wo.clientEventId('f', 'shape'), '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(filed.json).sort(), ['event', 'order', 'replay']);
+  const pulse = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
+  assert.match(pulse.json.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(pulse.json.work_order_id, ORDER);
+  const events = wo.runZensu(['work', 'events', ORDER, '--page', '1', '--per-page', '50', '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(events.json).sort(), ['data', 'page', 'perPage', 'total']);
+  box.mutate((state) => { state.now = Date.now() + 3600000; });
+  for (const argv of [['work', 'heartbeat', ORDER, '--json'], ['work', 'get', ORDER, '--json'], ['work', 'events', ORDER, '--json'],
+    ['work', 'event', ORDER, '--stage', 'implementing', '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--client-event-id', wo.clientEventId('r', 'late'), '--json']]) {
+    const outcome = wo.runZensu(argv, { env: box.env });
+    assert.equal(outcome.status, 401, argv.join(' '));
+    assert.equal(outcome.code, 'invalid_session_token', argv.join(' '));
+  }
+});
+
+test('the fake counts follow-ups per attempt, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const seeded = (attempt) => Array.from({ length: 20 }, (_, index) => ({ title: `Follow-up ${index}`, rationale: 'r', severity: 'low', paths: [], attempt }));
+  box.mutate((state) => { state.followups = seeded(1); state.order.attempt = 2; });
+  const next = wo.followup(context, { env: box.env, title: 'Index widgets by owner', rationale: 'The owner filter scans the table.', severity: 'medium' });
+  assert.equal(next.exit, wo.EXIT.OK, next.message);
+  box.mutate((state) => { state.followups = [...seeded(1), ...seeded(2)]; });
+  const limited = wo.followup(context, { env: box.env, title: 'Paginate the widget list', rationale: 'Long lists load slowly.', severity: 'low' });
+  assert.equal(limited.exit, wo.EXIT.REFUSED);
+  assert.match(limited.message, /followup_limit_reached/);
+  assert.match(limited.message, /file no more follow-ups in this attempt/);
+});
+
+test('push refuses a working branch without the order branch prefix before any forge write', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const git = (...args) => execFileSync('git', ['-C', box.project, ...args], { encoding: 'utf8', env: gitEnv });
+  git('init', '-q');
+  git('checkout', '-q', '-b', 'feature/widgets');
+  fs.writeFileSync(path.join(box.project, 'a.txt'), 'a\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'init');
+  const pushed = wo.push(context, { env: box.env });
+  assert.equal(pushed.exit, wo.EXIT.REFUSED);
+  assert.match(pushed.message, /feature\/widgets does not start with wo-/);
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event').length, 0);
 });
 
 test('start refuses without the token, without zensu work, and for an order of another session', () => {
@@ -344,6 +454,21 @@ test('start refuses without the token, without zensu work, and for an order of a
   assert.equal(foreign.exit, wo.EXIT.NOT_BOUND);
   assert.match(foreign.message, /another session/);
   assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+});
+
+test('start stops with exit 3 when the session environment names no Zensu host for the token', () => {
+  const box = sandbox();
+  box.seed();
+  const env = { ...box.env };
+  delete env.ZENSU_API_URL;
+  const result = wo.start({ env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.NO_CLI, result.message);
+  assert.match(result.message, /ZENSU_API_URL/);
+  assert.doesNotMatch(result.message, /did not answer/);
+  assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+  box.mutate((state) => { state.failNext = [{ command: 'get', status: 503, code: 'unavailable', times: 1 }]; });
+  const transient = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(transient.exit, wo.EXIT.TRANSIENT);
 });
 
 test('an unsupported kind ends with blocked(worker_error) naming the kind', () => {
@@ -405,7 +530,7 @@ test('renew queues the answers of non-blocking questions', () => {
   box.seed();
   assert.equal(wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER }).exit, wo.EXIT.OK);
   box.mutate((state) => {
-    state.questions.push({ id: 'q-answered', category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
+    state.questions.push({ id: 'q-answered', work_order_id: ORDER, category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
   });
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
   const beat = wo.renew(context, { env: box.env, force: true });
@@ -477,6 +602,23 @@ function writeRun(box, stage, events) {
   fs.mkdirSync(dir, { recursive: true });
   const evidence = { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7', headSha: HEAD } };
   fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({ runId: RUN, stage, events, evidence }));
+}
+
+const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+
+function gitProject(box, branch = `wo-${ORDER.slice(0, 8)}`) {
+  const remote = path.join(box.root, 'remote.git');
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '--bare', remote);
+  git('-C', box.project, 'init', '-q');
+  git('-C', box.project, 'config', 'user.name', 'Test');
+  git('-C', box.project, 'config', 'user.email', 'test@example.invalid');
+  git('-C', box.project, 'checkout', '-q', '-b', branch);
+  git('-C', box.project, 'remote', 'add', 'origin', remote);
+  fs.writeFileSync(path.join(box.project, 'README.md'), 'widgets\n');
+  git('-C', box.project, 'add', 'README.md');
+  git('-C', box.project, 'commit', '-q', '-m', 'init');
+  return (...args) => git('-C', box.project, ...args);
 }
 
 function ledger(...steps) {
@@ -591,18 +733,176 @@ test('a BLOCKED run finishes without a reason and names its block code', () => {
   assert.match(box.fake().order.blocked_reason, /did not converge/);
 });
 
-test('the approved plan is the last plan artifact before the last approval of the spec hash', () => {
+test('a DONE run whose pr_open stage Zensu refuses ends blocked with worker_error naming the refusal', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the pr_open stage \(status 422, code invalid_pr_url\)/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /pr open stage with code invalid_pr_url/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 0);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('the post-tool update tells the model when Zensu refuses a stage, and names a lease lost on a drained event', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const refused = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(refused.additionalContext, /refused the pr_open stage/);
+  assert.match(refused.additionalContext, /--finish --reason/);
+  box.mutate((state) => { state.staleAttempt = true; });
+  const lost = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(lost.additionalContext, /is lost \(stale_attempt\)/);
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a block reason Zensu refuses as prose is sent once more as a safe sentence', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  const result = wo.finish(context, { env: box.env, reason: 'npm test fails on the integration branch, so the change cannot be validated.' });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.equal(order.blocked_reason, 'The session ended before its Autopilot run reached a ready pull request.');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'field_not_allowed', times: 1 }]; });
+  const reason = 'The gates fail on a missing database migration.';
+  const refused = wo.finish(context, { env: box.env, reason });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.equal(wo.readState(context.files.ended), null);
+  const delivered = wo.finish(context, { env: box.env, reason });
+  assert.equal(delivered.exit, wo.EXIT.ENDED, delivered.message);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a push of an unchanged head after a stage advance gets its own event id, and a refused head is final', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  gitProject(box);
+  const first = wo.push(context, { env: box.env });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  box.mutate((state) => { state.order.status = 'reviewing'; state.order.pr_url = 'https://github.com/acme/widgets/pull/7'; state.order.pr_number = 7; });
+  const again = wo.push(context, { env: box.env });
+  assert.equal(again.exit, wo.EXIT.OK, again.message);
+  const pushes = stageCalls(box).filter((call) => call.argv.includes('--head'));
+  assert.deepEqual(pushes.map((call) => call.stage), ['implementing', 'reviewing']);
+  assert.notEqual(pushes[0].id, pushes[1].id);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 409, code: 'client_event_id_reused', times: 1 }]; });
+  const refused = wo.push(context, { env: box.env });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.match(refused.message, /client_event_id_reused/);
+});
+
+test('a plan-approval block that Zensu does not need sends the session back to --bind-spec', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.REFUSED, result.message);
+  assert.match(result.message, /run --bind-spec/);
+  assert.equal(result.cancelRun, undefined);
+  assert.equal(wo.readState(context.files.ended), null);
+});
+
+test('a plan artifact whose summary Zensu refuses is sent once more with the fixed summary', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 } });
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget list.\n');
+  box.mutate((state) => { state.failNext = [{ command: 'event', flag: 'artifact', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: detail.summary: code_block; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const artifacts = box.fake().events.filter((event) => event.event_type === 'artifact');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].detail.summary, 'Implementation plan for this work order.');
+  assert.equal(artifacts[0].detail.url, `https://github.com/acme/widgets/blob/${artifacts[0].detail.sha}/.zensu/plans/${ORDER}.md`);
+  assert.equal(box.fake().order.blocked_kind, 'plan_approval');
+});
+
+test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
-    { event_type: 'artifact', detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
-    { event_type: 'artifact', detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: spec } },
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
+    { event_type: 'artifact', attempt: 2, detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 3, detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
   ];
   assert.equal(wo.approvedPlanCommit(events, spec).sha, '2'.repeat(40));
   assert.equal(wo.approvedPlanCommit(events, 'd'.repeat(64)), null);
+  const fastClock = [
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '4'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'blocked', attempt: 1, detail: { blocked_kind: 'plan_approval' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(fastClock, spec).sha, '4'.repeat(40));
+  const recut = [
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '5'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'plan', sha: '6'.repeat(40), path: '.zensu/plans/x.md' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(recut, spec).sha, '6'.repeat(40));
+  assert.equal(wo.approvedPlanCommit([{ event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } }], spec), null);
+});
+
+test('bind-spec blocks an order Zensu marked spec_stale although its spec hash is unchanged', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({
+    runId: RUN, stage: 'PLANNING', events: DONE_LEDGER.slice(0, 1), evidence: {},
+    workOrder: { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) },
+  }));
+  box.mutate((state) => { state.order.spec_stale = true; });
+  const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /spec changed while the session ran/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'implementing').length, 0);
+});
+
+test('the plan blob link takes the scheme-less repository Zensu stores and an https one alike', () => {
+  const sha = 'e'.repeat(40);
+  const file = `.zensu/plans/${ORDER}.md`;
+  assert.equal(wo.blobLink('github.com/acme/widgets', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('https://github.com/acme/widgets.git', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('gitlab.com/group/project', sha, file), `https://gitlab.com/group/project/-/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('bitbucket.org/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('http://github.com/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('', sha, file), null);
 });
 
 test('the Stop decision blocks until three stops pass without progress, then ends the order', () => {
@@ -659,6 +959,10 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'zensu auth login': 'auth',
     'zensu work approve 1234': 'human-gate',
     'zensu work policy set --plan-approval auto': 'human-gate',
+    'zensu work policy get --product p1': 'order-file',
+    'zensu work list': 'order-file',
+    'zensu work questions --plan p1': 'order-file',
+    'zensu work repositories list --product p1': 'order-file',
     'zensu plan approve abc': 'human-gate',
     'zensu work event 1234 --stage implementing': 'helper-verb',
     'zensu work heartbeat 1234': 'helper-verb',
@@ -685,7 +989,7 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
   const allowed = [
     'git status', 'git commit -m "do not git push here"', 'git log --oneline -3', 'printenv PATH', 'set -e',
     'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
-    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work policy get', 'gh pr view 7', 'echo hello',
+    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
     "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
@@ -753,6 +1057,97 @@ test('ask continues with the default, and a blocking question ends the session',
   assert.equal(wo.forgeWriteVerdict(context).allowed, false);
 });
 
+test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' };
+  const cases = [
+    [{ defaultOption: 'pg-boss (recommended)' }, /--default-option must repeat one --option verbatim/],
+    [{ category: 'design' }, /--category must be one of clarification/],
+    [{ options: Array.from({ length: 11 }, (_, index) => `option ${index}`), defaultOption: 'option 0' }, /at most 10 times/],
+    [{ options: ['pg-boss', ' pg-boss '] }, /given twice/],
+    [{ options: ['pg-boss', 'x'.repeat(301)] }, /at most 300 bytes/],
+    [{ options: ['pg-boss', ' '] }, /every --option needs text/],
+    [{ requirements: ['AC-1'] }, /must look like AC-001/],
+    [{ requirements: ['AC-001,AC-002'] }, /one id per flag/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.ask(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+});
+
+test('the fake refuses a question the way the service does', () => {
+  const box = sandbox();
+  startedContext(box);
+  const ask = (extra) => wo.runZensu(['work', 'ask', ORDER, '--category', 'technical_choice', '--question', 'Which queue library should the worker use?',
+    '--client-event-id', wo.clientEventId('ask', JSON.stringify(extra)), ...extra, '--json'], { env: box.env });
+  const cases = [
+    [[...Array.from({ length: 11 }, (_, index) => ['--option', `option ${index}`]).flat(), '--default-option', 'option 0'], 'invalid_options'],
+    [['--option', 'a', '--option', 'a', '--default-option', 'a'], 'invalid_options'],
+    [['--option', 'x'.repeat(301), '--default-option', 'x'.repeat(301)], 'content_not_allowed'],
+    [['--option', 'a', '--option', 'b', '--default-option', 'c'], 'invalid_default'],
+    [['--option', 'a', '--default-option', 'a', '--requirement', 'AC-1'], 'invalid_requirements'],
+  ];
+  for (const [extra, code] of cases) {
+    const outcome = ask(extra);
+    assert.equal(outcome.status, 422, code);
+    assert.equal(outcome.code, code);
+  }
+  const category = wo.runZensu(['work', 'ask', ORDER, '--category', 'design', '--question', 'Which queue?', '--default-option', 'a', '--json'], { env: box.env });
+  assert.equal(category.code, 'invalid_category');
+  assert.equal(box.fake().questions.length, 0);
+});
+
+test('a question asked again as blocking is a new question, and only a blocking scope question blocks with spec_change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const scope = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', options: ['no', 'yes'], defaultOption: 'no' });
+  assert.equal(scope.exit, wo.EXIT.OK, scope.message);
+  assert.equal(scope.value.ended, false);
+  assert.equal(box.fake().order.status, 'claimed');
+  const escalated = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', blocking: true });
+  assert.equal(escalated.exit, wo.EXIT.ENDED, escalated.message);
+  assert.equal(escalated.value.replay, false);
+  assert.equal(box.fake().questions.length, 2);
+  assert.equal(box.fake().order.blocked_kind, 'spec_change');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:spec_change');
+});
+
+test('a question past the order limit escalates the order and ends the session', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 1, max_order_runtime_minutes: 240 } });
+  const first = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list paginate?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  const second = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list sort by name?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(second.exit, wo.EXIT.ENDED, second.message);
+  assert.equal(box.fake().order.blocked_kind, 'escalated');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
+});
+
+test('a decision a person made for the whole plan reaches the model as a plan-wide decision, and heartbeats carry only this order', () => {
+  const box = sandbox();
+  box.seed({
+    questions: [
+      { id: 'q-sibling', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'plan', category: 'product_decision', question: 'Which currency do prices use?', answer: 'Prices are in euro across the plan.', status: 'answered' },
+      { id: 'q-sibling-local', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'order', category: 'clarification', question: 'Which table holds sizes?', answer: 'The sizes table.', status: 'answered' },
+    ],
+  });
+  const started = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(started.exit, wo.EXIT.OK, started.message);
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const beat = wo.renew(context, { env: box.env, force: true });
+  assert.deepEqual(beat.answers, []);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Prices are in euro across the plan/);
+  assert.doesNotMatch(update.additionalContext, /sizes table/);
+  assert.doesNotMatch(update.additionalContext, /this order asked earlier/);
+  assert.equal(wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env }).additionalContext, null);
+});
+
 test('followup files once per title and the CLI parser collects repeated flags', () => {
   const box = sandbox();
   const context = startedContext(box);
@@ -762,6 +1157,42 @@ test('followup files once per title and the CLI parser collects repeated flags',
   assert.equal(box.fake().followups.length, 1);
   assert.deepEqual(wo.parseArgs(['--option', 'a', '--option', 'b', '--blocking', '--question', 'q', '--requirement', 'AC-001']),
     { option: ['a', 'b'], blocking: true, question: 'q', requirement: ['AC-001'] });
+});
+
+test('followup refuses inputs the CLI or Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, title: 'Add an index on widgets.owner_id', rationale: 'The list query scans the table.', severity: 'medium' };
+  const cases = [
+    [{ severity: 'major' }, /--severity must be one of low, medium, high, critical/],
+    [{ paths: ['src/auth/'] }, /clean relative file path/],
+    [{ paths: ['./src/a.ts'] }, /clean relative file path/],
+    [{ paths: ['src/**'] }, /clean relative file path/],
+    [{ paths: Array.from({ length: 21 }, (_, index) => `src/file${index}.ts`) }, /at most 20 times/],
+    [{ title: 'x'.repeat(201) }, /--title holds at most 200 bytes/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.followup(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'followup').length, 0);
+  const filed = wo.followup(context, { ...base, paths: ['src/widgets/list.ts', '.github/workflows/ci.yml'] });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+});
+
+test('a refused question or follow-up names the rule Zensu gave and what to shorten', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  box.mutate((state) => { state.failNext = [{ command: 'followup', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: rationale: too_long; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const followup = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'The list is read on every request.', severity: 'low' });
+  assert.equal(followup.exit, wo.EXIT.REFUSED);
+  assert.match(followup.message, /content_not_allowed: rationale: too_long/);
+  assert.match(followup.message, /shorten rationale and file it again/);
+  const asked = wo.ask(context, { env: box.env, category: 'technical_choice', question: 'git checkout the old branch first?', options: ['yes', 'no'], defaultOption: 'no' });
+  assert.equal(asked.exit, wo.EXIT.REFUSED);
+  assert.match(asked.message, /question: command_line/);
+  assert.match(asked.message, /rewrite it as plain prose and ask again/);
 });
 
 test('the post-tool update hands answers over once and ends the session on a blocked direct ask', () => {
@@ -787,6 +1218,31 @@ test('the plan summary carries no markup, command line or control character', ()
   assert.ok(!/[`*#<>\u0000-\u001f]/.test(summary), summary);
   assert.ok(summary.length <= 400);
   assert.match(summary, /^Implementation plan\./);
+  const { proseViolation } = require(FAKE);
+  for (const plan of [
+    '# Plan: Highlight <code> blocks\nWrap logs in <pre> tags.\nTraceback (most recent call last) stays visible.',
+    'Exception in thread "main" is logged\u2028goroutine 7 [running]\u0085panic: boom',
+    'npm install x\n$ make\n- git push origin main\n    indented\n    twice\n    thrice',
+    'diff --git a/x b/x\n@@ -1,2 +1,2 @@\n--- a/x\n+++ b/x',
+  ]) {
+    const text = wo.planSummary(plan);
+    assert.equal(proseViolation(text), null, text);
+    assert.doesNotMatch(text, /<(pre|code)|Traceback \(|Exception in thread "|goroutine \d+ \[/);
+  }
+});
+
+test('the fake guards prose with the service rules in both directions and with the per-field caps', () => {
+  const { proseViolation } = require(FAKE);
+  for (const text of ['pnpm install fails', '$ make', '<code>x</code>', 'Traceback (most recent call last)', '- npm install x', 'Run `git push --force` now', 'C:\\> dir']) {
+    assert.notEqual(proseViolation(text), null, text);
+  }
+  for (const text of ['go ahead with the default', 'node version 20', 'make test fails', 'Use ``` fences in docs', 'make sure the index exists']) {
+    assert.equal(proseViolation(text), null, text);
+  }
+  assert.equal(proseViolation('x'.repeat(201), 200), 'too_long');
+  assert.equal(proseViolation('x'.repeat(301), 300), 'too_long');
+  assert.equal(proseViolation('tab\there', 300), null);
+  assert.equal(proseViolation('bell\u0007', 300), 'control_characters');
 });
 
 test('the order-bound review key matches the state library helper and differs per order and head', () => {

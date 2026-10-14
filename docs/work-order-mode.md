@@ -1,7 +1,10 @@
 # Work-order mode
 
 A Zensu worker runs a claimed work order in a headless Claude Code session: it starts
-`claude -p "/zensu:work <order-id>"` with the session token in `ZENSU_SESSION_TOKEN`. The plugin is
+`claude -p "/zensu:work <order-id>"` with the session token in `ZENSU_SESSION_TOKEN` and the Zensu
+host that issued it in `ZENSU_API_URL`. The `zensu` CLI never sends a session token to its built-in
+default host, so a session without `ZENSU_API_URL`, and without a CLI config that stores the host,
+stops at `--start` with exit 3. The plugin is
 the reference harness for that session. It reads the order, builds it with Autopilot, reports every
 stage to Zensu and ends the session with `ready_for_merge` or a block. Nobody answers a question in
 such a session, so every step that would wait for a person either goes to Zensu or ends the order.
@@ -63,10 +66,13 @@ over:
 ## Questions and follow-ups
 
 The session asks Zensu, never a person. `--ask` sends a question with its options and the option
-the session continues with; a blocking question, a scope question or any question past the order's
-limit blocks the order and ends the session. `--followup` records an idea outside the order's scope
-as a follow-up. Answers that arrive while the session runs reach the model as context after its
-next tool call.
+the session continues with. A blocking question (`spec_change` when its category is `scope`) or any
+question past the order's limit (`escalated`) blocks the order and ends the session; a person's
+answer requeues a question or `spec_change` block, while an escalated order waits until a person
+requeues it. A non-blocking question, `scope` included, only records the assumption. `--followup`
+records an idea outside the order's scope as a follow-up. Answers that arrive while the session
+runs, and the decisions a person made for the whole plan, reach the model as context after its next
+tool call.
 
 ## The tool hooks
 
@@ -104,7 +110,7 @@ without a report.
 ```
 
 `launcher` is relative to the plugin root and executable. The worker starts it in the checkout it
-prepared, with the session token in `ZENSU_SESSION_TOKEN`:
+prepared, with the session token in `ZENSU_SESSION_TOKEN` and its host in `ZENSU_API_URL`:
 
 ```text
 harness/launcher.js --order <order-id> --session-id <client-session-id> [--project <dir>]
@@ -148,6 +154,9 @@ raw output to a file there; nothing else keeps it.
   wrote and then runs, is not judged; the worker's slot sandbox, not the gate, is the boundary.
 - `--start` releases only runs of the same order. A nonterminal run of another order in a reused
   checkout still holds the new run off, and the session ends with a stated reason.
+- Zensu records `zensu-cli` and the CLI version as the client of every question and follow-up,
+  because `zensu work ask` and `zensu work followup` take no `--client-name` in zensu-cli 0.9.0.
+  Stage, artifact and block events name `zensu-claude-code` and the plugin version.
 - `--review-import` trusts a review marker by its digest, which anyone who knows the order id can
   compute, and it reads only the first part of a review. A review that an earlier attempt published
   only in part is imported as if it were complete.

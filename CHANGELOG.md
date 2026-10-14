@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `bash -c` body, a heredoc a shell reads, `eval` or a command substitution inside a parameter
   expansion is now gated like a plain one, and every command the token scan denied before is still
   denied.
+- **work orders**: a work-order session now names its branch with the order's `branch_prefix`
+  (`wo-` today) instead of `zensu/work-`, which Zensu refused with `invalid_branch`, so a real
+  order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
+  to the Zensu host that issued the session token, unless the CLI config the session reads stores
+  that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
+  now stops with exit 3 instead of retrying. The work-order gate also denies `zensu work list`,
+  `questions`, `policy get` and `repositories list`, which Zensu refuses for a session token, and
+  points at the order file instead.
 
 ## [0.26.0] - 2026-10-12
 

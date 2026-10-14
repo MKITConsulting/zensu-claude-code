@@ -12,6 +12,8 @@ const STATE_SEGMENTS = Object.freeze(['.zensu', 'state', 'work-order']);
 const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_PENDING_ANSWERS = 50;
 const MAX_ANSWER_CHARS = 4000;
+const DEFAULT_BRANCH_PREFIX = 'wo-';
+const BRANCH_PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,62}$/;
 const RENEW_CEILING_MS = 60000;
 const CLI_TIMEOUT_MS = 30000;
 const DEFAULT_RETRY_BASE_MS = 2000;
@@ -289,7 +291,7 @@ function classifyFailure(outcome) {
   if (outcome && outcome.exitCode === 0) return { verdict: VERDICTS.OK, status: null, code: null };
   const status = outcome ? outcome.status : null;
   const code = outcome ? outcome.code : null;
-  if (status === null) return { verdict: VERDICTS.TRANSIENT, status, code };
+  if (status === null) return { verdict: VERDICTS.TRANSIENT, status, code, message: outcome && typeof outcome.message === 'string' ? outcome.message : '' };
   if (status === 401) return { verdict: VERDICTS.LOST, status, code };
   if (code) {
     if (LOST_CODES.has(code)) return { verdict: VERDICTS.LOST, status, code };
@@ -304,7 +306,10 @@ function classifyFailure(outcome) {
 }
 
 function describeFailure(failure) {
-  if (!failure || failure.status === null) return 'no answer from Zensu';
+  if (!failure || failure.status === null) {
+    const said = failure && typeof failure.message === 'string' ? failure.message.replace(/\s+/g, ' ').trim() : '';
+    return said ? `the zensu CLI failed without a status: ${said}` : 'no answer from Zensu';
+  }
   return failure.code ? `status ${failure.status}, code ${failure.code}` : `status ${failure.status}`;
 }
 
@@ -459,6 +464,7 @@ function recordAnswers(context, answers) {
       question: boundedText(answer.question),
       answer: boundedText(answer.answer),
       status: boundedText(answer.status),
+      planWide: answer.planWide === true,
     });
   }
   if (added.length === 0) return [];
@@ -467,6 +473,12 @@ function recordAnswers(context, answers) {
     pending: [...pending, ...added].slice(-MAX_PENDING_ANSWERS),
   });
   return added;
+}
+
+function planDecisions(order) {
+  const log = isObject(order) && Array.isArray(order.decision_log) ? order.decision_log : [];
+  return log.filter((entry) => isObject(entry) && (entry.status === 'answered' || entry.status === 'auto_answered'))
+    .map((entry) => ({ ...entry, planWide: true }));
 }
 
 function takePendingAnswers(context) {
@@ -589,13 +601,23 @@ function sendEvent(context, args, { env = process.env, now = Date.now, target = 
   }
 }
 
+const SAFE_BLOCK_REASON = 'The session ended before its Autopilot run reached a ready pull request.';
+const PROSE_REFUSAL_CODES = new Set(['content_not_allowed', 'missing_field']);
+
 function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'worker_error', reason, eventKey }) {
-  const prose = String(reason || 'The session stopped without a stated reason.').replace(/\s+/g, ' ').trim().slice(0, 480);
-  const sent = sendEvent(context, [
-    '--blocked', kind, '--reason', prose, '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'blocked', eventKey || kind),
+  let prose = String(reason || 'The session stopped without a stated reason.').replace(/\s+/g, ' ').trim().slice(0, 480);
+  const key = eventKey || kind;
+  const send = (text, suffix) => sendEvent(context, [
+    '--blocked', kind, '--reason', text, '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'blocked', `${key}${suffix}`),
   ], { env, now, terminal: true });
+  let sent = send(prose, '');
+  if (sent.verdict === VERDICTS.FINAL && kind === 'worker_error' && sent.failure && PROSE_REFUSAL_CODES.has(sent.failure.code)
+      && prose !== SAFE_BLOCK_REASON) {
+    prose = SAFE_BLOCK_REASON;
+    sent = send(prose, ':safe');
+  }
   const delivered = sent.verdict === VERDICTS.OK;
-  if (delivered || sent.verdict === VERDICTS.LOST || sent.verdict === VERDICTS.FINAL) {
+  if (delivered || sent.verdict === VERDICTS.LOST) {
     markEnded(context, {
       outcome: kind === 'plan_approval' && delivered ? 'success' : 'failure',
       kind: `blocked:${kind}`,
@@ -604,12 +626,19 @@ function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'wo
       at: now(),
     });
   }
-  return { ...sent, delivered };
+  return { ...sent, delivered, reason: prose };
+}
+
+function branchPrefixOf(order) {
+  const spec = isObject(order) && isObject(order.spec) ? order.spec : {};
+  const prefix = spec.branch_prefix;
+  return typeof prefix === 'string' && BRANCH_PREFIX_RE.test(prefix) && !prefix.includes('..') ? prefix : DEFAULT_BRANCH_PREFIX;
 }
 
 function orderSummary(order, context) {
   const policy = isObject(order.policy) ? order.policy : {};
   const plan = isObject(order.plan) ? order.plan : {};
+  const branchPrefix = branchPrefixOf(order);
   return {
     orderId: order.id,
     attempt: order.attempt,
@@ -619,7 +648,8 @@ function orderSummary(order, context) {
     baseBranch: plan.base_branch || null,
     integrationBranch: plan.integration_branch || null,
     branch: order.branch || null,
-    workBranch: order.branch || `zensu/work-${String(order.id || '').slice(0, 8).toLowerCase()}`,
+    branchPrefix,
+    workBranch: order.branch || `${branchPrefix}${String(order.id || '').slice(0, 8).toLowerCase()}`,
     prUrl: order.pr_url || null,
     prNumber: Number.isSafeInteger(order.pr_number) ? order.pr_number : null,
     headSha: order.head_sha || null,
@@ -631,6 +661,8 @@ function orderSummary(order, context) {
     orderFile: context ? context.files.order : null,
   };
 }
+
+const SESSION_TOKEN_SETUP_RE = /ZENSU_SESSION_TOKEN (?:needs the host|must hold)/;
 
 function probe({ env = process.env } = {}) {
   const outcome = runZensu(['work', '--help'], { env, timeoutMs: 15000 });
@@ -654,6 +686,12 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
   const got = runZensu(['work', 'get', orderId, '--json'], { env });
   if (got.exitCode !== 0 || !isObject(got.json)) {
     const failure = classifyFailure(got);
+    if (failure.status === null && got.exitCode !== null && got.exitCode !== 0 && SESSION_TOKEN_SETUP_RE.test(got.message || '')) {
+      return {
+        exit: EXIT.NO_CLI,
+        message: `the zensu CLI cannot use the session token: ${got.message.replace(/\s+/g, ' ').trim()}; the worker must start the session with ZENSU_API_URL set to the Zensu host that issued the token`,
+      };
+    }
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY || failure.verdict === VERDICTS.OK) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not answer the order read (${describeFailure(failure)}); try again` };
     }
@@ -690,6 +728,7 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
   writeState(projectRoot, files.order, { order });
   if (!existing) writeState(projectRoot, files.marker, marker);
   const context = { projectRoot, sessionKey, files, marker, fault: null };
+  recordAnswers(context, planDecisions(order));
   const summary = orderSummary(order, context);
   if (safeRead(files.ended).value) {
     return { exit: EXIT.ENDED, message: `the session of work order ${order.id} has already ended`, summary: { ...summary, action: 'stop' } };
@@ -784,6 +823,20 @@ function currentHead(projectRoot) {
   return head.ok && FULL_SHA_RE.test(value) ? value : null;
 }
 
+function orderBranchPrefix(context) {
+  const snapshot = safeRead(context.files.order).value;
+  return branchPrefixOf(snapshot && isObject(snapshot.order) ? snapshot.order : {});
+}
+
+function reportableBranch(context) {
+  const branch = currentBranch(context.projectRoot);
+  return branch && branch.startsWith(orderBranchPrefix(context)) ? branch : null;
+}
+
+function foreignBranchMessage(context, branch) {
+  return `the working branch ${branch} does not start with ${orderBranchPrefix(context)}, the branch prefix Zensu requires for this order; check out the workBranch named in the --start summary and run this step again`;
+}
+
 function readRunRecord(projectRoot, runId) {
   if (!RUN_ID_RE.test(String(runId || ''))) return null;
   const file = path.join(projectRoot, '.zensu', 'state', `autopilot-run-${runId}.json`);
@@ -853,7 +906,7 @@ function stageArgs(context, run, planned) {
     const head = fullSha(context.projectRoot, planned.pr.headSha);
     if (head) args.push('--head', head);
   }
-  const branch = currentBranch(context.projectRoot);
+  const branch = reportableBranch(context);
   if (branch && (planned.status === 'implementing' || planned.status === 'pr_open')) args.push('--branch', branch);
   return args;
 }
@@ -897,9 +950,23 @@ function drain(context, { env = process.env, now = Date.now } = {}) {
     if (result.verdict === VERDICTS.FINAL && result.failure && result.failure.code === 'plan_approval_required') {
       return { verdict: 'plan-approval-required', sent };
     }
-    return { verdict: result.verdict, failure: result.failure, sent };
+    return { verdict: result.verdict, failure: result.failure, sent, refused: entry.status };
   }
   return { verdict: VERDICTS.OK, sent };
+}
+
+function blockExit(blocked) {
+  if (blocked.delivered) return EXIT.ENDED;
+  if (blocked.verdict === VERDICTS.LOST) return EXIT.LOST;
+  if (blocked.verdict === VERDICTS.FINAL) return EXIT.REFUSED;
+  return EXIT.TRANSIENT;
+}
+
+function refusedStageReason(refused, reason) {
+  if (typeof reason === 'string' && reason.trim()) return reason.replace(/`/g, "'");
+  const stage = refused && refused.status ? String(refused.status).replace(/_/g, ' ') : 'an earlier';
+  const code = refused && refused.failure && refused.failure.code ? ` with code ${refused.failure.code}` : '';
+  return `Zensu refused the ${stage} stage${code}, so the delivered pull request cannot be reported as ready for merge.`;
 }
 
 function listOrderEvents(context, env) {
@@ -928,13 +995,20 @@ function detailOf(event) {
 }
 
 function approvedPlanCommit(events, specHash) {
-  let lastPlan = null;
+  let approvedAttempt = null;
+  for (const event of events) {
+    const detail = detailOf(event);
+    if (event.event_type === 'approved' && detail.subject === 'implementation_plan' && detail.spec_hash === specHash
+        && Number.isSafeInteger(event.attempt)) {
+      approvedAttempt = event.attempt;
+    }
+  }
+  if (approvedAttempt === null) return null;
   let approvedPlan = null;
   for (const event of events) {
     const detail = detailOf(event);
-    if (event.event_type === 'artifact' && detail.kind === 'plan' && typeof detail.sha === 'string') lastPlan = detail;
-    if (event.event_type === 'approved' && detail.subject === 'implementation_plan' && detail.spec_hash === specHash && lastPlan) {
-      approvedPlan = lastPlan;
+    if (event.event_type === 'artifact' && event.attempt === approvedAttempt && detail.kind === 'plan' && typeof detail.sha === 'string') {
+      approvedPlan = detail;
     }
   }
   return approvedPlan;
@@ -962,6 +1036,9 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   const reported = drain(context, { env, now });
   if (reported.verdict === 'ended') return { exit: EXIT.ENDED, message: `Zensu ended the session of work order ${context.marker.orderId}` };
   if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };
+  if (reported.verdict === VERDICTS.FINAL) {
+    return { exit: EXIT.REFUSED, message: `Zensu refused the ${reported.refused || 'planning'} stage (${describeFailure(reported.failure)}); finish with --reason` };
+  }
   if (reported.verdict !== VERDICTS.OK) {
     return { exit: EXIT.TRANSIENT, message: `the planning stage is not reported yet (${describeFailure(reported.failure)}); run --bind-spec again` };
   }
@@ -976,9 +1053,10 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   }
   const order = got.json;
   writeState(context.projectRoot, context.files.order, { order });
-  if (order.spec_hash !== context.marker.specHash) {
+  recordAnswers(context, planDecisions(order));
+  if (order.spec_hash !== context.marker.specHash || order.spec_stale === true) {
     const blocked = deliverBlocked(context, { env, now, reason: 'The order spec changed while the session ran, so its plan no longer matches the spec it was dispatched with.', eventKey: 'spec-changed' });
-    return { exit: blocked.delivered ? EXIT.ENDED : EXIT.TRANSIENT, message: 'the order spec changed during the session; the session ends' };
+    return { exit: blockExit(blocked), message: 'the order spec changed during the session; the session ends' };
   }
   const policy = isObject(order.policy) ? order.policy : {};
   let approvedPlanSha256 = order.spec_hash;
@@ -1011,7 +1089,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
       else if (!approved.ok) reason = 'The commit of the approved plan is not reachable from this checkout, so the approved plan cannot be compared.';
       else if (current === null) reason = 'The order branch carries no plan file, so the approved plan cannot be compared.';
       const blocked = deliverBlocked(context, { env, now, reason, eventKey: 'plan-mismatch' });
-      return { exit: blocked.delivered ? EXIT.ENDED : EXIT.TRANSIENT, message: reason };
+      return { exit: blockExit(blocked), message: reason };
     }
     approvedPlanSha256 = crypto.createHash('sha256').update(approved.stdout, 'utf8').digest('hex');
   }
@@ -1021,9 +1099,10 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     return { exit: EXIT.OK, value: bindingValue };
   };
   if ((STAGE_RANK[order.status] || 0) > STAGE_RANK.implementing) return pastImplementing();
+  const branch = currentBranch(context.projectRoot);
+  if (branch && !branch.startsWith(branchPrefixOf(order))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const args = ['--stage', 'implementing', '--client-event-id', clientEventId(bound.runId, 'order-spec-bound'),
     '--autopilot-stage', 'AWAIT_TDD', '--autopilot-run-id', bound.runId];
-  const branch = currentBranch(context.projectRoot);
   if (branch) args.push('--branch', branch);
   const sent = sendEvent(context, args, { env, now, target: 'implementing' });
   if (sent.verdict === VERDICTS.FINAL && sent.failure && sent.failure.code === 'invalid_transition') return pastImplementing();
@@ -1101,35 +1180,45 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     markEnded(context, { outcome: 'failure', kind: 'lease-lost', delivered: false, reason: 'the lease was lost', at: now() });
     return { exit: EXIT.LOST, message: 'the lease is lost; nothing can be reported any more', cancelRun: runToCancel(context) };
   }
+  let refused = null;
   if (stage === 'DONE') {
-    if (drained.verdict !== VERDICTS.OK) {
+    if (drained.verdict === VERDICTS.FINAL) {
+      refused = { status: drained.refused || null, failure: drained.failure };
+    } else if (drained.verdict !== VERDICTS.OK) {
       return { exit: EXIT.TRANSIENT, message: `the stages before ready_for_merge are not delivered yet (${drained.verdict}); run --finish again` };
+    } else {
+      const deliveryEvent = run.events.find((event) => event.eventType === 'DELIVERY_COMPLETE');
+      const evidence = isObject(run.evidence) ? run.evidence : {};
+      const head = fullSha(context.projectRoot, deliveryEvent && deliveryEvent.payload ? deliveryEvent.payload.headSha : null);
+      const pr = isObject(evidence.pr) ? evidence.pr : null;
+      if (!head || !pr) return { exit: EXIT.REFUSED, message: 'the delivered head or pull request could not be read from the run record' };
+      const args = ['--stage', 'ready_for_merge', '--head', head, '--pr-url', String(pr.url), '--pr-number', String(pr.number),
+        '--autopilot-stage', 'DONE', '--autopilot-run-id', run.runId,
+        '--client-event-id', clientEventId(run.runId, deliveryEvent.eventId)];
+      const branch = reportableBranch(context);
+      if (branch) args.push('--branch', branch);
+      const sent = sendEvent(context, args, { env, now, target: 'ready_for_merge', terminal: true });
+      if (sent.verdict === VERDICTS.OK) {
+        markEnded(context, { outcome: 'success', kind: 'ready_for_merge', delivered: true, reason: null, at: now() });
+        return { exit: EXIT.OK, message: `ready_for_merge is reported for work order ${context.marker.orderId}; the session is complete`, delivered: true };
+      }
+      if (sent.verdict === VERDICTS.TRANSIENT || sent.verdict === VERDICTS.RETRY) {
+        return { exit: EXIT.TRANSIENT, message: `ready_for_merge is not delivered yet (${describeFailure(sent.failure)}); run --finish again` };
+      }
+      if (sent.verdict === VERDICTS.LOST) {
+        markEnded(context, { outcome: 'failure', kind: 'ready_for_merge', delivered: false, reason: describeFailure(sent.failure), at: now() });
+        return { exit: EXIT.LOST, message: `the lease was lost while ready_for_merge was reported (${describeFailure(sent.failure)})` };
+      }
+      refused = { status: 'ready_for_merge', failure: sent.failure };
     }
-    const deliveryEvent = run.events.find((event) => event.eventType === 'DELIVERY_COMPLETE');
-    const evidence = isObject(run.evidence) ? run.evidence : {};
-    const head = fullSha(context.projectRoot, deliveryEvent && deliveryEvent.payload ? deliveryEvent.payload.headSha : null);
-    const pr = isObject(evidence.pr) ? evidence.pr : null;
-    if (!head || !pr) return { exit: EXIT.REFUSED, message: 'the delivered head or pull request could not be read from the run record' };
-    const args = ['--stage', 'ready_for_merge', '--head', head, '--pr-url', String(pr.url), '--pr-number', String(pr.number),
-      '--autopilot-stage', 'DONE', '--autopilot-run-id', run.runId,
-      '--client-event-id', clientEventId(run.runId, deliveryEvent.eventId)];
-    const branch = currentBranch(context.projectRoot);
-    if (branch) args.push('--branch', branch);
-    const sent = sendEvent(context, args, { env, now, target: 'ready_for_merge', terminal: true });
-    if (sent.verdict === VERDICTS.OK) {
-      markEnded(context, { outcome: 'success', kind: 'ready_for_merge', delivered: true, reason: null, at: now() });
-      return { exit: EXIT.OK, message: `ready_for_merge is reported for work order ${context.marker.orderId}; the session is complete`, delivered: true };
-    }
-    if (sent.verdict === VERDICTS.TRANSIENT || sent.verdict === VERDICTS.RETRY) {
-      return { exit: EXIT.TRANSIENT, message: `ready_for_merge is not delivered yet (${describeFailure(sent.failure)}); run --finish again` };
-    }
-    markEnded(context, { outcome: 'failure', kind: 'ready_for_merge', delivered: false, reason: describeFailure(sent.failure), at: now() });
-    return { exit: sent.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.REFUSED, message: `Zensu refused ready_for_merge (${describeFailure(sent.failure)})` };
   }
-  const prose = blockReasonFor(run, reason);
-  const blocked = deliverBlocked(context, { env, now, reason: prose, eventKey: run ? `run:${run.runId}` : 'no-run' });
+  const prose = refused ? refusedStageReason(refused, reason) : blockReasonFor(run, reason);
+  const blocked = deliverBlocked(context, {
+    env, now, reason: prose, eventKey: refused ? `refused:${refused.status || 'stage'}` : (run ? `run:${run.runId}` : 'no-run'),
+  });
   if (blocked.delivered) {
-    return { exit: EXIT.ENDED, message: `work order ${context.marker.orderId} is blocked with worker_error; the session has ended`, delivered: true, cancelRun: runToCancel(context) };
+    const cause = refused ? ` because Zensu refused the ${refused.status || 'earlier'} stage (${describeFailure(refused.failure)})` : '';
+    return { exit: EXIT.ENDED, message: `work order ${context.marker.orderId} is blocked with worker_error${cause}; the session has ended`, delivered: true, cancelRun: runToCancel(context) };
   }
   if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the block could not be reported', cancelRun: runToCancel(context) };
   if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the block (${describeFailure(blocked.failure)}); end the session`, cancelRun: runToCancel(context) };
@@ -1151,6 +1240,7 @@ function push(context, { env = process.env, now = Date.now } = {}) {
   const branch = currentBranch(context.projectRoot);
   const head = currentHead(context.projectRoot);
   if (!branch || !head) return { exit: EXIT.REFUSED, message: 'the working tree has no branch or no commit to push' };
+  if (!branch.startsWith(orderBranchPrefix(context))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const expect = beat.lease.recordedHead && FULL_SHA_RE.test(String(beat.lease.recordedHead).toLowerCase())
     ? String(beat.lease.recordedHead).toLowerCase() : '';
   const listed = git(context.projectRoot, ['ls-remote', 'origin', `refs/heads/${branch}`], env);
@@ -1168,12 +1258,18 @@ function push(context, { env = process.env, now = Date.now } = {}) {
     }
   }
   const args = ['--stage', status, '--head', head, '--branch', branch,
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'head', head)];
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'head', status, head)];
   const outbox = readOutbox(context);
   if (outbox.runId) args.push('--autopilot-run-id', outbox.runId);
   const sent = sendEvent(context, args, { env, now, target: status });
+  if (sent.verdict === VERDICTS.LOST) {
+    return { exit: EXIT.LOST, message: `the push landed but the lease is lost (${describeFailure(sent.failure)}); stop without any forge write` };
+  }
+  if (sent.verdict === VERDICTS.FINAL) {
+    return { exit: EXIT.REFUSED, message: `the push landed but Zensu refused to record the new head (${describeFailure(sent.failure)}); finish with --reason` };
+  }
   if (sent.verdict !== VERDICTS.OK) {
-    return { exit: sent.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.TRANSIENT, message: `the push landed but Zensu has not recorded the new head yet (${describeFailure(sent.failure)}); run --push again` };
+    return { exit: EXIT.TRANSIENT, message: `the push landed but Zensu has not recorded the new head yet (${describeFailure(sent.failure)}); run --push again` };
   }
   const lease = safeRead(context.files.lease).value || {};
   writeState(context.projectRoot, context.files.lease, { ...lease, recordedHead: head });
@@ -1375,7 +1471,8 @@ const SHELL_WRAPPERS = new Set(['command', 'builtin', 'exec', 'env', 'sudo', 'do
 const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 const VARIABLE_BUILTINS = new Set(['export', 'declare', 'typeset', 'readonly', 'local']);
 const SUDO_OPERAND_OPTIONS = new Set(['-u', '-g', '-h', '-p', '-C', '-T', '-r', '-t', '-D', '-R']);
-const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup', 'questions', 'list']);
+const SESSION_WORK_VERBS = new Set(['get', 'events', 'ask', 'followup']);
+const ORDER_FILE_WORK_VERBS = new Set(['list', 'questions']);
 const HELPER_WORK_VERBS = new Set(['event', 'heartbeat']);
 const HUMAN_PLAN_VERBS = new Set(['approve', 'finalize', 'abandon', 'confirm-merge']);
 const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
@@ -1726,10 +1823,12 @@ function analyzeBash(command, depth = 0) {
           result.deny = bashFinding('helper-verb', `zensu work ${verb}`);
           return result;
         }
-        const readOnly = SESSION_WORK_VERBS.has(verb)
-          || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list');
-        if (!readOnly) {
-          const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        const scoped = (verb === 'policy' || verb === 'repositories') && third ? ` ${third}` : '';
+        if (ORDER_FILE_WORK_VERBS.has(verb) || (verb === 'policy' && third === 'get') || (verb === 'repositories' && third === 'list')) {
+          result.deny = bashFinding('order-file', `zensu work ${verb}${scoped}`);
+          return result;
+        }
+        if (!SESSION_WORK_VERBS.has(verb)) {
           result.deny = bashFinding('human-gate', `zensu work ${verb}${scoped}`);
           return result;
         }
@@ -1762,6 +1861,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail} is sent by the work-order helper only. Use zensu-work-order.sh --drain for stages, --finish for the outcome and --renew for the lease.`;
     case 'human-gate':
       return `${lead} ${finding.detail} is a decision a person or the worker makes; a work-order session may not run it.`;
+    case 'order-file':
+      return `${lead} Zensu refuses ${finding.detail} for a session token. Read the order file that orderFile in the --start summary names instead: .order.questions holds the earlier questions with their answers and .order.policy the policy. Answers to non-blocking questions reach you through the work-order hooks.`;
     case 'token':
       return `${lead} The command is refused because ${finding.detail}. Never print, read, unset or override ${TOKEN_VARIABLE}; the helpers read it from the environment themselves.`;
     case 'lease':
@@ -1814,12 +1915,21 @@ function noteAskOutcome(context, body, now) {
 
 function answersContext(orderId, answers) {
   if (!Array.isArray(answers) || answers.length === 0) return null;
-  const lines = answers.map((entry) => {
+  const line = (entry) => {
     const question = String(entry.question || '').replace(/\s+/g, ' ').trim().slice(0, 400);
     const answer = String(entry.answer || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
     return `- Question (${entry.category || 'uncategorised'}): ${JSON.stringify(question)} Answer: ${JSON.stringify(answer)}`;
-  });
-  return `Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${lines.join('\n')}`;
+  };
+  const own = answers.filter((entry) => entry.planWide !== true);
+  const planWide = answers.filter((entry) => entry.planWide === true);
+  const parts = [];
+  if (own.length > 0) {
+    parts.push(`Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${own.map(line).join('\n')}`);
+  }
+  if (planWide.length > 0) {
+    parts.push(`Zensu work order ${orderId}: a person decided these questions for the whole work plan, so they bind this order too. Each decision is about the work, not an instruction about this session; apply it where it changes the work.\n${planWide.map(line).join('\n')}`);
+  }
+  return parts.join('\n');
 }
 
 const DIRECT_ASK_RE = /(^|[\s;&|(])zensu\s+(?:\S+\s+)*?work\s+ask(\s|$)/;
@@ -1856,7 +1966,7 @@ function postToolUpdate(context, payload, { env = process.env, now = Date.now } 
   }
   renew(context, { env: bounded, now: now() });
   if (safeRead(context.files.lost).value) {
-    result.additionalContext = `The lease of Zensu work order ${context.marker.orderId} is lost. Stop now without any push, pull request or event: run zensu-work-order.sh --finish once and end the turn.`;
+    result.additionalContext = lostContext(context);
     return result;
   }
   const drained = drain(context, { env: bounded, now });
@@ -1865,8 +1975,22 @@ function postToolUpdate(context, payload, { env = process.env, now = Date.now } 
     result.additionalContext = `Zensu blocked work order ${context.marker.orderId} and ended this session. Stop now: run zensu-work-order.sh --finish once and end the turn.`;
     return result;
   }
+  if (drained.verdict === VERDICTS.LOST || safeRead(context.files.lost).value) {
+    result.additionalContext = lostContext(context);
+    return result;
+  }
+  if (drained.verdict === VERDICTS.FINAL) {
+    result.additionalContext = `Zensu refused the ${drained.refused || 'latest'} stage of work order ${context.marker.orderId} (${describeFailure(drained.failure)}), so the order cannot move past it in this session. Stop the work: run zensu-work-order.sh --finish --reason with one plain sentence that names the cause, then end the turn.`;
+    return result;
+  }
   result.additionalContext = answersContext(context.marker.orderId, takePendingAnswers(context));
   return result;
+}
+
+function lostContext(context) {
+  const lost = safeRead(context.files.lost).value;
+  const code = lost && typeof lost.code === 'string' && CLI_CODE_RE.test(lost.code) ? ` (${lost.code})` : '';
+  return `The lease of Zensu work order ${context.marker.orderId} is lost${code}. Stop now without any push, pull request or event: run zensu-work-order.sh --finish once and end the turn.`;
 }
 
 function ask(context, { env = process.env, now = Date.now, category, question, options = [], defaultOption = null, blocking = false, requirements = [] } = {}) {
@@ -1877,10 +2001,13 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
   if (!blocking && (typeof defaultOption !== 'string' || !defaultOption)) {
     return { exit: EXIT.USAGE, message: '--ask needs --default-option unless --blocking is set' };
   }
+  const fault = askInputFault({ category, question, options, defaultOption, requirements });
+  if (fault) return { exit: EXIT.USAGE, message: fault };
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
   const args = ['work', 'ask', context.marker.orderId, '--category', category, '--question', question,
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'ask', category, question)];
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'ask', category, question,
+      blocking ? 'blocking' : 'continue', defaultOption || '')];
   for (const option of options) args.push('--option', option);
   if (defaultOption) args.push('--default-option', defaultOption);
   if (blocking) args.push('--blocking');
@@ -1896,10 +2023,9 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
     }
-    const next = failure.code === 'content_not_allowed'
-      ? 'rewrite it as plain prose and ask again'
-      : 'continue with your default option, or finish with --reason when the work cannot go on';
-    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)}); ${next}` };
+    const refused = refusedProse(outcome, failure, 'ask again');
+    const next = refused.next || 'continue with your default option, or finish with --reason when the work cannot go on';
+    return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})${refused.said}; ${next}` };
   }
   const body = outcome.json;
   const asked = isObject(body.question) ? body.question : {};
@@ -1920,6 +2046,8 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (typeof title !== 'string' || !title.trim() || typeof rationale !== 'string' || !rationale.trim()) {
     return { exit: EXIT.USAGE, message: '--followup needs --title and --rationale' };
   }
+  const fault = followupInputFault({ title, rationale, severity, paths });
+  if (fault) return { exit: EXIT.USAGE, message: fault };
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: forge.reason };
   const args = ['work', 'followup', context.marker.orderId, '--title', title, '--rationale', rationale, '--severity', severity,
@@ -1936,22 +2064,90 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(failure)})` };
   }
+  const refused = refusedProse(outcome, failure, 'file it again');
   let next = 'continue without it';
   if (failure.code === 'followup_limit_reached') next = 'file no more follow-ups in this attempt';
-  else if (failure.code === 'content_not_allowed') next = 'rewrite it as plain prose and file it again';
-  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)}); ${next}` };
+  else if (refused.next) next = refused.next;
+  return { exit: EXIT.REFUSED, message: `Zensu refused the follow-up (${describeFailure(failure)})${refused.said}; ${next}` };
 }
 
+const QUESTION_CATEGORIES = ['clarification', 'technical_choice', 'product_decision', 'scope', 'risk', 'external'];
+const QUESTION_OPTIONS = 10;
+const OPTION_BYTES = 300;
+const QUESTION_REQUIREMENTS = 20;
+const REQUIREMENT_ID_RE = /^(AC|FR|IF)-[0-9]{3,6}$/;
+
+function askInputFault({ category, question, options, defaultOption, requirements }) {
+  if (!QUESTION_CATEGORIES.includes(category)) return `--category must be one of ${QUESTION_CATEGORIES.join(', ')}`;
+  if (Buffer.byteLength(question.trim()) > PROSE_BYTES) return `--question holds at most ${PROSE_BYTES} bytes; shorten it`;
+  const list = Array.isArray(options) ? options : [];
+  if (list.length > QUESTION_OPTIONS) return `--option may repeat at most ${QUESTION_OPTIONS} times`;
+  const seen = new Set();
+  for (const option of list) {
+    const trimmed = String(option).trim();
+    if (!trimmed) return 'every --option needs text';
+    if (Buffer.byteLength(trimmed) > OPTION_BYTES) return `every --option holds at most ${OPTION_BYTES} bytes; shorten it`;
+    if (seen.has(trimmed)) return `--option ${JSON.stringify(trimmed)} is given twice; the options must be distinct`;
+    seen.add(trimmed);
+  }
+  const fallback = typeof defaultOption === 'string' ? defaultOption.trim() : '';
+  if (Buffer.byteLength(fallback) > OPTION_BYTES) return `--default-option holds at most ${OPTION_BYTES} bytes; shorten it`;
+  if (fallback && seen.size > 0 && !seen.has(fallback)) return '--default-option must repeat one --option verbatim';
+  const ids = Array.isArray(requirements) ? requirements : [];
+  if (ids.length > QUESTION_REQUIREMENTS) return `--requirement may repeat at most ${QUESTION_REQUIREMENTS} times`;
+  const bad = ids.find((id) => !REQUIREMENT_ID_RE.test(String(id)));
+  if (bad !== undefined) return `--requirement ${JSON.stringify(String(bad))} must look like AC-001, FR-001 or IF-001, one id per flag`;
+  return null;
+}
+
+const FOLLOWUP_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+const FOLLOWUP_TITLE_BYTES = 200;
+const FOLLOWUP_PATHS = 20;
+const PROSE_BYTES = 2048;
+const REPOSITORY_PATH_BYTES = 512;
+const REPOSITORY_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
+
+function cleanRepositoryPath(entry) {
+  if (typeof entry !== 'string' || entry === '' || entry === '.' || Buffer.byteLength(entry) > REPOSITORY_PATH_BYTES) return false;
+  if (entry.trim() !== entry || entry.startsWith('/') || entry.endsWith('/') || path.posix.normalize(entry) !== entry) return false;
+  if (entry.split('/').includes('..')) return false;
+  return REPOSITORY_PATH_RE.test(entry);
+}
+
+function followupInputFault({ title, rationale, severity, paths }) {
+  if (!FOLLOWUP_SEVERITIES.has(severity)) return '--severity must be one of low, medium, high, critical';
+  if (Buffer.byteLength(title.trim()) > FOLLOWUP_TITLE_BYTES) return `--title holds at most ${FOLLOWUP_TITLE_BYTES} bytes; shorten it`;
+  if (Buffer.byteLength(rationale.trim()) > PROSE_BYTES) return `--rationale holds at most ${PROSE_BYTES} bytes; shorten it`;
+  const list = Array.isArray(paths) ? paths : [];
+  if (list.length > FOLLOWUP_PATHS) return `--path may repeat at most ${FOLLOWUP_PATHS} times`;
+  const bad = list.find((entry) => !cleanRepositoryPath(entry));
+  if (bad !== undefined) return `--path ${JSON.stringify(String(bad))} must be a clean relative file path without wildcards, ./ or a trailing slash`;
+  return null;
+}
+
+function refusedProse(outcome, failure, again) {
+  const text = outcome && typeof outcome.message === 'string' ? outcome.message.replace(/\s+/g, ' ').trim() : '';
+  const tooLong = /^content_not_allowed: ([A-Za-z0-9_.]+): too_long\b/.exec(text);
+  let next = null;
+  if (tooLong) next = `shorten ${tooLong[1]} and ${again}`;
+  else if (failure.code === 'content_not_allowed') next = `rewrite it as plain prose and ${again}`;
+  return { said: text ? `: ${text}` : '', next };
+}
+
+const PLAN_SUMMARY_FALLBACK = 'Implementation plan for this work order.';
+
 function planSummary(text) {
-  const lines = String(text || '').split('\n')
-    .map((line) => line.replace(/[`*_#>|]/g, ' ').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter((line) => line && !/^[-=]{3,}$/.test(line) && !/^<!--/.test(line));
+  const lines = String(text || '').split(/\r\n|\r|\n|\u0085|\u2028|\u2029/)
+    .filter((line) => !/^\s*<!--/.test(line))
+    .map((line) => line.replace(/[`*_#>|<()[\]"]/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !/^[-=]{3,}$/.test(line));
   const summary = lines.slice(0, 6).join(' ').slice(0, 360).trim();
-  return summary ? `Implementation plan. ${summary}` : 'Implementation plan for this work order.';
+  return summary ? `Implementation plan. ${summary}` : PLAN_SUMMARY_FALLBACK;
 }
 
 function blobLink(repository, sha, file) {
-  const base = String(repository || '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const named = String(repository || '').trim().replace(/\.git$/, '').replace(/\/+$/, '');
+  const base = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(named) ? named : `https://${named}`;
   if (!/^https:\/\/[^/\s]+\/\S+$/.test(base)) return null;
   const host = base.slice('https://'.length).split('/')[0].toLowerCase();
   if (host === 'github.com') return `${base}/blob/${sha}/${file}`;
@@ -1980,6 +2176,9 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const reported = drain(context, { env, now });
   if (reported.verdict === 'ended') return { exit: EXIT.ENDED, message: 'Zensu ended the session of this work order', cancelRun: runToCancel(context) };
   if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };
+  if (reported.verdict === VERDICTS.FINAL) {
+    return { exit: EXIT.REFUSED, message: `Zensu refused the ${reported.refused || 'planning'} stage (${describeFailure(reported.failure)}); finish with --reason` };
+  }
   if (reported.verdict !== VERDICTS.OK && reported.verdict !== 'plan-approval-required') {
     return { exit: EXIT.TRANSIENT, message: `the planning stage is not reported yet (${describeFailure(reported.failure)}); run --plan-approval again` };
   }
@@ -1997,13 +2196,16 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const pushed = push(context, { env, now });
   if (pushed.exit !== EXIT.OK) return pushed;
   const sha = pushed.value.head;
-  const args = ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', planSummary(planText),
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha)];
   const snapshot = safeRead(context.files.order).value;
   const order = snapshot && isObject(snapshot.order) ? snapshot.order : {};
   const link = blobLink(order.repository || context.marker.repository, sha, file);
-  if (link) args.push('--url', link);
-  const artifact = sendEvent(context, args, { env, now });
+  const sendArtifact = (summary) => sendEvent(context, ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', summary,
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha), ...(link ? ['--url', link] : [])], { env, now });
+  const summary = planSummary(planText);
+  let artifact = sendArtifact(summary);
+  if (artifact.verdict === VERDICTS.FINAL && artifact.failure && artifact.failure.code === 'content_not_allowed' && summary !== PLAN_SUMMARY_FALLBACK) {
+    artifact = sendArtifact(PLAN_SUMMARY_FALLBACK);
+  }
   if (artifact.verdict !== VERDICTS.OK) {
     if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
     if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)}); finish with --reason` };
@@ -2021,7 +2223,10 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
     };
   }
   if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the approval request was not sent', cancelRun: runToCancel(context) };
-  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the approval request (${describeFailure(blocked.failure)}); finish with --reason`, cancelRun: runToCancel(context) };
+  if (blocked.verdict === VERDICTS.FINAL && blocked.failure && blocked.failure.code === 'plan_approval_not_required') {
+    return { exit: EXIT.REFUSED, message: 'Zensu approves the plans of this order automatically; run --bind-spec and continue with implementing' };
+  }
+  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the approval request (${describeFailure(blocked.failure)}); finish with --reason` };
   return { exit: EXIT.TRANSIENT, message: `the approval request is not delivered yet (${describeFailure(blocked.failure)}); run --plan-approval again` };
 }
 
@@ -2272,6 +2477,8 @@ module.exports = {
   ask,
   bindSpec,
   binding,
+  blobLink,
+  branchPrefixOf,
   drain,
   existingPullRequest,
   finish,

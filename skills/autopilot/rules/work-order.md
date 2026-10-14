@@ -16,7 +16,8 @@ Stay in the checkout the session started in: the worker prepared it. Do not crea
   it: `git fetch origin <branch>`, then `git checkout -B <branch> origin/<branch>`. `--start`
   already released the local Autopilot run an earlier attempt left in this checkout.
 - No `branch`: create `workBranch` from the order's integration branch, else its base branch:
-  `git fetch origin <base>`, then `git checkout -b <workBranch> origin/<base>`.
+  `git fetch origin <base>`, then `git checkout -b <workBranch> origin/<base>`. Use `workBranch`
+  verbatim: it carries the branch prefix Zensu requires, and any other branch name is refused.
 
 Resolve `$VCS` and detect the forge as Autopilot's Step 0 and 0.A.1 say. `cliReady=false` or an
 unknown provider cannot be fixed here: finish with `--reason`.
