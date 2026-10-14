@@ -131,6 +131,8 @@ and reading it as "not a repository" would open the gate on a real repository.
 suite drives through the unqualified verbs. The edit-landing audit draws the same split a third
 time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
+`workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
+places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
 
 **The gate sits at `--chain-done` only**: the ticket-bound standalone terminus and a
 bound chain with outcome `pass`. `--tdd-complete` is deliberately not gated, because

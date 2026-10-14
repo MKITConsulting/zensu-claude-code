@@ -27,7 +27,17 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   rename at `0600`, newest 64 per session, idle sessions swept after 14 days. It prints
   nothing and exits 0 on every fault, so it can never return a decision.
 - `check` — `zensu-log.sh --external-review --root <top> [--result <output-file>] [--launch <id>]`,
-  strict bind, change set on stdin. Freshness comes first: a launch must be newer than the change
+  strict bind, change set on stdin. The review root must be the root of the session's work
+  tree (`resolveRoot`): the canonical top level `git rev-parse --show-toplevel` prints for the
+  project root, asked through `workTreeTop` of `evidence-run-v1.js`, or the project root itself
+  when it lies outside git or no git binary exists. Any other root answers `unavailable
+  reason=root layout=<layout> — <what and next step>`, the layout one of `nested-work-tree`,
+  `nested-in-folder`, `outside`, `enclosing`, `subdirectory`, `unresolved-root`,
+  `unresolved-project-root` and `undetermined` (a git fault, with `detail=`; for the review root
+  it asks for a re-run with the session's root, which a fixed fault would not change), before
+  the store is read, so a refused root never imports. `zensu-log.sh` hands a root or project root that
+  `zensu-host-path.sh` refuses (missing, a symbolic link, a newline) to the module as empty, so
+  the layout text has one owner. Freshness comes first: a launch must be newer than the change
   time (`max(mtime, ctime)`) of every existing changed path and of the nearest existing parent of
   every missing one; `.zensu` paths are excluded and counted. Several fresh launches select the
   one whose `task_id` names the output file, else answer `unavailable reason=ambiguous-launch`
@@ -62,8 +72,9 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   and `degraded` leaves the panel path unchanged.
 - `tree` — `zensu-log.sh --external-review --tree --root <top>` prints `tree=<id>` from the same
   `computeTree` the import compares, or `tree=unavailable reason=<reason>`. With the import or
-  the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, so the skill
-  never launches a template whose result could not be imported.
+  the judge off it answers `reason=disabled` or `reason=review-judge-disabled`, and it applies
+  the import's root rule with the same `reason=root layout=<layout>` line, so the skill never
+  launches a template whose result could not be imported.
 - The template — `templates/workflows/zensu-review-v1.js`, which the main thread launches
   through the Workflow `scriptPath`. Its finders and refuters run as `zensu:review-aspect` (a
   refuter in the agent's verify mode, with a `VERIFY FINDING` block whose values are
@@ -133,6 +144,38 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `unverified`: the limits bound what is verified, never what is reported.
 - `task_id` and `transcript_dir` joined `RECORD_KEYS` before any release shipped the record
   format, so the strict key set changed with no reader in the field.
+- **The review root is the session's work tree by identity, not by containment.** `--root` is
+  the one model-typed input that decides what the import measures: freshness stats the change
+  set under it and the tree binding fingerprints it, and the import is the chain's only review
+  relaxation. So the root must be the tree every other Phase 6 surface measures, `$TOP`: the
+  step-2 change set, `finding-verify-v1.js --root "$TOP"` and the round scope. The first rule,
+  `isInside(root, projectRoot)`, approximated that lexically and admitted every directory above
+  the project root: `/`, a parent folder outside git, or an origin checkout whose ignored
+  `.claude/worktrees/` holds the session's worktree, whose tree never moves while freshness
+  stats the origin's copies of the changed paths. A subdirectory root that still contained the
+  project root fingerprinted only that subtree. Identity is the split `runDirectory` in
+  `evidence-run-v1.js` already draws: work-tree identity first, path identity only outside git.
+- **A nested or sibling root is refused, not imported.** A chain has one root. The change set,
+  the finding-verification gate and the round scope are `$TOP`-relative, and the reviewer
+  capability gate confines every reviewer, the template's agents included, to the session's
+  project root, so a template run over a sibling repository cannot read it. Importing such a
+  review would make the import the one place where a second root counts as the chain's own.
+  Stage 1 does not refuse this layout in the import's place: `zensu-log.sh append` writes the
+  project root as `<project>` and `normalize_claim` strips it, so a claim into a work tree
+  nested under the anchor never reaches the foreign-root arm
+  (`.claude/rules/multi-repo-stage1.md`). Measured 2026-10-14, such a claim graded
+  `EDIT LANDED (untracked-by-design)` when the anchor ignores the nested directory and
+  `EDIT NOT LANDED` when it does not. Accepting a second root needs all of these at
+  once: the root taken from the sealed `codeRoots[]` of `docs/multi-repo-chains-spec.md`
+  §6.1.1, never from a model-typed `--root` (the `--code-root` flag that section rejects); a
+  tree binding over the anchor and that root, the `project`/`work` tree `computeFingerprint`
+  already writes for a suite run in a nested work tree, with the template's `tree` argument
+  computed the same way; a root label on every changed path and every `changedFiles` entry,
+  because a root-relative path names a file in either root; the edit-landing audit grading each
+  claim against its declared root; and the reviewer lease widened to the
+  declared root (§7.2). Stages 2 and 3 are blocked on §6.1.1, so the import waits with them.
+  Until then the refusal names the layout and the next step: the aspect panel reviews this
+  change, and the other work tree's workflow review imports in a session started there.
 
 **Coupled sites.** The wait-file layout is spelled four times: `waitLocations`, `clearWait`
 and `sweepStaleWaits` in the module and `zensu_external_review_wait_file` in `zensu-tdd-phase.sh`, which
@@ -153,6 +196,11 @@ spelled in `runRecordPath` and `transcriptDirMatches`, the unit file's `workflow
 shell suite's `write_run_record`. `agents/review-judge.md` carries the `external_review` input and `## Gaps`
 (`P2m`), `agents/code-reviewer.md` names `EXT-<n>`. Operator rows: the hook, flag and Stop rows
 of `docs/configuration.md` and the Workflow paragraph of `docs/session-control.md`.
+The root rule asks git through `workTreeTop` beside `workTree`, `runDirectory` and
+`fingerprintRoot` in `evidence-run-v1.js`, which keeps the scrubbed `git()` and the
+no-work-tree split in one module. The layout sentences are spelled in `ROOT_ADVICE`, in the
+unit file's `*_ADVICE` constants and in `X11` to `X11e` of the shell suite, and
+`docs/review-chain.md` names the layouts for the operator.
 The result shape is spelled twice: the object the template returns and the `RESULT_*_KEYS`,
 `DROPPED_KINDS`, `VERIFICATION_STATUSES` and `VOTE_OUTCOMES` the module validates. The unit file
 runs the template in a sandbox and validates its output with the module, so a one-sided edit
@@ -193,10 +241,24 @@ counter sweep and the restored-mtime freshness check compare kernel-set times wi
   `--tdd-begin` arms a new chain and after 24 hours; a chain armed some other way, such as a
   deferred-review adoption, inherits the count, but such a chain never waits.
 - The recorder reads a `scriptPath` the main thread named (`O_NOFOLLOW`, at most 512 KiB).
+- **A multi-root layout cannot import.** A session whose work lives in a work tree nested
+  inside its own (a worktree of another repository, a submodule, an embedded clone) answers
+  `layout=nested-work-tree`, and one started in a folder outside git that holds several
+  repositories answers `layout=nested-in-folder` for each of them. Their first review costs the
+  aspect panel even when a template workflow already reviewed that work tree. Measured
+  2026-10-13 on 0.26.0, where both answered a bare `reason=root` and the tree id was computed
+  by hand. The durable answer is stage 2; until it ships, the session belongs in the work tree
+  it changes.
+- The layout comes from git's own answer: a nested worktree whose administrative directory was
+  removed reads as no work tree, so a root inside it is `subdirectory`, whose next step, the
+  session's top level, is still the root the import accepts.
 - Windows is unmeasured: the suite is in `ciStructureTests` and in no blocking Windows shard.
 
 **Version: `patch`.** No context-record or workflow-state field, no hook removed or
 re-matched, and the added hook returns no decision and no output. `RECORD_KEYS` and the
 `RESULT_*_KEYS` are strict key sets, but both ship for the first time here, so no released
 reader or writer predates them; a later change to either is a `minor`. The new config key is
-read permissively.
+read permissively. The root rule is `patch` as well: it refuses roots the containment test
+accepted, an enclosing directory or a subdirectory of the work tree but never the top level the
+skill passes, it adds no hook, key set, schema field or config key, and a refusal stays
+`unavailable`, which every caller already reads as "run the panel".

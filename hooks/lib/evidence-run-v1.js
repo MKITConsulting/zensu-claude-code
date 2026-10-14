@@ -310,12 +310,26 @@ function git(root, args, options = {}) {
     input: options.input,
     stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
-  if (result.error) return { ok: false, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
+  if (result.error) return { ok: false, code: result.error.code || null, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
   if (result.status !== 0) {
     const stderr = String(result.stderr || '').trim().split('\n')[0] || `exit ${result.status}`;
     return { ok: false, reason: `git ${args[0]} failed: ${stderr.slice(0, 160)}` };
   }
   return { ok: true, stdout: result.stdout };
+}
+
+function workTreeTop(directory, limits = LIMITS) {
+  const result = git(directory, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+  if (!result.ok) {
+    return result.code === 'ENOENT' || NO_WORK_TREE_RE.test(result.reason) ? { top: null, reason: null } : { top: null, reason: result.reason };
+  }
+  const printed = result.stdout.trim();
+  if (printed === '') return { top: null, reason: 'git rev-parse printed no top level' };
+  try {
+    return { top: fs.realpathSync.native(printed), reason: null };
+  } catch (error) {
+    return { top: null, reason: `the top level git printed does not resolve (${error.code || error.message})` };
+  }
 }
 
 function workTree(projectRoot, limits = LIMITS) {
@@ -1348,6 +1362,7 @@ module.exports = {
   listRecords,
   gitEnvironment,
   workTree,
+  workTreeTop,
   runDirectory,
   computeTree,
   commandDirectory,

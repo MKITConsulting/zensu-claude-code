@@ -99,6 +99,18 @@ const LIMITS = Object.freeze({
   maxReasonChars: 300,
   maxPrintedText: 2000,
 });
+const ROOT_ADVICE = Object.freeze({
+  'nested-work-tree': () => "the review root is a separate git work tree nested inside this session's work tree, and a chain reviews one work tree; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it",
+  'nested-in-folder': () => "the review root is a git work tree inside this session's project folder, which is not a git work tree itself, and a chain reviews one root; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it",
+  outside: () => "the review root lies outside this session's work tree, where no reviewer of this session can read; this review runs the aspect panel, and a workflow review of that directory imports only in a session started in it",
+  enclosing: (verdict) => `the review root encloses this session's work tree, so its tree and change times would not be this session's; re-run with --root set to ${verdict.rerun}`,
+  subdirectory: (verdict) => `the review root lies below the root of this session's work tree, so its tree would cover only part of it; re-run with --root set to ${verdict.rerun}`,
+  'unresolved-root': (verdict) => `the review root is not an absolute, symlink-free path to an existing directory; re-run with --root set to ${verdict.rerun}`,
+  'unresolved-project-root': () => "this session's project root is not an absolute, symlink-free path to an existing directory; run /zensu:doctor",
+  undetermined: (verdict) => (verdict.rerun
+    ? `the work tree of the review root could not be determined, and a root other than this session's own is refused whatever its layout; re-run with --root set to ${verdict.rerun}`
+    : "the work tree of this session's project root could not be determined; fix the cause the detail names and re-run"),
+});
 
 class ExternalReviewError extends Error {
   constructor(message) {
@@ -532,7 +544,7 @@ function recordLaunch(payload, env = process.env, options = {}) {
 
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
 }
 
 function canonicalDirectoryOrNull(value) {
@@ -545,6 +557,40 @@ function canonicalDirectoryOrNull(value) {
   } catch {
     return null;
   }
+}
+
+function workTreeTopOf(directory) {
+  let evidence;
+  try {
+    evidence = require('./evidence-run-v1.js');
+  } catch {
+    return { top: null, reason: 'tree-module' };
+  }
+  return evidence.workTreeTop(directory);
+}
+
+function resolveRoot(options) {
+  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
+  if (!projectRoot) return { layout: 'unresolved-project-root' };
+  const topOf = options.topOf || workTreeTopOf;
+  const own = topOf(projectRoot);
+  if (own.reason) return { layout: 'undetermined', detail: own.reason };
+  const anchor = own.top || projectRoot;
+  const rerun = own.top ? 'the top level that git -C <project root> rev-parse --show-toplevel prints' : "this session's project root";
+  const root = canonicalDirectoryOrNull(options.root);
+  if (!root) return { layout: 'unresolved-root', rerun };
+  if (root === anchor) return { root };
+  if (isInside(root, anchor)) return { layout: 'enclosing', rerun };
+  if (!isInside(anchor, root)) return { layout: 'outside' };
+  const other = topOf(root);
+  if (other.reason) return { layout: 'undetermined', detail: other.reason, rerun };
+  if (other.top && other.top !== anchor) return { layout: own.top ? 'nested-work-tree' : 'nested-in-folder' };
+  return { layout: 'subdirectory', rerun };
+}
+
+function rootRefusal(verdict) {
+  const detail = verdict.detail ? ` detail=${token(verdict.detail)}` : '';
+  return `reason=root layout=${verdict.layout}${detail} — ${ROOT_ADVICE[verdict.layout](verdict)}`;
 }
 
 function existingRecordsDirectory(pluginData, sessionKey) {
@@ -967,9 +1013,9 @@ function check(options, limits = LIMITS) {
   if (options.changedText === null) return unavailable('change-set-too-large');
   if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return unavailable('session');
   if (typeof options.pluginData !== 'string' || options.pluginData === '') return unavailable('plugin-data');
-  const root = canonicalDirectoryOrNull(options.root);
-  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
-  if (!root || !projectRoot || !isInside(root, projectRoot)) return unavailable('root');
+  const placed = resolveRoot(options);
+  if (placed.layout) return { status: 'unavailable', lines: [`${LOG_PREFIX} status=unavailable ${rootRefusal(placed)}`] };
+  const root = placed.root;
   const parsed = parseChangedPaths(options.changedText, limits);
   if (parsed.error) return unavailable(parsed.error);
   if (parsed.paths.length === 0) return unavailable('empty-change-set');
@@ -1154,19 +1200,20 @@ function main(argv, env = process.env, io = {}) {
   if (mode === 'tree') {
     let line;
     try {
-      const root = canonicalDirectoryOrNull(env.ZENSU_XR_ROOT);
-      const projectRoot = canonicalDirectoryOrNull(env.ZENSU_XR_PROJECT_ROOT);
       if (env.ZENSU_XR_ENABLED === '0') {
         line = `${LOG_PREFIX} tree=unavailable reason=disabled`;
       } else if (env.ZENSU_XR_JUDGE === '0') {
         line = `${LOG_PREFIX} tree=unavailable reason=review-judge-disabled`;
-      } else if (!root || !projectRoot || !isInside(root, projectRoot)) {
-        line = `${LOG_PREFIX} tree=unavailable reason=root`;
       } else {
-        const current = currentTree(root);
-        line = current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)
-          ? `${LOG_PREFIX} tree=${current.tree}`
-          : `${LOG_PREFIX} tree=unavailable reason=${token(current && current.reason)}`;
+        const placed = resolveRoot({ root: env.ZENSU_XR_ROOT, projectRoot: env.ZENSU_XR_PROJECT_ROOT });
+        if (placed.layout) {
+          line = `${LOG_PREFIX} tree=unavailable ${rootRefusal(placed)}`;
+        } else {
+          const current = currentTree(placed.root);
+          line = current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)
+            ? `${LOG_PREFIX} tree=${current.tree}`
+            : `${LOG_PREFIX} tree=unavailable reason=${token(current && current.reason)}`;
+        }
       }
     } catch {
       line = `${LOG_PREFIX} tree=unavailable reason=fault`;
@@ -1220,6 +1267,7 @@ module.exports = {
   buildRecord,
   recordLaunch,
   parseChangedPaths,
+  resolveRoot,
   newestChangeTime,
   validateReviewResult,
   templateDigest,
