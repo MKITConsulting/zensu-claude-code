@@ -39,7 +39,7 @@ rule, all five consent disclosures, the declined-call line and the Auto Mode def
 reminder, what a typed preference does and that it records nothing, the own-text-only scoping of
 the decided line, the router's routing and its Plan-mode permission. Restating them is most of
 what a later prompt costs. Do not trim a short line without checking that the obligation it drops
-is not needed on that turn; the needles in `R13f`, `R13g`, `C22`, `Z101` and `Z103` name them.
+is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z103` name them.
 
 ## Which contract takes which path
 
