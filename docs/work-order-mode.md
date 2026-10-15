@@ -4,8 +4,9 @@ A Zensu worker runs a claimed work order in a headless Claude Code session: it s
 `claude -p "/zensu:work <order-id>"` with the session token in `ZENSU_SESSION_TOKEN` and the Zensu
 host that issued it in `ZENSU_API_URL`. The `zensu` CLI never sends a session token to its built-in
 default host, so a session without `ZENSU_API_URL`, and without a CLI config that stores the host,
-stops at `--start` with exit 3. The plugin is
-the reference harness for that session. It reads the order, builds it with Autopilot, reports every
+stops at `--start` with exit 3. A CLI config the session can read must hold only the host, never a
+login, because without the session token the CLI falls back to the stored login; `zensu auth logout`
+keeps the host and removes the login. The plugin is the reference harness for that session. It reads the order, builds it with Autopilot, reports every
 stage to Zensu and ends the session with `ready_for_merge` or a block. Nobody answers a question in
 such a session, so every step that would wait for a person either goes to Zensu or ends the order.
 
@@ -70,16 +71,18 @@ the session continues with. A blocking question (`spec_change` when its category
 question past the order's limit (`escalated`) blocks the order and ends the session; a person's
 answer requeues a question or `spec_change` block, while an escalated order waits until a person
 requeues it. A non-blocking question, `scope` included, only records the assumption. `--followup`
-records an idea outside the order's scope as a follow-up. Answers that arrive while the session
-runs, and the decisions a person made for the whole plan, reach the model as context after its next
-tool call.
+records an idea outside the order's scope as a follow-up. Answers to this order's questions that
+arrive while the session runs reach the model as context after its next tool call. So do the
+decisions a person made for the whole plan, as recorded at `--start` and `--bind-spec`; a plan-wide
+decision made later reaches the next session of the order, not the running one.
 
 ## The tool hooks
 
 `hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools and the
 task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
-the `zensu work` and `zensu plan` verbs a worker session must not call, and every command that
-prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`. Each denial says why and, where a helper
+the `zensu work` and `zensu plan` verbs a worker session must not call, every command that
+prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`, and every command that sets, changes or
+removes `ZENSU_API_URL` or passes `--api-url` to `zensu`. Each denial says why and, where a helper
 verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.

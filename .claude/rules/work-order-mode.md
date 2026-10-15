@@ -28,12 +28,26 @@ the session's marker in `.zensu/state/work-order/` binds its Session Control key
 ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
-`--drain` derives the stages from the run record and the outbox file keeps only the highest rank
-Zensu accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`.
+`--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
+accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception
+is `inflight`: the last block, `ready_for_merge` or question send that got no answer. A renewal that
+finds the lease gone replays it before it writes `lost-`, because after Zensu ended a session a
+replay under a stored `client_event_id` is the only call it still answers. The safe-sentence resend
+of a block therefore keeps the first send's `client_event_id`; a refused `422` stores nothing.
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
 and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is
-transient. The error table lives in `skills/work/references/protocol.md`.
+transient, except at `--start`, where a CLI line matching `SESSION_TOKEN_HOST_RE` or
+`SESSION_TOKEN_SHAPE_RE` exits 3. The error table lives in `skills/work/references/protocol.md`.
+
+**Sites that move with the CLI and the service.** `SESSION_TOKEN_HOST_RE` and
+`SESSION_TOKEN_SHAPE_RE` match the two messages of `sessionTokenTarget` in zensu-cli, and the fake's
+`requireSessionToken` copies both word for word; a CLI rewording sends `--start` back to exit 7
+while every suite stays green. The fake's `proseViolation` ports the service's content guard, and
+its `SECRET_RES` the redaction patterns behind the service's `invalid_url` link check.
+`DEFAULT_BRANCH_PREFIX` in the runtime and `BRANCH_PREFIX` in the fake mirror the service's
+work-order branch prefix, `wo-`. A change on the service side means changing the fake with it, or
+the suites keep passing against behavior Zensu no longer has.
 
 **A work-order run keys its team review by the order, not by the run**:
 `team-review:v1:<sha256(canonical({headSha,orderId}))>`. A key derived from the run, as decision

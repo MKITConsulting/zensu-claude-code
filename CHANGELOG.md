@@ -39,9 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
   to the Zensu host that issued the session token, unless the CLI config the session reads stores
   that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
-  now stops with exit 3 instead of retrying. The work-order gate also denies `zensu work list`,
-  `questions`, `policy get` and `repositories list`, which Zensu refuses for a session token, and
-  points at the order file instead.
+  now stops with exit 3 instead of retrying. That CLI config must hold the host only, never a
+  login, because without the session token the CLI falls back to a stored login. The work-order
+  gate also denies `zensu work list`, `questions`, `policy get` and `repositories list`, which
+  Zensu refuses for a session token, and points at the order file instead. It now denies setting,
+  changing or removing `ZENSU_API_URL`, passing `--api-url` to `zensu`, and `env -i`.
 
 ## [0.26.0] - 2026-10-12
 

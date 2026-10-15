@@ -477,8 +477,7 @@ function recordAnswers(context, answers) {
 
 function planDecisions(order) {
   const log = isObject(order) && Array.isArray(order.decision_log) ? order.decision_log : [];
-  return log.filter((entry) => isObject(entry) && (entry.status === 'answered' || entry.status === 'auto_answered'))
-    .map((entry) => ({ ...entry, planWide: true }));
+  return log.filter((entry) => isObject(entry) && entry.status === 'answered').map((entry) => ({ ...entry, planWide: true }));
 }
 
 function takePendingAnswers(context) {
@@ -528,6 +527,7 @@ function renew(context, { env = process.env, now = Date.now(), force = false, th
   }
   const failure = classifyFailure(outcome);
   if ([VERDICTS.LOST, VERDICTS.AMBIGUOUS, VERDICTS.FINAL].includes(failure.verdict)) {
+    if (replayTerminal(context, { env, at: now })) return { verdict: 'ended', failure: null };
     markLost(context, { code: failure.code || `status_${failure.status}`, via: 'heartbeat', at: now });
     return { verdict: VERDICTS.LOST, failure };
   }
@@ -604,17 +604,23 @@ function sendEvent(context, args, { env = process.env, now = Date.now, target = 
 const SAFE_BLOCK_REASON = 'The session ended before its Autopilot run reached a ready pull request.';
 const PROSE_REFUSAL_CODES = new Set(['content_not_allowed', 'missing_field']);
 
-function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'worker_error', reason, eventKey }) {
+function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'worker_error', reason, eventKey, fallback = SAFE_BLOCK_REASON }) {
   let prose = String(reason || 'The session stopped without a stated reason.').replace(/\s+/g, ' ').trim().slice(0, 480);
-  const key = eventKey || kind;
-  const send = (text, suffix) => sendEvent(context, [
-    '--blocked', kind, '--reason', text, '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'blocked', `${key}${suffix}`),
-  ], { env, now, terminal: true });
-  let sent = send(prose, '');
+  const id = clientEventId(context.marker.orderId, context.marker.attempt, 'blocked', eventKey || kind);
+  const ended = { outcome: kind === 'plan_approval' ? 'success' : 'failure', kind: `blocked:${kind}` };
+  const send = (text) => {
+    const args = ['--blocked', kind, '--reason', text, '--client-event-id', id];
+    const answer = sendEvent(context, args, { env, now, terminal: true });
+    rememberTerminal(context, answer, { verb: 'event', args, ended });
+    return answer;
+  };
+  let sent = send(prose);
+  let replaced = null;
   if (sent.verdict === VERDICTS.FINAL && kind === 'worker_error' && sent.failure && PROSE_REFUSAL_CODES.has(sent.failure.code)
-      && prose !== SAFE_BLOCK_REASON) {
-    prose = SAFE_BLOCK_REASON;
-    sent = send(prose, ':safe');
+      && prose !== fallback) {
+    replaced = prose;
+    prose = fallback;
+    sent = send(prose);
   }
   const delivered = sent.verdict === VERDICTS.OK;
   if (delivered || sent.verdict === VERDICTS.LOST) {
@@ -626,7 +632,27 @@ function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'wo
       at: now(),
     });
   }
-  return { ...sent, delivered, reason: prose };
+  return { ...sent, delivered, reason: prose, replaced };
+}
+
+function rememberTerminal(context, sent, record) {
+  if (sent.verdict === VERDICTS.TRANSIENT || sent.verdict === VERDICTS.RETRY) writeOutbox(context, { inflight: record });
+  else if (readOutbox(context).inflight) writeOutbox(context, { inflight: null });
+}
+
+function replayTerminal(context, { env, at }) {
+  const inflight = readOutbox(context).inflight;
+  if (!isObject(inflight) || !Array.isArray(inflight.args)) return false;
+  const argv = inflight.verb === 'ask'
+    ? inflight.args.map(String)
+    : ['work', 'event', context.marker.orderId, ...inflight.args.map(String), '--client-name', CLIENT_NAME, '--client-version', pluginVersion(), '--json'];
+  const outcome = runZensu(argv, { env });
+  if (outcome.exitCode !== 0 || !isObject(outcome.json)) return false;
+  writeOutbox(context, { inflight: null });
+  if (inflight.verb === 'ask') return noteAskOutcome(context, outcome.json, () => at);
+  if (!isObject(inflight.ended)) return false;
+  markEnded(context, { outcome: String(inflight.ended.outcome), kind: String(inflight.ended.kind), delivered: true, reason: null, at });
+  return true;
 }
 
 function branchPrefixOf(order) {
@@ -662,7 +688,8 @@ function orderSummary(order, context) {
   };
 }
 
-const SESSION_TOKEN_SETUP_RE = /ZENSU_SESSION_TOKEN (?:needs the host|must hold)/;
+const SESSION_TOKEN_HOST_RE = /ZENSU_SESSION_TOKEN needs the host/;
+const SESSION_TOKEN_SHAPE_RE = /ZENSU_SESSION_TOKEN must hold/;
 
 function probe({ env = process.env } = {}) {
   const outcome = runZensu(['work', '--help'], { env, timeoutMs: 15000 });
@@ -686,11 +713,15 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
   const got = runZensu(['work', 'get', orderId, '--json'], { env });
   if (got.exitCode !== 0 || !isObject(got.json)) {
     const failure = classifyFailure(got);
-    if (failure.status === null && got.exitCode !== null && got.exitCode !== 0 && SESSION_TOKEN_SETUP_RE.test(got.message || '')) {
+    const said = String(got.message || '').replace(/\s+/g, ' ').trim();
+    if (failure.status === null && got.exitCode !== null && got.exitCode !== 0 && SESSION_TOKEN_HOST_RE.test(said)) {
       return {
         exit: EXIT.NO_CLI,
-        message: `the zensu CLI cannot use the session token: ${got.message.replace(/\s+/g, ' ').trim()}; the worker must start the session with ZENSU_API_URL set to the Zensu host that issued the token`,
+        message: `the zensu CLI cannot use the session token: ${said}; the worker must start the session with ZENSU_API_URL set to the Zensu host that issued the token`,
       };
+    }
+    if (failure.status === null && got.exitCode !== null && got.exitCode !== 0 && SESSION_TOKEN_SHAPE_RE.test(said)) {
+      return { exit: EXIT.NO_CLI, message: `the zensu CLI cannot use the session token: ${said}; the worker must pass the zst_ session token of its claim` };
     }
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY || failure.verdict === VERDICTS.OK) {
       return { exit: EXIT.TRANSIENT, message: `Zensu did not answer the order read (${describeFailure(failure)}); try again` };
@@ -973,11 +1004,11 @@ function listOrderEvents(context, env) {
   const all = [];
   for (let page = 1; page <= 50; page += 1) {
     const listed = runZensu(['work', 'events', context.marker.orderId, '--page', String(page), '--per-page', '100', '--json'], { env });
-    if (listed.exitCode !== 0 || !isObject(listed.json) || !Array.isArray(listed.json.data)) return null;
+    if (listed.exitCode !== 0 || !isObject(listed.json) || !Array.isArray(listed.json.data)) return { events: null, failure: classifyFailure(listed) };
     all.push(...listed.json.data);
-    if (listed.json.data.length < 100 || all.length >= Number(listed.json.total || 0)) return all;
+    if (listed.json.data.length < 100 || all.length >= Number(listed.json.total || 0)) return { events: all, failure: null };
   }
-  return all;
+  return { events: all, failure: null };
 }
 
 function detailOf(event) {
@@ -1033,6 +1064,8 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   const prior = run.events.find((event) => event.eventType === 'ORDER_SPEC_BOUND');
   if (prior) return { exit: EXIT.OK, value: prior.payload, already: true };
   if (run.stage !== 'PLANNING') return { exit: EXIT.REFUSED, message: `Autopilot run ${bound.runId} is at ${run.stage}, not PLANNING` };
+  const branch = currentBranch(context.projectRoot);
+  if (branch && !branch.startsWith(orderBranchPrefix(context))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const reported = drain(context, { env, now });
   if (reported.verdict === 'ended') return { exit: EXIT.ENDED, message: `Zensu ended the session of work order ${context.marker.orderId}` };
   if (reported.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; stop without any forge write' };
@@ -1064,9 +1097,9 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     if (order.implementation_plan_approved !== true) {
       return { exit: EXIT.REFUSED, message: 'plan-approval-required', planApproval: true };
     }
-    const events = listOrderEvents(context, env);
-    if (!events) return { exit: EXIT.TRANSIENT, message: 'the order timeline could not be read' };
-    const plan = approvedPlanCommit(events, order.spec_hash);
+    const listed = listOrderEvents(context, env);
+    if (!listed.events) return { exit: EXIT.TRANSIENT, message: `the order timeline could not be read (${describeFailure(listed.failure)})` };
+    const plan = approvedPlanCommit(listed.events, order.spec_hash);
     const planPath = plan && typeof plan.path === 'string' && PLAN_PATH_RE.test(plan.path) ? plan.path : planFileFor(context.marker.orderId);
     const planSha = plan && /^[0-9a-fA-F]{7,64}$/.test(String(plan.sha)) ? String(plan.sha).toLowerCase() : null;
     let approved = { ok: false, stdout: '' };
@@ -1099,7 +1132,6 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     return { exit: EXIT.OK, value: bindingValue };
   };
   if ((STAGE_RANK[order.status] || 0) > STAGE_RANK.implementing) return pastImplementing();
-  const branch = currentBranch(context.projectRoot);
   if (branch && !branch.startsWith(branchPrefixOf(order))) return { exit: EXIT.REFUSED, message: foreignBranchMessage(context, branch) };
   const args = ['--stage', 'implementing', '--client-event-id', clientEventId(bound.runId, 'order-spec-bound'),
     '--autopilot-stage', 'AWAIT_TDD', '--autopilot-run-id', bound.runId];
@@ -1185,7 +1217,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     if (drained.verdict === VERDICTS.FINAL) {
       refused = { status: drained.refused || null, failure: drained.failure };
     } else if (drained.verdict !== VERDICTS.OK) {
-      return { exit: EXIT.TRANSIENT, message: `the stages before ready_for_merge are not delivered yet (${drained.verdict}); run --finish again` };
+      return { exit: EXIT.TRANSIENT, message: `the stages before ready_for_merge are not delivered yet (${describeFailure(drained.failure)}); run --finish again` };
     } else {
       const deliveryEvent = run.events.find((event) => event.eventType === 'DELIVERY_COMPLETE');
       const evidence = isObject(run.evidence) ? run.evidence : {};
@@ -1198,6 +1230,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
       const branch = reportableBranch(context);
       if (branch) args.push('--branch', branch);
       const sent = sendEvent(context, args, { env, now, target: 'ready_for_merge', terminal: true });
+      rememberTerminal(context, sent, { verb: 'event', args, ended: { outcome: 'success', kind: 'ready_for_merge' } });
       if (sent.verdict === VERDICTS.OK) {
         markEnded(context, { outcome: 'success', kind: 'ready_for_merge', delivered: true, reason: null, at: now() });
         return { exit: EXIT.OK, message: `ready_for_merge is reported for work order ${context.marker.orderId}; the session is complete`, delivered: true };
@@ -1214,11 +1247,16 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
   }
   const prose = refused ? refusedStageReason(refused, reason) : blockReasonFor(run, reason);
   const blocked = deliverBlocked(context, {
-    env, now, reason: prose, eventKey: refused ? `refused:${refused.status || 'stage'}` : (run ? `run:${run.runId}` : 'no-run'),
+    env,
+    now,
+    reason: prose,
+    eventKey: refused ? `refused:${refused.status || 'stage'}` : (run ? `run:${run.runId}` : 'no-run'),
+    fallback: refused ? refusedStageReason(refused, null) : blockReasonFor(run, null),
   });
   if (blocked.delivered) {
     const cause = refused ? ` because Zensu refused the ${refused.status || 'earlier'} stage (${describeFailure(refused.failure)})` : '';
-    return { exit: EXIT.ENDED, message: `work order ${context.marker.orderId} is blocked with worker_error${cause}; the session has ended`, delivered: true, cancelRun: runToCancel(context) };
+    const swap = blocked.replaced ? `; Zensu refused the stated reason as prose, so the block carries "${blocked.reason}" instead` : '';
+    return { exit: EXIT.ENDED, message: `work order ${context.marker.orderId} is blocked with worker_error${cause}${swap}; the session has ended`, delivered: true, cancelRun: runToCancel(context) };
   }
   if (blocked.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the block could not be reported', cancelRun: runToCancel(context) };
   if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the block (${describeFailure(blocked.failure)}); end the session`, cancelRun: runToCancel(context) };
@@ -1316,7 +1354,7 @@ function openPr(context, { env = process.env, now = Date.now, title, bodyFile, p
   if (!forge.allowed) return { exit: EXIT.LOST, message: `${forge.reason}; no pull request` };
   const beat = renew(context, { env, now: now(), force: true });
   if (beat.verdict !== VERDICTS.OK) {
-    return { exit: beat.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.TRANSIENT, message: 'the lease renewal before opening the pull request did not succeed' };
+    return { exit: beat.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.TRANSIENT, message: `the lease renewal before opening the pull request did not succeed (${describeFailure(beat.failure)})` };
   }
   const branch = currentBranch(context.projectRoot);
   const head = currentHead(context.projectRoot);
@@ -1464,6 +1502,7 @@ function releasePlan(projectRoot, orderId, belowAttempt) {
 }
 
 const TOKEN_VARIABLE = 'ZENSU_SESSION_TOKEN';
+const HOST_VARIABLE = 'ZENSU_API_URL';
 const ASK_TOOLS = new Set(['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
 const CHIP_TOOLS = new Set(['mcp__ccd_session__spawn_task']);
 const SHELL_KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', 'for', 'select', 'case', 'esac', 'function', 'coproc']);
@@ -1519,6 +1558,48 @@ function matchingParen(text, open) {
   return text.length;
 }
 
+const ANSI_ESCAPES = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11 };
+
+function ansiCString(text, start) {
+  let value = '';
+  let cursor = start;
+  while (cursor < text.length && text[cursor] !== "'") {
+    if (text[cursor] !== '\\' || cursor + 1 >= text.length) {
+      value += text[cursor];
+      cursor += 1;
+      continue;
+    }
+    const code = text[cursor + 1];
+    const rest = text.slice(cursor + 2);
+    let match = null;
+    if (Object.prototype.hasOwnProperty.call(ANSI_ESCAPES, code)) {
+      value += String.fromCharCode(ANSI_ESCAPES[code]);
+      cursor += 2;
+    } else if (/[0-7]/.test(code)) {
+      match = /^[0-7]{1,3}/.exec(text.slice(cursor + 1));
+      value += String.fromCharCode(parseInt(match[0], 8) & 255);
+      cursor += 1 + match[0].length;
+    } else if (code === 'x' && (match = /^[0-9A-Fa-f]{1,2}/.exec(rest))) {
+      value += String.fromCharCode(parseInt(match[0], 16));
+      cursor += 2 + match[0].length;
+    } else if ((code === 'u' || code === 'U') && (match = (code === 'u' ? /^[0-9A-Fa-f]{1,4}/ : /^[0-9A-Fa-f]{1,8}/).exec(rest))) {
+      const point = parseInt(match[0], 16);
+      value += point <= 1114111 ? String.fromCodePoint(point) : '';
+      cursor += 2 + match[0].length;
+    } else if (code === 'c' && rest.length > 0) {
+      value += String.fromCharCode(rest.charCodeAt(0) & 31);
+      cursor += 3;
+    } else if (code === '\\' || code === "'" || code === '"' || code === '?') {
+      value += code;
+      cursor += 2;
+    } else {
+      value += `\\${code}`;
+      cursor += 2;
+    }
+  }
+  return { value, end: cursor };
+}
+
 function shellCommands(text, depth = 0) {
   const commands = [];
   if (depth > MAX_SHELL_DEPTH) return commands;
@@ -1547,6 +1628,13 @@ function shellCommands(text, depth = 0) {
       index += 1;
       continue;
     }
+    if (char === '$' && next === "'") {
+      const decoded = ansiCString(text, index + 2);
+      add(decoded.value);
+      index = decoded.end;
+      continue;
+    }
+    if (char === '$' && next === '"') continue;
     if (char === "'") {
       const end = text.indexOf("'", index + 1);
       const stop = end < 0 ? text.length : end;
@@ -1659,6 +1747,11 @@ function leadingCommand(words) {
           index += 1;
           continue;
         }
+        if (option === '-' || option === '--ignore-environment' || /^-[^-u]*i/.test(option)) {
+          unset.push(TOKEN_VARIABLE, HOST_VARIABLE);
+          index += 1;
+          continue;
+        }
         if (option.startsWith('-')) {
           index += 1;
           continue;
@@ -1741,6 +1834,10 @@ function analyzeBash(command, depth = 0) {
       result.deny = bashFinding('token', 'it overrides or removes the session token variable');
       return result;
     }
+    if (lead.assignments.includes(HOST_VARIABLE) || lead.unset.includes(HOST_VARIABLE)) {
+      result.deny = bashFinding('token-host', `it sets or removes ${HOST_VARIABLE}`);
+      return result;
+    }
     if (lead.bareEnv) {
       result.deny = bashFinding('token', 'it prints the whole environment');
       return result;
@@ -1749,6 +1846,10 @@ function analyzeBash(command, depth = 0) {
     if (!name) continue;
     if (SHELL_INTERPRETERS.has(name) || name === 'eval') {
       const at = name === 'eval' ? -1 : args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
+      if (at >= 0 && String(args[at + 1] || '').startsWith('-')) {
+        result.deny = bashFinding('shell-option', `${name} ${args[at]} ${args[at + 1]}`);
+        return result;
+      }
       const inner = name === 'eval' ? args.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
       if (inner) {
         const innerResult = analyzeBash(inner, depth + 1);
@@ -1781,10 +1882,18 @@ function analyzeBash(command, depth = 0) {
         result.deny = bashFinding('token', 'it overrides or prints the session token variable');
         return result;
       }
+      if (names.includes(HOST_VARIABLE)) {
+        result.deny = bashFinding('token-host', `it sets ${HOST_VARIABLE}`);
+        return result;
+      }
       continue;
     }
     if (name === 'unset' && args.includes(TOKEN_VARIABLE)) {
       result.deny = bashFinding('token', 'it removes the session token variable');
+      return result;
+    }
+    if (name === 'unset' && args.includes(HOST_VARIABLE)) {
+      result.deny = bashFinding('token-host', `it removes ${HOST_VARIABLE}`);
       return result;
     }
     if (name === 'git') {
@@ -1813,7 +1922,11 @@ function analyzeBash(command, depth = 0) {
       continue;
     }
     if (name === 'zensu') {
-      const [noun, verb, third] = plainWords(args);
+      if (args.some((arg) => arg === '--api-url' || arg.startsWith('--api-url='))) {
+        result.deny = bashFinding('token-host', 'it passes --api-url to zensu');
+        return result;
+      }
+      const [noun, verb, third] = plainWords(args, new Set(['--api-url']));
       if (noun === 'auth') {
         result.deny = bashFinding('auth', null);
         return result;
@@ -1865,6 +1978,10 @@ function gateReason(orderId, finding) {
       return `${lead} Zensu refuses ${finding.detail} for a session token. Read the order file that orderFile in the --start summary names instead: .order.questions holds the earlier questions with their answers and .order.policy the policy. Answers to non-blocking questions reach you through the work-order hooks.`;
     case 'token':
       return `${lead} The command is refused because ${finding.detail}. Never print, read, unset or override ${TOKEN_VARIABLE}; the helpers read it from the environment themselves.`;
+    case 'token-host':
+      return `${lead} The command is refused because ${finding.detail}. The session token may reach only the Zensu host the worker configured: never set, change or remove ${HOST_VARIABLE} and never pass --api-url.`;
+    case 'shell-option':
+      return `${lead} ${finding.detail} puts an option between -c and the command string, which the gate cannot judge. Put the command string right after -c.`;
     case 'lease':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
     default:
@@ -2021,6 +2138,7 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
       return { exit: EXIT.LOST, message: 'the lease is lost; the question was not asked' };
     }
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
+      writeOutbox(context, { inflight: { verb: 'ask', args } });
       return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
     }
     const refused = refusedProse(outcome, failure, 'ask again');
@@ -2028,6 +2146,7 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
     return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})${refused.said}; ${next}` };
   }
   const body = outcome.json;
+  if (readOutbox(context).inflight) writeOutbox(context, { inflight: null });
   const asked = isObject(body.question) ? body.question : {};
   const value = { questionId: asked.id || null, status: asked.status || null, escalated: body.escalated === true, replay: body.replay === true };
   if (noteAskOutcome(context, body, now)) {
@@ -2199,12 +2318,16 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const snapshot = safeRead(context.files.order).value;
   const order = snapshot && isObject(snapshot.order) ? snapshot.order : {};
   const link = blobLink(order.repository || context.marker.repository, sha, file);
-  const sendArtifact = (summary) => sendEvent(context, ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', summary,
-    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha), ...(link ? ['--url', link] : [])], { env, now });
-  const summary = planSummary(planText);
-  let artifact = sendArtifact(summary);
-  if (artifact.verdict === VERDICTS.FINAL && artifact.failure && artifact.failure.code === 'content_not_allowed' && summary !== PLAN_SUMMARY_FALLBACK) {
-    artifact = sendArtifact(PLAN_SUMMARY_FALLBACK);
+  const sendArtifact = (summary, url) => sendEvent(context, ['--artifact', 'plan', '--path', file, '--sha', sha, '--summary', summary,
+    '--client-event-id', clientEventId(context.marker.orderId, context.marker.attempt, 'plan-artifact', sha), ...(url ? ['--url', url] : [])], { env, now });
+  let summary = planSummary(planText);
+  let url = link;
+  let artifact = sendArtifact(summary, url);
+  for (let retry = 0; retry < 2 && artifact.verdict === VERDICTS.FINAL && artifact.failure; retry += 1) {
+    if (artifact.failure.code === 'content_not_allowed' && summary !== PLAN_SUMMARY_FALLBACK) summary = PLAN_SUMMARY_FALLBACK;
+    else if (artifact.failure.code === 'invalid_url' && url) url = null;
+    else break;
+    artifact = sendArtifact(summary, url);
   }
   if (artifact.verdict !== VERDICTS.OK) {
     if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
@@ -2217,7 +2340,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   if (blocked.delivered) {
     return {
       exit: EXIT.OK,
-      value: { plan: file, commit: sha, link },
+      value: { plan: file, commit: sha, link: url },
       message: `the plan of work order ${context.marker.orderId} waits for approval; the session is complete`,
       cancelRun: runToCancel(context),
     };
@@ -2255,7 +2378,8 @@ function stopDecision(context, { env = process.env, now = Date.now } = {}) {
     };
   }
   const bounded = { ...env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: String(Math.min(retrySettings(env).budgetMs, STOP_RETRY_BUDGET_MS)) };
-  const closed = finish(context, { env: bounded, now, reason: 'The session stopped without reporting the outcome of its work order.' });
+  const terminalRun = run && ['DONE', 'BLOCKED', 'CANCELLED'].includes(run.stage);
+  const closed = finish(context, { env: bounded, now, reason: terminalRun ? null : 'The session stopped without reporting the outcome of its work order.' });
   return { decision: 'allow', cancelRun: closed.cancelRun || runToCancel(context), exit: closed.exit };
 }
 

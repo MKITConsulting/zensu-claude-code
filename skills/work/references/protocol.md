@@ -27,8 +27,8 @@ key. Each is written to a temporary file and renamed into place.
 | `marker-` | `--start` | order id, attempt, kind, repository, spec hash, plan-approval policy |
 | `order-` | `--start`, `--bind-spec` | the last `zensu work get` answer |
 | `lease-` | every successful renewal or event | lease seconds, last success time, recorded head, order status |
-| `outbox-` | `--autopilot-begin`, `--drain` | the bound Autopilot run id and the highest stage rank Zensu accepted |
-| `answers-` | renewals | answers to non-blocking questions not yet shown to the model |
+| `outbox-` | `--autopilot-begin`, `--drain`, and a block, `ready_for_merge` or question send without an answer | the bound Autopilot run id, the highest stage rank Zensu accepted, and the last block, `ready_for_merge` or question send that got no answer |
+| `answers-` | renewals, `--start`, `--bind-spec` | answers to this order's non-blocking questions and the plan-wide decisions of `decision_log` not yet shown to the model |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
 | `stop-` | the Stop hook | stops in a row without a new ledger event |
@@ -57,9 +57,9 @@ no `--client-name`.
 ## Binding the spec
 
 `--autopilot-begin --work-order <id>` stores the binding `{orderId, attempt, specHash}` in the run
-record. `--bind-spec --run <id>` then reads the order again, refuses a spec that changed since
-`--start`, reports `planning` and then `implementing`, and only after Zensu accepted `implementing`
-records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. Zensu claims only
+record. `--bind-spec --run <id>` then refuses a working branch without the order's prefix, reports
+`planning`, reads the order again, refuses a spec that changed since `--start`, reports
+`implementing`, and only after Zensu accepted `implementing` records `ORDER_SPEC_BOUND`, which moves the run from `PLANNING` to `AWAIT_TDD`. Zensu claims only
 queued orders and starts every attempt at `claimed`, keeping the branch, the pull request and the
 head of the earlier attempt, so a new attempt reports `planning` and `implementing` again. An order
 already past `implementing` would be bound without sending a stage behind it.
@@ -90,7 +90,8 @@ is a new event, and a repeat at the same stage replays.
 Zensu accepts an order branch only when it starts with the spec's `branch_prefix` (`wo-` today) and
 refuses any other with `422 invalid_branch`. The runtime names a fresh order's branch from that
 prefix and the first eight characters of the order id. `--bind-spec` and `--push` refuse a working
-branch without the prefix before they send anything, and stage events leave such a branch out.
+branch without the prefix before they send any stage or block event, and stage events leave such a
+branch out.
 
 `--open-pr --title <title> --body-file <path>` renews the lease, requires that Zensu recorded the
 current head, and opens the pull request against the plan's integration branch, else its base
@@ -135,24 +136,30 @@ with three to six digits. When Zensu answers with the order `blocked` — a bloc
 exits 6. A person's answer requeues a `question` or `spec_change` block; an `escalated` order waits
 until a person requeues it. A non-blocking question, `scope` included, only records the default.
 
+`--followup` sends `zensu work followup` with a `client_event_id` derived from the order, the
+attempt and the title, so a repeat replays; Zensu takes at most 20 per attempt. It refuses with
+exit 2, before the CLI runs, a severity other than `low`, `medium`, `high` or `critical`, a title
+over 200 bytes, a rationale over 2048 bytes, more than 20 paths, and a path that is not a clean
+relative file path: no `./`, no trailing slash, no `..`, no wildcard. A refusal of a question or a
+follow-up quotes Zensu's message, and for a text that is too long names the field to shorten.
+
 `--start` and `--bind-spec` queue the answered entries of the order's `decision_log` — questions a
 person decided for the whole plan — beside the answers, and the post-tool hook hands them to the
-model as decisions that bind this order. `--followup` sends `zensu work followup` the same way; Zensu takes at most 20 per attempt.
-It refuses with exit 2, before the CLI runs, a severity other than `low`, `medium`, `high` or
-`critical`, a title over 200 bytes, a rationale over 2048 bytes, more than 20 paths, and a path that
-is not a clean relative file path: no `./`, no trailing slash, no `..`, no wildcard. A refusal of a
-question or a follow-up quotes Zensu's message, and for a text that is too long names the field to
-shorten.
+model as decisions that bind this order. A plan-wide decision made after `--bind-spec` reaches the
+next session, not this one: the heartbeat carries only this order's answers.
 
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
-file when it is new or changed, pushes through the push verb, sends an artifact event of kind
+file when it is new or changed, pushes through the push verb, and sends an artifact event of kind
 `plan` with the path, the commit, a one-line summary behind a fixed `Implementation plan.` prefix
 with no markup, tags, brackets or quotes and, for a GitHub or GitLab repository, the blob link built
-from the `host/owner/name` Zensu stores, then sends `--blocked plan_approval`. When Zensu refuses
-the summary as prose, the artifact goes once more with `Implementation plan for this work order.`. Zensu ends the session there; the helper
-records a successful outcome. When Zensu answers the block with `plan_approval_not_required`, the
-order's policy approves plans itself: the helper exits 8, and the session continues with
-`--bind-spec`.
+from the `host/owner/name` Zensu stores. When Zensu refuses the summary as prose, the artifact goes
+once more with the summary `Implementation plan for this work order.` instead; when it refuses the
+link with `invalid_url`, for example because the repository name reads like a secret, the artifact
+goes once more without the link. Both resends keep the `client_event_id`, because a refused event
+stores nothing. The helper then sends `--blocked plan_approval`; Zensu ends the session on that block, and
+the helper records a successful outcome. When Zensu answers the block with
+`plan_approval_not_required`, the order's policy approves plans itself: the helper exits 8, and the
+session continues with `--bind-spec`.
 
 ## Work-order hooks
 
@@ -162,11 +169,14 @@ Outside work-order mode all three print nothing and exit 0.
   `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
   `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
   `followup`, the `zensu plan` approval verbs, and every command that prints, reads, unsets or
-  overrides `ZENSU_SESSION_TOKEN`. Zensu refuses `zensu work list`, `questions`, `policy get` and
+  overrides `ZENSU_SESSION_TOKEN`, `env -i` included. It also denies every command that sets,
+  changes or removes `ZENSU_API_URL` or passes `--api-url` to `zensu`, so the token reaches only the
+  host the worker configured. Zensu refuses `zensu work list`, `questions`, `policy get` and
   `repositories list` for a session token, so their denial points at the order file. It reads commands
-  inside `bash -c`, `eval`, command substitutions and wrappers such as `env` or `sudo`. It renews
-  the lease when due, and once the lease is lost or the session ended it denies every `gh`, `glab`
-  and `zensu-vcs.sh` call. It never allows anything.
+  inside `bash -c`, `eval`, command substitutions, ANSI-C quoting such as `$'work'`, and wrappers
+  such as `env` or `sudo`, and denies an option between `-c` and the command string, which it cannot
+  judge. It renews the lease when due, and once the lease is lost or the session ended it denies
+  every `gh`, `glab` and `zensu-vcs.sh` call. It never allows anything.
 - `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
   answers to the model, and ends the session when a direct `zensu work ask` blocked the order. It
   tells the model to stop when the lease is lost, naming the code, and when Zensu refused a stage.
@@ -199,7 +209,7 @@ every message about it quotes the CLI's own line.
 | `invalid_transition` on a stage | the stage is already behind the order; counted as delivered |
 | `409` without a code | probe the order: an unconfirmed claim retries, a missing plan approval reads as `plan_approval_required`, anything else as `invalid_transition` |
 | any other code or `4xx` | final; the helper exits 8 and names the code |
-| a CLI error without a status that names `ZENSU_SESSION_TOKEN`, at `--start` | setup error: the session has no host for the token, or the token is malformed; exit 3 with the CLI's line |
+| at `--start`, a CLI error without a status that says `ZENSU_SESSION_TOKEN needs the host` or `ZENSU_SESSION_TOKEN must hold` | setup error: the session has no host for the token, or the token is not a session token; exit 3 with the CLI's line and what the worker must change |
 
 A heartbeat that fails with a final answer is treated as a lost lease, because a lease Zensu does not
 renew cannot be relied on.
@@ -208,10 +218,18 @@ A final answer to a stage stops the outbox at that stage. `--bind-spec` and `--p
 and name the stage, and the post-tool hook tells the model to run `--finish --reason`. `--finish` on
 a DONE run whose earlier stage or whose `ready_for_merge` Zensu refused blocks the order with
 `worker_error` and a reason that names the stage and the code, so the order never waits for a report
-that cannot come. A `worker_error` block whose reason Zensu refuses with `content_not_allowed` or
-`missing_field` is sent once more with a fixed sentence under its own `client_event_id`. Any other
-final answer to a block writes no `ended-`, so a later `--finish` reports the block again, and the
-Stop hook still lets the session stop after its budget.
+that cannot come; the Stop hook's own sentence never replaces that reason. A `worker_error` block
+whose reason Zensu refuses with `content_not_allowed` or `missing_field` is sent once more under the
+same `client_event_id`, because a refused event stores nothing. The resend carries the generated
+sentence that names the refused stage, or else a fixed sentence for the run's state, and the exit-6
+message says that the stated reason was replaced. Any other final answer to a block writes no
+`ended-`, so a later `--finish` reports the block again, and the Stop hook still lets the session
+stop after its budget.
+
+A block, `ready_for_merge` or question send that got no answer stays in `outbox-`. When a later
+renewal finds the lease gone, the helper first replays that send under its `client_event_id`: Zensu
+answers a replay even after it ended the session, so a block it stored ends the session as delivered
+instead of as a lost lease. A replay Zensu refuses leaves the lease lost.
 
 ## Ending
 
