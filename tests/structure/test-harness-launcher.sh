@@ -20,10 +20,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     check "native Windows launcher run skipped (macOS/Linux/WSL required)" PASS
-    finish; exit 0
+    unit_check_done "H12a every unit file the registry gives this suite was graded"
+    finish; exit
     ;;
 esac
 
@@ -285,7 +288,6 @@ else
 fi
 
 SUPERVISOR_TEST="$PLUGIN_DIR/tests/structure/process-supervisor.test.js"
-. "$(dirname "$0")/lib-unit-registry.sh"
 LOOPBACK_AVAILABLE=0
 if node -e '
   const net = require("node:net");

@@ -87,7 +87,8 @@
       "summary": "Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path."
     },
     {
-      "path": "tests/structure/process-supervisor.test.js", "registered": 7, "skips": {"linux": 1, "root": 1, "win32": 4},
+      "path": "tests/structure/process-supervisor.test.js", "registered": 7, "skips": {"linux": 1, "root": 1},
+      "notRunOn": {"win32": "test-harness-launcher.sh skips native Windows before grading, because the launcher stops its session through POSIX process groups"},
       "runs": [{ "driver": "tests/structure/test-harness-launcher.sh" }],
       "summary": "The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code."
     },
@@ -184,7 +185,7 @@
       "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings."
     },
     {
-      "path": "tests/structure/unit-registry.test.js", "registered": 28,
+      "path": "tests/structure/unit-registry.test.js", "registered": 30,
       "runs": [{ "driver": "tests/structure/test-unit-registry.sh" }],
       "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
     },
@@ -240,6 +241,7 @@
     },
     {
       "path": "tests/structure/work-order-v1.test.js", "registered": 38,
+      "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
       "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan."
     },

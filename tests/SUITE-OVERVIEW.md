@@ -81,11 +81,13 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
   A new structure test that nobody classified fails the run rather than being skipped.
 - **Preflight unit-file census** — every `*.test.js` under `tests/` that git does not ignore must
   have exactly one valid entry in `tests/profiles/unit-files.v1.json`, and each entry's
-  `registered` must equal the file's column-0 `test(` registrations. A file with an indented
-  `test(`, a subtest on a case's context parameter (`t.test(`) or a `describe` or `it` imported
-  from `node:test` is refused too, because that static count cannot see such a case. Otherwise the
-  run refuses to start and names each path; a case the census cannot see fails its driver's grade
-  instead.
+  `registered` must equal the file's column-0 `test(` registrations. A file is refused too when
+  it has an indented `test(`; a `t.test(` that starts a line (optionally after `await`, `return`
+  or `void`), where `t` is the one parameter a column-0 case declares in a callback head ending
+  its own `test(` line; or a line-start `describe`, `it` or `suite` destructured from `node:test`
+  by a `require` or `import` that starts its line. The static count cannot see such a case.
+  Otherwise the run refuses to start and names each path; a case the census cannot see fails its
+  driver's grade instead.
 - **Per-suite watchdog** — `ZENSU_SUITE_TIMEOUT` (default 3600 s), portable pid poll
   (no GNU `timeout` on macOS). A suite that never returns is reported `HANG`, not `FAIL`.
 - **Output to a file, never a command substitution** — so a suite leaving a background
@@ -373,7 +375,7 @@ file here directly through `node tests/run-clock-shift.js` with `Date` shifted f
 `session-control/session-control-core-v1.test.js` stays on the real clock (§9).
 
 <!-- unit-registry:begin section-4 -->
-Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-unit-registry.js render --write`; edit the registry, never this table. Registered is node's exact total, Skips the per-host ceiling of skipped or todo cases (absent means 0).
+Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-unit-registry.js render --write`; edit the registry, never this table. Registered is node's exact total, Skips the per-host ceiling of skipped or todo cases (absent means 0), and "not run" a host the entry's notRunOn declares that no driver runs the file on.
 
 | Unit file | Registered | Skips | Driven by | Summary |
 |---|---|---|---|---|
@@ -394,7 +396,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/plan-payload-v1.test.js` | 20 | – | `test-plan-payload-fallback.sh` | The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback. |
 | `structure/playwright-cli-version-v1.test.js` | 14 | win32 12 | `test-verify-consent.sh` | The installed playwright-cli version identity, read from its package manifest without running the binary. |
 | `structure/plugin-data-guard-v1.test.js` | 37 | win32 4 | `test-plugin-data-guard.sh` | Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path. |
-| `structure/process-supervisor.test.js` | 7 | linux 1, root 1, win32 4 | `test-harness-launcher.sh` | The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code. |
+| `structure/process-supervisor.test.js` | 7 | linux 1, root 1, win32 not run | `test-harness-launcher.sh` | The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code. |
 | `structure/profile-runner.test.js` | 23 | win32 2 | `test-windows-ci-contract.sh` (lifecycle, all) | The Windows profile runner: lifecycle, digests and deadlines. |
 | `structure/prompt-listing-v1.test.js` | 17 | – | `test-session-trail-verdict.sh` | The session-trail prompt listing: queue pairing, pull-backs, the withdrawn list and the truncated read. |
 | `structure/release-run-step.test.js` | 11 | – | `test-immutable-marketplace-release.sh` | The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup. |
@@ -412,7 +414,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
 | `structure/session-reanchor-v1.test.js` | 67 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
 | `structure/subagent-shell-guard-v1.test.js` | 25 | win32 2 | `test-reviewer-capability-gate.sh` | The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings. |
-| `structure/unit-registry.test.js` | 28 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
+| `structure/unit-registry.test.js` | 30 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
 | `structure/verify-browser-config.test.js` | 21 | – | `test-verify-consent.sh` | The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run. |
 | `structure/verify-consent-v1.test.js` | 125 | win32 2 | `test-verify-consent.sh` | The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection. |
 | `structure/verify-feature-transcript-check.test.js` | 26 | – | `test-eval-harness-units.sh` | The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session. |
@@ -423,7 +425,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/windows-observation.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows observation summarizer. |
 | `structure/windows-profile-contract.test.js` | 4 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows profile contract. |
 | `structure/windows-safety-shard.test.js` | 5 | – | `test-windows-ci-contract.sh` (metadata, all) | Windows Safety shard partitioning, with no suite duplicated or lost. |
-| `structure/work-order-v1.test.js` | 38 | – | `test-work-order-runtime.sh` | The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan. |
+| `structure/work-order-v1.test.js` | 38 | win32 not run | `test-work-order-runtime.sh` | The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan. |
 | `structure/workflow-dispatch-inputs.test.js` | 24 | – | `test-workflow-dispatch-inputs.sh` | Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable. |
 | `structure/worktree-advice-v1.test.js` | 66 | win32 2 | `test-session-trail-verdict.sh` | The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative. |
 | `structure/worktree-keep-v1.test.js` | 101 | – | `test-worktree-keep.sh` | Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement. |
@@ -439,9 +441,12 @@ uid 0, `win32`), and the guarded titles that must pass. An emptied file fails ev
 `registered: 1`, because node then counts the file itself as its only test. `unit_grade` grades
 a run a driver spawned itself, which `tests/session-control/run.sh` does to keep its timeout and
 progress diagnostic, and `unit_registry_done` fails a driver that never ran a file the registry
-gives it. A failing grade replays each `not ok` line on stderr with its YAML block and the last
-40 diagnostic lines node printed since the case before it, counting any earlier ones it leaves
-out, or the last 40 lines of node's output when no case reported `not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
+gives it on this host. A host an entry's `notRunOn` names owes no grade and refuses one; a
+driver that leaves such a host early calls its done check first, so it passes there only while
+the registry declares the exclusion. A failing grade replays each `not ok` line on stderr with
+its YAML block and the last 40 diagnostic lines node printed since the case before it, counting
+any earlier ones it leaves out, or the last 40 lines of node's output when no case reported
+`not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
 in the same commit, followed by `node tests/structure/lib-unit-registry.js render --write`.
 
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by

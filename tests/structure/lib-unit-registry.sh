@@ -17,11 +17,9 @@ unit_abs_path() {
 unit_registry_cli() {
   local command="${1:-}"
   [ "$#" -gt 0 ] && shift
-  if [ -n "${UNIT_REGISTRY_FILE:-}" ]; then
-    node "$UNIT_REGISTRY_JS" "$command" --registry "$UNIT_REGISTRY_FILE" ${1+"$@"} 2>&1
-  else
-    node "$UNIT_REGISTRY_JS" "$command" ${1+"$@"} 2>&1
-  fi
+  [ -z "${UNIT_REGISTRY_HOST:-}" ] || set -- --host "$UNIT_REGISTRY_HOST" ${1+"$@"}
+  [ -z "${UNIT_REGISTRY_FILE:-}" ] || set -- --registry "$UNIT_REGISTRY_FILE" ${1+"$@"}
+  node "$UNIT_REGISTRY_JS" "$command" ${1+"$@"} 2>&1
 }
 
 unit_one_line() {

@@ -13,7 +13,7 @@ const UNIT = 'tests/structure/sample.test.js';
 const DRIVER = 'tests/structure/test-sample.sh';
 
 function makeRoot(t, options = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'unit-registry-'));
+  const root = fs.mkdtempSync(path.join(options.parent ?? os.tmpdir(), 'unit-registry-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'tests', 'structure'), { recursive: true });
   fs.mkdirSync(path.join(root, 'tests', 'profiles'), { recursive: true });
@@ -177,6 +177,11 @@ test('every load error names its cause', (t) => {
     [[entry({ summary: 'a | b' })], /summary must be one non-empty line without "\|"/],
     [[entry({ skips: { windows: 2 } })], /unknown host class "windows"/],
     [[entry({ skips: { linux: 0 } })], /skips\.linux must be an integer of at least 1/],
+    [[entry({ notRunOn: {} })], /notRunOn must be a non-empty object keyed by host class/],
+    [[entry({ notRunOn: { windows: 'POSIX only' } })], /notRunOn names unknown host class "windows"/],
+    [[entry({ notRunOn: { win32: ' ' } })], /notRunOn\.win32 must be one non-empty line that says why no driver runs the file there/],
+    [[entry({ skips: { win32: 1 }, notRunOn: { win32: 'POSIX only' } })], /notRunOn\.win32 contradicts skips\.win32/],
+    [[entry({ notRunOn: { darwin: 'a', linux: 'b', root: 'c', win32: 'd' } })], /notRunOn names every host class, so no host runs the file/],
     [[entry({ runs: [] })], /runs must list at least one/],
     [[entry({ runs: [{ driver: 'tests/structure/test-missing.sh' }] })], /names a driver that does not exist/],
   ];
@@ -205,21 +210,23 @@ test('the census names an unregistered file, a nested registration and a stale c
 
 test('the census refuses a subtest on a case context and a describe or it imported from node:test', (t) => {
   const root = makeRoot(t);
-  const refused = /registers a case below column 0, as a subtest, or through describe or it/;
+  const refused = /registers a case below column 0, as a subtest, or through describe, it or suite/;
   fs.writeFileSync(path.join(root, UNIT), `${cases(2)}test('case 3', async (t) => {\n  await t.test('inner', () => {});\n});\n`);
   assert.match(registry.census(root)[0], refused);
   fs.writeFileSync(path.join(root, UNIT), `${cases(2)}test('case 3', async (t) => {\n  for (const name of ['a']) {\n    await t.test(name, () => {});\n  }\n});\n`);
   assert.match(registry.census(root)[0], refused);
   fs.writeFileSync(path.join(root, UNIT), `const { describe, it } = require('node:test');\n${cases(3)}describe('group', () => {\n  it('member', () => {});\n});\n`);
   assert.match(registry.census(root)[0], refused);
+  fs.writeFileSync(path.join(root, UNIT), `import { suite as group } from 'node:test';\n${cases(3)}group('members', () => {});\n`);
+  assert.match(registry.census(root)[0], refused);
 });
 
-test('the census leaves a regex test, a fixture that spells describe and an unimported describe alone', (t) => {
+test('the census leaves a regex test, a fixture that spells a node:test import and describe, and an unimported describe alone', (t) => {
   const root = makeRoot(t);
   const source = [
     cases(3).trimEnd(),
     "const TOKEN_RE = /^[0-9A-F]+$/;",
-    'const fixture = `',
+    "const fixture = `const { describe, it } = require('node:test');",
     "describe('cart', () => {",
     "  it('adds an item', () => {});",
     '});',
@@ -235,15 +242,21 @@ test('the census leaves a regex test, a fixture that spells describe and an unim
   assert.deepEqual(registry.census(root), []);
 });
 
-test('the grade names the column-0 rule when node counts a case the static count cannot see', (t) => {
-  const root = makeRoot(t, { unitSource: `${cases(3)}for (const n of [4]) test('case ' + n, () => {});\n` });
-  assert.deepEqual(registry.census(root), []);
-  const run = runNode(root, UNIT);
-  const output = path.join(root, 'out.tap');
-  fs.writeFileSync(output, run.text);
-  const graded = captureMain(['verify', '--root', root, '--cwd', root, '--path', UNIT, '--output', output, '--rc', String(run.rc), '--driver', DRIVER, '--mode', '', '--host', 'linux']);
-  assert.equal(graded.code, 1);
-  assert.equal(graded.text, `${UNIT}: node registered 4 but the file's column-0 test( calls number 3, which the registry declares; register every case with its own column-0 test( call so both counts agree\n`);
+test('the grade names the column-0 rule when node counts a case the static count cannot see, and the dead column-0 line when it counts fewer', (t) => {
+  const gradeAgainst = (unitSource, registered) => {
+    const root = makeRoot(t, { unitSource, files: [entry({ registered })] });
+    assert.deepEqual(registry.census(root), []);
+    const run = runNode(root, UNIT);
+    const output = path.join(root, 'out.tap');
+    fs.writeFileSync(output, run.text);
+    return captureMain(['verify', '--root', root, '--cwd', root, '--path', UNIT, '--output', output, '--rc', String(run.rc), '--driver', DRIVER, '--mode', '', '--host', 'linux']);
+  };
+  const looped = gradeAgainst(`${cases(3)}for (const n of [4]) test('case ' + n, () => {});\n`, 3);
+  assert.equal(looped.code, 1);
+  assert.equal(looped.text, `${UNIT}: node registered 4 but the file's column-0 test( calls number 3, which the registry declares; register every case with its own column-0 test( call so both counts agree\n`);
+  const commented = gradeAgainst(`${cases(3)}/*\ntest('case 4', () => {});\n*/\n`, 4);
+  assert.equal(commented.code, 1);
+  assert.equal(commented.text, `${UNIT}: node registered 3 but the file's column-0 test( lines number 4, which the registry declares; 1 of them registered no case, so they sit in a comment, a string or a branch that did not run; skip a case through its skip option instead, and keep text that only spells test( off the start of a line\n`);
 });
 
 test('in a git work tree the census skips ignored files and still names an untracked unregistered one', (t) => {
@@ -283,6 +296,50 @@ test('a work tree git cannot read makes the census say that it walked tests/ ins
     if (saved === undefined) delete process.env.GIT_DIR;
     else process.env.GIT_DIR = saved;
   }
+});
+
+test('a root git does not list as its own top level walks tests/, and says so only when the root has its own .git', (t) => {
+  const git = (args) => {
+    const run = spawnSync('git', args, { encoding: 'utf8', env: registry.gitEnvironment() });
+    assert.equal(run.status, 0, run.stderr);
+  };
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'unit-registry-worktree-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  const moved = makeRoot(t);
+  git(['-C', moved, 'init', '-q']);
+  git(['-C', moved, 'config', 'core.worktree', elsewhere]);
+  fs.writeFileSync(path.join(moved, 'tests', 'structure', 'other.test.js'), cases(1));
+  const problems = registry.census(moved);
+  assert.equal(problems.length, 2);
+  assert.equal(problems[0], 'tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one');
+  assert.match(problems[1], /^tests: git could not list this work tree \(git names .+ as the top level, not this root\), so the census walked tests\/ and may name files that git ignores$/);
+  const enclosing = fs.mkdtempSync(path.join(os.tmpdir(), 'unit-registry-enclosing-'));
+  t.after(() => fs.rmSync(enclosing, { recursive: true, force: true }));
+  git(['-C', enclosing, 'init', '-q']);
+  const nested = makeRoot(t, { parent: enclosing });
+  fs.writeFileSync(path.join(nested, 'tests', 'structure', 'other.test.js'), cases(1));
+  assert.deepEqual(registry.census(nested), ['tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
+});
+
+test('a host that notRunOn names owes the done check no grade, renders as not run and refuses a grade there', (t) => {
+  const root = makeRoot(t, { files: [entry({ skips: { linux: 1 }, notRunOn: { win32: 'POSIX only' } })] });
+  const ownedOn = (host) => captureMain(['owned', '--root', root, '--cwd', root, '--driver', DRIVER, '--mode', '', '--host', host]);
+  assert.deepEqual(ownedOn('win32'), {
+    code: 0,
+    text: `${DRIVER}: every unit file it is registered for was graded; the registry declares ${UNIT} not run on win32\n`,
+  });
+  const onLinux = ownedOn('linux');
+  assert.equal(onLinux.code, 1);
+  assert.match(onLinux.text, /never ran or graded tests\/structure\/sample\.test\.js/);
+  const run = runNode(root, UNIT);
+  const output = path.join(root, 'out.tap');
+  fs.writeFileSync(output, run.text);
+  const refused = captureMain(['verify', '--root', root, '--cwd', root, '--path', UNIT, '--output', output, '--rc', String(run.rc), '--driver', DRIVER, '--mode', '', '--host', 'win32']);
+  assert.equal(refused.code, 2);
+  assert.equal(refused.text, `${UNIT}: the registry declares it not run on win32 (POSIX only); remove win32 from its notRunOn in tests/profiles/unit-files.v1.json once a driver runs it there\n`);
+  const rendered = registry.render(root);
+  assert.deepEqual(rendered.errors, []);
+  assert.match(rendered.regions['section-4'], /\| `structure\/sample\.test\.js` \| 3 \| linux 1, win32 not run \| `test-sample\.sh` \| sample cases \|/);
 });
 
 test('the rendered regions round-trip and a hand edit is reported with the render command', (t) => {

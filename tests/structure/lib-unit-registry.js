@@ -9,7 +9,7 @@ const MANIFEST_REL = 'tests/profiles/promptfoo-local-only.v1.json';
 const OVERVIEW_REL = 'tests/SUITE-OVERVIEW.md';
 const RENDER_COMMAND = 'node tests/structure/lib-unit-registry.js render --write';
 const HOST_CLASSES = ['darwin', 'linux', 'root', 'win32'];
-const ENTRY_KEYS = new Set(['path', 'registered', 'skips', 'guards', 'runs', 'summary']);
+const ENTRY_KEYS = new Set(['path', 'registered', 'skips', 'notRunOn', 'guards', 'runs', 'summary']);
 const RUN_KEYS = new Set(['driver', 'mode']);
 const UNIT_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.test\.js$/;
 const DRIVER_PATH = /^tests\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.sh$/;
@@ -17,7 +17,7 @@ const MODE = /^[a-z][a-z0-9-]*$/;
 const REGISTRATION = /^test(?:\.(?:skip|todo|only))?\(/gm;
 const INDENTED_REGISTRATION = /^[ \t]+test(?:\.(?:skip|todo|only))?\(/m;
 const CONTEXT_PARAMETER = /(?:\(\s*([A-Za-z_$][\w$]*)\s*\)|([A-Za-z_$][\w$]*))\s*=>\s*\{?\s*$|\bfunction\b[^(]*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{?\s*$/;
-const SUITE_IMPORT = /(?:\{([^}]*)\}\s*=\s*require\(\s*['"]node:test['"]\s*\)|import\s*\{([^}]*)\}\s*from\s*['"]node:test['"])/g;
+const SUITE_IMPORT = /^[ \t]*(?:(?:const|let|var)[ \t]+\{([^}]*)\}\s*=\s*require\(\s*['"]node:test['"]\s*\)|import\s*\{([^}]*)\}\s*from\s*['"]node:test['"])/gm;
 const UNIT_CALL = /\bunit_(?:run|check|grade|not_run)\b/;
 const DONE_CALL = /\bunit_(?:registry_done|check_done)\b/;
 const COMMAND_POSITION = '(?:^|[;&|(`!]|\\$\\(|\\b(?:if|elif|while|until|then|do|else|exec|command|env|nice|time)\\b|\\btimeout(?:[ \\t]+-\\S+)*[ \\t]+\\S+)[ \\t]*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*[ \\t]+)*';
@@ -72,6 +72,18 @@ function validateEntry(entry, index, root) {
         else if (!isInteger(ceiling, 1)) problems.push(`${label}: skips.${host} must be an integer of at least 1; omit the host for 0`);
         else if (isInteger(entry.registered, 1) && ceiling > entry.registered) problems.push(`${label}: skips.${host} exceeds registered`);
       }
+    }
+  }
+  if (entry.notRunOn !== undefined) {
+    if (!isPlainObject(entry.notRunOn) || Object.keys(entry.notRunOn).length === 0) {
+      problems.push(`${label}: notRunOn must be a non-empty object keyed by host class`);
+    } else {
+      for (const [host, reason] of Object.entries(entry.notRunOn)) {
+        if (!HOST_CLASSES.includes(host)) problems.push(`${label}: notRunOn names unknown host class "${host}"; use ${HOST_CLASSES.join(', ')}`);
+        else if (typeof reason !== 'string' || reason.trim().length === 0 || /[\r\n]/.test(reason)) problems.push(`${label}: notRunOn.${host} must be one non-empty line that says why no driver runs the file there`);
+        else if (isPlainObject(entry.skips) && entry.skips[host] !== undefined) problems.push(`${label}: notRunOn.${host} contradicts skips.${host}; a host that never runs the file has no skip ceiling`);
+      }
+      if (HOST_CLASSES.every((host) => Object.hasOwn(entry.notRunOn, host))) problems.push(`${label}: notRunOn names every host class, so no host runs the file`);
     }
   }
   if (entry.guards !== undefined) {
@@ -156,13 +168,16 @@ function gitListedUnitFiles(root) {
   const top = git(['rev-parse', '--show-toplevel']);
   let reason = failure(top);
   if (!reason) {
+    const toplevel = top.stdout.trim();
     let same = false;
     try {
-      same = path.relative(fs.realpathSync.native(top.stdout.trim()), fs.realpathSync.native(root)) === '';
+      same = path.relative(fs.realpathSync.native(toplevel), fs.realpathSync.native(root)) === '';
     } catch {
       same = false;
     }
-    if (!same) return { files: null, gitFailure: null };
+    if (!same) {
+      return { files: null, gitFailure: fs.existsSync(path.join(root, '.git')) ? `git names ${toplevel} as the top level, not this root` : null };
+    }
     const listing = git(['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'tests']);
     reason = failure(listing);
     if (!reason) {
@@ -226,7 +241,7 @@ function nestedRegistration(source) {
   }
   const imported = new Set();
   for (const match of source.matchAll(SUITE_IMPORT)) {
-    for (const binding of (match[1] || match[2]).split(',')) {
+    for (const binding of (match[1] ?? match[2] ?? '').split(',')) {
       const [exported, local = exported] = binding.split(/:|\s+as\s+/).map((part) => part.trim());
       if (['describe', 'it', 'suite'].includes(exported)) imported.add(local);
     }
@@ -257,7 +272,7 @@ function census(root, registryFile) {
       continue;
     }
     if (nestedRegistration(source)) {
-      problems.push(`${entry.path}: registers a case below column 0, as a subtest, or through describe or it; register every case with a column-0 test( call so the static count holds`);
+      problems.push(`${entry.path}: registers a case below column 0, as a subtest, or through describe, it or suite; register every case with a column-0 test( call so the static count holds`);
       continue;
     }
     const registered = staticRegistrations(source);
@@ -312,10 +327,16 @@ function verify(entry, text, rc, host, staticCount) {
     return { ok: false, message: `${unitPath}: registers no case of its own; node counted the file itself, so the file is empty or failed to load` };
   }
   if (summary.tests !== entry.registered) {
-    if (staticCount === entry.registered) {
+    if (staticCount === entry.registered && summary.tests > staticCount) {
       return {
         ok: false,
         message: `${unitPath}: node registered ${summary.tests} but the file's column-0 test( calls number ${staticCount}, which the registry declares; register every case with its own column-0 test( call so both counts agree`,
+      };
+    }
+    if (staticCount === entry.registered) {
+      return {
+        ok: false,
+        message: `${unitPath}: node registered ${summary.tests} but the file's column-0 test( lines number ${staticCount}, which the registry declares; ${staticCount - summary.tests} of them registered no case, so they sit in a comment, a string or a branch that did not run; skip a case through its skip option instead, and keep text that only spells test( off the start of a line`,
       };
     }
     return { ok: false, message: countMessage(unitPath, summary.tests, entry.registered, 'node registered') };
@@ -354,8 +375,12 @@ function runsFor(entry, driver, mode) {
   return Array.isArray(entry.runs) && entry.runs.some((run) => run.driver === driver && (run.mode || '') === (mode || ''));
 }
 
-function owned(entries, driver, mode) {
-  return entries.filter((entry) => isPlainObject(entry) && runsFor(entry, driver, mode)).map((entry) => entry.path);
+function notRunOn(entry, host) {
+  return isPlainObject(entry.notRunOn) && Object.hasOwn(entry.notRunOn, host);
+}
+
+function owned(entries, driver, mode, host) {
+  return entries.filter((entry) => isPlainObject(entry) && runsFor(entry, driver, mode) && !notRunOn(entry, host)).map((entry) => entry.path);
 }
 
 function readManifest(root) {
@@ -368,9 +393,11 @@ function driverLabel(driver) {
 
 function renderSection4(entries) {
   const rows = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((entry) => {
-    const skips = entry.skips
-      ? HOST_CLASSES.filter((host) => entry.skips[host]).map((host) => `${host} ${entry.skips[host]}`).join(', ')
-      : '–';
+    const cells = HOST_CLASSES.map((host) => {
+      if (notRunOn(entry, host)) return `${host} not run`;
+      return entry.skips && entry.skips[host] ? `${host} ${entry.skips[host]}` : null;
+    }).filter(Boolean);
+    const skips = cells.length ? cells.join(', ') : '–';
     const byDriver = new Map();
     for (const run of entry.runs) {
       if (!byDriver.has(run.driver)) byDriver.set(run.driver, []);
@@ -380,7 +407,7 @@ function renderSection4(entries) {
     return `| \`${entry.path.slice('tests/'.length)}\` | ${entry.registered} | ${skips} | ${drivers} | ${entry.summary} |`;
   });
   return [
-    `Generated from \`${REGISTRY_REL}\` by \`${RENDER_COMMAND}\`; edit the registry, never this table. Registered is node's exact total, Skips the per-host ceiling of skipped or todo cases (absent means 0).`,
+    `Generated from \`${REGISTRY_REL}\` by \`${RENDER_COMMAND}\`; edit the registry, never this table. Registered is node's exact total, Skips the per-host ceiling of skipped or todo cases (absent means 0), and "not run" a host the entry's notRunOn declares that no driver runs the file on.`,
     '',
     '| Unit file | Registered | Skips | Driven by | Summary |',
     '|---|---|---|---|---|',
@@ -734,11 +761,14 @@ function main(argv, out = process.stdout) {
       return exitCodes.plumbing;
     }
     const mode = options.mode || '';
+    const host = options.host || hostClass();
     if (command === 'owned') {
       const graded = new Set(options.positional.map((given) => toRepoPath(root, options.cwd, given)).filter(Boolean));
-      const missing = owned(entries, driver, mode).filter((unitPath) => !graded.has(unitPath));
+      const missing = owned(entries, driver, mode, host).filter((unitPath) => !graded.has(unitPath));
       if (missing.length === 0) {
-        out.write(`${driver}${mode ? ` mode ${mode}` : ''}: every unit file it is registered for was graded\n`);
+        const excluded = entries.filter((entry) => isPlainObject(entry) && runsFor(entry, driver, mode) && notRunOn(entry, host)).map((entry) => entry.path);
+        const declared = excluded.length ? `; the registry declares ${excluded.join(', ')} not run on ${host}` : '';
+        out.write(`${driver}${mode ? ` mode ${mode}` : ''}: every unit file it is registered for was graded${declared}\n`);
         return exitCodes.pass;
       }
       out.write(`${driver}${mode ? ` mode ${mode}` : ''}: never ran or graded ${missing.join(', ')}, which the registry says it runs\n`);
@@ -752,6 +782,10 @@ function main(argv, out = process.stdout) {
     }
     if (!runsFor(entry, driver, mode)) {
       out.write(`${unitPath}: ${driver}${mode ? ` mode ${mode}` : ''} is not a registered driver of this file; add it to the entry's runs in ${REGISTRY_REL}\n`);
+      return exitCodes.plumbing;
+    }
+    if (notRunOn(entry, host)) {
+      out.write(`${unitPath}: the registry declares it not run on ${host} (${entry.notRunOn[host]}); remove ${host} from its notRunOn in ${REGISTRY_REL} once a driver runs it there\n`);
       return exitCodes.plumbing;
     }
     let text;
@@ -768,7 +802,7 @@ function main(argv, out = process.stdout) {
       staticCount = null;
     }
     const rc = Number(options.rc);
-    const verdict = verify(entry, text, Number.isInteger(rc) ? rc : -1, options.host || hostClass(), staticCount);
+    const verdict = verify(entry, text, Number.isInteger(rc) ? rc : -1, host, staticCount);
     out.write(`${verdict.message}\n`);
     return verdict.ok ? exitCodes.pass : exitCodes.verdict;
   }

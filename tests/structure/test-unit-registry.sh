@@ -37,6 +37,7 @@ const doc = JSON.parse(fs.readFileSync(source, 'utf8'));
 const index = doc.files.findIndex((entry) => entry.path === unitPath);
 if (index < 0) process.exit(3);
 if (change === 'drop') doc.files.splice(index, 1);
+else if (change === 'run-everywhere') delete doc.files[index].notRunOn;
 else doc.files[index].registered += Number(change);
 fs.writeFileSync(target, JSON.stringify(doc));
 NODE
@@ -420,6 +421,35 @@ if [ "$U10E_RESULT" = "$U10E_WANT" ]; then
   check "U10e unit_run refuses UNIT_RUN_TEE without a driver-owned UNIT_RUN_OUTPUT before node runs" PASS
 else
   check "U10e tee without an output file: got '$U10E_RESULT', want '$U10E_WANT'" FAIL
+fi
+
+FAKE_WINDOWS="$WORK/fake-windows-bin"
+mkdir -p "$FAKE_WINDOWS"
+printf '#!/bin/sh\necho MINGW64_NT-10.0-19045\n' > "$FAKE_WINDOWS/uname"
+chmod +x "$FAKE_WINDOWS/uname"
+U11_RESULT=""
+for U11_PAIR in test-harness-launcher.sh:tests/structure/process-supervisor.test.js test-work-order-runtime.sh:tests/structure/work-order-v1.test.js; do
+  U11_DRIVER="${U11_PAIR%%:*}"
+  U11_UNIT="${U11_PAIR#*:}"
+  U11_DECLARED=0
+  PATH="$FAKE_WINDOWS:$PATH" UNIT_REGISTRY_HOST=win32 bash "$ROOT/tests/structure/$U11_DRIVER" > "$WORK/u11-declared.log" 2>&1 || U11_DECLARED=$?
+  U11_REMOVED=0
+  if mutate_registry "$WORK/u11-runs-everywhere.json" "$U11_UNIT" run-everywhere; then
+    PATH="$FAKE_WINDOWS:$PATH" UNIT_REGISTRY_HOST=win32 UNIT_REGISTRY_FILE="$WORK/u11-runs-everywhere.json" bash "$ROOT/tests/structure/$U11_DRIVER" > "$WORK/u11-removed.log" 2>&1 || U11_REMOVED=$?
+  else
+    U11_REMOVED=99
+  fi
+  if [ "$U11_DECLARED" = 0 ] && grep -qF "declares $U11_UNIT not run on win32" "$WORK/u11-declared.log" \
+    && [ "$U11_REMOVED" = 1 ] && grep -qF "never ran or graded $U11_UNIT" "$WORK/u11-removed.log"; then
+    :
+  else
+    U11_RESULT="$U11_RESULT $U11_DRIVER: declared rc $U11_DECLARED, removed rc $U11_REMOVED;"
+  fi
+done
+if [ -z "$U11_RESULT" ]; then
+  check "U11 on native Windows each POSIX-only driver passes its done check only while the registry declares its unit file not run there" PASS
+else
+  check "U11 native Windows arms:$U11_RESULT" FAIL
 fi
 
 unit_check_done "U9 every unit file the registry gives this driver was graded"

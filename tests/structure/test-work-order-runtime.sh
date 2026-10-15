@@ -20,10 +20,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     check "native Windows work-order run skipped (macOS/Linux/WSL required)" PASS
-    finish; exit 0
+    unit_check_done "R2a every unit file the registry gives this suite was graded"
+    finish; exit
     ;;
 esac
 
@@ -39,7 +42,6 @@ check "R0 module, wrapper, unit suite, fake and session baseline exist" PASS
   && check "R1 wrapper is executable and parses" PASS || check "R1 wrapper is executable and parses" FAIL
 node --check "$MODULE" 2>/dev/null && check "R1 module parses" PASS || check "R1 module parses" FAIL
 
-. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "R2 the work-order runtime unit file passes with its registered count and no skipped case" "$UNIT"
 unit_check_done "R2a every unit file the registry gives this suite was graded"
 
