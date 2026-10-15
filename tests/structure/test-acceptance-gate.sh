@@ -9,7 +9,7 @@ LIB="$PLUGIN_DIR/hooks/lib/acceptance-verify-v1.js"
 UNIT="$PLUGIN_DIR/tests/structure/acceptance-verify-v1.test.js"
 CAPABILITY="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -51,23 +51,7 @@ WORK="$(mktemp -d 2>/dev/null)" || { check "A0 scratch dir" FAIL; finish; exit 1
 trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd -P "$WORK" && pwd -P)"
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "A0b the unit suite passes (node --test acceptance-verify-v1.test.js)" PASS
-else
-  check "A0b the unit suite passes (node --test acceptance-verify-v1.test.js)" FAIL
-  sed -n '1,60p' "$WORK/unit.out"
-fi
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
-  check "A0c the unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "A0c the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if A0C_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "A0c-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "A0c-overview $A0C_OVERVIEW" FAIL
-fi
+unit_check "A0b the acceptance-verify unit file passes" "$UNIT"
 
 if [ "$(grep -cF '_zensu_acceptance_gate "$session_val" 1 "$(_zensu_autopilot_validate_option "$done_run")" || exit 1' "$LOG")" = "1" ] \
   && [ "$(grep -cF '_zensu_acceptance_gate "$session_val" || chain_gate_rc=1' "$LOG")" = "1" ]; then
@@ -765,4 +749,5 @@ else
 fi
 
 rm -f "$TDD_SKILL"
+unit_check_done "A0z every unit file the registry gives this suite was graded"
 finish

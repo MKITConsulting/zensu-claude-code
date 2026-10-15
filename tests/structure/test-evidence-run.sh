@@ -5,7 +5,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 LIB="$PLUGIN_DIR/hooks/lib/evidence-run-v1.js"
 UNIT="$PLUGIN_DIR/tests/structure/evidence-run-v1.test.js"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -39,29 +39,7 @@ check "E0 node and git are available" PASS
 WORK="$(mktemp -d 2>/dev/null)" || { check "E0 scratch dir" FAIL; finish; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
-if node --test --test-reporter=tap "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "E1 the unit suite passes (node --test evidence-run-v1.test.js)" PASS
-else
-  check "E1 the unit suite passes (node --test evidence-run-v1.test.js)" FAIL
-  if grep -q '^not ok ' "$WORK/unit.out"; then
-    awk '/^not ok /{show=1} /^# Subtest: /{show=0} show' "$WORK/unit.out" | head -n 200
-    grep -E '^# (tests|pass|fail|cancelled|skipped) ' "$WORK/unit.out"
-  else
-    sed -n '1,60p' "$WORK/unit.out"
-  fi
-fi
-
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if unit_cases_registered_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
-  check "E1a the unit suite registered at least $UNIT_FLOOR cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "E1a the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if E1A_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "E1a-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "E1a-overview $E1A_OVERVIEW" FAIL
-fi
+unit_check "E1 the evidence-run unit file passes" "$UNIT"
 
 if node -e '
   const m = require(process.argv[1]);
@@ -215,4 +193,5 @@ else
   check "E12 an unknown scope, an unknown argument and a missing --cmd are usage errors ($RC_SCOPE/$RC_ARG/$RC_CMD)" FAIL
 fi
 
+unit_check_done "E1z every unit file the registry gives this suite was graded"
 finish

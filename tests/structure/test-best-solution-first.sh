@@ -131,6 +131,9 @@ if [ -z "$DRIVE_TMP" ]; then
   exit 1
 fi
 
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "B0 the shared reader's unit file passes" "$PLUGIN_DIR/tests/structure/rule-block-v1.test.js"
+
 OUT=""; RC=0
 # Drive the hook with a payload. Sets OUT (stdout) and RC (exit code) in the
 # CALLER's scope — never call this inside `$( )`, see the header note.
@@ -359,46 +362,6 @@ if printf '%s\n' "$B2H_CODE" | grep -qF 'const MAX_FILE =' \
   check "B2i the shared reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
 else
   check "B2i the shared reader lost its size ceiling, short-read refusal or guarded close" FAIL
-fi
-
-# B0 — the unit contract for the shared reader, driven FIRST. tests/run-all.sh
-# discovers only test-*.sh, so a *.test.js with no driver is never executed by the
-# tree runner. It runs at the head of this file on purpose: it needs nothing this
-# suite builds, and at the tail a Windows shard timeout would cost the only
-# coverage the reader's own refusal branches have anywhere.
-RULE_BLOCK_UNIT="$PLUGIN_DIR/tests/structure/rule-block-v1.test.js"
-if [ ! -f "$RULE_BLOCK_UNIT" ]; then
-  check "B0 the shared reader's unit contract is missing from disk" FAIL
-elif ! command -v node >/dev/null 2>&1; then
-  skip "B0 rule-block unit contract (node unavailable)"
-else
-  B0_OUT="$(node --test "$RULE_BLOCK_UNIT" 2>&1)"
-  B0_RC=$?
-  # A case-count floor as well as the exit status: `node --test` exits 0 for a file
-  # that registers ZERO cases, so the status alone cannot tell a green run from a
-  # suite that stopped being discovered.
-  #
-  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ pass 10`, and that mark is
-  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old
-  # pattern read nothing, so B0 reported a fully green unit suite as failing on every
-  # macOS run. The first field is the only thing that varies between node's reporters
-  # (`#` on the TAP one), so matching one space-free token covers both and depends on no
-  # locale. It cannot match node's failure detail either: those lines are INDENTED, and
-  # this pattern requires the count to be the second field of an unindented line.
-  B0_PASS="$(printf '%s\n' "$B0_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
-  # Two cases skip themselves on win32 — a real symlink and a FIFO, neither of which
-  # that host can produce — so a single pass floor cannot hold on both platforms. The
-  # REGISTERED floor (pass + skipped) is what catches a file that stopped being
-  # discovered; the pass floor below it is what keeps an all-skipped file from
-  # satisfying the registered one.
-  B0_SKIP="$(printf '%s\n' "$B0_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
-  [ -n "$B0_SKIP" ] || B0_SKIP=0
-  B0_SEEN=$(( ${B0_PASS:-0} + B0_SKIP ))
-  if [ "$B0_RC" -eq 0 ] && [ -n "$B0_PASS" ] && [ "$B0_SEEN" -ge 9 ] && [ "$B0_PASS" -ge 7 ]; then
-    check "B0 the shared reader's unit contract passes ($B0_PASS cases, $B0_SKIP skipped)" PASS
-  else
-    check "B0 rule-block unit contract: rc=$B0_RC pass=${B0_PASS:-none} skipped=$B0_SKIP (want registered >= 9 and pass >= 7): $(printf '%s' "$B0_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
-  fi
 fi
 
 # ── B1: registration on both events ─────────────────────────────────────────
@@ -1029,4 +992,5 @@ else
 fi
 
 
+unit_check_done "B0z every unit file the registry gives this suite was graded"
 finish

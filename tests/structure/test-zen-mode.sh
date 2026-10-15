@@ -13,6 +13,7 @@ set -u
 # off-phrase still works after the model has drifted away from the mode.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 HOOK="$PLUGIN_DIR/hooks/user-prompt-zen-mode.sh"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh"
 SKILL="$PLUGIN_DIR/skills/zen-mode/SKILL.md"
@@ -591,7 +592,7 @@ if command -v node >/dev/null 2>&1; then
     // with its registration leaves a consistent smaller world. The absolute
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
-    // for a new scenario, exactly as `Z29_FLOOR` and `Z31_FLOOR` work.
+    // for a new scenario, exactly as `registered` in tests/profiles/unit-files.v1.json works.
     if (registered < 5) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
@@ -1438,81 +1439,12 @@ fi
 # choose its own. The unit file runs every grader against canned replies and
 # pins the pass/fail vector, so a grader that stops catching what it is named
 # for turns THIS suite — which is in ciStructureTests — red.
-Z29_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
-if [ ! -f "$Z29_UNIT" ]; then
-  check "Z29 the eval graders' unit contract is missing from disk" FAIL
-elif ! command -v node >/dev/null 2>&1; then
-  # FAIL, not a skip: recording a PASS here would credit a check that did not
-  # execute, which is the one verdict this suite may not give.
-  check "Z29 eval-grader unit contract did not run — node is not on PATH" FAIL
-else
-  Z29_OUT="$(node --test "$Z29_UNIT" 2>&1)"
-  Z29_RC=$?
-  # A case-count floor as well as the exit status: `node --test` exits 0 for a
-  # file that registers ZERO cases, so the status alone cannot tell a green run
-  # from a file that stopped being discovered.
-  #
-  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ pass 25`, and that mark is
-  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old
-  # pattern read nothing, so `pass` resolved to empty and `fail` to `unknown`, and Z29
-  # and Z31 both reported a fully green unit suite as failing on every macOS run — the
-  # same byte-versus-character hazard CLAUDE.md already records for the anchor marks
-  # themselves. The first field is the only thing that varies between node's reporters
-  # (`#` on the TAP one), so matching one space-free token covers both and depends on no
-  # locale. It cannot match node's failure detail either: those lines are INDENTED, and
-  # this pattern requires the count to be the second field of an unindented line.
-  Z29_PASS_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
-  Z29_SKIP_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
-  [ -n "$Z29_SKIP_N" ] || Z29_SKIP_N=0
-  Z29_FAIL_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* fail \([0-9]*\)$/\1/p' | head -1)"
-  [ -n "$Z29_FAIL_N" ] || Z29_FAIL_N=unknown
-  Z29_SEEN=$(( ${Z29_PASS_N:-0} + Z29_SKIP_N ))
-  # The floors are the REGISTRATION step for a new case, the convention this repo
-  # records for test-session-trail-skill.sh T22. At 3 against a file of 6 they
-  # admitted the deletion of every case that actually executes a grader — the
-  # vector tests and the both-directions test — while staying green. Raise this
-  # number in the same commit that adds a case.
-  Z29_FLOOR=11
-  # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
-  # FLOOR` could never fail independently — skips are non-negative, so the first
-  # conjunct held whenever the second did — and it defeated the stated intent:
-  # marking a case `test.skip` left it registered but reported FAIL. `Z29_SEEN`
-  # is the registration count, and a non-zero `# fail` is what turns this red.
-  if [ "$Z29_RC" -eq 0 ] && [ -n "$Z29_PASS_N" ] && [ "$Z29_FAIL_N" = "0" ] && [ "$Z29_SEEN" -ge "$Z29_FLOOR" ]; then
-    check "Z29 the eval graders' unit contract passes ($Z29_PASS_N cases)" PASS
-  else
-    check "Z29 eval-grader unit contract: rc=$Z29_RC pass=${Z29_PASS_N:-none} skipped=$Z29_SKIP_N (want registered >= $Z29_FLOOR and fail 0, got fail=$Z29_FAIL_N): $(printf '%s' "$Z29_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
-  fi
-fi
-
+unit_check "Z29 the eval graders' unit file passes" "$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
 
 # ── Z31: the anchor module's own unit contract ──────────────────────────────
 # tests/run-all.sh discovers only test-*.sh, so the node --test file that pins
-# the shape -> line mapping needs a driver here. Same shape as Z29, and for the
-# same reason: node --test exits 0 for a file registering zero cases, so a floor
-# over REGISTRATIONS is what keeps a silently emptied file from reading as
-# agreement. Raise it in the same commit that adds a case.
-Z31_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
-Z31_FLOOR=25
-if [ ! -f "$Z31_UNIT" ]; then
-  check "Z31 the anchor module's unit contract is missing from disk" FAIL
-elif ! command -v node >/dev/null 2>&1; then
-  check "Z31 anchor-module unit contract did not run — node is not on PATH" FAIL
-else
-  Z31_OUT="$(node --test "$Z31_UNIT" 2>&1)"
-  Z31_RC=$?
-  Z31_PASS_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
-  Z31_SKIP_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
-  [ -n "$Z31_SKIP_N" ] || Z31_SKIP_N=0
-  Z31_FAIL_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* fail \([0-9]*\)$/\1/p' | head -1)"
-  [ -n "$Z31_FAIL_N" ] || Z31_FAIL_N=unknown
-  Z31_SEEN=$(( ${Z31_PASS_N:-0} + Z31_SKIP_N ))
-  if [ "$Z31_RC" -eq 0 ] && [ -n "$Z31_PASS_N" ] && [ "$Z31_FAIL_N" = "0" ] && [ "$Z31_SEEN" -ge "$Z31_FLOOR" ]; then
-    check "Z31 the anchor module's unit contract passes ($Z31_PASS_N cases)" PASS
-  else
-    check "Z31 anchor-module unit contract: rc=$Z31_RC pass=${Z31_PASS_N:-none} skipped=$Z31_SKIP_N (want registered >= $Z31_FLOOR and fail 0, got fail=$Z31_FAIL_N)" FAIL
-  fi
-fi
+# the shape -> line mapping needs a driver here.
+unit_check "Z31 the anchor module's unit file passes" "$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
 
 # ── Z32: the anchor the hook actually EMITS ─────────────────────────────────
 # Z19b compares the carriers and Z31 pins the mapping; neither observes the one
@@ -3320,8 +3252,7 @@ else
 fi
 rm -rf "$P77"
 
-# Z78 the three source-needle checks above must BITE, and the two unit floors
-# must equal the registration counts they guard.
+# Z78 the three source-needle checks above must BITE.
 #
 # A grep needle that also matches an unrelated site cannot fail for the property
 # it names, and this suite shipped three of them: Z62's `[ -d "$ZEN_STATE_DIR" ]`
@@ -3334,10 +3265,6 @@ rm -rf "$P77"
 # deleted for real. The predicates are shared functions rather than a second copy
 # of each pattern: a hand-copied bite harness drifts away from the check it grades
 # and then proves nothing, which is the same class this check exists to close.
-#
-# The floors are held the same way. A floor below the registration count admits
-# the deletion of every case the commit added, so it is compared against the
-# count rather than asserted as a literal.
 Z78_BAD=""
 Z78_SRC="$(cat "$HOOK")"
 
@@ -3362,27 +3289,8 @@ if [ -z "$Z78_BAD" ]; then
   zen_probe_z65 "$Z78_M65" && Z78_BAD="$Z78_BAD z65-does-not-bite"
 fi
 
-Z78_N31="$(grep -cE '^[[:space:]]*test\(' "$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js" 2>/dev/null || echo 0)"
-Z78_N29="$(grep -cE '^[[:space:]]*test\(' "$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js" 2>/dev/null || echo 0)"
-[ "${Z31_FLOOR:-0}" = "$Z78_N31" ] || Z78_BAD="$Z78_BAD z31-floor-${Z31_FLOOR:-unset}-against-$Z78_N31"
-# THE OVERVIEW ROWS TOO. Both counts were correct and held by nothing, while this
-# check already computes them - so the row could drift the moment a case landed.
-Z78_OV="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
-for Z78_PAIR in "zen-anchor-v1.test.js:$Z78_N31" "zen-anchor-assertions.test.js:$Z78_N29"; do
-  Z78_FILE="${Z78_PAIR%%:*}"; Z78_WANT="${Z78_PAIR##*:}"
-  Z78_ROW="$(grep -F "\`$Z78_FILE\`" "$Z78_OV" | head -1)"
-  if [ -z "$Z78_ROW" ]; then
-    Z78_BAD="$Z78_BAD overview-row-missing-for-$Z78_FILE"
-  else
-    Z78_GOT="$(printf '%s' "$Z78_ROW" | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
-    [ "$Z78_GOT" = "$Z78_WANT" ] \
-      || Z78_BAD="$Z78_BAD overview-row-$Z78_FILE-says-${Z78_GOT:-none}-want-$Z78_WANT"
-  fi
-done
-[ "${Z29_FLOOR:-0}" = "$Z78_N29" ] || Z78_BAD="$Z78_BAD z29-floor-${Z29_FLOOR:-unset}-against-$Z78_N29"
-
 if [ -z "$Z78_BAD" ]; then
-  check "Z78 the source-needle checks bite and both unit floors equal their registration counts" PASS
+  check "Z78 the source-needle checks bite" PASS
 else
   check "Z78 a check above cannot fail for the property it names:$Z78_BAD" FAIL
 fi
@@ -4715,6 +4623,8 @@ fi
 # two are torn down here because the fail-open arms need them alive until the
 # last check that reads them.
 rm -rf "$P32" "$P39"
+
+unit_check_done "every unit file the registry gives this suite was graded"
 
 echo "----"
 if [ "${SKIP:-0}" -gt 0 ]; then

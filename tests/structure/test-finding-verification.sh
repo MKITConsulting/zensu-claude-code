@@ -11,9 +11,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$ROOT/hooks/lib/finding-verify-v1.js"
 UNIT="$ROOT/tests/structure/finding-verify-v1.test.js"
-# Shared, locale-independent `node --test` summary parse (see the file header for
-# why the count matters and why it is not hand-copied here).
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 
 source "$ROOT/tests/structure/lib-skill-text.sh"
 TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
@@ -53,19 +51,7 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # ── P1 the model-free grader ─────────────────────────────────────────
-P1_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_registered_floor "$WORK/unit.out" "$P1_FLOOR"; then
-  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
-else
-  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= ${P1_FLOOR:-<no overview row>} registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
-  grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
-fi
-if P1_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "P1-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($P1_FLOOR)" PASS
-else
-  check "P1-overview $P1_OVERVIEW" FAIL
-fi
+unit_check "P1 the grader unit file passes" "$UNIT"
 
 mkdir -p "$WORK/repo/src"
 printf 'one\ntwo\nthree\n' > "$WORK/repo/src/a.js"
@@ -317,6 +303,7 @@ else
 fi
 
 rm -f "$TDD_MD" "$PR_MD"
+unit_check_done "P1z every unit file the registry gives this suite was graded"
 echo "----"
 echo "test-finding-verification: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
