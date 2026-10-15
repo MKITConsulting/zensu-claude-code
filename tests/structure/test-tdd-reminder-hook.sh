@@ -227,6 +227,33 @@ else
 fi
 rm -rf "$P15"
 
+P16="$(mktemp -d -t tddrem-XXXXXX)"
+payload "x" "s16" "$P16" >/dev/null
+LARGE16="$P16/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "s16", prompt: "fix the auth token expiry bug\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE16"
+PAD16=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD16="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT16="$(env PAD16_A="$PAD16" PAD16_B="$PAD16" PAD16_C="$PAD16" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P16/plugin-data" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE16" 2>/dev/null | fired)"
+[ "$OUT16" = "FIRED" ] \
+  && check "C16 a code prompt in a payload over the exec size limit still fires the TDD directive" PASS \
+  || check "C16 oversized code prompt (got '$OUT16')" FAIL
+rm -rf "$P16"
+
+C17_LEAK="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8").replace(/\\\n\s*/g, " ");
+  const leaks = src.split("\n").filter((line) =>
+    /(^|[\s;\x28|&])[A-Za-z_][A-Za-z0-9_]*="\$\{?INPUT\}?"[^\n]*\bnode\b/.test(line)
+    || /\bnode\b[^|\n]*"\$\{?INPUT\}?"/.test(line));
+  process.stdout.write(leaks.join("\n"));
+')"
+if [ -z "$C17_LEAK" ]; then
+  check "C17 no node child takes the hook payload from its environment or argv" PASS
+else
+  check "C17 a node child takes the hook payload from its environment or argv, so an oversized payload fails the exec silently (${C17_LEAK:0:120})" FAIL
+fi
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

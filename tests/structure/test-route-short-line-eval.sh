@@ -16,7 +16,7 @@ FIXTURE_TEST="$EVAL_DIR/test-projects/cart-app/src/cart.test.js"
 LEDGER_RULE="$PLUGIN_DIR/.claude/rules/prompt-ledger.md"
 CODE_MESSAGE='Add an optional discountPercent parameter to cartTotal in src/cart.js that reduces the item subtotal by that percentage before the shipping fee is added, default 0.'
 PLAN_MESSAGE='Plan this cart app as a product in Zensu: set up the roadmap with its features and tiers.'
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -68,23 +68,7 @@ WORK="$(mktemp -d 2>/dev/null)" || { check "RS0 scratch dir" FAIL; finish; exit 
 trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd -P "$WORK" && pwd -P)"
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "RS1 the grader unit suite passes (node --test route-short-line-graders.test.js)" PASS
-else
-  check "RS1 the grader unit suite passes (node --test route-short-line-graders.test.js)" FAIL
-  sed -n '1,60p' "$WORK/unit.out"
-fi
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
-  check "RS1a the grader unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "RS1a the grader unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if RS1_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "RS1b the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "RS1b $RS1_OVERVIEW" FAIL
-fi
+unit_check "RS1 the grader unit file passes" "$UNIT"
 
 node - "$MAIN_CFG" "$PRE_CFG" > "$WORK/rs2.tsv" 2>&1 <<'NODE'
 const fs = require('node:fs');
@@ -403,10 +387,13 @@ else
   check "RS8 the wrapper passes ZENSU_WRAPPER_SETTINGS as --settings behind its refusals, and the provider sets it with the eval config" FAIL
 fi
 
-if node --test "$FIXTURE_TEST" >"$WORK/fixture.out" 2>&1 && unit_cases_meet_floor "$WORK/fixture.out" 2; then
+if node --test-reporter=tap "$FIXTURE_TEST" >"$WORK/fixture.out" 2>&1; then RS9_RC=0; else RS9_RC=$?; fi
+RS9_PASS="$(sed -n 's/^# pass \([0-9]*\)$/\1/p' "$WORK/fixture.out" | head -1)"
+RS9_FAIL="$(sed -n 's/^# fail \([0-9]*\)$/\1/p' "$WORK/fixture.out" | head -1)"
+if [ "$RS9_RC" -eq 0 ] && [ "${RS9_FAIL:-none}" = 0 ] && [ "${RS9_PASS:-0}" -ge 2 ]; then
   check "RS9 the cart-app fixture's own tests pass, so the model starts from a green tree" PASS
 else
-  check "RS9 the cart-app fixture's own tests pass (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
+  check "RS9 the cart-app fixture's own tests pass (rc=$RS9_RC pass=${RS9_PASS:-none} fail=${RS9_FAIL:-none})" FAIL
 fi
 
 RS10_BAD=""
@@ -431,5 +418,7 @@ if grep -qF 'evals/route-short-line-reaction' "$LEDGER_RULE"; then
 else
   check "RS11 the prompt-ledger rule points at the reaction eval for the short lines" FAIL
 fi
+
+unit_check_done "RS12 every unit file the registry gives this suite was graded"
 
 finish

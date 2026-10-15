@@ -151,5 +151,6 @@ raw output to a file there; nothing else keeps it.
 - `--review-import` trusts a review marker by its digest, which anyone who knows the order id can
   compute, and it reads only the first part of a review. A review that an earlier attempt published
   only in part is imported as if it were complete.
-- The launcher's process-group handling is POSIX only; Windows is unverified.
+- Work-order mode is unverified on native Windows: the launcher's process-group handling is POSIX
+  only, and the work-order suites skip on that host.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.

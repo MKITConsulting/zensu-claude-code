@@ -79,7 +79,15 @@ workers first needs the `SubagentStop` reader to take the result from the handba
 **Neutral children** (`host-profile-v1`) get an ALLOWLIST, not a denylist. `neutralViolation`
 admits a tool only when it is in `HOST_PROFILE_TOOLS`, is named in
 `HOST_PROFILE_MCP_READ_TOOLS`, or is a Zensu MCP read tool (`/^mcp__.*zensu/i` plus
-`ZENSU_MCP_READ_RE`, kept from before); every other tool is denied. The six-name
+`ZENSU_MCP_READ_RE`, kept from before); every other tool is denied, with one exception. `Bash`
+is granted to a named neutral child that is not a `zensu-review-*` persona, behind an accident
+guard, unless `hooks.subagentShell` withdraws it (`false` in a consulted config file, or a
+consulted file that cannot be read; the consulted files are the `ZENSU_CONFIG` file alone while it
+is set, else the global file and the project overlay): `hostProfileToolViolation` routes it through `shellViolation` before the `COMMAND_TOOLS`
+deny, and `.claude/rules/subagent-shell-guard.md` documents the grant, the guard and their gaps.
+The guard prevents accidents and is not a sandbox. `Monitor` is not part of that grant and stays
+denied with every other tool outside the list; that deny names `Bash` in its list only while the
+grant admits the caller. The six-name
 `COMMAND_TOOLS` denylist and the Zensu-only MCP check it replaced let every command-executing
 MCP tool through (`ctx_execute`, `ctx_execute_file`, `ctx_batch_execute`, `run_in_terminal`,
 `browser_run_code_unsafe`), and the host's `Monitor`, whose `command` input is a shell script,
@@ -127,7 +135,7 @@ resolution first: allowed with an existing `cwd`, denied with a vanished one.
   `tests/structure/test-session-control-claude.sh` and
   `evals/session-control/tests/wrapper-selftest.sh`. The deny texts are pinned in
   `evals/session-control/lib/contract-provider.js`; `evals/session-control/lib/live-evidence.js`
-  matches the command deny by prefix. `skills/gauntlet-loop/SKILL.md` states the bound and G15
+  matches the command deny by prefix and also accepts the guard's environment-dump deny. `skills/gauntlet-loop/SKILL.md` states the bound and G15
   in `tests/structure/test-gauntlet-loop-skill.sh` pins it. `docs/multi-repo-chains-spec.md`
   and `docs/multi-repo-chains-overview.html` cite lines of this module. Operator accounts of
   the allowlist: the capability-gate row in `docs/configuration.md`, the principal item and

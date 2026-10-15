@@ -46,65 +46,15 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # ── Unit-suite driver ───────────────────────────────────────────────────────
-# tests/run-all.sh discovers only test-*.sh, so a bare *.test.js is never executed
-# by the tree runner. Driven FIRST, before any scenario: at the tail a shard
-# timeout would cost the whole unit suite, which is the only coverage the module's
-# own refusal table has anywhere. The case-count floor matters because exit 0 also
-# accepts a file that registered zero cases.
-UNIT_OUT="$(node --test "$PLUGIN_DIR/tests/structure/session-lineage-v1.test.js" 2>&1)"
-UNIT_RC=$?
-# BOTH summary spellings: `# tests`/`# pass` is the TAP reporter's form, and
-# capturing only the other one made an empty capture look like a module failure.
-# `^.*[[:space:]]` rather than a leading `.`: the spec reporter prefixes each
-# summary with a three-BYTE glyph, and `.` matches one byte -- so under a non-UTF-8
-# locale the capture came back empty, UNIT_TOTAL fell to 0, and a healthy module
-# was reported as a failure. Anchored on the WORD and the digits instead.
-UNIT_TOTAL="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-UNIT_SKIP="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]skipped \([0-9][0-9]*\)$/\1/p' | tail -1)"
-case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
-case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
-case "$UNIT_SKIP" in ''|*[!0-9]*) UNIT_SKIP=0 ;; esac
-# EXACT, not a floor -- and now that applies to the TOTAL as well. A pass floor
-# accepts a case that quietly started skipping itself, which is precisely how a
-# platform-gated case dies: the gate widens, the case stops running, and the suite
-# still reports green with a smaller pass count than the floor allows for. The old
-# `-ge 61` against 71 registered cases left ten of them deletable with everything
-# green, so the floor had the same defect one axis over.
-#
-# SEVENTEEN cases carry a win32 skip, in TWO spellings: twelve write the plain
-# boolean `skip: process.platform === 'win32'` and five write a ternary that yields a
-# STRING reason, which node:test counts as a skip just the same. Counting one spelling
-# reported 12 against an actual 17 and took the whole lineage suite red on
-# windows-shard-3 for a reason unrelated to the module. TWO of the seventeen ALSO skip
-# as root, where a mode guard cannot be observed at all.
-#
-# All three numbers stay hand-maintained on purpose: deriving them from the file under
-# test would make the check agree with whatever that file currently says.
-UNIT_PLATFORM="$(node -p 'process.platform' 2>/dev/null)"
-UNIT_ROOT="$(node -p 'process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() === 0 ? 2 : 0' 2>/dev/null)"
-case "$UNIT_ROOT" in ''|*[!0-9]*) UNIT_ROOT=0 ;; esac
-UNIT_TOTAL_WANT=78
-UNIT_WIN_SKIP_WANT=17
-# The win32 count is enforced only ON win32, so a case whose gate widened would drift
-# until the Windows shard ran -- one CI round after the edit, which is how the
-# 12-against-17 miss reached a shard in the first place. Derived here as a SECOND,
-# independent count from the source, so the number fails on the platform the edit is
-# made on. Deliberately a different measurement from the runtime one: this counts
-# DECLARATIONS, that counts node:test's own tally, and they agree only while both hold.
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "L-unit the session-lineage unit file passes" "$PLUGIN_DIR/tests/structure/session-lineage-v1.test.js"
 UNIT_SKIP_DECLS="$(grep -c 'skip: process.platform' "$PLUGIN_DIR/tests/structure/session-lineage-v1.test.js" || true)"
 case "$UNIT_SKIP_DECLS" in ''|*[!0-9]*) UNIT_SKIP_DECLS=0 ;; esac
-if [ "$UNIT_SKIP_DECLS" = "$UNIT_WIN_SKIP_WANT" ]; then
-  check "L-unit-decls the win32 skip expectation matches the declarations in the file ($UNIT_SKIP_DECLS)" PASS
+UNIT_WIN_SKIP_WANT="$(node -p 'const entry = require(process.argv[1]).files.find((file) => file.path === "tests/structure/session-lineage-v1.test.js"); String((entry && entry.skips && entry.skips.win32) || 0)' "$PLUGIN_DIR/tests/profiles/unit-files.v1.json" 2>/dev/null)"
+if [ -n "$UNIT_WIN_SKIP_WANT" ] && [ "$UNIT_SKIP_DECLS" = "$UNIT_WIN_SKIP_WANT" ]; then
+  check "L-unit-decls the registry's win32 skip ceiling matches the win32 skip declarations in the file ($UNIT_SKIP_DECLS)" PASS
 else
-  check "L-unit-decls win32 skip declarations drifted (source has $UNIT_SKIP_DECLS, the expectation is $UNIT_WIN_SKIP_WANT)" FAIL
-fi
-if [ "$UNIT_PLATFORM" = "win32" ]; then UNIT_SKIP_WANT="$UNIT_WIN_SKIP_WANT"; else UNIT_SKIP_WANT="$UNIT_ROOT"; fi
-if [ "$UNIT_RC" = "0" ] && [ "$UNIT_TOTAL" = "$UNIT_TOTAL_WANT" ] && [ "$UNIT_SKIP" = "$UNIT_SKIP_WANT" ] && [ "$UNIT_PASS" = "$((UNIT_TOTAL - UNIT_SKIP))" ]; then
-  check "L-unit session-lineage-v1.test.js passes ($UNIT_PASS/$UNIT_TOTAL cases, $UNIT_SKIP skipped on $UNIT_PLATFORM)" PASS
-else
-  check "L-unit session-lineage-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0} skipped=${UNIT_SKIP:-0}, want exactly $UNIT_TOTAL_WANT cases and exactly $UNIT_SKIP_WANT skipped on $UNIT_PLATFORM)" FAIL
-  printf '%s\n' "$UNIT_OUT" | tail -20
+  check "L-unit-decls win32 skip declarations drifted (source has $UNIT_SKIP_DECLS, the registry allows ${UNIT_WIN_SKIP_WANT:-<unreadable>})" FAIL
 fi
 
 FAKE="$(mktemp -d -t zensu-session-trail-lineage-XXXXXX)" || FAKE=""
@@ -3254,4 +3204,5 @@ else
   check "L29 the single exemption is the L10 case" FAIL
 fi
 
+unit_check_done "L-unit-z every unit file the registry gives this suite was graded"
 report

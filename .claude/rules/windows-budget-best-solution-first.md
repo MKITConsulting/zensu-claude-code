@@ -3,6 +3,8 @@ paths:
   - "tests/profiles/windows-ci.v1.json"
   - "tests/structure/windows-ci-contract.test.js"
   - "tests/structure/test-best-solution-first.sh"
+  - ".github/workflows/ci.yml"
+  - "tests/run-profile.js"
 ---
 
 # Windows Budget for `best-solution-first`
@@ -151,3 +153,57 @@ three. It also stays below what a returning scan would cost: about eight helper 
 than 11.5 s each (run 37155469145) push the suite past 110 s, so that regression surfaces as this
 suite's own `TIMED_OUT`. The suite still runs last on shard 3, so its timeout cannot starve a neighbour.
 Re-measure on the next green Windows run and replace these figures.
+
+**`windows-shard-2` ran out of room, so `versioned-plugin-upgrade` moved to the FRONT of
+`windows-shard-7`.** On the 29 all-green runs from 38309344682 to 38432294025 (2026-10-12 and
+2026-10-13), shard 2's eight suites took 928-1601 s of the 1800000 ms envelope; the slowest,
+run 38419619148, left 198.6 s of it. Its two large suites took 391-703 s (`installed-wrapper`) and
+247-480 s (`versioned-plugin-upgrade`). On PR #383's run 37666241244 the shard did not finish at
+all (see the next paragraph). Shard 7's only suite, `stop-enforcer-self-review-routing`, took
+383-630 s on the same runs, the least of any shard; the other seven shards peaked at 934-1554 s.
+`versioned-plugin-upgrade` moved with its command and its 900000 ms cap unchanged. On the same
+runs, shard 2 without it would have taken 682-1167 s and shard 7 with it 751-1084 s; the slowest
+figures of its two suites, 479625 and 630417 ms, sum to 1110 s. `installed-wrapper` stayed on
+shard 2: beside the routing suite, two 1200000 ms caps would leave either suite only 600 s after
+the other ran to its cap, less than either suite's slowest figure, 703 and 630 s.
+`versioned-plugin-upgrade` runs FIRST on shard 7 because the routing suite's cap is the larger
+one. A run of it to its 900000 ms cap, plus the up to 45 s that ending it takes, still leaves the
+routing suite about 855-900 s for its 630 s. Both suites read an exported `ZENSU_CONFIG` and keep
+their state in their own temporary directories, so sharing shard 7's sandbox changes neither.
+`expectedShardHomes` in `tests/structure/windows-ci-contract.test.js` pins the moved suite's home,
+and `expectedShardTails` pins the routing suite as the tail of shard 7. Shard 5 is the next to
+watch: run 38412632511 measured it at 1554 s, with `autopilot-plan-delegate` at 670 s of its
+720000 ms cap and `post-review-self-review-handoff` at 834 s of its 900000 ms cap. Re-measure
+shards 2, 5 and 7 on the next green Windows run and replace these figures.
+
+**The job limit stayed at 35 minutes, because no workflow limit would have saved that run's
+report.** On run 37666241244 the `windows-shard-2` job reached its 35-minute limit 2030 s into
+the profile step, which had started after 70 s of setup. Its job record still lists the profile
+step as `in_progress` with no end time, and "Record shard outcome", "Upload Windows profile
+timing report" and both post steps as `pending`; the job closed five minutes after the limit,
+and its log returns HTTP 404. GitHub's workflow-cancellation reference says what a working runner
+does instead: it sends Ctrl-C to the cancelled step, Ctrl-Break after 7500 ms, and kills the
+process tree after another 2500 ms, and the expressions reference says steps with `if: always()`
+still run when a job is cancelled. The server forcibly ends whatever is still running after a
+five-minute cancellation timeout, and the job closed at exactly that point, so the runner never
+ended the step at all. A step-level `timeout-minutes` is enforced by that same runner, so it
+would not have saved the report either, and none was added. A runner that stalled explains every
+observation at once (the overrun, the step that never ended and the missing log), but nothing
+proves it.
+
+`tests/run-profile.js` itself ends a timed-out suite within about 45 s: up to two `taskkill`
+attempts of at most 10 s each, a 5 s wait for the supervisor to close, a third `taskkill` of at
+most 10 s with another 5 s wait, and a 5 s wait for the output streams. It writes the final
+report right after that. Those bounds are event-loop timers, and they hold only while the runner
+drains the step output: Node writes `process.stdout` to a Windows pipe synchronously, so a
+reader that stops blocks the event loop at the next heartbeat or output line, before either
+report write. With the output drained, only two things after the deadline have no time bound:
+removing the profile sandbox, which on win32 makes up to 20 attempts and must also delete the
+temporary tree of a suite killed before its `EXIT` trap ran, and the process exit. The job's
+five-minute reserve over the envelope, which `windows-ci-contract.test.js` pins, covers the
+measured rest. Across 346 green Windows shard jobs on 39 runs from 37635298476 to 38455928917,
+setup took 53-161 s, the profile clock started 0-2 s after its step, and everything after the
+step took 3-45 s; with the 45 s teardown that is at most 253 s of the 300 s. A working runner
+that reaches the job limit anyway still ends the step and runs the `always()` steps, so the
+report is uploaded either way. The defence that does not depend on the runner is headroom: a
+shard that ends well inside its envelope never reaches either limit.

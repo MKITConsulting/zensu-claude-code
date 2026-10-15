@@ -22,9 +22,9 @@ command -v node >/dev/null 2>&1 || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
 
-PROMPT="$(PAYLOAD="$INPUT" node -e '
+PROMPT="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     process.stdout.write(typeof j.prompt === "string" ? j.prompt : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
@@ -38,7 +38,6 @@ esac
 
 KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '
   {
-    out = ""
     for (i = 1; i <= NF; i++) {
       t = $i
       if (skip) { skip = 0; continue }
@@ -48,9 +47,9 @@ KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '
       l = tolower(t)
       sub(/^[^a-z0-9]+/, "", l)
       if (l ~ /^zensu:[a-z0-9]/) continue
-      out = out " " t
+      printf " %s", t
     }
-    print out
+    printf "\n"
   }
 ')"
 
@@ -58,9 +57,9 @@ printf '%s' "$KEYWORD_TEXT" | grep -qiE '(^|[^[:alnum:]])(zensu|product|feature|
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-ledger.sh"
-ROUTER_SESSION_ID="$(PAYLOAD="$INPUT" node -e '
+ROUTER_SESSION_ID="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"

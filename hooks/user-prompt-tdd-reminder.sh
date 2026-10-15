@@ -49,9 +49,9 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled tddReminder || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
-PROMPT="$(PAYLOAD="$INPUT" node -e '
+PROMPT="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     process.stdout.write(typeof j.prompt === "string" ? j.prompt : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
@@ -64,9 +64,9 @@ case "$PROMPT_ORIGIN" in
   task-notification|agent-message|bash-input|slash-command) exit 0 ;;
 esac
 
-SESSION_ID="$(PAYLOAD="$INPUT" node -e '
+SESSION_ID="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"

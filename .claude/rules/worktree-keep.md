@@ -404,11 +404,11 @@ bullets and the `Session state` bullet of §"What it checks" in `skills/doctor/S
 `test-readme-hook-count-sync.sh`; the three
 hook rows and two config rows in `docs/configuration.md`, the README docs-index row, and
 `docs/worktree-keep.md`; the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` with
-the counts in `tests/SUITE-OVERVIEW.md`. `tests/structure/worktree-keep-v1.test.js` pins the
-module (driven by `K3` in `tests/structure/test-worktree-keep.sh`, whose `UNIT_FLOOR` is the
-measured case count and is raised in the same commit as any case added, whose `UNIT_MAX_SKIPPED`
-pins how many cases may skip — none — so a skip fails K3 with its count and its `# SKIP` line
-instead of reading as a deleted case, and which also drives the
+the unit file's entry in `tests/profiles/unit-files.v1.json`. `tests/structure/worktree-keep-v1.test.js`
+pins the module (driven by `K3` in `tests/structure/test-worktree-keep.sh`, which grades each run
+against that entry — its exact registered count is raised in the same commit as any case added,
+and its skip ceiling of none fails K3 with the skipped titles instead of reading as a deleted
+case — and which also drives the
 three hooks end to end against a temp base repo plus a linked worktree), the `P1wk*` family in
 `tests/structure/test-doctor.sh` pins the row shapes including the lazy-require degradation,
 `P1wk13` pins the wrapper's two exports, `P1wk19` EXTRACTS the wrapper's on/off arm and evaluates

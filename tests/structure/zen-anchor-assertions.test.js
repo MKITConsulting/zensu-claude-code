@@ -192,7 +192,7 @@ test("every scenario in the directory exposes at least one executable grader", (
   // The current scenario count, not a round number below it: at 3 against a
   // directory of 5, a scenario deleted together with its registration passed
   // every check in the tree. Raising this is the registration step for a new
-  // scenario, the same convention `Z29_FLOOR` and `Z31_FLOOR` follow.
+  // scenario, the same convention `registered` in tests/profiles/unit-files.v1.json follows.
   assert.ok(scenarios.length >= 8, `expected at least 8 scenarios, found ${scenarios.length}`);
   for (const f of scenarios) {
     const raw = fs.readFileSync(path.join(SCENARIO_DIR, f), "utf8");

@@ -29,16 +29,8 @@ fi
 
 bash -n "$HOOK" 2>/dev/null && check "R1 the hook passes bash -n" PASS || check "R1 the hook passes bash -n" FAIL
 
-UNIT_OUT="$(node --test "$UNIT" 2>&1)"
-UNIT_RC=$?
-UNIT_TOTAL="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-if [ "$UNIT_RC" = "0" ] && [ "${UNIT_TOTAL:-0}" = "12" ] && [ "${UNIT_PASS:-0}" = "12" ]; then
-  check "R2 session-hub-receipt-v1.test.js passes all 12 cases" PASS
-else
-  check "R2 session-hub-receipt-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0}, want 12 of 12)" FAIL
-  printf '%s\n' "$UNIT_OUT" | tail -20
-fi
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "R2 the session-hub-receipt unit file passes" "$UNIT"
 
 WANT_CONTRACT='{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1}}'
 GOT_CONTRACT="$(cat "$CONTRACT" 2>/dev/null)"
@@ -188,6 +180,8 @@ case "$SHAPE_OUT" in *"--receipt needs 32 lowercase hexadecimal characters"*) ;;
 [ -z "$FLAG_BAD" ] \
   && check "R11 trail.mjs accepts --receipt on show, handoff and takeover, refuses it elsewhere and refuses a malformed token" PASS \
   || check "R11 trail.mjs --receipt handling:$FLAG_BAD" FAIL
+
+unit_check_done "R2z every unit file the registry gives this suite was graded"
 
 report
 [ "$FAIL" -eq 0 ]

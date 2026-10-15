@@ -41,8 +41,8 @@ without one.
 
 Moving together: `RUN_OWNED` (the ancestor set is DERIVED from it, never hand-listed),
 `EXCLUDED_PATHS` and `gitControlSnapshot` in `fixture-manifest.js` (what a manifest delta can
-still see is what makes gating `.git` safe), and the registered-case floor in the shell
-driver. `tests/structure/fixture-mutation-watch.test.js` carries the four measured shapes and
+still see is what makes gating `.git` safe), and the unit file's entry in
+`tests/profiles/unit-files.v1.json`, which its shell driver grades every run against. `tests/structure/fixture-mutation-watch.test.js` carries the four measured shapes and
 pins the single-implementation property at SOURCE level — a rule pin alone cannot catch a
 SECOND copy of the rule, which is what the bug was. That unit file runs in GitHub Actions
 through `tests/structure/test-eval-harness-units.sh`, a `ciStructureTests` suite, and so on the

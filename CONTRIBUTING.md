@@ -51,7 +51,7 @@ The following standards apply to maintainer commits:
 - **Conventional Commits** — use prefixes like `feat:`, `fix:`, `chore:`, `docs:`
 - **Skills** — follow the existing phase-based workflow pattern (see `skills/bootstrap/SKILL.md` for reference). Include `Prerequisites` and `MCP Tools Used` sections. Add `MCP Prompts Used` if the skill uses MCP prompts. Never write `$0`–`$9`, `$ARGUMENTS` or a declared argument name in a skill body unless the skill consumes its arguments there: Claude Code substitutes them when the skill is invoked with arguments, so pass a value into a shell snippet through a named environment variable instead.
 - **Agents** — follow the structure of `agents/zensu-plm.md` (decision rules, tool references, important rules)
-- **Hooks** — use `bash -c` with proper error handling and `2>/dev/null` for optional commands
+- **Hooks** — register each hook in `hooks/hooks.json` as a command hook whose `command` is `bash "${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh"`, with no `shell` or `args` field, and write the script with proper error handling and `2>/dev/null` for optional commands
 
 ## Licensing
 

@@ -878,6 +878,74 @@ check "X16a-pre the sibling claim reached the run log in its redacted form" "$(v
 ! printf '%s' "$RD_INV" | grep -qF "${RD_SIB_ABS}"
 check "X16a a sibling under \$HOME is rewritten to ~ before the parser sees it (stage 1 gap, named not fixed)" "$(verdict $?)"
 
+echo "== A <project>-redacted claim is placed like its absolute spelling =="
+nested_redact_case() {
+  local kind="$1" a
+  shift
+  a="$WORK/nested-redact/$kind/anchor"
+  NRD_A="$a"
+  NRD_LOG="$a/.zensu/logs/nested-redact.log"
+  new_repo "$a" && mkdir -p "$a/src" "$a/.zensu/logs" || return 1
+  printf '%s\n' "$@" > "$a/.gitignore"
+  printf 'v1\n' > "$a/src/a.ts"
+  { G "$a" add -A && G "$a" commit -qm base; } >/dev/null 2>&1 || return 1
+  printf 'v2\n' > "$a/src/a.ts"
+  new_repo "$a/nested/other" && mkdir -p "$a/nested/other/src" || return 1
+  printf 'v1\n' > "$a/nested/other/src/x.ts"
+  { G "$a/nested/other" add -A && G "$a/nested/other" commit -qm base; } >/dev/null 2>&1 || return 1
+  printf 'v2\n' > "$a/nested/other/src/x.ts"
+  NRD_ABS="$(cd "$a" && pwd -P)"
+  NRD_NEST_ABS="$(cd "$a/nested/other" && pwd -P)"
+  ( cd "$a" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$NRD_ABS" \
+      bash "$RD_WRITER" append --truncate --log "$NRD_LOG" \
+      --message "S50 IMPL completed — files: ${NRD_NEST_ABS}/src/x.ts, ${NRD_ABS}/src/a.ts" >/dev/null 2>&1 )
+}
+for NRD_KIND in ignored tracked; do
+  if [ "$NRD_KIND" = ignored ]; then
+    nested_redact_case "$NRD_KIND" nested/ .zensu/
+  else
+    nested_redact_case "$NRD_KIND" .zensu/
+  fi
+  NRD_RC=$?
+  { [ "$NRD_RC" -eq 0 ] && grep -qF 'S50 IMPL completed — files: <project>/nested/other/src/x.ts, <project>/src/a.ts' "$NRD_LOG"; }
+  check "X16b-pre ($NRD_KIND) the production writer logged both claims in their <project> spelling" "$(verdict $?)"
+  OUT_NRD="$(run_audit --log "$NRD_LOG" --project "$NRD_A" --receipt -)"
+  RC_NRD=$?
+  { [ "$RC_NRD" -eq 1 ] && printf '%s' "$OUT_NRD" | grep -qF 'UNVERIFIED (foreign root) — S50:'; }
+  check "X16b ($NRD_KIND) a <project>-redacted claim into a work tree nested under the anchor is foreign and fails the audit" "$(verdict $?)"
+  printf '%s' "$OUT_NRD" | grep -qF "it belongs to ${NRD_NEST_ABS}"
+  check "X16c ($NRD_KIND) the verdict names the nested work tree as the root" "$(verdict $?)"
+  { ! printf '%s' "$OUT_NRD" | grep -qE '^EDIT (LANDED|NOT LANDED).*nested/other'; }
+  check "X16d ($NRD_KIND) the nested claim reaches neither EDIT LANDED (untracked-by-design) nor EDIT NOT LANDED" "$(verdict $?)"
+  printf '%s' "$OUT_NRD" | grep -qF 'EDIT LANDED — S50: src/a.ts'
+  check "X16e ($NRD_KIND) the <project>-redacted in-anchor claim beside it still grades EDIT LANDED" "$(verdict $?)"
+  INV_NRD="$(run_audit --inventory --log "$NRD_LOG" --project "$NRD_A")"
+  RC_INV_NRD=$?
+  { [ "$RC_INV_NRD" -eq 0 ] \
+    && printf '%s\n' "$INV_NRD" | grep -qxF "foreign-root$(printf '\t')${NRD_NEST_ABS}" \
+    && [ "$(printf '%s\n' "$INV_NRD" | grep -c '^foreign-root')" -eq 1 ]; }
+  check "X16f ($NRD_KIND) --inventory reports the nested work tree, and only it, as a foreign root" "$(verdict $?)"
+done
+SUB_R="$WORK/nested-redact/subdir"
+new_repo "$SUB_R" && mkdir -p "$SUB_R/pkg/src" "$SUB_R/pkg/.zensu/logs" "$SUB_R/src"
+printf '.zensu/\n' > "$SUB_R/.gitignore"
+printf 'v1\n' > "$SUB_R/pkg/src/y.ts"
+printf 'v1\n' > "$SUB_R/src/y.ts"
+{ G "$SUB_R" add -A && G "$SUB_R" commit -qm base; } >/dev/null 2>&1
+printf 'v2\n' > "$SUB_R/pkg/src/y.ts"
+printf 'v2\n' > "$SUB_R/src/y.ts"
+SUB_PKG_ABS="$(cd "$SUB_R/pkg" && pwd -P)"
+SUB_LOG="$SUB_R/pkg/.zensu/logs/subdir.log"
+( cd "$SUB_R/pkg" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$SUB_PKG_ABS" \
+    bash "$RD_WRITER" append --truncate --log "$SUB_LOG" \
+    --message "S52 IMPL completed — files: ${SUB_PKG_ABS}/src/y.ts" >/dev/null 2>&1 )
+grep -qF 'S52 IMPL completed — files: <project>/src/y.ts' "$SUB_LOG"
+check "X16g-pre the production writer logged the subdirectory claim as <project>/src/y.ts" "$(verdict $?)"
+OUT_SUB="$(run_audit --log "$SUB_LOG" --project "$SUB_R/pkg" --receipt -)"
+RC_SUB=$?
+{ [ "$RC_SUB" -eq 0 ] && printf '%s' "$OUT_SUB" | grep -qF 'EDIT LANDED — S52: pkg/src/y.ts'; }
+check "X16g a <project> claim is rebuilt under the audited project root, not the repository top that holds a same-named dirty file" "$(verdict $?)"
+
 echo "== Harness hygiene =="
 # `check` counts anything that is not the literal `PASS` as a FAILURE, and the
 # file's last statement is `[ "$T_FAIL" -eq 0 ]`. So `check "..." SKIP` turns the

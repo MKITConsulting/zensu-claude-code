@@ -231,39 +231,64 @@ else
 fi
 rm -rf "$P21"
 
-C22_DATA="$(mktemp -d -t router-ledger-XXXXXX)"
-C22_SID="router-ledger-$$"
-c22_fire() {
-  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$C22_SID" "$1" \
-    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C22_DATA" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
+P22="$(mktemp -d -t introuter-XXXXXX)"
+LARGE22="$P22/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "Plan the product roadmap for this repository.\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE22"
+PAD22=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD22="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT22="$(env PAD22_A="$PAD22" PAD22_B="$PAD22" PAD22_C="$PAD22" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P22" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE22" 2>/dev/null | classify)"
+[ "$OUT22" = "UserPromptSubmit|main|triage|planmode" ] \
+  && check "C22 a planning prompt in a payload over the exec size limit still gets the routing" PASS \
+  || check "C22 oversized planning prompt (got '$OUT22')" FAIL
+rm -rf "$P22"
+
+C23_GROW="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8");
+  const start = src.indexOf("| awk \x27");
+  const end = start === -1 ? -1 : src.indexOf("\x27", start + 7);
+  if (start === -1 || end === -1) { process.stdout.write("no keyword scan found"); process.exit(0); }
+  const grow = src.slice(start + 7, end).split("\n").filter((line) => /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\1\s/.test(line));
+  process.stdout.write(grow.join("\n"));
+')"
+[ -z "$C23_GROW" ] \
+  && check "C23 the keyword scan prints each kept token instead of growing a line buffer, which is quadratic on a long single-line prompt" PASS \
+  || check "C23 keyword scan grows a buffer (${C23_GROW:0:120})" FAIL
+
+C24_DATA="$(mktemp -d -t router-ledger-XXXXXX)"
+C24_SID="router-ledger-$$"
+c24_fire() {
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]}))' "$C24_SID" "$1" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C24_DATA" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
 }
-c22_ctx() {
+c24_ctx() {
   node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||"")}catch(_){process.stdout.write("BADJSON")}})'
 }
-C22_FIRST="$(c22_fire "plan the product roadmap for next quarter" | classify)"
-C22_SHORT="$(c22_fire "plan the product roadmap for next quarter" | c22_ctx)"
-node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"compact",session_id:process.argv[1]}))' "$C22_SID" \
-  | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C22_DATA" bash "$PLUGIN_DIR/hooks/session-start-prompt-ledger.sh" >/dev/null 2>&1
-C22_AFTER="$(c22_fire "plan the product roadmap for next quarter" | classify)"
-C22_BAD=""
-[ "$C22_FIRST" = "UserPromptSubmit|main|triage|planmode" ] || C22_BAD="$C22_BAD [first prompt: $C22_FIRST]"
-case "$C22_SHORT" in
+C24_FIRST="$(c24_fire "plan the product roadmap for next quarter" | classify)"
+C24_SHORT="$(c24_fire "plan the product roadmap for next quarter" | c24_ctx)"
+node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"compact",session_id:process.argv[1]}))' "$C24_SID" \
+  | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$C24_DATA" bash "$PLUGIN_DIR/hooks/session-start-prompt-ledger.sh" >/dev/null 2>&1
+C24_AFTER="$(c24_fire "plan the product roadmap for next quarter" | classify)"
+C24_BAD=""
+[ "$C24_FIRST" = "UserPromptSubmit|main|triage|planmode" ] || C24_BAD="$C24_BAD [first prompt: $C24_FIRST]"
+case "$C24_SHORT" in
   "Zensu planning notice (the full notice given earlier in this context still applies)"*) ;;
-  *) C22_BAD="$C22_BAD [second prompt is not the short line: $(printf '%s' "$C22_SHORT" | head -c 60)]" ;;
+  *) C24_BAD="$C24_BAD [second prompt is not the short line: $(printf '%s' "$C24_SHORT" | head -c 60)]" ;;
 esac
-for C22_NEEDLE in "three project-context triage questions" "instead of guessing them, before reading any file or launching a search" \
+for C24_NEEDLE in "three project-context triage questions" "instead of guessing them, before reading any file or launching a search" \
   "asking is read-only and allowed in Plan mode" "/zensu:bootstrap" "/zensu:ghost-scan" \
   "the hybrid sequence" "never delegating mutations to a child or running Zensu CLI mutations freelance" "/zensu:pilot" \
   "merely mentions such a word ignores this notice"; do
-  printf '%s' "$C22_SHORT" | grep -qF -- "$C22_NEEDLE" || C22_BAD="$C22_BAD [short line missing: $C22_NEEDLE]"
+  printf '%s' "$C24_SHORT" | grep -qF -- "$C24_NEEDLE" || C24_BAD="$C24_BAD [short line missing: $C24_NEEDLE]"
 done
-[ "${#C22_SHORT}" -le 1200 ] || C22_BAD="$C22_BAD [short line is ${#C22_SHORT} characters]"
-[ "$C22_AFTER" = "UserPromptSubmit|main|triage|planmode" ] || C22_BAD="$C22_BAD [after a compact SessionStart: $C22_AFTER]"
-rm -rf "$C22_DATA"
-if [ -z "$C22_BAD" ]; then
-  check "C22 with a session id the first keyword prompt of a context generation gets the full notice, later ones a short line with the triage, its Plan-mode permission, the routing and the dismiss clause, and a compact SessionStart brings the full notice back" PASS
+[ "${#C24_SHORT}" -le 1200 ] || C24_BAD="$C24_BAD [short line is ${#C24_SHORT} characters]"
+[ "$C24_AFTER" = "UserPromptSubmit|main|triage|planmode" ] || C24_BAD="$C24_BAD [after a compact SessionStart: $C24_AFTER]"
+rm -rf "$C24_DATA"
+if [ -z "$C24_BAD" ]; then
+  check "C24 with a session id the first keyword prompt of a context generation gets the full notice, later ones a short line with the triage, its Plan-mode permission, the routing and the dismiss clause, and a compact SessionStart brings the full notice back" PASS
 else
-  check "C22 router ledger path broken:$C22_BAD" FAIL
+  check "C24 router ledger path broken:$C24_BAD" FAIL
 fi
 
 echo "----"

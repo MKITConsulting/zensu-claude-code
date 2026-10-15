@@ -68,8 +68,8 @@ than as a uniform count: all eleven sit in the module header, `docs/gates.md` an
 the module header.
 
 **THE NET DELTA IS THE MAIN THREAD ONLY, and the measurement sentence must say so.**
-`hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a write into this
-store (`protectedRoots`, `immutableRuntimeRoots`) and returns early for `main-v1`. So this gate
+`hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a file-tool write
+into this store (`protectedRoots`, `immutableRuntimeRoots`) and returns early for `main-v1`. So this gate
 adds exactly main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel §6.1.2
 measured open, and is the justification. Never justify it with "every principal": true of the
 hook's behaviour, false as a description of what it adds. That module therefore belongs on the
@@ -146,8 +146,8 @@ unpinned and contradicted §"Reviewer-Spawn Grant" two sections up; the flagless
 roster in `docs/architecture.md`; the per-gate roster in `docs/session-control.md` (this gate
 binds no session, so all three columns are identical); `docs/gates.md`'s gate COUNT in its own
 intro, which no test checks; the README docs-index row; the suite manifest entry in
-`tests/profiles/promptfoo-local-only.v1.json` together with the counts in
-`tests/SUITE-OVERVIEW.md`; and the seam-consumer sentence in `bash-source-write-parse.js` —
+`tests/profiles/promptfoo-local-only.v1.json` together with the unit file's entry in
+`tests/profiles/unit-files.v1.json`; and the seam-consumer sentence in `bash-source-write-parse.js` —
 this module is its SECOND consumer, so removing `within` or `msysToDrive` now degrades a DENY
 gate to allow, not just a skill's rendering.
 

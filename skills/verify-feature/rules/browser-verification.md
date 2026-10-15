@@ -1,7 +1,8 @@
 # Browser verification rules
 
 These rules are the self-contained browser loop for `/zensu:verify-feature`. They replace
-the source skill's dependency on a personal `/test-feature` command.
+the source skill's dependency on a personal `/test-feature` command. They are the `browser`
+driver's rule file; every other driver has its own, listed in `rules/drivers.md`.
 
 ## 0. The command set on a `zensu-verify` session
 
@@ -72,8 +73,16 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    `declared-safe`; there is no trusted redaction-driver path. Wait for the user's answer;
    a refused prompt makes that origin's rows PARTIAL.
    Never re-issue a refused navigation and never try another spelling of the same target to avoid the prompt.
-   The session consent memory named in SKILL.md is yours to READ for the report and never to
-   write, edit or delete: a record you place there skips the human's prompt for that origin.
+   The FIRST `playwright-cli` call that reaches a new origin — `open` with the run config, `goto`,
+   or `tab-new` — opens the prompt. Answering it is the user's action; never answer it on their
+   behalf and never work around a refusal. The floor holds in every mode: no credentials, no query
+   or fragment in a navigation, and the browser refuses every HTTP(S) request to an origin outside
+   the run config; a WebSocket connection is not fenced by the run config, which is an open gap.
+   The session consent memory named in SKILL.md records each approved ORIGIN; a record names the
+   route that was visited, but the route steers no later decision, and the report lists every
+   record in its `Consent` block. It is yours to READ for the report and never to write, edit or
+   delete: a record you place there skips the human's prompt for that origin, so writing one grants
+   yourself the consent this gate exists to ask for. Only the PostToolUse hook writes it.
 1. Open the run-config session at the resolved base URL and route only after the policy
    preflight passes for every origin: `declared-safe` for each origin the run navigates, and
    `network-only` for each network-only origin.

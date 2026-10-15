@@ -47,6 +47,7 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 
 CAPABILITY_LIB="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
+SHELL_GUARD_LIB="$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js"
 PRINCIPAL_LIB="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
 EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
@@ -85,7 +86,7 @@ finish() {
 # surfaced as "G16 review-chain rationale does not discriminate", pointing the reader
 # at prose. A missing file is named here instead.
 for f in "$SKILL_MD" "$HARNESS_MD" "$BARS_MD" "$PLUGIN_JSON" "$README_MD" \
-  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
+  "$CAPABILITY_LIB" "$SHELL_GUARD_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
   "$CAPABILITY_GATE_TEST" "$MANIFEST_JSON" $AGENT_MDS; do
   if [ ! -f "$f" ]; then
     check "G0 required file exists: $f" FAIL
@@ -266,8 +267,19 @@ const hit = entry && (entry.hooks || []).some(
 process.stdout.write(hit ? "yes" : "no");
 ' "$HOOKS_JSON" 2>/dev/null)"
 [ "$G8_REGISTERED" = yes ] || G8_MISS="$G8_MISS manifest-registration"
-flat_has 'no builder and no critic in this loop can run' "$SKILL_FLAT" \
+flat_has 'a builder or critic that reports its `agent_type` may hold a guarded `Bash` unless `hooks.subagentShell` is `false`' "$SKILL_FLAT" \
   || G8_MISS="$G8_MISS skill-claim"
+flat_has 'no builder and no critic in this loop can run' "$SKILL_FLAT" && G8_MISS="$G8_MISS skill-stale-no-shell-claim"
+grep -qF "shellGuard.isShellCall(payload)" "$CAPABILITY_LIB" || G8_MISS="$G8_MISS module-guarded-bash"
+{ grep -qF 'const commandViolation = () => `${COMMAND_TOOL_DENY}.' "$CAPABILITY_LIB" \
+  && grep -qF 'if (COMMAND_TOOLS.has(tool)) return commandViolation();' "$CAPABILITY_LIB"; } \
+  || G8_MISS="$G8_MISS module-alias-deny"
+grep -A1 -F 'function isShellCall(payload) {' "$SHELL_GUARD_LIB" | grep -qF "return payload.tool_name === 'Bash';" \
+  || G8_MISS="$G8_MISS guard-bash-only"
+grep -qF "const CONFIG_KEY = 'subagentShell';" "$SHELL_GUARD_LIB" || G8_MISS="$G8_MISS guard-config-key"
+grep -qF 'if (!boundedIdentity(type)) {' "$SHELL_GUARD_LIB" || G8_MISS="$G8_MISS guard-agent-type-refusal"
+flat_has 'the guard (`hooks/lib/subagent-shell-guard-v1.js`) prevents accidents and is not a sandbox' "$SKILL_FLAT" \
+  || G8_MISS="$G8_MISS skill-not-a-sandbox"
 flat_has 'command-execution tool' "$SKILL_FLAT" || G8_MISS="$G8_MISS skill-category"
 if [ -z "$G8_MISS" ]; then
   check "G8 skill states the command-tool denial the capability gate enforces" PASS
@@ -471,11 +483,12 @@ grep -qE 'mcp__\.\*zensu' "$CAPABILITY_LIB" || G15_MISS="$G15_MISS module-zensu-
 # conjunct PRINCIPAL_LIB was existence-gated by G0 and asserted against by nothing.
 grep -qF 'if (!hasAgentId && !hasAgentType) return PRINCIPALS.MAIN;' "$PRINCIPAL_LIB" \
   || G15_MISS="$G15_MISS module-main-fallthrough"
-flat_has 'It is an ALLOWLIST, not a denylist' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-allowlist-shape"
+flat_has 'It is an ALLOWLIST plus a guarded `Bash`, not a denylist' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-allowlist-shape"
 flat_has 'Every other MCP tool is denied too' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-mcp-bound"
 grep -qF 'neutral agent is denied browser tools of a foreign server keyed playwright' "$CAPABILITY_GATE_TEST" \
   || G15_MISS="$G15_MISS sibling-browser-deny-row"
 flat_has 'a six-name DENYLIST' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-denylist-shape"
+flat_has 'five-name DENYLIST' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-five-name-denylist"
 flat_has 'from a non-Zensu server is not denied' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-mcp-residue"
 # The anchor spans the CONDITION and the CONSEQUENCE. The first version matched
 # only the hinge between them, so inverting the premise left it green — the exact
@@ -498,17 +511,15 @@ flat_has 'keeps its nested-spawn capability' "$SKILL_FLAT" || G15_MISS="$G15_MIS
 flat_has 'THREE things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 flat_has 'TWO things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 if [ -z "$G15_MISS" ]; then
-  check "G15 skill states the allowlist bound and the nested spawn it still admits" PASS
+  check "G15 skill states the allowlist-plus-guarded-Bash bound and the nested spawn it still admits" PASS
 else
   check "G15 containment claim is unbounded —$G15_MISS" FAIL
 fi
 
 # ── G16: the review-chain rationale names a reason that discriminates ────────
 # The first version said the chain is not reused "because its critics must run the
-# artifact". G8 establishes that NO subagent in this plugin can run anything, so
-# that reason applied equally to the Explore critics this skill mandates instead —
-# it chose between two options on a property both share. The reason that actually
-# discriminates is the packet protocol, which post-review-tdd-delegate.sh enforces.
+# artifact". The reason that actually discriminates is the packet protocol, which
+# post-review-tdd-delegate.sh enforces.
 G16_MISS=""
 # The claim is the PACKET protocol, which lives in the agent definitions — not in
 # post-review-tdd-delegate.sh, whose literal is G10's consume-mode first-line check.
@@ -589,7 +600,7 @@ fi
 # that silently changes behavior, and in each of these four the wrong one is
 # reached FIRST by a model reading top to bottom.
 #   (a) step 2 told critics to reproduce the capture, which the first bullet says
-#       they cannot do;
+#       they never do;
 #   (b) the charter step prescribed plan mode, which the residency section says is
 #       intercepted;
 #   (c) the hard-gate veto offered BAR_MET as a DECISION value, but the resolution

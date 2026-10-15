@@ -49,7 +49,19 @@ security-review conventions the skills enforce. Reads and telemetry are always a
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
 name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
-source of truth. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
+source of truth. It reads the command twice and gates every invocation either reading finds. The
+shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
+invocation behind a wrapper such as `timeout`, `nice -n`, `env -i` or `xargs`, in a loop or `if`
+body, in a `bash -c` body or a heredoc a shell reads, in `eval`, and in a command substitution,
+also one inside a parameter or arithmetic expansion. The gate's own token scan splits the text at
+separators such as `;`, `&&`, `|` and a line break, whatever the quoting, and keeps every
+invocation it found before. So a call that follows `&&` inside an `ssh` or `su -c` command string
+is gated, and a line inside a heredoc fed to `cat` that names a mutation is still denied. A search
+pattern that names a mutation passes unless a separator precedes the name inside it. When the
+module cannot load, the token scan runs alone. A command name assembled from variables, a call
+made from interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
+`docker exec` or `kubectl exec` runs is seen only when a separator precedes it in the command
+text. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
 is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
 conventions, not a security control (the same role, and the same `ZENSU_MCP_GATE=off` escape, as
 the MCP write-gate it replaced).
@@ -75,7 +87,8 @@ that skill's declared tools — so `/zensu:implement` cannot forge a `set_securi
 it never declared — and `--workflow-end` closes it again. The `--tools` list stays tool-name-keyed;
 the gate maps each CLI command back to its canonical tool name to check membership. `ZENSU_MCP_GATE=off`
 disables the gate for a deliberate one-off — honored both as a session env and as an **inline prefix**
-(`ZENSU_MCP_GATE=off zensu …`). The gate is scoped to its threat model (a low-context agent writing to the
+(`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
+ignores it on a subagent's command. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
@@ -298,7 +311,7 @@ plus `pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` — answered *all
 inside the store, in every chain state (no chain armed, a vanilla chain armed, and a strict chain
 at `RED_WRITE`). None of them performs a containment check. The main-thread qualifier is
 load-bearing: `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a
-write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
+file-tool write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
 main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel the measurement found
 open. It is a hook of its own rather than a
 branch inside the phase gate because that hook returns early while no chain is armed, which is
@@ -733,6 +746,19 @@ through Bash.
 - **A deployed app's API or identity origin has no network-only role without a policy.** It is
   passed as one more `--origin`, asked in the same prompt and never navigated to by the skill,
   but the gate would admit a navigation to it.
+- **Only the `browser` driver is gated.** The other drivers of `/zensu:verify-feature` (`api`,
+  `cli`, `library`, `async`, `iac`, `mobile`, `desktop`, `custom`) run the worktree's own build on
+  run-owned local resources, bounded by the skill's rules, the host's own permission prompts and
+  the per-app or per-device grants of the host's computer-use and simulator tools. No hook judges
+  them, and how the host resolves those prompts in auto mode or a headless run is unverified.
+  Teardown is the mechanical part: `skills/verify-feature/scripts/verify-run-resources.js`
+  records every device, supervised process, emulator serial, cluster, container and `tmux`
+  socket a driver starts, and acts only on recorded entries. A simulator must still carry the
+  run's name, a process is stopped through the supervisor's lease or after a command-line check,
+  and an emulator is only stopped through its supervised process, never killed by its serial.
+  A container, a `tmux` socket and a `kind` cluster are removed by the run-prefixed name that was
+  checked when it was recorded, with no second check. A resource started outside the helper is
+  outside its reach.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.
@@ -1058,8 +1084,11 @@ reads the newest record, never a claim in the run log.
 - **Bypass** with `ZENSU_FULL_SUITE_GATE=off`. The escape is recorded in the bypass ledger only
   where the gate applies: never for a wrong ticket and never outside a work tree.
 - **What it does not prove.** Records live in the plugin's private data directory, which the
-  reviewer and neutral subagents cannot read and Edit/Write cannot reach. A Bash redirect from
-  the main thread can still write one, which is the documented residual of every plugin store.
+  file tools of the reviewer and of a neutral subagent cannot read, the subagent shell guard
+  denies by name, and Edit/Write cannot reach. A Bash redirect from
+  the main thread can still write one, which is the documented residual of every plugin store,
+  and so can a deliberately obfuscated subagent command, because the shell guard prevents
+  accidents and is not a sandbox.
   The gate stops a chain from closing on a missing, red or stale run by accident; it does not
   stop a model that forges a record on purpose. It measures only the tree the suite ran in: a
   suite reached through anything but the cwd or a leading literal `cd` (a manifest path,
@@ -1080,14 +1109,19 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
 
 - **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
   <pass|fail|partial> --driver <driver> --log <run log> [--evidence-run <id>]`, with the
-  evidence text on stdin. The driver names come from `skills/autopilot/rules/drivers.md`.
-  - **Observed:** `api`, `cli`, `async`, `iac`, `custom`, `library` and `artifact` are decided
+  evidence text on stdin. The driver names are the nine ids of
+  `skills/verify-feature/rules/drivers.md`. `desktop-native` and `artifact`, the spellings of
+  earlier releases, stay accepted, so a running session whose skill text still names them can
+  record; `desktop-native` counts as attested and `artifact` as observed.
+  - **Observed:** `api`, `cli`, `async`, `iac`, `custom` and `library` are decided
     by an exit code. So the check must run through
     `zensu-log.sh --evidence-run --scope acceptance`, and the record must cite that run. A pass
     needs exit 0, a fail needs a non-zero exit, and a run that changed the tree while it ran is
     refused.
-  - **Attested:** `browser`, `mobile` and `desktop-native` are driven by the model and recorded
-    with the evidence text alone.
+  - **Attested:** `browser`, `mobile` and `desktop` are driven by the model and recorded
+    with the evidence text alone. A `desktop` record is stored as `desktop-native`: after an
+    update, the earlier installation can still read the same session's records, and it accepts
+    only that spelling.
 
   The verb refuses an unknown or deprecated id, empty or secret-matching evidence, and a run
   log whose stem differs from the one this session's edit-landing receipt records. It appends
@@ -1139,7 +1173,8 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
   honestly. An observed verdict proves only that a command the model chose exited as recorded on
   this tree: the command is not bound to the criterion, and one run may back several criteria.
   Records live in the same kind of private store as the full-suite records, so a Bash redirect
-  from the main thread can forge one. The gate stops a chain from closing on a criterion that
+  from the main thread can forge one, and so can a deliberately obfuscated subagent command,
+  because the shell guard prevents accidents and is not a sandbox. The gate stops a chain from closing on a criterion that
   nobody verified, or one verified before a later edit; it does not stop a model that forges a
   record on purpose.
 

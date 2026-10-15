@@ -66,42 +66,8 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/nul
 # newline-delimited string rather than an array: an empty array expansion under
 # `set -u` aborts on that shell.
 
-# --- G38: the unit driver ----------------------------------------------------
-# tests/run-all.sh discovers only tests/structure/test-*.sh, so a *.test.js file
-# with no driver is never executed by the tree runner. This row is that driver.
-# It runs FIRST among the expensive rows for the reason the sibling
-# stop-enforcer suite states: at the tail, a Windows shard timeout would drop the
-# only coverage the module's injectable seams have anywhere.
-#
-# The case-count floor is not decoration — `node --test` exits 0 for a file that
-# registers no cases at all, so an early `return` or a deleted block would leave
-# this row green while measuring nothing.
-UNIT="$PLUGIN_DIR/tests/structure/plugin-data-guard-v1.test.js"
-# The reporter is PINNED. Node selects `spec` or `tap` by its own rules, and
-# the two spell the summary differently — the floor silently read 0 against the
-# spec form while the suite itself was green, which is the exact vacuity this
-# row exists to prevent.
-UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"; UNIT_RC=$?
-UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p')"
-UNIT_SKIP="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# skipped \([0-9][0-9]*\)$/\1/p')"
-[ -z "$UNIT_PASS" ] && UNIT_PASS=0
-[ -z "$UNIT_SKIP" ] && UNIT_SKIP=0
-UNIT_REG=$((UNIT_PASS + UNIT_SKIP))
-[ "$UNIT_RC" -eq 0 ] \
-  && check "G38 the plugin-data-guard unit suite passes" PASS \
-  || check "G38 the plugin-data-guard unit suite passes (rc=$UNIT_RC)" FAIL
-# REGISTERED, not passing. Three unit cases skip themselves on a host that cannot
-# produce a real symlink, so a floor set from this host's passing count would turn
-# such a host red for an environment fact — the same mistake G42 was fixed for one
-# axis over. The registered count is what is platform-independent.
-[ "$UNIT_REG" -ge 37 ] \
-  && check "G38-floor the unit suite registered at least 37 cases ($UNIT_REG = $UNIT_PASS passing + $UNIT_SKIP skipped)" PASS \
-  || check "G38-floor the unit suite registered at least 37 cases (only $UNIT_REG)" FAIL
-# ...and a separate passing floor that tolerates exactly the three symlink cases,
-# so a case that stops running for any OTHER reason still costs the suite.
-[ "$UNIT_PASS" -ge 34 ] \
-  && check "G38-pass at least 34 unit cases actually ran ($UNIT_PASS, $UNIT_SKIP skipped)" PASS \
-  || check "G38-pass at least 34 unit cases actually ran (only $UNIT_PASS)" FAIL
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "G38 the plugin-data-guard unit file passes" "$PLUGIN_DIR/tests/structure/plugin-data-guard-v1.test.js"
 
 TMP_ROOTS=""
 cleanup() {
@@ -1253,7 +1219,7 @@ esac
 # skipped fixture would otherwise leave this suite green while measuring less
 # than it claims. BOTH floors sit at the MEASURED counts, not below them, so a
 # deleted row fails the floor it exists to protect; raise them with every added
-# row. Note the three rows below are registered AFTER this count is taken.
+# row. Note the four rows below are registered AFTER this count is taken.
 #
 # The REGISTERED floor counts skips, so it survives a host without real
 # symlinks. On its own it is defeated by exactly the failure it exists to
@@ -1266,7 +1232,7 @@ esac
 # case-INSENSITIVE volume. The executed floor tolerates all twelve, because a
 # host can legitimately lack every premise at once.
 MAX_SKIPPABLE=12
-EXPECTED_CHECKS=114
+EXPECTED_CHECKS=112
 EXECUTED_FLOOR=$((EXPECTED_CHECKS - MAX_SKIPPABLE))
 EXECUTED=$((PASS + FAIL))
 TOTAL=$((PASS + FAIL + SKIPPED))
@@ -1295,6 +1261,8 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
       && check "G42 no row lost coverage on this POSIX host ($SKIPPED skipped, all $SKIPPED_ENV environmental)" PASS \
       || check "G42 $LOST_COVERAGE row(s) lost coverage on this POSIX host ($SKIPPED skipped, $SKIPPED_ENV environmental)" FAIL ;;
 esac
+
+unit_check_done "G38z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-plugin-data-guard: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"

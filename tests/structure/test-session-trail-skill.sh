@@ -1701,8 +1701,8 @@ else
   # PLAIN-TEXT bound did not.
   case "$CONTROL_CLASS" in *'p{Cf}'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-the-format-block($CONTROL_CLASS)]" ;; esac
   # `briefPath` belongs here too, and its absence was the defect: it bounded with
-  # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
-  # was the only one of the three not covered by the shared class.
+  # `oneLine` alone, whose `/\s+/` missed ESC/C0/DEL/C1 at the time — so the
+  # PERSISTED carrier was the only one of the three not covered by the shared class.
   for helper in flatPath briefShellArg briefPath; do
     printf '%s\n' "$TRAIL_CODE" | grep -A2 "^function ${helper}(" | grep -qF 'CONTROL_RUN' \
       || CAUTION_MISS="$CAUTION_MISS [${helper}-does-not-use-CONTROL_RUN]"
@@ -1770,9 +1770,13 @@ RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . 
 # is compared, not clipped); `briefPath`/`oneLine` also remove a line break.
 # `oneLine\(` is NOT a compliant wrapper here, and admitting it was the structural
 # cause of two separate leaks. This roster is the only check that scans plain-text
-# print carriers for an unbounded third-party value, and `oneLine` collapses
-# `/\s+/` ONLY — JS `\s` excludes ESC, the rest of C0, DEL and C1, which is the
-# class that can overwrite a row the reader already trusted. While `oneLine(` sat
+# print carriers for an unbounded third-party value, and it certifies a SPELLING:
+# every accepted one routes through `CONTROL_RUN`, which T29 checks above, or
+# prints only text this tool computes. `oneLine` strips that class too, but only
+# through its delegation to `boundText` in the ledger module, which this roster
+# does not check. Before that delegation it collapsed `/\s+/` ONLY — JS `\s`
+# excludes ESC, the rest of C0, DEL and C1, which is the class that can overwrite
+# a row the reader already trusted. While `oneLine(` sat
 # in this alternation, every carrier still using it was invisible here: the BRANCH
 # row and the STATUS/CONFIG rows both passed for that reason alone, one line below
 # an OWNER row that had been moved to `flatPath` precisely because of this class.
