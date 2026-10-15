@@ -285,7 +285,7 @@ else
 fi
 
 SUPERVISOR_TEST="$PLUGIN_DIR/tests/structure/process-supervisor.test.js"
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 LOOPBACK_AVAILABLE=0
 if node -e '
   const net = require("node:net");
@@ -295,19 +295,15 @@ if node -e '
 ' >/dev/null 2>&1; then
   LOOPBACK_AVAILABLE=1
 fi
-SUPERVISOR_FLOOR="$(unit_overview_declared "${SUPERVISOR_TEST##*/}")"
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
-  check "H12 process-supervisor unit file skipped because the managed host forbids loopback listeners" PASS
-elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
-  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" "$SUPERVISOR_FLOOR"; then
-  check "H12 the process supervisor the launcher loads authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
+  if unit_not_run "$SUPERVISOR_TEST" "the managed host forbids loopback listeners"; then
+    check "H12 process-supervisor unit file skipped because the managed host forbids loopback listeners" PASS
+  else
+    check "H12 process-supervisor unit file: $UNIT_RUN_VERDICT" FAIL
+  fi
 else
-  check "H12 the process supervisor the launcher loads authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= ${SUPERVISOR_FLOOR:-<no overview row>} registered)" FAIL
+  unit_check "H12 the process supervisor the launcher loads authenticates status/stop and terminates its child group" "$SUPERVISOR_TEST"
 fi
-if SUPERVISOR_OVERVIEW="$(unit_overview_check "$SUPERVISOR_TEST")"; then
-  check "H12a the SUITE-OVERVIEW Blocks cell matches what ${SUPERVISOR_TEST##*/} registers ($SUPERVISOR_FLOOR)" PASS
-else
-  check "H12a $SUPERVISOR_OVERVIEW" FAIL
-fi
+unit_check_done "H12a every unit file the registry gives this suite was graded"
 
 finish

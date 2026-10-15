@@ -1,0 +1,282 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 217, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "runs": [{ "driver": "tests/session-control/run.sh" }],
+      "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
+    },
+    {
+      "path": "tests/structure/acceptance-verify-v1.test.js", "registered": 26,
+      "runs": [{ "driver": "tests/structure/test-acceptance-gate.sh" }],
+      "summary": "Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention."
+    },
+    {
+      "path": "tests/structure/aspect-activation-v1.test.js", "registered": 21,
+      "runs": [{ "driver": "tests/structure/test-incremental-review-rounds.sh" }],
+      "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
+    },
+    {
+      "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
+      "runs": [{ "driver": "tests/structure/test-chain-recover.sh" }],
+      "summary": "The chain shape lattice and the rearm-receipt predicate."
+    },
+    {
+      "path": "tests/structure/claude-stream-render.test.js", "registered": 6,
+      "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
+      "summary": "The eval harness renderer for the claude stream-json output."
+    },
+    {
+      "path": "tests/structure/clock-shift-v1.test.js", "registered": 19,
+      "runs": [{ "driver": "tests/structure/test-clock-shift.sh" }],
+      "summary": "The shifted-clock preload and runner that the scheduled clock-shift pass uses."
+    },
+    {
+      "path": "tests/structure/deferred-review-claim-cases.test.js", "registered": 11,
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "The deferred-review claim case table."
+    },
+    {
+      "path": "tests/structure/evidence-run-v1.test.js", "registered": 80, "skips": {"win32": 3},
+      "runs": [{ "driver": "tests/structure/test-evidence-run.sh" }],
+      "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
+    },
+    {
+      "path": "tests/structure/external-review-v1.test.js", "registered": 41, "skips": {"win32": 3},
+      "runs": [{ "driver": "tests/structure/test-external-review-hook.sh" }],
+      "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, and the freshness check against changed files."
+    },
+    {
+      "path": "tests/structure/finding-verify-v1.test.js", "registered": 28,
+      "runs": [{ "driver": "tests/structure/test-finding-verification.sh" }],
+      "summary": "The finding-verification grading module."
+    },
+    {
+      "path": "tests/structure/fixture-mutation-watch.test.js", "registered": 19,
+      "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
+      "summary": "Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends."
+    },
+    {
+      "path": "tests/structure/full-suite-ci-v1.test.js", "registered": 28,
+      "runs": [{ "driver": "tests/structure/test-full-suite-ci.sh" }],
+      "summary": "Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict."
+    },
+    {
+      "path": "tests/structure/git-repo-escape.test.js", "registered": 45,
+      "runs": [{ "driver": "tests/structure/test-bash-source-write-gate.sh" }],
+      "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
+    },
+    {
+      "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
+      "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
+      "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
+    },
+    {
+      "path": "tests/structure/plan-payload-v1.test.js", "registered": 20,
+      "runs": [{ "driver": "tests/structure/test-plan-payload-fallback.sh" }],
+      "summary": "The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback."
+    },
+    {
+      "path": "tests/structure/playwright-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 12},
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The installed playwright-cli version identity, read from its package manifest without running the binary."
+    },
+    {
+      "path": "tests/structure/plugin-data-guard-v1.test.js", "registered": 37, "skips": {"win32": 4},
+      "runs": [{ "driver": "tests/structure/test-plugin-data-guard.sh" }],
+      "summary": "Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path."
+    },
+    {
+      "path": "tests/structure/process-supervisor.test.js", "registered": 7, "skips": {"linux": 1, "root": 1, "win32": 4},
+      "runs": [{ "driver": "tests/structure/test-harness-launcher.sh" }],
+      "summary": "The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code."
+    },
+    {
+      "path": "tests/structure/profile-runner.test.js", "registered": 23, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "lifecycle" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "The Windows profile runner: lifecycle, digests and deadlines."
+    },
+    {
+      "path": "tests/structure/prompt-listing-v1.test.js", "registered": 17,
+      "guards": [
+        "a delivery is credited only to a remove that took a copy and carries no reason, however near another remove sits",
+        "a remove followed by a record of another build is judged under both builds",
+        "a record without a version leaves the build in effect rather than starting one",
+        "a readable delivery whose text no enqueued copy carries vetoes its build even when a matched delivery opened it",
+        "the keep-one fallback restores the newest copy when every copy of a delivered text was withdrawn"
+      ],
+      "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
+      "summary": "The session-trail prompt listing: queue pairing, pull-backs, the withdrawn list and the truncated read."
+    },
+    {
+      "path": "tests/structure/release-run-step.test.js", "registered": 11,
+      "runs": [{ "driver": "tests/structure/test-immutable-marketplace-release.sh" }],
+      "summary": "The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup."
+    },
+    {
+      "path": "tests/structure/restore-root-render-cases.test.js", "registered": 79,
+      "runs": [{ "driver": "tests/structure/test-restore-project-root.sh" }],
+      "summary": "Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms."
+    },
+    {
+      "path": "tests/structure/review-evidence-sweep-v1.test.js", "registered": 32, "skips": {"win32": 6},
+      "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
+      "summary": "The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe."
+    },
+    {
+      "path": "tests/structure/review-ledger-v1.test.js", "registered": 42,
+      "runs": [{ "driver": "tests/structure/test-review-convergence.sh" }],
+      "summary": "The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts."
+    },
+    {
+      "path": "tests/structure/review-round-scope-v1.test.js", "registered": 24,
+      "runs": [{ "driver": "tests/structure/test-incremental-review-rounds.sh" }],
+      "summary": "Delta-scoped review rounds: which files and findings a fix round reviews."
+    },
+    {
+      "path": "tests/structure/reviewer-spawn-allow-v1.test.js", "registered": 20,
+      "runs": [{ "driver": "tests/structure/test-reviewer-spawn-allow.sh" }],
+      "summary": "The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan."
+    },
+    {
+      "path": "tests/structure/reviewer-spawn-denial-v1.test.js", "registered": 37, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-stop-enforcer-self-review-routing.sh" }],
+      "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
+    },
+    {
+      "path": "tests/structure/rule-block-v1.test.js", "registered": 10, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-best-solution-first.sh" }],
+      "summary": "The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals."
+    },
+    {
+      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 59,
+      "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
+      "summary": "The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows."
+    },
+    {
+      "path": "tests/structure/session-auto-adopt-v1.test.js", "registered": 44,
+      "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
+      "summary": "Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock."
+    },
+    {
+      "path": "tests/structure/session-control-lineage.test.js", "registered": 13,
+      "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
+      "summary": "The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root."
+    },
+    {
+      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 12,
+      "runs": [{ "driver": "tests/structure/test-session-hub-receipt.sh" }],
+      "summary": "The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields."
+    },
+    {
+      "path": "tests/structure/session-lineage-v1.test.js", "registered": 78, "skips": {"root": 2, "win32": 17},
+      "runs": [{ "driver": "tests/structure/test-session-trail-lineage.sh" }],
+      "summary": "The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk."
+    },
+    {
+      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 67, "skips": {"win32": 1},
+      "runs": [{ "driver": "tests/structure/test-session-reanchor.sh" }],
+      "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
+    },
+    {
+      "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 25, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-reviewer-capability-gate.sh" }],
+      "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings."
+    },
+    {
+      "path": "tests/structure/unit-registry.test.js", "registered": 27,
+      "runs": [{ "driver": "tests/structure/test-unit-registry.sh" }],
+      "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
+    },
+    {
+      "path": "tests/structure/verify-browser-config.test.js", "registered": 21,
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run."
+    },
+    {
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 125, "skips": {"win32": 2},
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection."
+    },
+    {
+      "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
+      "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
+      "summary": "The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session."
+    },
+    {
+      "path": "tests/structure/verify-free-port.test.js", "registered": 3,
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The free loopback port helper: argument parsing, occupied and excluded ports and the CLI contract."
+    },
+    {
+      "path": "tests/structure/verify-navigation-floor-v1.test.js", "registered": 21,
+      "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
+      "summary": "The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals."
+    },
+    {
+      "path": "tests/structure/verify-run-resources.test.js", "registered": 18, "skips": {"win32": 15},
+      "runs": [{ "driver": "tests/structure/test-verify-feature-skill.sh" }],
+      "summary": "The verify-feature run-resource helper: owned names, the run ledger, simulator and emulator teardown, and supervised process groups."
+    },
+    {
+      "path": "tests/structure/windows-ci-contract.test.js", "registered": 12,
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job."
+    },
+    {
+      "path": "tests/structure/windows-observation.test.js", "registered": 11,
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "The Windows observation summarizer."
+    },
+    {
+      "path": "tests/structure/windows-profile-contract.test.js", "registered": 4,
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "The Windows profile contract."
+    },
+    {
+      "path": "tests/structure/windows-safety-shard.test.js", "registered": 5,
+      "runs": [{ "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "metadata" }, { "driver": "tests/structure/test-windows-ci-contract.sh", "mode": "all" }],
+      "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
+    },
+    {
+      "path": "tests/structure/work-order-v1.test.js", "registered": 38,
+      "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan."
+    },
+    {
+      "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,
+      "runs": [{ "driver": "tests/structure/test-workflow-dispatch-inputs.sh" }],
+      "summary": "Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable."
+    },
+    {
+      "path": "tests/structure/worktree-advice-v1.test.js", "registered": 66, "skips": {"win32": 2},
+      "guards": [
+        "the briefShellArg carrier population is derived, and a twelfth carrier fails here",
+        "the create route and the move alternative are not in the same paste unit",
+        "the move alternative states its stop condition before the command"
+      ],
+      "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
+      "summary": "The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative."
+    },
+    {
+      "path": "tests/structure/worktree-keep-v1.test.js", "registered": 101,
+      "runs": [{ "driver": "tests/structure/test-worktree-keep.sh" }],
+      "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
+    },
+    {
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 11,
+      "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
+      "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
+    },
+    {
+      "path": "tests/structure/zen-anchor-v1.test.js", "registered": 25,
+      "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
+      "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
+    },
+    {
+      "path": "tests/structure/zensu-doctor-invocation.test.js", "registered": 27,
+      "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
+      "summary": "The /zensu:doctor invocation allowlist."
+    }
+  ]
+}

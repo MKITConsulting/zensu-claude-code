@@ -8,82 +8,21 @@ Derived by reading `tests/run-all.sh`, `tests/profiles/promptfoo-local-only.v1.j
 source — not from an executed run. Assertion counts are approximations derived from
 each suite's `check()` / `run()` / `expect()` call sites.
 
-**The structure-suite count is owned by `tests/profiles/promptfoo-local-only.v1.json`,
-not by this file.** `run-all.sh` compares that manifest against the actual directory
-listing before any suite runs and refuses to execute at all when they disagree — so a
-new suite file and its manifest entry must land in the same commit, or every mode,
-including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (171 = 164 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 164 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 171). The figures here have drifted FIFTEEN times, fourteen of them upward, and every
-correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
-already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
-151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
-`main` into the worktree-keep branch was landing the 146th, then 153 = 146 + 7 while the
-next such merge was landing the 147th, then 154 = 147 + 7 while the merge of `main` into
-the review-convergence branch was landing the 148th, then 155 = 148 + 7 while the merge of
-`main` into the restore-project-root branch was landing the 149th, and then 153 = 146 + 7 on the
-evidence-runner branch after it retired three witness suites and added two, leaving 145, and
-then 156 = 149 + 7 on `main` while its manifest already held 151 CI entries, and then
-159 = 152 + 7 while it already held 154, and then 162 = 155 + 7 on a branch and on `main` alike
-while the merge of the two was landing the 156th, and then 165 = 158 + 7 while the external
-review import was landing the 159th, and then 166 = 159 + 7 while the Session Hub receipt was
-landing the 160th, and then 166 = 159 + 7 again on the work-order branch while its runtime suite
-was landing the 160th there, and then 171 = 164 + 7 while the merge of `main` into the work-order
-branch was landing the 165th. Each
-of those was internally
-consistent and merely stale. Correcting only the headline and leaving the derivation clauses
-behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
-section-4 header-numeral paragraph below names — so every re-derivation since closes the
-clauses together with the headline. SEVEN of the eleven drifts arrived the same way, through a
-merge of two branches that each re-derived its own count and neither of which could see the
-other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
-manifest from 143 to 144 in its own branch, so merging them is what made 145;
-`test-worktree-keep.sh` took its own branch from 144 to 145 while `main` independently reached
-145, so that merge made 146; `test-delivery-route.sh` took `main` from 145 to 146 while the
-worktree-keep branch independently reached 146, so the next merge made 147;
-`test-review-convergence.sh` took its own branch to 146 while `main` independently reached 147,
-so merging `main` into it made 148; and `test-restore-project-root.sh` took its own branch to
-146 while `main` independently reached 148, so merging `main` into it made 149. The eighth is
-the reverse case: a branch that removed suites without re-deriving, whose merge with `main` at
-149 lands on 148. The ninth came through three suites that reached `main` one squash-merge at a
-time — `test-stop-enforcer-reviewer-denial-note.sh`, `test-workflow-dispatch-inputs.sh` and
-`test-acceptance-gate.sh` — while the figure moved only with the first. The tenth came the same
-way: `test-full-suite-ci.sh` and `test-session-reanchor.sh` each joined its §3 group and neither
-moved the figure. The eleventh is the merge shape again: `test-user-prompt-budget.sh` took its
-own branch to 155 while `main` independently reached 155 through `test-skill-text-budget.sh`, so
-merging `main` into it made 156. The twelfth is the tenth's shape without the group:
-`test-external-review-hook.sh` joined the manifest while neither the figure nor its §3 group
-moved. The thirteenth is the twelfth's shape again: `test-session-hub-receipt.sh` joined the
-manifest while neither the figure nor its §3 group moved. The fourteenth is that shape on the
-work-order branch: `test-work-order-runtime.sh` joined the manifest in its own commit while neither
-the figure nor its §3 group moved, and the commit that added `test-work-order-implement.sh`
-re-derived both; `test-work-order-gates.sh`, `test-work-order-takeover.sh` and
-`test-harness-launcher.sh` each moved both in their own commit. The fifteenth is the merge shape
-again: `test-session-hub-receipt.sh` took `main` to 160 CI entries while the work-order branch
-independently reached 164, so merging `main` into it made 165.
-**§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 161 against 164 CI-classified suites, so THREE CI
-suites appear in no §3 group. They are `test-session-trail-lineage.sh`,
-`test-incremental-review-rounds.sh` and `test-restore-project-root.sh`, re-derived BY NAME
-by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
-§"Bash gates, evidence & secrets", and the reviewer-spawn grant, filed under §"Review chain &
-findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
-described, so its nine shard ids and their membership are the JSON's own, and the entry total
-is **44**.
+**The structure-suite counts are owned by `tests/profiles/promptfoo-local-only.v1.json` and the
+unit-file facts by `tests/profiles/unit-files.v1.json`, not by this file.** Before any suite
+runs, `run-all.sh` compares the manifest with the `tests/structure/test-*.sh` listing and the
+registry with every `*.test.js` under `tests/` that git does not ignore, and it refuses every
+mode when either disagrees. The totals in §1 and the table in §4 are generated from those two files by
+`node tests/structure/lib-unit-registry.js render --write`, and `test-unit-registry.sh` fails
+when either generated region differs from the renderer's output, so neither can go stale
+silently.
 
-**Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
-owns the unit-file count and a header can no longer contradict it. It had said 24 while the
-count above said 26; both were then stale again within one merge, because the directory had
-moved to 27. The rowless files are enumerated ONCE, in the closing note under section 4's
-table — deliberately not repeated here, since a second copy of that list is the drift this
-document exists to prevent. Recorded rather than quietly reconciled: an audited count that
-disagrees with its own table is the failure shape, and an earlier revision of this very
-paragraph said "two files" while naming one, which is the same failure one level down.
-
-**Nothing machine-checks the §1/§3 reconciliation.** It is a hand audit performed at this
-commit, not an invariant: the next suite added without touching §3 silently breaks it again,
-and no test will say so. Re-derive rather than trust when the numbers matter.
+**§3 is a hand audit.** At this commit every classified suite appears in exactly one §3 group,
+and each group header equals the number of suites it lists, re-derived by comparing the group
+lists with the manifest. Nothing machine-checks that: the next suite added without touching §3
+breaks it again, so re-derive rather than trust it when the numbers matter. §7's profile table
+was re-derived from `tests/profiles/windows-ci.v1.json` rather than described, so its nine
+shard ids and their membership are the JSON's own, and the entry total is **44**.
 
 **Windows coverage of `test-artifact-redaction.sh` is deliberately
 STRUCTURAL-ONLY.** The suite is in `ciStructureTests`, so POSIX `run-all.sh --ci`
@@ -101,12 +40,22 @@ is ever measured for the suite.
 
 ## 1. Totals
 
+<!-- unit-registry:begin totals -->
+Generated by `node tests/structure/lib-unit-registry.js render --write` from `tests/profiles/promptfoo-local-only.v1.json` and `tests/profiles/unit-files.v1.json`; edit those files, never these lines.
+
+- `tests/structure/test-*.sh`: **172** suites, 165 CI-blocking + 7 Promptfoo local-only. A `--ci` run executes 165 structure suites + 5 offline evals = 170; the 7 local-only suites are skipped as `LOCAL`.
+- `node --test` unit files: **53**, each with exactly one entry in `tests/profiles/unit-files.v1.json` (§4).
+- Offline eval suites (`ciOfflineSuites`): **5**.
+<!-- unit-registry:end totals -->
+
+`run-all.sh` runs every structure suite in every mode except `--ci`, which skips the local-only
+ones as `LOCAL`. The `node --test` unit files run inside the suites that drive them (§4), and the
+offline eval suites run under `run-all.sh`. `scheduled.yml` also runs every
+`tests/structure/*.test.js` file directly on a shifted clock (§8); the other unit files stay on
+the real clock (§9).
+
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **171** — 164 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **164 structure suites + 5 offline evals = 169 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 171 − 164 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites; `scheduled.yml` also runs every one directly on a shifted clock |
-| Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **9** (`windows-shard-1`…`-9`, 44 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
@@ -116,8 +65,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 171 structure suites + 5 offline evals | none |
-| `--ci` | 164 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | every structure suite + the offline evals (counts in §1) | none |
+| `--ci` | the CI structure suites (the Promptfoo local-only ones are skipped as `LOCAL`) + the offline evals with `ciArgs` (counts in §1) | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -130,6 +79,13 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
   `localStructureTests` must exactly equal the real directory listing, duplicate-free,
   and every `ciOfflineSuites` path must exist. Otherwise the run refuses to start.
   A new structure test that nobody classified fails the run rather than being skipped.
+- **Preflight unit-file census** — every `*.test.js` under `tests/` that git does not ignore must
+  have exactly one valid entry in `tests/profiles/unit-files.v1.json`, and each entry's
+  `registered` must equal the file's column-0 `test(` registrations. A file with an indented
+  `test(`, a subtest on a case's context parameter (`t.test(`) or a `describe` or `it` imported
+  from `node:test` is refused too, because that static count cannot see such a case. Otherwise the
+  run refuses to start and names each path; a case the census cannot see fails its driver's grade
+  instead.
 - **Per-suite watchdog** — `ZENSU_SUITE_TIMEOUT` (default 3600 s), portable pid poll
   (no GNU `timeout` on macOS). A suite that never returns is reported `HANG`, not `FAIL`.
 - **Output to a file, never a command substitution** — so a suite leaving a background
@@ -148,8 +104,8 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (16)
-`orphaned-project-root` · `session-control-claude` · `session-control-core` ·
+### Session Control & workflow state (17)
+`orphaned-project-root` · `restore-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` · `session-reanchor` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
@@ -161,8 +117,9 @@ Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-lea
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
 state verbs, the SessionStart banner, a vanished live working directory under an
 intact binding, the verified re-anchor of a session record to a sibling worktree of the same
-repository, and the worktree-keep marker, anchor and drift lifecycle that keeps an
-app-managed worktree out of the Claude Desktop pool while a session is bound to it. `session-control-claude` alone carries ~140
+repository, the restore of a vanished recorded project root, and the worktree-keep marker,
+anchor and drift lifecycle that keeps an app-managed worktree out of the Claude Desktop pool
+while a session is bound to it. `session-control-claude` alone carries ~140
 assertions.
 
 ### TDD engine & phase gate (18)
@@ -184,10 +141,10 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/references/review-chain.md`.
 
-### Review chain & findings (30)
+### Review chain & findings (31)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
 `deferred-review-fallback` · `external-review-hook` · `finding-verification` ·
-`pending-review-ttl` ·
+`incremental-review-rounds` · `pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
 `reset-review-limit-transaction` · `review-aspect-agent` · `review-convergence` · `review-judge` ·
@@ -203,8 +160,8 @@ spawned-agent no-op, the early exit for a Stop with nothing to enforce and the
 hook-wide deadline, the read-only reviewer capability confinement, the finding
 verification gate (findings graded against real source before they route), the
 one-shot review ticket CAS and budget rearm, deferred/pending review markers plus
-their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
-unqualified chain terminus.
+their TTL, `--chain-status` / `--chain-recover`, delta-scoped review rounds and aspect
+activation, and the zero-file-change gate on the unqualified chain terminus.
 
 ### Autopilot (22)
 `autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
@@ -243,13 +200,13 @@ Windows, where Node cannot start their shell-script fakes without a shell.
 `secret-scan-gate` · `skill-workflow-markers` · `verify-consent`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
-(183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
+(183 probe cases + a 45-case pure unit suite), the `zensu <noun> <verb>` write gate,
 the bypass ledger (gate escapes only — ~100 assertions), the evidence runner and the
 `--chain-done` full-suite gate, the CI deferral of full-suite runs (the `/zensu:full-suite`
 helper verbs against a `gh` stub, the policy verb, a CI chain closing `deferred-ci`, and
 mid-chain switches that only ever tighten the terminus), the acceptance verification gate, the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
-plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
+plugin-data containment gate (116 checks; floors at the measured counts — `EXPECTED_CHECKS=112` registered, an executed-row floor of 100 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
 three chain states with an in-project allow control each and an armed-state premise, all four
 write tool names, the anchored-containment and relative-target bites, the symlink family — a
 symlinked directory, a dangling leaf, and `..` after a symlink into the store, each with a
@@ -258,7 +215,7 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (220 checks: the Bash-matcher hook pair driven against a real Session Control session — an
+gate (206 checks: the Bash-matcher hook pair driven against a real Session Control session — an
 unrelated call left alone, a refused command, the first loopback navigation asking, the recorded
 approval and the remembered origin, the floor refusals, a subagent denied, policy mode, and the
 `open` run-config, Chromium-only and global-config refusals — remote consent through the real
@@ -277,18 +234,17 @@ the byte-identical prefilter carrying every derived CLI marker, the escaped-slas
 reached with `sed` failing and a control proving that failing `sed` is the one the hooks run,
 both no-node arms, degraded roots
 left silent on unmarked payloads, the two doc pins on fault direction and the mention cost — the
-five unit files held at their
-registered counts and against this document's table, the one navigation floor both the gate and
+five unit files graded against their registry entries, the one navigation floor both the gate and
 the run-config helper require, the fail-closed load faults, the policy `rules/setup.md` renders,
 and a tree-wide census that no file outside its allowlist still names the retired MCP broker),
 and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
-### Skill contracts (21)
+### Skill contracts (22)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `gauntlet-loop-skill` · `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-lineage` · `session-trail-skill` ·
 `session-trail-verdict` · `setup-skill` · `skill-overlays` · `skill-text-budget` · `templates` ·
 `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
@@ -296,11 +252,12 @@ Structural pins on each shipped skill's SKILL.md: required phases, marker wiring
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
 consistency. Heaviest: `pr-team-review-skill` (~121).
 
-`session-trail-verdict` is the one BEHAVIOURAL suite in this group: it builds synthetic
+`session-trail-verdict` is a BEHAVIOURAL suite in this group: it builds synthetic
 transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decides about
 taking a session over, which its structural sibling can only pin as vocabulary. It skips
 loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
-developer's real sessions.
+developer's real sessions. `session-trail-lineage` is behavioural too: it drives the
+machine-wide takeover ledger the skill writes and the chain walk that reads it back.
 
 `skill-text-budget` is the one suite in this group that reads EVERY skill: it bounds each
 `SKILL.md` body at 25,000 chars, with a shrink-only allowlist for the larger ones, and each
@@ -314,8 +271,9 @@ listed description at 220 chars with its "Use when"/"Use for" trigger in the fir
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, the prompt-origin classifier and the per-hook
 and summed `additionalContext` ceilings it buys on typed, task-notification, shell-input and
-CI-event prompts, and how the PostToolUse(ExitPlanMode) delegate reads the approved plan (with
-a distinct receipt for each failure mode).
+CI-event prompts, the receipt the Session Hub takeover command leaves, and how the
+PostToolUse(ExitPlanMode) delegate reads the approved plan (with a distinct receipt for each
+failure mode).
 
 `session-hub-receipt` drives the UserPromptSubmit hook that writes one private receipt when a
 prompt is exactly the Session Hub's takeover command and stays silent for every other prompt,
@@ -330,12 +288,12 @@ GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (17)
+### Release & repo hygiene (18)
 `changelog-unreleased-resolver-entries` · `clock-shift` · `drift-assertion-or-logic` · `drift-audit-regex` ·
 `eval-harness-units` · `file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
 `promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
-`run-all-required-offline-suites` · `run-all-sharding` · `version-sync` ·
+`run-all-required-offline-suites` · `run-all-sharding` · `unit-registry` · `version-sync` ·
 `workflow-dispatch-inputs`
 
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
@@ -343,7 +301,8 @@ invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo co
 only reference existing files, that Promptfoo stays local-only while the four node unit files
 of its harness still run in CI (`eval-harness-units`), that no workflow `run:`
 block template-expands a dispatcher-controlled expression, the shifted-clock pass behind
-`scheduled.yml` (its preload, its allowlist and its runner), and the runner's own contract.
+`scheduled.yml` (its preload, its allowlist and its runner), the unit-file registry with its
+census and the generated regions of this file (`unit-registry`), and the runner's own contract.
 `workflow-dispatch-inputs` and `clock-shift` need `node_modules` → `BLOCK` without `npm ci`.
 
 ### Windows & portability (5)
@@ -407,99 +366,84 @@ binary; these guard the local harness contract.
 
 ## 4. `node --test` unit suites
 
-Each is driven by a parent shell suite under `run-all.sh`, so a JS failure surfaces as that
-suite's failure. Separately, `scheduled.yml` runs every file here directly through
-`node tests/run-clock-shift.js` with `Date` shifted forward (§8), including the files whose
-only drivers are the local-only Promptfoo suites; those are deterministic units that spawn
-node alone, never the Promptfoo binary or a model.
+Each is driven by a shell suite under `run-all.sh`: a structure suite, or
+`tests/session-control/run.sh`, which `test-session-control-core.sh` runs. A JS failure therefore
+surfaces as that suite's failure. Separately, `scheduled.yml` runs every `tests/structure/*.test.js`
+file here directly through `node tests/run-clock-shift.js` with `Date` shifted forward (§8);
+`session-control/session-control-core-v1.test.js` stays on the real clock (§9).
 
-`R13` in `test-restore-project-root.sh` compares every row's `Blocks` cell with the
-`^test(` registrations of its file through `unit_overview_check` in
-`tests/structure/lib-unit-summary.sh`; every driver that sources that library and drives a
-file with a row calls the same helper beside the floor it reads from that cell through
-`unit_overview_declared`, so a stale cell fails as
-`tests/SUITE-OVERVIEW.md:<line>: <file> declares N, registers M; edit that Blocks cell`.
+<!-- unit-registry:begin section-4 -->
+Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-unit-registry.js render --write`; edit the registry, never this table. Registered is node's exact total, Skips the per-host ceiling of skipped or todo cases (absent means 0).
 
-| Unit file | Blocks | Driven by | Covers |
-|---|---|---|---|
-| `git-repo-escape.test.js` | 45 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-run-v1.test.js` | 80 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, per-scope retention, the run directory (work-tree identity first, path containment for a root outside git) |
-| `full-suite-ci-v1.test.js` | 28 | `test-full-suite-ci.sh` | CI deferral of full-suite runs: workflow scan and the bound job's conditions, remote proof via a `gh` stub, verification cache, grace and invalidation, the policy ladder and chain snapshot, the scoped tree binding and the `deferred-ci` verdict |
-| `clock-shift-v1.test.js` | 19 | `test-clock-shift.sh` | the shifted-clock pass `scheduled.yml` runs daily: the `tests/lib/clock-shift.cjs` preload (`Date.now`, `new Date()` and `Date()` without arguments move by `ZENSU_TEST_CLOCK_SHIFT_DAYS` while every other `Date` member stays, `Date.now` stays assignable so a stub still wins, a malformed value refuses to run rather than running unshifted, a second copy does not shift twice, and the `NODE_OPTIONS` form the runner writes carries the shift into grandchild processes), the runner's child environment and its reporter loaded by file URL, the allowlist validator, the outcome merge across same-named top-level tests, the runner's verdict end to end against synthetic unit files (allowed, unexpected, stale, an allowlisted name that two tests share, and a skipped or failing todo test through the real reporter), that every shipped allowlist entry names exactly one top-level test its file registers, and that `scheduled.yml` runs the pass on a daily cron and on dispatch on ubuntu while `ci.yml` does not run it |
-| `acceptance-verify-v1.test.js` | 26 | `test-acceptance-gate.sh` (A0b) | acceptance records: record schema and store, the verify-feature driver ids with the two earlier spellings still accepted, criteria through the shared lister, the chain anchor from the edit-landing receipt, criterion and gate verdict states, retention |
-| `external-review-v1.test.js` | 41 | `test-external-review-hook.sh` (X0b) | external review import: the Workflow launch record (main thread only, the skipped payloads, the script, script-path and named sources, the digest over the whole script, the task id and transcript directory of the launch result, the bounds, retention and idle sweep), the freshness check against changed-file change times and the parents of deleted paths with its `.zensu` exclusion and every `unavailable` reason, the template digest on the launch and on the run record, the result read from the run record and never from the named output file (an unfinished, unreadable, linked, oversized, unparseable or mismatching record), the `zensu-review-result/v1` shape gate, the run arguments that must name every changed file, the binding of a result to its launch and to the current tree (a mocked and a real git tree), the runtime cross-check through the run journal or the run record's progress, a restarted label judged by its latest start, and every `degraded` reason, a finder-failed gap, ambiguous launches and selection by the result's task id or the launch id, future-dated records, the store permission, symlink and script-path refusals, the nonce that fences the imported findings and the `-` anchor of a file-level finding, the tree mode with the import or the judge off, the stage mode (the session-keyed copy of the template in the recorded project root's state directory, its digest check, a replaced edit, the idle sweep of other sessions' copies, every `unavailable` reason, the link refusal, and a staged copy that moves no tree and is imported), the Stop guard's bounded workflow wait with its running-status allowlist and stale-counter sweep, and the review template run in a sandbox (dedup, per-lens cap counted after it, malformed entries, agent ceiling, budget and the refuter window, failed finders and refuters, quoted finder text in refuter prompts, argument checks, a pure-literal `meta`) |
-| `finding-verify-v1.test.js` | 28 | `test-finding-verification.sh` | finding-verification grading module |
-| `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
-| `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
-| `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
-| `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |
-| `restore-root-render-cases.test.js` | 79 | `test-restore-project-root.sh` (R0) | `renderRestoreVerdict` / `performRestore` / `renderRestoreOutcome` — the returning split of the former `renderRestoreRoot`, plus the pins that neither renderer writes a global, that no verdict factory remains, and that no case in the file intercepts the stdout writer: the refusal arm (the only reader of `RESTORE_REMEDY` and of its no-remedy fallback), the ladder-result rows, the benign already-present race with and without a non-empty `created`, the workflow document that race still owes, the FAILED arm with and without a non-empty `created`, a rebuilt directory with no document, an already-present baseline, a rebuild whose provenance entry failed, the `root-present` remedy, the five rendered-text corrections (the pre-confirm MOVED caveat, the disclosure the raced arm owes, the WARNING a failed restore provenance owes, the non-empty-target caveat, and the untracked-write cost on the closing line), `repairBaseline`'s provenance-cause copy through its `deps` seam, the shared unrecorded-provenance predicate together with what a core LACKING the export must do — every one of its three writers discloses a missing check and renders no verdict, the retired guarded fallback having been removed rather than aligned, a core without `RESTORE_ROOT_REFUSALS`, and a core missing individual members of it, the raced arm's own disclosure, its unestablished-baseline exit and the project root it names, the provenance-warning conjunct that decides a failed baseline beside a non-recorded provenance, the already-present baseline reached through `performRestore`, and a hostile `limit` on a taken verdict, plus the raced arm's THREE-VALUED tamper flag — a `null` verdict discloses that the check could not be made and withholds the rebuild remedy, which is the operation that declines on the tamper it could not rule out, while `true` and `false` keep their own arms, and the raced arm's rendered project root, which `performRestore`'s second parameter is the sole source of because the throw carries only `created` — every arm no armed fixture can reach |
-| `reviewer-spawn-denial-v1.test.js` | 37 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
-| `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
-| `zensu-doctor-invocation.test.js` | 27 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
-| `session-reanchor-v1.test.js` | 67 | `test-session-reanchor.sh` (E0a) | verified re-anchor of a session record to a sibling worktree of the same repository: git identity and worktree registration, every refusal reason including the Autopilot-run rung (a lease it cannot take, a shell that prints no run, a BASH_ENV file, and its place after the cheap refusals) and the two containment refusals, the live-session claim probe (registry working directory, recorded project root, worktree-keep anchors) and its fail-closed arms, the re-mint under the repository and session locks with its set-aside record and two-sided provenance, the project-root lease filter, the keep-anchor and session-marker moves, and both renderers, including quoted uncommitted file names read without optional git locks |
-| `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
-| `session-adopt-report-v1.test.js` | 59 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, that the display rule has exactly ONE owner, and the adoption half of `main()` through its `deps` seam — the three `--confirm` failure arms (served meanwhile, refused under the lock, did not complete), the read-only preview's served, refused and adoptable answers, the provenance branches read off the core vocabulary rather than literals, and the already-served `--confirm` arm whole for every lease-sweep result — none recorded, moved, clean, refused (named as refused, never as completed) and stuck |
-| `session-auto-adopt-v1.test.js` | 44 | `test-versioned-plugin-upgrade.sh` | the automatic adoption shared by every hook binder and the manual entry point: the ladder (probe, then the crash-resume check the preview owns — a dangling link at the superseded name included — then the opt-out, which stands only for an adoptable record, adopt under the lock, sweep), every refusal and unavailable arm through injected core and sweep stubs, the closed outcome and reason vocabularies, the opt-out precedence (explicit file as one layer, else the global file and the project overlay as two; `false` is STICKY across them while the merged view still lets the project win; malformed input degrades to enabled), that `previewAdoption` never writes — a served answer from it carries no sweep, while `adoptForHook` completes a sibling's adoption with one, on the probe-time, lock-time and timed-out-then-served arms alike — the candidate files equal to those of `_ZENSU_STRICT_JS` in `zensu-config.sh`, that the manual caller may ignore the opt-out, the named-state predicate, the typed lock-timeout code and that the core MINTS it, that a refusal names the state the PROBE carried (and that the real `adoptableRecord` attaches it to every refusal but `record-unreadable`), the single JavaScript owner of the token grammar, the shared notice renderer (a refused sweep is named as refused — partial or not — the orphan and concurrent variants, the unmeasured already-served span, every value screened, the doctor pointer conditional per provenance), `supersededRecordFile` refusing an unsafe version, the observed version travelling on the request, the operator line and the kept-record screen, the `.*` gate's token screens and verb/remedy/tail selectors through its export seam, the adapter's `serveOrAdopt` through its `deps` seam (including the lease sweep of a served answer it names when the strict re-read still fails), the served-sweep line naming the served record rather than a sibling's adoption, the notice's closing on a deny and on an orphaned adoption, and that the default instance is wired to the real core and sweep |
-| `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `verify-consent-v1.test.js` | 125 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants, the CLI names it takes from the version module with the per-platform bare set, and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the shape and final refusal classes with the re-issue note only a shape denial carries, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent, the permission modes in which the session can show the prompt, a remote origin asked at every open whatever the memory holds and refused where the session cannot show the prompt, a policy that pre-approves its targets in every mode and stays the whole allowlist only where the session cannot show the prompt, with a reason of its own for an origin of the other kind than the policy's, the remote and mixed prompt texts, the Chromium-only `--browser` rule, the `--config` run-config shape with its refusal of a resolver pin for `localhost` and of an unpinned or pattern remote host, the global-config and ambient-override refusals, policy mode admitting every route of a target origin, a network-only origin admitted in the run config with no plan entry and refused for every navigation, the two policy roles of `judgeOrigin`, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, the prompt text, and the absence of any route contract of its own |
-| `verify-navigation-floor-v1.test.js` | 21 | `test-verify-consent.sh` (V6) | the one navigation floor the consent gate and the run-config helper share: the local-host predicate (loopback IPs and the exact name `localhost`), loopback and public-address classes, URL refusals including a wildcard or pattern remote host, remote host resolution, route normalization, the top-level policy contract check, and `parsePolicyTargets` with its route-free target and the legacy route list it still bounds at `MAX_POLICY_ROUTES` and then drops, the optional `networkOnlyOrigins` list with its own contract cause, shape faults, floor per mode and target overlap, and the one exported exact-host predicate that refuses a wildcard or pattern host in either list and in navigation (the run-config half is pinned in `verify-consent-v1.test.js`) |
-| `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
-| `verify-browser-config.test.js` | 21 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, a `localhost` origin written with no resolver pin, the public-address pins of a remote run written for consent or for a policy, a policy that pre-approves only its targets whatever its mode, the `--network-only-origin` flag with its shared origin bound, pins, role refusals and consent-mode refusal, the per-origin `--check-policy` answer for both operands and the readiness refusal it runs first, the stderr note printed only when a present policy leaves an origin to the permission prompt, the run-directory refusals, the readiness refusals with the cause and remedy each names, and the CLI contract |
-| `playwright-cli-version-v1.test.js` | 14 | `test-verify-consent.sh` (V7d) | the installed playwright-cli version identity the doctor and the run-config helper share: the `@playwright/cli` manifest the resolved binary belongs to, read without running it; a manifest naming another package or malformed, which is never executed; the npm shim sibling, read before any directory above the shim; the bounded `--version` self-report with stdin closed and the update notifier off; the PATH walk in shell order, with an empty or relative entry read against the working directory and named as unstable; and the key-per-line CLI |
-| `verify-run-resources.test.js` | 18 | `test-verify-feature-skill.sh` (P11) | the run-resource helper of `/zensu:verify-feature`: argument parsing, the owned-name prefix, the physical and plainly named run directory and its length limit, the stdout-only simulator UDID capture with the device recorded before `simctl create` runs, a teardown that deletes only a device still carrying the run's name, also for a device recorded before its UDID was known, a failed create that still records the device it made, the record-time name rule for containers, `tmux` sockets and `kind` clusters, an emulator serial recorded only while `adb` lists none and never killed at teardown, reverse-order teardown with each kind's own command and resources already gone, kept resources retried on a later call, the strict ledger read before any tool runs, a stale lock that names its dead holder, the supervisor's command-line and process-group checks, the supervised start and whole-group stop, a command without arguments, and the CLI refusal contract |
-| `release-run-step.test.js` | 11 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
-| `workflow-dispatch-inputs.test.js` | 24 | `test-workflow-dispatch-inputs.sh` | dispatcher-controlled values reach `run:` scripts only through `env:` or a runner variable: no `run:` block in any workflow template-expands an `inputs`, `env` or `needs` reference, or a `github` reference other than a dotted `sha`, `event_name`, `repository` or `server_url`, in any letter case (with a synthetic document proving the scan flags dotted, index and whole-context forms and no trusted one), every release step reading `SKIP_REASON`, `SKIP_TEST_GATE` or `VERSION_TYPE` maps it from that input, and prepare and publish carry one identical skip-request validation. EXECUTED through an emulated expression renderer: that validation against hostile, empty, whitespace-only, multi-line and edge-padded reasons; the release commit step in a throwaway repository followed by the publish plan's own decision block, for an ordinary release and a skipped one; that block's push default, which runs the gate unless the trailer reads `skipped`, its dispatch branches, the trailer outranking a dispatched reason with a notice only when the reasons differ, and a trailer without a reason, refused on push and left to the dispatch on a publish retry; the plan's `gate` and `gate_reason` outputs as one line each, a hostile reason included; both evidence steps, which record `passed` only after the suite job succeeded and `skipped` only when it was skipped with a reason, and refuse every contradicting combination; the main-only guard against a hostile ref; and the version computation |
-| `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
-| `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
-| `verify-feature-transcript-check.test.js` | 26 | `test-eval-harness-units.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module, the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument, and the network-only remote check that needs a passing `network-only` preflight before the helper call, the helper flag echoed back in the spelling the skill documents, every required operation in a session whose config that flagged call wrote last, and no navigation toward the network-only origin |
-| `fixture-mutation-watch.test.js` | 19 | `test-eval-harness-units.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
-| `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
-| `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
-| `windows-ci-contract.test.js` | 12 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
-| `windows-observation.test.js` | 11 | Windows safety | observation summarizer |
-| `claude-stream-render.test.js` | 6 | `test-eval-harness-units.sh` | stream renderer |
-| `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
-| `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
-| `process-supervisor.test.js` | 7 | `test-harness-launcher.sh` (H12) | the process supervisor the work-order launcher loads: bounded supervisor + process-tree teardown, a stop that never fails on the EPERM macOS answers while the group holds only zombies (a macOS-only fixture keeps one there), and the distinct exit code for an endpoint no supervisor answers |
-| `owned-process.test.js` | 4 | `test-eval-harness-units.sh` | owned-process lifecycle, and a signal-killed child reported as 128 + its signal number |
-| `subagent-shell-guard-v1.test.js` | 25 | `test-reviewer-capability-gate.sh` | the subagent shell grant (unnamed children, read-only identities, personas, the strict `hooks.subagentShell` reader against `zensu_hook_enabled_strict`, a relative or multi-line `ZENSU_CONFIG`, the refusal text, the config authorities) and the accident guard: every listed form, the quote-aware parse with its comments, redirections, heredoc escapes and brace expansion, interpreter code, `-c` and `eval` bodies the outer shell expands, whole-tree git operands, the working-directory candidates and their bound, quoted paths with spaces, a symlinked `~/.claude` and config layer, a `ZENSU_CONFIG` beside the project, the project overlay under `HOME` with globs matched segment by segment, every string field, Bash as the only shell call, the project-root and parent rules, Windows spellings and platform case folding; and the command walker the CLI gate reads |
-| `reviewer-spawn-allow-v1.test.js` | 20 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
-| `worktree-keep-v1.test.js` | 101 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, the nested-repository scan with its narrow submodule exemption, bare repositories, its name order, early stop, deadline and refusals, the nested-repository marker hold on every path that ends an anchor including a worktree moved into the taker, anchor retirement on behalf of a released session with its stamp check, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
-| `session-hub-receipt-v1.test.js` | 12 | `test-session-hub-receipt.sh` (R2) | the Session Hub takeover receipt: the token read from the raw takeover command the Hub types and from the command-tag spelling in either tag order, leading system reminders skipped before the command is read, every other prompt shape refused, the six-field receipt built for a `UserPromptSubmit` payload only, the command and receipt directory the session-trail handover contract declares, the config root taken from `CLAUDE_CONFIG_DIR` with the `~/.claude` fallback, a private receipt that lands once and is never replaced, the refusal of a symlinked component below the config root, pruning of old receipts and temp files within its scan bound that never follows a symlinked receipts directory, and that recording needs the skill on disk and writes nothing for any other prompt |
-| `work-order-v1.test.js` | 38 | `test-work-order-runtime.sh` (R2) | work-order runtime: the CLI error grammar and its verdicts with context after the status group and messages over several lines, deterministic client event ids, the forward-only ledger-to-stage mapping, renewal cadence and lease expiry, the inert context outside work-order mode, state-file refusals, the once-only markers, forge-write verdicts, queued answers, start with its refusals and the unsupported-kind block, lease loss on renewal, retries and the codeless-409 probe, a replay after the session ended, the DONE delivery order with `ready_for_merge` last, drain replays and `invalid_transition`, the reasoned and the BLOCKED finish, the approved-plan lookup, the Stop budget without progress, the order binding and the push refused on a stale attempt, the Bash analysis of the gate, the gate's denials and renewal, `--ask` with its default and its blocking end, `--followup` and the repeated CLI flags, the post-tool answers and the blocked direct ask, the plan summary, the order-bound review key against the state library, and the release plan of a takeover |
+| Unit file | Registered | Skips | Driven by | Summary |
+|---|---|---|---|---|
+| `session-control/session-control-core-v1.test.js` | 217 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
+| `structure/acceptance-verify-v1.test.js` | 26 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
+| `structure/aspect-activation-v1.test.js` | 21 | – | `test-incremental-review-rounds.sh` | Review-aspect activation: which review perspectives a round activates for a given change. |
+| `structure/chain-recovery-v1.test.js` | 21 | – | `test-chain-recover.sh` | The chain shape lattice and the rearm-receipt predicate. |
+| `structure/claude-stream-render.test.js` | 6 | – | `test-eval-harness-units.sh` | The eval harness renderer for the claude stream-json output. |
+| `structure/clock-shift-v1.test.js` | 19 | – | `test-clock-shift.sh` | The shifted-clock preload and runner that the scheduled clock-shift pass uses. |
+| `structure/deferred-review-claim-cases.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The deferred-review claim case table. |
+| `structure/evidence-run-v1.test.js` | 80 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
+| `structure/external-review-v1.test.js` | 41 | win32 3 | `test-external-review-hook.sh` | External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, and the freshness check against changed files. |
+| `structure/finding-verify-v1.test.js` | 28 | – | `test-finding-verification.sh` | The finding-verification grading module. |
+| `structure/fixture-mutation-watch.test.js` | 19 | – | `test-eval-harness-units.sh` | Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends. |
+| `structure/full-suite-ci-v1.test.js` | 28 | – | `test-full-suite-ci.sh` | Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict. |
+| `structure/git-repo-escape.test.js` | 45 | – | `test-bash-source-write-gate.sh` | The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice. |
+| `structure/owned-process.test.js` | 4 | win32 4 | `test-eval-harness-units.sh` | The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number. |
+| `structure/plan-payload-v1.test.js` | 20 | – | `test-plan-payload-fallback.sh` | The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback. |
+| `structure/playwright-cli-version-v1.test.js` | 14 | win32 12 | `test-verify-consent.sh` | The installed playwright-cli version identity, read from its package manifest without running the binary. |
+| `structure/plugin-data-guard-v1.test.js` | 37 | win32 4 | `test-plugin-data-guard.sh` | Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path. |
+| `structure/process-supervisor.test.js` | 7 | linux 1, root 1, win32 4 | `test-harness-launcher.sh` | The process supervisor the work-order launcher loads: process-tree teardown, the macOS zombie-only stop and the unreachable-endpoint exit code. |
+| `structure/profile-runner.test.js` | 23 | win32 2 | `test-windows-ci-contract.sh` (lifecycle, all) | The Windows profile runner: lifecycle, digests and deadlines. |
+| `structure/prompt-listing-v1.test.js` | 17 | – | `test-session-trail-verdict.sh` | The session-trail prompt listing: queue pairing, pull-backs, the withdrawn list and the truncated read. |
+| `structure/release-run-step.test.js` | 11 | – | `test-immutable-marketplace-release.sh` | The release workflow run_step wrapper, executed: the annotation, the stderr replay, the exit status and temp-file cleanup. |
+| `structure/restore-root-render-cases.test.js` | 79 | – | `test-restore-project-root.sh` | Restoring a vanished recorded project root: the verdict, restore and outcome renderers and their refusal arms. |
+| `structure/review-evidence-sweep-v1.test.js` | 32 | win32 6 | `test-versioned-plugin-upgrade.sh` | The superseded review-lease sweep: the ownership selector, the canonicalized repair root and the ancestor probe. |
+| `structure/review-ledger-v1.test.js` | 42 | – | `test-review-convergence.sh` | The review findings ledger: latest-wins, generations, carried open entries and fail-open verdicts. |
+| `structure/review-round-scope-v1.test.js` | 24 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |
+| `structure/reviewer-spawn-allow-v1.test.js` | 20 | – | `test-reviewer-spawn-allow.sh` | The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan. |
+| `structure/reviewer-spawn-denial-v1.test.js` | 37 | win32 2 | `test-stop-enforcer-self-review-routing.sh` | Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds. |
+| `structure/rule-block-v1.test.js` | 10 | win32 2 | `test-best-solution-first.sh` | The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals. |
+| `structure/session-adopt-report-v1.test.js` | 59 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
+| `structure/session-auto-adopt-v1.test.js` | 44 | – | `test-versioned-plugin-upgrade.sh` | Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock. |
+| `structure/session-control-lineage.test.js` | 13 | – | `test-versioned-plugin-upgrade.sh` | The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root. |
+| `structure/session-hub-receipt-v1.test.js` | 12 | – | `test-session-hub-receipt.sh` | The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields. |
+| `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
+| `structure/session-reanchor-v1.test.js` | 67 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
+| `structure/subagent-shell-guard-v1.test.js` | 25 | win32 2 | `test-reviewer-capability-gate.sh` | The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings. |
+| `structure/unit-registry.test.js` | 27 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
+| `structure/verify-browser-config.test.js` | 21 | – | `test-verify-consent.sh` | The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run. |
+| `structure/verify-consent-v1.test.js` | 125 | win32 2 | `test-verify-consent.sh` | The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection. |
+| `structure/verify-feature-transcript-check.test.js` | 26 | – | `test-eval-harness-units.sh` | The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session. |
+| `structure/verify-free-port.test.js` | 3 | – | `test-verify-consent.sh` | The free loopback port helper: argument parsing, occupied and excluded ports and the CLI contract. |
+| `structure/verify-navigation-floor-v1.test.js` | 21 | – | `test-verify-consent.sh` | The navigation floor the consent gate and the run-config helper share: local hosts, address classes and URL refusals. |
+| `structure/verify-run-resources.test.js` | 18 | win32 15 | `test-verify-feature-skill.sh` | The verify-feature run-resource helper: owned names, the run ledger, simulator and emulator teardown, and supervised process groups. |
+| `structure/windows-ci-contract.test.js` | 12 | – | `test-windows-ci-contract.sh` (metadata, all) | Windows CI manifest invariants: the shards, their deadlines, the command catalog and the workflow job. |
+| `structure/windows-observation.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows observation summarizer. |
+| `structure/windows-profile-contract.test.js` | 4 | – | `test-windows-ci-contract.sh` (metadata, all) | The Windows profile contract. |
+| `structure/windows-safety-shard.test.js` | 5 | – | `test-windows-ci-contract.sh` (metadata, all) | Windows Safety shard partitioning, with no suite duplicated or lost. |
+| `structure/work-order-v1.test.js` | 38 | – | `test-work-order-runtime.sh` | The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan. |
+| `structure/workflow-dispatch-inputs.test.js` | 24 | – | `test-workflow-dispatch-inputs.sh` | Dispatcher-controlled values reach workflow run scripts only through env or a trusted runner variable. |
+| `structure/worktree-advice-v1.test.js` | 66 | win32 2 | `test-session-trail-verdict.sh` | The session-trail takeover destination advice: every arm on both legs, the carry-over recipe and the move alternative. |
+| `structure/worktree-keep-v1.test.js` | 101 | – | `test-worktree-keep.sh` | Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement. |
+| `structure/zen-anchor-assertions.test.js` | 11 | – | `test-zen-mode.sh` | The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector. |
+| `structure/zen-anchor-v1.test.js` | 25 | – | `test-zen-mode.sh` | The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain. |
+| `structure/zensu-doctor-invocation.test.js` | 27 | – | `test-versioned-plugin-upgrade.sh` | The /zensu:doctor invocation allowlist. |
+<!-- unit-registry:end section-4 -->
 
-FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
-`prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
-exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (51
-files) against this table's 46 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
-and is recorded here rather than quietly replaced: it named
-`review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
-all three of which DO have rows twenty lines above it, and it named neither of the two files PR
-#306 added. For TWO of the five that drift predates the reviewer-spawn
-grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
-`prompt-listing-v1.test.js` postdate it; `worktree-advice-v1.test.js` and
-`prompt-listing-v1.test.js` are different and the distinction is worth keeping — the
-session-trail takeover-destination change added the first and the queued-prompt withdrawal
-change the second, and both were left rowless deliberately, because nothing grades a row's
-PRESENCE here. Say it that way rather than "these files are graded by no suite", which is
-false: `R13` in `test-restore-project-root.sh` grades every row's `Blocks` numeral against
-the `test(` registrations of its file, and `R13b` in the same suite grades this paragraph's
-file and row counts. What no suite checks is which files lack a row. Both unit files ARE
-driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
-rowless here, not ungraded there. The reconciliation and the missing rows are recorded
-rather than silently absorbed. The inventory row above no longer carries a unit-file numeral
-at all: it was a hand-maintained count nothing graded, and it went stale on its next merge.
+Every driver runs its files through `tests/structure/lib-unit-registry.sh`. `unit_run` runs one
+file under the TAP reporter and grades that run against the file's entry: node's exact
+registered total, the per-host ceiling of skipped or todo cases (`darwin`, `linux`, `root` for
+uid 0, `win32`), and the guarded titles that must pass. An emptied file fails even at
+`registered: 1`, because node then counts the file itself as its only test. `unit_grade` grades
+a run a driver spawned itself, which `tests/session-control/run.sh` does to keep its timeout and
+progress diagnostic, and `unit_registry_done` fails a driver that never ran a file the registry
+gives it. A failing grade replays each `not ok` line on stderr with the diagnostics node printed
+before it and its YAML block, or the last 40 lines of node's output when no case reported
+`not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
+in the same commit, followed by `node tests/structure/lib-unit-registry.js render --write`.
 
-Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
-unit suite, reached via `tests/session-control/run.sh`. It is driven by
-`tests/structure/test-session-control-core.sh`, which `run-all.sh` collects like every
-other structure suite, so it runs on EVERY host under `--ci` — not only on the Windows
-profiles. That driver is what closed the gap the suite's own header describes ("On Linux
-and macOS the whole suite was therefore green by omission"); this sentence still said
-"Windows only" for a round after it landed. Its hand-maintained registered-case floor is
-`SC_FLOOR` in that driver, enforced there and required rather than skipped when the shared
-summary parse is unavailable; the file has no row in the table above, so no cell repeats it.
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
 ~8 autopilot / chain structure suites.
 
@@ -589,8 +533,6 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 
 ## 9. Known gaps and caveats
 
-- `tests/session-control/run.sh` (Session Control core unit suite) is **not** in
-  `run-all.sh` — only in the Windows profiles and the legacy canary.
 - The shifted-clock pass in `scheduled.yml` moves `Date` in node processes only, and only
   for `tests/structure/*.test.js`: the shell suites, `tests/session-control/`, child
   processes that are not node (`git`, `date`), file mtimes and any node child whose
@@ -612,10 +554,14 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
 
 ## 10. Maintaining this document
 
-A new suite must be classified in `tests/profiles/promptfoo-local-only.v1.json` or the
-preflight gate fails the whole run — that gate, not this file, is the enforcement point.
-This overview is descriptive: update the group lists and totals in §1/§3 when suites are
-added or removed.
+A new structure suite must be classified in `tests/profiles/promptfoo-local-only.v1.json`, and
+a new `node --test` file needs its entry in `tests/profiles/unit-files.v1.json`; the run-all
+preflight refuses every mode otherwise, and those gates, not this file, are the enforcement
+points. §1's totals and §4's table are generated: edit the two JSON files and run
+`node tests/structure/lib-unit-registry.js render --write`, never the regions by hand.
+`test-unit-registry.sh` fails when a region differs from the renderer's output. The rest of
+this overview is descriptive, and §3's group lists are updated by hand when suites are added
+or removed.
 
 ## Suite-prologue re-entry guard (cross-suite convention)
 

@@ -84,50 +84,9 @@ fi
 # `ciStructureTests`, so the WEEKLY Windows Safety structure shards do execute it, and
 # windows-ci-contract.test.js machine-enforces that such a claim is true. So the unit
 # file does run on Windows, on a weekly cadence, and its Windows wall clock is
-# UNMEASURED in the session that added it — say "unmeasured", never "does not run". The case-count check matters because exit 0 also accepts a file that
-# registered zero cases.
-WT_UNIT_OUT="$(node --test "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js" 2>&1)"
-WT_UNIT_RC=$?
-# BOTH summary spellings, and anchored on the WORD rather than a leading `.`: the
-# spec reporter prefixes each summary line with a multi-byte glyph, so a `.`-anchored
-# capture comes back empty under a non-UTF-8 locale and a healthy module reads as a
-# failure. Copied in shape from test-session-trail-lineage.sh's driver for that reason.
-WT_UNIT_TOTAL="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-WT_UNIT_PASS="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-# SKIPPED is captured because `pass` and `skipped` are DISJOINT counters, and this driver
-# used to demand `pass = total`. One case in that file creates a symlinked second spelling
-# of a directory and calls `t.skip` where the filesystem refuses one -- an environment
-# property, which its own comment says is not a contract failure -- so on the weekly Windows
-# structure shard a DESIGNED skip reddened this suite. The sibling driver in
-# test-session-trail-lineage.sh already solved exactly this, and the comment below says this
-# one was copied in shape from it; the skip half was what the copy left behind.
-WT_UNIT_SKIP="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]skipped \([0-9][0-9]*\)$/\1/p' | tail -1)"
-case "$WT_UNIT_TOTAL" in ''|*[!0-9]*) WT_UNIT_TOTAL=0 ;; esac
-case "$WT_UNIT_PASS" in ''|*[!0-9]*) WT_UNIT_PASS=0 ;; esac
-case "$WT_UNIT_SKIP" in ''|*[!0-9]*) WT_UNIT_SKIP=0 ;; esac
-# EXACT, not a floor, and hand-maintained on purpose: a floor accepts a case that
-# quietly started skipping itself, and deriving the number from the file under test
-# would make the check agree with whatever that file currently says.
-#
-# WHAT AN EXACT COUNT CANNOT SEE IS SUBSTITUTION. Delete a case and add an unrelated one in
-# the same commit and the total is unchanged, every arm here passes, and the tree has lost a
-# control. Closing that in general means the hand-maintained roster this count exists to
-# avoid, so it is closed for exactly TWO cases, and they were admitted on DIFFERENT criteria.
-# The FIRST is the one whose loss would be invisible and whose
-# title is already a self-identifying literal that the census in trail.mjs quotes back. The
-# SECOND meets only the first half of that — the fence case's title is quoted by no census
-# anywhere — and is admitted on the looser criterion alone: a case whose disappearance nothing
-# else would report. Both guards name their own case below. Apply this shape on that looser
-# criterion, never as a blanket rule, and state which of the two a third one matches.
-WT_UNIT_TOTAL_WANT=66
-# The skip BOUND is DERIVED from the file rather than hand-written, and then the derivation
-# itself is registered. A bare ceiling would accept a case that quietly started skipping
-# itself, which is the failure the exact-count comment above exists to prevent; counting the
-# `t.skip(` declarations means a new skip has to be registered here deliberately, while a
-# case that starts skipping without declaring one still cannot hide.
-# CASES, not declarations. A case may hold more than one `t.skip(` and still skip at most once,
-# so counting declarations admitted a higher `skipped` total than any declared route can reach:
-# three declarations sit in two cases today. The bound is the number of cases that can skip.
+# UNMEASURED in the session that added it — say "unmeasured", never "does not run".
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "WT-unit the worktree-advice unit file passes, its three guarded cases included" "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"
 WT_UNIT_SKIP_CASES="$(node -e '
 const fs = require("fs");
 const lines = fs.readFileSync(process.argv[1], "utf8").split("\n");
@@ -142,64 +101,14 @@ for (const l of lines) {
 process.stdout.write(String(cases));
 ' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js")"
 case "$WT_UNIT_SKIP_CASES" in ''|*[!0-9]*) WT_UNIT_SKIP_CASES=0 ;; esac
-# CASES, matching what the walk above actually counts. The identifier and both messages said
-# "declarations" while the value has always been cases -- a case may hold more than one
-# `t.skip(`, and three declarations sit in two cases today -- so the name contradicted the
-# comment four lines above it that makes exactly this correction.
-WT_UNIT_SKIP_CASES_WANT=2
-if [ "$WT_UNIT_SKIP_CASES" != "$WT_UNIT_SKIP_CASES_WANT" ]; then
-  check "WT-unit-cases the cases that can skip in worktree-advice-v1.test.js drifted (source has $WT_UNIT_SKIP_CASES, the expectation is $WT_UNIT_SKIP_CASES_WANT)" FAIL
+WT_UNIT_SKIP_CASES_WANT="$(node -p 'const entry = require(process.argv[1]).files.find((file) => file.path === "tests/structure/worktree-advice-v1.test.js"); String((entry && entry.skips && entry.skips.win32) || 0)' "$PLUGIN_DIR/tests/profiles/unit-files.v1.json" 2>/dev/null)"
+if [ -n "$WT_UNIT_SKIP_CASES_WANT" ] && [ "$WT_UNIT_SKIP_CASES" = "$WT_UNIT_SKIP_CASES_WANT" ]; then
+  check "WT-unit-cases the registry's win32 skip ceiling matches the cases that can skip in the file ($WT_UNIT_SKIP_CASES)" PASS
 else
-  check "WT-unit-cases the skip expectation matches the cases that can skip in the file ($WT_UNIT_SKIP_CASES)" PASS
-fi
-if [ "$WT_UNIT_RC" = "0" ] && [ "$WT_UNIT_TOTAL" = "$WT_UNIT_TOTAL_WANT" ] \
-  && [ "$WT_UNIT_SKIP" -le "$WT_UNIT_SKIP_CASES" ] \
-  && [ "$WT_UNIT_PASS" = "$((WT_UNIT_TOTAL - WT_UNIT_SKIP))" ]; then
-  check "WT-unit worktree-advice-v1.test.js passes ($WT_UNIT_PASS/$WT_UNIT_TOTAL cases, $WT_UNIT_SKIP skipped)" PASS
-else
-  check "WT-unit worktree-advice-v1.test.js (rc=$WT_UNIT_RC pass=${WT_UNIT_PASS:-0} total=${WT_UNIT_TOTAL:-0} skipped=${WT_UNIT_SKIP:-0}, want exactly $WT_UNIT_TOTAL_WANT cases, at most $WT_UNIT_SKIP_CASES skipped, and every unskipped case passing)" FAIL
-  printf '%s\n' "$WT_UNIT_OUT" | tail -20
-fi
-if grep -qF 'the briefShellArg carrier population is derived' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
-  check "WT-unit the derived briefShellArg census case is still registered" PASS
-else
-  check "WT-unit the derived briefShellArg census case is gone — the derived carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
-fi
-# The SECOND title guard, admitted on the criterion the comment above `WT_UNIT_TOTAL_WANT`
-# states: apply this shape to a case whose disappearance nothing else would report. The
-# fence-separation case is the ONLY holder of the create-then-move paste-unit contract that
-# `MOVE_ALTERNATIVE`'s own header calls load-bearing — every other move check in both suites
-# is a presence needle. Delete it and add any unrelated case in the same commit and the exact
-# total stays 65 while the property has zero holders in the tree. Two carriers, not one, so a
-# maintainer who moves the case still has to move its guard.
-if grep -qF 'the create route and the move alternative are not in the same paste unit' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
-  check "WT-unit the create-then-move paste-unit case is still registered" PASS
-else
-  check "WT-unit the create-then-move paste-unit case is gone — the fence separation and its ordering have no holder left, and the exact total above cannot see a substitution" FAIL
-fi
-# The THIRD, on the same looser criterion. `WT8v10b` asserts the emitted CLAIM `sits ABOVE the
-# line`; only this unit case asserts the PLACEMENT that claim describes, so deleting it leaves
-# the array free to be reordered while `WT8v10b` keeps asserting a sentence that has become
-# false — the one shape a presence needle can never see.
-if grep -qF 'the move alternative states its stop condition before the command' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
-  check "WT-unit the stop-condition placement case is still registered" PASS
-else
-  check "WT-unit the stop-condition placement case is gone — WT8v10b then asserts a claim with nothing holding the placement it describes" FAIL
+  check "WT-unit-cases the cases that can skip in worktree-advice-v1.test.js drifted (source has $WT_UNIT_SKIP_CASES, the registry allows ${WT_UNIT_SKIP_CASES_WANT:-<unreadable>})" FAIL
 fi
 
-PL_UNIT_OUT="$(node --test "$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js" 2>&1)"
-PL_UNIT_RC=$?
-PL_UNIT_TOTAL="$(printf '%s' "$PL_UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-PL_UNIT_PASS="$(printf '%s' "$PL_UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-case "$PL_UNIT_TOTAL" in ''|*[!0-9]*) PL_UNIT_TOTAL=0 ;; esac
-case "$PL_UNIT_PASS" in ''|*[!0-9]*) PL_UNIT_PASS=0 ;; esac
-PL_UNIT_TOTAL_WANT=17
-if [ "$PL_UNIT_RC" = "0" ] && [ "$PL_UNIT_TOTAL" = "$PL_UNIT_TOTAL_WANT" ] && [ "$PL_UNIT_PASS" = "$PL_UNIT_TOTAL" ]; then
-  check "PL-unit prompt-listing-v1.test.js passes ($PL_UNIT_PASS/$PL_UNIT_TOTAL cases): extractPrompts is driven directly for the pairing window's edges on both sides, the reach guard, the per-build channel and what starts a build, the fallback, the pull-backs and the truncated read" PASS
-else
-  check "PL-unit prompt-listing-v1.test.js (rc=$PL_UNIT_RC pass=$PL_UNIT_PASS total=$PL_UNIT_TOTAL, want exactly $PL_UNIT_TOTAL_WANT cases, all passing)" FAIL
-  printf '%s\n' "$PL_UNIT_OUT" | tail -20
-fi
+unit_check "PL-unit the prompt-listing unit file passes, its five guarded cases included" "$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_FILE="$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_PULLBACKS="$(sed -n "s/^const QUEUE_PULLBACKS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
 PL_LOOP_OPS="$(node -e '
@@ -219,16 +128,8 @@ case "$PL_LOOP_OPS" in CASE_NOT_FOUND|LOOP_NOT_FOUND|'') PL_GUARD_MISS="$PL_GUAR
 for PL_OP in $PL_PULLBACKS; do
   printf '%s\n' "$PL_LOOP_OPS" | grep -qxF -- "$PL_OP" || PL_GUARD_MISS="$PL_GUARD_MISS [pull-back-case-skips-$PL_OP]"
 done
-for PL_TITLE in \
-  'a delivery is credited only to a remove that took a copy and carries no reason, however near another remove sits' \
-  'a remove followed by a record of another build is judged under both builds' \
-  'a record without a version leaves the build in effect rather than starting one' \
-  'a readable delivery whose text no enqueued copy carries vetoes its build even when a matched delivery opened it' \
-  'the keep-one fallback restores the newest copy when every copy of a delivered text was withdrawn'; do
-  grep -qF -- "test('$PL_TITLE'" "$PL_FILE" || PL_GUARD_MISS="$PL_GUARD_MISS [case-gone:$PL_TITLE]"
-done
 if [ -z "$PL_GUARD_MISS" ]; then
-  check "PL-unit the pull-back case loops over every QUEUE_PULLBACKS member read from trail.mjs ($(printf '%s' "$PL_PULLBACKS" | tr '\n' ' ' | sed 's/ $//')), and the five cases that alone hold the crediting filter, the two-build judgement, the unversioned-record rule, the text veto and the newest-copy fallback are still registered" PASS
+  check "PL-unit the pull-back case loops over every QUEUE_PULLBACKS member read from trail.mjs ($(printf '%s' "$PL_PULLBACKS" | tr '\n' ' ' | sed 's/ $//')), " PASS
 else
   check "PL-unit sole-holder case guard:$PL_GUARD_MISS" FAIL
 fi
@@ -8212,4 +8113,5 @@ else
   [ -z "$FK_BAD" ] && check "FK9 a fork past the full-read limit, whose first own record lies in the unread middle and spans more than one read chunk, resolves to that record's worktree, not to the nested worktree its tail shows or to its parent's" PASS || check "FK9 large fork:$FK_BAD" FAIL
 fi
 
+unit_check_done "WT-unit-z every unit file the registry gives this suite was graded"
 report

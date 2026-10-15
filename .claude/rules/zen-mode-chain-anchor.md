@@ -280,15 +280,12 @@ is the drift the rule exists to prevent.
   not declare, and its mechanism is the fourth distinct one - the anchor keeps rendering and
   the allowlist-membership case in `zen-anchor-v1.test.js` is what reddens. Four exports,
   four different mechanisms, and only one of them silences the anchor.
-- `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
-  REGISTRATION count, so adding or removing a case in either zen unit file makes that
-  table stale, which `Z78` in `tests/structure/test-zen-mode.sh` and `R13` in
-  `tests/structure/test-restore-project-root.sh` both report. Its section 1 row for
-  `tests/structure/*.test.js` deliberately reads "(count deliberately omitted)", so adding a
-  unit FILE owes nothing there. An earlier wording here claimed that row carried a total and
-  that the file named itself its single owner; neither statement is in that file, and a
-  maintainer working from it would have gone looking for a figure that does not exist. The
-  per-file row is the whole obligation.
+- `tests/profiles/unit-files.v1.json` carries an entry per driven `node --test` file with its
+  exact REGISTRATION count, so adding or removing a case in either zen unit file fails its
+  driver (`Z29` or `Z31`) until `registered` moves with it, and the `run-all.sh` preflight
+  census refuses the tree from the source alone. `tests/SUITE-OVERVIEW.md` §4 is generated
+  from that file, so the obligation is the entry plus
+  `node tests/structure/lib-unit-registry.js render --write`.
 - `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
   clause — its ranking obligation and the anti-inflation counterweight — so editing that
   clause reddens a suite named for the best-solution-first hook. Note the boundary: a
@@ -302,22 +299,22 @@ is the drift the rule exists to prevent.
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
-  this suite. TWO KINDS of floor guard the unit file and they count different
+  this suite. TWO KINDS of count guard the unit file and they count different
   things — do not conflate them, and note that the two kinds do not move together.
-  `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS in the whole
-  file; the per-table `floor:` values live in the unit file and count CASES inside one
-  scenario. So binding a further scenario raises the registration count and no case count,
-  while adding a grader to a scenario already bound does the reverse — which is why
-  "raise the matching number" needs the word MATCHING. Both kinds fire on REMOVAL only, so
-  raising either in the same commit that adds to it is a CONVENTION the file states in its
-  own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
+  `registered` in the file's entry in `tests/profiles/unit-files.v1.json` counts `test()`
+  REGISTRATIONS in the whole file and is exact; the per-table `floor:` values live in the
+  unit file and count CASES inside one scenario. So binding a further scenario raises the
+  registration count and no case count, while adding a grader to a scenario already bound does
+  the reverse — which is why "raise the matching number" needs the word MATCHING. The
+  per-table floors fire on REMOVAL only, so raising one in the same commit that adds to it is
+  a CONVENTION the file states in its own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
   when the mark-derivation graders went: the cases that drove them described a decision the
   reply no longer makes. That is a deliberate lowering with its reason recorded at the
   constant, and lowering it again needs the same note. The per-table count is deliberately
   not written out here — it grew by one when the third scenario was bound, and a numeral in
   this file is exactly what nothing recomputes.
 - Z31 drives `tests/structure/zen-anchor-v1.test.js`, the anchor module's own unit
-  contract, with the same registration floor. Z32 drives the hook end to end against a real
+  contract, graded against its own registry entry. Z32 drives the hook end to end against a real
   Session Control record: `none` with no chain, the implementing position with one armed,
   and — the load-bearing arm — an unreadable workflow document costing the ANCHOR and never
   the MODE.
