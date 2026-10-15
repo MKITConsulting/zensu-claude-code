@@ -36,7 +36,9 @@ unit_failure_excerpt() {
     { ring[NR % 40] = $0 }
     /^not ok / {
       found = 1
-      for (i = 0; i < held; i++) emit(pending[i])
+      first = (held > 40) ? held - 40 : 0
+      if (first > 0) emit("# (" first " earlier diagnostic line(s) omitted)")
+      for (i = first; i < held; i++) emit(pending[i % 40])
       held = 0
       show = 1
       emit($0)
@@ -49,7 +51,7 @@ unit_failure_excerpt() {
       if ($0 == "  ...") show = 0
       next
     }
-    /^# / { if (held < 40) pending[held++] = $0 }
+    /^# / { pending[held % 40] = $0; held++ }
     END {
       if (!found) {
         start = NR > 40 ? NR - 39 : 1

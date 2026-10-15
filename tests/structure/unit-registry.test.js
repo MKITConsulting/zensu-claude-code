@@ -253,22 +253,36 @@ test('in a git work tree the census skips ignored files and still names an untra
   fs.writeFileSync(fixture, cases(1));
   fs.writeFileSync(path.join(root, '.gitignore'), 'tests/e2e/fixtures/\n');
   assert.deepEqual(registry.census(root), ['tests/e2e/fixtures/probe/math.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
-  const init = spawnSync('git', ['-C', root, 'init', '-q'], { encoding: 'utf8' });
+  const init = spawnSync('git', ['-C', root, 'init', '-q'], { encoding: 'utf8', env: registry.gitEnvironment() });
   assert.equal(init.status, 0, init.stderr);
   assert.deepEqual(registry.census(root), []);
   fs.writeFileSync(path.join(root, 'tests', 'structure', 'other.test.js'), cases(1));
   assert.deepEqual(registry.census(root), ['tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one']);
 });
 
-test('a work tree git cannot read makes the census say that it walked tests/ instead', (t) => {
+test('a work tree git cannot read makes the census say that it walked tests/ instead, whatever GIT_DIR the environment exports', (t) => {
   const root = makeRoot(t);
   fs.writeFileSync(path.join(root, '.git'), `gitdir: ${path.join(root, 'missing-gitdir')}\n`);
   assert.deepEqual(registry.census(root), []);
   fs.writeFileSync(path.join(root, 'tests', 'structure', 'other.test.js'), cases(1));
-  const problems = registry.census(root);
-  assert.equal(problems.length, 2);
-  assert.equal(problems[0], 'tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one');
-  assert.match(problems[1], /^tests: git could not list this work tree \(.+\), so the census walked tests\/ and may name files that git ignores$/);
+  const walked = (problems) => {
+    assert.equal(problems.length, 2);
+    assert.equal(problems[0], 'tests/structure/other.test.js: no entry in tests/profiles/unit-files.v1.json; add one');
+    assert.match(problems[1], /^tests: git could not list this work tree \(.+\), so the census walked tests\/ and may name files that git ignores$/);
+  };
+  walked(registry.census(root));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'unit-registry-elsewhere-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  const init = spawnSync('git', ['-C', elsewhere, 'init', '-q'], { encoding: 'utf8', env: registry.gitEnvironment() });
+  assert.equal(init.status, 0, init.stderr);
+  const saved = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(elsewhere, '.git');
+  try {
+    walked(registry.census(root));
+  } finally {
+    if (saved === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = saved;
+  }
 });
 
 test('the rendered regions round-trip and a hand edit is reported with the render command', (t) => {
@@ -355,6 +369,11 @@ test('every node --test spawn needs its own unit_grade call, and a check label n
   assert.deepEqual(registry.driverProblems(root), [
     `${DRIVER}: spawns node --test itself 2 time(s) but calls unit_grade 1 time(s); run unit files through unit_run, or grade each run through unit_grade`,
   ]);
+  const absolute = [...graded.slice(0, 4), '/usr/local/bin/node --test tests/structure/other.test.js', ...graded.slice(4)];
+  fs.writeFileSync(path.join(root, DRIVER), absolute.join('\n'));
+  assert.deepEqual(registry.driverProblems(root), [
+    `${DRIVER}: spawns node --test itself 2 time(s) but calls unit_grade 1 time(s); run unit files through unit_run, or grade each run through unit_grade`,
+  ]);
 });
 
 test('only a CI suite that runs it with bash reaches a driver that is not itself a CI suite', (t) => {
@@ -377,6 +396,10 @@ test('only a CI suite that runs it with bash reaches a driver that is not itself
   fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'INNER="$ROOT/tests/inner/run.sh"', 'bash "$INNER" 2>&1 | tee "$OUT"', ''].join('\n'));
   assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
   fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'bash "$ROOT/tests/inner/run.sh"', ''].join('\n'));
+  assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
+  fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', 'INNER="$ROOT/tests/inner/run.sh"', '"$BASH" "$INNER" 2>&1 | tee "$OUT"', ''].join('\n'));
+  assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
+  fs.writeFileSync(path.join(root, DRIVER), ['#!/bin/bash', '/bin/bash "$ROOT/tests/inner/run.sh"', ''].join('\n'));
   assert.doesNotMatch(registry.driverProblems(root).join('\n'), /no CI structure suite runs it/);
 });
 
@@ -423,6 +446,37 @@ test('the shell reader blanks quoted text and comments, keeps expansions and sub
     "      ' rest",
   ]);
   assert.equal(lines[0].text, 'echo "a $X b" \'c d\' ');
+});
+
+test('the shell reader closes each heredoc on the word bash reads, and a here-string or an arithmetic shift opens none', () => {
+  const lines = registry.shellLines([
+    'read -r MODE <<< "strict"',
+    'read -r WORD <<< y',
+    'x=$(( 1 << n )); (( x <<= 2 ))',
+    'cat > "$STUB" <<\\EOF',
+    'exit 0',
+    'EOF',
+    "cat <<'END-STUB' <<EOF-1",
+    "it's prose",
+    'END-STUB',
+    'node --test hidden',
+    'EOF-1',
+    'exit 0',
+  ].join('\n'));
+  assert.deepEqual(lines.map((line) => line.code), [
+    'read -r MODE <<< "      "',
+    'read -r WORD <<< y',
+    'x=$(( 1 << n )); (( x <<= 2 ))',
+    'cat > "$STUB" <<\\EOF',
+    '',
+    '',
+    "cat <<'END-STUB' <<EOF-1",
+    '',
+    '',
+    '',
+    '',
+    'exit 0',
+  ]);
 });
 
 test('verify refuses a caller that is not a registered driver and owned names what was never graded', (t) => {

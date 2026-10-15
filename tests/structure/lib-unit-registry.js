@@ -21,13 +21,16 @@ const SUITE_IMPORT = /(?:\{([^}]*)\}\s*=\s*require\(\s*['"]node:test['"]\s*\)|im
 const UNIT_CALL = /\bunit_(?:run|check|grade|not_run)\b/;
 const DONE_CALL = /\bunit_(?:registry_done|check_done)\b/;
 const COMMAND_POSITION = '(?:^|[;&|(`!]|\\$\\(|\\b(?:if|elif|while|until|then|do|else|exec|command|env|nice|time)\\b|\\btimeout(?:[ \\t]+-\\S+)*[ \\t]+\\S+)[ \\t]*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*[ \\t]+)*';
-const NODE_TEST_SPAWN = new RegExp(`${COMMAND_POSITION}(?:node|"?\\$\\{?NODE[A-Za-z0-9_]*\\}?"?)(?:[ \\t]+(?!--test(?![\\w-]))\\S+)*[ \\t]+--test(?![\\w-])`);
-const SHELL_CALL = new RegExp(`${COMMAND_POSITION}(?:bash|sh)\\b`);
+const PATH_PREFIX = '(?:(?:/[A-Za-z0-9._-]+)*/)?';
+const NODE_TEST_SPAWN = new RegExp(`${COMMAND_POSITION}(?:${PATH_PREFIX}node|"?\\$\\{?NODE[A-Za-z0-9_]*\\}?"?)(?:[ \\t]+(?!--test(?![\\w-]))\\S+)*[ \\t]+--test(?![\\w-])`);
+const SHELL_CALL = new RegExp(`${COMMAND_POSITION}(?:"?\\$(?:BASH|\\{BASH\\})"?(?![A-Za-z0-9_])|${PATH_PREFIX}(?:bash|sh)\\b)`);
 const SOURCE_CALL = /(?:^|[;&|]|\b(?:then|do|else)\b)[ \t]*(?:\.|source)[ \t]+/;
 const ASSIGNMENT = /^[ \t]*(?:(?:local|export|readonly|declare)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=/;
 const GRADE_CALL = /^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*unit_grade\b/;
 const EARLY_EXIT = /^[ \t]*exit 0\b/;
 const REGIONS = ['totals', 'section-4'];
+const GIT_ENV_SCRUB = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES', 'GIT_DISCOVERY_ACROSS_FILESYSTEM'];
 
 const exitCodes = { pass: 0, verdict: 1, plumbing: 2 };
 
@@ -136,8 +139,15 @@ function loadRegistry(root, registryFile) {
   return { entries: doc.files, errors };
 }
 
+function gitEnvironment(env = process.env) {
+  const scrubbed = { ...env };
+  for (const name of GIT_ENV_SCRUB) delete scrubbed[name];
+  return scrubbed;
+}
+
 function gitListedUnitFiles(root) {
-  const git = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const env = gitEnvironment();
+  const git = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
   const failure = (run) => {
     if (run.error) return run.error.code || run.error.message;
     if (run.status === 0) return null;
@@ -421,20 +431,51 @@ function writeOverview(overviewText, regions) {
   return { problems: [], text };
 }
 
+function heredocMarker(line, start) {
+  let index = start;
+  const strip = line[index] === '-';
+  if (strip) index += 1;
+  while (line[index] === ' ' || line[index] === '\t') index += 1;
+  let word = '';
+  while (index < line.length && !/[\s|&;()<>]/.test(line[index])) {
+    const char = line[index];
+    if (char === "'") {
+      const close = line.indexOf("'", index + 1);
+      if (close < 0) return null;
+      word += line.slice(index + 1, close);
+      index = close + 1;
+    } else if (char === '"') {
+      let close = index + 1;
+      while (close < line.length && line[close] !== '"') close += line[close] === '\\' ? 2 : 1;
+      if (close >= line.length) return null;
+      word += line.slice(index + 1, close).replace(/\\([$`"\\])/g, '$1');
+      index = close + 1;
+    } else if (char === '\\') {
+      if (index + 1 >= line.length) return null;
+      word += line[index + 1];
+      index += 2;
+    } else {
+      word += char;
+      index += 1;
+    }
+  }
+  return word ? { strip, word, end: index } : null;
+}
+
 function shellLines(source) {
   const result = [];
   const stack = [{ kind: 'code', depth: 0, closer: null }];
-  let heredoc = null;
+  const heredocs = [];
   for (const raw of source.split('\n')) {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    if (heredoc) {
+    if (heredocs.length) {
       result.push({ code: '', text: '' });
-      if ((heredoc.strip ? line.replace(/^\t+/, '') : line) === heredoc.word) heredoc = null;
+      if ((heredocs[0].strip ? line.replace(/^\t+/, '') : line) === heredocs[0].word) heredocs.shift();
       continue;
     }
     let code = '';
     let end = line.length;
-    let opened = null;
+    const opened = [];
     for (let index = 0; index < line.length; index += 1) {
       const top = stack[stack.length - 1];
       const char = line[index];
@@ -463,7 +504,7 @@ function shellLines(source) {
           continue;
         }
         if (char === '$' && next === '(') {
-          stack.push({ kind: 'code', depth: 0, closer: ')' });
+          stack.push({ kind: 'code', depth: 0, closer: ')', arithmetic: line[index + 2] === '(' });
           code += '$(';
           index += 1;
           continue;
@@ -518,9 +559,14 @@ function shellLines(source) {
         break;
       }
       if (char === '$' && next === '(') {
-        stack.push({ kind: 'code', depth: 0, closer: ')' });
+        stack.push({ kind: 'code', depth: 0, closer: ')', arithmetic: line[index + 2] === '(' });
         code += '$(';
         index += 1;
+        continue;
+      }
+      if (char === '(' && next === '(' && !top.arithmetic) {
+        stack.push({ kind: 'code', depth: 0, closer: ')', arithmetic: true });
+        code += char;
         continue;
       }
       if (top.closer === ')' && char === '(') top.depth += 1;
@@ -532,19 +578,22 @@ function shellLines(source) {
         }
         top.depth -= 1;
       }
-      if (char === '<' && next === '<' && line[index + 2] !== '<') {
-        const marker = /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/.exec(line.slice(index));
+      if (char === '<' && next === '<') {
+        const marker = top.arithmetic ? null : heredocMarker(line, index + 2);
         if (marker) {
-          opened = { strip: marker[1] === '-', word: marker[3] };
-          code += marker[0];
-          index += marker[0].length - 1;
+          opened.push({ strip: marker.strip, word: marker.word });
+          code += line.slice(index, marker.end);
+          index = marker.end - 1;
           continue;
         }
+        code += '<<';
+        index += 1;
+        continue;
       }
       code += char;
     }
     result.push({ code, text: line.slice(0, end) });
-    if (opened) heredoc = opened;
+    heredocs.push(...opened);
   }
   return result;
 }
@@ -733,6 +782,7 @@ module.exports = {
   HOST_CLASSES,
   hostClass,
   loadRegistry,
+  gitEnvironment,
   walkUnitFiles,
   census,
   parseTap,

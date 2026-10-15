@@ -184,7 +184,7 @@
       "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings."
     },
     {
-      "path": "tests/structure/unit-registry.test.js", "registered": 27,
+      "path": "tests/structure/unit-registry.test.js", "registered": 28,
       "runs": [{ "driver": "tests/structure/test-unit-registry.sh" }],
       "summary": "The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions."
     },

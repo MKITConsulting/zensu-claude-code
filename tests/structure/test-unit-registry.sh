@@ -328,6 +328,84 @@ else
   check "U10d load-failure excerpt: got '$(unit_one_line "$(cat "$WORK/load-failure.got")")'" FAIL
 fi
 
+cat > "$WORK/two-failing.tap" <<'TAP'
+TAP version 13
+# printed by the passing case
+# Subtest: passes
+ok 1 - passes
+  ---
+  duration_ms: 0.2
+  ...
+# Subtest: first
+not ok 2 - first
+  ---
+  error: 'one'
+  ...
+# printed by the second failing case
+# Subtest: second
+not ok 3 - second
+  ---
+  error: 'two'
+  ...
+1..3
+# tests 3
+# pass 1
+# fail 2
+TAP
+cat > "$WORK/two-failing.want" <<'TAP'
+not ok 2 - first
+  ---
+  error: 'one'
+  ...
+# printed by the second failing case
+not ok 3 - second
+  ---
+  error: 'two'
+  ...
+TAP
+unit_failure_excerpt "$WORK/two-failing.tap" > "$WORK/two-failing.got"
+if cmp -s "$WORK/two-failing.want" "$WORK/two-failing.got"; then
+  check "U10f the failure excerpt replays every not ok case with only the diagnostics printed after the case before it" PASS
+else
+  check "U10f two failing cases: got '$(unit_one_line "$(cat "$WORK/two-failing.got")")'" FAIL
+fi
+
+printf 'TAP version 13\n' > "$WORK/long-load.tap"
+printf '# (7 earlier diagnostic line(s) omitted)\n' > "$WORK/long-load.want"
+LINE=1
+while [ "$LINE" -le 45 ]; do
+  printf '# warning %s\n' "$LINE" >> "$WORK/long-load.tap"
+  [ "$LINE" -le 7 ] || printf '# warning %s\n' "$LINE" >> "$WORK/long-load.want"
+  LINE=$((LINE + 1))
+done
+cat >> "$WORK/long-load.tap" <<'TAP'
+# Error: boom at load
+#     at Object.<anonymous> (/probe/load.test.js:4:7)
+# Subtest: /probe/load.test.js
+not ok 1 - /probe/load.test.js
+  ---
+  error: 'test failed'
+  ...
+1..1
+# tests 1
+# pass 0
+# fail 1
+TAP
+cat >> "$WORK/long-load.want" <<'TAP'
+# Error: boom at load
+#     at Object.<anonymous> (/probe/load.test.js:4:7)
+not ok 1 - /probe/load.test.js
+  ---
+  error: 'test failed'
+  ...
+TAP
+unit_failure_excerpt "$WORK/long-load.tap" > "$WORK/long-load.got"
+if cmp -s "$WORK/long-load.want" "$WORK/long-load.got"; then
+  check "U10g a load failure after more than 40 diagnostic lines keeps the last 40, which hold its exception, and counts the lines it omitted" PASS
+else
+  check "U10g long load-failure excerpt: got '$(unit_one_line "$(cat "$WORK/long-load.got")")'" FAIL
+fi
+
 U10E_RESULT="$(
   UNIT_RUN_TEE=1
   UNIT_RUN_OUTPUT=""

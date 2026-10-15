@@ -27,8 +27,11 @@ from it and from the suite manifest, never edited by hand.
   entry names a missing file, or an entry's `registered` differs from the file's column-0
   `test(` registrations. Inside a git work tree it lists unit files through `git ls-files`,
   tracked and untracked with ignored files excluded, so a gitignored fixture under `tests/` needs
-  no entry; outside one it walks `tests/`. When git fails inside a work tree, it walks too and
-  says so beside any file it names, because the walk also finds files git ignores. It refuses a
+  no entry; outside one it walks `tests/`. It runs git without the discovery variables
+  (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and their kin, the list `work-order-v1.js`
+  scrubs), so an exported `GIT_DIR`, which git hands its hooks, cannot point the listing at
+  another repository. When git fails inside a work tree, it walks too and says so beside any
+  file it names, because the walk also finds files git ignores. It refuses a
   file whose source shows a case the static count cannot see: an indented `test(`, a `.test(`
   call that starts a line on a column-0 case's context parameter (`t.test(`, any title), or a
   `describe` or `it` imported from `node:test`. A registration it cannot see, such as a
@@ -38,15 +41,17 @@ from it and from the suite manifest, never edited by hand.
   checks node's exact total from the TAP summary, refuses an emptied file even at
   `registered: 1`, and applies the host's skip ceiling and the guards. `unit_registry_done`
   fails a driver that never ran a file the registry gives it. A failing grade replays each
-  `not ok` line on stderr with the diagnostics node printed before it and its YAML block, or
-  node's last 40 lines when none is present; a file that fails to load therefore shows its
-  exception. Without `UNIT_RUN_OUTPUT`, `unit_run` creates its temp file only after node has
+  `not ok` line on stderr with its YAML block and the last 40 diagnostic lines node printed
+  since the case before it, counting any earlier ones it leaves out, or node's last 40 lines
+  when no case reported `not ok`; a file that fails to load therefore shows its exception,
+  which node prints last. Without `UNIT_RUN_OUTPUT`, `unit_run` creates its temp file only after node has
   exited, so an interrupted node run leaves none behind, and it refuses `UNIT_RUN_TEE` without a
   driver-owned `UNIT_RUN_OUTPUT`.
 - `tests/structure/test-unit-registry.sh`, a `ciStructureTests` member, runs the census and the
   driver audit over `tests/structure/test-*.sh` and every registered driver. Each driver is
-  reached by CI (it is a CI suite, or a CI suite runs it with `bash` or `sh`, by its path or
-  through a variable assigned that path), sources the library, names its files, calls the done
+  reached by CI (it is a CI suite, or a CI suite runs it with `bash` or `sh`, by name, by
+  absolute path or as `$BASH`, naming its path or a variable assigned that path), sources the
+  library, names its files, calls the done
   check and has no line starting with `exit 0` before its first unit call. No scanned suite
   spawns `node --test` more often than a line of it starts with a `unit_grade` call. It also
   holds the generated overview regions against the renderer and carries mutation controls on a
@@ -61,8 +66,9 @@ every host class that runs it, and then running
 from a local macOS run; `linux` and `root` from `node:20-bookworm` (Node 20.20.2, the CI
 version) as uid 1000 and as root; and `win32` from the green main CI run 38286044034 for the
 files its blocking Windows shards run, and from the green main CI run 38575714149 for
-`subagent-shell-guard-v1.test.js`, which joined the registry after it. For every other file the `win32` value counts the cases
-whose code can skip on win32. Replace those from a green Windows Safety run.
+`subagent-shell-guard-v1.test.js`, which joined the registry after it. For every other file
+the `win32` value counts the cases whose code can skip on win32. Replace those from a green
+Windows Safety run.
 
 **Decisions, recorded so they are not re-decided from scratch:**
 
@@ -72,9 +78,11 @@ whose code can skip on win32. Replace those from a green Windows Safety run.
   count only so the preflight can refuse before any suite runs.
 - The driver audit reads each suite through `shellLines`, a small shell reader: quoted text,
   comments and heredoc bodies never count, while parameter expansions and command
-  substitutions do. A check label or a heredoc fixture that names `node --test` is therefore no
-  spawn. Only `node` or a `$NODE…` variable at a command position, with `--test` on the same
-  line, counts as one. An `exit 0` that does not start its line, behind `||`, `&&` or `;` or
+  substitutions do. A heredoc ends on the word bash reads after quote removal, so `<<\EOF`,
+  `<<'END-STUB'` and `<<EOF-1` close where bash closes them, and a here-string (`<<<`) or a
+  shift inside `$(( ))` or `(( ))` opens none. A check label or a heredoc fixture that names
+  `node --test` is therefore no spawn. Only `node`, by name or absolute path, or a `$NODE…`
+  variable at a command position, with `--test` on the same line, counts as one. An `exit 0` that does not start its line, behind `||`, `&&` or `;` or
   in a one-line case arm, passes the drive-first rule. A broader early-exit pattern was
   measured and refused: it flagged the node-unavailable exits of four suites.
 - One node process per file per driver, because a summed multi-file run cannot attribute a

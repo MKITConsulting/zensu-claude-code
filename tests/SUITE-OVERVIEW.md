@@ -412,7 +412,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
 | `structure/session-reanchor-v1.test.js` | 67 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
 | `structure/subagent-shell-guard-v1.test.js` | 25 | win32 2 | `test-reviewer-capability-gate.sh` | The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings. |
-| `structure/unit-registry.test.js` | 27 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
+| `structure/unit-registry.test.js` | 28 | – | `test-unit-registry.sh` | The unit-file registry: load errors, the census, TAP grading against an entry, the driver audit and the rendered overview regions. |
 | `structure/verify-browser-config.test.js` | 21 | – | `test-verify-consent.sh` | The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run. |
 | `structure/verify-consent-v1.test.js` | 125 | win32 2 | `test-verify-consent.sh` | The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection. |
 | `structure/verify-feature-transcript-check.test.js` | 26 | – | `test-eval-harness-units.sh` | The verify-feature transcript assertion contract for plain playwright-cli calls on the zensu-verify session. |
@@ -439,9 +439,9 @@ uid 0, `win32`), and the guarded titles that must pass. An emptied file fails ev
 `registered: 1`, because node then counts the file itself as its only test. `unit_grade` grades
 a run a driver spawned itself, which `tests/session-control/run.sh` does to keep its timeout and
 progress diagnostic, and `unit_registry_done` fails a driver that never ran a file the registry
-gives it. A failing grade replays each `not ok` line on stderr with the diagnostics node printed
-before it and its YAML block, or the last 40 lines of node's output when no case reported
-`not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
+gives it. A failing grade replays each `not ok` line on stderr with its YAML block and the last
+40 diagnostic lines node printed since the case before it, counting any earlier ones it leaves
+out, or the last 40 lines of node's output when no case reported `not ok`. A new unit file needs its entry, with skip counts measured on each host that runs it,
 in the same commit, followed by `node tests/structure/lib-unit-registry.js render --write`.
 
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
