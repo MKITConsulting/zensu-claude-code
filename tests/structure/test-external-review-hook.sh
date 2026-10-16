@@ -416,7 +416,7 @@ arm stop-control || { check "X12 arm" FAIL; finish; exit 1; }
 CONTROL_OUT="$(stop_payload stop-control | bash "$STOP" 2>/dev/null)"
 CONTROL_REASON="$(printf '%s' "$CONTROL_OUT" | reason)"
 if [ "$(printf '%s' "$CONTROL_OUT" | decision)" = "block" ] \
-  && printf '%s' "$CONTROL_REASON" | grep -qF "fan out the review panel's zensu:review-aspect agents" \
+  && printf '%s' "$CONTROL_REASON" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel" \
   && printf '%s' "$CONTROL_REASON" | grep -qF -- '--external-review'; then
   check "X12 control: an armed chain without background work blocks and names the panel and the import path" PASS
 else
