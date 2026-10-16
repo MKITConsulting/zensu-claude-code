@@ -3,6 +3,7 @@ paths:
   - "hooks/lib/review-round-scope-v1.js"
   - "hooks/lib/aspect-activation-v1.js"
   - "tests/structure/test-incremental-review-rounds.sh"
+  - "hooks/stop-chain-enforcer.sh"
 ---
 
 # Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)
@@ -33,13 +34,16 @@ delta; that deletes the compensating control rather than a redundancy.
 decision.** The first review spawns `correctness`, `design` and `security` plus the judge; a fix
 round's re-review spawns `correctness` alone on the round delta and no judge (`--panel <panel>
 --round <round>` of `aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of
-both delegate arms). That drops the compensating control above knowingly: with one fix round by
-default, the re-review is the last review before `/zensu:self-review`, which re-reads the whole
-change, and the consume-mode code-reviewer still reads the merge. `reviewPanel: full` restores
-five perspectives and a judge on every review. Without a judge, a lean re-review routes an
+both delegate arms). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
+by default a chain runs up to two lean re-reviews, the last of them hands the chain to
+`/zensu:self-review`, which re-reads the whole change, and the consume-mode code-reviewer still
+reads the merge. With `hooks.selfReview: false` that whole-change read is gone (see the known
+gaps). `reviewPanel: full` restores five perspectives and a judge on every review. Without a judge, a lean re-review routes an
 IMPORTANT finding only when it cites code the fix pass edited, and the convergence clause runs
 its helpers before classifying instead of before a judge pass. Coupled sites: `zensu_review_panel`
-in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, the `correctness`
+in `hooks/lib/zensu-config.sh`, `PANEL` in `hooks/post-review-tdd-delegate.sh`, `REVIEW_PANEL` and
+`REVIEW_PERSPECTIVES` in `hooks/stop-chain-enforcer.sh` with T60 and T61 in
+`tests/structure/test-stop-enforcer-self-review-routing.sh`, the `correctness`
 and `design` checklist lines of `agents/review-aspect.md`, the `reviewPanel` row of
 `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`, `config.example.json`,
 LC3 to LC3j in `tests/structure/test-review-convergence.sh`, and LP1 to LP4 in
@@ -87,9 +91,21 @@ of BOTH severity arms in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:
 paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on
 that one. A round whose claims still lack the prefix answers `empty` — the safe direction.
 
-**DELIBERATELY NOT CHANGED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
-turn ended without continuing the chain, where the round number is not established, so it keeps
-prescribing the full fan-out. That is the fail-safe direction and it costs no test churn.
+**DELIBERATELY NOT NARROWED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
+turn ended without continuing the chain. Its routing fields do not include `reviewRound`, so it
+cannot tell a first review from a fix round's re-review, and it prescribes the full fan-out: one
+`zensu:review-aspect` agent per perspective of the configured panel, read with
+`zensu_review_panel` from the record's project root, plus the repo-local personas of step 10.2b,
+over the step 10.2 change set instead of a round delta, with the judge while `hooks.reviewJudge`
+is enabled. That is the fail-safe direction for the panel and the judge: a routed lean re-review
+runs `correctness` alone without the judge, while a resumed review runs the whole panel unless, on
+the first review, the Phase 6.10 step 3 import the directive also names answers `ok` or `degraded`:
+the imported template review then stands in for the panel, and the judge always runs.
+Activation would also be unsafe on this path: a model that takes `git diff --name-only HEAD` as
+the change set misses untracked files, so a change whose new code lives only in untracked files
+would classify as documentation-only. The directive therefore names the step 10.2 change set and
+says what that command leaves out. It names the panel's perspectives itself, and T60 and T61 pin
+that list against the exports of `aspect-activation-v1.js`.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
 workflow-state schema field (both libs are read-only and persist nothing), no strict key set, no
@@ -115,6 +131,12 @@ PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `
   costed at `defaultSeconds` until a real ubuntu `--ci` figure exists.
 - **No `/zensu:doctor` row.** A project whose activation helper stopped loading is visible only
   in the run log's `ASPECT ACTIVATION UNAVAILABLE` line, not in a diagnostic.
+- **`hooks.selfReview: false` leaves the lean panel without a whole-change read after the first
+  review.** A lean re-review reads only its round's delta and runs no judge, and the stage that
+  would re-read the whole change is switched off, so a fix round's drift into a file it did not
+  touch reaches no reviewer. A project that switches the self-review off and still wants that read
+  sets `hooks.reviewPanel: full`, which keeps the judge, and the full cumulative change set it
+  reads, on every review.
 
 **Port-relevant.** The core half is both libs, which are host-neutral, zero-dependency and carry
 no environment reads of their own — every anchor arrives as an option or an argument. The host

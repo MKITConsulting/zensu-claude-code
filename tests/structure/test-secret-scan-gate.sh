@@ -74,6 +74,23 @@ WIRING="$(node -e '
   );
   process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash")].join(","));
 ' "$HOOKS_JSON" 2>/dev/null)"
+TIMEOUTS="$(node -e '
+  const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const found = [];
+  for (const g of (h.hooks && h.hooks.PreToolUse) || []) {
+    for (const x of g.hooks || []) {
+      if (typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1) {
+        found.push(g.matcher + "=" + (typeof x.timeout === "number" ? x.timeout : "none"));
+      }
+    }
+  }
+  process.stdout.write(found.sort().join(" "));
+' "$HOOKS_JSON" 2>/dev/null)"
+if [ "$TIMEOUTS" = "Bash=60 Edit|Write|MultiEdit=60 NotebookEdit=60" ]; then
+  check "P1b every registration carries the 60 s gate timeout ($TIMEOUTS)" PASS
+else
+  check "P1b every registration carries the 60 s gate timeout (got: $TIMEOUTS)" FAIL
+fi
 if [ "$WIRING" = "true,true,true" ]; then
   check "P1 hook wired under Edit|Write|MultiEdit + NotebookEdit + Bash matchers" PASS
 else

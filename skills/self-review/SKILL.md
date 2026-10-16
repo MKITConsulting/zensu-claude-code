@@ -19,15 +19,15 @@ code, take at most ONE fix round if a must-fix surfaces, then render the final
 report and close the chain. This is the LAST instance — it never re-runs the
 code-reviewer.
 
-You have full access to the conversation history and know exactly which files you
-edited, created, or deleted in this session. Use that knowledge directly.
+Your context names the files you edited, created, or deleted this session, as far as it
+survived; step 1 below adds what the worktree shows.
 
 ## When to Use
 
 - Invoked automatically as the terminal review-chain stage: the
   `post-review-tdd-delegate.sh` hook hands off here once the code-reviewer chain
-  converges, and the `stop-chain-enforcer.sh` Stop hook forces this skill while
-  `codeReviewDone` is set but `chainDone` is not.
+  converges, and the `stop-chain-enforcer.sh` Stop hook demands it, up to its cap,
+  while `codeReviewDone` is set but `chainDone` is not.
 - You should normally NOT run this by hand — it is the chain's final gate.
 
 ## Do NOT Use For
