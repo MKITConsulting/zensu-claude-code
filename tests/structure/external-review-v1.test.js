@@ -913,6 +913,7 @@ test('stage sweeps the copies other sessions left idle past the idle window and 
   for (const file of [idle, recent, unrelated]) fs.writeFileSync(file, SCRIPT);
   const now = Date.now();
   setMtime(idle, now - xr.LIMITS.idleSessionMs - 60000);
+  setMtime(recent, now - xr.LIMITS.idleSessionMs + 60000);
   setMtime(unrelated, now - xr.LIMITS.idleSessionMs - 60000);
   const staged = xr.stageTemplate(stageOptions(root, { now }));
   assert.equal(staged.status, 'ok');
