@@ -8,8 +8,8 @@ set -u
 #     hooks/agents/skills/docs/templates into the Session Control runtime digest.
 #   - hooks/user-prompt-best-solution-first.sh READS that block at run time (it
 #     must not carry its own copy, or the hook silently drifts from the canonical
-#     text), injects it on BOTH UserPromptSubmit — every prompt, no de-bounce —
-#     and SubagentStart, and fails silent on everything it does not understand.
+#     text), injects it on SessionStart and SubagentStart, sends its one-line
+#     reminder on every UserPromptSubmit, and fails silent on what it cannot parse.
 #   - unlike session-start-evidence-discipline.sh the rule IS switchable, via
 #     hooks.bestSolutionFirst, because it directs how a decision is presented
 #     rather than asserting a correctness invariant.
@@ -50,6 +50,9 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 HOOK_BASENAME="user-prompt-best-solution-first.sh"
 OPEN_MARKER='<!-- zensu:best-solution-first -->'
 CLOSE_MARKER='<!-- /zensu:best-solution-first -->'
+REMINDER_OPEN_MARKER='<!-- zensu:best-solution-first-reminder -->'
+REMINDER_CLOSE_MARKER='<!-- /zensu:best-solution-first-reminder -->'
+REMINDER_CEILING=420
 # The hook's run-time refusal is a fail-safe at `MAX_BLOCK`; REVIEW_CEILING is the real control.
 # The criterion is ABSOLUTE headroom of roughly one clause, IDENTICAL on both carriers — not a
 # preserved percentage, which would hand the larger slack to whichever block happens to be
@@ -260,6 +263,37 @@ esac
 # only the literal "> " would fail a correct hook over an invisible trailing space.
 BLOCK="$(printf '%s' "$BLOCK_RAW" | sed -e 's/^>[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
+REMINDER_RAW="$(awk -v o="$REMINDER_OPEN_MARKER" -v c="$REMINDER_CLOSE_MARKER" '
+  $0 == o { inb = 1; next }
+  inb && $0 == c { exit }
+  inb { print }
+' "$RULES")"
+REMINDER="$(printf '%s' "$REMINDER_RAW" | sed -e 's/^>[[:space:]]*//' -e 's/[[:space:]]*$//')"
+if [ "$(grep -cxF "$REMINDER_OPEN_MARKER" "$RULES")" = "1" ] && [ "$(grep -cxF "$REMINDER_CLOSE_MARKER" "$RULES")" = "1" ] \
+   && [ -n "$REMINDER_RAW" ] && [ "$(printf '%s\n' "$REMINDER_RAW" | grep -c '')" = "1" ]; then
+  check "B2r1 the reminder is exactly one line between its own unique marker pair" PASS
+else
+  check "B2r1 the reminder marker pair is missing, duplicated, empty or not one line" FAIL
+fi
+B2I_BAD=""
+for B2I_NEEDLE in '**Best solution first (option quality)**' 'in the set, first and marked recommended' 'its cost stated' 'never licenses inflating scope' 'an option order a skill or hook fixes still stands'; do
+  case "$REMINDER" in
+    *"$B2I_NEEDLE"*) ;;
+    *) B2I_BAD="$B2I_BAD [$B2I_NEEDLE]" ;;
+  esac
+done
+[ -z "$B2I_BAD" ] \
+  && check "B2r2 the reminder names the block by its lede and keeps both halves of the rule" PASS \
+  || check "B2r2 the reminder lost a clause:$B2I_BAD" FAIL
+if printf '%s' "$REMINDER" | grep -qE '[A-Za-z0-9_-]+\.(md|json|sh|js|mjs|cjs|txt|ya?ml)|/'; then
+  check "B2r3 the reminder names a file path or a slash-separated location — a hostile repo could plant it" FAIL
+else
+  check "B2r3 the reminder names no file path of any shape" PASS
+fi
+[ "${#REMINDER}" -le "$REMINDER_CEILING" ] \
+  && check "B2r4 the reminder stays within its ${REMINDER_CEILING}-char ceiling (${#REMINDER})" PASS \
+  || check "B2r4 the reminder grew past its ceiling (${#REMINDER} > $REMINDER_CEILING)" FAIL
+
 # The rule is worthless if it stops naming both halves of what it demands, and
 # actively harmful if it keeps only the prohibition — a block carrying no
 # anti-inflation carve-out pushes every agent toward inflating scope.
@@ -302,8 +336,8 @@ fi
 
 # The clause pins above cover a lede and five substrings; the rest of the directive could
 # still be rewritten in a docs-only commit with no test literal changing. That is the
-# low-visibility channel this digest closes: the bytes that reach every prompt and every
-# spawn cannot change without a matching literal here, in the same commit.
+# low-visibility channel this digest closes: the bytes that reach every session start, every
+# spawn and, through the reminder, every prompt cannot change without a matching literal here.
 # Hashed through node, not shasum/sha256sum: node is already required at P0, while
 # neither hashing binary is guaranteed on every supported host. This suite runs in
 # windows-shard-4, and a check that goes red because a tool is missing fails for a
@@ -322,6 +356,18 @@ elif [ "$BLOCK_SHA" = "$EXPECTED_BLOCK_SHA" ]; then
   check "B2f1 injected block matches its pinned digest" PASS
 else
   check "B2f1 injected block CHANGED ($BLOCK_SHA != $EXPECTED_BLOCK_SHA) — update this literal deliberately, in the same commit" FAIL
+fi
+REMINDER_SHA="$(BLOCK_TEXT="$REMINDER" node -e '
+  try {
+    process.stdout.write(require("crypto").createHash("sha256")
+      .update(process.env.BLOCK_TEXT || "", "utf8").digest("hex"));
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
+EXPECTED_REMINDER_SHA='57e895c12f75670ad70894aafaecc9c36585ee36fbc8cb59f96893d606f9901e'
+if [ -n "$REMINDER_SHA" ] && [ "$REMINDER_SHA" = "$EXPECTED_REMINDER_SHA" ]; then
+  check "B2f2 the per-prompt reminder matches its pinned digest" PASS
+else
+  check "B2f2 the per-prompt reminder CHANGED (${REMINDER_SHA:-unhashed} != $EXPECTED_REMINDER_SHA) — update this literal deliberately, in the same commit" FAIL
 fi
 # node, not ${#BLOCK}: bash counts bytes under LC_ALL=C and this block carries em dashes,
 # while the hook compares String.length. Same measure as test-evidence-discipline.sh H7a.
@@ -364,7 +410,7 @@ else
   check "B2i the shared reader lost its size ceiling, short-read refusal or guarded close" FAIL
 fi
 
-# ── B1: registration on both events ─────────────────────────────────────────
+# ── B1: registration on all three events ────────────────────────────────────
 # The reducer also reports a matcher on either carrying block: a matcher would
 # silence some sources while the leg counts stayed green.
 REG="$(HOOKS_JSON="$HOOKS_JSON" BASE="$HOOK_BASENAME" node -e '
@@ -372,7 +418,7 @@ REG="$(HOOKS_JSON="$HOOKS_JSON" BASE="$HOOK_BASENAME" node -e '
   const base = process.env.BASE;
   const carrying = (ev) => (h.hooks[ev] || [])
     .filter((m) => (m.hooks || []).some((x) => String(x.command || "").includes(base)));
-  for (const ev of ["UserPromptSubmit", "SubagentStart"]) {
+  for (const ev of ["UserPromptSubmit", "SessionStart", "SubagentStart"]) {
     if (carrying(ev).some((m) => Object.prototype.hasOwnProperty.call(m, "matcher"))) {
       process.stdout.write("matcher:" + ev);
       process.exit(0);
@@ -381,29 +427,18 @@ REG="$(HOOKS_JSON="$HOOKS_JSON" BASE="$HOOK_BASENAME" node -e '
   const legs = (ev) => (h.hooks[ev] || [])
     .flatMap((m) => (m.hooks || []).map((x) => String(x.command || "")))
     .filter((c) => c.includes(base)).length;
-  process.stdout.write(legs("UserPromptSubmit") + ":" + legs("SubagentStart"));
+  process.stdout.write(legs("UserPromptSubmit") + ":" + legs("SessionStart") + ":" + legs("SubagentStart"));
 ' 2>/dev/null)"
-if [ "$REG" = "1:1" ]; then
-  check "B1 hooks.json registers the hook exactly once on UserPromptSubmit and once on SubagentStart, both matcher-free" PASS
+if [ "$REG" = "1:1:1" ]; then
+  check "B1 hooks.json registers the hook exactly once on UserPromptSubmit, SessionStart and SubagentStart, all matcher-free" PASS
 else
-  check "B1 registration wrong (${REG:-<unreadable>}, want 1:1 with no matcher)" FAIL
+  check "B1 registration wrong (${REG:-<unreadable>}, want 1:1:1 with no matcher)" FAIL
 fi
 
-# No SessionStart leg: UserPromptSubmit already covers turn 1, so registering it
-# there too would inject the same rule twice on the first turn.
-SS="$(HOOKS_JSON="$HOOKS_JSON" BASE="$HOOK_BASENAME" node -e '
-  const h = JSON.parse(require("fs").readFileSync(process.env.HOOKS_JSON, "utf8"));
-  const legs = (h.hooks.SessionStart || [])
-    .flatMap((m) => (m.hooks || []).map((x) => String(x.command || "")))
-    .filter((c) => c.includes(process.env.BASE)).length;
-  process.stdout.write(String(legs));
-' 2>/dev/null)"
-[ "$SS" = "0" ] \
-  && check "B1a hook is NOT registered on SessionStart (would double-inject on turn 1)" PASS \
-  || check "B1a hook is registered on SessionStart (${SS} legs) — double-injects on turn 1" FAIL
 
-# ── B3 / B4: both live events emit the block verbatim ───────────────────────
+# ── B3 / B4: the prompt emits the reminder, the other events the block ──────
 drive '{"hook_event_name":"UserPromptSubmit"}'
+UP_OUT="$OUT"
 UP_RC="$RC"
 UP_EVENT="$(field "$OUT" hookEventName)"
 UP_CTX="$(field "$OUT" additionalContext)"
@@ -412,27 +447,54 @@ if [ "$UP_RC" -eq 0 ] && [ "$UP_EVENT" = "UserPromptSubmit" ]; then
 else
   check "B3 UserPromptSubmit emission wrong (exit=$UP_RC event='${UP_EVENT}')" FAIL
 fi
+if [ -n "$REMINDER" ] && [ "$UP_CTX" = "Zensu $REMINDER" ]; then
+  check "B3a UserPromptSubmit additionalContext is the one-line reminder VERBATIM" PASS
+else
+  check "B3a UserPromptSubmit additionalContext is not the one-line reminder (len ${#UP_CTX})" FAIL
+fi
 case "$UP_CTX" in
-  *"$BLOCK"*) check "B3a UserPromptSubmit additionalContext carries the canonical block VERBATIM" PASS ;;
-  *) check "B3a UserPromptSubmit additionalContext does not carry the canonical block" FAIL ;;
+  *"$BLOCK"*) check "B1a the prompt leg carries the full block — turn 1 would carry it twice" FAIL ;;
+  *) check "B1a the prompt leg never carries the full block, so turn 1 carries it once, from SessionStart" PASS ;;
 esac
+SS_SOURCES_BAD=""
+for SS_SOURCE in startup resume clear compact fork; do
+  drive "{\"hook_event_name\":\"SessionStart\",\"source\":\"$SS_SOURCE\"}"
+  SS_CTX_ONE="$(field "$OUT" additionalContext)"
+  if [ "$RC" -ne 0 ] || [ "$(field "$OUT" hookEventName)" != "SessionStart" ]; then
+    SS_SOURCES_BAD="$SS_SOURCES_BAD $SS_SOURCE:exit=$RC"
+  else
+    case "$SS_CTX_ONE" in
+      *"$BLOCK"*) ;;
+      *) SS_SOURCES_BAD="$SS_SOURCES_BAD $SS_SOURCE:no-block" ;;
+    esac
+  fi
+done
+[ -z "$SS_SOURCES_BAD" ] \
+  && check "B3d SessionStart carries the canonical block VERBATIM on startup, resume, clear, compact and fork" PASS \
+  || check "B3d SessionStart leg broken:$SS_SOURCES_BAD" FAIL
+drive '{"hook_event_name":"SessionStart","source":"startup"}'
+SS_OUT="$OUT"
+SS_CTX="$(field "$OUT" additionalContext)"
 # The framing prefix is what tells the reader the rule binds every process; without
 # this the prefix could be dropped with B3a still green.
-case "$UP_CTX" in
+case "$SS_CTX" in
   'Zensu best-solution-first — binding for every process in this session, main thread and subagents alike. '*)
     check "B3b emitted context OPENS with the full framing prefix, then the block" PASS ;;
   *)
-    check "B3b emitted context lost or reordered its framing prefix (len ${#UP_CTX} vs block ${#BLOCK})" FAIL ;;
+    check "B3b emitted context lost or reordered its framing prefix (len ${#SS_CTX} vs block ${#BLOCK})" FAIL ;;
 esac
 # The hook's central claim is that it can never block a prompt or a spawn. Any other
 # top-level key — decision, continue, permissionDecision — would make that false.
-UP_KEYS="$(PAYLOAD="$OUT" node -e '
-  try { process.stdout.write(Object.keys(JSON.parse(process.env.PAYLOAD || "{}")).sort().join(",")); }
-  catch (_) { process.stdout.write("unparseable"); }
-' 2>/dev/null)"
-[ "$UP_KEYS" = "hookSpecificOutput" ] \
-  && check "B3c emitted object carries hookSpecificOutput and nothing else — it cannot block" PASS \
-  || check "B3c emitted object carries extra top-level keys ($UP_KEYS) — it could block a prompt" FAIL
+UP_KEYS=""
+for B3C_OUT in "$UP_OUT" "$SS_OUT"; do
+  UP_KEYS="$UP_KEYS $(PAYLOAD="$B3C_OUT" node -e '
+    try { process.stdout.write(Object.keys(JSON.parse(process.env.PAYLOAD || "{}")).sort().join(",")); }
+    catch (_) { process.stdout.write("unparseable"); }
+  ' 2>/dev/null)"
+done
+[ "$UP_KEYS" = " hookSpecificOutput hookSpecificOutput" ] \
+  && check "B3c the prompt and session-start objects carry hookSpecificOutput and nothing else — they cannot block" PASS \
+  || check "B3c an emitted object carries extra top-level keys ($UP_KEYS) — it could block a prompt" FAIL
 
 # A REAL subagent payload: one carrying neither agent_id nor agent_type classifies
 # as main-v1 (hooks/lib/claude-principal-v1.js), so the bare shape cannot tell a
@@ -441,6 +503,13 @@ drive '{"hook_event_name":"SubagentStart","agent_id":"a1","agent_type":"zensu:re
 SA_RC="$RC"
 SA_EVENT="$(field "$OUT" hookEventName)"
 SA_CTX="$(field "$OUT" additionalContext)"
+SA_KEYS="$(PAYLOAD="$OUT" node -e '
+  try { process.stdout.write(Object.keys(JSON.parse(process.env.PAYLOAD || "{}")).sort().join(",")); }
+  catch (_) { process.stdout.write("unparseable"); }
+' 2>/dev/null)"
+[ "$SA_KEYS" = "hookSpecificOutput" ] \
+  && check "B4e the SubagentStart object carries hookSpecificOutput and nothing else — it cannot block a spawn" PASS \
+  || check "B4e the SubagentStart object carries extra top-level keys ($SA_KEYS)" FAIL
 if [ "$SA_RC" -eq 0 ] && [ "$SA_EVENT" = "SubagentStart" ]; then
   check "B4 a real subagent-shaped SubagentStart payload emits hookEventName=SubagentStart (exit 0)" PASS
 else
@@ -460,7 +529,7 @@ else
 fi
 
 # The hook must never claim the rule cannot be switched off — it can.
-case "$UP_CTX" in
+case "$UP_CTX $SS_CTX" in
   *'not switchable off'*) check "B4c injected directive falsely claims the rule is not switchable" FAIL ;;
   *) check "B4c injected directive does not claim the rule is unswitchable" PASS ;;
 esac
@@ -476,7 +545,7 @@ fi
 
 # ── B5: every other event is silent ─────────────────────────────────────────
 B5_OK=1
-for ev in SessionStart PreToolUse PostToolUse Stop SubagentStop; do
+for ev in PreToolUse PostToolUse Stop SubagentStop SessionEnd; do
   drive "{\"hook_event_name\":\"$ev\"}"
   if [ "$RC" -ne 0 ] || [ -n "$OUT" ]; then
     B5_OK=0
@@ -556,14 +625,14 @@ if [ -n "$FAKE_BLOCK" ] && build_fake "$FAKE_BLOCK"; then
   BLOCK_FILE="$FAKE_BLOCK/docs/best-solution-first.md"
   block_case() {
     local label="$1"
-    CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"UserPromptSubmit"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+    CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"SessionStart","source":"startup"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
     [ "$RC" -eq 0 ] && [ -z "$OUT" ] \
       && check "$label" PASS \
       || check "${label} — NOT refused (exit=$RC bytes=${#OUT})" FAIL
   }
 
   cp "$RULES" "$BLOCK_FILE"
-  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"UserPromptSubmit"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"SessionStart","source":"startup"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
   [ "$RC" -eq 0 ] && [ -n "$OUT" ] \
     && check "B7b positive control: the block tree emits with an intact block" PASS \
     || check "B7b block tree does not emit with an intact block — B7c-B7g would be vacuous" FAIL
@@ -581,7 +650,7 @@ if [ -n "$FAKE_BLOCK" ] && build_fake "$FAKE_BLOCK"; then
     printf '%s\n' '> appended rule that must never be injected'
     printf '%s\n' "$CLOSE_MARKER"
   } > "$BLOCK_FILE"
-  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"UserPromptSubmit"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"SessionStart","source":"startup"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
   if [ "$RC" -eq 0 ] && [ -n "$OUT" ] \
      && ! printf '%s' "$OUT" | grep -qF 'appended rule that must never be injected'; then
     check "B7d a duplicate open marker leaves the SHIPPED block injected, not the appended one" PASS
@@ -619,6 +688,16 @@ if [ -n "$FAKE_BLOCK" ] && build_fake "$FAKE_BLOCK"; then
     block_case "B7g a block longer than $MAX_BLOCK chars drops the injection (built ${BSZ}, close marker at open+2)"
   else
     check "B7g fixture is not an oversized ONE-line block (size=${BSZ:-none} need > $MAX_BLOCK; open+2='${BCLOSE:-none}' need the close marker) — it would test a different refusal" FAIL
+  fi
+
+  grep -vxF "$REMINDER_OPEN_MARKER" "$RULES" > "$BLOCK_FILE"
+  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"UserPromptSubmit"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+  B7H_UP="$RC:${#OUT}"
+  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"SessionStart","source":"startup"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+  if [ "$B7H_UP" = "0:0" ] && [ "$RC" -eq 0 ] && [ -n "$OUT" ]; then
+    check "B7h a missing reminder open marker drops only the prompt leg; the SessionStart block still arrives" PASS
+  else
+    check "B7h a missing reminder open marker was not refused on the prompt leg alone (prompt=$B7H_UP sessionstart=$RC:${#OUT})" FAIL
   fi
 else
   check "B7b could not build the malformed-block plugin tree" FAIL
@@ -713,6 +792,10 @@ if [ -n "$CFG_OFF" ] && printf '{"hooks":{"bestSolutionFirst":false}}' > "$CFG_O
   [ "$RC" -eq 0 ] && [ -n "$OUT" ] \
     && check "B9a the opt-out does NOT reach the SubagentStart leg — a repo cannot silence its own reviewer" PASS \
     || check "B9a opt-out silenced the SubagentStart leg (exit=$RC bytes=${#OUT})" FAIL
+  ZENSU_CONFIG="$CFG_OFF" drive '{"hook_event_name":"SessionStart","source":"startup"}'
+  [ "$RC" -eq 0 ] && [ -z "$OUT" ] \
+    && check "B9b hooks.bestSolutionFirst:false suppresses the SessionStart leg as well" PASS \
+    || check "B9b opt-out did not suppress the SessionStart leg (exit=$RC bytes=${#OUT})" FAIL
 else
   check "B9 could not write the opt-out config fixture" FAIL
 fi

@@ -35,8 +35,8 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 
 That writes a session-scoped marker under `.zensu/state/` holding
 `{"active":true}`. From the next prompt on, `hooks/user-prompt-zen-mode.sh`
-re-injects the contract below on every turn, so the style cannot quietly fade the
-way a one-time skill load does.
+injects the contract below in full once per context generation and a short form of
+it on every later turn, so the style cannot quietly fade the way a one-time skill load does.
 
 Then confirm in one line, in the user's own language, and continue with whatever
 they were doing. Do not explain the mode at length — that would be the first

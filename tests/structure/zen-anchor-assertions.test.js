@@ -193,7 +193,7 @@ test("every scenario in the directory exposes at least one executable grader", (
   // directory of 5, a scenario deleted together with its registration passed
   // every check in the tree. Raising this is the registration step for a new
   // scenario, the same convention `registered` in tests/profiles/unit-files.v1.json follows.
-  assert.ok(scenarios.length >= 5, `expected at least 5 scenarios, found ${scenarios.length}`);
+  assert.ok(scenarios.length >= 8, `expected at least 8 scenarios, found ${scenarios.length}`);
   for (const f of scenarios) {
     const raw = fs.readFileSync(path.join(SCENARIO_DIR, f), "utf8");
     // DERIVED, not a floor of one. At `>= 1` a grader rewritten as `value: >`
@@ -346,6 +346,8 @@ const NONE_SCENARIOS = [
   "contract-compliance.yaml",
   "precedence-over-compression.yaml",
   "safety-carve-out.yaml",
+  "short-contract-compliance.yaml",
+  "short-safety-carve-out.yaml",
 ];
 test("every scenario supplies an anchor the module can produce", () => {
   const mod = require(path.join(ROOT, "hooks", "lib", "zen-anchor-v1.js"));
@@ -371,6 +373,27 @@ test("every scenario supplies an anchor the module can produce", () => {
   }
   for (const f of NONE_SCENARIOS) {
     assert.ok(scenarios.includes(f), `${f} is listed as a none-scenario but is not in the directory`);
+  }
+});
+
+const SHORT_PREFIX = "short-";
+
+test("every short-body scenario grades exactly what its full-contract twin grades", () => {
+  const shorts = scenarios.filter((f) => f.startsWith(SHORT_PREFIX));
+  assert.ok(shorts.length >= 3, `expected at least 3 short-body scenarios, found ${shorts.length}`);
+  for (const f of shorts) {
+    const twin = f.slice(SHORT_PREFIX.length);
+    assert.ok(scenarios.includes(twin), `${f}: its full-contract twin ${twin} is not in the directory`);
+    assert.deepStrictEqual(
+      assertionBodies(path.join(SCENARIO_DIR, f)),
+      assertionBodies(path.join(SCENARIO_DIR, twin)),
+      `${f}: its graders differ from ${twin}, so the pinned vectors of the twin no longer cover them`,
+    );
+    assert.strictEqual(
+      suppliedAnchor(path.join(SCENARIO_DIR, f)),
+      suppliedAnchor(path.join(SCENARIO_DIR, twin)),
+      `${f}: supplies a different anchor than ${twin}`,
+    );
   }
 });
 

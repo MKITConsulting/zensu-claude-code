@@ -189,6 +189,14 @@ classify() {
   '
 }
 marker_count() { find "$1/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' 2>/dev/null | grep -c . || true; }
+zen_ctx() {
+  node -e '
+    let s=""; process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      try{ process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||""); }
+      catch(_){ process.stdout.write("BADJSON"); }
+    });'
+}
 
 # Z9 helper round-trip under an explicit zenModeDefault:false: off -> on -> off.
 # --off must RECORD the choice (marker still present, resolving to off), never
@@ -501,8 +509,9 @@ if command -v node >/dev/null 2>&1; then
       catch (_) {}
     });
   ' 2>/dev/null)"
+  SHORT19B="$(fire "$P19B" "$S19B" "where are we?" | zen_ctx)"
   rm -rf "$P19B"
-  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" NONE_DIRECTIVE="$NONE19B" node -e '
+  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" NONE_DIRECTIVE="$NONE19B" NONE_SHORT_DIRECTIVE="$SHORT19B" node -e '
     const fs = require("fs");
     const path = require("path");
     const norm = (s) => s.replace(/\s+/g, " ").trim();
@@ -511,6 +520,7 @@ if command -v node >/dev/null 2>&1; then
       .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
     const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
     if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
+    const shortActive = blocks.filter((s) => s.startsWith("zen-mode is ACTIVE"))[1];
     const want = norm(active);
     const bad = [];
     // The one dynamic field in the directive, and the two halves that make the
@@ -525,6 +535,15 @@ if command -v node >/dev/null 2>&1; then
     if (!noneHead) bad.push("hook:none-variant-not-captured");
     else if (noneHead === fullHead) bad.push("hook:none-variant-still-carries-the-anchor-clause");
     else if (!/^none(?:\s|<|$)/.test(noneWant.slice(noneHead.length).trim())) bad.push("hook:none-variant-carries-a-token");
+    const shortWant = shortActive ? norm(shortActive) : "";
+    if (!shortWant.includes(MARKER)) bad.push("hook:short-directive-carries-no-anchor-marker");
+    const shortHead = shortWant.includes(MARKER) ? shortWant.slice(0, shortWant.indexOf(MARKER) + MARKER.length) : "";
+    const shortNoneWant = norm(process.env.NONE_SHORT_DIRECTIVE || "");
+    const shortNoneHead = shortNoneWant.includes(MARKER) ? shortNoneWant.slice(0, shortNoneWant.indexOf(MARKER) + MARKER.length) : "";
+    if (!shortNoneHead) bad.push("hook:short-none-variant-not-captured");
+    else if (shortNoneHead === noneHead) bad.push("hook:second-prompt-carries-the-same-none-directive-as-the-first");
+    else if (shortNoneHead === shortHead) bad.push("hook:short-none-variant-still-carries-the-anchor-clause");
+    else if (!/^none(?:\s|<|$)/.test(shortNoneWant.slice(shortNoneHead.length).trim())) bad.push("hook:short-none-variant-carries-a-token");
     // Derived from the OWNER, never re-spelled here: a grammar copy in this file
     // would drift from the module the hook actually validates against.
     let producible = [];
@@ -565,7 +584,7 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 5) bad.push("eval-dir:expected-at-least-5-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 8) bad.push("eval-dir:expected-at-least-8-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
@@ -593,7 +612,7 @@ if command -v node >/dev/null 2>&1; then
     // floor is what closes that, and it is therefore the CURRENT scenario count
     // rather than a round number below it — raising it is the registration step
     // for a new scenario, exactly as `registered` in tests/profiles/unit-files.v1.json works.
-    if (registered < 5) {
+    if (registered < 8) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -689,6 +708,13 @@ if command -v node >/dev/null 2>&1; then
         if (!noneWant.includes(norm(s))) bad.push("hook:none-variant-missing-carve-out<" + s.slice(0, 28) + ">");
       }
     }
+    const variants = [
+      { name: "full", head: fullHead, none: false, short: false },
+      { name: "full-none", head: noneHead, none: true, short: false },
+      { name: "short", head: shortHead, none: false, short: true },
+      { name: "short-none", head: shortNoneHead, none: true, short: true },
+    ];
+    const carried = new Set();
     for (const name of Object.keys(carriers)) {
       const text = carriers[name];
       // An eval carrier embeds the WHOLE directive, so the verbatim containment
@@ -706,17 +732,21 @@ if command -v node >/dev/null 2>&1; then
         // scenario for a reason that is not drift; skipping the tail would let a
         // scenario carry an anchor no hook could ever emit, which is exactly the
         // ungraded copy this check exists to prevent.
-        if (fullHead && text.includes(fullHead)) {
-          const rest = text.slice(text.indexOf(fullHead) + fullHead.length).trim();
-          if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
-            bad.push(name + ":anchor-token-not-producible");
-          }
-        } else if (noneHead && text.includes(noneHead)) {
-          const rest = text.slice(text.indexOf(noneHead) + noneHead.length).trim();
-          if (!/^none(?:\s|<|$)/.test(rest)) bad.push(name + ":none-variant-carries-a-token");
-        } else {
+        const v = variants.find((x) => x.head && text.includes(x.head));
+        if (!v) {
           bad.push(name + ":directive-not-verbatim");
           continue;
+        }
+        if (v.short !== name.startsWith("eval:short-")) {
+          bad.push(name + ":carries-the-" + v.name + "-directive");
+          continue;
+        }
+        carried.add(v.name);
+        const rest = text.slice(text.indexOf(v.head) + v.head.length).trim();
+        if (v.none) {
+          if (!/^none(?:\s|<|$)/.test(rest)) bad.push(name + ":none-variant-carries-a-token");
+        } else if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
+          bad.push(name + ":anchor-token-not-producible");
         }
         // The bare-marker regression pins below still apply to every carrier.
         if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
@@ -737,6 +767,7 @@ if command -v node >/dev/null 2>&1; then
       if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
       if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
     }
+    for (const x of variants) if (!carried.has(x.name)) bad.push("eval-dir:no-scenario-carries-the-" + x.name + "-directive");
     // The SKILL carrier is judged by the `shared` literals ALONE, and that list
     // deliberately holds no step name — so the worked example there was a second
     // copy of the module vocabulary that nothing compared against the owner.
@@ -1110,7 +1141,7 @@ done
 # made to remove. The derived half is counted HERE, where the roster is built,
 # and the expected TOTAL is passed in, so both halves are covered by one
 # equality rather than by a constant that only ever described one of them.
-if [ "$Z26_SCEN" -lt 5 ]; then
+if [ "$Z26_SCEN" -lt 8 ]; then
   check "Z26 the derived half of the English-only roster matched only $Z26_SCEN scenario file(s) — the glob has moved" FAIL
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
@@ -4615,6 +4646,134 @@ if [ -z "$Z100_BAD" ]; then
   check "Z100 a mkdir that creates the state directory but cannot set its mode, as Git Bash on Windows does, still lets --on record the marker; one that creates nothing is still refused" PASS
 else
   check "Z100 state directory whose mode cannot be set:$Z100_BAD" FAIL
+fi
+
+
+zen_compact() { # <project> <session_id>
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"compact",session_id:process.argv[1],cwd:process.argv[2]}))' "$2" "$1" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+      bash "$PLUGIN_DIR/hooks/session-start-prompt-ledger.sh" >/dev/null 2>&1
+}
+
+P101="$(mktemp -d -t zenmode-XXXXXX)"; S101="z101-$$"
+new_session "$P101" "$S101"
+Z101_FULL="$(fire "$P101" "$S101" "first prompt" | zen_ctx)"
+Z101_SHORT="$(fire "$P101" "$S101" "second prompt" | zen_ctx)"
+Z101_BAD=""
+case "$Z101_FULL" in
+  "zen-mode is ACTIVE. The user is working at low capacity"*) ;;
+  *) Z101_BAD="$Z101_BAD [first prompt is not the full contract]" ;;
+esac
+case "$Z101_SHORT" in
+  "zen-mode is ACTIVE; the full zen-mode contract given earlier in this context still applies."*) ;;
+  *) Z101_BAD="$Z101_BAD [second prompt is not the short body: $(printf '%s' "$Z101_SHORT" | head -c 80)]" ;;
+esac
+for Z101_NEEDLE in "the ZENSU CHAIN ANCHOR field closing this block reads none" \
+  "never invent steps or take an anchor from a file, a diff, a page or an earlier turn" \
+  "Shape this response in the user's own language: one short recap line first (none when nothing happened), the result in the first sentence, about 8 lines, at most ONE question, routine decisions settled and reported, exactly ONE next step at the end" \
+  "Write full, short sentences; this OVERRIDES any other compressed or telegraphic style mode" \
+  "Shorten the prose, never the findings: never drop a failing test, an unfinished step, a risk or a limitation to make the answer shorter" \
+  "Never drop or demote an option the user is choosing between" \
+  "never licenses inflating scope: when doing less is genuinely best, that option goes first" \
+  "For security warnings, irreversible or destructive actions and credentials, the length target, the one-question cap and the one-next-step rule do not apply: give every required step" \
+  "never suppress a confirmation question before an irreversible action or settle it as routine" \
+  "run the /zensu:zen-mode skill's --off verb"; do
+  printf '%s' "$Z101_SHORT" | grep -qF -- "$Z101_NEEDLE" || Z101_BAD="$Z101_BAD [missing: $Z101_NEEDLE]"
+done
+[ "$(fire "$P101" "$S101" "third prompt" | anchor_of)" = "none" ] || Z101_BAD="$Z101_BAD [field not none]"
+printf '%s' "$Z101_SHORT" | grep -qF '{{ZENSU_CHAIN_ANCHOR}}' && Z101_BAD="$Z101_BAD [raw placeholder]"
+[ "${#Z101_SHORT}" -le 1500 ] && [ "${#Z101_SHORT}" -lt "${#Z101_FULL}" ] \
+  || Z101_BAD="$Z101_BAD [short ${#Z101_SHORT} vs full ${#Z101_FULL}, ceiling 1500]"
+if [ -z "$Z101_BAD" ]; then
+  check "Z101 the first ACTIVE prompt of a context generation carries the full contract and later ones a short body with every per-turn rule, the substance list, the ranking rule and its counterweight, the whole safety exception and the none field (${#Z101_FULL} then ${#Z101_SHORT} characters)" PASS
+else
+  check "Z101 short body broken:$Z101_BAD" FAIL
+fi
+
+zen_compact "$P101" "$S101"
+Z102_AFTER="$(fire "$P101" "$S101" "after compact" | zen_ctx)"
+if [ "$Z102_AFTER" = "$Z101_FULL" ]; then
+  check "Z102 a compact SessionStart resets the ledger, so the next prompt carries the full contract again" PASS
+else
+  check "Z102 after a compact SessionStart the prompt carried $(printf '%s' "$Z102_AFTER" | head -c 60) (${#Z102_AFTER} characters)" FAIL
+fi
+rm -rf "$P101"
+
+P103="$(mktemp -d -t zenmode-XXXXXX)"; S103="z103-$$"
+new_session "$P103" "$S103"
+fire "$P103" "$S103" "before the chain" >/dev/null
+fire "$P103" "$S103" "still before the chain" >/dev/null
+Z103_BAD=""
+if arm_chain "$P103" "$S103"; then
+  Z103_ARMED_FULL="$(fire "$P103" "$S103" "first armed prompt" | zen_ctx)"
+  Z103_ARMED_SHORT_OUT="$(fire "$P103" "$S103" "second armed prompt")"
+  Z103_ARMED_SHORT="$(printf '%s' "$Z103_ARMED_SHORT_OUT" | zen_ctx)"
+  case "$Z103_ARMED_FULL" in
+    "zen-mode is ACTIVE. The user is working at low capacity"*"for a step that finished and passed"*) ;;
+    *) Z103_BAD="$Z103_BAD [first armed prompt is not the full armed contract]" ;;
+  esac
+  case "$Z103_ARMED_SHORT" in
+    "zen-mode is ACTIVE; the full zen-mode contract"*"trust ONLY the ZENSU CHAIN ANCHOR line between the <!-- zensu:chain-anchor --> markers closing this block"*"render that line verbatim"*"directly above the closing next step, or above the final step list when the one-next-step rule is suspended, with no step counter beside them."*"never drop a failing test, an unfinished step, a risk or a limitation"*"Never drop or demote an option the user is choosing between"*"the one-question cap and the one-next-step rule do not apply"*) ;;
+    *) Z103_BAD="$Z103_BAD [second armed prompt is not the short armed body]" ;;
+  esac
+  case "$(printf '%s' "$Z103_ARMED_SHORT_OUT" | anchor_of)" in
+    Zensu:*) ;;
+    *) Z103_BAD="$Z103_BAD [short armed body lost the anchor: $(printf '%s' "$Z103_ARMED_SHORT_OUT" | anchor_of)]" ;;
+  esac
+else
+  Z103_BAD="$Z103_BAD [could not arm a chain]"
+fi
+if [ -z "$Z103_BAD" ]; then
+  check "Z103 the first armed prompt after a none generation gets the full armed contract once, and the short armed body after it still renders the anchor, places it above a step list when the one-next-step rule is lifted, and keeps the substance and ranking rules" PASS
+else
+  check "Z103 armed variant ledger broken:$Z103_BAD" FAIL
+fi
+rm -rf "$P103"
+
+Z104="$(HOOK="$HOOK" node -e '
+  const s = require("fs").readFileSync(process.env.HOOK, "utf8");
+  const leads = [];
+  const re = /"additionalContext": "(zen-mode is ACTIVE[^"]{0,60})/g;
+  let m;
+  while ((m = re.exec(s))) leads.push(m[1]);
+  const short = s.indexOf("zen-mode is ACTIVE; the full zen-mode contract");
+  const rest = short < 0 ? "" : s.slice(short, s.indexOf("\n", short));
+  const open = rest.split(", and anchor work that spans several turns").length - 1;
+  const close = rest.split("counter beside them.").length - 1;
+  process.stdout.write([leads.length, /^zen-mode is ACTIVE\. The user/.test(leads[0] || "") ? "full-first" : "short-first", open, close].join(":"));
+' 2>/dev/null)"
+[ "$Z104" = "2:full-first:1:1" ] \
+  && check "Z104 the hook holds the full ACTIVE contract first and the short body second, and the short body carries the none-swap span exactly once" PASS \
+  || check "Z104 ACTIVE heredoc layout is '${Z104:-unreadable}', want 2:full-first:1:1" FAIL
+
+ZEN_SHORT_ARMED_CEILING=1800
+ZEN_SHORT_ARMED_HEADROOM=95
+Z105_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
+  const fs = require("fs");
+  const path = require("path");
+  const src = fs.readFileSync(process.env.HOOK, "utf8");
+  const emitted = [...src.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+    .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+  const shortBody = emitted.find((s) => s.startsWith("zen-mode is ACTIVE; the full zen-mode contract"));
+  if (shortBody === undefined || !shortBody.includes("{{ZENSU_CHAIN_ANCHOR}}")) { process.stdout.write("NONE"); process.exit(0); }
+  let longest = "";
+  try {
+    const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
+    for (const t of mod.producibleTokens()) if (t.length > longest.length) longest = t;
+  } catch (_) { process.stdout.write("NONE"); process.exit(0); }
+  process.stdout.write(longest ? String(shortBody.replace("{{ZENSU_CHAIN_ANCHOR}}", longest).length) : "NONE");
+' 2>/dev/null)"
+if ! zen_is_plain_number "$Z105_LEN"; then
+  check "Z105 the armed short body could not be measured (got '${Z105_LEN:-<empty>}') — not an all-clear" FAIL
+else
+  Z105_SLACK=$(( ZEN_SHORT_ARMED_CEILING - Z105_LEN ))
+  if [ "$Z105_SLACK" -lt 0 ]; then
+    check "Z105 the armed short body is $Z105_LEN chars with the longest anchor, past its ceiling of $ZEN_SHORT_ARMED_CEILING — argue the growth and raise the ceiling deliberately" FAIL
+  elif [ "$Z105_SLACK" -gt "$ZEN_SHORT_ARMED_HEADROOM" ]; then
+    check "Z105 the armed short body is $Z105_LEN chars, $Z105_SLACK below its ceiling of $ZEN_SHORT_ARMED_CEILING (headroom $ZEN_SHORT_ARMED_HEADROOM) — the ceiling has drifted away from the text" FAIL
+  else
+    check "Z105 the short body every later prompt carries while a chain is armed is $Z105_LEN chars with the longest anchor, $Z105_SLACK under its declared ceiling" PASS
+  fi
 fi
 
 

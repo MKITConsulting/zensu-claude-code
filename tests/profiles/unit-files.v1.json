@@ -145,6 +145,11 @@
       "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
     },
     {
+      "path": "tests/structure/route-short-line-graders.test.js", "registered": 38,
+      "runs": [{ "driver": "tests/structure/test-route-short-line-eval.sh" }],
+      "summary": "The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions."
+    },
+    {
       "path": "tests/structure/rule-block-v1.test.js", "registered": 10, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-best-solution-first.sh" }],
       "summary": "The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals."
@@ -266,7 +271,7 @@
       "summary": "Worktree keep: managed-worktree detection, the nested-repository scan and hold, and anchor retirement."
     },
     {
-      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 11,
+      "path": "tests/structure/zen-anchor-assertions.test.js", "registered": 12,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode eval graders: every assertion body compiled and a pinned pass and fail vector."
     },
