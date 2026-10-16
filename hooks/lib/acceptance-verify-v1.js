@@ -14,9 +14,13 @@ const { canonical, resolveRunLog } = receipts;
 const SCHEMA = 'acceptance-verify-v1';
 const STORE_SEGMENTS = Object.freeze(['acceptance-verify', 'v1']);
 const VERDICTS = Object.freeze(['pass', 'fail', 'partial']);
-const ATTESTED_DRIVERS = Object.freeze(['browser', 'mobile', 'desktop-native']);
-const OBSERVED_DRIVERS = Object.freeze(['api', 'cli', 'async', 'iac', 'custom', 'library', 'artifact']);
+const ATTESTED_DRIVERS = Object.freeze(['browser', 'mobile', 'desktop']);
+const OBSERVED_DRIVERS = Object.freeze(['api', 'cli', 'async', 'iac', 'custom', 'library']);
 const DRIVERS = Object.freeze([...ATTESTED_DRIVERS, ...OBSERVED_DRIVERS]);
+const EARLIER_ATTESTED_DRIVERS = Object.freeze(['desktop-native']);
+const EARLIER_OBSERVED_DRIVERS = Object.freeze(['artifact']);
+const ACCEPTED_DRIVERS = Object.freeze([...DRIVERS, ...EARLIER_ATTESTED_DRIVERS, ...EARLIER_OBSERVED_DRIVERS]);
+const RECORDED_DRIVER_SPELLINGS = new Map([['desktop', 'desktop-native']]);
 const GATE_MODES = Object.freeze(['required', 'advisory']);
 const VERDICT_STATES = Object.freeze([
   'pass',
@@ -138,7 +142,7 @@ function validateRecord(record, expected = {}) {
   if (typeof record.criterion !== 'string' || record.criterion.length > LIMITS.maxCriterionChars) return 'malformed criterion';
   if (typeof record.criterion_digest !== 'string' || !DIGEST_RE.test(record.criterion_digest)) return 'malformed criterion digest';
   if (!VERDICTS.includes(record.verdict)) return 'unknown verdict';
-  if (!DRIVERS.includes(record.driver)) return 'unknown driver';
+  if (!ACCEPTED_DRIVERS.includes(record.driver)) return 'unknown driver';
   if (typeof record.evidence !== 'string' || record.evidence === '' || record.evidence.length > LIMITS.maxEvidenceChars) {
     return 'malformed evidence';
   }
@@ -466,7 +470,7 @@ function record(options) {
   const ac = options.ac;
   if (typeof ac !== 'string' || !AC_RE.test(ac)) return { code: 2, error: '--ac must name an acceptance criterion id such as AC-001' };
   if (!VERDICTS.includes(options.verdict)) return { code: 2, error: `--verdict must be one of ${VERDICTS.join(', ')}` };
-  if (!DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
+  if (!ACCEPTED_DRIVERS.includes(options.driver)) return { code: 2, error: `--driver must be one of ${DRIVERS.join(', ')}` };
   if (!options.logPath) return { code: 2, error: '--log <this chain\'s run log> is required' };
   const evidence = cleanEvidence(options.evidenceText, options.projectRoot, limits);
   if (evidence.error) return { code: 1, error: evidence.error };
@@ -488,7 +492,7 @@ function record(options) {
   }
   const currentTree = evidenceRun.computeTree(options.projectRoot, locations.scratch, evidenceRun.LIMITS);
   const runId = typeof options.evidenceRun === 'string' && options.evidenceRun !== '' ? options.evidenceRun : null;
-  const observed = OBSERVED_DRIVERS.includes(options.driver);
+  const observed = OBSERVED_DRIVERS.includes(options.driver) || EARLIER_OBSERVED_DRIVERS.includes(options.driver);
   if (observed && !runId && options.verdict !== 'partial') {
     return {
       code: 1,
@@ -516,7 +520,7 @@ function record(options) {
     criterion: clip(normalizeText(criterion.text), limits.maxCriterionChars),
     criterion_digest: criterionDigest(criterion.text),
     verdict: options.verdict,
-    driver: options.driver,
+    driver: RECORDED_DRIVER_SPELLINGS.get(options.driver) || options.driver,
     evidence: evidence.value,
     evidence_run: runId,
     tree: currentTree.tree,
@@ -893,6 +897,10 @@ module.exports = {
   ATTESTED_DRIVERS,
   OBSERVED_DRIVERS,
   DRIVERS,
+  EARLIER_ATTESTED_DRIVERS,
+  EARLIER_OBSERVED_DRIVERS,
+  ACCEPTED_DRIVERS,
+  RECORDED_DRIVER_SPELLINGS,
   GATE_MODES,
   VERDICT_STATES,
   PASSING_STATES,

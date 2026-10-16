@@ -318,6 +318,24 @@ else
 fi
 rm -rf "$C11_STATE_DIR"
 
+C12_STATE_DIR="$(mktemp -d -t hookmirror-c12-XXXX)"
+seed_active "$C12_STATE_DIR" "hookmirror-large"
+C12_PAYLOAD_FILE="$C12_STATE_DIR/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "/tmp/x.ts", content: "a".repeat(700000) }, session_id: "hookmirror-large" }))' "$C12_PAYLOAD_FILE"
+C12_PAD=
+if [ "$(uname -s)" = Darwin ]; then
+  C12_PAD="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT_C12="$(env C12_PAD_A="$C12_PAD" C12_PAD_B="$C12_PAD" C12_PAD_C="$C12_PAD" \
+  STATE_DIR="$C12_STATE_DIR" bash "$HOOK" < "$C12_PAYLOAD_FILE" 2>/dev/null)"
+if printf '%s' "$OUT_C12" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$OUT_C12" | grep -qF 'TDD-Phase-Gate: Write on '; then
+  check "C12 a Write whose payload is over the exec size limit is still phase-gated" PASS
+else
+  check "C12 oversized Write payload (out=${OUT_C12:0:240})" FAIL
+fi
+rm -rf "$C12_STATE_DIR"
+
 echo "----"
 echo "test-pre-edit-hook-mirror: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

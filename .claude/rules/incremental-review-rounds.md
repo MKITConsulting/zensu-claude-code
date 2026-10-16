@@ -79,9 +79,9 @@ exactly twice, so a one-sided edit there fails in a suite named for something el
 config keys in `config.example.json`; and the operator accounts in `docs/configuration.md`,
 `docs/review-chain.md`, `docs/architecture.md` and `docs/tdd-manager-workflow.md`.
 `tests/structure/test-incremental-review-rounds.sh` pins all of it and drives both unit files;
-the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` plus the counts in
-`tests/SUITE-OVERVIEW.md` move with it, because `run-all.sh` refuses to execute at all when the
-manifest and the directory disagree.
+the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` plus both unit files'
+entries in `tests/profiles/unit-files.v1.json` move with it, because `run-all.sh` refuses to
+execute at all when either file and the directory disagree.
 
 **Generations and the claim prefix.** A `REVIEW BUDGET RESET` line, which
 `/zensu:reset-review-limit` appends after a same-chain rearm, starts a new generation:

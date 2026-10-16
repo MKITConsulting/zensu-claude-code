@@ -44,6 +44,7 @@ const RECORD_KEYS = Object.freeze([
 ]);
 const RESULT_SCHEMA = 'zensu-review-result/v1';
 const TEMPLATE_FILE = path.join(__dirname, '..', '..', 'templates', 'workflows', 'zensu-review-v1.js');
+const STAGED_TEMPLATE_PREFIX = `${path.basename(TEMPLATE_FILE, '.js')}-`;
 const RESULT_KEYS = Object.freeze(['agents', 'ceiling', 'dropped', 'findings', 'lenses', 'schema', 'tree']);
 const RESULT_AGENT_KEYS = Object.freeze(['failed', 'finished', 'started']);
 const RESULT_DROPPED_KEYS = Object.freeze(['count', 'kind', 'lens', 'reason']);
@@ -899,6 +900,88 @@ function templateDigest(file = TEMPLATE_FILE, limits = LIMITS) {
   return loaded.invalid ? null : digest(loaded.text);
 }
 
+function stagedTemplateName(sessionKey) {
+  return `${STAGED_TEMPLATE_PREFIX}${sessionKey}.js`;
+}
+
+function isStagedTemplateName(name) {
+  return name.startsWith(STAGED_TEMPLATE_PREFIX) && name.endsWith('.js')
+    && SESSION_KEY_RE.test(name.slice(STAGED_TEMPLATE_PREFIX.length, -3));
+}
+
+function projectStateDirectory(projectRoot) {
+  let current = projectRoot;
+  for (const segment of core.WORKFLOW_STATE_SEGMENTS) {
+    current = path.join(current, segment);
+    try {
+      fs.mkdirSync(current, { mode: 0o700 });
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') return null;
+    }
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+  }
+  return canonicalDirectoryOrNull(current);
+}
+
+function sweepStagedTemplates(directory, keep, limits, now) {
+  let names;
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return 0;
+  }
+  let swept = 0;
+  for (const name of names) {
+    if (name === keep || !isStagedTemplateName(name)) continue;
+    try {
+      const file = path.join(directory, name);
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || now - stat.mtimeMs <= limits.idleSessionMs) continue;
+      fs.unlinkSync(file);
+      swept += 1;
+    } catch { }
+  }
+  return swept;
+}
+
+function stageUnavailable(reason) {
+  return { status: 'unavailable', reason, line: `${LOG_PREFIX} stage=unavailable reason=${reason}` };
+}
+
+function stageTemplate(options, limits = LIMITS) {
+  if (!options.enabled) return stageUnavailable('disabled');
+  if (options.judge === false) return stageUnavailable('review-judge-disabled');
+  const root = canonicalDirectoryOrNull(options.root);
+  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
+  if (!root || !projectRoot || !isInside(root, projectRoot)) return stageUnavailable('root');
+  if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return stageUnavailable('session');
+  const current = (options.treeOf || currentTree)(root);
+  if (!current || typeof current.tree !== 'string' || !TREE_ID_RE.test(current.tree)) {
+    return stageUnavailable(token(current && current.reason));
+  }
+  const template = readBoundedFile(options.templateFile || TEMPLATE_FILE, limits.maxScriptFileBytes);
+  if (template.invalid) return stageUnavailable('template-unreadable');
+  const directory = projectStateDirectory(projectRoot);
+  if (!directory) return stageUnavailable('state-directory');
+  const name = stagedTemplateName(options.sessionKey);
+  let script;
+  try {
+    script = writeFileAtomic(directory, name, template.text);
+  } catch {
+    return stageUnavailable('write-failed');
+  }
+  const staged = readBoundedFile(script, limits.maxScriptFileBytes);
+  if (staged.invalid || digest(staged.text) !== digest(template.text)) return stageUnavailable('digest-mismatch');
+  sweepStagedTemplates(directory, name, limits, options.now === undefined ? Date.now() : options.now);
+  return { status: 'ok', tree: current.tree, script, line: `${LOG_PREFIX} stage=ok tree=${current.tree} script=${script}` };
+}
+
 function judgeResult(record, options, limits) {
   const expected = templateDigest(options.templateFile || TEMPLATE_FILE, limits);
   if (expected === null) return { status: 'unavailable', reason: 'template-unreadable' };
@@ -1174,6 +1257,22 @@ function main(argv, env = process.env, io = {}) {
     write(`${line}\n`);
     return 0;
   }
+  if (mode === 'stage') {
+    let line;
+    try {
+      line = stageTemplate({
+        enabled: env.ZENSU_XR_ENABLED !== '0',
+        judge: env.ZENSU_XR_JUDGE !== '0',
+        sessionKey: env.ZENSU_XR_SESSION_KEY,
+        projectRoot: env.ZENSU_XR_PROJECT_ROOT,
+        root: env.ZENSU_XR_ROOT,
+      }).line;
+    } catch {
+      line = `${LOG_PREFIX} stage=unavailable reason=fault`;
+    }
+    write(`${line}\n`);
+    return 0;
+  }
   if (mode === 'stop-wait') {
     let result;
     try {
@@ -1188,7 +1287,7 @@ function main(argv, env = process.env, io = {}) {
     write(`${result.line}\n`);
     return 0;
   }
-  process.stderr.write('usage: external-review-v1.js record|check|tree|stop-wait\n');
+  process.stderr.write('usage: external-review-v1.js record|check|tree|stage|stop-wait\n');
   return 2;
 }
 
@@ -1223,6 +1322,8 @@ module.exports = {
   newestChangeTime,
   validateReviewResult,
   templateDigest,
+  stagedTemplateName,
+  stageTemplate,
   runRecordPath,
   readRunRecord,
   journalCounts,

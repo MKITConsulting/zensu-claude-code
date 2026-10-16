@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.25.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.26.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -86,9 +86,9 @@ direct, autopilot or pilot answer decides only that plan or request), and
 
 ## What's included
 
-### Skills (30)
+### Skills (31)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (31 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (32 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -102,7 +102,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the permission prompt asks you once per session for each loopback origin and at every browser start for a deployed HTTPS origin, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Exercise the running feature and report what actually happened, for any kind of application: a web UI in a browser through `playwright-cli`, an API, a CLI, a library, a worker, infrastructure code, an iOS or Android app in a simulator or emulator, or a desktop app. Report-only. Without a launch-time policy it runs in consent mode: the permission prompt asks you once per session for each loopback origin and at every browser start for a deployed HTTPS origin, and `--setup` writes the runtime recipe with you. Inside a `/zensu:tdd` chain its `--chain` mode verifies every acceptance criterion before the chain can close. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -121,6 +121,7 @@ direct, autopilot or pilot answer decides only that plan or request), and
 | `/zensu:adopt-session` | Report a refused automatic adoption after a plugin update landed mid-run and retry it by hand, re-create a vanished recorded project root, or move the session's anchor to a sibling worktree of the same repository (`--reanchor`) |
 | `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
+| `/zensu:work` | Run one Zensu work order in a headless worker session, reporting every stage until ready_for_merge or a block |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`
@@ -185,8 +186,8 @@ The `zensu` CLI transmits **product and feature metadata** over HTTPS to
 classifications and OWASP tags, file paths, git SHAs and branch names, vision
 documents, and pulse session metadata.
 
-It does **not** transmit source code or file contents — only paths. Error
-messages are excluded unless `freetext_logging` is explicitly enabled for Pulse.
+It does **not** transmit source code or file contents — only paths. Pulse never
+records error messages or any other free text.
 Pulse sessions are retained for 90 days by default.
 
 ### Self-hosting
@@ -204,12 +205,20 @@ self-hosting keeps the data under your control.
 
 ## Requirements
 
-Claude Code 2.1.211 or newer on macOS or Linux. Hooks need a POSIX shell —
-Windows users need WSL or Git Bash; native `cmd.exe` and PowerShell are not
-supported. `/zensu:verify-feature` and the autopilot browser driver additionally
-need `playwright-cli` on `PATH` (`npm install -g @playwright/cli@0.1.21`, the
-version the browser consent gate was measured against; `brew install playwright-cli`
-is unpinned).
+Claude Code 2.1.211 or newer, and `node` on the `PATH` of the environment that
+starts Claude Code: without it, Zensu refuses every tool call. Zensu's hooks are
+bash scripts, which macOS and Linux run as they are. On Windows, run Claude Code
+inside WSL, or install Git for Windows so that Claude Code runs the hooks through
+Git Bash, whichever terminal you start `claude` from. Native Windows without Git
+Bash is not supported. With Git Bash, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`
+in the environment that starts Claude Code or in the `env` block of
+`~/.claude/settings.json`: Zensu's shell-command gates watch only the Bash tool,
+so a command Claude runs through the PowerShell tool skips them.
+[Platform Support](docs/operations.md#platform-support) has the details and the
+known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
+driver additionally need `playwright-cli` on `PATH`
+(`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
+was measured against; `brew install playwright-cli` is unpinned).
 
 ## Documentation
 
@@ -222,7 +231,7 @@ is unpinned).
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
-| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the driver for every kind of application and what each needs, consent mode with no setup at all, local and remote, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for sessions that cannot show the prompt |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |

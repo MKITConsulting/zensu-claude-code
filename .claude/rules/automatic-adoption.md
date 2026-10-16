@@ -307,8 +307,8 @@ adoption row). This is a census, and the rule is the search:
   emitter and the routing are driven with a stubbed wrapper, and the Stop re-bind with a
   stubbed session library in `AUTO-28`), and the `.*` gate rendering `lock-timeout` or
   `adoption-failed`.
-- Windows is unmeasured: the upgrade suite is the last entry of `windows-shard-2`. Do not
-  raise the cap before a green Windows run supplies a figure.
+- Windows is measured: the upgrade suite runs first on `windows-shard-7`, and its figures are
+  in `.claude/rules/session-adoption.md`. Do not raise its cap without a new measurement.
 
 ## Tests
 

@@ -113,9 +113,10 @@ For each plan item, in the project's own idiom:
      production here.**
 
 Only test **authoring** (step 1) may fan out: parallel workflows or agents may write the tests
-of independent items across layers. A worker can run no command, so the main thread runs every
-authored test, the RED/GREEN triage and any executed mutation check itself, and runs them one
-at a time where the probe reports a shared test DB or a fixed port.
+of independent items across layers. A worker holds at most a guarded `Bash` (the guard prevents
+accidents and is not a sandbox), none when `hooks.subagentShell` is `false`, and the main thread owns every run whose result counts as
+evidence, so it runs every authored test, the RED/GREEN triage and any executed mutation check
+itself, and runs them one at a time where the probe reports a shared test DB or a fixed port.
 
 ### Phase 3 — Quality gate + review chain
 

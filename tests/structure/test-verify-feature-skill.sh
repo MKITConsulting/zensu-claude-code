@@ -5,7 +5,7 @@ set -u
 # skills/doctor/SKILL.md for the wrapper invocation line, so no renderer
 # process is started and no HOME is resolved.
 # Structure test for /zensu:verify-feature.
-# Pins the public command, self-contained browser loop, isolated Zensu local adapter,
+# Pins the public command, self-contained browser loop,
 # credential-blind auth contract, evidence/verdict gates, playwright-cli command set,
 # plugin registration, and user-facing documentation. No browser or network is launched.
 
@@ -13,12 +13,10 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/verify-feature"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 BROWSER_MD="$SKILL_DIR/rules/browser-verification.md"
-ZENSU_MD="$SKILL_DIR/rules/zensu-monorepo.md"
 SETUP_MD="$SKILL_DIR/rules/setup.md"
 CONSENT_MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR_MODULE="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
 BROWSER_CONFIG="$PLUGIN_DIR/scripts/verify-browser-config.js"
-RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 HELP_MD="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
@@ -36,8 +34,8 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
-  "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
+  "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
@@ -105,7 +103,7 @@ if grep -qF 'P0/P1/P2' "$SKILL_MD" && grep -qF 'completeness-critic' "$SKILL_MD"
 else
   check "P2b matrix is diff-grounded, prioritized, and completeness-checked" FAIL
 fi
-if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'candidate was rejected' "$SKILL_MD"; then
+if grep -qF 'An autopilot recipe is not automatically safe' "$SKILL_MD" && grep -qF 'explicit scoped `down` command' "$SKILL_MD" && grep -qF 'Record why the candidate was rejected' <<<"$SKILL_FLAT"; then
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" PASS
 else
   check "P2d autopilot config is accepted only with a verification-safe lifecycle" FAIL
@@ -384,30 +382,6 @@ if grep -qF 'A future gate may re-enable opaque state only when it admits a path
 else
   check "P4g browser state commands stay denied until a narrow gate exists" FAIL
 fi
-if grep -qF 'Use visible manual browser login' "$ZENSU_MD" \
-  && grep -qF 'never read, print, or pass' "$ZENSU_MD" \
-  && grep -qF 'If no credential-blind path' "$ZENSU_MD"; then
-  check "P4h bundled Zensu adapter never runs a storage-state login script" PASS
-else
-  check "P4h bundled Zensu adapter never runs a storage-state login script" FAIL
-fi
-if grep -qF 'ORIGIN="$(parent_origin)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'APP_BASE_URL="$ORIGIN"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'Resolve the planned application origin before starting any resource' "$ZENSU_MD" \
-  && grep -qF -- '--check-policy local "$APP_ORIGIN" declared-safe' "$ZENSU_MD" \
-  && grep -qF 'Use visible manual browser login' "$ZENSU_MD"; then
-  check "P4i local auth waits for the exact frontend origin and stays visible" PASS
-else
-  check "P4i local auth waits for the exact frontend origin and stays visible" FAIL
-fi
-if grep -qF 'Without a parent policy the gate runs in consent mode and the same three commands still' "$ZENSU_MD" \
-  && grep -qF 'prints `consent` with exit `0`' "$ZENSU_MD" \
-  && grep -qF 'consent_origin' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'node "$FREE_PORT_HELPER" --from 5173' "$RUNTIME_CONTROLLER"; then
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" PASS
-else
-  check "P4t bundled adapter picks and records its own loopback origin in consent mode" FAIL
-fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
   check "P4j autopilot example pins distinct auth/app contract to its same-origin proxy" PASS
@@ -491,54 +465,6 @@ if grep -qF 'Visible manual login' "$SKILL_MD" && grep -qF 'credential into chat
   check "P4d remote/manual login stays in the visible browser" PASS
 else
   check "P4d remote/manual login stays in the visible browser" FAIL
-fi
-
-# P5 — local adapter isolation, readiness, typed fixtures, and teardown.
-for needle in '55432 + OFFSET' '8090 + OFFSET' 'FRONTEND_PORT="${ORIGIN##*:}"' 'pgvector/pgvector:pg17' '/api/health' '--strictPort' 'docker rm -f "$CONTAINER"'; do
-  if grep -qF -- "$needle" "$RUNTIME_CONTROLLER"; then
-    check "P5 local adapter pins $needle" PASS
-  else
-    check "P5 local adapter pins $needle" FAIL
-  fi
-done
-if grep -qF 'Never use `pkill`' "$ZENSU_MD" \
-  && grep -qF 'lease-authenticated supervisors' "$ZENSU_MD" \
-  && grep -qF 'Mutable JSON' "$ZENSU_MD"; then
-  check "P5a teardown is scoped to run-owned processes/resources" PASS
-else
-  check "P5a teardown is scoped to run-owned processes/resources" FAIL
-fi
-if grep -qF 'make -C backend seed' "$ZENSU_MD" && grep -qF 'without exposing the' "$ZENSU_MD"; then
-  check "P5b fixture mutations prefer typed/repository-owned paths" PASS
-else
-  check "P5b fixture mutations prefer typed/repository-owned paths" FAIL
-fi
-if grep -qF '127.0.0.1:${PG_PORT}:5432' "$RUNTIME_CONTROLLER" && grep -qF 'SERVER_HOST=127.0.0.1' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'openssl rand -hex 24' "$RUNTIME_CONTROLLER" && grep -qF 'openssl rand -hex 32' "$RUNTIME_CONTROLLER"; then
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" PASS
-else
-  check "P5c local services bind loopback and use per-run DB/JWT secrets" FAIL
-fi
-if grep -qF '$(seq ' "$RUNTIME_CONTROLLER"; then
-  check "P5d local adapter avoids non-portable seq dependency" FAIL
-else
-  check "P5d local adapter avoids non-portable seq dependency" PASS
-fi
-if grep -qF '[ -d "$WORKTREE/frontend/node_modules" ] || pnpm -C "$WORKTREE/frontend" install --frozen-lockfile' "$RUNTIME_CONTROLLER"; then
-  check "P5e frontend dependencies install only when node_modules is absent" PASS
-else
-  check "P5e frontend dependencies install only when node_modules is absent" FAIL
-fi
-if grep -qF 'RUN_ID="$(openssl rand -hex 6)"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'CONTAINER="$(expected_container "$RUN_ID")"' "$RUNTIME_CONTROLLER"; then
-  check "P5f resource IDs include a per-run random component" PASS
-else
-  check "P5f resource IDs include a per-run random component" FAIL
-fi
-if grep -qF -- '--host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort' "$RUNTIME_CONTROLLER"; then
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" PASS
-else
-  check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" FAIL
 fi
 
 # P6 — playwright-cli driver and plugin manifest wiring.
@@ -896,16 +822,12 @@ fi
 if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy' "$SKILL_MD" \
   && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
   && grep -qF 'supporting files loaded through `Read` do not receive' "$SKILL_MD" \
-  && grep -qF '<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
-  && grep -qF 'node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy' "$ZENSU_MD" \
+  && grep -qF 'plugin script a bundled rule names from this concrete absolute `ROOT`' "$SKILL_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
-  && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$ZENSU_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" PASS
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD"; then
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" PASS
 else
-  check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
+  check "P8c skill uses native root rendering and runs bundled-rule scripts from the concrete root" FAIL
 fi
 
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
@@ -1037,6 +959,253 @@ case "$(p9_verdict bumped)" in
   ok$'\t'*) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" PASS ;;
   *) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" FAIL ;;
 esac
+
+DRIVERS_MD="$SKILL_DIR/rules/drivers.md"
+SERVICE_MD="$SKILL_DIR/rules/service-verification.md"
+CLI_MD="$SKILL_DIR/rules/cli-verification.md"
+MOBILE_MD="$SKILL_DIR/rules/mobile-verification.md"
+DESKTOP_MD="$SKILL_DIR/rules/desktop-verification.md"
+ATTACH_MD="$SKILL_DIR/rules/attach.md"
+RESOURCES_JS="$SKILL_DIR/scripts/verify-run-resources.js"
+RESOURCES_UNIT="$PLUGIN_DIR/tests/structure/verify-run-resources.test.js"
+AUTOPILOT_DRIVERS="$PLUGIN_DIR/skills/autopilot/rules/drivers.md"
+AUTOPILOT_PROBE="$PLUGIN_DIR/skills/autopilot/rules/probe.md"
+COVER_DRIVERS="$PLUGIN_DIR/skills/cover/rules/drivers.md"
+VERIFY_DOC="$PLUGIN_DIR/docs/verify-feature.md"
+ACCEPTANCE_LIB="$PLUGIN_DIR/hooks/lib/acceptance-verify-v1.js"
+P10_MISSING=""
+for f in "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" "$ATTACH_MD" "$RESOURCES_JS" "$RESOURCES_UNIT" \
+  "$AUTOPILOT_DRIVERS" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$VERIFY_DOC" "$ACCEPTANCE_LIB"; do
+  [ -f "$f" ] || P10_MISSING="$P10_MISSING ${f#"$PLUGIN_DIR"/}"
+done
+if [ -z "$P10_MISSING" ]; then
+  check "P10a every driver rule file, the run-resource helper and its unit file exist" PASS
+else
+  check "P10a every driver rule file, the run-resource helper and its unit file exist (missing:$P10_MISSING)" FAIL
+fi
+DRIVERS_FLAT="$(tr '\n' ' ' < "$DRIVERS_MD" 2>/dev/null | tr -s ' ')"
+MOBILE_FLAT="$(tr '\n' ' ' < "$MOBILE_MD" 2>/dev/null | tr -s ' ')"
+DESKTOP_FLAT="$(tr '\n' ' ' < "$DESKTOP_MD" 2>/dev/null | tr -s ' ')"
+DOC_FLAT="$(tr '\n' ' ' < "$VERIFY_DOC" 2>/dev/null | tr -s ' ')"
+if ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$DRIVERS_MD" "$SERVICE_MD" "$CLI_MD" "$MOBILE_MD" "$DESKTOP_MD" 2>/dev/null \
+  && grep -qF 'node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" list --run-dir "$RUN_DIR"' "$DRIVERS_MD" \
+  && grep -qF '`node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" teardown --run-dir "<that path>"`' "$DRIVERS_MD" \
+  && grep -qF 'Whenever a bundled rule file says `<absolute-plugin-root>`, replace it with this concrete absolute `ROOT`' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'verify-run-resources.js' "$SKILL_MD"; then
+  check "P10b the driver rule files name the helper behind the plugin-root placeholder, which the skill tells the model to replace" PASS
+else
+  check "P10b the driver rule files name the helper behind the plugin-root placeholder, which the skill tells the model to replace" FAIL
+fi
+P10_VOCAB="$(node -e '
+  const fs = require("node:fs");
+  const args = process.argv.slice(1);
+  const [config, drivers, skill, autopilotSkill, probe, cover, autopilotDrivers, doc] = args.slice(0, 8).map((file) => fs.readFileSync(file, "utf8"));
+  const recorder = require(args[8]);
+  const problems = [];
+  const enumLine = config.split("\n").find((line) => /^  driver: /.test(line)) || "";
+  const found = /#\s*([a-z| -]+?)\s+\(see drivers\.md\)/.exec(enumLine);
+  if (!found) { process.stdout.write("the validate.driver enum line was not found"); process.exit(1); }
+  const ids = found[1].split("|").map((id) => id.trim()).filter(Boolean);
+  if (ids.length !== 9) problems.push("the enum names " + ids.length + " drivers");
+  const section = (text, start, end) => {
+    const from = text.indexOf(start);
+    const to = from === -1 ? -1 : text.indexOf(end, from + start.length);
+    return from === -1 || to === -1 ? "" : text.slice(from, to);
+  };
+  const tableIds = (text) => Array.from(text.matchAll(/^\| `([a-z-]+)` \|/gm), (match) => match[1]);
+  const same = (label, list) => { if (list.join(",") !== ids.join(",")) problems.push(label + " lists [" + list.join(",") + "]"); };
+  const sorted = (list) => Array.from(new Set(list)).sort().join(",");
+  const sameSet = (label, list) => { if (sorted(list) !== sorted(ids)) problems.push(label + " names [" + sorted(list) + "]"); };
+  const catalog = section(drivers, "## 1. Catalog", "## 2.");
+  same("the drivers.md catalog", tableIds(catalog));
+  const ruleFiles = { browser: "`rules/browser-verification.md`", api: "`rules/service-verification.md`", cli: "`rules/cli-verification.md`", library: "`rules/cli-verification.md`", async: "`rules/service-verification.md`", iac: "`rules/service-verification.md`", mobile: "`rules/mobile-verification.md`", desktop: "`rules/desktop-verification.md`", custom: "this file, section 7" };
+  for (const match of catalog.matchAll(/^\| `([a-z-]+)` \| [^|]* \| ([^|]*) \|/gm)) {
+    if (!(match[1] in ruleFiles) || !match[2].startsWith(ruleFiles[match[1]])) problems.push("the catalog routes " + match[1] + " to " + match[2].trim());
+  }
+  sameSet("the autopilot driver catalog", [
+    ...tableIds(section(autopilotDrivers, "## Tier 1 ", "### ")),
+    ...Array.from(section(autopilotDrivers, "## Tier 1.5", "## Choosing").matchAll(/^- `([a-z-]+)` — /gm), (match) => match[1]),
+  ]);
+  const coverList = (/unchanged \(([^;]*);/.exec(cover.replace(/\s+/g, " ")) || [null, ""])[1];
+  sameSet("the cover driver list", Array.from(coverList.matchAll(/`([a-z-]+)`/g), (match) => match[1]));
+  same("the drivers.md evidence-plane table", tableIds(section(drivers, "## 3. Evidence planes", "## 4.")));
+  same("the docs driver table", tableIds(section(doc, "## What it can verify", "## How the browser is fenced")));
+  sameSet("the acceptance recorder drivers", recorder.DRIVERS);
+  const seams = (autopilotSkill.split("\n").find((line) => /^\s+browser \| api \| /.test(line)) || "").replace("(rules/drivers.md)", "");
+  same("the autopilot seams line", seams.split("|").map((id) => id.trim()).filter(Boolean));
+  const skillRow = skill.split("\n").find((line) => line.startsWith("| `--driver=<id>` |")) || "";
+  const autopilotRow = autopilotSkill.split("\n").find((line) => line.startsWith("| `--driver=<name>` |")) || "";
+  const flatProbe = probe.replace(/\s+/g, " ");
+  for (const id of ids) {
+    if (!skillRow.includes("`" + id + "`")) problems.push("the skill --driver row misses " + id);
+    if (!autopilotRow.includes("`" + id + "`")) problems.push("the autopilot --driver row misses " + id);
+    if (!flatProbe.includes("→ `" + id + "`")) problems.push("the autopilot probe misses " + id);
+  }
+  for (const [name, text] of [["verify-feature SKILL.md", skill], ["autopilot SKILL.md", autopilotSkill], ["autopilot probe.md", probe], ["autopilot drivers.md", autopilotDrivers], ["cover drivers.md", cover]]) {
+    if (text.includes("desktop-native")) problems.push(name + " still names desktop-native");
+  }
+  if (/web app \(\+ electron/.test(autopilotDrivers)) problems.push("autopilot drivers.md still files Electron under browser");
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+  process.stdout.write(ids.join(","));
+' "$AUTOPILOT_CONFIG" "$DRIVERS_MD" "$SKILL_MD" "$AUTOPILOT_SKILL" "$AUTOPILOT_PROBE" "$COVER_DRIVERS" "$AUTOPILOT_DRIVERS" "$VERIFY_DOC" "$ACCEPTANCE_LIB" 2>&1)"
+P10_VOCAB_RC=$?
+if [ "$P10_VOCAB_RC" = "0" ] \
+  && grep -qF 'apply to `browser` rows only; `rules/drivers.md` section 8 holds what every other row does instead.' <<<"$SKILL_FLAT" \
+  && grep -qxF '## 8. Every other driver, phase by phase' "$DRIVERS_MD"; then
+  check "P10c one driver vocabulary ($P10_VOCAB) across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, the acceptance recorder, and each driver's rule file" PASS
+else
+  check "P10c one driver vocabulary across the recipe enum, the catalog, the evidence planes, the docs, the skill, autopilot and cover, the acceptance recorder, and each driver's rule file ($P10_VOCAB)" FAIL
+fi
+if grep -qF '`--mode=remote` together with a `--driver` other than `browser` stops the same way, in memory, with `remote mode supports the browser driver only`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'In `remote` mode a row whose driver is not `browser` is PARTIAL, because remote mode supports the browser driver only.' <<<"$SKILL_FLAT" \
+  && grep -qF 'Remote mode stays browser-only.' "$DRIVERS_MD" \
+  && grep -qF 'Remote mode supports the `browser` driver only.' <<<"$DOC_FLAT"; then
+  check "P10d remote mode stays browser-only, refused in memory for another driver" PASS
+else
+  check "P10d remote mode stays browser-only, refused in memory for another driver" FAIL
+fi
+if grep -qF 'Proving it only through `api`, `library`, `async` or a log caps that criterion at PARTIAL' <<<"$DRIVERS_FLAT" \
+  && grep -qF 'or a criterion the user sees was proven only through a non-UI driver.' <<<"$SKILL_FLAT" \
+  && grep -qF 'every acceptance criterion has the evidence planes its driver requires' <<<"$SKILL_FLAT"; then
+  check "P10e a criterion the user sees caps at PARTIAL without a UI driver, and PASS needs each driver's planes" PASS
+else
+  check "P10e a criterion the user sees caps at PARTIAL without a UI driver, and PASS needs each driver's planes" FAIL
+fi
+P10_MOBILE_MISSING=""
+for needle in \
+  'Simulators and emulators only: never a physical device, and never a simulator or emulator the user already has.' \
+  'node "<absolute-plugin-root>/skills/verify-feature/scripts/verify-run-resources.js" create-simulator --run-dir "$RUN_DIR" --device-type' \
+  'which reads the UDID from stdout only' \
+  'Never put `name=` in a destination' \
+  '-derivedDataPath "$RUN_DIR/DerivedData" -disableAutomaticPackageResolution build' \
+  "Pass the run's UDID on EVERY call" \
+  'Every `adb` call names `-s <serial>`.' \
+  'Never `./gradlew installDebug`'; do
+  grep -qF -- "$needle" <<<"$MOBILE_FLAT" || P10_MOBILE_MISSING="$P10_MOBILE_MISSING [$needle]"
+done
+grep -qF 'Never `xcrun simctl delete all`, `delete unavailable`, `shutdown all` or `erase`' <<<"$DRIVERS_FLAT" || P10_MOBILE_MISSING="$P10_MOBILE_MISSING [bulk simctl verbs]"
+if [ -z "$P10_MOBILE_MISSING" ]; then
+  check "P10f mobile runs on a run-owned simulator or emulator only, with a stdout-only UDID, an id destination and no bulk verb" PASS
+else
+  check "P10f mobile runs on a run-owned simulator or emulator only, with a stdout-only UDID, an id destination and no bulk verb (missing:$P10_MOBILE_MISSING)" FAIL
+fi
+if grep -qF 'Never `open`, Finder, the Dock or another launcher' <<<"$DESKTOP_FLAT" \
+  && grep -qF 'App-window screenshots only, never the full screen' <<<"$DESKTOP_FLAT" \
+  && grep -qF 'When it already exists and the recipe names no isolation switch, do not launch the app' <<<"$DESKTOP_FLAT" \
+  && grep -qF 'addressed by process id, never by name' <<<"$DESKTOP_FLAT"; then
+  check "P10g desktop launches the build under the supervisor, captures the app window only and never touches the user's data" PASS
+else
+  check "P10g desktop launches the build under the supervisor, captures the app window only and never touches the user's data" FAIL
+fi
+if grep -qF "An in-app browser pane or a browser extension drives the user's own browser profile outside the consent gate." <<<"$SKILL_FLAT" \
+  && grep -qF 'Never a host browser tool.' "$DRIVERS_MD" \
+  && grep -qF 'Simulators and emulators, never a physical device' <<<"$DRIVERS_FLAT"; then
+  check "P10h no host browser tool and no physical device, for any driver" PASS
+else
+  check "P10h no host browser tool and no physical device, for any driver" FAIL
+fi
+P10_SETUP_MISSING=""
+for row in '| Xcode app |' '| Android app |' '| Cross-platform mobile |' '| Electron or Tauri |' '| CLI |' '| Library |' '| Infrastructure |' '| Worker |' '  driver: mobile' '  driver: cli'; do
+  grep -qF -- "$row" "$SETUP_MD" || P10_SETUP_MISSING="$P10_SETUP_MISSING [$row]"
+done
+if [ -z "$P10_SETUP_MISSING" ]; then
+  check "P10i setup detects the non-web stacks and writes a build driver's block" PASS
+else
+  check "P10i setup detects the non-web stacks and writes a build driver's block (missing:$P10_SETUP_MISSING)" FAIL
+fi
+P10_HELPER="$(node -e '
+  const fs = require("node:fs");
+  const helper = require(process.argv[1]);
+  const drivers = fs.readFileSync(process.argv[2], "utf8");
+  const problems = [];
+  const kinds = Array.isArray(helper.RECORD_KINDS) ? helper.RECORD_KINDS : [];
+  if (kinds.join(",") !== "android-emulator,tmux-socket,kind-cluster,container") problems.push("RECORD_KINDS is [" + kinds.join(",") + "]");
+  if (!drivers.includes("record --kind <" + kinds.join("\\|") + "> --id <id>")) problems.push("the drivers.md verb table does not name every record kind");
+  if (helper.NAME_PREFIX !== "zensu-verify-" || !drivers.includes("prefix=zensu-verify-<run>")) problems.push("the name prefix differs between the helper and drivers.md");
+  const from = drivers.indexOf("## 5. Run-owned resources");
+  const to = from === -1 ? -1 : drivers.indexOf("## 6.", from);
+  const table = from === -1 || to === -1 ? "" : drivers.slice(from, to);
+  const listed = Array.from(table.matchAll(/^\| `([a-z-]+)[ `]/gm), (match) => match[1]).sort().join(",");
+  const verbs = Array.isArray(helper.VERB_NAMES) ? helper.VERB_NAMES.slice().sort().join(",") : "";
+  if (verbs === "" || listed !== verbs) problems.push("the drivers.md verb table lists [" + listed + "], the helper has [" + verbs + "]");
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+' "$RESOURCES_JS" "$DRIVERS_MD" 2>&1)"
+P10_HELPER_RC=$?
+if [ "$P10_HELPER_RC" = "0" ] \
+  && grep -qF "run the run-resource helper's \`teardown\` for \`\$RUN_DIR\` before the run directory is deleted" <<<"$PHASE4"; then
+  check "P10j the helper's verbs, record kinds and name prefix match the catalog, and Phase 4 tears down through it before the run directory goes" PASS
+else
+  check "P10j the helper's verbs, record kinds and name prefix match the catalog, and Phase 4 tears down through it before the run directory goes ($P10_HELPER)" FAIL
+fi
+CONFIG_INPUTS="$(awk '/^### Driver blocks and recipe inputs/{p=1;next} /^### /{p=0} p' "$AUTOPILOT_CONFIG" | tr '\n' ' ' | tr -s ' ')"
+DRIVERS_SELECT="$(awk '/^## 2\. Selecting drivers/{p=1;next} /^## /{p=0} p' "$DRIVERS_MD" | tr '\n' ' ' | tr -s ' ')"
+P10_INPUTS_MISSING=""
+for input in ZENSU_VERIFY_RUN_DIR ZENSU_VERIFY_PORT ZENSU_VERIFY_DEVICE; do
+  grep -qF -- "\`$input\`" <<<"$CONFIG_INPUTS" || P10_INPUTS_MISSING="$P10_INPUTS_MISSING [config.md $input]"
+  grep -qF -- "\`$input\`" <<<"$DRIVERS_SELECT" || P10_INPUTS_MISSING="$P10_INPUTS_MISSING [drivers.md $input]"
+done
+grep -qE '^  exercise: ' "$AUTOPILOT_CONFIG" || P10_INPUTS_MISSING="$P10_INPUTS_MISSING [validate.exercise]"
+grep -qF 'The project supplies `validate.exercise` and `validate.assert`' "$DRIVERS_MD" || P10_INPUTS_MISSING="$P10_INPUTS_MISSING [custom scripts]"
+grep -qF '${ZENSU_VERIFY_RUN_DIR:?}/bin/tool' "$SETUP_MD" || P10_INPUTS_MISSING="$P10_INPUTS_MISSING [guarded setup input]"
+if grep -qE '\$ZENSU_VERIFY_(RUN_DIR|DEVICE)' "$SETUP_MD" "$AUTOPILOT_CONFIG"; then
+  P10_INPUTS_MISSING="$P10_INPUTS_MISSING [unguarded recipe input]"
+fi
+if [ -z "$P10_INPUTS_MISSING" ]; then
+  check "P10k the recipe schema and the driver catalog name every recipe input, and a shared recipe spells them guarded" PASS
+else
+  check "P10k the recipe schema and the driver catalog name every recipe input, and a shared recipe spells them guarded (missing:$P10_INPUTS_MISSING)" FAIL
+fi
+SERVICE_FLAT="$(tr '\n' ' ' < "$SERVICE_MD" 2>/dev/null | tr -s ' ')"
+CLI_FLAT="$(tr '\n' ' ' < "$CLI_MD" 2>/dev/null | tr -s ' ')"
+P10_SAFETY_MISSING=""
+for needle in \
+  'A deployed host is never a target: remote API verification is not supported' \
+  'carries `--max-redirs 0` and never `-L`' \
+  'Never print response headers' \
+  'Never a real account and never a credential from the chat.' \
+  'Never a shared or deployed broker.' \
+  'Never a real account, a remote backend or remote state.' \
+  "Never the user's cloud credentials." \
+  'EVERY `kubectl` and `helm` call passes `--kubeconfig "$RUN_DIR/kubeconfig"`' \
+  'lint them when a linter is installed. Never deploy.'; do
+  grep -qF -- "$needle" <<<"$SERVICE_FLAT" || P10_SAFETY_MISSING="$P10_SAFETY_MISSING [$needle]"
+done
+for needle in \
+  'Never install or publish the artifact.' \
+  "Run the worktree's build, never an installed copy." \
+  'A prompt that waits for input is a failed row, not a hang.' \
+  'tmux -f /dev/null -L <prefix>-tui new-session' \
+  'Never `tmux kill-server` without `-L`'; do
+  grep -qF -- "$needle" <<<"$CLI_FLAT" || P10_SAFETY_MISSING="$P10_SAFETY_MISSING [$needle]"
+done
+grep -qF '**No bulk verbs.** Never `xcrun simctl delete all`, `delete unavailable`, `shutdown all` or `erase`, never `adb emu kill`, never a `docker rm` by pattern, never `kind delete clusters --all`, never `tmux kill-server` without `-L`, never `pkill` or `killall`.' <<<"$DRIVERS_FLAT" \
+  || P10_SAFETY_MISSING="$P10_SAFETY_MISSING [no bulk verbs]"
+if [ -z "$P10_SAFETY_MISSING" ]; then
+  check "P10l the service and CLI drivers keep off deployed targets, real accounts, installs and bulk verbs" PASS
+else
+  check "P10l the service and CLI drivers keep off deployed targets, real accounts, installs and bulk verbs (missing:$P10_SAFETY_MISSING)" FAIL
+fi
+ATTACH_FLAT="$(tr '\n' ' ' < "$ATTACH_MD" 2>/dev/null | tr -s ' ')"
+if grep -qF 'skip runtime preparation entirely and follow `rules/attach.md`.' <<<"$SKILL_FLAT" \
+  && grep -qF 'never stop, signal, or restart the attached process' <<<"$ATTACH_FLAT" \
+  && grep -qF 'report "attached runtime, identity unproven" otherwise, which caps the verdict at PARTIAL' <<<"$ATTACH_FLAT" \
+  && grep -qF 'Attach applies to `browser` and `api` rows; a build driver always builds and launches its own copy.' <<<"$ATTACH_FLAT"; then
+  check "P10m attach mode loads its own rule file, which boots nothing and caps an unproven identity at PARTIAL" PASS
+else
+  check "P10m attach mode loads its own rule file, which boots nothing and caps an unproven identity at PARTIAL" FAIL
+fi
+if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <<<"$SKILL_FLAT" \
+  && grep -qF 'is read for the report and never written, edited or deleted' <<<"$SKILL_FLAT" \
+  && grep -qF 'never answer it on their behalf and never work around a refusal' <<<"$BROWSER_FLAT" \
+  && grep -qF 'a WebSocket connection is not fenced by the run config, which is an open gap' <<<"$BROWSER_FLAT" \
+  && grep -qF 'Only the PostToolUse hook writes it.' <<<"$BROWSER_FLAT"; then
+  check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" PASS
+else
+  check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
+fi
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "P11 the run-resource helper's unit file passes" "$RESOURCES_UNIT"
+unit_check_done "P11z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-verify-feature-skill: $PASS PASS / $FAIL FAIL"

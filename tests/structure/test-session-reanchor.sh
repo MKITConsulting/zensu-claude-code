@@ -23,22 +23,8 @@ expect_eq() {
 contains() { case "$1" in (*"$2"*) return 0 ;; (*) return 1 ;; esac; }
 
 echo "=== E0: unit layer ==="
-UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"
-UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# pass ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_FLOOR=67
-UNIT_MAX_SKIPPED=0
-if [ "$(node -p 'process.platform' 2>/dev/null)" = "win32" ]; then
-  UNIT_FLOOR=66
-  UNIT_MAX_SKIPPED=1
-fi
-if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" -le "$UNIT_MAX_SKIPPED" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
-  check "E0a session-reanchor-v1.test.js green with at least $UNIT_FLOOR cases (pass=$UNIT_PASS)" PASS
-else
-  check "E0a session-reanchor-v1.test.js (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?}, floor $UNIT_FLOOR)" FAIL
-  printf '%s\n' "$UNIT_OUT" | grep -E '^not ok|# SKIP' | head -5
-fi
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "E0a the session-reanchor unit file passes" "$UNIT"
 
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SESSION_KEY ZENSU_PROJECT_ROOT \
   ZENSU_SESSION_CONTEXT ZENSU_RUNTIME_DIGEST ZENSU_CLAUDE_PLUGIN_ROOT CLAUDE_CODE_SESSION_ID \
@@ -685,5 +671,6 @@ else
 fi
 
 rm -f "$SKILL_TDD"
+unit_check_done "E0z every unit file the registry gives this suite was graded"
 echo "session-reanchor: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

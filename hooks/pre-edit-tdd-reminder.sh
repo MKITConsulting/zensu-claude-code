@@ -52,9 +52,9 @@ fi
 
 parse_field() {
   local field="$1"
-  PAYLOAD_BODY="$PAYLOAD" FIELD_PATH="$field" node -e '
+  printf '%s' "$PAYLOAD" | FIELD_PATH="$field" node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD_BODY || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const path = process.env.FIELD_PATH.split(".");
       let v = j;
       for (const p of path) { if (v && typeof v === "object") v = v[p]; else { v = ""; break; } }

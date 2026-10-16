@@ -92,43 +92,12 @@ else
   check "V4b the module's own registration probes find both hooks in this plugin" FAIL
 fi
 
-. "$(dirname "$0")/lib-unit-summary.sh"
-
-# The summary parse belongs to tests/structure/lib-unit-summary.sh, whose own header records that
-# this expression was hand-copied into two suites before that file existed. The floor is on the
-# REGISTERED total rather than on passes, for the reason that library states: a passing floor is a
-# claim about how many cases run on the host executing it, and cases skip themselves for platform
-# reasons. A real failure is already non-zero from node, which the rc arm below reports.
-# The floor is EQUAL to what the file registers, and the SUITE-OVERVIEW cell is compared against
-# the same number, because a hand-maintained floor one below the real count hides a deleted case —
-# which is exactly what the V6 floor did.
-run_unit() { # $1 label  $2 file
-  local out rc registered floor overview
-  floor="$(unit_overview_declared "${2##*/}")"
-  out="$(node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
-  [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  if unit_cases_registered_floor_text "$out" "$floor"; then
-    check "$1-floor at least $floor unit cases registered ($(unit_cases_report_text "$out"))" PASS
-  else
-    check "$1-floor at least ${floor:-<no overview row>} unit cases registered ($(unit_cases_report_text "$out"))" FAIL
-  fi
-  registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-  if [ -n "$registered" ] && [ "$floor" = "$registered" ]; then
-    check "$1-exact the floor equals what the file registers (floor=$floor registered=$registered)" PASS
-  else
-    check "$1-exact the floor equals what the file registers (floor=${floor:-<no overview row>} registered=${registered:-<none>})" FAIL
-  fi
-  if overview="$(unit_overview_check "$2")"; then
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals the file's test() registrations (cell=$floor)" PASS
-  else
-    check "$1-overview $overview" FAIL
-  fi
-}
-run_unit "V6 floor" "$UNIT_FLOOR"
-run_unit "V7 consent" "$UNIT_CONSENT"
-run_unit "V7b free-port" "$UNIT_PORT"
-run_unit "V7c browser-config" "$UNIT_CONFIG"
-run_unit "V7d cli-version" "$UNIT_VERSION"
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "V6 the navigation floor unit file passes" "$UNIT_FLOOR"
+unit_check "V7 the consent gate unit file passes" "$UNIT_CONSENT"
+unit_check "V7b the free-port unit file passes" "$UNIT_PORT"
+unit_check "V7c the browser-config unit file passes" "$UNIT_CONFIG"
+unit_check "V7d the cli-version unit file passes" "$UNIT_VERSION"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \
@@ -1031,9 +1000,9 @@ case "$POST_MISMATCH_ERR" in *'CLAUDE_PLUGIN_ROOT'*) MISMATCH_SAID=1 ;; *) MISMA
 TEMPLATE_ROUTES_RE='^[[:space:]]*routes:'
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD" && ! grep -qF 'portEnv' "$SETUP_MD" \
   && ! grep -qE "$TEMPLATE_ROUTES_RE" "$SETUP_MD"; then
-  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" PASS
+  check "V34a the template carries no key the autopilot contract never reads (portEnv, routes)" PASS
 else
-  check "V34a the template carries no key the adapter and the autopilot contract never read (portEnv, routes)" FAIL
+  check "V34a the template carries no key the autopilot contract never reads (portEnv, routes)" FAIL
 fi
 if [ -r "$SETUP_MD" ] && grep -qF 'evidenceSafety' "$SETUP_MD"; then
   check "V34a-control the negative scan above ran against a readable template that carries the key it keeps" PASS
@@ -1518,6 +1487,8 @@ if [ -z "$SHELL_STATE_MISSING" ]; then
 else
   check "V66 the docs say a function is denied only when the command defines it, and the version is checked only when the helper runs (missing:$SHELL_STATE_MISSING)" FAIL
 fi
+
+unit_check_done "V7z every unit file the registry gives this suite was graded"
 
 echo "----"
 if [ "$SKIP" -gt 0 ]; then

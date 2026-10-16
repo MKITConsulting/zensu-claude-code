@@ -870,6 +870,129 @@ test('the tree mode and the import agree on a real git work tree and a later edi
   assert.match(stale.lines[0], /^EXTERNAL REVIEW — status=stale reason=tree /);
 });
 
+function stageOptions(root, overrides = {}) {
+  return {
+    enabled: true,
+    sessionKey: SESSION,
+    projectRoot: root,
+    root,
+    treeOf: () => ({ tree: TREE, reason: null }),
+    templateFile: TEMPLATE,
+    ...overrides,
+  };
+}
+
+test('stage copies the template into the project state directory under the session key, verifies it and replaces an edited copy', () => {
+  const root = project();
+  const expected = path.join(root, '.zensu', 'state', `zensu-review-v1-${SESSION}.js`);
+  const staged = xr.stageTemplate(stageOptions(root));
+  assert.equal(staged.status, 'ok');
+  assert.equal(staged.script, expected);
+  assert.equal(xr.stagedTemplateName(SESSION), path.basename(expected));
+  assert.equal(staged.line, `EXTERNAL REVIEW — stage=ok tree=${TREE} script=${expected}`);
+  assert.ok(fs.readFileSync(expected).equals(fs.readFileSync(TEMPLATE)));
+  if (process.platform !== 'win32') assert.equal(fs.statSync(expected).mode & 0o777, 0o600);
+  const launched = xr.buildRecord(payload({ cwd: root, tool_input: { scriptPath: expected } }), SESSION, { now: 1 });
+  assert.equal(launched.script_sha256, xr.templateDigest(TEMPLATE));
+  fs.appendFileSync(expected, '\nlog("edited")\n');
+  assert.notEqual(xr.templateDigest(expected), xr.templateDigest(TEMPLATE));
+  assert.equal(xr.stageTemplate(stageOptions(root)).status, 'ok');
+  assert.equal(xr.templateDigest(expected), xr.templateDigest(TEMPLATE));
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')).sort(), [path.basename(expected), 'x.json'].sort());
+  const nested = xr.stageTemplate(stageOptions(root, { projectRoot: path.join(root, 'src') }));
+  assert.equal(nested.script, path.join(root, 'src', '.zensu', 'state', xr.stagedTemplateName(SESSION)));
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(root, 'src', '.zensu', 'state')).mode & 0o777, 0o700);
+});
+
+test('stage sweeps the copies other sessions left idle past the idle window and keeps everything else', () => {
+  const root = project();
+  const state = path.join(root, '.zensu', 'state');
+  const idle = path.join(state, xr.stagedTemplateName(OTHER_SESSION));
+  const recent = path.join(state, xr.stagedTemplateName(`scv1_${'d'.repeat(64)}`));
+  const unrelated = path.join(state, 'zensu-review-v1-notes.js');
+  for (const file of [idle, recent, unrelated]) fs.writeFileSync(file, SCRIPT);
+  const now = Date.now();
+  setMtime(idle, now - xr.LIMITS.idleSessionMs - 60000);
+  setMtime(unrelated, now - xr.LIMITS.idleSessionMs - 60000);
+  const staged = xr.stageTemplate(stageOptions(root, { now }));
+  assert.equal(staged.status, 'ok');
+  assert.equal(fs.existsSync(idle), false);
+  assert.equal(fs.existsSync(recent), true);
+  assert.equal(fs.existsSync(unrelated), true);
+  assert.equal(fs.existsSync(path.join(state, 'x.json')), true);
+});
+
+test('stage answers unavailable with a named reason and writes nothing before every input holds', () => {
+  const root = project();
+  const unavailable = (overrides) => xr.stageTemplate(stageOptions(root, overrides)).line;
+  assert.equal(unavailable({ enabled: false }), 'EXTERNAL REVIEW — stage=unavailable reason=disabled');
+  assert.equal(unavailable({ judge: false }), 'EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled');
+  assert.equal(unavailable({ root: path.join(root, 'src') }), 'EXTERNAL REVIEW — stage=unavailable reason=root');
+  assert.equal(unavailable({ projectRoot: '/definitely/not/here' }), 'EXTERNAL REVIEW — stage=unavailable reason=root');
+  assert.equal(unavailable({ sessionKey: 'scv1_../../escape' }), 'EXTERNAL REVIEW — stage=unavailable reason=session');
+  assert.equal(unavailable({ treeOf: () => ({ tree: null, reason: 'not a work tree' }) }), 'EXTERNAL REVIEW — stage=unavailable reason=not-a-work-tree');
+  assert.equal(unavailable({ templateFile: path.join(root, 'absent.js') }), 'EXTERNAL REVIEW — stage=unavailable reason=template-unreadable');
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')), ['x.json']);
+  const blocked = path.join(root, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  fs.mkdirSync(blocked);
+  assert.equal(unavailable({}), 'EXTERNAL REVIEW — stage=unavailable reason=write-failed');
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')).sort(), [path.basename(blocked), 'x.json'].sort());
+  const plain = path.join(tempDir('plain-state'), 'project');
+  fs.mkdirSync(path.join(plain, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(plain, '.zensu', 'state'), 'not a directory\n');
+  assert.equal(xr.stageTemplate(stageOptions(plain)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+});
+
+test('stage refuses a project state directory reached through a symbolic link', { skip: process.platform === 'win32' }, () => {
+  const linkedState = project();
+  const elsewhere = tempDir('elsewhere-state');
+  fs.rmSync(path.join(linkedState, '.zensu', 'state'), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(linkedState, '.zensu', 'state'));
+  assert.equal(xr.stageTemplate(stageOptions(linkedState)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+  const linkedZensu = project();
+  const moved = path.join(tempDir('elsewhere-zensu'), 'moved');
+  fs.renameSync(path.join(linkedZensu, '.zensu'), moved);
+  fs.symlinkSync(moved, path.join(linkedZensu, '.zensu'));
+  assert.equal(xr.stageTemplate(stageOptions(linkedZensu)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+  assert.deepEqual(fs.readdirSync(path.join(moved, 'state')), ['x.json']);
+});
+
+test('the stage mode prints the tree id the tree mode prints, and its copy moves neither that tree nor the import', () => {
+  const root = project();
+  const init = spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8' });
+  if (init.status !== 0) {
+    assert.fail(`git init failed: ${init.stderr}`);
+  }
+  const env = { ZENSU_XR_ENABLED: '1', ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_PROJECT_ROOT: root, ZENSU_XR_ROOT: root };
+  const written = [];
+  const write = (text) => written.push(text);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  assert.equal(xr.main(['stage'], env, { write }), 0);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  const tree = /^EXTERNAL REVIEW — tree=([0-9a-f]{40,64})\n$/.exec(written[0]);
+  assert.ok(tree, written[0]);
+  const script = path.join(root, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  assert.equal(written[1], `EXTERNAL REVIEW — stage=ok tree=${tree[1]} script=${script}\n`);
+  assert.equal(written[2], written[0]);
+  written.length = 0;
+  assert.equal(xr.main(['stage'], { ...env, ZENSU_XR_JUDGE: '0' }, { write }), 0);
+  assert.equal(xr.main(['stage'], { ...env, ZENSU_XR_SESSION_KEY: '' }, { write }), 0);
+  assert.deepEqual(written, [
+    'EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled\n',
+    'EXTERNAL REVIEW — stage=unavailable reason=session\n',
+  ]);
+  const data = tempDir('data');
+  setMtime(path.join(root, 'src', 'a.js'), BASE);
+  const run = launchedRun(data, BASE + 120000, { script: fs.readFileSync(script, 'utf8'), result: reviewResult({ tree: tree[1] }) },
+    { tool_input: { scriptPath: script } });
+  const options = checkOptions(data, root, { resultFile: run.outputFile, templateFile: TEMPLATE });
+  delete options.treeOf;
+  const imported = xr.check(options);
+  assert.equal(imported.status, 'ok');
+  assert.match(imported.lines[0], / tree=match /);
+});
+
 test('check skips a record dated beyond the clock skew', () => {
   const data = tempDir('data');
   const root = project();

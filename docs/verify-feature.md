@@ -1,8 +1,11 @@
 # Verifying a feature live, standalone
 
-`/zensu:verify-feature` proves an already-built feature in a real browser and reports what
-it observed. Under `/zensu:autopilot` its preconditions are prepared for you. Run on its own,
-it has two ways to authorize the browser:
+`/zensu:verify-feature` proves an already-built feature in the real running application and
+reports what it observed: a web UI in a real browser, an API, a CLI, a library, a worker,
+infrastructure code, an iOS or Android app in a simulator or emulator, or a desktop app.
+[What it can verify](#what-it-can-verify) lists each driver and what it needs. Under
+`/zensu:autopilot` its preconditions are prepared for you. Run on its own, it has two ways to
+authorize the browser:
 
 - **Consent mode** (the default when nothing is configured): Claude Code's own permission
   prompt asks you, in the CLI and in the desktop app alike, with no environment variable and no
@@ -44,9 +47,8 @@ and a five-second bound that kills it on every host; the version it prints is re
 self-reported and is never taken as measured, so the run-config helper still refuses to start a
 run on it.
 
-In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
-bundled Zensu monorepo adapter recognizes, or an application you already run
-(`--attach`). `/zensu:verify-feature --setup` writes the recipe with you. The authoritative
+In local mode the skill also needs a **runtime recipe** it can accept, or an application you
+already run (`--attach`). `/zensu:verify-feature --setup` writes the recipe with you. The authoritative
 contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules/setup.md`
 and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
 replace them.
@@ -69,6 +71,47 @@ the tree the records bind to. The consent and policy rules below apply unchanged
 mode the later pass boots on the same loopback origin, so the prompt is not asked twice. An
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
 run was started with `--no-validate`, and the chain's terminus line says which.
+
+## What it can verify
+
+Every scenario of a run gets a **driver**. The skill picks it from the diff, from the recipe's
+`validate.driver`, or from `--driver=<id>`. A feature that spans surfaces mixes drivers: a
+SwiftUI screen and the endpoint it calls are verified as `mobile` rows and `api` rows in one run.
+The catalog, the evidence each driver needs for a PASS and the driver rule files live under
+`skills/verify-feature/rules/`, starting at `drivers.md`.
+
+| Driver | Verifies | Needs on this machine | Isolation |
+|---|---|---|---|
+| `browser` | web apps and PWAs | `playwright-cli` (below) and Chrome | an isolated browser restricted to the run's origins, behind the consent gate |
+| `api` | REST, GraphQL, gRPC, WebSocket and SSE endpoints | `curl`, or `grpcurl` or a WebSocket client | the service runs from the worktree on a run-specific loopback port |
+| `cli` | commands, scripts, batch jobs, terminal UIs | the project's toolchain; `tmux` or `expect` for a terminal UI | a run directory, redirected configuration and data directories, a run-owned `tmux` socket |
+| `library` | packages and SDKs | the project's toolchain | a throwaway consumer in the run directory |
+| `async` | queue consumers, workers, schedulers, pipelines | the project's toolchain and broker | a uniquely named, run-owned broker |
+| `iac` | Terraform, Helm, Kubernetes, CDK and CloudFormation | the infrastructure CLIs; `kind` or localstack for an apply | a copy in the run directory; an apply only to a run-named `kind` cluster or localstack |
+| `mobile` | iOS, iPadOS, watchOS, tvOS, visionOS; Android | Xcode (`xcrun`, `xcodebuild`) or the Android SDK (`adb`, `emulator`); optionally Maestro or a simulator accessibility CLI | a simulator created for the run and deleted afterwards; an Android virtual device created in the run directory and an emulator the run starts |
+| `desktop` | macOS, Electron, Tauri, Windows and Linux apps | a computer-use tool of the host, or macOS System Events with the Accessibility permission | the build runs under a supervisor; no launch when the app's data location exists without an isolation switch |
+| `custom` | anything else | the project's `exercise` and `assert` scripts | what the scripts guarantee |
+
+- Remote mode supports the `browser` driver only. Every other driver verifies a build of your
+  current worktree.
+- Simulators and emulators only, never a physical device, and never one of your own
+  simulators: a run creates `zensu-verify-<run>` and deletes exactly that device at the end.
+- Every device, supervised process, cluster, container and `tmux` socket that a driver starts
+  goes through `skills/verify-feature/scripts/verify-run-resources.js`, which records it in the
+  run directory and removes only what it recorded. The services of a runtime recipe keep the
+  recipe's own `down`. When teardown keeps something, the report names it and the run directory
+  stays, so the teardown can be retried.
+- The skill never installs a tool or lets a build download dependencies without asking you
+  first. A missing tool makes the affected scenarios PARTIAL, and the report names it.
+- A native or command-line build needs no runtime recipe: the skill reads the scheme, bundle
+  identifier and build command from the project. `/zensu:verify-feature --setup` writes the
+  driver's block into `.zensu/runtime.yaml` when you want those facts fixed.
+- This plugin has measured one iOS simulator run end to end. It has not measured Android
+  emulators, Windows and Linux desktop automation, the macOS desktop launch, Maestro, AXe, idb
+  or `tmux`; treat those paths as unverified until a run of yours has shown them.
+
+The rest of this page is about the `browser` driver: how the browser is fenced, consent mode,
+the navigation policy, local mode with its runtime recipe, and remote mode.
 
 ## How the browser is fenced
 
@@ -370,12 +413,9 @@ nothing fits:
 
 1. `--config=<path>`, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`, inspected as a
    **candidate** against the rules below;
-2. the bundled Zensu monorepo adapter (`skills/verify-feature/rules/zensu-monorepo.md`), when
-   the repository carries `backend/cmd/zensu`, `backend/Makefile`, `frontend/package.json`,
-   and `frontend/pnpm-lock.yaml`; it needs macOS, Linux, or WSL;
-3. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
+2. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
    `.zensu/runtime.yaml` with the user, after which resolution restarts at step 1;
-4. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
+3. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
    isolation, and teardown facts. The skill never invents commands.
 
 The design decisions behind consent mode, its residuals and the alternatives that were weighed
@@ -525,3 +565,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
 | PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in a session that cannot show the prompt, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |
+| PARTIAL; a scenario names a missing tool such as `xcrun`, `adb`, `maestro` or `tmux` | the driver's toolchain is not on `PATH`, and no lower rung of its ladder can observe the criterion | install the tool yourself and re-run, or accept the lower rung the report names; the skill asks before it downloads anything |
+| PARTIAL; reason `remote mode supports the browser driver only` | `--mode=remote` was combined with a driver other than `browser` | verify the worktree's build in local mode |
+| the report's Resources line names a `kept` resource | the run-resource helper could not prove that a device, process, emulator serial, cluster, container or `tmux` socket was the run's own, or the tool that removes it failed | the skill keeps the run directory and names it under Limitations; check that the resource carries the run's `zensu-verify-<run>` prefix, then retry with `verify-run-resources.js teardown --run-dir <dir>` or remove it yourself |
+| a desktop scenario is PARTIAL because its data location already exists | the app shares its data location or its credential-store items with a copy installed on this machine, and the recipe names no isolation switch | add `validate.desktop.dataIsolation` to the recipe: a launch argument or environment variable that points the app's data and credential storage at `${ZENSU_VERIFY_RUN_DIR:?}` |

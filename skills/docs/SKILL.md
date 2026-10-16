@@ -67,7 +67,7 @@ Slash form: `/zensu:docs [<target>] [--flag=value ...]`.
 
 ## The `docs_complete` contract (read this first)
 
-The release gate (`DocsStrictness`, zensu-monorepo) satisfies a required
+The server's release gate (`DocsStrictness`) satisfies a required
 `doc_type` for a feature **only** with a live doc that is ALL of:
 
 1. **Fresh** — not `is_outdated`. CI flips `is_outdated` when the feature's code
@@ -125,7 +125,7 @@ or on early exit), run
 
 The single Zensu **mutation** (`zensu link docs`) runs in
 **this main thread** under that marker. The Phase 3 authoring fan-out uses
-read-only `Explore` agents that cannot mutate — the exact invariant
+`Explore` agents that are read-only by instruction and run no `zensu` mutation — the exact invariant
 `/zensu:ghost-scan` follows (fan out to read, consolidate + write in the main
 thread).
 
@@ -190,16 +190,17 @@ feature record reformatted, not documentation. Never publish it.
 **Batch (parallel authoring fan-out — model on `/zensu:ghost-scan` Phase 2b):**
 
 1. Spawn authoring agents in ONE parallel batch with the `Agent` tool,
-   `subagent_type: Explore` (read-only — they cannot mutate Zensu, write repo
-   files or run a command, so every mutation and every `zensu` call stays in the
-   main thread under the workflow marker).
+   `subagent_type: Explore` (read-only by instruction: an Explore agent may hold a
+   guarded `Bash`, none when `hooks.subagentShell` is `false`, and the guard
+   prevents accidents and is not a sandbox, so every mutation and every `zensu`
+   call stays in the main thread under the workflow marker).
 2. Each agent authors exactly ONE feature's doc. It receives: the feature id,
    title, the target `doc_type`(s) + audience, and, inline in its brief, that
-   feature's Phase 2 context map (linked source paths, symbols, posture). The
-   agent cannot run `zensu doc gen-context`; only the main thread runs it, in
-   Phase 2. Its instruction: **Read the real source files the map names**,
-   author code-grounded Markdown per `docs/documentation-guide.md`, and return
-   `{feature_id, doc_type, title, audience, markdown}`.
+   feature's Phase 2 context map (linked source paths, symbols, posture). Only
+   the main thread runs `zensu doc gen-context`, in Phase 2, so the agent needs no
+   shell for the map. Its instruction: **Read the real source files the map names**,
+   author code-grounded Markdown per `docs/documentation-guide.md`, change nothing,
+   and return `{feature_id, doc_type, title, audience, markdown}`.
    It performs NO Zensu writes.
 3. **Cap concurrency (~8–12 agents) and wave through large batches.** A
    256-feature product is many waves — `log` wave progress and never silently cap:
@@ -309,5 +310,5 @@ never published green.
 
 | Component | Type | Phase | Purpose |
 |---|---|---|---|
-| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and runs no command |
+| `Explore` | subagent (read-only) | 3 | Parallel per-feature authoring fan-out — reads the source files its inlined gen-context map names, returns markdown, never mutates and makes no `zensu` call |
 | `docs/documentation-guide.md` | reference | 3 | The code-grounding source of truth (doc types, focus, anti-pattern, checklist) |

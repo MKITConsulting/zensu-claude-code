@@ -257,8 +257,9 @@ and the authorization and cost paragraphs were otherwise deletable with both sui
 Two further unit cases pin that the survey drops the route and that the two axes are
 independent. **Adding the command cost BOTH hand-maintained counters in the same change** —
 `WT8_PRESENT_EXPECT` and `T35_EXPECT`, whose sum invariant this section's own roster already
-names — plus `WT_UNIT_TOTAL_WANT` and the `references/takeover.md` step 4 mirror `T35` greps them
-against. **And it moved two line-anchored citations**: `T36` caught both immediately, which
+names — plus `registered` in the `worktree-advice-v1.test.js` entry of
+`tests/profiles/unit-files.v1.json` and the `references/takeover.md` step 4 mirror `T35` greps
+them against. **And it moved two line-anchored citations**: `T36` caught both immediately, which
 is exactly what that pin exists for. It introduces NO new placeholder — `<their worktree>`
 and `<path>` were both already in the present leg's command set, so `recipePlaceholders`
 returns the same SET. Claim the set and never the ORDER, and carry no ordinal: an earlier
@@ -651,8 +652,8 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   turning the whole CLI into a silent no-op — far worse than the import side effect it
   removes. Both unit files that import `trail.mjs` — `worktree-advice-v1.test.js` and
   `prompt-listing-v1.test.js` — are driven from `test-session-trail-verdict.sh`, because
-  `tests/run-all.sh` discovers only `test-*.sh`; each case count is hand-maintained and EXACT
-  there, for the same reason `T35_EXPECT` is.
+  `tests/run-all.sh` discovers only `test-*.sh`; each case count is EXACT in the file's entry in
+  `tests/profiles/unit-files.v1.json`, for the same reason `T35_EXPECT` is.
 - **The line-anchored citations from `docs/multi-repo-chains-*` into this skill broke THREE
   times during one change**, silently each time, because `test-multi-repo-doc-citations.sh`
   states in its own header that a citation landing on a different but still substantive line

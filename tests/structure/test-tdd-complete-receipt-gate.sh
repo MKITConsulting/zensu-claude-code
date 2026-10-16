@@ -58,7 +58,7 @@ git -C "$PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
 for SID in gate-refuse gate-accept gate-escape gate-integration gate-clean-tree \
            gate-clean-claim gate-clean-noclaim gate-clean-empty gate-clean-unresolved \
            gate-clean-receipt gate-verdict gate-clean-noclaim-receipt gate-budget-claim gate-nolog gate-symlink-receipt gate-plain-receipt \
-           gate-stem-bind gate-retire gate-claims-type gate-armed-log; do
+           gate-stem-bind gate-retire gate-claims-type gate-armed-log gate-git-refused; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -118,7 +118,8 @@ LOG_LINES="$(grep -c . "$LOG" 2>/dev/null || true)"
   && [ "${TC_WIN_LINES:-0}" -lt "${LOG_LINES:-0}" ] \
   && ! TC_WIN | grep -qF 'refusing the unqualified standalone terminus'
 check "W0 the --tdd-complete awk window is non-empty and still bounded (end anchor matches)" "$(verdict $?)"
-TC_WIN | grep -qF 'ls-files --others --exclude-standard'
+TC_WIN | grep -qF '_zensu_unqualified_change_count "$_tc_root"' \
+  && awk '/^_zensu_unqualified_change_count\(\) \{/,/^}/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
 check "W2 the gate scopes itself on the same change set the terminus uses" "$(verdict $?)"
 # W1 above replicates the predicate WITHOUT a fallback, so it cannot see the shape that
 # actually broke: `grep -c .` prints 0 and then exits 1 on no match, so pairing it with an
@@ -423,6 +424,31 @@ check "R4b the missing-receipt remedy names the bound root through --project-roo
 # Refusing must not have advanced the chain.
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_R")" implComplete)" != "true" ]
 check "R5 a refused completion leaves implComplete unset" "$(verdict $?)"
+R6_HOME="$PROJ/.zensu/r6-home"
+R6_SAFE_HOME="$PROJ/.zensu/r6-safe-home"
+mkdir -p "$R6_HOME" "$R6_SAFE_HOME"
+printf '[safe]\n\tdirectory = *\n' > "$R6_SAFE_HOME/.gitconfig"
+R6_ERR="$(HOME="$R6_HOME" XDG_CONFIG_HOME="$R6_HOME/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1 \
+  env LC_ALL=C git -C "$PROJ" rev-parse --is-inside-work-tree 2>&1 >/dev/null)"
+R6_RC=$?
+[ "$R6_RC" -ne 0 ] && printf '%s\n' "$R6_ERR" | grep -qF 'dubious ownership'
+check "R6-control real git refuses this suite's project as owned by another user" "$(verdict $?)"
+SID_G="gate-git-refused"
+activate_session "$SID_G"
+bash "$LOG" --tdd-begin --session "$SID_G" >/dev/null 2>&1
+ERR_G="$(HOME="$R6_HOME" XDG_CONFIG_HOME="$R6_HOME/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1 \
+  bash "$LOG" --tdd-complete --session "$SID_G" 2>&1 >/dev/null)"
+RC_G=$?
+[ "$RC_G" -eq 1 ] && printf '%s' "$ERR_G" | grep -qF 'git could not list this worktree' \
+  && ! printf '%s' "$ERR_G" | grep -qF 'no edit-landing receipt' \
+  && [ "$(tdd_get_flag "$(tdd_state_file "$SID_G")" implComplete)" != "true" ]
+check "R6 a safe.directory refusal on a changed tree refuses rather than exempting the chain as unchanged" "$(verdict $?)"
+ERR_GX="$(HOME="$R6_SAFE_HOME" XDG_CONFIG_HOME="$R6_SAFE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 GIT_TEST_ASSUME_DIFFERENT_OWNER=1 \
+  bash "$LOG" --tdd-complete --session "$SID_G" 2>&1 >/dev/null)"
+RC_GX=$?
+[ "$RC_GX" -eq 1 ] && printf '%s' "$ERR_GX" | grep -qF 'no edit-landing receipt' \
+  && ! printf '%s' "$ERR_GX" | grep -qF 'git could not list this worktree'
+check "R6a once a safe.directory exception clears the refusal, the same chain meets the receipt refusal" "$(verdict $?)"
 
 echo "== Acceptance with a receipt =="
 SID_A="gate-accept"

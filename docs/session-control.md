@@ -102,9 +102,16 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   report tool in the next item, and the evidence workers to
   `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
   host-profile children keep only the tools on the capability gate's allowlist
-  (see **Security boundary** below) that Claude and their agent definitions grant, and
-  every shell/command tool is denied because command text cannot be safely
-  confined by token inspection. Only the top-level
+  (see **Security boundary** below) that Claude and their agent definitions grant.
+  A child that reports a usable `agent_type` may also run `Bash` behind an
+  accident guard, a grant that `hooks.subagentShell` can withdraw; every other
+  shell/command tool stays denied, `Monitor` included, and so does the `Bash` of
+  an unnamed child or of a `zensu-review-*` persona. The guard prevents accidents
+  and is not a sandbox, because command text cannot be safely confined by token
+  inspection. A child's file tools also cannot edit a Zensu config layer,
+  because those layers decide the grant; the guard refuses a command that names
+  a config file or a `.zensu` directory, but an obfuscated command still passes.
+  Only the top-level
   interactive thread receives `main-v1`; there
   is no transcript scan, PPID key, newest-file selection, or fallback identity.
 - **`SubagentHandback` is the one host tool beside the read trio.** In `auto`
@@ -150,10 +157,32 @@ cannot impersonate a principal: identity comes only from trusted hook payload
 fields. For neutral children the gate admits only an allowlist of host tools
 plus a short named list of read-only MCP tools, which the capability-gate row
 in [Configuration](configuration.md) spells out. Every other tool is denied:
-every command tool, and every other MCP tool, including third-party servers that
+every command tool but `Bash`, `Monitor` included, and every other MCP tool,
+including third-party servers that
 expose arbitrary local execution such as `ctx_execute` or `run_in_terminal`, so a
-newly connected MCP server never widens a neutral child. Within the allowlist the
-gate blocks actual protected paths, protected traversal roots, and mutating Zensu
+newly connected MCP server never widens a neutral child. `Bash` is granted only
+to a child that reports a usable `agent_type`, and a usable `agent_id` whenever
+it reports one, and that is not a `zensu-review-*` persona. `hooks.subagentShell`
+withdraws the grant when it is `false` in a config file the gate consults: the
+`ZENSU_CONFIG` file alone while that variable is set, otherwise
+`$HOME/.zensu/config.json` and the `.zensu/config.json` overlay of
+`CLAUDE_PROJECT_DIR`. It also withdraws the grant when a consulted file exists
+but cannot be read or parsed, or its top level or `hooks` value is not a JSON
+object; when a consulted path is relative or spans lines; and when neither
+`ZENSU_CONFIG`, `HOME` nor `CLAUDE_PROJECT_DIR` is set. A consulted file that
+does not exist withdraws nothing, so the grant is on by default. While
+`ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is
+not read and does not withdraw the grant. A refused grant
+denies `Bash` before its command is considered. A granted command must still
+pass the accident guard in `hooks/lib/subagent-shell-guard-v1.js`, which parses
+it as shell and denies, among other rules, protected paths, `.zensu`
+directories, a command that runs a Zensu session or workflow helper such as
+`zensu-log.sh`, and Session Control selector variables. The guard prevents
+accidents and is not a sandbox: a deliberately obfuscated command can still
+reach Zensu's state past it, as the main thread can, and an OS sandbox is the
+boundary. Within the allowlist the
+gate blocks actual protected paths, protected traversal roots, edits of a Zensu
+config layer, and mutating Zensu
 operations. `Grep`/`Glob` must target a concrete safe subtree; omitted paths and
 project/plugin/plugin-data ancestors are denied, and that deny, like the command
 deny, names the project's subdirectories that are safe to search.
@@ -193,14 +222,17 @@ candidate execution is unsupported; its hermetic fake remains solely for local
 deterministic coverage.
 See [Session Control release gate](session-control-release-gate.md).
 
-**Reviewing a Workflow-triggered run.** A worker's `Stop` no-ops, a workflow's agents cannot
-run `zensu-log.sh`, and a review round counts only when the main thread spawns
-`zensu:code-reviewer`. The review chain therefore runs in the main thread,
+**Reviewing a Workflow-triggered run.** A worker's `Stop` no-ops, the shell guard refuses a
+workflow agent's command that runs a Zensu session or workflow helper such as `zensu-log.sh`
+(the guard prevents accidents and is not a sandbox), and a review round counts only when the
+main thread spawns `zensu:code-reviewer`. The review chain therefore runs in the main thread,
 **once over the aggregate diff**:
 
 - **The workflow reviewed the change (an Ultracode review, for example).** On the first review,
   while `hooks.reviewJudge` and `hooks.externalReviewImport` are on (the defaults), run the
-  review through the plugin's template `templates/workflows/zensu-review-v1.js` with the
+  review through the plugin's template `templates/workflows/zensu-review-v1.js`, launched from the
+  copy `zensu-log.sh --external-review --stage` writes into the session's `.zensu/state/`
+  (the Workflow tool loads no script from the plugin's install directory), with the
   complete Phase 6.10 step 2c REVIEW PACKET v1 in its `args`, and let it finish; the template
   validates that packet and starts every finder and refuter prompt with it. Phase 6.10 step 3 of
   `/zensu:tdd` then imports the review: `zensu-log.sh --external-review` confirms from the
@@ -259,16 +291,34 @@ live-looking id counts as the owner, as it always does on Windows. Either way, a
 dies between adoption and handoff can keep its claim from another session for at most the
 lease, while its own session recovers it on its next `Stop`.
 
-The locks that serialize these steps do not trust a live-looking id either. A lock is written
-by its holder, so the holder existed before the lock's recorded creation time. When the process
-now using the recorded id provably started more than one second after that time, it cannot be
-the holder: the holder is gone, the id was reused, and the next acquisition recovers the lock.
-Linux and macOS first compare the start identity the lock stored. Windows stores none, so a
-waiting process reads the start time through `powershell.exe`, and only for a lock older than
-one second, at most once every two seconds per lock. A start time that cannot be read keeps the
-lock held. So does a reused id whose new process started within that second; acquisitions then
-still fail with `timed out acquiring external process lock` or `timed out acquiring per-session
-lock` until that process exits.
+The locks that serialize these steps do not trust a live-looking id either. On Windows the
+process that holds a lock keeps a holder marker open for as long as it holds it: an empty file
+beside the lock, `.<lock file name>.<token>.marker`, which it opens exclusively before it
+publishes the lock and closes after the lock is gone, or earlier when its own release fails, so
+the next waiting process recovers the lock at once. Windows refuses every other open of that
+file while the holder keeps it open and frees it within milliseconds of the holder's exit, so a
+waiting process reads a marker it cannot open as a live holder and a marker it can open as a
+holder that no longer holds the lock, whatever process the recorded id names now, and recovers
+such a lock on its next attempt. A lock whose recorded process is gone is recovered whatever its
+marker reads. No clock and no helper process takes part. Where no marker decides — a lock
+written by an earlier release, by a holder that could not create its marker, by a holder whose
+file system did not enforce the exclusive open, or on Linux and macOS whenever the start
+identity the lock stored cannot be read — the start time decides. A lock is written by its
+holder, so the holder existed before the lock's recorded creation time, which, for a lock this
+release wrote in its holder's own name, never lies before the holder's own process start; a
+lock from an earlier release, or a bash 3.2 lease that stored no start identity, can after a
+backward clock step, and such a live lock can then be recovered. When the process now using the recorded
+id provably started more than one second after that time, it cannot be the holder: the holder
+is gone, the id was reused, and the next acquisition recovers the lock. Windows reads that start
+time through `powershell.exe`, only for a lock older than one second, at most once every two
+seconds per lock. A start time that cannot be read keeps the lock held. So does a reused id
+whose new process started within that second; acquisitions then still fail with `timed out
+acquiring external process lock` or `timed out acquiring per-session lock` until that process
+exits. A marker refuses every open while its lock is held, so on Windows a `git add` of a
+`.zensu/state` that is not gitignored, and removing the worktree, fail for that moment. A
+`.marker` file whose lock file is gone is an inert empty file, left by a holder that was killed
+during its release or by a recovery that could not delete it while another process held it
+open, and may be deleted.
 
 ## Unbindable sessions
 

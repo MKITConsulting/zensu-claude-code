@@ -9,6 +9,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **subagent shell**: a neutral subagent that reports an `agent_type` (`Explore`,
+  `general-purpose`, and a workflow agent when it reports one, which no live run has measured
+  yet) may now run `Bash` behind an accident guard, so a workflow's workers can build and run
+  tests themselves. `Bash` is the only tool this adds: `Monitor`, the five other shell tool names
+  and every command-executing MCP tool stay outside the capability gate's allowlist. A subagent
+  that reports no `agent_type`, a `zensu-review-*` persona and a read-only Zensu agent hold no
+  shell. The guard parses the command as shell and refuses one that names the plugin's private
+  data, the installed plugin, the session record, a Zensu config file or a `.zensu` directory, or
+  that runs a Zensu session or workflow helper, reads or sets a Session Control selector variable,
+  prints the environment, runs a destructive git operation or `claude plugin`, removes or moves
+  the project root, starts a background shell (a detached `tmux` or `screen` session included)
+  or asks to leave the host sandbox. It prevents
+  accidents and is not a sandbox. Because it refuses the Zensu helpers, a worker still cannot
+  record Zensu workflow state. A neutral subagent can no longer edit a Zensu config layer, and a
+  subagent can no longer pass a `zensu` CLI mutation through the inline `ZENSU_MCP_GATE=off`
+  prefix. `"subagentShell": false` restores the previous deny of `Bash` when it sits in a config
+  file the gate consults (the `ZENSU_CONFIG` file alone while that variable is set, otherwise the
+  global file and the project overlay), and so does a consulted config file that cannot be read.
+  While `ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is not read.
+- **CLI write-gate**: the gate now also reads a Bash command with the accident guard's shell model,
+  on the main thread too, and gates every invocation that model or its token scan finds. A `zensu`
+  mutation behind a wrapper (`timeout`, `nice -n`, `env -i`, `xargs`), in a loop or `if` body, in
+  a `bash -c` body, a heredoc a shell reads, `eval` or a command substitution inside a parameter
+  expansion is now gated like a plain one, and every command the token scan denied before is still
+  denied.
+
+## [0.26.0] - 2026-10-12
+
+### Added
+
+- **work-order**: Run Zensu work orders as the reference harness (#428)
+- **session-trail**: Write a receipt for the Session Hub's takeover command (#427)
+- **session-trail**: Carry open task chips over on every takeover (#426)
+- **review**: Import a template workflow review on the first review (#420)
+- **verify-feature**: Approve remote origins at the permission prompt (#412)
+- **tdd**: Split the tdd skill into a router and references (#391)
+- **skills**: Budget skill text and split session-trail into references (#390)
+
+### Changed
+
+- **verify-feature**: Remove the bundled Zensu monorepo adapter (#430)
+- **work-order**: Name zensu-cli 0.8.0 as the first CLI with zensu work (#432)
+- **changelog**: Add the upgrade note for the neutral-subagent tool allowlist (#431)
+- **tests**: File the session-hub-receipt suite in the suite overview (#429)
+- **ci**: Run the eval-harness unit files in a CI suite (#418)
+- **ci**: Run the unit suites daily on a shifted clock (#386)
+- Correct review-guarantee and principal claims (#415)
+- Keep every command run with the main thread in subagent guidance (#411)
+- **stop**: Link L13 and L17d through the Node helpers (#373)
+- **windows**: Make the structure fixtures hold on Git Bash (#407)
+- **evals**: Fit the Windows offline shards into their time budgets (#406)
+- **profile**: Canonicalize and bound the Windows profile sandbox (#405)
+- **structure**: Read unit-file floors from the suite overview (#393)
+
+### Fixed
+
+- **session-trail**: Drop the takeover brief's dead owning-instance line (#436)
+- **verify-feature**: Wait for PostgreSQL and drop the fixed metrics port in the monorepo adapter (#385)
+- **verify-feature**: Keep the monorepo backend's blob store inside the run directory (#425)
+- **chain**: Refuse --tdd-complete when git cannot list the changes (#423)
+- **chain**: Refuse the unqualified terminus when git refuses the repository (#421)
+- **chain**: Count changes before a minted self-review ticket closes a chain (#422)
+- **hooks**: Name no main-thread remedy in a deny a subagent reads (#413)
+- **review**: Describe the configured review panel instead of five aspects (#417)
+- **chain**: Refuse an unqualified --code-review-done on a changed tree (#414)
+- **stop**: Count blocked Stops at the cap and correct the Stop-guard docs (#416)
+- **skills**: Drop the session-id rebind from the review-evidence lease commands (#394)
+- **reviewer-capability**: Align the gauntlet critic packet, docs and C39 with the allowlist (#410)
+- **session-trail**: Ask one plan confirmation per takeover (#408)
+- **verify**: Compare the consent memory directory in native separators (#404)
+- **windows**: Accept a state directory whose mode Git Bash cannot set (#403)
+- **session**: Name a Windows project root in the Stop and deny diagnostics (#402)
+- **windows**: Refuse a symlinked state file where O_NOFOLLOW is missing (#401)
+- **log**: Canonicalize both sides of the truncate anchor natively (#400)
+- **reanchor**: Judge a Windows root on the spelling the shell pastes (#399)
+- **deps**: Close all 33 open Dependabot advisories in the eval tooling (#398)
+- **verify-feature**: Correct the network-only accounts and their eval grading (#397)
+- **redact**: Redact Claude Code's dash-encoded home and project paths (#396)
+- **hooks**: Answer harness prompts with only the user-visible directives (#389)
+- **skills**: Shrink the gauntlet-loop body back under its budget entry (#395)
+- **reviewer-capability**: Confine neutral subagents to a tool allowlist (#387)
+- **hooks**: Keep the plan-approval directive inline and decision-first (#388)
+
+### Upgrade notes
+
 - **verify-feature**: a remote HTTPS origin no longer needs `ZENSU_VERIFY_NAVIGATION_POLICY_V1`.
   In a session that can show the permission prompt (Manual, Accept edits, Plan or Auto),
   `/zensu:verify-feature --mode=remote` asks for each remote origin at every browser start; under
@@ -46,6 +131,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stop guard releases up to three Stops in a row while a workflow still runs, then blocks until
   it ends. The import needs the judge, so `"reviewJudge": false` turns it off as well;
   `"externalReviewImport": false` restores the previous behavior.
+- **subagents**: a subagent that is not one of the plugin's own agents, such as `Explore`,
+  `general-purpose` or another plugin's agent, may now call only an allowlist of tools instead
+  of every tool outside a short denylist: `Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`,
+  `NotebookEdit`, `apply_patch`, `LSP`, `WebFetch`, `WebSearch`, `ToolSearch`, `TodoWrite`,
+  `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `Agent`, `SendMessage`, `AskUserQuestion`,
+  `StructuredOutput`, `ReportFindings` and `SubagentHandback`, the two Context7 documentation
+  tools, and the read-only Zensu MCP tools. Every other tool is denied, MCP tools included: a
+  subagent that drove a browser, a terminal, context-mode, the desktop session tools, `Skill`,
+  `TaskStop` or `Monitor` is now refused and reports back to the main thread, so run such work
+  in the main thread. An MCP tool whose name carries a command word (`exec`, `execute`, `run`,
+  `shell`, `terminal`, `command` or `code`, as in `ctx_execute` or `run_in_terminal`) gets the
+  same deny as `Bash`. A host tool that a later Claude Code version adds or renames stays
+  denied until the allowlist names it.
 
 ## [0.25.0] - 2026-10-06
 

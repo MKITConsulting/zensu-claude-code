@@ -320,8 +320,10 @@ unverified regardless of how many checks passed before it.
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `cmd0` anchoring depends on — is hand-duplicated as a JS literal in
-`hooks/pre-bash-zensu-gate.sh`; a wrapper added to one and not the other means the
-same wrapped invocation is gated by one Bash gate and not its sibling.
+`hooks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
+unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
+what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is
+transparent to the CLI gate and not to rule (C).
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and `contains()` in
 `hooks/lib/zensu-autopilot-state.sh` is a further member this roster omitted while the

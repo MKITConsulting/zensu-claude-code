@@ -96,7 +96,7 @@ It reaches every process through three deliberately redundant carriers, because 
 
 The hook reads the block out of the canonical file at run time rather than carrying its own copy, so it cannot drift from the `agents/*.md` and `skills/*/SKILL.md` prompt carriers when the rule is reworded. (The carrier population is pinned as `EXPECTED_AGENTS` + `EXPECTED_SKILLS` in `tests/structure/test-evidence-discipline.sh`; it is deliberately not restated as a literal here, because a numeral goes stale on every new skill and nothing fails closed on it.)
 
-It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, `pre-write-plugin-data-guard.sh`, the browser consent pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
+It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, whose `subagentShell` key only withdraws the subagent shell grant and never disables the gate, `pre-write-plugin-data-guard.sh`, the browser consent pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
 
 **The block names no file, on purpose.** A `reviewer-readonly-v1` subagent resolves tool paths against the *project* root, not the plugin root, so a `docs/evidence-discipline.md` pointer inside the block could only ever resolve into the repository under review — letting a hostile repo plant that path and have its own text ingested as the authoritative rule. The two leased `evidence-worker-v1` agents would additionally burn a bounded turn on a read their lease denies. So the block declares itself complete and forbids any workspace file claiming to be the rule from overriding it; agents act on the block, humans and the hook read the file.
 
@@ -170,9 +170,9 @@ while one is, because its rule 6 shrinks to one sentence when the anchor reads `
 they read the hook and never open this document, so the numbers written here are hand-derived
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
 out of this paragraph. A full-panel `/zensu:tdd` review round
-(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
+(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
-spawns three aspects and runs the judge on the first review only and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
+spawns three aspects and runs the judge on the first review only (twice side by side while `hooks.reviewJudgeSecondRun` is on) and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
 to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds a chain needs at
@@ -180,7 +180,7 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and six hooks are registered on it.
+on every prompt with no de-bounce, and seven hooks are registered on it.
 `tests/structure/test-user-prompt-budget.sh` drives every one of them on four prompt kinds — a
 typed request, a background-task notification, a shell input behind a system reminder, and a
 CI-monitor event — and holds each hook and each sum under declared ceilings, so treat that suite,
@@ -192,7 +192,9 @@ carries a planning keyword outside paths, `zensu:` skill names and `--repo` oper
 `user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above, on every prompt kind because the reply is
 user-visible) and this hook (1,756 characters, on every prompt kind for the same reason). Two emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
-`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose. With
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
+`user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
+takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **12.5 K characters per turn**, and a task notification or shell input about 4.9 K
 (5.2 K for a CI-monitor event); `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and

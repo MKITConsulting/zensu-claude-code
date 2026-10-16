@@ -33,6 +33,12 @@ a remote origin approved mid-session could not be pinned — does not hold, beca
 written before `open` and the prompt is raised at that same `open`. AC-018 is amended in place,
 and §12 records the decisions.
 
+**The bundled monorepo adapter was removed on 2026-10-12.** The plugin serves projects whose
+users cannot see the Zensu monorepo, so it no longer carries a start script for it. Phase 2
+resolves the candidate recipe and otherwise offers the guided setup, and a repository is verified
+through its own checked-in `.zensu/runtime.yaml`. AC-010 is amended in place; every statement
+below about the monorepo adapter, its markers or its controller describes the retired design.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)
@@ -412,7 +418,7 @@ session can write.
 | AC-007 | **deprecated** — replaced by AC-018. The first approved navigation locks the session to local or remote; a later navigation of the other class is refused with a reason naming the lock. | spec §6.2 |
 | AC-008 | `/zensu:verify-feature` with no recipe and no `--attach` offers setup instead of ending PARTIAL, and a declined offer ends PARTIAL with the same missing-facts list as today. | spec §6.6 |
 | AC-009 | Setup writes `.zensu/runtime.yaml` only after one `AskUserQuestion` round, every proposed value names its evidence file, and a value setup could not derive is left empty and reported rather than invented. | spec §6.6 |
-| AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, then the monorepo adapter, in that order, and records which one was selected. | spec §6.7 |
+| AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, in that order, and records which one was selected. Amended 2026-10-12: the monorepo adapter that followed them was removed. | spec §6.7 |
 | AC-011 | `--attach=<loopback-origin>` boots no runtime, runs no `down` command, and the report states "worktree identity proven" only when the listening process's working directory equals the worktree. | spec §6.8 |
 | AC-012 | The report carries a `Consent` block listing every `(origin, route, decidedBy)` record of the run. | spec §6.4 |
 | AC-013 | `/zensu:doctor` renders exactly one verify-feature row, and every state it can reach renders differently from the others — the shipped set is larger than §6.9's four. | spec §6.9 |
@@ -576,7 +582,7 @@ was local XOR remote, switched off local consent everywhere.
   - "Asked again at every browser start" assumes that no stored choice answers a later hook `ask`.
     Whether a persistent choice in the host dialog or a `Bash(playwright-cli:*)` allow rule does
     was not measured.
-  - The preflight and the monorepo controller cannot see the permission mode, so a session that
+  - The preflight cannot see the permission mode, so a session that
     cannot show the prompt may boot a whole runtime for an origin the gate then denies at `open`.
     The stderr note is the early signal, and the skill's rules stop on it in such a session; that
     is prose, not a gate.

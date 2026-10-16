@@ -407,7 +407,12 @@ case "${1:-}" in
         --root) _xr_root="${2:-}"; shift 2 || break ;;
         --launch) _xr_launch="${2:-}"; shift 2 || break ;;
         --result) _xr_result="${2:-}"; shift 2 || break ;;
-        --tree) _xr_mode="tree"; shift ;;
+        --tree|--stage)
+          if [ "$_xr_mode" != "check" ]; then
+            echo "zensu-log.sh --external-review: --tree and --stage exclude each other" >&2
+            exit 2
+          fi
+          _xr_mode="${1#--}"; shift ;;
         *) echo "zensu-log.sh --external-review: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
@@ -415,8 +420,8 @@ case "${1:-}" in
       echo "zensu-log.sh --external-review: --root <repository top level> is required" >&2
       exit 2
     fi
-    if [ "$_xr_mode" = "tree" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
-      echo "zensu-log.sh --external-review: --tree takes only --root" >&2
+    if [ "$_xr_mode" != "check" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
+      echo "zensu-log.sh --external-review: --$_xr_mode takes only --root" >&2
       exit 2
     fi
     if [ "$_xr_mode" = "check" ] && [ -t 0 ]; then
@@ -424,7 +429,7 @@ case "${1:-}" in
       exit 2
     fi
     _xr_none="status=unavailable"
-    [ "$_xr_mode" = "tree" ] && _xr_none="tree=unavailable"
+    [ "$_xr_mode" != "check" ] && _xr_none="$_xr_mode=unavailable"
     if ! command -v node >/dev/null 2>&1; then
       echo "EXTERNAL REVIEW — $_xr_none reason=node"
       exit 0
@@ -460,7 +465,7 @@ case "${1:-}" in
     ZENSU_XR_ROOT="$_xr_root_native" \
     ZENSU_XR_LAUNCH="$_xr_launch" \
     ZENSU_XR_RESULT="$_xr_result_native" \
-      node -e 'const tree = process.env.ZENSU_XR_MODE === "tree"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(tree ? "EXTERNAL REVIEW — tree=unavailable reason=module\n" : "EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main([tree ? "tree" : "check"]);'
+      node -e 'const mode = ["tree", "stage"].includes(process.env.ZENSU_XR_MODE) ? process.env.ZENSU_XR_MODE : "check"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(`EXTERNAL REVIEW — ${mode === "check" ? "status" : mode}=unavailable reason=module\n`); process.exit(0); } process.exitCode = m.main([mode]);'
     exit $?
     ;;
   --acceptance-record|--acceptance-status)
@@ -737,11 +742,14 @@ case "${1:-}" in
     cover_val=false
     validate_val=true
     workspace_val=""
+    work_order_val=""
+    work_order_json=""
     seen_run=false
     seen_session=false
     seen_cover=false
     seen_validate=false
     seen_workspace=false
+    seen_work_order=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -765,6 +773,10 @@ case "${1:-}" in
           [ "$seen_workspace" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --workspace" >&2; exit 2; }
           seen_workspace=true; workspace_val="$2"; shift 2
           ;;
+        --work-order)
+          [ "$seen_work_order" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --work-order" >&2; exit 2; }
+          seen_work_order=true; work_order_val="$2"; shift 2
+          ;;
         *) echo "zensu-log.sh --autopilot-begin: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
@@ -779,6 +791,14 @@ case "${1:-}" in
       echo "zensu-log.sh --autopilot-begin: --workspace must name an existing directory" >&2
       exit 2
     fi
+    if [ "$seen_work_order" = true ] && [ -z "$work_order_val" ]; then
+      echo "zensu-log.sh --autopilot-begin: --work-order must not be empty" >&2
+      exit 2
+    fi
+    if [ "$seen_work_order" = true ] && [ "$seen_session" = true ]; then
+      echo "zensu-log.sh --autopilot-begin: --work-order binds this session's own run; --session is not accepted with it" >&2
+      exit 2
+    fi
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-begin --run $run_val}"
     fi
@@ -787,9 +807,32 @@ case "${1:-}" in
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
       exit 2
     }
+    if [ "$seen_work_order" = true ] || [ -n "${ZENSU_SESSION_TOKEN:-}" ]; then
+      if [ "$seen_work_order" = true ]; then
+        work_order_json="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --binding --run "$run_val" --order "$work_order_val")"
+      else
+        work_order_json="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --binding --run "$run_val")"
+      fi
+      work_order_rc=$?
+      if [ "$work_order_rc" -ne 0 ]; then
+        echo "zensu-log.sh --autopilot-begin: the work-order binding was refused" >&2
+        exit 4
+      fi
+      if [ "$seen_work_order" = true ] && [ -z "$work_order_json" ]; then
+        echo "zensu-log.sh --autopilot-begin: --work-order was given but this session runs no work order" >&2
+        exit 4
+      fi
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val" "$workspace_val"
-    exit $?
+    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val" "$workspace_val" "$work_order_json"
+    begin_rc=$?
+    if [ "$begin_rc" -eq 0 ] && [ -n "$work_order_json" ]; then
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order.sh" --bind-run --run "$run_val" >/dev/null || {
+        echo "zensu-log.sh --autopilot-begin: the run began but the work order does not report it yet; run --autopilot-begin again" >&2
+        exit 5
+      }
+    fi
+    exit "$begin_rc"
     ;;
   --autopilot-event)
     run_val=""
@@ -836,10 +879,22 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-event: the 'release-' event-id namespace is reserved for --autopilot-release" >&2
         exit 2
         ;;
+      work-order-release-*)
+        echo "zensu-log.sh --autopilot-event: the 'work-order-release-' event-id namespace is reserved for zensu-work-order.sh" >&2
+        exit 2
+        ;;
     esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use the generation-bound TDD commands" >&2
+        exit 2
+        ;;
+      ORDER_SPEC_BOUND)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --bind-spec" >&2
+        exit 2
+        ;;
+      TEAM_REVIEW_IMPORTED)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use zensu-work-order.sh --review-import" >&2
         exit 2
         ;;
     esac
@@ -1488,7 +1543,6 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-complete: Session Control project context unavailable" >&2
           exit 1
         fi
-        _tc_changes=0
         # Armed when either gate is ON — and ALSO when either is OFF, because the
         # bypass-ledger records below conjoin on this count too: with both switches
         # off the old condition left the count at 0 and silently recorded NEITHER
@@ -1520,17 +1574,14 @@ case "${1:-}" in
         # alone empties `ls-files --others --exclude-standard`.
         #
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
-        # cannot be resolved the `if` below is false, the count stays 0, and every
-        # consumer conjoins on it — disarming both gates AND suppressing both ledger
-        # records, which is precisely the outcome this wrapper exists to prevent.
-        if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-          # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
-          # fallback would append a SECOND line and turn the count into "0\n0" — which
-          # makes the -gt comparison below abort with "integer expression expected" and
-          # silently skips the gate on exactly the empty change set it is scoping for.
-          _tc_changes="$( { _tc_git -C "$_tc_root" diff --name-only HEAD 2>/dev/null
-                            _tc_git -C "$_tc_root" ls-files --others --exclude-standard 2>/dev/null; } \
-                          | sort -u | grep -c . 2>/dev/null || true)"
+        # cannot be resolved every scope call fails, which refuses this verb on a
+        # repository git itself would read.
+        _tc_changes="$(_zensu_unqualified_change_count "$_tc_root")"
+        [ "$_tc_changes" = unknown ] && _tc_changes=0
+        if [ "$_tc_changes" = unavailable ] \
+           && ! { [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ]; }; then
+          echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — git could not list this worktree's changes against HEAD, and that count decides whether the edit-landing receipt gate and the requirements-table gate apply to this chain. Run git diff --name-only HEAD in the project root to see the git error and resolve it, then run --tdd-complete again." >&2
+          exit 1
         fi
         _tc_receipt_verdict() {
           ZENSU_TC_RECEIPT="$(_tdd_native_path "$1" 2>/dev/null || printf '%s' "$1")" node -e '
@@ -1606,7 +1657,7 @@ case "${1:-}" in
           ' 2>/dev/null || printf 'unavailable\t0\t'
         }
         _tc_armed=0
-        [ "${_tc_changes:-0}" -gt 0 ] && _tc_armed=1
+        [ "$_tc_changes" != 0 ] && _tc_armed=1
         _tc_receipt_state=""
         _tc_receipt_claims=0
         _tc_receipt_claims_bad=0
@@ -1928,7 +1979,7 @@ case "${1:-}" in
         # when the table is absent; measured across real projects a third of plans
         # carried none. Same move as the receipt gate above: make the obligation a
         # precondition of completion.
-        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ] && [ "$_tc_changes" != 0 ]; then
           # An env escape is free but never silent: the ledger is what keeps
           # everything a chain renders under "Gates bypassed" true. Fail-open, as
           # every other recording site is — failing to record must not change the
@@ -1936,7 +1987,7 @@ case "${1:-}" in
           # no decision point to short-circuit, so there is no escape to record.
           tdd_record_bypass "$session_val" ZENSU_REQUIREMENTS_GATE >/dev/null 2>&1 || true
         fi
-        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off" ] && [ "$_tc_changes" != 0 ]; then
           _rq_plan="$plan_val"
           _rq_explicit="$seen_plan"
           _rq_reason=""

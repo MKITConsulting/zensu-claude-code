@@ -61,6 +61,7 @@ DIRTY_BEFORE=""
 RECEIPT_PATH=""
 RECEIPT_EXPLICIT=0
 RECEIPT_FAILED=0
+RECEIPT_RETIRED=""
 BASELINE_SEEN=0
 EPOCH_SEEN=0
 DIRTY_SEEN=0
@@ -191,11 +192,33 @@ _el_git() (
   git -c core.excludesFile=/dev/null "$@"
 )
 
+git_fault() {
+  local rc="$1" root="$2" first
+  shift 2
+  first="$(LC_ALL=C _el_git -C "$root" "$@" 2>&1 >/dev/null | awk 'NF { sub(/^(fatal|error): /, ""); print; exit }')"
+  GIT_FAULT_CMD="git $*"
+  GIT_FAULT_RC="$rc"
+  GIT_FAULT_ROOT="$root"
+  GIT_FAULT="${first:-git printed no message}"
+}
+
 IN_GIT=0
+GIT_FAULT=""
 REPO_ROOT="$PROJECT_ABS"
-if _el_git -C "$PROJECT_ABS" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  IN_GIT=1
-  REPO_ROOT="$(_el_git -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT="$PROJECT_ABS"
+if command -v git >/dev/null 2>&1; then
+  if IN_GIT_ANSWER="$(_el_git -C "$PROJECT_ABS" rev-parse --is-inside-work-tree 2>/dev/null)"; then
+    [ "$IN_GIT_ANSWER" != "true" ] || IN_GIT=1
+  else
+    git_fault "$?" "$PROJECT_ABS" rev-parse --is-inside-work-tree
+    case "$GIT_FAULT" in
+      *[Nn]"ot a git repository"*) GIT_FAULT="" ;;
+    esac
+  fi
+fi
+if [ "$IN_GIT" -eq 1 ]; then
+  REPO_ROOT="$(_el_git -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null)" \
+    || { git_fault "$?" "$PROJECT_ABS" rev-parse --show-toplevel; REPO_ROOT="$PROJECT_ABS"; }
+  [ -n "$REPO_ROOT" ] || REPO_ROOT="$PROJECT_ABS"
 fi
 REPO_CANON="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" || REPO_CANON="$REPO_ROOT"
 [ -n "$REPO_CANON" ] || REPO_CANON="$REPO_ROOT"
@@ -215,31 +238,46 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-# The four git appends deliberately TOLERATE their command's status — a `git`
-# that answers nothing is an ordinary outcome here — and a shell redirect gives
-# no status of its own to test, so `|| die` on these lines would refuse a
-# healthy run while still saying nothing about a failed WRITE. The write is
-# checked where a status exists to check: the sort below reads and rewrites the
-# same file and fails on an I/O fault, and the file's own presence is asserted
-# after it. That is the honest boundary, and it is stated rather than papered
-# over with a check on the wrong object. What it buys: the union is what
-# `in_union` answers from, so a partial one makes every absent claim grade
-# `EDIT NOT LANDED` — loud — except for an `is_ignored` hit, which flips to
-# `EDIT LANDED (untracked-by-design)`, the silent green this audit exists to
-# remove.
-if [ "$INVENTORY" -eq 0 ] && [ "$IN_GIT" -eq 1 ]; then
-  if _el_git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-    _el_git -C "$REPO_ROOT" diff --name-only HEAD -- 2>/dev/null >> "$UNION_FILE"
-    # A mid-run commit empties the worktree diff; the baseline range is what
-    # keeps those claims verifiable.
-    if [ -n "$BASELINE_SHA" ] && _el_git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASELINE_SHA" >/dev/null 2>&1; then
-      _el_git -C "$REPO_ROOT" diff --name-only "$BASELINE_SHA"..HEAD -- 2>/dev/null >> "$UNION_FILE"
-    fi
-  else
-    # Unborn HEAD: `diff HEAD` is fatal, so take the index instead.
-    _el_git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
+union_add() {
+  local listing rc
+  [ -z "$GIT_FAULT" ] || return 0
+  listing="$(_el_git -C "$REPO_ROOT" "$@" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    git_fault "$rc" "$REPO_ROOT" "$@"
+    return 0
   fi
-  _el_git -C "$REPO_ROOT" ls-files --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
+  [ -z "$listing" ] || printf '%s\n' "$listing" >> "$UNION_FILE" \
+    || die "the change union could not be written"
+}
+
+if [ "$INVENTORY" -eq 0 ] && [ "$IN_GIT" -eq 1 ] && [ -z "$GIT_FAULT" ]; then
+  _el_git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD >/dev/null 2>&1
+  HEAD_RC=$?
+  case "$HEAD_RC" in
+    0)
+      union_add diff --name-only HEAD --
+      # A mid-run commit empties the worktree diff; the baseline range is what
+      # keeps those claims verifiable.
+      if [ -n "$BASELINE_SHA" ]; then
+        _el_git -C "$REPO_ROOT" rev-parse --verify --quiet "${BASELINE_SHA}^{commit}" >/dev/null 2>&1
+        BASELINE_RC=$?
+        case "$BASELINE_RC" in
+          0) union_add diff --name-only "$BASELINE_SHA"..HEAD -- ;;
+          1) ;;
+          *) git_fault "$BASELINE_RC" "$REPO_ROOT" rev-parse --verify --quiet "${BASELINE_SHA}^{commit}" ;;
+        esac
+      fi
+      ;;
+    1)
+      # Unborn HEAD: `diff HEAD` is fatal, so take the index instead.
+      union_add ls-files --cached --others --exclude-standard --
+      ;;
+    *)
+      git_fault "$HEAD_RC" "$REPO_ROOT" rev-parse --verify --quiet HEAD
+      ;;
+  esac
+  union_add ls-files --others --exclude-standard --
 fi
 sort -u -o "$UNION_FILE" "$UNION_FILE" 2>/dev/null \
   || die "the change union could not be sorted"
@@ -464,25 +502,23 @@ EXEMPT_VERIFIED=0
 
 emit() { printf '%s\n' "$1"; }
 
-# Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
-# nothing when it cannot be resolved unambiguously.
-normalize_claim() {
-  local raw="$1" p verdict kind
-  p="$(trim_claim "$raw")"
-  [ -n "$p" ] || return 1
+unredact_claim() {
+  local p="$1" stripped=0
+  UNREDACTED_CLAIM=""
   # The run log is REDACTED on the way in. `zensu-log.sh append` routes every
   # line through `zensu-artifact-redact-v1.js`, whose FIRST rule rewrites the
   # project root to the literal `<project>` — so an author who spells a claim
   # absolutely inside the anchor gets `<project>/src/x.ts` in the log, which has
-  # no leading `/`, never reaches `absolute_claim_verdict`, is in the union under
-  # no spelling, and used to fall through the `*/*` arm verbatim: `EDIT NOT
-  # LANDED` for an edit that DID land, `clean: false`, a refused `--tdd-complete`
-  # and a step 5b b) remedy — land it at the path the claim names — that cannot
-  # be performed. Stripping is sound HERE and only here: the placeholder denotes
-  # the root this run was handed, so the remainder is repo-relative by
-  # construction. Two bounds travel with it. The redactor's `projectRoot` accepts
+  # no leading `/`, never matches the `/*` arm of `normalize_claim`, is in the
+  # union under no spelling, and used to fall through the `*/*` arm verbatim:
+  # `EDIT NOT LANDED` for an edit that DID land, `clean: false`, a refused
+  # `--tdd-complete` and a step 5b b) remedy — land it at the path the claim
+  # names — that cannot be performed. Rebuilding is sound HERE and only here: the
+  # placeholder denotes the root this run was handed, so the claim is rebuilt
+  # under `PROJECT_ABS` and placed by `absolute_claim_verdict` exactly like its
+  # absolute spelling. Two bounds travel with it. The redactor's `projectRoot` accepts
   # an ARRAY and renders every member as the same `<project>`, so a log written
-  # against two roots is ambiguous and this strip silently picks the audited one.
+  # against two roots is ambiguous and this rebuild silently picks the audited one.
   # State that bound UNESTABLISHED rather than closed: an earlier revision said
   # `append` "forces the two authorities to agree through `expectedRoot`
   # whenever `CLAUDE_PROJECT_DIR` is set, which is the normal case", and
@@ -492,37 +528,46 @@ normalize_claim() {
   # word is unverified. This is the one transform in the file that can turn
   # `EDIT NOT LANDED` into `EDIT LANDED`, which is why the bound is stated
   # rather than assumed. And the `~` half is
-  # deliberately NOT stripped — `$HOME` names any home-rooted path, including a
-  # genuine sibling repository, so guessing there would relabel foreign work as
-  # in-anchor. That one stays a stated bound; X16/X16a pin it.
-  _nc_stripped=0
+  # deliberately NOT rebuilt — `$HOME` names any home-rooted path, including a
+  # genuine sibling repository, and nothing records the home the writer redacted
+  # against. That one stays a stated bound; X16/X16a pin it.
   case "$p" in
     '<project>'|'<home>') return 1 ;;
-    '<project>/'*) p="${p#<project>/}"; _nc_stripped=1 ;;
+    '<project>/'*) p="${p#<project>/}"; stripped=1 ;;
     # A literal backslash, written as an escaped character outside quotes: the
     # redactor's `rootSpellings` adds a backslash-separated form of every root,
     # so this is the second half of one rule rather than a second rule.
-    '<project>'\\*) p="${p#<project>\\}"; _nc_stripped=1 ;;
+    '<project>'\\*) p="${p#<project>\\}"; stripped=1 ;;
     # `<home>` is the redactor's THIRD rule and is NOT stripped. It stands for a
     # residual `/Users/<seg>`, `/home/<seg>` or `/root`, which names no
     # particular root this run can resolve — the same reason `~` is not
-    # stripped. Named here so the census is three rules rather than the two it
+    # rebuilt. Named here so the census is three rules rather than the two it
     # read as, and REFUSED rather than falling through to be graded relative.
     '<home>/'*|'<home>'\\*) return 1 ;;
   esac
-  if [ "$_nc_stripped" -eq 1 ]; then
+  if [ "$stripped" -eq 1 ]; then
     [ -n "$p" ] || return 1
     # Re-checked, and ONLY for a stripped remainder — an ordinary absolute claim
-    # is the next `case`'s business and must not be refused here. This is the
-    # one non-absolute spelling that can leave the anchor: `<project>/../../x`
-    # stays relative, so it never reaches `absolute_claim_verdict`, and the
-    # `[ -e "$REPO_ROOT/$p" ]` test below resolves `..` through the filesystem
-    # straight out of the tree. The test is ANCHORED, so a real file named
+    # is `normalize_claim`'s business and must not be refused here.
+    # `<project>/../../x` climbs out of the root the placeholder denotes, so it
+    # is refused rather than rebuilt. The test is ANCHORED, so a real file named
     # `..bak` inside the tree is inside it.
     case "$p" in
       /*|..|../*|*/../*|*/..) return 1 ;;
     esac
+    p="$PROJECT_ABS/$p"
   fi
+  UNREDACTED_CLAIM="$p"
+}
+
+# Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
+# nothing when it cannot be resolved unambiguously.
+normalize_claim() {
+  local raw="$1" p verdict kind
+  p="$(trim_claim "$raw")"
+  [ -n "$p" ] || return 1
+  unredact_claim "$p" || return 1
+  p="$UNREDACTED_CLAIM"
   case "$p" in
     /*)
       verdict="$(absolute_claim_verdict "$p")"
@@ -700,6 +745,7 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
     WIRED)
       [ "$INVENTORY" -eq 1 ] && continue
+      [ -z "$GIT_FAULT" ] || continue
       UNVERIFIED=$((UNVERIFIED + 1))
       CLAIM_COUNT=$((CLAIM_COUNT + 1))
       # The LINE NUMBER, never the line. This value is wholly author-written and
@@ -734,6 +780,8 @@ done < "$LOG_FILE"
 if [ "$INVENTORY" -eq 1 ]; then
   INV_CLAIMS=0
   INV_FAULT=""
+  [ -z "$GIT_FAULT" ] \
+    || INV_FAULT="$(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT") ($(render_claim_value "$GIT_FAULT")), so the anchor every absolute claim is placed against is unknown"
   INV_ROOTS="$(mktemp)" || die "mktemp failed"
   while IFS="$(printf '\t')" read -r step raw; do
     [ -n "${raw// /}" ] || continue
@@ -747,8 +795,11 @@ if [ "$INVENTORY" -eq 1 ]; then
     fi
     INV_CLAIMS=$((INV_CLAIMS + 1))
     INV_PATH="$(trim_claim "$raw")"
+    unredact_claim "$INV_PATH" || continue
+    INV_PATH="$UNREDACTED_CLAIM"
     case "$INV_PATH" in
       /*)
+        [ -z "$GIT_FAULT" ] || continue
         INV_VERDICT="$(absolute_claim_verdict "$INV_PATH")"
         case "${INV_VERDICT%%$'\t'*}" in
           # The append is CHECKED. An ENOSPC, a full tmpfs or a destination that
@@ -830,21 +881,26 @@ if [ "$INVENTORY" -eq 1 ]; then
 fi
 
 # The pipeline above runs in a subshell, so grade in the parent to keep counters.
-while IFS="$(printf '\t')" read -r step raw; do
-  [ -n "${raw// /}" ] || continue
-  grade_claim "$step" "$raw"
-done < "$CLAIMS_FILE"
+if [ -z "$GIT_FAULT" ]; then
+  while IFS="$(printf '\t')" read -r step raw; do
+    [ -n "${raw// /}" ] || continue
+    grade_claim "$step" "$raw"
+  done < "$CLAIMS_FILE"
+fi
 
 CLEAN=1
 [ "$NOT_LANDED" -gt 0 ] && CLEAN=0
 [ "$UNVERIFIED" -gt 0 ] && CLEAN=0
 [ "$PENDING" -gt 0 ] && CLEAN=0
-if [ "$CLAIM_COUNT" -eq 0 ]; then
+if [ -n "$GIT_FAULT" ]; then
+  CLEAN=0
+elif [ "$CLAIM_COUNT" -eq 0 ]; then
   CLEAN=0
   emit "UNVERIFIED (no claims logged) — the run log holds no IMPL/WIRED files: entry, so nothing could be audited"
 fi
 
-emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=${NOT_LANDED} unverified=${UNVERIFIED} pending=${PENDING} exempt_ignored=${EXEMPT_IGNORED} exempt_verified=${EXEMPT_VERIFIED}"
+[ -n "$GIT_FAULT" ] \
+  || emit "EDIT LANDING AUDIT — claims=${CLAIM_COUNT} landed=${LANDED} not_landed=${NOT_LANDED} unverified=${UNVERIFIED} pending=${PENDING} exempt_ignored=${EXEMPT_IGNORED} exempt_verified=${EXEMPT_VERIFIED}"
 
 # ── Receipt ──────────────────────────────────────────────────────────────────
 if [ "$RECEIPT_EXPLICIT" -eq 1 ] && [ "$RECEIPT_PATH" = "-" ]; then
@@ -924,7 +980,17 @@ else
       RECEIPT_PATH=""; RECEIPT_FAILED=1
       ;;
   esac
-  if [ -n "$RECEIPT_PATH" ]; then
+  if [ -n "$RECEIPT_PATH" ] && [ -n "$GIT_FAULT" ]; then
+    if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
+      rm -f "$RECEIPT_PATH" 2>/dev/null
+      if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
+        emit "RECEIPT REFUSED — the earlier receipt at $(zensu_safe_render "${RECEIPT_PATH}") could not be removed, so it still records an audit this run could not repeat"
+        RECEIPT_FAILED=1
+      else
+        RECEIPT_RETIRED="$RECEIPT_PATH"
+      fi
+    fi
+  elif [ -n "$RECEIPT_PATH" ]; then
     mkdir -p "$(dirname "$RECEIPT_PATH")" 2>/dev/null
     # `mktemp` in the destination directory rather than a predictable
     # "${RECEIPT_PATH}.tmp.$$": a plain `>` follows a symlink pre-planted at a
@@ -1015,6 +1081,13 @@ else
       rm -f "$tmp_receipt" 2>/dev/null
     fi
   fi
+fi
+
+if [ -n "$GIT_FAULT" ]; then
+  RETIRED_CLAUSE=""
+  [ -z "$RECEIPT_RETIRED" ] || RETIRED_CLAUSE="; the earlier receipt at $(render_claim_value "$RECEIPT_RETIRED") was removed"
+  emit "EDIT LANDING AUDIT FAULT — $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT"). This is a git fault, not a verdict about any claim: no claim was graded and no receipt was written${RETIRED_CLAUSE}. Resolve the git error, then re-run the audit."
+  exit 2
 fi
 
 # Two DIFFERENT failures, two different exit codes, because the caller acts on them

@@ -62,6 +62,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 | `user-prompt-best-solution-first.sh` | directive | directive | directive |
 | `user-prompt-context-nudge.sh` | once per band | once per band | once per band |
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
+| `user-prompt-session-hub-receipt.sh` | silent; writes a receipt only for the Session Hub's exact takeover command | silent | silent |
 
 Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note is

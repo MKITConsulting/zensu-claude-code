@@ -212,8 +212,7 @@ the capped and uncapped arms then agree. A new cap needs a fixture count above i
 
 **Test-side couplings, which break silently rather than loudly:** the manifest
 entry in `tests/profiles/promptfoo-local-only.v1.json` (`run-all.sh` refuses to
-execute at all when the manifest and the directory disagree) together with the
-counts in `tests/SUITE-OVERVIEW.md`; and the grep-exact literals
+execute at all when the manifest and the directory disagree); and the grep-exact literals
 of the secure-open inventory in `tests/structure/test-windows-portability-guards.sh` —
 which is also the ONLY Windows pin any part of this module has, since
 `test-artifact-redaction.sh` has no `windows-ci.v1.json` entry and the `\Users\<seg>`
@@ -222,6 +221,11 @@ rule and the `msysSpelling` inverse are therefore exercised on POSIX only
 and the mechanism-2 consumer list in the header of
 `tests/structure/test-msys-special-plugin-module-boundaries.sh`, which stays true
 only while a new module-transport consumer is added to it.
+
+**A test-side coupling that breaks LOUDLY, named apart from that list:** the suite totals in
+`tests/SUITE-OVERVIEW.md` follow the manifest, but they are generated, and
+`test-unit-registry.sh` fails until `node tests/structure/lib-unit-registry.js render --write`
+regenerates them.
 
 **Port-relevant.** The core half is `redact` / `redactFile` / `writeArtifactLine` /
 `resolveArtifactTarget` / `sweepTargets` / `projectRootFromArtifactPath` /
