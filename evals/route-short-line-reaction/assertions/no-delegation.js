@@ -1,8 +1,7 @@
 'use strict';
 
 const { parse, firstEnd } = require('../lib/envelope.js');
-
-const MUTATION = /(^|[\s;&|/])zensu(?:\s+--?[\w-]+(?:=\S+)?)*\s+(?:[a-z][\w-]*\s+)?(create|update|delete|set|add|remove|link|import|move)\b/;
+const { MUTATION } = require('../lib/decision-probe.js');
 
 module.exports = (output) => {
   const cut = firstEnd(parse(output));

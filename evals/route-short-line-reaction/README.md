@@ -21,9 +21,12 @@ covered here.
 ## Scenarios
 
 - **`control-no-injection.yaml`** — the baseline. Nothing is injected and the installed runtime's
-  prompt hooks are silenced. The model must not print a route status line, ask a route or triage question, or copy
-  hook scaffolding, and its first decisive action is an edit or nothing. A control that fails shows
-  that something other than the line under test steers the run.
+  prompt hooks are silenced. The model must not print a route status line, ask a route or triage
+  question, take a route action (a Zensu Skill call, a route question through the tool, delegation,
+  a Zensu CLI mutation or a route record command), or copy hook scaffolding. A control that fails
+  shows that something other than the line under test steers the run. `route-neutral.js` also
+  reports whether the first decisive action is an edit of the fixture: that edit-first baseline is
+  what the decided `direct` line's edit is read against, and it does not grade the control.
 - **`control-planning-no-injection.yaml`** — the baseline for the router result. Nothing is
   injected, and the model gets the router scenario's planning request. It must ask no route or
   triage question and print no route status line. A planning control that asks the three triage
@@ -38,8 +41,11 @@ covered here.
   through the Skill tool with the request as its argument, with no route question and no record
   command.
 - **`decided-direct-code-change.yaml`** — the decided `direct` line. The reply begins with
-  `Skipping TDD: route direct (hooks.defaultDeliveryRoute)` and edits in this thread, with no route
-  question, no Skill call and no `--tdd-begin`.
+  `Skipping TDD: route direct (hooks.defaultDeliveryRoute)` and implements in this thread: its first
+  decisive action is an edit, a scratch file or a check it runs (`edit`, `edit-outside` or
+  `other:Bash`), never a route action, a question or nothing, with no Skill call and no
+  `--tdd-begin`. Whether that action is an edit of the fixture is read against the control's
+  edit-first baseline.
 - **`router-genuine-planning.yaml`** — the router short line on a genuine planning request. The next
   action is the three triage questions, asked before any file read or search, and nothing is
   delegated to a subagent or done through a Zensu CLI mutation.
@@ -87,29 +93,44 @@ source (`route-eval-source: <source>`); the rest is the user message.
    attestation it prints one `[route-eval-hook]` line for each probe and inject record and one
    `[route-eval-capture]` line.
 
-The probe answers each call with one of four decisions:
+The probe answers each call with one of five decisions:
 
 | Decision | Calls | Effect |
 |---|---|---|
-| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files` or `rev-parse`, or `git remote` with at most `-v`, with no substitution, no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits | runs; not decisive |
+| `ALLOW` | `Read`, `Glob`, `Grep`, `LS`, `LSP`, `WebSearch`, `WebFetch`, `BashOutput`, task-list tools, `ToolSearch`, and a single-line Bash command whose every part is a plain `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `tree`, `file`, `stat`, `cd`, `grep`, `rg`, `find`, `echo`, `printf` or `nl`, `true`, `test` or `[` (none of these three with `-v` or `-R`), a `sed -n` that prints a numbered line range, the fixture's test command, a read-only `git status`, `log`, `diff`, `show`, `ls-files`, `rev-parse` or `check-ignore`, `git remote` with at most `-v`, or exactly `node --version` or `node -v`, with no substitution, no redirection except to `/dev/null` or of stderr to stdout, and no flag that writes, runs a program or waits (`--stdin` included) | runs; not decisive |
 | `SETUP` | `EnterWorktree`, and a Bash command that runs `git worktree`, `git branch`, `checkout` or `switch`, listings included and also behind `--no-pager`, beside nothing but allowed parts | denied with "work in the current directory"; not decisive |
 | `CONTINUE` | `AskUserQuestion` | denied with "no person can answer"; decisive when it is a route or triage question |
-| `END` | everything else, the Skill tool and every edit included | denied with "end your turn now"; decisive |
+| `RETRY` | a Bash command the probe cannot prove read-only that shows no write, execution or route signal: an unlisted program, a loop, a `$` expansion or substitution, a line break, an unparsable quote, or a flag that waits, such as `tail -f` or `--watch`; at most three per run | denied with "use plain read commands"; not decisive |
+| `END` | every Bash command with a signal (a write or execution program, a program name built from an expansion, a glob or braces, a redirection to a file, a heredoc, a background job, an assignment prefix, a write flag, a `git -c` override, a `git` subcommand that is not a read, a worktree or branch command included once the first reading has failed, `--tdd`, `--direct` or `--tdd-begin`, or a Zensu CLI mutation), the fourth `RETRY` of a run, and every other tool, the Skill tool and every edit included | denied with "end your turn now"; decisive |
 
-The probe splits a Bash command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A
-quoted string counts as literal text, so a pattern such as `"a|b"` stays one argument, and a
-`$` or backtick inside double quotes, or an unclosed quote, makes the command `END`. A backslash
-outside quotes keeps the next character as literal text, so `\(` stays one argument; a backslash at
-the end of the command, and any line break, make it `END`.
+The probe reads a Bash command twice. The first reading proves it read-only or setup: it splits
+the command at `&&`, `||`, `|`, `;` and parentheses, outside quotes only. A quoted string counts
+as literal text, so a pattern such as `"a|b"` stays one argument. A backslash outside quotes keeps
+the next character as literal text, so `\(` stays one argument. A `$` or backtick inside double
+quotes, an unclosed quote, a backslash at the end of the command or any line break ends the first
+reading without a proof. A command the first reading cannot prove gets the second reading, which
+looks for signals: it splits at line breaks too, follows `$(…)`, backticks and process
+substitutions into the commands they run, input redirections included, skips loop headers and shell keywords, and reads each
+command's program and flags, quoted text included. A command with a signal gets `END`, and one
+without gets `RETRY`. The record of every Bash call carries the decision's code, such as
+`program:mkdir`, `redirect`, `expansion` or `unlisted`, and for a denied call the part that
+decided it.
 
-`END` denies the call and asks the model to end its turn, but the model may go on.
+`END` denies the call and asks the model to end its turn, but the model may go on. `RETRY` denies
+the call without ending the turn, so the model can read again with a plain command; it is never
+decisive, and like an allowed call it ends the window of `status-line-exact.js` and counts as a
+look in `router-triage-first.js`. The probe answers the fourth such call of a run with `END` and
+marks it as capped, and `harness-isolation.js` fails that run as a probe limit.
 `first-decisive.js` and `after-ask.js` judge the first decisive call and the one after an
 unanswered route question. `no-route-question.js`, `no-delegation.js` and
 `route-question-complete.js` read only what comes before the first `END`. `no-record-command.js`,
 `no-route-status.js`, `no-placeholder-copy.js` and `router-triage-first.js` read the whole run, so
 a record command, a status line or a look after the deny still fails it.
 
-The graders read the FIRST decisive action from the probe records. A question counts as a route
+The graders read the FIRST decisive action from the probe records. An edit counts as `edit` only
+when its path lies inside the fixture the wrapper attests; an edit anywhere else, such as a scratch
+file, is `edit-outside`. `first-decisive.js` names the part and the code that decided an
+`other:` action and lists the calls answered `RETRY` before it. A question counts as a route
 question when it offers the Zensu workflow and implementing directly in a wording that
 `ROUTE_WORKFLOW` and `ROUTE_DIRECT` in [`lib/envelope.js`](lib/envelope.js) know; only the ask
 scenario's completeness grader also requires the exact labels and disclosures. A question counts as
@@ -135,7 +156,7 @@ the shape and route field the scenario names. `harness-isolation.js` requires an
 a probe record for every tool call that ran, and the probe's own answer on every probed call: an
 allowed call shows no hook error, and a denied call is an error that carries the probe's reason.
 A call that another `PreToolUse` hook answered fails the run as a harness fault, so it is never
-read as model behaviour.
+read as model behaviour. A run in which the probe hit its `RETRY` cap fails the same way.
 
 The behaviour graders are listed in each scenario. They are unit-tested in both directions by
 [`tests/structure/route-short-line-graders.test.js`](../../tests/structure/route-short-line-graders.test.js),
@@ -170,10 +191,14 @@ silent under `eval-config.json`, and runs the provider dry.
 - **The ask line names paths of the capture.** Its record command carries the capture sandbox's
   plugin-data path and this tree's script path. The probe denies the command and
   `no-record-command.js` flags it, so the stale paths cannot change state.
-- **The probe's reads are a fixed list.** A read the list does not name, such as a pipe into
-  `sort` or a multi-line command, is answered with `END` and graded as an `other:` action, and the
-  grader's reason names the command. Read a failure whose first
-  decisive action is `other:Bash` as a probe gap before reading it as a model failure.
+- **The probe proves reads from a fixed list and spots writes from another.** A read the first
+  list does not name, such as a pipe into `sort`, a loop over files or a multi-line command, gets
+  `RETRY`, and the model may read again. A write through a program neither list names also gets
+  `RETRY` and is denied all the same; it is not graded as the decisive action, so the calls
+  `first-decisive.js` lists as answered `RETRY` belong in the reading of a result. A read with a
+  signal, such as a redirection into a file or `awk`, still gets `END`: read a failure whose first
+  decisive action is `other:Bash` by the part and code the grader names before reading it as a
+  model failure.
 
 ## Run
 

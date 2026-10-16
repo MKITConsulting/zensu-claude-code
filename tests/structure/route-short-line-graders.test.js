@@ -19,7 +19,7 @@ const TRIAGE = 'Is the code already built? Is there a plan or spec document? Doe
 const ATTESTED = { init_git: true, tracked_clean: true };
 const LIVE = { root: '/plugin', version: '0.25.0', silent_hooks: 6, leaks: 0, control_chars: 5690 };
 const CONTROL = { route_source: 'none', hook: '', shape: 'none', field: 'n/a', blocks: [], live: LIVE };
-const VERDICTS = ['skill:zensu:tdd', 'ask', 'edit', 'none', 'delegate', 'plan'];
+const VERDICTS = ['skill:zensu:tdd', 'ask', 'edit', 'edit-outside', 'other:Bash', 'none', 'delegate', 'plan'];
 
 function output(spec) {
   const s = spec || {};
@@ -187,12 +187,28 @@ test('the decisive action skips allowed calls, setup calls and clarifying questi
     [{ tool: 'Agent', decision: 'END' }, 'delegate'],
     [{ tool: 'EnterPlanMode', decision: 'END' }, 'plan'],
     [{ tool: 'Bash', decision: 'END', command: 'npm test' }, 'other:Bash'],
+    [{ tool: 'Bash', decision: 'RETRY', command: 'sort x' }, 'none'],
   ];
   for (const [last, want] of cases) assert.equal(envelope.decisive([...base, { id: 'd', ...last }]), want, want);
   assert.equal(envelope.decisive(base), 'none');
   const at = envelope.decisiveAt([{ tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }, { tool: 'Edit', decision: 'END' }], 1);
   assert.deepEqual([at.value, at.index], ['edit', 1]);
+  const retried = [{ tool: 'Bash', decision: 'RETRY', command: 'sort x' }, { tool: 'Read', decision: 'ALLOW' }, { tool: 'Bash', decision: 'RETRY', command: 'jq . y' }, { tool: 'Edit', decision: 'END' }];
+  assert.deepEqual([envelope.decisiveAt(retried, 0).value, envelope.decisiveAt(retried, 0).index], ['edit', 3]);
+  assert.deepEqual(envelope.retriedBefore(retried, 3).map((r) => r.command), ['sort x', 'jq . y']);
+  assert.deepEqual(envelope.retriedBefore(retried.slice(0, 3), -1).map((r) => r.command), ['sort x', 'jq . y']);
 });
+
+test('an edit counts as edit only inside the attested fixture', () => {
+  const root = '/private/tmp/claude-eval-AB12';
+  const inside = ['/private/tmp/claude-eval-AB12/src/cart.js', '/tmp/claude-eval-AB12/src/cart.js', 'src/cart.js', './src/cart.js'];
+  const outside = ['/private/tmp/zensu-rt.x/scratchpad/check.js', '/private/tmp/claude-eval-AB12x/a.js', '../a.js', '~/a.js', '/private/tmp/claude-eval-AB12/../other/a.js'];
+  for (const file of inside) assert.equal(envelope.decisive([{ tool: 'Write', decision: 'END', path: file }], root), 'edit', file);
+  for (const file of outside) assert.equal(envelope.decisive([{ tool: 'Write', decision: 'END', path: file }], root), 'edit-outside', file);
+  assert.equal(envelope.decisive([{ tool: 'Edit', decision: 'END', path: '/anywhere/a.js' }]), 'edit');
+  assert.equal(envelope.decisive([{ tool: 'Edit', decision: 'END' }], root), 'edit');
+});
+
 
 test('firstEnd keeps only what came before the result of the first denied call', () => {
   const e = envelope.parse(output({
@@ -255,8 +271,8 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'git diff --ext-diff' }, 'END'],
     ['Bash', { command: 'ls; rm -rf src' }, 'END'],
     ['Bash', { command: 'cat src/cart.js > copy.js' }, 'END'],
-    ['Bash', { command: 'cat $(echo src/cart.js)' }, 'END'],
-    ['Bash', { command: 'lsof -i' }, 'END'],
+    ['Bash', { command: 'cat $(echo src/cart.js)' }, 'RETRY'],
+    ['Bash', { command: 'lsof -i' }, 'RETRY'],
     ['Bash', { command: 'git status && git commit -am x' }, 'END'],
     ['Bash', { command: 'git worktree add .claude/worktrees/x -b claude/x' }, 'SETUP'],
     ['Bash', { command: 'git checkout -b feature' }, 'SETUP'],
@@ -269,7 +285,7 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'cd src' }, 'ALLOW'],
     ['Bash', { command: 'git status && git log --oneline -3' }, 'ALLOW'],
     ['Bash', { command: 'find . -delete' }, 'END'],
-    ['Bash', { command: 'npm test -- --watch' }, 'END'],
+    ['Bash', { command: 'npm test -- --watch' }, 'RETRY'],
     ['Bash', { command: 'rg -n x --pre cat' }, 'END'],
     ['Bash', { command: 'echo hi' }, 'ALLOW'],
     ['Bash', { command: 'touch src/new.js' }, 'END'],
@@ -291,7 +307,7 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'echo "a \\"quoted\\" word" && ls' }, 'ALLOW'],
     ['Bash', { command: 'echo "`rm -rf src`"' }, 'END'],
     ['Bash', { command: "echo $'\\x41'" }, 'END'],
-    ['Bash', { command: 'cat "src/cart.js' }, 'END'],
+    ['Bash', { command: 'cat "src/cart.js' }, 'RETRY'],
     ['Bash', { command: "find . -ex''ec rm {} +" }, 'END'],
     ['Bash', { command: 'git diff --out"put"=patch.txt' }, 'END'],
     ['Bash', { command: '(rm -rf src)' }, 'END'],
@@ -322,11 +338,11 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'find . \\( -name a -o -name b \\)' }, 'ALLOW'],
     ['Bash', { command: 'find . -exec rm {} \\;' }, 'END'],
     ['Bash', { command: 'find . \\-exec rm {} +' }, 'END'],
-    ['Bash', { command: 'ls \\' }, 'END'],
+    ['Bash', { command: 'ls \\' }, 'RETRY'],
     ['Bash', { command: 'ec\\ho hi' }, 'ALLOW'],
-    ['Bash', { command: "grep -n 'cartTotal\nshipping' src/cart.js" }, 'END'],
-    ['Bash', { command: 'echo "a\nb"' }, 'END'],
-    ['Bash', { command: 'echo "a\\\nb"' }, 'END'],
+    ['Bash', { command: "grep -n 'cartTotal\nshipping' src/cart.js" }, 'RETRY'],
+    ['Bash', { command: 'echo "a\nb"' }, 'RETRY'],
+    ['Bash', { command: 'echo "a\\\nb"' }, 'RETRY'],
     ['Bash', { command: "cat src/cart.js # let's read it\nrm -rf src" }, 'END'],
     ['Bash', { command: 'git branch feature' }, 'SETUP'],
     ['Bash', { command: 'git branch -D main' }, 'SETUP'],
@@ -335,14 +351,55 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['Bash', { command: 'git -C . worktree add x' }, 'SETUP'],
     ['Bash', { command: 'git -C . status' }, 'ALLOW'],
     ['Bash', { command: 'git status\ngit checkout -b feat' }, 'END'],
-    ['Bash', { command: 'pwd\nnode --test src/' }, 'END'],
+    ['Bash', { command: 'pwd\nnode --test src/' }, 'RETRY'],
     ['Bash', { command: 'cat\nrm -rf ~/x' }, 'END'],
     ['Bash', { command: 'ls src 2>/dev/null' }, 'ALLOW'],
     ['Bash', { command: 'node --test src/ 2>&1 | tail -5' }, 'ALLOW'],
     ['Bash', { command: 'cat src/cart.js | head -40' }, 'ALLOW'],
     ['Bash', { command: 'ls 2>/dev/nullx' }, 'END'],
-    ['Bash', { command: 'tail -f log' }, 'END'],
-    ['Bash', { command: 'tail --follow=name log' }, 'END'],
+    ['Bash', { command: 'tail -f log' }, 'RETRY'],
+    ['Bash', { command: 'tail --follow=name log' }, 'RETRY'],
+    ['Bash', { command: 'git check-ignore -v .zensu .verify-runtime 2>/dev/null' }, 'ALLOW'],
+    ['Bash', { command: 'git check-ignore --stdin' }, 'RETRY'],
+    ['Bash', { command: 'cat package.json && node --version' }, 'ALLOW'],
+    ['Bash', { command: 'node -v' }, 'ALLOW'],
+    ['Bash', { command: 'npm --version' }, 'RETRY'],
+    ['Bash', { command: 'npm version patch' }, 'END'],
+    ['Bash', { command: 'node -e "console.log(1)"' }, 'END'],
+    ['Bash', { command: 'node scripts/check.js' }, 'END'],
+    ['Bash', { command: 'cat package.json | sort' }, 'RETRY'],
+    ['Bash', { command: 'sort -o out.txt package.json' }, 'END'],
+    ['Bash', { command: 'jq .scripts package.json' }, 'RETRY'],
+    ['Bash', { command: 'which node && command -v npm' }, 'RETRY'],
+    ['Bash', { command: 'command rm -rf src' }, 'END'],
+    ['Bash', { command: 'env' }, 'RETRY'],
+    ['Bash', { command: 'env X=1 ls' }, 'END'],
+    ['Bash', { command: 'LC_ALL=C grep -n cartTotal src/cart.js' }, 'END'],
+    ['Bash', { command: 'for f in src/*.js; do wc -l "$f"; done' }, 'RETRY'],
+    ['Bash', { command: 'for f in $(rm -rf src); do cat "$f"; done' }, 'END'],
+    ['Bash', { command: 'cat <<EOF\nx\nEOF' }, 'END'],
+    ['Bash', { command: 'echo x | python3' }, 'END'],
+    ['Bash', { command: './scripts/setup.sh' }, 'END'],
+    ['Bash', { command: '/bin/cat src/cart.js' }, 'RETRY'],
+    ['Bash', { command: 'zensu feature list' }, 'RETRY'],
+    ['Bash', { command: 'zensu feature create --title Cart' }, 'END'],
+    ['Bash', { command: 'git stash' }, 'END'],
+    ['Bash', { command: 'git blame src/cart.js' }, 'RETRY'],
+    ['Bash', { command: 'git worktree list\ngit status' }, 'END'],
+    ['Bash', { command: 'sleep 5' }, 'RETRY'],
+    ['Bash', { command: 'cat src/cart.js &' }, 'END'],
+    ['Bash', { command: 'cat src/cart.js > /dev/null' }, 'ALLOW'],
+    ['Bash', { command: 'printf "%s" "$HOME"' }, 'RETRY'],
+    ['Bash', { command: 'echo "a -> b" | cat' }, 'ALLOW'],
+    ['Bash', { command: 'grep -n x src/cart.js | awk "{print $1}"' }, 'END'],
+    ['Bash', { command: 'diff <(cat a) <(cat b)' }, 'RETRY'],
+    ['Bash', { command: 'tee >(cat) < src/cart.js' }, 'END'],
+    ['Bash', { command: 'cat src/cart.js 2>&1 | head' }, 'ALLOW'],
+    ['Bash', { command: 'ls &>out.txt' }, 'END'],
+    ['Bash', { command: 'bash /p/hooks/lib/zensu-delivery-route.sh --tdd' }, 'END'],
+    ['Bash', { command: 'echo --tdd-begin | head' }, 'ALLOW'],
+    ['Bash', { command: 'jq . x --tdd-begin' }, 'END'],
+    ['Bash', { command: '# just a note' }, 'END'],
     ['WebSearch', {}, 'ALLOW'],
     ['LSP', {}, 'ALLOW'],
     ['mcp__server__tool', {}, 'END'],
@@ -357,13 +414,285 @@ test('the probe decides by tool and, for Bash, by command', () => {
     ['', {}, 'END'],
   ];
   for (const [tool, input, want] of cases) assert.equal(probe.decide(tool, input), want, `${tool} ${JSON.stringify(input)}`);
-  assert.deepEqual(['ALLOW', 'CONTINUE', 'SETUP', 'END'].map(probe.reasonFor), [probe.END_REASON, probe.CONTINUE_REASON, probe.SETUP_REASON, probe.END_REASON]);
+  assert.deepEqual(['ALLOW', 'CONTINUE', 'SETUP', 'RETRY', 'END'].map(probe.reasonFor), [probe.END_REASON, probe.CONTINUE_REASON, probe.SETUP_REASON, probe.RETRY_REASON, probe.END_REASON]);
   assert.doesNotMatch(probe.CONTINUE_REASON, /continue/i);
+  assert.doesNotMatch(probe.RETRY_REASON, /end your turn/i);
   assert.deepEqual(probe.record('Skill', { skill: 'zensu:tdd', args: 'Add discountPercent' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd', args: 'Add discountPercent' });
   assert.deepEqual(probe.record('Skill', { skill: 'zensu:tdd' }, 's1', 'END'), { id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' });
   assert.equal(probe.record('Skill', { skill: 'x', args: 'a'.repeat(500) }, 's1', 'END').args.length, 500);
   assert.equal(probe.record('Skill', { skill: 'x', args: 'a'.repeat(5000) }, 's1', 'END').args.length, 4001);
   assert.equal(probe.record('Bash', { command: 'ls', args: 'x' }, 'b1', 'ALLOW').args, undefined);
+});
+
+test('the probe reads a Bash command it cannot prove for signals, and names the code and the part that decided it', () => {
+  const observed = [
+    ['for f in package.json src/cart.js src/cart.test.js; do echo "===== $f ====="; cat -n "$f"; done; echo "===== .zensu tree ====="; find .zensu -maxdepth 3 | head -50', 'RETRY', 'expansion'],
+    ['cat package.json && echo "---" && cat src/cart.test.js && echo "---" && find .zensu .verify-feature-runtime .verify-runtime -maxdepth 3 2>/dev/null | head -50 && echo "---" && cat .gitignore 2>/dev/null; git check-ignore -v .zensu .verify-runtime .verify-feature-runtime 2>/dev/null; git status --short --ignored', 'ALLOW', 'read'],
+    ['echo "--- package.json:" && cat -n package.json && echo "--- .zensu tree:" && find .zensu -maxdepth 3 -not -name \'hook-events.log\' | head -50 && echo "--- node/npm:" && node --version && npm --version && ls node_modules 2>/dev/null | head', 'RETRY', 'unlisted'],
+    ["mkdir -p /tmp/run/scratchpad && cat > /tmp/run/scratchpad/formula-check.js <<'EOF'\n'use strict';\nconst A = (s, p) => s * (1 - p / 100);\nEOF\nnode /tmp/run/scratchpad/formula-check.js", 'END', 'program:mkdir'],
+    ['cat package.json && echo "---" && cat src/cart.test.js && echo "---" && node --version', 'ALLOW', 'read'],
+  ];
+  for (const [command, decision, code] of observed) {
+    const verdict = probe.bashVerdict(command);
+    assert.deepEqual([verdict.decision, verdict.code], [decision, code], command);
+  }
+  assert.equal(probe.bashVerdict('npm --version').part, 'npm --version');
+  assert.deepEqual(probe.bashVerdict('cat src/cart.js > copy.js'), { decision: 'END', code: 'redirect', part: '> copy.js' });
+  assert.deepEqual(probe.bashVerdict('ls && rm -rf src'), { decision: 'END', code: 'program:rm', part: 'rm -rf src' });
+  assert.deepEqual(probe.bashVerdict('echo "$(git commit -am x)"'), { decision: 'END', code: 'git:commit', part: 'git commit -am x' });
+  assert.equal(probe.bashVerdict('ls `touch x`').code, 'program:touch');
+  assert.equal(probe.bashVerdict('git diff --out"put"=patch.txt').code, 'flag:--output');
+  assert.equal(probe.bashVerdict("echo $'\\x72\\x6d'").code, 'ansi-c');
+  assert.equal(probe.bashVerdict('pwd\nls').code, 'multi-line');
+  assert.equal(probe.bashVerdict('cat "src/cart.js').code, 'unparsed');
+  assert.deepEqual(probe.bashVerdict('git status && git worktree list'), { decision: 'SETUP', code: 'setup', part: '' });
+  assert.deepEqual(probe.bashVerdict(''), { decision: 'END', code: 'empty', part: '' });
+  assert.deepEqual(probe.verdictFor('Read', {}), { decision: 'ALLOW' });
+  assert.deepEqual(probe.record('Bash', { command: 'sort x' }, 'b1', 'RETRY', probe.bashVerdict('sort x')), { id: 'b1', tool: 'Bash', decision: 'RETRY', command: 'sort x', code: 'unlisted', part: 'sort x' });
+  assert.equal(probe.record('Bash', { command: 'x' }, 'b1', 'END', { code: 'unlisted', part: 'p'.repeat(500) }).part.length, 201);
+  assert.equal(probe.record('Bash', { command: 'x' }, 'b1', 'END', { code: 'unlisted', part: 'p', cap: true }).cap, true);
+  assert.equal(require(path.join(EVAL, 'assertions', 'no-delegation.js')).MUTATION, probe.MUTATION);
+});
+
+test('the probe answers the fourth RETRY of a run with a capped END', () => {
+  const dir = tempDir('route-eval-retry-');
+  try {
+    const call = (id, command, env) => spawnSync(process.execPath, [path.join(EVAL, 'lib', 'decision-probe.js')], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_use_id: id, tool_input: { command } }), env: { ...process.env, ZENSU_ROUTE_EVAL_DIR: dir, ...env }, encoding: 'utf8',
+    });
+    const reasons = [['b1', 'sort a'], ['b2', 'cat src/cart.js'], ['b3', 'sort b'], ['b4', 'jq . c'], ['b5', 'sort d']].map(([id, command]) => {
+      const r = call(id, command);
+      assert.equal(r.status, 0);
+      return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason : 'allowed';
+    });
+    assert.equal(probe.RETRY_CAP, 3);
+    assert.deepEqual(reasons, [probe.RETRY_REASON, 'allowed', probe.RETRY_REASON, probe.RETRY_REASON, probe.END_REASON]);
+    const log = fs.readFileSync(path.join(dir, 'hook.log'), 'utf8').trim().split('\n').map((line) => JSON.parse(line.slice('probe '.length)));
+    assert.deepEqual(log.map((r) => [r.seq, r.decision, r.code, r.cap === true]), [[1, 'RETRY', 'unlisted', false], [2, 'ALLOW', 'read', false], [3, 'RETRY', 'unlisted', false], [4, 'RETRY', 'unlisted', false], [5, 'END', 'unlisted', true]]);
+    const loose = call('b6', 'sort e', { ZENSU_ROUTE_EVAL_DIR: '' });
+    assert.equal(JSON.parse(loose.stdout).hookSpecificOutput.permissionDecisionReason, probe.RETRY_REASON);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the second reading ends every write, run and route command the review tried, and no plain read', () => {
+  const writes = [
+    "for f in a; do rm -rf \"$f\"; done",
+    "zensu feature \"create\" --title X",
+    "rg -n x . > out.txt",
+    "git -c alias.x=\"!rm -rf src\" x",
+    "git log --output=x",
+    "git diff --output x",
+    "find . -fprint x",
+    "npm pkg set name=x",
+    "node --eval \"require('fs').writeFileSync('a','b')\"",
+    "node -p 1",
+    "node --require ./x.js --test",
+    "node --test --test-reporter-destination=out.txt",
+    "node --test --test-update-snapshots",
+    "cat src/cart.js | tee x",
+    "echo x >| file",
+    "exec 3>file",
+    "{ echo x; } > file",
+    "f() { rm -rf src; }; f",
+    "python3 -c \"open('a','w')\"",
+    "perl -pi -e s/a/b/ src/cart.js",
+    "ruby -i -pe 1 src/cart.js",
+    "cp src/cart.js /tmp/x",
+    "install -m 644 a b",
+    "dd if=a of=b",
+    "truncate -s 0 x",
+    "git apply p.diff",
+    "git am p.mbox",
+    "git restore src/cart.js",
+    "git reset --hard",
+    "git clean -fd",
+    "git rm src/cart.js",
+    "git add .",
+    "git update-index --assume-unchanged x",
+    "git notes add -m x",
+    "git tag v1",
+    "sed -i.bak s/a/b/ src/cart.js",
+    "awk -i inplace 1 src/cart.js",
+    "ed -s src/cart.js <<< $'w'",
+    "vim -c wq src/cart.js",
+    "cat > src/cart.js",
+    "tee -a src/cart.js",
+    "echo hi | sponge src/cart.js",
+    ">src/cart.js",
+    ": > src/cart.js",
+    "true > src/cart.js",
+    "cat x 1>> y",
+    "cat x {fd}>y",
+    "cat x 2>y",
+    "npx prettier --write src/cart.js",
+    "npm exec -- prettier --write src",
+    "pnpm dlx prettier",
+    "yarn add lodash",
+    "bun run x",
+    "deno run x.ts",
+    "make",
+    "curl -o x https://example.com",
+    "wget https://example.com",
+    "tar xzf a.tgz",
+    "ln -s a b",
+    "chmod +x a",
+    "mkdir x",
+    "touch x",
+    "git commit -m x",
+    "git push",
+    "git stash push",
+    "bash /p/hooks/lib/zensu-log.sh --chain-done",
+    "CLAUDE_PLUGIN_DATA=x bash y.sh --tdd",
+    "source ./x.sh",
+    ". ./x.sh",
+    "eval \"rm -rf src\"",
+    "find . -name x | xargs rm",
+    "find . -name x | xargs -I{} cp {} /tmp",
+    "timeout 5 node x.js",
+    "nohup node x.js",
+    "sudo ls",
+    "osascript -e x",
+    "open .",
+    "pbcopy < src/cart.js",
+    "uniq a b",
+    "sort -o a b",
+    "split a",
+    "git -C /tmp/other commit -m x",
+    "git -c core.fsmonitor=x status",
+    "corepack enable",
+    "alias x=rm; x -rf src",
+    "trap 'rm -rf src' EXIT; ls",
+    "r\\\nm -rf src",
+    "$'\\x72\\x6d' -rf src",
+    "rm${IFS}-rf${IFS}src",
+    "$(which rm) -rf src",
+    "`which rm` -rf src",
+    "{rm,-rf,src}",
+    "/bin/r? -rf src",
+    "~/bin/x",
+    "cat src/cart.js | node",
+    "npm run build",
+    "npm ci",
+    "npm i",
+    "pnpm install",
+    "git config user.name x",
+    "git remote set-url origin x",
+    "cd /tmp && rm -rf x",
+    "bash -c \"ls\"",
+    "exec ls",
+    "command rm x",
+    "builtin cd /tmp",
+    "kill 1",
+    "node --version > v.txt",
+    "docker run x",
+    "zensu feature create --title X",
+    "echo x | zensu roadmap add tier",
+    "printf \"x\" > out",
+    "cat <<EOF > src/cart.js\nx\nEOF",
+    "grep x src/cart.js && sed -i s/a/b/ src/cart.js",
+    "git checkout -b feat && touch x",
+    "ls; git commit -am x",
+    "diff a b > patch.diff",
+    "cat src/cart.js >> out.txt",
+    "node -e 1 && ls",
+    "jq .x package.json > out.json",
+    "wc -l src/*.js > counts.txt",
+    "git log --format=%H -1 | xargs git show",
+    "env X=1 node x.js",
+    "LC_ALL=C sort a",
+    "X=1",
+    "ls && X=1 git commit -m y",
+    "awk '{print > \"f\"}' a",
+    "gawk 1 a",
+    "perl -ne print a",
+    "ruby -e 1",
+    "npm config set x y",
+    "cat <<< \"$(rm -rf src)\"",
+    "[[ -v x ]]",
+  ];
+  const reads = [
+    "git remote -v | sort",
+    "ls -la",
+    "cat package.json",
+    "cat -n src/cart.js",
+    "head -40 src/cart.js",
+    "sed -n 1,40p src/cart.js",
+    "grep -rn cartTotal .",
+    "rg cartTotal",
+    "find . -name \"*.js\" -not -path \"./node_modules/*\"",
+    "git status --short",
+    "git log --oneline -5",
+    "git diff",
+    "git ls-files",
+    "git check-ignore -v .zensu",
+    "node --version",
+    "node -v",
+    "npm --version",
+    "npm test",
+    "node --test",
+    "cat package.json | jq .scripts",
+    "cat src/cart.js | sort | uniq -c",
+    "wc -l src/*.js",
+    "tree -L 2",
+    "stat src/cart.js",
+    "file src/cart.js",
+    "ls src | sort",
+    "for f in src/*.js; do echo \"== $f\"; cat \"$f\"; done",
+    "while read l; do echo \"$l\"; done < src/cart.js",
+    "grep -c x src/cart.js || true",
+    "[ -f package.json ] && cat package.json",
+    "[[ -f package.json ]] && cat package.json",
+    "test -d src && ls src",
+    "git blame -L 1,10 src/cart.js",
+    "git show HEAD:src/cart.js",
+    "git log -p -1 -- src/cart.js | head -50",
+    "cat src/cart.js src/cart.test.js | wc -l",
+    "diff src/cart.js src/cart.test.js",
+    "cmp a b",
+    "basename src/cart.js",
+    "dirname src/cart.js",
+    "realpath src/cart.js",
+    "which node",
+    "command -v node",
+    "type node",
+    "uname -a",
+    "date",
+    "pwd && ls",
+    "echo \"$PWD\"",
+    "printf \"%s\\n\" \"$(pwd)\"",
+    "cat package.json | head -20 | tail -5",
+    "ls -la .zensu 2>/dev/null || echo none",
+    "cat src/cart.js | grep -n \"SHIPPING\"",
+    "grep -n \"a > b\" src/cart.js",
+    "echo \"--- a -> b ---\"",
+    "sort package.json",
+    "cut -d: -f1 /etc/passwd | head",
+    "tr a-z A-Z < src/cart.js",
+    "node --test src/ 2>&1 | tail -20",
+    "git rev-parse --show-toplevel",
+    "npm ls --depth=0",
+    "cat .gitignore; git status --ignored --short",
+    "ls -1 src | while read f; do wc -l \"src/$f\"; done",
+    "git --no-pager diff --stat",
+    "git log --oneline | head",
+    "du -sh .",
+    "ps aux | head -3",
+    "env",
+    "hostname",
+    "whoami",
+    "npm config get registry",
+    "pnpm why lodash",
+    "uniq -c a",
+    "cat <<< \"plain text\"",
+  ];
+  for (const command of writes) assert.equal(probe.bashDecision(command), 'END', command);
+  for (const command of reads) assert.notEqual(probe.bashDecision(command), 'END', command);
+  assert.deepEqual(probe.bashVerdict('$(which rm) -rf src'), { decision: 'END', code: 'program:expanded', part: '$(…) -rf src' });
+  assert.equal(probe.bashVerdict('cat <<< "$(rm -rf src)"').code, 'program:rm');
+  assert.equal(probe.bashVerdict('git -c core.fsmonitor=x status').code, 'git:-c');
+  assert.equal(probe.bashVerdict('[[ -f package.json ]] && cat package.json').decision, 'RETRY');
 });
 
 test('the probe flattens a question into one bounded line', () => {
@@ -493,12 +822,18 @@ test('harness-isolation fails a run in which another hook or the tool itself ans
   assert.equal(passes('harness-isolation', run('ALLOW', 'Read', { error: true, summary: 'File does not exist.' })), true);
   assert.equal(passes('harness-isolation', run('ALLOW', 'Read', { error: true, summary: gate })), false);
   assert.equal(passes('harness-isolation', run('ALLOW', 'Read', { summary: gate })), true);
-  for (const decision of ['SETUP', 'CONTINUE', 'END']) {
+  for (const decision of ['SETUP', 'CONTINUE', 'RETRY', 'END']) {
     assert.equal(passes('harness-isolation', run(decision, 'Bash', { error: true, summary: own(decision) })), true, decision);
     assert.equal(passes('harness-isolation', run(decision, 'Bash', { error: true, summary: gate })), false, decision);
     assert.equal(passes('harness-isolation', run(decision, 'Bash', { summary: own(decision) })), false, decision);
   }
   assert.equal(passes('harness-isolation', run('SETUP', 'Bash', { error: true, summary: own('END') })), false);
+  assert.equal(passes('harness-isolation', run('RETRY', 'Bash', { error: true, summary: own('END') })), false);
+  const capped = output({
+    blocks: [{ use: 'Bash', id: 'c1' }, { result: 'Bash', id: 'c1', error: true, summary: own('END') }],
+    probe: [{ id: 'c1', tool: 'Bash', decision: 'END', command: 'sort z', code: 'unlisted', cap: true }],
+  });
+  assert.equal(grade('harness-isolation', capped).reason, "the probe answered RETRY 3 times and then ended the run at call #1 (sort z), so the run measures the probe's read list, not the model");
   const reason = grade('harness-isolation', run('ALLOW', 'Read', { error: true, summary: gate })).reason;
   assert.match(reason, /^1 call\(s\) did not get the probe's answer/);
   assert.match(reason, /Read #1 \(ALLOW\): PreToolUse:Read hook error: \[bash/);
@@ -565,7 +900,55 @@ test('first-decisive grades the first decisive action against the scenario allow
   assert.equal(grade('first-decisive', touched, control).reason, 'first decisive action other:Bash (touch src/new.js); allowed edit | none');
   const edited = output({ probe: [{ id: 'e1', tool: 'Edit', decision: 'END', path: 'src/cart.js' }] });
   assert.equal(grade('first-decisive', edited, control).reason, 'first decisive action edit; allowed edit | none');
+  const attestation = { ...ATTESTED, root: '/private/tmp/claude-eval-AB12' };
+  const scratch = output({ attestation, probe: [{ id: 'w1', tool: 'Write', decision: 'END', path: '/private/tmp/zensu-rt.x/scratchpad/check.js' }] });
+  assert.equal(grade('first-decisive', scratch, direct).reason, 'first decisive action edit-outside (/private/tmp/zensu-rt.x/scratchpad/check.js); allowed edit');
+  assert.equal(passes('first-decisive', output({ attestation, probe: [{ id: 'e1', tool: 'Edit', decision: 'END', path: '/tmp/claude-eval-AB12/src/cart.js' }] }), direct), true);
+  const named = output({ probe: [
+    { id: 'b1', tool: 'Bash', decision: 'RETRY', command: 'cat package.json | sort', code: 'unlisted', part: 'sort' },
+    { id: 'b2', tool: 'Bash', decision: 'END', command: 'cat package.json && mkdir -p tmp', code: 'program:mkdir', part: 'mkdir -p tmp' },
+  ] });
+  assert.equal(grade('first-decisive', named, control).reason, 'first decisive action other:Bash (mkdir -p tmp) [program:mkdir]; allowed edit | none; answered RETRY before it: cat package.json | sort');
+  const cappedEnd = output({ probe: [{ id: 'b1', tool: 'Bash', decision: 'END', command: 'sort z', code: 'unlisted', part: 'sort z', cap: true }] });
+  assert.equal(grade('first-decisive', cappedEnd, control).reason, 'first decisive action other:Bash (sort z) [unlisted, RETRY cap]; allowed edit | none');
+  const implementing = { ...direct, allowed_first: 'edit,edit-outside,other:Bash' };
+  const check = output({ probe: [{ id: 'b1', tool: 'Bash', decision: 'END', command: 'node -e 1', code: 'program:node', part: 'node -e 1' }] });
+  assert.deepEqual([passes('first-decisive', check, implementing), passes('first-decisive', scratch, implementing)], [true, true]);
+  assert.deepEqual([passes('first-decisive', skillRun('Executing.'), implementing), passes('first-decisive', output({}), implementing), passes('first-decisive', output({ probe: [{ id: 't1', tool: 'Task', decision: 'END' }] }), implementing)], [false, false, false]);
+  const retriedOnly = output({ probe: [{ id: 'b1', tool: 'Bash', decision: 'RETRY', command: 'sort y' }] });
+  assert.equal(grade('first-decisive', retriedOnly, control).reason, 'first decisive action none; allowed edit | none; answered RETRY before it: sort y');
 });
+
+test('route-neutral fails a route action with nothing injected and reports the edit-first baseline otherwise', () => {
+  const run = (records, attestation) => output({ probe: records, ...(attestation ? { attestation } : {}) });
+  const routed = [
+    [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:tdd' }], 'skill:zensu:tdd'],
+    [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'zensu:bootstrap' }], 'skill:zensu:bootstrap'],
+    [[{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: ROUTE_QUESTION }], 'ask:route'],
+    [[{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: TRIAGE }], 'ask:triage'],
+    [[{ id: 't1', tool: 'Task', decision: 'END' }], 'delegate'],
+    [[{ id: 'b1', tool: 'Bash', decision: 'END', command: 'zensu feature create --title Cart' }], 'zensu-mutation'],
+  ];
+  for (const [records, got] of routed) {
+    const verdict = grade('route-neutral', run(records));
+    assert.deepEqual([verdict.pass, verdict.reason], [false, `with nothing injected the first decisive action is a route action: ${got}`]);
+  }
+  const attestation = { ...ATTESTED, root: '/private/tmp/claude-eval-AB12' };
+  const neutral = [
+    [[{ id: 'e1', tool: 'Edit', decision: 'END', path: '/private/tmp/claude-eval-AB12/src/cart.js' }], 'route-neutral; edit-first baseline yes: first decisive action edit'],
+    [[{ id: 'w1', tool: 'Write', decision: 'END', path: '/private/tmp/zensu-rt.x/scratchpad/check.js' }], 'route-neutral; edit-first baseline no: first decisive action edit-outside (/private/tmp/zensu-rt.x/scratchpad/check.js)'],
+    [[{ id: 'b1', tool: 'Bash', decision: 'END', command: 'mkdir -p x && cat > x/a.js', part: 'mkdir -p x' }], 'route-neutral; edit-first baseline no: first decisive action other:Bash (mkdir -p x)'],
+    [[{ id: 'b1', tool: 'Bash', decision: 'RETRY', command: 'sort x' }], 'route-neutral; edit-first baseline no: first decisive action none'],
+    [[{ id: 'q1', tool: 'AskUserQuestion', decision: 'CONTINUE', question: 'Which currency?' }], 'route-neutral; edit-first baseline no: first decisive action none'],
+    [[{ id: 's1', tool: 'Skill', decision: 'END', skill: 'frontend-design:frontend-design' }], 'route-neutral; edit-first baseline no: first decisive action skill:frontend-design:frontend-design'],
+    [[{ id: 'p1', tool: 'EnterPlanMode', decision: 'END' }], 'route-neutral; edit-first baseline no: first decisive action plan'],
+  ];
+  for (const [records, reason] of neutral) {
+    const verdict = grade('route-neutral', run(records, attestation));
+    assert.deepEqual([verdict.pass, verdict.reason], [true, reason]);
+  }
+});
+
 
 test('after-ask lets an unanswered route question end the run or start the workflow, never an edit', () => {
   const asked = { id: 'q', tool: 'AskUserQuestion', decision: 'CONTINUE', question: COMPLETE_ROUTE_QUESTION };

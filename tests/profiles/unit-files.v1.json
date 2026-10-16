@@ -145,7 +145,7 @@
       "summary": "Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds."
     },
     {
-      "path": "tests/structure/route-short-line-graders.test.js", "registered": 33,
+      "path": "tests/structure/route-short-line-graders.test.js", "registered": 38,
       "runs": [{ "driver": "tests/structure/test-route-short-line-eval.sh" }],
       "summary": "The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions."
     },

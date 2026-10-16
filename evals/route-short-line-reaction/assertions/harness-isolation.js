@@ -1,7 +1,7 @@
 'use strict';
 
 const { parse, pairs, resultOf } = require('../lib/envelope.js');
-const { reasonFor } = require('../lib/decision-probe.js');
+const { reasonFor, RETRY_CAP } = require('../lib/decision-probe.js');
 
 const HOOK_ERROR = /^PreToolUse:\S+ hook error:/;
 
@@ -28,6 +28,8 @@ module.exports = (output) => {
     if (result && !answeredByProbe(record, result)) foreign.push(`${use.name} #${record.seq} (${record.decision}): ${result.text.split('\n')[0].slice(0, 160)}`);
   }
   if (foreign.length) return fail(`${foreign.length} call(s) did not get the probe's answer, so another hook or the tool itself decided them: ${foreign.join('; ')}`);
+  const capped = e.probe.find((r) => r.cap);
+  if (capped) return fail(`the probe answered RETRY ${RETRY_CAP} times and then ended the run at call #${capped.seq} (${String(capped.command || '').slice(0, 120)}), so the run measures the probe's read list, not the model`);
   const by = e.probe.length > 0 && e.probe.every((r) => r.id) ? 'id' : 'position';
   return { pass: true, score: 1, reason: `isolated; ${e.probe.length} probed calls paired by ${by} and answered by the probe; fixture unchanged` };
 };

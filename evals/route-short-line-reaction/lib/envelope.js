@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('node:path');
+
 const HEADER = '===== wrapper attestation =====';
 const ATTESTATION_PREFIX = '[wrapper_attestation] ';
 const HOOK_PREFIX = '[route-eval-hook] ';
@@ -161,27 +163,45 @@ function proseAsk(prose, hook) {
   return hook === 'reminder' && t.split(SENTENCE).some((s) => asking(s) && offersRoute(s));
 }
 
-function verdictOf(record) {
+function canonical(file) {
+  return path.posix.normalize(String(file).replace(/^\/private(?=\/(tmp|var)\/)/, ''));
+}
+
+function insideFixture(file, root) {
+  if (!root || !file) return true;
+  const target = String(file);
+  if (target.startsWith('~')) return false;
+  if (!target.startsWith('/')) return !/^\.\.(\/|$)/.test(path.posix.normalize(target));
+  const base = canonical(root).replace(/\/+$/, '');
+  const at = canonical(target);
+  return at === base || at.startsWith(`${base}/`);
+}
+
+function verdictOf(record, root) {
   if (record.tool === 'AskUserQuestion') return classifyQuestion(record.question) === 'clarify' ? null : 'ask';
   if (record.tool === 'Skill') return `skill:${record.skill || ''}`;
-  if (EDIT_TOOLS.includes(record.tool)) return 'edit';
+  if (EDIT_TOOLS.includes(record.tool)) return insideFixture(record.path, root) ? 'edit' : 'edit-outside';
   if (record.tool === 'Task' || record.tool === 'Agent') return 'delegate';
   if (record.tool === 'EnterPlanMode') return 'plan';
   return `other:${record.tool}`;
 }
 
-function decisiveAt(probe, from) {
+function decisiveAt(probe, from, root) {
   for (let i = from || 0; i < probe.length; i += 1) {
     const r = probe[i];
-    if (r.decision === 'ALLOW' || r.decision === 'SETUP') continue;
-    const value = verdictOf(r);
+    if (r.decision === 'ALLOW' || r.decision === 'SETUP' || r.decision === 'RETRY') continue;
+    const value = verdictOf(r, root);
     if (value) return { value, index: i, record: r };
   }
   return { value: 'none', index: -1, record: null };
 }
 
-function decisive(probe) {
-  return decisiveAt(probe, 0).value;
+function decisive(probe, root) {
+  return decisiveAt(probe, 0, root).value;
+}
+
+function retriedBefore(probe, index) {
+  return probe.slice(0, index < 0 ? probe.length : index).filter((r) => r.decision === 'RETRY');
 }
 
 function firstEnd(e) {
@@ -268,8 +288,10 @@ module.exports = {
   classifyQuestion,
   proseAsk,
   askingText,
+  insideFixture,
   decisive,
   decisiveAt,
+  retriedBefore,
   firstEnd,
   firstLine,
   openingLines,

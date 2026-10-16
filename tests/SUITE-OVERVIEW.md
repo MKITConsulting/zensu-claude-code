@@ -407,7 +407,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/review-round-scope-v1.test.js` | 24 | – | `test-incremental-review-rounds.sh` | Delta-scoped review rounds: which files and findings a fix round reviews. |
 | `structure/reviewer-spawn-allow-v1.test.js` | 20 | – | `test-reviewer-spawn-allow.sh` | The reviewer-spawn grant: the derived agent set, its silence on every non-grant path and the one-definition scan. |
 | `structure/reviewer-spawn-denial-v1.test.js` | 37 | win32 2 | `test-stop-enforcer-self-review-routing.sh` | Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds. |
-| `structure/route-short-line-graders.test.js` | 33 | – | `test-route-short-line-eval.sh` | The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions. |
+| `structure/route-short-line-graders.test.js` | 38 | – | `test-route-short-line-eval.sh` | The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions. |
 | `structure/rule-block-v1.test.js` | 10 | win32 2 | `test-best-solution-first.sh` | The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals. |
 | `structure/session-adopt-report-v1.test.js` | 59 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
 | `structure/session-auto-adopt-v1.test.js` | 44 | – | `test-versioned-plugin-upgrade.sh` | Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock. |
