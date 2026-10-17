@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-17
+
+### Added
+
+- **hooks**: Send each prompt contract in full once per context generation (#419)
+- **review**: Add an independent second judge run and two cross-cutting reviewer rules (#457)
+- **verify-feature**: Verify every kind of application through nine drivers (#383)
+- **capability**: Grant named neutral subagents a guarded Bash inside the allowlist (#446)
+
+### Changed
+
+- **clock-shift**: Put the five allowlisted file-time tests on one clock (#462)
+- **external-review**: Set the recent staged copy's mtime from the injected clock (#461)
+- **structure**: Let one registry own every unit file's declared facts (#460)
+- **pulse**: State that Pulse never records error messages (#438)
+- **windows**: Move versioned-plugin-upgrade to the front of windows-shard-7 (#451)
+- Correct the Windows shell support statement (#447)
+- Fix the Windows shell-guard cases and TL8's negative delta (#448)
+- **session-control**: Raise the run.sh floor to the measured win32 count (#444)
+- **session-trail**: Resolve id selectors without indexing every transcript (#443)
+- **session-trail**: Correct the oneLine comments that predate its boundText delegation (#441)
+- **session-trail**: Correct what takeover --json adds over the brief (#442)
+- **work-order**: Skip the work-order suites on native Windows (#437)
+- **changelog**: List #430 and #436 in the 0.26.0 notes (#440)
+
+### Fixed
+
+- **hooks**: Close the review-handoff, gate-timeout, banner and guidance gaps (#409)
+- **external-review**: Stage the review template inside the working directory (#454)
+- **capability**: Refuse quoted helper paths and detached tmux or screen sessions (#456)
+- **edit-landing**: Place a <project>-redacted claim like its absolute spelling (#455)
+- **hooks**: Read the hook payload from stdin in five hooks (#450)
+- **session-trail**: Resolve a forked session's worktree and branch from its own records (#445)
+- **session-control**: Hold a kernel-exclusive holder marker for win32 lock liveness (#433)
+- **session-trail**: Stop index rewrites, fsmonitor hooks and diff drivers in the source worktree (#439)
+
 ### Upgrade notes
 
 - **subagent shell**: a neutral subagent that reports an `agent_type` (`Explore`,
