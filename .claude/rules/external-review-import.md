@@ -196,9 +196,12 @@ pins the step-3 recipe and the `docs/review-chain.md` sentence, and `X7d`, `X9d`
 drive the verb, whose copy `X7` and `X7b` then launch and import. The `degraded`
 status lives in `STATUSES`, step 3's `On ok or degraded` and the docs. The output file reaches
 the module as `ZENSU_XR_RESULT`, which is in the MSYS exclusions, and `zensu-host-path.sh`
-converts only its directory. Four tests of the unit file sit in
-`tests/profiles/clock-shift-allowlist.v1.json` with the `file-mtime` dependency: the wait
-counter sweep and the restored-mtime freshness check compare kernel-set times with `Date.now()`.
+converts only its directory. No test of the unit file is on
+`tests/profiles/clock-shift-allowlist.v1.json`: every sweep test sets each mtime the sweep
+reads from the clock the sweep is given, after the last write to that file, and the
+restored-mtime freshness test injects launch times read from a file the kernel just stamped,
+because no call can set a ctime. Both sides of each comparison stay on one clock when `Date`
+is shifted.
 
 **Known gaps.**
 
