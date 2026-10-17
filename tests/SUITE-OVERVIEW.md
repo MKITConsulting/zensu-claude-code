@@ -545,7 +545,8 @@ The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo pro
   processes that are not node (`git`, `date`), file mtimes and any node child whose
   environment drops `NODE_OPTIONS` or `ZENSU_TEST_CLOCK_SHIFT_DAYS` stay on the real clock.
   A test that compares a file mtime, a git date or a lease age with `Date.now()` therefore
-  fails under the shift by design; the allowlist names each such test with its dependency
+  fails under the shift unless it moves both sides onto one clock, as `tests/README.md`
+  describes; the allowlist names each test that cannot, with its dependency
   (`file-mtime`, `git-date` or `lease-staleness`).
 - 5 eval directories are not wired into any `run-all.sh` mode
   (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`,
