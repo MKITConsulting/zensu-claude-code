@@ -413,7 +413,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/session-adopt-report-v1.test.js` | 59 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
 | `structure/session-auto-adopt-v1.test.js` | 44 | – | `test-versioned-plugin-upgrade.sh` | Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock. |
 | `structure/session-control-lineage.test.js` | 13 | – | `test-versioned-plugin-upgrade.sh` | The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root. |
-| `structure/session-hub-receipt-v1.test.js` | 12 | – | `test-session-hub-receipt.sh` | The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields. |
+| `structure/session-hub-receipt-v1.test.js` | 13 | – | `test-session-hub-receipt.sh` | The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields. |
 | `structure/session-lineage-v1.test.js` | 78 | root 2, win32 17 | `test-session-trail-lineage.sh` | The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk. |
 | `structure/session-reanchor-v1.test.js` | 67 | win32 1 | `test-session-reanchor.sh` | Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason. |
 | `structure/subagent-shell-guard-v1.test.js` | 25 | win32 2 | `test-reviewer-capability-gate.sh` | The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings. |

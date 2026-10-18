@@ -179,7 +179,7 @@
       "summary": "The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root."
     },
     {
-      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 12,
+      "path": "tests/structure/session-hub-receipt-v1.test.js", "registered": 13,
       "runs": [{ "driver": "tests/structure/test-session-hub-receipt.sh" }],
       "summary": "The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields."
     },
