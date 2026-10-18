@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **session-trail linked sessions**: a takeover now continues the old session's open linked
+  sessions, the sessions it started in Claude Desktop. Both briefs list them under *Linked
+  sessions*, read from the records in the old session's Claude Desktop folder, each with its kind,
+  whether it is started and why not, and the `start_session` call that starts it; `takeover --json`
+  carries them as `linkedSessions`. The plan confirmation names them, and after the yes the session
+  that takes over starts each side and task-chip session in that same turn, at most eight per
+  takeover, so that Claude links it to the new session. Each started session takes its old
+  counterpart over and confirms its own plan with its own user. A user fork starts only when the
+  user names it; a side question (`btw`), a session over SSH, a detached session and one that a
+  confirmed lineage edge already continues stay behind. The briefs also quote the newest eight
+  reports the linked sessions queued that the old session never read (*Reports not yet read*,
+  `unreadReports` under `--json`). `skills/session-trail/handover-contract.json` declares the
+  capability as `linkedSessions` with the lineage ledger's directory and schema, and leaves
+  `takeover.contract` at 1, so every current Zensu Session Hub keeps accepting the plugin.
+
 ## [0.27.0] - 2026-10-17
 
 ### Added
