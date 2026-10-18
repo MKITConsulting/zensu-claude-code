@@ -109,6 +109,7 @@
     "test-session-control-core.sh",
     "test-session-control-sandbox-hook-integration.sh",
     "test-session-hub-receipt.sh",
+    "test-session-hub-usage-feed.sh",
     "test-session-id-v1.sh",
     "test-session-reanchor.sh",
     "test-session-start-banner.sh",

@@ -302,5 +302,6 @@
         ]
       }
     ]
-  }
+  },
+  "modules": ["./usage-feed.ts"]
 }
