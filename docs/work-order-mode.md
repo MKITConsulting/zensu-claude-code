@@ -78,11 +78,14 @@ decision made later reaches the next session of the order, not the running one.
 
 ## The tool hooks
 
-`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools, both
-Claude Desktop session tools (`spawn_task` and `start_session`), a raw push, opening or merging a
-pull request outside the helpers, `zensu auth`,
-the `zensu work` and `zensu plan` verbs a worker session must not call, the usual spellings that
-print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`,
+`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools; every
+Claude Desktop session tool except the four that neither start nor move work (`dismiss_task`,
+`mark_chapter`, `list_start_targets` and `read_widget_context`), so `spawn_task`, `start_session`,
+`hand_off_to_session`, `move_to_cloud` and any session tool a later Claude Desktop adds are denied;
+`mcp__ccd_session_mgmt__send_message`, which asks another session to take work up; a raw
+`git push`; `gh pr create`, `glab mr create`, `gh pr merge` and `glab mr merge`; `zensu auth`;
+the `zensu work` and `zensu plan` verbs a worker session must not call; the usual spellings that
+print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`;
 and `--api-url` on `zensu`. Each denial says why and, where a helper verb does the job, names it. Once the lease is lost, or while Zensu refused it and a send without an answer still waits for its replay, it also denies every forge command. It renews the lease when due
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.
@@ -180,6 +183,12 @@ raw output to a file there; nothing else keeps it.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not
   judged; the worker's slot sandbox, not the gate, is the boundary.
+- The gate judges forge writes only in Bash command text, and tools by name only on the Claude
+  Desktop session servers. An MCP tool that pushes, opens or merges a pull request is not judged,
+  nor is `RemoteTrigger`, which can create and run a remote routine, nor `SendMessage`, which can
+  ask another running session to take work up and stays allowed because it also continues the
+  session's own subagents. The slot's MCP configuration, its permission mode and the host's own
+  rules are the boundary there.
 - `--start` releases only runs of the same order. A nonterminal run of another order in a reused
   checkout still holds the new run off, and the session ends with a stated reason.
 - Zensu records `zensu-cli` and the CLI version as the client of every question and follow-up,
