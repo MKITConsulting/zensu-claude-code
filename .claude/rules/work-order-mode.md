@@ -76,6 +76,20 @@ process, never inside a bound session, and it loads the digested runtime from `h
 only production caller, so removing or renaming the module breaks the launcher, not only a test. `test-harness-launcher.sh` H12 drives the
 module's unit file.
 
+**The gate denies both Claude Desktop session tools by name**: `mcp__ccd_session__spawn_task` and
+`mcp__ccd_session__start_session` (`CHIP_TOOLS` in `hooks/lib/work-order-v1.js`), with the `chip`
+reason, which names `zensu work followup <order>`. Nobody in a work order clicks a card or answers
+an offer, and a session started from one runs outside the order's lease. Claude Desktop 2.42304.0
+replaced the task chip with a `start_session` proposal (read from its bundle on 2026-10-18), so a
+deny of `spawn_task` alone left the work skill's "never open a task chip" rule unguarded there.
+Claude Desktop supplies both tools itself, so a work-order session the launcher starts with
+`claude -p` has neither; the deny guards a work order bound inside a Claude Desktop session.
+Adding a name to `CHIP_TOOLS` changes no matcher (the gate matches `.*`), adds no hook and moves
+no schema, so it ships as a `patch`. `test-work-order-gates.sh` G4 and the gate case in
+`work-order-v1.test.js` pin both names. `skills/work/references/protocol.md`, the tool-hooks
+section of `docs/work-order-mode.md` and the gate row of `docs/configuration.md` name both tools
+too, and no test reads those sentences, so they move with `CHIP_TOOLS` by hand.
+
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.

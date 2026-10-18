@@ -23,8 +23,8 @@ skill needs a work order id.
 ## Rules that hold for the whole session
 
 - **No person in the loop.** Never call `AskUserQuestion`, `EnterPlanMode` or `ExitPlanMode`, and
-  never open a task chip. A question goes to Zensu (see "Questions"); a follow-up idea goes to Zensu
-  as a follow-up.
+  never open a task chip or start or propose another session. A question goes to Zensu (see
+  "Questions"); a follow-up idea goes to Zensu as a follow-up.
 - **The token is not yours to read.** Never print, echo, unset or override `ZENSU_SESSION_TOKEN`,
   never run `env`, `printenv` or `set`, and never run `zensu auth`. The helpers read the token from
   the environment themselves.

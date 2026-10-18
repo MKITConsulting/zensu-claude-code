@@ -70,8 +70,9 @@ next tool call.
 
 ## The tool hooks
 
-`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools and the
-task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
+`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools, both
+Claude Desktop session tools (`spawn_task` and `start_session`), a raw push, opening or merging a
+pull request outside the helpers, `zensu auth`,
 the `zensu work` and `zensu plan` verbs a worker session must not call, and every command that
 prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`. Each denial says why and, where a helper
 verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
