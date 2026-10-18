@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unreadReports` under `--json`). `skills/session-trail/handover-contract.json` declares the
   capability as `linkedSessions` with the lineage ledger's directory and schema, and leaves
   `takeover.contract` at 1, so every current Zensu Session Hub keeps accepting the plugin.
+- **Claude Code 2.1.296**: the plugin now requires Claude Code 2.1.296 or newer, because it
+  ships a hooks module beside its classic hooks. An older Claude Code skips the module and still
+  runs every classic hook and skill. Measured on 2.1.280 with the plugin installed from a
+  marketplace, the skip prints nothing into `claude -p` output and is named only in the
+  `--debug-file` log.
+- **usage feed**: the new `hooks/usage-feed.ts` module writes the session's rate-limit reading
+  for the Zensu Session Hub, and only while `<config root>/zensu/session-hub/v1/usage/` already
+  exists (`CLAUDE_CONFIG_DIR` when it names an absolute path, else `~/.claude`). The Session Hub
+  creates that directory; the module never does, so nothing is written without the Hub. Each
+  `<session id>.json` holds the schema version, the session id, the time of the reading and, per
+  rate-limit window, its name, the percentage used and the reset time, nothing else. It is
+  written when Claude Code measures the session after a response, at the end of every turn, and
+  whenever a window moves; never when a session starts and never while it is idle. The
+  record shape is the contract in `hooks/usage-feed-contract.json`. The module uses Claude Code's
+  early-access hooks module API, which Anthropic can switch off for installed plugins; the feed
+  then writes nothing and the Session Hub keeps reading limits from Claude's usage popover.
 - **session-trail task chips**: a takeover now carries the old session's open task chips over as
   Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
   session is released, each chip the brief marks **propose** gets one `start_session` call with
