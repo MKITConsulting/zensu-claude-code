@@ -1358,7 +1358,7 @@ reset_ledger
 # between the two reads them.
 TDZ_TREE="$(mktemp -d -t zensu-tdz-XXXXXX)"
 mkdir -p "$TDZ_TREE/skills/session-trail/scripts"
-cp "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$TDZ_TREE/skills/session-trail/scripts/" 2>/dev/null
+cp "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$TDZ_TREE/skills/session-trail/scripts/" 2>/dev/null
 TDZ_OUT="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$TDZ_TREE/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
 case "$TDZ_OUT" in *ReferenceError*) check "L46 a tree without hooks/lib does not crash before its own diagnostic" FAIL ;; *) check "L46 a tree without hooks/lib does not crash before its own diagnostic" PASS ;; esac
 case "$TDZ_OUT" in *"plugin tree is incomplete"*) check "L46a and the authored diagnostic is what the user actually sees" PASS ;; *) check "L46a the authored diagnostic is what the user sees (got ${TDZ_OUT:-<empty>})" FAIL ;; esac

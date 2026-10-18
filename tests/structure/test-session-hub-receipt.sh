@@ -32,7 +32,7 @@ bash -n "$HOOK" 2>/dev/null && check "R1 the hook passes bash -n" PASS || check 
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "R2 the session-hub-receipt unit file passes" "$UNIT"
 
-WANT_CONTRACT='{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1}}'
+WANT_CONTRACT='{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}}'
 GOT_CONTRACT="$(cat "$CONTRACT" 2>/dev/null)"
 GOT_BYTES="$(wc -c < "$CONTRACT" 2>/dev/null | tr -d ' ')"
 if [ "$GOT_CONTRACT" = "$WANT_CONTRACT" ] && [ "$GOT_BYTES" = "$(( ${#WANT_CONTRACT} + 1 ))" ]; then
