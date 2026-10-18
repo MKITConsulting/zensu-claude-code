@@ -108,6 +108,7 @@ else
   check "WT-unit-cases the cases that can skip in worktree-advice-v1.test.js drifted (source has $WT_UNIT_SKIP_CASES, the registry allows ${WT_UNIT_SKIP_CASES_WANT:-<unreadable>})" FAIL
 fi
 
+unit_check "LS-unit the linked-sessions unit file passes, its two guarded cases included" "$PLUGIN_DIR/tests/structure/linked-sessions-v1.test.js"
 unit_check "PL-unit the prompt-listing unit file passes, its five guarded cases included" "$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_FILE="$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_PULLBACKS="$(sed -n "s/^const QUEUE_PULLBACKS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
@@ -2605,7 +2606,7 @@ writes_block() { grep -E -A4 '^WRITES' || true; }
 mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
-  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
+  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
   cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
@@ -5622,7 +5623,7 @@ else
   cont_mutant() { # <tag> -> path to place the mutated trail.mjs at
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
-    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
+    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
@@ -7277,6 +7278,175 @@ if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH
 else
   check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
 fi
+
+LS_HOME="$FAKE/ls-home"
+LS_ACCT=acc11111-0000-4000-8000-000000000001
+LS_STORE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/$LS_ACCT/org-0001"
+LS_SELF_STORE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/acc22222-0000-4000-8000-000000000002/org-0002"
+LS_ROOT=e1e1e1e1-0000-4000-8000-000000000001
+LS_SELF=5e1f5e1f-0000-4000-8000-000000000001
+mkdir -p "$LS_STORE" "$LS_SELF_STORE" "$LS_HOME/.claude/zensu/session-lineage/v1/edges"
+HOME="$LS_HOME" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, selfStore, rootCli, selfCli, acct] = process.argv.slice(1);
+const repo = path.join(home, "work", "repo");
+const iso = new Date(Date.now() - 3600000).toISOString();
+const dir = path.join(home, ".claude", "projects", repo.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, `${rootCli}.jsonl`), [
+  JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: repo, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: repo, isSidechain: false, timestamp: iso }),
+].join("\n") + "\n");
+const rootRun = "local_e1e1e1e1-1111-4111-8111-000000000001";
+const run = (n) => `local_${String(n).padStart(8, "0")}-1111-4111-8111-${String(n).padStart(12, "0")}`;
+const cli = (n) => `c1c1c1c1-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const put = (folder, o) => fs.writeFileSync(path.join(folder, `${o.sessionId}.json`), JSON.stringify(o));
+const esc = String.fromCharCode(27);
+const tick = "```";
+const notes = Array.from({ length: 10 }, (_, i) => ({ sessionId: run(70 + i), title: `note ${i}`, report: `report ${i}`, body: i === 9 ? `body 9\n${tick}\nfenced${esc}[2K` : `body ${i}`, at: 1760000000000 + i * 1000, batch: 1 }));
+put(store, { sessionId: rootRun, cliSessionId: rootCli, isArchived: false, title: "linked root", originCwd: repo, cwd: repo, createdAt: 1, queuedSideSessionNotes: notes });
+const child = (n, extra = {}, from = {}) => put(store, { sessionId: run(n), cliSessionId: cli(n), isArchived: false, title: `linked ${n}`, originCwd: repo, cwd: repo, createdAt: 1760000000000 + n * 1000, ...extra, spawnedFrom: { sessionId: rootRun, taskId: `task_${n}`, title: `spawned ${n}`, sideSession: true, ...from } });
+const below = (n, parent, created) => put(store, { sessionId: run(n), cliSessionId: cli(n), isArchived: false, title: `linked ${n}`, originCwd: repo, createdAt: created, spawnedFrom: { sessionId: run(parent), taskId: `task_${n}`, title: "below", sideSession: true } });
+child(1, { title: `Alpha${esc}[2K side` }, { name: "alpha" });
+child(2, {}, { sideSession: undefined });
+child(3, {}, { userFork: true });
+child(4, {}, { userFork: true, btw: true });
+child(5, { isArchived: true });
+below(51, 5, 1760000099000);
+child(6, { lineageDetached: true });
+below(61, 6, 1760000098000);
+child(7, { sshConfig: { host: "box" } });
+child(8);
+child(9, { originCwd: path.join(home, "work", "other") });
+child(10, { startedFromEnvironmentId: "aaaaaaaa-0000-4000-8000-000000000001" });
+child(11, {}, { sharedCheckout: true });
+for (const n of [12, 13, 14, 15]) child(n);
+below(16, 12, 1760000097000);
+fs.writeFileSync(path.join(store, "local_corrupt.json"), "{\"spawnedFrom\": not json");
+fs.writeFileSync(path.join(home, "Library", "Application Support", "Claude", "ccd-session-presets.json"), JSON.stringify({ byAccount: { [acct]: { presets: [{ id: "aaaaaaaa-0000-4000-8000-000000000001", name: "Env Fixture", target: { kind: "local", cwd: repo } }] } } }));
+const edges = path.join(home, ".claude", "zensu", "session-lineage", "v1", "edges");
+const edge = (name, from, confidence) => fs.writeFileSync(path.join(edges, name), JSON.stringify({ schemaVersion: 1, from: { sessionId: from }, to: { sessionId: "d1d1d1d1-0000-4000-8000-000000000001" }, confidence, inferred: false, reason: "manual", recordedAt: "2026-10-17T10:00:00.000Z" }));
+edge("1760000000001-fixture.json", cli(8), "confirmed");
+edge("1760000000002-fixture.json", cli(13), "provisional");
+const selfRun = "local_5e1f5e1f-1111-4111-8111-000000000001";
+put(selfStore, { sessionId: selfRun, cliSessionId: selfCli, isArchived: false, title: "continuing parent", originCwd: repo, createdAt: 2 });
+put(selfStore, { sessionId: "local_5e1f5e1f-1111-4111-8111-000000000002", cliSessionId: "5e1f5e1f-0000-4000-8000-000000000002", isArchived: false, title: "started already", originCwd: repo, createdAt: 3, spawnedFrom: { sessionId: selfRun, taskId: "task_s", title: "started already", sideSession: true, name: "cont-00000014" } });
+' "$LS_HOME" "$LS_STORE" "$LS_SELF_STORE" "$LS_ROOT" "$LS_SELF" "$LS_ACCT" 2>/dev/null
+lsrun() { local self="$1"; shift; env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="$self" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+ls_eval() {
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+let o;
+try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const pick = (n) => o.linkedSessions.sessions.find((e) => e.run === `local_${String(n).padStart(8, "0")}-1111-4111-8111-${String(n).padStart(12, "0")}`) || {};
+const v = Function("o", "pick", "path", "home", "return (" + process.argv[2] + ");")(o, pick, path, process.argv[3]);
+process.stdout.write(typeof v === "object" ? JSON.stringify(v) : String(v));
+' "$1" "$2" "$LS_HOME"
+}
+lsrun "" takeover "$LS_ROOT" --all --no-record --json > "$LS_HOME/ls.json" 2>/dev/null
+lsrun "$LS_SELF" takeover "$LS_ROOT" --all --no-record --json > "$LS_HOME/ls-self.json" 2>/dev/null
+LS_MD="$(lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+LS_HO="$(lsrun "" handoff "$LS_ROOT" --all 2>/dev/null)"
+LS_SEQ="1,2,3,4,7,8,9,10,11,12,13,14,15,51"
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.measured + ":" + o.linkedSessions.total + ":" + o.linkedSessions.sessions.map((e) => Number(e.run.slice(6, 14))).join(",")')"
+[ "$LS_GOT" = "true:14:$LS_SEQ" ] && check "LS1 takeover --json lists the open linked sessions from the records in the old session's folder, in creation order, and none below an open one" PASS || check "LS1 linked-session read: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[1, 2, 3, 4].map((n) => [pick(n).kind, pick(n).decision, pick(n).why, Boolean(pick(n).start)].join(":")).join(" ")')"
+[ "$LS_GOT" = "side:start::true task:start::true fork:if-named:fork:true btw:stays:btw:false" ] && check "LS2 side and task-chip sessions start, a user fork starts only when named, and a btw stays" PASS || check "LS2 linked-session kinds: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.archived + ":" + pick(51).throughArchived + ":" + Boolean(pick(5).run)')"
+[ "$LS_GOT" = "1:true:false" ] && check "LS3 the walk passes through an archived linked session and lists its open child, never the archived one" PASS || check "LS3 archived walk: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.detached + ":" + Boolean(pick(6).run) + ":" + Boolean(pick(61).run)')"
+[ "$LS_GOT" = "1:false:false" ] && check "LS4 a detached linked session and the one below it are never listed" PASS || check "LS4 detached skip: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.cap + ":" + o.linkedSessions.sessions.filter((e) => e.decision === "start").length + ":" + [15, 51].map((n) => pick(n).decision + "/" + pick(n).why + "/" + Boolean(pick(n).start)).join(",")')"
+[ "$LS_GOT" = "8:8:later/cap/true,later/cap/true" ] && check "LS5 at most eight start in creation order, and the rest wait for a later message with their start calls" PASS || check "LS5 start cap: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[8, 13].map((n) => [pick(n).continued, pick(n).decision, pick(n).why].join("/")).join(",")')"
+[ "$LS_GOT" = "true/stays/continued,false/start/" ] && check "LS6 a confirmed lineage edge keeps a linked session from starting again, and a provisional one does not" PASS || check "LS6 already continued: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls-self.json" '[14, 15, 51].map((n) => pick(n).decision + "/" + pick(n).why).join(",")')"
+[ "$LS_GOT" = "stays/started,start/null,later/cap" ] && check "LS7 a linked session the running session already started under its cont- handle is not started twice" PASS || check "LS7 started guard: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.unreadable + ":" + (o.skipped >= 1)')"
+if [ "$LS_GOT" = "1:true" ] && printf '%s\n' "$LS_MD" | grep -qxF '_1 record(s) in its Claude Desktop folder could not be read, so a linked session may be missing below._'; then
+  check "LS8 an unreadable record in the old session's folder is counted and named in the brief" PASS
+else
+  check "LS8 unreadable record: $LS_GOT" FAIL
+fi
+
+LS_NONE_JSON="$FAKE/ls-none.json"
+trailrun takeover "$CH_NONE_SID" --all --no-record --no-git --json > "$LS_NONE_JSON" 2>/dev/null
+LS_GOT="$(node -e '
+const o = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write([o.linkedSessions.measured, o.linkedSessions.reason, o.linkedSessions.sessions.length, o.unreadReports.measured, o.unreadReports.reason].join(":"));
+' "$LS_NONE_JSON" 2>/dev/null)"
+if [ "$LS_GOT" = "false:Claude Desktop holds no record for this session:0:false:Claude Desktop holds no record for this session" ] \
+  && printf '%s\n' "$CH_NONE_MD" | grep -qxF '_Not read: Claude Desktop holds no record for this session. If that session ran in Claude Desktop, ask the user to look in its window for linked sessions._'; then
+  check "LS9 a session without a desktop record reports its linked sessions and reports as not read instead of as none" PASS
+else
+  check "LS9 missing record: $LS_GOT" FAIL
+fi
+
+LS_BAD=""
+LS_AT_CHIPS="$(printf '%s\n' "$LS_MD" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+LS_AT_LINKED="$(printf '%s\n' "$LS_MD" | grep -nxF '## Linked sessions' | head -1 | cut -d: -f1)"
+LS_AT_REPORTS="$(printf '%s\n' "$LS_MD" | grep -nxF '## Reports not yet read' | head -1 | cut -d: -f1)"
+LS_AT_RECENT="$(printf '%s\n' "$LS_MD" | grep -nF '## Recent instructions' | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_CHIPS" ] && [ -n "$LS_AT_LINKED" ] && [ -n "$LS_AT_REPORTS" ] && [ -n "$LS_AT_RECENT" ] \
+  && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_RECENT" ] \
+  || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_RECENT"
+printf '%s\n' "$LS_MD" | grep -qF '**14 open linked session(s)**: 8 marked **start**, 1 marked **if named**, 2 marked **later**, 3 marked **stays**.' || LS_BAD="$LS_BAD tally-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'Start them in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'never more than 8 in one takeover, with `initiation` `user_asked`, `context` `fresh`, `use_worktree` true and neither `source_branch` nor `branch_name`' || LS_BAD="$LS_BAD call-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Linked session 1: start' || LS_BAD="$LS_BAD heading-absent"
+printf '%s\n' "$LS_MD" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
+printf '%s\n' "$LS_MD" | grep -qxF 'Alpha[2K side' || LS_BAD="$LS_BAD title-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/zensu:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset` only when `list_start_targets` lists a local preset of exactly this name' || LS_BAD="$LS_BAD preset-absent"
+printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac' || LS_BAD="$LS_BAD ssh-why-absent"
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')" = "1" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')"
+case "$LS_MD" in *"$(printf '\033')"*) LS_BAD="$LS_BAD esc-survived" ;; esac
+[ -z "$LS_BAD" ] && check "LS10 the takeover brief carries the linked sessions between the chips and the reports, with the start instruction and each start call in fences" PASS || check "LS10 takeover brief linked sessions:$LS_BAD" FAIL
+
+LS_BAD=""
+printf '%s\n' "$LS_MD" | grep -qF '**10 report(s) from linked sessions that the old session never read; the newest 8 follow.**' || LS_BAD="$LS_BAD lead-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Report 8' || LS_BAD="$LS_BAD eighth-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Report 9' && LS_BAD="$LS_BAD ninth-rendered"
+printf '%s\n' "$LS_MD" | grep -qxF 'note 1' && LS_BAD="$LS_BAD oldest-rendered"
+printf '%s\n' "$LS_MD" | grep -qxF 'note 9' || LS_BAD="$LS_BAD newest-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '````text' || LS_BAD="$LS_BAD fence-not-widened"
+printf '%s\n' "$LS_MD" | grep -qxF 'fenced[2K' || LS_BAD="$LS_BAD control-not-stripped"
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.unreadReports.total + ":" + o.unreadReports.reports.length + ":" + o.unreadReports.reports.map((r) => r.title).join(",")')"
+[ "$LS_GOT" = "10:8:note 2,note 3,note 4,note 5,note 6,note 7,note 8,note 9" ] || LS_BAD="$LS_BAD json=$LS_GOT"
+[ -z "$LS_BAD" ] && check "LS11 the reports the old session never read carry the newest eight, in time order and fenced like chip text" PASS || check "LS11 unread reports:$LS_BAD" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[pick(9).start.cwd === path.join(home, "work", "other"), pick(1).start.cwd === undefined, pick(10).preset.name, "preset" in pick(10).start, pick(11).sharedCheckout, pick(11).start.use_worktree, pick(7).why].join(":")')"
+[ "$LS_GOT" = "true:true:Env Fixture:false:true:true:ssh" ] && check "LS12 cwd is passed only for another repository, a saved environment is named from the account presets, a shared checkout gets its own worktree and SSH stays" PASS || check "LS12 start places: $LS_GOT" FAIL
+
+LS_BAD=""
+LS_AT_CHIPS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+LS_AT_LINKED="$(printf '%s\n' "$LS_HO" | grep -nxF '## Linked sessions' | head -1 | cut -d: -f1)"
+LS_AT_REPORTS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Reports not yet read' | head -1 | cut -d: -f1)"
+LS_AT_THREADS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Open threads' | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_CHIPS" ] && [ -n "$LS_AT_LINKED" ] && [ -n "$LS_AT_REPORTS" ] && [ -n "$LS_AT_THREADS" ] \
+  && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_THREADS" ] \
+  || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_THREADS"
+printf '%s\n' "$LS_HO" | grep -qF 'Start them in the turn in which the user confirmed your plan, before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_HO" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
+[ -z "$LS_BAD" ] && check "LS13 the handoff brief carries the same linked sessions and reports ahead of its open threads" PASS || check "LS13 handoff brief linked sessions:$LS_BAD" FAIL
+
+LS_AT_START="$(grep -nF "**Start the old session's linked sessions here, right after \`takeover --force\`, in the turn in which the user confirmed the plan.**" "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_BAD=""
+[ -n "$LS_AT_START" ] && [ -n "$LS_AT_CARRY" ] && [ -n "$LS_AT_RELEASE" ] && [ "$LS_AT_START" -lt "$LS_AT_CARRY" ] && [ "$LS_AT_CARRY" -lt "$LS_AT_RELEASE" ] || LS_BAD="$LS_BAD order=$LS_AT_START/$LS_AT_CARRY/$LS_AT_RELEASE"
+for LS_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `user_asked`, `context` `fresh`, `use_worktree` true, no `source_branch` and no `branch_name`' 'never more than 8 times in one takeover' 'before the worktree, the carry-over, the chips and `release`' "It names the brief's linked sessions too" 'call `list_start_targets` before the confirmation'; do
+  grep -qF -- "$LS_NEEDLE" "$CH_REF" || LS_BAD="$LS_BAD [missing:$LS_NEEDLE]"
+done
+[ -z "$LS_BAD" ] && check "LS14 references/takeover.md starts the linked sessions right after the --force run, before the chips and the release, and its plan confirmation names them" PASS || check "LS14 takeover.md linked-session step:$LS_BAD" FAIL
 
 DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
 DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"

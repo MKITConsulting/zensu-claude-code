@@ -67,6 +67,15 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 17,
+      "guards": [
+        "a detached linked session and everything below it is never listed",
+        "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
+      ],
+      "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
+      "summary": "The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets and the unread reports."
+    },
+    {
       "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
       "runs": [{ "driver": "tests/structure/test-eval-harness-units.sh" }],
       "summary": "The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number."
