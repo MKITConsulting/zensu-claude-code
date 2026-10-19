@@ -96,6 +96,12 @@ const GIT_SCRUBBED_ENV = Object.freeze([
   'GIT_CONFIG_COUNT',
   'GIT_CONFIG_PARAMETERS',
 ]);
+const GIT_PATHSPEC_ENV = Object.freeze([
+  'GIT_LITERAL_PATHSPECS',
+  'GIT_GLOB_PATHSPECS',
+  'GIT_NOGLOB_PATHSPECS',
+  'GIT_ICASE_PATHSPECS',
+]);
 const CHILD_SCRUBBED_ENV = Object.freeze([
   'ZENSU_CLAUDE_PLUGIN_ROOT',
   'ZENSU_SESSION_KEY',
@@ -292,6 +298,7 @@ function listRecords(locations, expected, limits = LIMITS) {
 function gitEnvironment(extra) {
   const env = { ...process.env };
   for (const name of GIT_SCRUBBED_ENV) delete env[name];
+  for (const name of GIT_PATHSPEC_ENV) delete env[name];
   env.GIT_OPTIONAL_LOCKS = '0';
   env.LC_ALL = 'C';
   env.LANG = 'C';

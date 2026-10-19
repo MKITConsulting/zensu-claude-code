@@ -98,6 +98,13 @@ if grep -qF 'first run `CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/h
 else
   check "X27 step 3 and the operator account launch the copy --external-review --stage prints, never the template under the plugin root" FAIL
 fi
+RERUN_SUFFIXES="$(grep -cF 're-run with --root set to ${verdict.rerun}`' "$PLUGIN_DIR/hooks/lib/external-review-v1.js")"
+if grep -qF 'only a `reason=root` answer whose advice ends in `re-run with --root set to …` is first re-run once with the root that advice names' "$SKILL_FILE" \
+  && [ "$RERUN_SUFFIXES" -ge 4 ]; then
+  check "X27b step 3 re-runs a root refusal whose advice ends in the module's re-run suffix before it falls back to the panel" PASS
+else
+  check "X27b step 3 re-run trigger (module suffixes=$RERUN_SUFFIXES)" FAIL
+fi
 rm -f "$SKILL_FILE"
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"

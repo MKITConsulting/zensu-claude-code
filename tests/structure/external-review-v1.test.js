@@ -1218,6 +1218,16 @@ test('a session started in a subdirectory keeps its own state out of the tree it
   const imported = xr.check(options);
   assert.equal(imported.status, 'ok', imported.lines.join('\n'));
   assert.match(imported.lines[0], / tree=match /);
+  const literal = process.env.GIT_LITERAL_PATHSPECS;
+  const literalWritten = [];
+  try {
+    process.env.GIT_LITERAL_PATHSPECS = '1';
+    assert.equal(xr.main(['tree'], env, { write: (text) => literalWritten.push(text) }), 0);
+  } finally {
+    if (literal === undefined) delete process.env.GIT_LITERAL_PATHSPECS;
+    else process.env.GIT_LITERAL_PATHSPECS = literal;
+  }
+  assert.deepEqual(literalWritten, [written[0]]);
 });
 
 test('check skips a record dated beyond the clock skew', () => {

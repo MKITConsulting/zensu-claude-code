@@ -235,7 +235,11 @@ through `currentTree`, which passes `computeTree` the recorded project root's `.
 root lies below the fingerprinted one (`projectStateExclusion`; `X11f` and the
 subdirectory-session unit case). The layout sentences are spelled in `ROOT_ADVICE`, in the unit
 file's `*_ADVICE` constants and in `X9d` and `X11` to `X11e` of the shell suite, and
-`docs/review-chain.md` names the layouts for the operator.
+`docs/review-chain.md` names the layouts for the operator. Step 3 of
+`skills/tdd/references/review-chain.md` re-runs once only a `reason=root` answer whose advice
+ends in `re-run with --root set to …`, the suffix the `enclosing`, `subdirectory`,
+`unresolved-root` and review-root `undetermined` advice end in; `X27b` pins both sides, so a
+reworded suffix or step-3 sentence fails there.
 The result shape is spelled twice: the object the template returns and the `RESULT_*_KEYS`,
 `DROPPED_KINDS`, `VERIFICATION_STATUSES` and `VOTE_OUTCOMES` the module validates. The unit file
 runs the template in a sandbox and validates its output with the module, so a one-sided edit
