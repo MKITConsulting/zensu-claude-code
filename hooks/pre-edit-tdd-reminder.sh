@@ -245,7 +245,7 @@ MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" PAYLOAD_PHASE="$PHASE" PAYLOAD
     "     " + logCommand + " --phase RED_FAIL --step <id> --reason \"...\"\n" +
     "     " + logCommand + " --phase IMPL --step <id>\n" +
     "  3. Refactor: " + logCommand + " --phase REFACTOR --step <id>\n" +
-    "  4. Legitimate non-TDD edit: set ZENSU_TDD_GATE=off";
+    "  4. Legitimate non-TDD edit: ZENSU_TDD_GATE is read from the environment Claude Code was started in, so no Edit, Write or Bash prefix can set it for this edit. Ask the user to choose: leave this chain with " + logCommand + " --tdd-reset, or restart Claude Code with ZENSU_TDD_GATE=off, which the bypass ledger records.";
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",

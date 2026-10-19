@@ -53,6 +53,14 @@ It runs LAST because its cap is the largest: the three caps sum to 1980000 ms ag
 starving the suite behind it. `expectedShardTails` in `tests/structure/windows-ci-contract.test.js`
 pins that position. Re-measure on the next green Windows run and replace these figures.
 
+**The prompt-ledger change grew this suite by nine hook drives, UNMEASURED on Windows.** Its
+full block moved to `SessionStart`, so `B3d` drives that leg for all five sources, `B3b` drives it
+once more for the framing prefix, `B7h` drives the reminder refusal on both legs and `B9b` drives the
+opt-out on it. At the roughly 1.2 s per drive the 49843 ms figure above implies for its ~42 drives,
+that is about 11 s,
+well inside the shard's slack; no cap moved and no suite moved. Replace the estimate with the
+next green Windows run's figure.
+
 **`windows-shard-1` paid for `C7-renew` the same way.** Run 36625440255 exhausted that shard's
 envelope at 1800264 ms: `tdd-no-flock-external-lease` was granted 9579 ms and overran it, and
 three suites behind it never ran. `C7-renew` itself took about 96 s of `deferred-lease-refresh`'s

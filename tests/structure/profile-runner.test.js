@@ -28,11 +28,11 @@ const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
 // deadline stays below that, and the suite timeout leaves room for the real exit code.
 const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
-const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 10000 : 120;
+const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 10000 : 15000;
 const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
-  process.platform === 'win32' ? 90000 : 5000;
+  process.platform === 'win32' ? 90000 : 30000;
 const TEST_PROFILE_DEADLINE_ASSERT_MS =
-  process.platform === 'win32' ? 120000 : 3000;
+  process.platform === 'win32' ? 120000 : 25000;
 
 function temporaryRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-profile-runner-'));
@@ -393,12 +393,17 @@ test('the internal profile deadline terminates the active tree before the CI env
       root,
       reportDirectory: path.join(root, 'reports'),
       output: { write() { return true; } },
+      suiteTimeoutTrigger: () => waitFor(() => fs.existsSync(readyFile), TEST_PROFILE_DEADLINE_MS),
     });
+    assert.equal(
+      fs.existsSync(readyFile),
+      true,
+      `the profile deadline fired before the suite wrote its ready file within ${TEST_PROFILE_DEADLINE_MS}ms`,
+    );
     assert.equal(result.exitCode, EXIT_SUITE);
     assert.equal(result.report.profileDeadlineExceeded, true);
     assert.equal(result.report.suites[0].timeoutScope, 'profile');
     assert.equal(result.report.suites[0].cleanup.status, 'terminated');
-    assert.equal(fs.existsSync(readyFile), true);
     assert.ok(result.report.durationMs < TEST_PROFILE_DEADLINE_ASSERT_MS);
   } finally {
     await removeTemporaryRootAfterProcessExit(root);

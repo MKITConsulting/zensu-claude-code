@@ -63,20 +63,8 @@ reg SessionStart session-start-worktree-keep.sh && check "K2 SessionStart regist
 reg UserPromptSubmit user-prompt-worktree-keep.sh && check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 10" PASS || check "K2 UserPromptSubmit registers user-prompt-worktree-keep.sh with timeout 10" FAIL
 reg SessionEnd session-end-worktree-keep.sh && check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 10" PASS || check "K2 SessionEnd registers session-end-worktree-keep.sh with timeout 10" FAIL
 
-UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"
-UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# pass ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_MAX_SKIPPED=0
-# A floor fires on REMOVAL only, so it is raised in the SAME commit as any case added
-# to the unit file. Left below the real count it lets a third of the suite be deleted green.
-UNIT_FLOOR=101
-if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" -le "$UNIT_MAX_SKIPPED" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
-  check "K3 unit suite green with at least $UNIT_FLOOR registered cases and at most $UNIT_MAX_SKIPPED skipped (pass=$UNIT_PASS)" PASS
-else
-  check "K3 unit suite green with at least $UNIT_FLOOR registered cases and at most $UNIT_MAX_SKIPPED skipped (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?})" FAIL
-  printf '%s\n' "$UNIT_OUT" | grep -E '^not ok|# SKIP' | head -5
-fi
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "K3 the worktree-keep unit file passes" "$UNIT"
 
 make_repo() {
   local repo="$1"
@@ -360,4 +348,5 @@ grep -qF 'UNBOUND session gets no drift disclosure' "$PLUGIN_DIR/docs/worktree-k
 grep -qF 'read_field cwd' "$PLUGIN_DIR/hooks/user-prompt-worktree-keep.sh" \
   && check "K21b-control the prompt hook really has no payload fallback" FAIL \
   || check "K21b-control the prompt hook really has no payload fallback" PASS
+unit_check_done "K3z every unit file the registry gives this suite was graded"
 finish
