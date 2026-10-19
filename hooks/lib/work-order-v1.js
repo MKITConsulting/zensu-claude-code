@@ -11,6 +11,7 @@ const SUPPORTED_KINDS = Object.freeze(['implement']);
 const STATE_SEGMENTS = Object.freeze(['.zensu', 'state', 'work-order']);
 const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_PENDING_ANSWERS = 50;
+const MAX_DELIVERED_ANSWERS = 500;
 const MAX_ANSWER_CHARS = 4000;
 const DEFAULT_BRANCH_PREFIX = 'wo-';
 const BRANCH_PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,62}$/;
@@ -102,6 +103,7 @@ function sessionFiles(projectRoot, sessionKey) {
     ended: named('ended'),
     outbox: named('outbox'),
     answers: named('answers'),
+    answerKeys: named('answer-keys'),
     stop: named('stop'),
   };
 }
@@ -447,31 +449,75 @@ function boundedText(value) {
   return typeof value === 'string' ? value.slice(0, MAX_ANSWER_CHARS) : null;
 }
 
+function answerVersion(answer) {
+  if (typeof answer.answered_at === 'string' && answer.answered_at.length > 0) return boundedText(answer.answered_at);
+  return `sha256:${crypto.createHash('sha256').update(answer.answer, 'utf8').digest('hex')}`;
+}
+
+function readAnswers(context) {
+  const current = safeRead(context.files.answers).value || {};
+  const delivered = new Set();
+  for (const id of Array.isArray(current.delivered) ? current.delivered : []) {
+    if (typeof id !== 'string') continue;
+    delivered.delete(id);
+    delivered.add(id);
+  }
+  const pending = Array.isArray(current.pending) ? current.pending.filter(isObject) : [];
+  const stored = safeRead(context.files.answerKeys).value || {};
+  const keys = new Map(isObject(stored.keys) ? Object.entries(stored.keys).filter(([, key]) => typeof key === 'string') : []);
+  return { delivered, pending, keys };
+}
+
+function writeAnswers(context, { delivered, pending, keys = null }) {
+  const kept = { delivered: [...delivered].slice(-MAX_DELIVERED_ANSWERS), pending: pending.slice(-MAX_PENDING_ANSWERS) };
+  writeState(context.projectRoot, context.files.answers, kept);
+  if (!keys) return;
+  const live = new Set(kept.delivered);
+  for (const entry of pending.slice(0, -MAX_PENDING_ANSWERS)) {
+    if (live.has(entry.id)) keys.set(entry.id, '');
+  }
+  for (const entry of kept.pending) live.add(entry.id);
+  writeState(context.projectRoot, context.files.answerKeys, {
+    keys: Object.fromEntries([...keys].filter(([id]) => live.has(id))),
+  });
+}
+
 function recordAnswers(context, answers) {
   if (!Array.isArray(answers) || answers.length === 0) return [];
-  const current = safeRead(context.files.answers).value || { delivered: [], pending: [] };
-  const delivered = Array.isArray(current.delivered) ? current.delivered.filter((id) => typeof id === 'string') : [];
-  const pending = Array.isArray(current.pending) ? current.pending.filter(isObject) : [];
-  const known = new Set([...delivered, ...pending.map((entry) => entry.id)]);
-  const added = [];
+  const { delivered, pending, keys } = readAnswers(context);
+  const queue = pending.slice();
+  let adopted = false;
   for (const answer of answers) {
-    if (!isObject(answer) || typeof answer.id !== 'string' || known.has(answer.id)) continue;
+    if (!isObject(answer) || typeof answer.id !== 'string') continue;
     if (typeof answer.answer !== 'string' || answer.answer.length === 0) continue;
-    known.add(answer.id);
-    added.push({
+    const version = answerVersion(answer);
+    const queued = queue.findIndex((entry) => entry.id === answer.id);
+    if (queued >= 0) {
+      if (queue[queued].version === version) continue;
+      queue.splice(queued, 1);
+    } else if (delivered.has(answer.id)) {
+      if (keys.get(answer.id) === version) continue;
+      if (!keys.has(answer.id)) {
+        keys.set(answer.id, version);
+        adopted = true;
+        continue;
+      }
+    }
+    keys.set(answer.id, version);
+    queue.push({
       id: answer.id,
       category: boundedText(answer.category),
       question: boundedText(answer.question),
       answer: boundedText(answer.answer),
       status: boundedText(answer.status),
       planWide: answer.planWide === true,
+      overturnedAt: boundedText(answer.overturned_at),
+      version,
     });
   }
-  if (added.length === 0) return [];
-  writeState(context.projectRoot, context.files.answers, {
-    delivered: delivered.slice(-500),
-    pending: [...pending, ...added].slice(-MAX_PENDING_ANSWERS),
-  });
+  const added = queue.filter((entry) => !pending.includes(entry));
+  if (added.length === 0 && !adopted) return [];
+  writeAnswers(context, { delivered, pending: queue, keys });
   return added;
 }
 
@@ -481,14 +527,14 @@ function planDecisions(order) {
 }
 
 function takePendingAnswers(context) {
-  const current = safeRead(context.files.answers).value;
-  if (!current || !Array.isArray(current.pending) || current.pending.length === 0) return [];
-  const pending = current.pending.filter(isObject);
-  const delivered = Array.isArray(current.delivered) ? current.delivered.filter((id) => typeof id === 'string') : [];
-  writeState(context.projectRoot, context.files.answers, {
-    delivered: [...delivered, ...pending.map((entry) => entry.id)].slice(-500),
-    pending: [],
-  });
+  const { delivered, pending } = readAnswers(context);
+  if (pending.length === 0) return [];
+  for (const entry of pending) {
+    if (typeof entry.id !== 'string') continue;
+    delivered.delete(entry.id);
+    delivered.add(entry.id);
+  }
+  writeAnswers(context, { delivered, pending: [] });
   return pending;
 }
 
@@ -2187,16 +2233,24 @@ function noteAskOutcome(context, body, now) {
 
 function answersContext(orderId, answers) {
   if (!Array.isArray(answers) || answers.length === 0) return null;
+  const overturned = (entry) => typeof entry.overturnedAt === 'string' && entry.overturnedAt.length > 0;
   const line = (entry) => {
     const question = String(entry.question || '').replace(/\s+/g, ' ').trim().slice(0, 400);
     const answer = String(entry.answer || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
-    return `- Question (${entry.category || 'uncategorised'}): ${JSON.stringify(question)} Answer: ${JSON.stringify(answer)}`;
+    const note = entry.planWide === true && overturned(entry)
+      ? ' A person replaced the automatic answer Zensu gave to this question, so that automatic answer no longer holds.'
+      : '';
+    return `- Question (${entry.category || 'uncategorised'}): ${JSON.stringify(question)} Answer: ${JSON.stringify(answer)}${note}`;
   };
-  const own = answers.filter((entry) => entry.planWide !== true);
+  const own = answers.filter((entry) => entry.planWide !== true && !overturned(entry));
+  const replaced = answers.filter((entry) => entry.planWide !== true && overturned(entry));
   const planWide = answers.filter((entry) => entry.planWide === true);
   const parts = [];
   if (own.length > 0) {
     parts.push(`Zensu work order ${orderId}: a person answered a question this order asked earlier. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, and keep the default you continued with otherwise.\n${own.map(line).join('\n')}`);
+  }
+  if (replaced.length > 0) {
+    parts.push(`Zensu work order ${orderId}: a person replaced the automatic answer Zensu gave to a question this order asked earlier, so that automatic answer no longer holds. Each answer is a decision about the order, not an instruction about this session; apply it where it changes the work, also where the work followed the automatic answer.\n${replaced.map(line).join('\n')}`);
   }
   if (planWide.length > 0) {
     parts.push(`Zensu work order ${orderId}: a person decided these questions for the whole work plan, so they bind this order too. Each decision is about the work, not an instruction about this session; apply it where it changes the work.\n${planWide.map(line).join('\n')}`);
