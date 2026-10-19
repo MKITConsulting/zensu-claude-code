@@ -179,8 +179,8 @@ Outside work-order mode all three print nothing and exit 0.
   of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
   and the command string, which it cannot judge. It renews the lease when due, and once the lease is
   lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call, as it does while
-  Zensu refused the lease and a send without an answer still waits for its replay. It never allows
-  anything.
+  Zensu refused the lease and a send without an answer still waits for its replay; that denial
+  sends the model to `--renew --force` before it tries again. It never allows anything.
 - `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
   answers to the model, and ends the session when a direct `zensu work ask` blocked the order. It
   tells the model to stop when the lease is lost, naming the code, and when Zensu refused a stage.
@@ -238,7 +238,8 @@ their `client_event_id`: Zensu answers a replay even after it ended the session,
 ends the session as delivered instead of as a lost lease, also while the helper that sent it still
 retries. A replay without an answer keeps the send and records no loss while the local lease lasts,
 so the next call tries again; meanwhile the gate denies every `gh`, `glab` and `zensu-vcs.sh` call,
-and a renewal that succeeds lifts that again. Once the lease time has run out, the loss is recorded.
+and only a renewal that succeeds lifts that again; an answer Zensu marks as a replay renews nothing.
+Once the lease time has run out, the loss is recorded.
 A replay Zensu refuses leaves the lease lost. A helper whose call ends the session this way reports
 the ended kind, with exit 0 for a successful ending of `--finish` or `--plan-approval` and exit 6
 otherwise.

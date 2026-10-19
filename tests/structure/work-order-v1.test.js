@@ -1006,6 +1006,8 @@ test('a refused lease whose replay gets no answer closes the forge fence until a
   const fenced = wo.gateDecision(context, comment, { env: box.env, now: () => Date.now() + 120000 });
   assert.equal(fenced && fenced.code, 'lease');
   assert.match(fenced.reason, /Zensu refused the lease of work order \S+ \(invalid_session_token\), and an unanswered send still waits for its replay/);
+  assert.match(fenced.reason, /may run until a lease renewal succeeds\. Run zensu-work-order\.sh --renew --force/);
+  assert.doesNotMatch(fenced.reason, /may run any more/);
   assert.equal(wo.readState(context.files.lost), null);
   assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
   assert.equal(wo.gateDecision(context, { tool_name: 'Bash', tool_input: { command: 'git status' } }, { env: box.env, now: () => Date.now() + 120000 }), null);
@@ -1024,6 +1026,26 @@ test('a refused lease whose replay gets no answer closes the forge fence until a
   assert.equal(wo.readState(flakyContext.files.outbox).leaseRefusal, null);
   assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }), null);
   assert.equal(wo.readState(flakyContext.files.lost), null);
+
+  const replayed = sandbox();
+  const replayContext = startedContext(replayed);
+  wo.markerRun(replayContext, RUN);
+  writeRun(replayed, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  replayed.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.drain(replayContext, { env: replayed.env }).verdict, wo.VERDICTS.TRANSIENT);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(replayContext, { env: replayed.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' }).exit, wo.EXIT.TRANSIENT);
+  replayed.mutate((state) => { state.staleAttempt = true; state.dropAnswers = 1; });
+  const renewedAt = wo.readState(replayContext.files.lease).lastSuccessAt;
+  wo.postToolUpdate(replayContext, { tool_name: 'Read', tool_input: {} }, { env: replayed.env, now: () => Date.now() + 61000 });
+  assert.equal(wo.readState(replayContext.files.outbox).deliveredRank, 1);
+  assert.ok(wo.readState(replayContext.files.outbox).leaseRefusal);
+  assert.equal(wo.readState(replayContext.files.lease).lastSuccessAt, renewedAt);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  const held = wo.gateDecision(replayContext, comment, { env: replayed.env, now: () => Date.now() + 63000 });
+  assert.equal(held && held.code, 'lease');
+  assert.match(held.reason, /\(stale_attempt\), and an unanswered send still waits for its replay/);
+  assert.equal(wo.readState(replayContext.files.lost), null);
 });
 
 test('a terminal send is in the outbox before its first attempt, so a renewal that meets the ended session meanwhile replays it', () => {
@@ -1506,6 +1528,7 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
   assert.match(lost.reason, /stale_attempt/);
+  assert.match(lost.reason, /may run any more\. Run zensu-work-order\.sh --finish once and end the session/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
 });
 

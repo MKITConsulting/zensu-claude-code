@@ -581,7 +581,7 @@ function sendEvent(context, args, { env = process.env, now = Date.now, target = 
     const outcome = runZensu(command, { env });
     if (outcome.exitCode === 0 && isObject(outcome.json)) {
       const order = isObject(outcome.json.order) ? outcome.json.order : {};
-      if (!terminal && order.status !== 'blocked') recordLease(context, { order, lease_seconds: null }, now());
+      if (!terminal && order.status !== 'blocked' && outcome.json.replay !== true) recordLease(context, { order, lease_seconds: null }, now());
       return { verdict: VERDICTS.OK, order, replay: outcome.json.replay === true };
     }
     let failure = classifyFailure(outcome);
@@ -2132,6 +2132,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail} puts an option between -c and the command string, which the gate cannot judge. Put the command string right after -c.`;
     case 'lease':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
+    case 'lease-refused':
+      return `${lead} ${finding.detail}. No push, pull request or other forge command may run until a lease renewal succeeds. Run zensu-work-order.sh --renew --force and follow its exit code: after exit 0 run the command again, after exit 4 or 6 run zensu-work-order.sh --finish once and end the session, and after exit 7 follow the exit table of /zensu:work.`;
     default:
       return `${lead} The command is not allowed in a work-order session.`;
   }
@@ -2161,7 +2163,7 @@ function gateDecision(context, payload, { env = process.env, now = Date.now } = 
     const refusal = readOutbox(context).leaseRefusal;
     if (isObject(refusal)) {
       const detail = `Zensu refused the lease of work order ${orderId} (${refusal.code}), and an unanswered send still waits for its replay`;
-      return { code: 'lease', reason: gateReason(orderId, bashFinding('lease', detail)) };
+      return { code: 'lease', reason: gateReason(orderId, bashFinding('lease-refused', detail)) };
     }
   }
   return null;

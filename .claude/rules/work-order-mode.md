@@ -38,7 +38,9 @@ session a replay under a stored `client_event_id` is the only call it still answ
 safe-sentence resend of a block therefore keeps the first send's `client_event_id`; a refused `422`
 stores nothing. A replay without an answer keeps the send and, while the local lease lasts, writes
 `leaseRefusal` into the outbox instead of `lost-`; once the lease time has run out it writes
-`lost-`. The gate's forge branch denies on `leaseRefusal` and `recordLease` clears it.
+`lost-`. The gate's forge branch denies on `leaseRefusal`, with its own reason that sends the model
+to `--renew --force`, and `recordLease` clears it. `sendEvent` records the lease only for an answer
+Zensu did not mark as a replay, because a replay renews nothing and must not lift the fence.
 `forgeWriteVerdict` ignores it on purpose, because `--ask`, `--followup` and `--bind-spec` check it
 before they resend, and a resend is a replay. Every helper verb that gets the verdict `ended` back
 maps it through `endedResult`; the post-tool hook builds its own notice from the ended marker.
