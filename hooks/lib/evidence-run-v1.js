@@ -96,6 +96,12 @@ const GIT_SCRUBBED_ENV = Object.freeze([
   'GIT_CONFIG_COUNT',
   'GIT_CONFIG_PARAMETERS',
 ]);
+const GIT_PATHSPEC_ENV = Object.freeze([
+  'GIT_LITERAL_PATHSPECS',
+  'GIT_GLOB_PATHSPECS',
+  'GIT_NOGLOB_PATHSPECS',
+  'GIT_ICASE_PATHSPECS',
+]);
 const CHILD_SCRUBBED_ENV = Object.freeze([
   'ZENSU_CLAUDE_PLUGIN_ROOT',
   'ZENSU_SESSION_KEY',
@@ -292,6 +298,7 @@ function listRecords(locations, expected, limits = LIMITS) {
 function gitEnvironment(extra) {
   const env = { ...process.env };
   for (const name of GIT_SCRUBBED_ENV) delete env[name];
+  for (const name of GIT_PATHSPEC_ENV) delete env[name];
   env.GIT_OPTIONAL_LOCKS = '0';
   env.LC_ALL = 'C';
   env.LANG = 'C';
@@ -310,12 +317,26 @@ function git(root, args, options = {}) {
     input: options.input,
     stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
-  if (result.error) return { ok: false, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
+  if (result.error) return { ok: false, code: result.error.code || null, reason: result.error.code === 'ETIMEDOUT' ? 'git timed out' : `git unavailable (${result.error.code || result.error.message})` };
   if (result.status !== 0) {
     const stderr = String(result.stderr || '').trim().split('\n')[0] || `exit ${result.status}`;
     return { ok: false, reason: `git ${args[0]} failed: ${stderr.slice(0, 160)}` };
   }
   return { ok: true, stdout: result.stdout };
+}
+
+function workTreeTop(directory, limits = LIMITS) {
+  const result = git(directory, ['rev-parse', '--show-toplevel'], { timeoutMs: limits.gitTimeoutMs });
+  if (!result.ok) {
+    return result.code === 'ENOENT' || NO_WORK_TREE_RE.test(result.reason) ? { top: null, reason: null } : { top: null, reason: result.reason };
+  }
+  const printed = result.stdout.trim();
+  if (printed === '') return { top: null, reason: 'git rev-parse printed no top level' };
+  try {
+    return { top: fs.realpathSync.native(printed), reason: null };
+  } catch (error) {
+    return { top: null, reason: `the top level git printed does not resolve (${error.code || error.message})` };
+  }
 }
 
 function workTree(projectRoot, limits = LIMITS) {
@@ -355,14 +376,15 @@ function runDirectory(projectRoot, requested, limits = LIMITS) {
   return { cwd: projectRoot, moved: true };
 }
 
-function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
+function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = []) {
   const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree']);
   if (!inside.ok || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
   const prefix = git(projectRoot, ['rev-parse', '--show-prefix']);
   if (!prefix.ok) return { tree: null, reason: prefix.reason };
   const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
   if (!indexPath.ok) return { tree: null, reason: indexPath.reason };
-  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ':(exclude).zensu'], { encoding: 'buffer' });
+  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ':(exclude).zensu',
+    ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer' });
   if (!untracked.ok) return { tree: null, reason: untracked.reason };
   const untrackedPaths = untracked.stdout.toString('utf8').split('\0').filter(Boolean);
   if (untrackedPaths.length > limits.untrackedMaxFiles) {
@@ -388,7 +410,8 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS) {
     const env = { GIT_INDEX_FILE: temporaryIndex };
     const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
     if (!added.ok) return { tree: null, reason: added.reason };
-    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--', '.zensu'], { env });
+    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--', '.zensu',
+      ...excluded.map((entry) => `:(literal)${entry}`)], { env });
     if (!pruned.ok) return { tree: null, reason: pruned.reason };
     const relativePrefix = prefix.stdout.trim();
     const written = git(projectRoot, relativePrefix ? ['write-tree', `--prefix=${relativePrefix}`] : ['write-tree'], { env });
@@ -1348,6 +1371,7 @@ module.exports = {
   listRecords,
   gitEnvironment,
   workTree,
+  workTreeTop,
   runDirectory,
   computeTree,
   commandDirectory,

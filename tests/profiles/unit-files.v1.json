@@ -42,9 +42,9 @@
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
     {
-      "path": "tests/structure/external-review-v1.test.js", "registered": 41, "skips": {"win32": 3},
+      "path": "tests/structure/external-review-v1.test.js", "registered": 47, "skips": {"win32": 5},
       "runs": [{ "driver": "tests/structure/test-external-review-hook.sh" }],
-      "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, and the freshness check against changed files."
+      "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named."
     },
     {
       "path": "tests/structure/finding-verify-v1.test.js", "registered": 28,
