@@ -1115,6 +1115,10 @@ test('bind-spec hands over a plan-wide decision made after --start, and an autom
   assert.match(update.additionalContext, /decided these questions for the whole work plan/);
   assert.match(update.additionalContext, /Prices are in euro across the plan/);
   assert.doesNotMatch(update.additionalContext, /ISO date format/);
+  const read = wo.runZensu(['work', 'get', ORDER, '--json'], { env: box.env });
+  assert.deepEqual(read.json.decision_log.map((entry) => entry.id), ['q-later']);
+  const decided = wo.planDecisions({ decision_log: [{ id: 'q-auto', status: 'auto_answered' }, { id: 'q-later', status: 'answered' }] });
+  assert.deepEqual(decided.map((entry) => [entry.id, entry.planWide]), [['q-later', true]]);
 });
 
 test('the plan blob link takes the scheme-less repository Zensu stores and an https one alike', () => {

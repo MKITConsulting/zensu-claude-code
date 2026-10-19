@@ -2612,6 +2612,7 @@ module.exports = {
   openPr,
   parseArgs,
   planApproval,
+  planDecisions,
   planSummary,
   postToolUpdate,
   push,
