@@ -27,7 +27,7 @@ key. Each is written to a temporary file and renamed into place.
 | `marker-` | `--start` | order id, attempt, kind, repository, spec hash, plan-approval policy |
 | `order-` | `--start`, `--bind-spec` | the last `zensu work get` answer |
 | `lease-` | every successful renewal or event | lease seconds, last success time, recorded head, order status |
-| `outbox-` | `--autopilot-begin`, `--drain`, and a block, `ready_for_merge` or question send without an answer | the bound Autopilot run id, the highest stage rank Zensu accepted, and the last block, `ready_for_merge` or question send that got no answer |
+| `outbox-` | `--autopilot-begin`, `--drain`, and a block, `ready_for_merge` or question send without an answer | the bound Autopilot run id, the highest stage rank Zensu accepted, and up to four block, `ready_for_merge` or question sends that got no answer |
 | `answers-` | renewals, `--start`, `--bind-spec` | answers to this order's non-blocking questions and the plan-wide decisions of `decision_log` not yet shown to the model |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
@@ -168,22 +168,26 @@ Outside work-order mode all three print nothing and exit 0.
 - `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
   `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
   `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
-  `followup`, the `zensu plan` approval verbs, and every command that prints, reads, unsets or
-  overrides `ZENSU_SESSION_TOKEN`, `env -i` included. It also denies every command that sets,
-  changes or removes `ZENSU_API_URL` or passes `--api-url` to `zensu`, so the token reaches only the
-  host the worker configured. Zensu refuses `zensu work list`, `questions`, `policy get` and
-  `repositories list` for a session token, so their denial points at the order file. It reads commands
-  inside `bash -c`, `eval`, command substitutions, ANSI-C quoting such as `$'work'`, and wrappers
-  such as `env` or `sudo`, and denies an option between `-c` and the command string, which it cannot
-  judge. It renews the lease when due, and once the lease is lost or the session ended it denies
-  every `gh`, `glab` and `zensu-vcs.sh` call. It never allows anything.
+  `followup`, the `zensu plan` approval verbs, and a command that prints, reads, unsets or overrides
+  `ZENSU_SESSION_TOKEN` or sets, changes or removes `ZENSU_API_URL` in the spellings it knows: an
+  assignment prefix, `export`, `declare` and their kin, `unset`, `env -u`, `env -i`, any long `env`
+  option, `exec -c`, `printf -v`, `read`, `let` and a loop variable. It also denies `--api-url` on
+  `zensu`. Zensu refuses `zensu work list`, `questions`, `policy get` and `repositories list` for a
+  session token, so their denial points at the order file. It reads commands inside `bash -c`,
+  `eval`, `env -S`, command substitutions and wrappers such as `env` or `sudo`. It reads every
+  command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
+  of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
+  and the command string, which it cannot judge. It renews the lease when due, and once the lease is
+  lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call. It never allows
+  anything.
 - `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
   answers to the model, and ends the session when a direct `zensu work ask` blocked the order. It
   tells the model to stop when the lease is lost, naming the code, and when Zensu refused a stage.
 - `stop-work-order.sh` blocks a Stop until the order reported an outcome.
 
 The gate reads command text; a command assembled at run time, such as a script file the model wrote,
-is not judged. The slot sandbox of the worker, not this gate, is the boundary.
+an interpreter one-liner such as `python3 -c`, or a spelling it does not know, is not judged. The
+slot sandbox of the worker, not this gate, is the boundary.
 
 The worker starts the session through `harness/launcher.js` (`docs/work-order-mode.md`). The
 launcher renews the lease when no renewal succeeded for a third of the lease time, terminates the
@@ -226,10 +230,14 @@ message says that the stated reason was replaced. Any other final answer to a bl
 `ended-`, so a later `--finish` reports the block again, and the Stop hook still lets the session
 stop after its budget.
 
-A block, `ready_for_merge` or question send that got no answer stays in `outbox-`. When a later
-renewal finds the lease gone, the helper first replays that send under its `client_event_id`: Zensu
-answers a replay even after it ended the session, so a block it stored ends the session as delivered
-instead of as a lost lease. A replay Zensu refuses leaves the lease lost.
+A block, `ready_for_merge` or question send that got no answer stays in `outbox-`. Before any helper
+records a lost lease, whether a renewal, a stage or block event, a question, a follow-up or the order
+read met it, it replays those sends under their `client_event_id`: Zensu answers a replay even after
+it ended the session, so a block it stored ends the session as delivered instead of as a lost lease.
+A replay without an answer keeps the send and records no loss, so the next call tries again. A
+replay Zensu refuses leaves the lease lost. A helper whose call ends the session this way reports
+the ended kind, with exit 0 for a successful ending of `--finish` or `--plan-approval` and exit 6
+otherwise.
 
 ## Ending
 

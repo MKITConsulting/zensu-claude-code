@@ -181,6 +181,7 @@ test('the status and code are read when context follows the suffix and the messa
   assert.equal(flagError.status, null);
   assert.equal(flagError.code, null);
   assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(wo.classifyFailure(flagError)), 'the zensu CLI failed without a status: unknown flag --bogus');
 });
 
 test('clientEventId is deterministic, prefixed and inside the backend pattern', () => {
@@ -361,6 +362,25 @@ test('the fake refuses a stage branch outside the order branch prefix, as the se
   const accepted = wo.sendEvent(context, ['--stage', 'implementing', '--branch', `wo-${ORDER.slice(0, 8)}`, '--client-event-id', wo.clientEventId('r', 'bound-2')], { env: box.env, target: 'implementing' });
   assert.equal(accepted.verdict, wo.VERDICTS.OK);
   assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
+});
+
+test('the fake refuses an artifact link the service redaction would change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const sha = 'e'.repeat(40);
+  const send = (url, key) => wo.sendEvent(context, ['--artifact', 'plan', '--path', `.zensu/plans/${ORDER}.md`, '--sha', sha, '--url', url,
+    '--client-event-id', wo.clientEventId('artifact', key)], { env: box.env });
+  for (const [url, key] of [
+    [`https://gitlab.acme-secret:8443/acme/widgets/-/blob/${sha}/.zensu/plans/${ORDER}.md`, 'host-port'],
+    ['https://example.com/plan?token=abcdef12', 'token'],
+    ['https://user:pass@example.com/plan', 'credentials'],
+    [`https://github.com/acme/sk-payments-gateway-service/blob/${sha}/.zensu/plans/${ORDER}.md`, 'secret-name'],
+  ]) {
+    const refused = send(url, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_url', url);
+  }
+  assert.equal(send(`https://github.com/acme/widgets/blob/${sha}/.zensu/plans/${ORDER}.md`, 'plain').verdict, wo.VERDICTS.OK);
 });
 
 test('the fake takes the pull request links the service takes and refuses the rest', () => {
@@ -885,7 +905,7 @@ test('a terminal event whose answer never arrived is replayed on the next renewa
   assert.equal(wo.renew(blockContext, { env: block.env, force: true }).verdict, 'ended');
   assert.equal(wo.readState(blockContext.files.lost), null);
   assert.deepEqual([wo.readState(blockContext.files.ended).kind, wo.readState(blockContext.files.ended).delivered], ['blocked:worker_error', true]);
-  assert.equal(wo.readState(blockContext.files.outbox).inflight, null);
+  assert.deepEqual(wo.readState(blockContext.files.outbox).inflight, []);
 
   const merge = sandbox();
   const mergeContext = startedContext(merge);
@@ -904,6 +924,7 @@ test('a terminal event whose answer never arrived is replayed on the next renewa
   asked.mutate((state) => { state.dropAnswers = 1000; });
   const question = wo.ask(askContext, { env: asked.env, category: 'clarification', question: 'Should deleted widgets stay visible to admins?', blocking: true });
   assert.equal(question.exit, wo.EXIT.TRANSIENT, question.message);
+  assert.match(question.message, /the zensu CLI failed without a status: read: connection reset by peer/);
   asked.mutate((state) => { state.dropAnswers = 0; });
   assert.equal(wo.renew(askContext, { env: asked.env, force: true }).verdict, 'ended');
   assert.equal(wo.readState(askContext.files.ended).kind, 'blocked:question');
@@ -918,6 +939,63 @@ test('a terminal event whose answer never arrived is replayed on the next renewa
   revoked.mutate((state) => { state.dropAnswers = 0; state.mode = 'revoked'; });
   assert.equal(wo.renew(revokedContext, { env: revoked.env, force: true }).verdict, wo.VERDICTS.LOST);
   assert.ok(wo.readState(revokedContext.files.lost));
+});
+
+function unansweredBlock(box, context) {
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(context, { env: box.env, reason: 'The gates fail on a missing database migration.' }).exit, wo.EXIT.TRANSIENT);
+}
+
+test('a replay without an answer keeps the send for the next renewal, and every route that meets the ended session replays it first', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const unanswered = wo.renew(context, { env: box.env, force: true });
+  assert.equal(unanswered.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(context, { env: box.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const refused = sandbox();
+  const refusedContext = startedContext(refused);
+  wo.markerRun(refusedContext, RUN);
+  writeRun(refused, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(refusedContext, { env: refused.env }).verdict, wo.VERDICTS.OK);
+  writeRun(refused, 'DONE', DONE_LEDGER);
+  refused.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; state.dropAnswers = 1000; });
+  assert.equal(wo.finish(refusedContext, { env: refused.env }).exit, wo.EXIT.TRANSIENT);
+  refused.mutate((state) => { state.dropAnswers = 0; });
+  const again = wo.finish(refusedContext, { env: refused.env });
+  assert.equal(again.exit, wo.EXIT.ENDED, again.message);
+  assert.equal(wo.readState(refusedContext.files.lost), null);
+  assert.deepEqual([wo.readState(refusedContext.files.ended).kind, wo.readState(refusedContext.files.ended).delivered], ['blocked:worker_error', true]);
+
+  const pushed = sandbox();
+  const pushContext = startedContext(pushed);
+  unansweredBlock(pushed, pushContext);
+  pushed.mutate((state) => { state.dropAnswers = 0; });
+  const push = wo.push(pushContext, { env: pushed.env });
+  assert.equal(push.exit, wo.EXIT.ENDED, push.message);
+  assert.match(push.message, /\(blocked:worker_error\); no push/);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.TRANSIENT);
+  merge.mutate((state) => { state.dropAnswers = 0; });
+  const update = wo.postToolUpdate(mergeContext, { tool_name: 'Read', tool_input: {} }, { env: merge.env, now: () => Date.now() + 120000 });
+  assert.match(update.additionalContext, /Zensu recorded ready_for_merge for work order/);
+  assert.doesNotMatch(update.additionalContext, /blocked/);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
 });
 
 test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
@@ -1079,7 +1157,10 @@ test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec
     assert.equal(result.exit, wo.EXIT.REFUSED, `${verb}: ${result.message}`);
     assert.match(result.message, /refused the planning stage \(status 422, code invalid_autopilot_run_id\)/, verb);
   }
-  for (const [status, code, exit] of [[422, 'field_not_allowed', wo.EXIT.REFUSED], [401, 'invalid_session_token', wo.EXIT.LOST]]) {
+  for (const [status, code, exit, said] of [
+    [422, 'field_not_allowed', wo.EXIT.REFUSED, /spec changed during the session; Zensu refused the block \(status 422, code field_not_allowed\); end the session/],
+    [401, 'invalid_session_token', wo.EXIT.LOST, /the lease is lost, so the block could not be reported \(status 401, code invalid_session_token\)/],
+  ]) {
     const box = sandbox();
     const context = startedContext(box);
     wo.markerRun(context, RUN);
@@ -1087,6 +1168,7 @@ test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec
     box.mutate((state) => { state.order.spec_stale = true; state.failNext = [{ command: 'event', flag: 'blocked', status, code, times: 1 }]; });
     const result = wo.bindSpec(context, { env: box.env, runId: RUN });
     assert.equal(result.exit, exit, `${code}: ${result.message}`);
+    assert.match(result.message, said);
     assert.notEqual(box.fake().order.status, 'blocked', code);
     if (exit === wo.EXIT.LOST) {
       assert.ok(wo.readState(context.files.lost), code);
@@ -1095,6 +1177,15 @@ test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec
       assert.equal(wo.readState(context.files.lost), null, code);
     }
   }
+  const quiet = sandbox();
+  const quietContext = startedContext(quiet);
+  wo.markerRun(quietContext, RUN);
+  writeBoundRun(quiet);
+  assert.equal(wo.drain(quietContext, { env: quiet.env }).verdict, wo.VERDICTS.OK);
+  quiet.mutate((state) => { state.order.spec_stale = true; state.dropAnswers = 1000; });
+  const pending = wo.bindSpec(quietContext, { env: quiet.env, runId: RUN });
+  assert.equal(pending.exit, wo.EXIT.TRANSIENT, pending.message);
+  assert.match(pending.message, /the block is not delivered yet \(the zensu CLI failed without a status: read: connection reset by peer\); run --bind-spec again/);
 });
 
 test('bind-spec hands over a plan-wide decision made after --start, and an automatic answer is no plan-wide decision', () => {
@@ -1226,6 +1317,35 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     "gh $'pr' create --fill": 'open-pr',
     "bash -c -- 'git push'": 'shell-option',
     "bash -c -e 'zensu work event 1'": 'shell-option',
+    "echo $'\\c'; git push origin HEAD": 'push',
+    "echo $'\\c\\\\'; git push origin HEAD; echo 'x'": 'push',
+    "echo $$'\\'; git push origin HEAD; echo 'x'": 'push',
+    "zensu $'work\\0' heartbeat 1": 'helper-verb',
+    "zensu $'wo\\0x'rk heartbeat 1": 'helper-verb',
+    "$'git\\0' push origin HEAD": 'push',
+    "zensu work$'\\0'x heartbeat 1": 'helper-verb',
+    "echo $'it\\'s'; git push origin HEAD": 'push',
+    "echo $'x\\'; git push origin HEAD #'": 'push',
+    "bash -c +x 'git push origin HEAD'": 'shell-option',
+    "bash -co pipefail 'git push origin HEAD'": 'shell-option',
+    "bash +c 'git push origin HEAD'": 'push',
+    "bash -o pipefail -c 'git push origin HEAD'": 'push',
+    "eval -- 'git push origin HEAD'": 'push',
+    'env -vu ZENSU_SESSION_TOKEN zensu work get 1': 'token',
+    'env -vu ZENSU_API_URL zensu work get 1': 'token-host',
+    'env --ignore-env zensu work get 1': 'token',
+    'env --uns=ZENSU_API_URL zensu work get 1': 'token',
+    "env -S 'git push origin HEAD'": 'push',
+    'env -C . git push origin HEAD': 'push',
+    'env -P /usr/bin git push origin HEAD': 'push',
+    'exec -c zensu work get 1': 'token',
+    'printf -v ZENSU_API_URL %s https://h': 'token-host',
+    'printf -v ZENSU_SESSION_TOKEN %s x': 'token',
+    'read ZENSU_API_URL': 'token-host',
+    'read -r ZENSU_SESSION_TOKEN': 'token',
+    'for ZENSU_API_URL in https://h; do zensu work get 1; done': 'token-host',
+    'declare -n ref=ZENSU_API_URL': 'token-host',
+    'let ZENSU_API_URL=1': 'token-host',
   };
   for (const [command, code] of Object.entries(denied)) {
     const analysis = wo.analyzeBash(command);
@@ -1237,6 +1357,8 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
     'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
     "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1', 'echo $ZENSU_API_URL', "echo $'a\\tb'", 'env -0 zensu work get 1',
+    'bash scripts/test.sh -race -v', "read -r -d $'\\0' line", 'printf -v line %s x', 'read -r answer', 'for f in a b; do echo $f; done',
+    'bash -lc "git status"',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
   assert.equal(wo.analyzeBash('gh pr view 7').forge, true);

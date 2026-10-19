@@ -79,6 +79,10 @@ const SECRET_RES = [
   /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
   /:\/\/[^/\s:@]+:[^/\s@]+@/,
 ];
+const REDACT_SPACE = '[\\t\\n\\f\\r \\p{Z}\\u0085]';
+const BEARER_RE = new RegExp(`\\b(bearer${REDACT_SPACE}+)([A-Za-z0-9._~+/=-]{16,})`, 'iu');
+const BASIC_TOKEN_RE = new RegExp(`(\\bauthorization["']?${REDACT_SPACE}*[:=]${REDACT_SPACE}*["']?)?\\b(basic${REDACT_SPACE}+)([A-Za-z0-9+/]{8,}={0,2})`, 'giu');
+const ASSIGNMENT_RE = new RegExp(`\\b((?:[A-Za-z0-9]+[_-])*[A-Za-z0-9]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret))(["']?${REDACT_SPACE}*(?::=|=>|[:=])${REDACT_SPACE}*["']?)([^\\t\\n\\f\\r \\p{Z}\\u0085"',;]{6,})`, 'giu');
 const CLI_VERSION = '0.8.0-fake';
 const DEFAULT_API_URL = 'https://api.zensu.dev';
 const PLAN_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
@@ -530,6 +534,24 @@ function applyStage(flags, clientEventId) {
   return event;
 }
 
+function isBasicCredential(token) {
+  const trimmed = token.replace(/=+$/, '');
+  if (trimmed.length % 4 === 1) return false;
+  let text = null;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(trimmed, 'base64'));
+  } catch (_) {
+    return false;
+  }
+  return text.includes(':') && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
+}
+
+function redactChanges(text) {
+  if (SECRET_RES.some((pattern) => pattern.test(text)) || BEARER_RE.test(text)) return true;
+  if ([...text.matchAll(BASIC_TOKEN_RE)].some((match) => match[1] || isBasicCredential(match[3]))) return true;
+  return [...text.matchAll(ASSIGNMENT_RE)].some((match) => !match[3].startsWith('[REDACTED'));
+}
+
 function applyArtifact(flags, clientEventId) {
   const kinds = ['plan', 'report', 'evidence', 'pr', 'other'];
   if (!kinds.includes(flags.artifact)) apiFail(422, 'invalid_detail', 'detail.kind must be one of plan, report, evidence, pr, other');
@@ -546,7 +568,7 @@ function applyArtifact(flags, clientEventId) {
     if (!parsed || parsed.protocol !== 'https:' || !parsed.host || parsed.username || parsed.password) {
       apiFail(422, 'invalid_url', 'detail.url must be an https link without credentials');
     }
-    if (SECRET_RES.some((pattern) => pattern.test(url))) apiFail(422, 'invalid_url', 'detail.url must not carry a secret');
+    if (redactChanges(url)) apiFail(422, 'invalid_url', 'detail.url must not carry a secret');
   }
   if (flags.sha !== undefined && !/^[0-9a-fA-F]{7,64}$/.test(flags.sha)) apiFail(422, 'invalid_sha', 'detail.sha must be a commit SHA');
   guardProse('detail.summary', flags.summary, false);

@@ -527,9 +527,7 @@ function renew(context, { env = process.env, now = Date.now(), force = false, th
   }
   const failure = classifyFailure(outcome);
   if ([VERDICTS.LOST, VERDICTS.AMBIGUOUS, VERDICTS.FINAL].includes(failure.verdict)) {
-    if (replayTerminal(context, { env, at: now })) return { verdict: 'ended', failure: null };
-    markLost(context, { code: failure.code || `status_${failure.status}`, via: 'heartbeat', at: now });
-    return { verdict: VERDICTS.LOST, failure };
+    return loseLease(context, failure, 'heartbeat', { env, at: now });
   }
   return { verdict: failure.verdict === VERDICTS.OK ? VERDICTS.TRANSIENT : failure.verdict, failure };
 }
@@ -591,8 +589,9 @@ function sendEvent(context, args, { env = process.env, now = Date.now, target = 
       failure = { verdict: probed.verdict, status: failure.status, code: probed.code };
     }
     if (failure.verdict === VERDICTS.LOST) {
-      markLost(context, { code: failure.code || `status_${failure.status}`, via: 'event', at: now() });
-      return { verdict: VERDICTS.LOST, failure };
+      const lost = loseLease(context, failure, 'event', { env, at: now() });
+      if (lost.verdict !== VERDICTS.TRANSIENT) return { verdict: lost.verdict, failure };
+      failure = lost.failure;
     }
     if (failure.verdict === VERDICTS.FINAL) return { verdict: VERDICTS.FINAL, failure };
     if (now() - started + delay > settings.budgetMs) return { verdict: VERDICTS.TRANSIENT, failure };
@@ -635,24 +634,87 @@ function deliverBlocked(context, { env = process.env, now = Date.now, kind = 'wo
   return { ...sent, delivered, reason: prose, replaced };
 }
 
+const INFLIGHT_LIMIT = 4;
+
+function eventIdOf(args) {
+  const at = args.indexOf('--client-event-id');
+  return at >= 0 ? String(args[at + 1] || '') : '';
+}
+
+function inflightRecords(context) {
+  const inflight = readOutbox(context).inflight;
+  return Array.isArray(inflight) ? inflight.filter((record) => isObject(record) && Array.isArray(record.args)) : [];
+}
+
+function forgetTerminal(context, args) {
+  const records = inflightRecords(context);
+  const kept = records.filter((record) => eventIdOf(record.args) !== eventIdOf(args));
+  if (kept.length !== records.length) writeOutbox(context, { inflight: kept });
+}
+
 function rememberTerminal(context, sent, record) {
-  if (sent.verdict === VERDICTS.TRANSIENT || sent.verdict === VERDICTS.RETRY) writeOutbox(context, { inflight: record });
-  else if (readOutbox(context).inflight) writeOutbox(context, { inflight: null });
+  if (sent.verdict !== VERDICTS.TRANSIENT && sent.verdict !== VERDICTS.RETRY) {
+    forgetTerminal(context, record.args);
+    return;
+  }
+  const others = inflightRecords(context).filter((entry) => eventIdOf(entry.args) !== eventIdOf(record.args));
+  writeOutbox(context, { inflight: [...others, record].slice(-INFLIGHT_LIMIT) });
 }
 
 function replayTerminal(context, { env, at }) {
-  const inflight = readOutbox(context).inflight;
-  if (!isObject(inflight) || !Array.isArray(inflight.args)) return false;
-  const argv = inflight.verb === 'ask'
-    ? inflight.args.map(String)
-    : ['work', 'event', context.marker.orderId, ...inflight.args.map(String), '--client-name', CLIENT_NAME, '--client-version', pluginVersion(), '--json'];
-  const outcome = runZensu(argv, { env });
-  if (outcome.exitCode !== 0 || !isObject(outcome.json)) return false;
-  writeOutbox(context, { inflight: null });
-  if (inflight.verb === 'ask') return noteAskOutcome(context, outcome.json, () => at);
-  if (!isObject(inflight.ended)) return false;
-  markEnded(context, { outcome: String(inflight.ended.outcome), kind: String(inflight.ended.kind), delivered: true, reason: null, at });
-  return true;
+  let unanswered = null;
+  for (const record of inflightRecords(context).reverse()) {
+    const argv = record.verb === 'ask'
+      ? record.args.map(String)
+      : ['work', 'event', context.marker.orderId, ...record.args.map(String), '--client-name', CLIENT_NAME, '--client-version', pluginVersion(), '--json'];
+    const outcome = runZensu(argv, { env });
+    if (outcome.exitCode !== 0 || !isObject(outcome.json)) {
+      const failure = classifyFailure(outcome);
+      if ([VERDICTS.TRANSIENT, VERDICTS.RETRY, VERDICTS.OK].includes(failure.verdict)) unanswered = unanswered || { ...failure, verdict: VERDICTS.TRANSIENT };
+      else forgetTerminal(context, record.args);
+      continue;
+    }
+    forgetTerminal(context, record.args);
+    if (record.verb === 'ask') {
+      if (noteAskOutcome(context, outcome.json, () => at)) return { state: 'ended', failure: null };
+      continue;
+    }
+    if (!isObject(record.ended)) continue;
+    markEnded(context, { outcome: String(record.ended.outcome), kind: String(record.ended.kind), delivered: true, reason: null, at });
+    return { state: 'ended', failure: null };
+  }
+  return unanswered ? { state: 'unanswered', failure: unanswered } : { state: 'refused', failure: null };
+}
+
+function loseLease(context, failure, via, { env, at }) {
+  if (safeRead(context.files.ended).value) return { verdict: 'ended', failure: null };
+  const replayed = replayTerminal(context, { env, at });
+  if (replayed.state === 'ended') return { verdict: 'ended', failure: null };
+  if (replayed.state === 'unanswered') return { verdict: VERDICTS.TRANSIENT, failure: replayed.failure };
+  markLost(context, { code: failure.code || `status_${failure.status}`, via, at });
+  return { verdict: VERDICTS.LOST, failure };
+}
+
+function endedResult(context, step, successExit = EXIT.ENDED) {
+  const ended = safeRead(context.files.ended).value || {};
+  return {
+    exit: ended.outcome === 'success' ? successExit : EXIT.ENDED,
+    message: `Zensu ended the session of work order ${context.marker.orderId} (${ended.kind || 'unknown'})${step}`,
+    ended,
+    cancelRun: runToCancel(context),
+  };
+}
+
+function blockedResult(context, blocked, cause, again) {
+  if (blocked.delivered) {
+    return { exit: EXIT.ENDED, message: `${cause}; work order ${context.marker.orderId} is blocked with worker_error and the session has ended`, cancelRun: runToCancel(context) };
+  }
+  if (blocked.verdict === 'ended') return endedResult(context, `; ${cause}`);
+  if (blocked.verdict === VERDICTS.LOST) {
+    return { exit: EXIT.LOST, message: `${cause}; the lease is lost, so the block could not be reported (${describeFailure(blocked.failure)})`, cancelRun: runToCancel(context) };
+  }
+  if (blocked.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `${cause}; Zensu refused the block (${describeFailure(blocked.failure)}); end the session` };
+  return { exit: EXIT.TRANSIENT, message: `${cause}; the block is not delivered yet (${describeFailure(blocked.failure)}); run ${again} again` };
 }
 
 function branchPrefixOf(order) {
@@ -765,6 +827,7 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
     return { exit: EXIT.ENDED, message: `the session of work order ${order.id} has already ended`, summary: { ...summary, action: 'stop' } };
   }
   const beat = renew(context, { env, now: now(), force: true });
+  if (beat.verdict === 'ended') return { ...endedResult(context, ''), summary: { ...summary, action: 'stop' } };
   if (beat.verdict === VERDICTS.LOST) {
     return { exit: EXIT.LOST, message: `the lease of work order ${order.id} is lost (${describeFailure(beat.failure)}); stop without any forge write`, summary: { ...summary, action: 'stop' } };
   }
@@ -778,10 +841,7 @@ function start({ env = process.env, projectRoot, sessionKey, orderId, now = Date
     const reason = `This harness does not run work orders of kind ${String(order.kind).replace(/[^A-Za-z0-9 ]/g, ' ')}. Its manifest supports the kind implement only.`;
     const blocked = deliverBlocked(context, { env, now, reason, eventKey: 'unsupported-kind' });
     return {
-      exit: EXIT.ENDED,
-      message: blocked.delivered
-        ? `work order ${order.id} is of kind ${order.kind}, which this harness does not run; it is blocked with worker_error`
-        : `work order ${order.id} is of kind ${order.kind}, which this harness does not run; the block could not be delivered`,
+      ...blockedResult(context, blocked, `work order ${order.id} is of kind ${order.kind}, which this harness does not run`, '--start'),
       summary: { ...summary, action: 'stop', delivered: blocked.delivered },
     };
   }
@@ -986,13 +1046,6 @@ function drain(context, { env = process.env, now = Date.now } = {}) {
   return { verdict: VERDICTS.OK, sent };
 }
 
-function blockExit(blocked) {
-  if (blocked.delivered) return EXIT.ENDED;
-  if (blocked.verdict === VERDICTS.LOST) return EXIT.LOST;
-  if (blocked.verdict === VERDICTS.FINAL) return EXIT.REFUSED;
-  return EXIT.TRANSIENT;
-}
-
 function refusedStageReason(refused, reason) {
   if (typeof reason === 'string' && reason.trim()) return reason.replace(/`/g, "'");
   const stage = refused && refused.status ? String(refused.status).replace(/_/g, ' ') : 'an earlier';
@@ -1077,10 +1130,12 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   }
   const got = runZensu(['work', 'get', context.marker.orderId, '--json'], { env });
   if (got.exitCode !== 0 || !isObject(got.json)) {
-    const failure = classifyFailure(got);
+    let failure = classifyFailure(got);
     if (failure.verdict === VERDICTS.LOST) {
-      markLost(context, { code: failure.code || `status_${failure.status}`, via: 'get', at: now() });
-      return { exit: EXIT.LOST, message: `the order cannot be read any more (${describeFailure(failure)})` };
+      const lost = loseLease(context, failure, 'get', { env, at: now() });
+      if (lost.verdict === 'ended') return endedResult(context, '');
+      if (lost.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: `the order cannot be read any more (${describeFailure(failure)})` };
+      failure = lost.failure;
     }
     return { exit: EXIT.TRANSIENT, message: `Zensu did not answer the order read (${describeFailure(failure)})` };
   }
@@ -1089,7 +1144,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
   recordAnswers(context, planDecisions(order));
   if (order.spec_hash !== context.marker.specHash || order.spec_stale === true) {
     const blocked = deliverBlocked(context, { env, now, reason: 'The order spec changed while the session ran, so its plan no longer matches the spec it was dispatched with.', eventKey: 'spec-changed' });
-    return { exit: blockExit(blocked), message: 'the order spec changed during the session; the session ends' };
+    return blockedResult(context, blocked, 'the order spec changed during the session', '--bind-spec');
   }
   const policy = isObject(order.policy) ? order.policy : {};
   let approvedPlanSha256 = order.spec_hash;
@@ -1122,7 +1177,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
       else if (!approved.ok) reason = 'The commit of the approved plan is not reachable from this checkout, so the approved plan cannot be compared.';
       else if (current === null) reason = 'The order branch carries no plan file, so the approved plan cannot be compared.';
       const blocked = deliverBlocked(context, { env, now, reason, eventKey: 'plan-mismatch' });
-      return { exit: blockExit(blocked), message: reason };
+      return blockedResult(context, blocked, reason.replace(/\.$/, ''), '--bind-spec');
     }
     approvedPlanSha256 = crypto.createHash('sha256').update(approved.stdout, 'utf8').digest('hex');
   }
@@ -1137,6 +1192,7 @@ function bindSpec(context, { env = process.env, now = Date.now, runId } = {}) {
     '--autopilot-stage', 'AWAIT_TDD', '--autopilot-run-id', bound.runId];
   if (branch) args.push('--branch', branch);
   const sent = sendEvent(context, args, { env, now, target: 'implementing' });
+  if (sent.verdict === 'ended') return endedResult(context, '');
   if (sent.verdict === VERDICTS.FINAL && sent.failure && sent.failure.code === 'invalid_transition') return pastImplementing();
   if (sent.verdict === VERDICTS.OK) {
     if (sent.order && sent.order.status === 'blocked') {
@@ -1205,9 +1261,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     };
   }
   const drained = drain(context, { env, now });
-  if (drained.verdict === 'ended') {
-    return { exit: EXIT.ENDED, message: 'Zensu ended the session while its stages were reported', ended: safeRead(context.files.ended).value, cancelRun: runToCancel(context) };
-  }
+  if (drained.verdict === 'ended') return endedResult(context, ' while its stages were reported', EXIT.OK);
   if (drained.verdict === VERDICTS.LOST) {
     markEnded(context, { outcome: 'failure', kind: 'lease-lost', delivered: false, reason: 'the lease was lost', at: now() });
     return { exit: EXIT.LOST, message: 'the lease is lost; nothing can be reported any more', cancelRun: runToCancel(context) };
@@ -1231,6 +1285,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
       if (branch) args.push('--branch', branch);
       const sent = sendEvent(context, args, { env, now, target: 'ready_for_merge', terminal: true });
       rememberTerminal(context, sent, { verb: 'event', args, ended: { outcome: 'success', kind: 'ready_for_merge' } });
+      if (sent.verdict === 'ended') return endedResult(context, '', EXIT.OK);
       if (sent.verdict === VERDICTS.OK) {
         markEnded(context, { outcome: 'success', kind: 'ready_for_merge', delivered: true, reason: null, at: now() });
         return { exit: EXIT.OK, message: `ready_for_merge is reported for work order ${context.marker.orderId}; the session is complete`, delivered: true };
@@ -1253,6 +1308,7 @@ function finish(context, { env = process.env, now = Date.now, reason = null } = 
     eventKey: refused ? `refused:${refused.status || 'stage'}` : (run ? `run:${run.runId}` : 'no-run'),
     fallback: refused ? refusedStageReason(refused, null) : blockReasonFor(run, null),
   });
+  if (blocked.verdict === 'ended') return endedResult(context, '', EXIT.OK);
   if (blocked.delivered) {
     const cause = refused ? ` because Zensu refused the ${refused.status || 'earlier'} stage (${describeFailure(refused.failure)})` : '';
     const swap = blocked.replaced ? `; Zensu refused the stated reason as prose, so the block carries "${blocked.reason}" instead` : '';
@@ -1268,6 +1324,7 @@ function push(context, { env = process.env, now = Date.now } = {}) {
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: `${forge.reason}; no push` };
   const beat = renew(context, { env, now: now(), force: true });
+  if (beat.verdict === 'ended') return endedResult(context, '; no push');
   if (beat.verdict !== VERDICTS.OK) {
     return { exit: beat.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.TRANSIENT, message: `the lease renewal before the push did not succeed (${describeFailure(beat.failure)}); no push` };
   }
@@ -1300,6 +1357,7 @@ function push(context, { env = process.env, now = Date.now } = {}) {
   const outbox = readOutbox(context);
   if (outbox.runId) args.push('--autopilot-run-id', outbox.runId);
   const sent = sendEvent(context, args, { env, now, target: status });
+  if (sent.verdict === 'ended') return endedResult(context, '; the push landed');
   if (sent.verdict === VERDICTS.LOST) {
     return { exit: EXIT.LOST, message: `the push landed but the lease is lost (${describeFailure(sent.failure)}); stop without any forge write` };
   }
@@ -1353,6 +1411,7 @@ function openPr(context, { env = process.env, now = Date.now, title, bodyFile, p
   const forge = forgeWriteVerdict(context, now());
   if (!forge.allowed) return { exit: EXIT.LOST, message: `${forge.reason}; no pull request` };
   const beat = renew(context, { env, now: now(), force: true });
+  if (beat.verdict === 'ended') return endedResult(context, '; no pull request');
   if (beat.verdict !== VERDICTS.OK) {
     return { exit: beat.verdict === VERDICTS.LOST ? EXIT.LOST : EXIT.TRANSIENT, message: `the lease renewal before opening the pull request did not succeed (${describeFailure(beat.failure)})` };
   }
@@ -1517,6 +1576,10 @@ const HUMAN_PLAN_VERBS = new Set(['approve', 'finalize', 'abandon', 'confirm-mer
 const TOKEN_EXPANSION_RE = /\$\{?[!#]?ZENSU_SESSION_TOKEN(?![A-Za-z0-9_])/;
 const PROCESS_ENVIRONMENT_RE = /\/proc\/[^/\s]+\/environ(?![A-Za-z0-9_])/;
 const MAX_SHELL_DEPTH = 4;
+const SHELL_READINGS = ['posix', 'bash', 'zsh'];
+const ENV_SHORT_OPERANDS = new Set(['u', 'C', 'P', 'S', 'a', 'L', 'U']);
+const ENV_LONG_OPERANDS = new Set(['unset', 'chdir', 'split-string', 'argv0']);
+const VARIABLE_READERS = new Set(['read', 'mapfile', 'readarray', 'getopts']);
 const HOOK_RETRY_BUDGET_MS = 5000;
 
 function stripHeredocBodies(text) {
@@ -1535,12 +1598,20 @@ function gitOperandOptions() {
   }
 }
 
-function matchingParen(text, open) {
+function matchingParen(text, open, reading = 'posix') {
   let depth = 0;
   for (let index = open; index < text.length; index += 1) {
     const char = text[index];
     if (char === '\\') {
       index += 1;
+      continue;
+    }
+    if (reading === 'bash' && char === '$' && text[index + 1] === '$') {
+      index += 1;
+      continue;
+    }
+    if (reading !== 'posix' && char === '$' && text[index + 1] === "'") {
+      index = ansiCStringEnd(text, index + 2);
       continue;
     }
     if (char === "'") {
@@ -1560,23 +1631,31 @@ function matchingParen(text, open) {
 
 const ANSI_ESCAPES = { a: 7, b: 8, e: 27, E: 27, f: 12, n: 10, r: 13, t: 9, v: 11 };
 
+function ansiCStringEnd(text, start) {
+  let end = start;
+  while (end < text.length && text[end] !== "'") end += text[end] === '\\' ? 2 : 1;
+  return Math.min(end, text.length);
+}
+
 function ansiCString(text, start) {
+  const end = ansiCStringEnd(text, start);
+  const body = text.slice(start, end);
   let value = '';
-  let cursor = start;
-  while (cursor < text.length && text[cursor] !== "'") {
-    if (text[cursor] !== '\\' || cursor + 1 >= text.length) {
-      value += text[cursor];
+  let cursor = 0;
+  while (cursor < body.length) {
+    if (body[cursor] !== '\\' || cursor + 1 >= body.length) {
+      value += body[cursor];
       cursor += 1;
       continue;
     }
-    const code = text[cursor + 1];
-    const rest = text.slice(cursor + 2);
+    const code = body[cursor + 1];
+    const rest = body.slice(cursor + 2);
     let match = null;
     if (Object.prototype.hasOwnProperty.call(ANSI_ESCAPES, code)) {
       value += String.fromCharCode(ANSI_ESCAPES[code]);
       cursor += 2;
     } else if (/[0-7]/.test(code)) {
-      match = /^[0-7]{1,3}/.exec(text.slice(cursor + 1));
+      match = /^[0-7]{1,3}/.exec(body.slice(cursor + 1));
       value += String.fromCharCode(parseInt(match[0], 8) & 255);
       cursor += 1 + match[0].length;
     } else if (code === 'x' && (match = /^[0-9A-Fa-f]{1,2}/.exec(rest))) {
@@ -1597,10 +1676,10 @@ function ansiCString(text, start) {
       cursor += 2;
     }
   }
-  return { value, end: cursor };
+  return { value, end };
 }
 
-function shellCommands(text, depth = 0) {
+function shellCommands(text, depth = 0, reading = 'bash') {
   const commands = [];
   if (depth > MAX_SHELL_DEPTH) return commands;
   let words = [];
@@ -1609,7 +1688,7 @@ function shellCommands(text, depth = 0) {
     word = (word === null ? '' : word) + piece;
   };
   const endWord = () => {
-    if (word !== null) words.push(word);
+    if (word !== null) words.push(reading === 'zsh' && word.includes('\u0000') ? word.slice(0, word.indexOf('\u0000')) : word);
     word = null;
   };
   const endCommand = () => {
@@ -1618,7 +1697,7 @@ function shellCommands(text, depth = 0) {
     words = [];
   };
   const nested = (inner) => {
-    for (const command of shellCommands(inner, depth + 1)) commands.push(command);
+    for (const command of shellCommands(inner, depth + 1, reading)) commands.push(command);
   };
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
@@ -1628,13 +1707,18 @@ function shellCommands(text, depth = 0) {
       index += 1;
       continue;
     }
-    if (char === '$' && next === "'") {
+    if (reading === 'bash' && char === '$' && next === '$') {
+      add('$$');
+      index += 1;
+      continue;
+    }
+    if (reading !== 'posix' && char === '$' && next === "'") {
       const decoded = ansiCString(text, index + 2);
-      add(decoded.value);
+      add(reading === 'bash' && decoded.value.includes('\u0000') ? decoded.value.slice(0, decoded.value.indexOf('\u0000')) : decoded.value);
       index = decoded.end;
       continue;
     }
-    if (char === '$' && next === '"') continue;
+    if (reading !== 'posix' && char === '$' && next === '"') continue;
     if (char === "'") {
       const end = text.indexOf("'", index + 1);
       const stop = end < 0 ? text.length : end;
@@ -1652,7 +1736,7 @@ function shellCommands(text, depth = 0) {
           continue;
         }
         if (text[cursor] === '$' && text[cursor + 1] === '(') {
-          const close = matchingParen(text, cursor + 1);
+          const close = matchingParen(text, cursor + 1, reading);
           nested(text.slice(cursor + 2, close));
           cursor = close + 1;
           continue;
@@ -1672,7 +1756,7 @@ function shellCommands(text, depth = 0) {
       continue;
     }
     if ((char === '$' || char === '<' || char === '>') && next === '(') {
-      const close = matchingParen(text, index + 1);
+      const close = matchingParen(text, index + 1, reading);
       nested(text.slice(index + 2, close));
       add('');
       index = close;
@@ -1711,7 +1795,26 @@ function commandName(word) {
   return String(word || '').split('/').pop();
 }
 
+function splitEnvString(operand) {
+  return shellCommands(String(operand || ''), 0, 'posix').flat();
+}
+
+function interpreterOptionEnd(args) {
+  let index = 0;
+  while (index < args.length && /^[-+]/.test(args[index])) {
+    const word = args[index];
+    if (word === '-' || word === '--') return index + 1;
+    if (/^--?(?:rcfile|init-file|emulate)$/.test(word)) {
+      index += 2;
+      continue;
+    }
+    index += 1 + (word.startsWith('--') ? 0 : (word.slice(1).match(/[oOR]/g) || []).length);
+  }
+  return index;
+}
+
 function leadingCommand(words) {
+  words = words.slice();
   const assignments = [];
   const unset = [];
   let bareEnv = false;
@@ -1732,31 +1835,36 @@ function leadingCommand(words) {
     if (name === 'env') {
       while (index < words.length) {
         const option = words[index];
-        if (option === '-u' || option === '--unset') {
-          unset.push(String(words[index + 1] || ''));
-          index += 2;
-          continue;
-        }
-        if (option.startsWith('--unset=')) {
-          unset.push(option.slice('--unset='.length));
+        if (option === '--') {
           index += 1;
-          continue;
+          break;
         }
-        if (/^-u./.test(option)) {
-          unset.push(option.slice(2));
-          index += 1;
-          continue;
-        }
-        if (option === '-' || option === '--ignore-environment' || /^-[^-u]*i/.test(option)) {
+        if (option === '-') {
           unset.push(TOKEN_VARIABLE, HOST_VARIABLE);
           index += 1;
           continue;
         }
-        if (option.startsWith('-')) {
+        if (option.startsWith('--')) {
+          unset.push(TOKEN_VARIABLE, HOST_VARIABLE);
+          const key = option.slice(2).split('=')[0];
+          const attached = option.includes('=') ? option.slice(option.indexOf('=') + 1) : null;
           index += 1;
+          const operand = attached !== null || !ENV_LONG_OPERANDS.has(key) ? attached : String(words[index++] || '');
+          if (key === 'unset' && operand !== null) unset.push(operand);
+          if (key === 'split-string' && operand !== null) words.splice(index, 0, ...splitEnvString(operand));
           continue;
         }
-        break;
+        if (!option.startsWith('-')) break;
+        index += 1;
+        for (let at = 1; at < option.length; at += 1) {
+          const letter = option[at];
+          if (letter === 'i') unset.push(TOKEN_VARIABLE, HOST_VARIABLE);
+          if (!ENV_SHORT_OPERANDS.has(letter)) continue;
+          const operand = at + 1 < option.length ? option.slice(at + 1) : String(words[index++] || '');
+          if (letter === 'u') unset.push(operand);
+          if (letter === 'S') words.splice(index, 0, ...splitEnvString(operand));
+          break;
+        }
       }
       takeAssignments();
       if (index >= words.length) bareEnv = true;
@@ -1766,6 +1874,11 @@ function leadingCommand(words) {
       const option = words[index];
       if ((name === 'sudo' || name === 'doas') && SUDO_OPERAND_OPTIONS.has(option)) {
         index += 2;
+        continue;
+      }
+      if (name === 'exec' && /^-[A-Za-z]+$/.test(option)) {
+        if (option.includes('c')) unset.push(TOKEN_VARIABLE, HOST_VARIABLE);
+        index += option.includes('a') ? 2 : 1;
         continue;
       }
       if (option.startsWith('-') || /^[0-9.]+[smhd]?$/.test(option)) {
@@ -1828,7 +1941,15 @@ function analyzeBash(command, depth = 0) {
     result.deny = bashFinding('token', 'it reads a process environment file');
     return result;
   }
-  for (const words of shellCommands(stripHeredocBodies(text))) {
+  const stripped = stripHeredocBodies(text);
+  const seen = new Set();
+  const readings = SHELL_READINGS.flatMap((reading) => shellCommands(stripped, 0, reading)).filter((words) => {
+    const key = JSON.stringify(words);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  for (const words of readings) {
     const lead = leadingCommand(words);
     if (lead.assignments.includes(TOKEN_VARIABLE) || lead.unset.includes(TOKEN_VARIABLE)) {
       result.deny = bashFinding('token', 'it overrides or removes the session token variable');
@@ -1844,13 +1965,28 @@ function analyzeBash(command, depth = 0) {
     }
     const { name, args } = lead;
     if (!name) continue;
+    const named = (variable) => name === variable
+      || (name === 'printf' && args.some((arg, index) => arg === `-v${variable}` || (arg === '-v' && args[index + 1] === variable)))
+      || (VARIABLE_READERS.has(name) && args.includes(variable))
+      || (name === 'let' && args.some((arg) => arg.startsWith(variable)))
+      || (VARIABLE_BUILTINS.has(name) && args.some((arg) => arg.includes('=') && arg.slice(arg.indexOf('=') + 1) === variable));
+    if (named(TOKEN_VARIABLE)) {
+      result.deny = bashFinding('token', 'it overrides or removes the session token variable');
+      return result;
+    }
+    if (named(HOST_VARIABLE)) {
+      result.deny = bashFinding('token-host', `it sets or removes ${HOST_VARIABLE}`);
+      return result;
+    }
     if (SHELL_INTERPRETERS.has(name) || name === 'eval') {
-      const at = name === 'eval' ? -1 : args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
-      if (at >= 0 && String(args[at + 1] || '').startsWith('-')) {
-        result.deny = bashFinding('shell-option', `${name} ${args[at]} ${args[at + 1]}`);
+      const optionEnd = name === 'eval' ? 0 : interpreterOptionEnd(args);
+      const at = args.slice(0, optionEnd).findIndex((arg) => /^[-+][A-Za-z]*c[A-Za-z]*$/.test(arg));
+      if (at >= 0 && (/[oOR]/.test(args[at].slice(1)) || /^[-+]/.test(String(args[at + 1] || '')))) {
+        result.deny = bashFinding('shell-option', `${name} ${args.slice(at, at + 2).join(' ')}`);
         return result;
       }
-      const inner = name === 'eval' ? args.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
+      const evalWords = name === 'eval' && (args[0] === '--' || args[0] === '-') ? args.slice(1) : args;
+      const inner = name === 'eval' ? evalWords.join(' ') : (at >= 0 ? String(args[at + 1] || '') : '');
       if (inner) {
         const innerResult = analyzeBash(inner, depth + 1);
         if (innerResult.deny) return innerResult;
@@ -2089,7 +2225,11 @@ function postToolUpdate(context, payload, { env = process.env, now = Date.now } 
   const drained = drain(context, { env: bounded, now });
   if (drained.verdict === 'ended') {
     result.cancelRun = runToCancel(context);
-    result.additionalContext = `Zensu blocked work order ${context.marker.orderId} and ended this session. Stop now: run zensu-work-order.sh --finish once and end the turn.`;
+    const ended = safeRead(context.files.ended).value;
+    const what = ended && ended.kind === 'ready_for_merge' && ended.outcome === 'success'
+      ? `Zensu recorded ready_for_merge for work order ${context.marker.orderId}`
+      : `Zensu blocked work order ${context.marker.orderId}`;
+    result.additionalContext = `${what} and ended this session. Stop now: run zensu-work-order.sh --finish once and end the turn.`;
     return result;
   }
   if (drained.verdict === VERDICTS.LOST || safeRead(context.files.lost).value) {
@@ -2134,19 +2274,23 @@ function ask(context, { env = process.env, now = Date.now, category, question, o
   if (outcome.exitCode !== 0 || !isObject(outcome.json)) {
     const failure = classifyFailure(outcome);
     if (failure.verdict === VERDICTS.LOST) {
-      markLost(context, { code: failure.code || `status_${failure.status}`, via: 'ask', at: now() });
-      return { exit: EXIT.LOST, message: 'the lease is lost; the question was not asked' };
+      forgetTerminal(context, args);
+      const lost = loseLease(context, failure, 'ask', { env, at: now() });
+      if (lost.verdict === 'ended') return endedResult(context, '; the question was not asked');
+      if (lost.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the question was not asked' };
+      return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(lost.failure)}); run --ask again` };
     }
     if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
-      writeOutbox(context, { inflight: { verb: 'ask', args } });
+      rememberTerminal(context, failure, { verb: 'ask', args });
       return { exit: EXIT.TRANSIENT, message: `Zensu did not take the question yet (${describeFailure(failure)}); run --ask again` };
     }
+    forgetTerminal(context, args);
     const refused = refusedProse(outcome, failure, 'ask again');
     const next = refused.next || 'continue with your default option, or finish with --reason when the work cannot go on';
     return { exit: EXIT.REFUSED, message: `Zensu refused the question (${describeFailure(failure)})${refused.said}; ${next}` };
   }
   const body = outcome.json;
-  if (readOutbox(context).inflight) writeOutbox(context, { inflight: null });
+  forgetTerminal(context, args);
   const asked = isObject(body.question) ? body.question : {};
   const value = { questionId: asked.id || null, status: asked.status || null, escalated: body.escalated === true, replay: body.replay === true };
   if (noteAskOutcome(context, body, now)) {
@@ -2177,8 +2321,10 @@ function followup(context, { env = process.env, now = Date.now, title, rationale
   if (outcome.exitCode === 0) return { exit: EXIT.OK, value: { filed: true, replay: isObject(outcome.json) && outcome.json.replay === true } };
   const failure = classifyFailure(outcome);
   if (failure.verdict === VERDICTS.LOST) {
-    markLost(context, { code: failure.code || `status_${failure.status}`, via: 'followup', at: now() });
-    return { exit: EXIT.LOST, message: 'the lease is lost; the follow-up was not filed' };
+    const lost = loseLease(context, failure, 'followup', { env, at: now() });
+    if (lost.verdict === 'ended') return endedResult(context, '; the follow-up was not filed');
+    if (lost.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the follow-up was not filed' };
+    return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(lost.failure)})` };
   }
   if (failure.verdict === VERDICTS.TRANSIENT || failure.verdict === VERDICTS.RETRY) {
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the follow-up yet (${describeFailure(failure)})` };
@@ -2313,7 +2459,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
     }
   }
   const pushed = push(context, { env, now });
-  if (pushed.exit !== EXIT.OK) return pushed;
+  if (pushed.exit !== EXIT.OK) return safeRead(context.files.ended).value ? endedResult(context, '', EXIT.OK) : pushed;
   const sha = pushed.value.head;
   const snapshot = safeRead(context.files.order).value;
   const order = snapshot && isObject(snapshot.order) ? snapshot.order : {};
@@ -2330,6 +2476,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
     artifact = sendArtifact(summary, url);
   }
   if (artifact.verdict !== VERDICTS.OK) {
+    if (artifact.verdict === 'ended') return endedResult(context, '', EXIT.OK);
     if (artifact.verdict === VERDICTS.LOST) return { exit: EXIT.LOST, message: 'the lease is lost; the plan was not attached' };
     if (artifact.verdict === VERDICTS.FINAL) return { exit: EXIT.REFUSED, message: `Zensu refused the plan artifact (${describeFailure(artifact.failure)}); finish with --reason` };
     return { exit: EXIT.TRANSIENT, message: `Zensu did not take the plan artifact yet (${describeFailure(artifact.failure)}); run --plan-approval again` };
@@ -2337,6 +2484,7 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
   const blocked = deliverBlocked(context, {
     env, now, kind: 'plan_approval', reason: 'The implementation plan is attached and waits for a human approval.', eventKey: `plan-approval:${sha}`,
   });
+  if (blocked.verdict === 'ended') return endedResult(context, '', EXIT.OK);
   if (blocked.delivered) {
     return {
       exit: EXIT.OK,

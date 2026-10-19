@@ -30,10 +30,12 @@ ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
 `--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
 accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception
-is `inflight`: the last block, `ready_for_merge` or question send that got no answer. A renewal that
-finds the lease gone replays it before it writes `lost-`, because after Zensu ended a session a
-replay under a stored `client_event_id` is the only call it still answers. The safe-sentence resend
-of a block therefore keeps the first send's `client_event_id`; a refused `422` stores nothing.
+is `inflight`: up to four block, `ready_for_merge` or question sends that got no answer. Every route
+that meets a lost lease goes through `loseLease`, which replays them before it writes `lost-`,
+because after Zensu ended a session a replay under a stored `client_event_id` is the only call it
+still answers. A replay without an answer writes nothing and keeps the send. The safe-sentence
+resend of a block therefore keeps the first send's `client_event_id`; a refused `422` stores
+nothing. A caller that gets the verdict `ended` back maps it through `endedResult`.
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
 and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is
@@ -44,7 +46,7 @@ transient, except at `--start`, where a CLI line matching `SESSION_TOKEN_HOST_RE
 `SESSION_TOKEN_SHAPE_RE` match the two messages of `sessionTokenTarget` in zensu-cli, and the fake's
 `requireSessionToken` copies both word for word; a CLI rewording sends `--start` back to exit 7
 while every suite stays green. The fake's `proseViolation` ports the service's content guard, and
-its `SECRET_RES` the redaction patterns behind the service's `invalid_url` link check.
+its `redactChanges` the service's `Redact`, which backs the `invalid_url` link check.
 `DEFAULT_BRANCH_PREFIX` in the runtime and `BRANCH_PREFIX` in the fake mirror the service's
 work-order branch prefix, `wo-`. A change on the service side means changing the fake with it, or
 the suites keep passing against behavior Zensu no longer has.
@@ -96,7 +98,10 @@ version; never bump it by hand.
 
 **Known gaps, accepted and named:**
 
-- The gate reads command text; a script the session writes and then runs is not judged.
+- The gate reads command text; a script the session writes and then runs is not judged. It reads
+  each command three ways, with plain single quotes and with the ANSI-C quoting of bash and of zsh,
+  so its deny set never shrinks below the plain reading; a reading the shell does not use can only
+  add a deny.
 - `--review-import` trusts a marker by its digest and reads only the first part of a review.
 - A nonterminal run of another order in a reused checkout still holds a new run off.
 - Native Windows is unverified. The launcher's process-group handling is POSIX only, and the five

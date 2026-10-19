@@ -80,10 +80,9 @@ decision made later reaches the next session of the order, not the running one.
 
 `hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools and the
 task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
-the `zensu work` and `zensu plan` verbs a worker session must not call, every command that
-prints, reads, unsets or overrides `ZENSU_SESSION_TOKEN`, and every command that sets, changes or
-removes `ZENSU_API_URL` or passes `--api-url` to `zensu`. Each denial says why and, where a helper
-verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
+the `zensu work` and `zensu plan` verbs a worker session must not call, the usual spellings that
+print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`,
+and `--api-url` on `zensu`. Each denial says why and, where a helper verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.
 
@@ -154,7 +153,8 @@ raw output to a file there; nothing else keeps it.
 - The installed `zensu` CLI must provide `zensu work`, which zensu-cli 0.8.0 is the first release
   to carry; with an older CLI, `/zensu:work` refuses in one line.
 - The gate reads command text. A command assembled at run time, such as a script the session
-  wrote and then runs, is not judged; the worker's slot sandbox, not the gate, is the boundary.
+  wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not
+  judged; the worker's slot sandbox, not the gate, is the boundary.
 - `--start` releases only runs of the same order. A nonterminal run of another order in a reused
   checkout still holds the new run off, and the session ends with a stated reason.
 - Zensu records `zensu-cli` and the CLI version as the client of every question and follow-up,
