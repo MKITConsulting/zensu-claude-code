@@ -593,6 +593,15 @@ var RULE_CARRIERS = [
     open: '<!-- zensu:best-solution-first -->',
     close: '<!-- /zensu:best-solution-first -->',
     flag: 'bestSolutionFirst',
+    off: 'the main thread does not receive it at session start, every subagent still does',
+  },
+  {
+    id: 'best-solution-first-reminder',
+    doc: 'docs/best-solution-first.md',
+    open: '<!-- zensu:best-solution-first-reminder -->',
+    close: '<!-- /zensu:best-solution-first-reminder -->',
+    flag: 'bestSolutionFirst',
+    off: 'the main thread does not receive it on any prompt',
   },
   {
     id: 'evidence-discipline',
@@ -658,7 +667,7 @@ function ruleCarrierRows(cfgReads) {
     if (out && out.block) {
       if (c.flag && hookFlagDisabled(cfgReads, c.flag)) {
         line(WARN, 'rule carriers: ' + c.id + ' block is intact (' + out.block.length
-          + ' chars) but hooks.' + c.flag + ' is false — the rule is not injected');
+          + ' chars) but hooks.' + c.flag + ' is false — ' + c.off);
       } else {
         line(OK, 'rule carriers: ' + c.id + ' block is intact (' + out.block.length + ' chars)');
       }

@@ -10,7 +10,7 @@ UNIT="$PLUGIN_DIR/tests/structure/full-suite-ci-v1.test.js"
 SKILL="$PLUGIN_DIR/skills/full-suite/SKILL.md"
 MANIFEST="$PLUGIN_DIR/.claude-plugin/plugin.json"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -61,24 +61,7 @@ WORK="$(mktemp -d 2>/dev/null)" || { check "C0 scratch dir" FAIL; finish; exit 1
 trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd -P "$WORK" && pwd -P)"
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "C1 the unit suite passes (node --test full-suite-ci-v1.test.js)" PASS
-else
-  check "C1 the unit suite passes (node --test full-suite-ci-v1.test.js)" FAIL
-  sed -n '1,80p' "$WORK/unit.out"
-fi
-
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
-  check "C1a the unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "C1a the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if C1B="$(unit_overview_check "$UNIT")"; then
-  check "C1b the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "C1b $C1B" FAIL
-fi
+unit_check "C1 the full-suite CI unit file passes" "$UNIT"
 
 SKILL_OK=PASS
 for verb in '--status' '--ci --repo' '--local --repo' '--ci --session'; do
@@ -474,4 +457,5 @@ else
   check "C23 drive a CI chain without self-review to the max-rounds close" FAIL
 fi
 
+unit_check_done "C1z every unit file the registry gives this suite was graded"
 finish

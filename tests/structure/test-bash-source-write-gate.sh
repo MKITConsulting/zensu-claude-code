@@ -28,52 +28,17 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 { [ -f "$PARSER" ] && node --check "$PARSER" 2>/dev/null; } \
   && check "W3 parser exists + node --check" PASS || check "W3 parser exists + node --check" FAIL
 
-. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
+. "$(dirname "$0")/lib-unit-registry.sh"
 UNIT="$PLUGIN_DIR/tests/structure/git-repo-escape.test.js"
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if [ ! -f "$UNIT" ]; then
-  check "W3a rule-C unit suite is missing from the checkout ($UNIT) — stage it with the change" FAIL
-elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
-  # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
-  # and explains why it cannot be a `^. pass` pattern. This block used to carry its
-  # own copy of that expression; the copy is gone so the next correction has one site.
-  #
-  # The two floors are EQUAL here, deliberately, unlike T26's 29/27 split: this suite
-  # reports 45 registered / 45 passing / 0 skipped, so there is no measured skip to
-  # allow for and lowering the pass floor for a hypothetical one would weaken it for
-  # nothing. The win32 cases ARE platform-conditional — if one starts skipping, lower
-  # the pass floor in that same commit and name the case and the host.
-  # Called for the counts it publishes, not for its verdict — the floor is applied
-  # in the conjunction below, together with the symbol pin, so one FAIL message can
-  # name whichever half failed. The *_text helper spools to a temp file rather than
-  # reading /dev/stdin: this suite runs on the Windows shards, where Git Bash's
-  # /dev/stdin is not something to bet a count on.
-  unit_cases_registered_floor_text "$UNIT_OUT" "$UNIT_FLOOR" || true
-  UNIT_PASS="$UNIT_CASES_PASS"
-  UNIT_TOTAL="$UNIT_CASES_TESTS"
-  # Exit 0 alone would also accept a file that registers zero cases.
-  # The win32 cases are the ONLY witnesses of the MSYS
-  # namespace fix — no POSIX host executes that branch end-to-end — so a stale
-  # floor would let every one of them be deleted with this suite green.
-  # A count floor only catches deletion-without-replacement; the win32 block could
-  # be swapped for the same number of unrelated POSIX cases with it still green. So
-  # pin the symbols too — those cases are the only witnesses of the MSYS fix.
-  UNIT_SYMS=1
-  for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
-    grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
-  done
-  if [ -n "$UNIT_PASS" ] && [ -n "$UNIT_FLOOR" ] && [ "$UNIT_TOTAL" -ge "$UNIT_FLOOR" ] && [ "$UNIT_PASS" -ge "$UNIT_FLOOR" ] && [ "$UNIT_SYMS" -eq 1 ]; then
-    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS of $UNIT_TOTAL cases, win32 witnesses present)" PASS
-  else
-    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing of '${UNIT_TOTAL}' registered (want total >= ${UNIT_FLOOR:-<no overview row>}, pass >= ${UNIT_FLOOR:-<no overview row>}) win32_symbols=$UNIT_SYMS" FAIL
-  fi
+unit_check "W3a the rule-C option lattice unit file passes" "$UNIT"
+UNIT_SYMS=1
+for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
+  grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
+done
+if [ "$UNIT_SYMS" -eq 1 ]; then
+  check "W3a-symbols the unit file still drives the win32 witnesses of the MSYS namespace fix" PASS
 else
-  check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL
-fi
-if W3A_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "W3a-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "W3a-overview $W3A_OVERVIEW" FAIL
+  check "W3a-symbols the unit file lost a win32 witness (msysToDrive, splitTempList, isUnsafeTempEntry, winTempList or path.win32)" FAIL
 fi
 
 # `within` is a hand-copy of reviewer-capability-v1.js's isInside. Nothing but this
@@ -1455,6 +1420,7 @@ rm -rf "$WP_COPY"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_UNSET" "$CFG_QUOTED"
 
+unit_check_done "W3z every unit file the registry gives this suite was graded"
 echo "----"
 echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

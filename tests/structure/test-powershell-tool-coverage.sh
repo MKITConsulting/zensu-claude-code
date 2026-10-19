@@ -24,31 +24,8 @@ for f in "$HOOKS_JSON" "$COVERAGE" "$ANALYZER" "$UNIT"; do
 done
 check "PC0 the coverage module, the analyzer and its unit file exist" PASS
 
-. "$(dirname "$0")/lib-unit-summary.sh"
-
-run_unit() {
-  local out rc registered floor overview
-  floor="$(unit_overview_declared "${2##*/}")"
-  out="$(env -u NODE_TEST_CONTEXT node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
-  [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  if unit_cases_registered_floor_text "$out" "$floor"; then
-    check "$1-floor at least $floor unit cases registered ($(unit_cases_report_text "$out"))" PASS
-  else
-    check "$1-floor at least ${floor:-<no overview row>} unit cases registered ($(unit_cases_report_text "$out"))" FAIL
-  fi
-  registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-  if [ -n "$registered" ] && [ "$floor" = "$registered" ]; then
-    check "$1-exact the floor equals what the file registers (floor=$floor registered=$registered)" PASS
-  else
-    check "$1-exact the floor equals what the file registers (floor=${floor:-<no overview row>} registered=${registered:-<none>})" FAIL
-  fi
-  if overview="$(unit_overview_check "$2")"; then
-    check "$1-overview the SUITE-OVERVIEW Blocks cell equals the file's test() registrations (cell=$floor)" PASS
-  else
-    check "$1-overview $overview" FAIL
-  fi
-}
-run_unit "PC1 analyzer" "$UNIT"
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "PC1 the analyzer unit file passes" "$UNIT"
 
 ROSTER="$(node -e '
   const fs = require("fs");
@@ -124,6 +101,8 @@ grep -qF 'ZPS=./powershell-command-v1.js' "$PLUGIN_DIR/hooks/pre-bash-zensu-gate
 grep -qF "require('./powershell-command-v1.js').spellings(" "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" \
   && check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" PASS \
   || check "PC5c the consent gate reads PowerShell spellings through the analyzer in its own hooks/lib" FAIL
+
+unit_check_done "PC1z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-powershell-tool-coverage: $PASS PASS / $FAIL FAIL"

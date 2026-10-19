@@ -439,6 +439,9 @@ test('idle sessions are swept and the current and fresh ones are kept', () => {
   const past = (Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000;
   fs.utimesSync(path.join(idle, 'old.json'), past, past);
   fs.utimesSync(idle, past, past);
+  const recent = Date.now() / 1000;
+  fs.utimesSync(path.join(fresh, 'new.json'), recent, recent);
+  fs.utimesSync(fresh, recent, recent);
   assert.equal(attest(fixture, 'AC-001').code, 0);
   assert.equal(fs.existsSync(idle), false);
   assert.equal(fs.existsSync(fresh), true);

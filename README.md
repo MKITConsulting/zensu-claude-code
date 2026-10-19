@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.26.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.27.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -36,7 +36,7 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## Install
 
-Requires Claude Code **2.1.211** or newer.
+Requires Claude Code **2.1.296** or newer.
 
 ```bash
 claude plugin marketplace add MKITConsulting/zensu-claude-code
@@ -203,9 +203,37 @@ The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint
 to redirect. If you operate under GDPR, CCPA, or similar regulations,
 self-hosting keeps the data under your control.
 
+### Session Hub usage feed
+
+The plugin carries one optional hooks module, `hooks/usage-feed.ts`, for the
+Zensu Session Hub, a macOS app that shows the five-hour and weekly limits of
+several Claude accounts. The module writes only while the directory
+`<config root>/zensu/session-hub/v1/usage/` already exists, where the config
+root is `CLAUDE_CONFIG_DIR` when that names an absolute path and `~/.claude`
+otherwise. The Session Hub creates that directory; the module never creates it,
+so on a machine without the Session Hub nothing is written.
+
+While the directory exists, the module writes one file per Claude Code session,
+`<session id>.json`, each time Claude Code measures the session after a response
+from Claude, which happens at the end of every turn, and whenever a rate-limit
+window moves. It writes nothing when a session starts and nothing while a session
+is idle, so a file keeps the time of its last reading. The file holds the
+record's schema version, the session id, the time of the reading, and for each
+window its name (`five_hour`, `seven_day`), the percentage used and the reset
+time. It holds nothing else: no prompt, response, title, path, project or
+account data. Each write replaces the whole file, the file stays on your
+machine, and the module sends nothing anywhere. Deleting the directory stops the
+feed; only a write already under way at that moment can create it once more.
+
+The module needs Claude Code 2.1.296 or newer and uses its early-access hooks
+module API, which can change between releases. Anthropic can also switch modules
+of installed plugins off at any time. The feed then writes nothing, every other
+Zensu hook keeps running, and the Session Hub reads the limits from Claude's
+usage popover as it does without the plugin.
+
 ## Requirements
 
-Claude Code 2.1.211 or newer, and `node` on the `PATH` of the environment that
+Claude Code 2.1.296 or newer, and `node` on the `PATH` of the environment that
 starts Claude Code: without it, Zensu refuses every tool call. Zensu's hooks are
 bash scripts, which macOS and Linux run as they are. On Windows, run Claude Code
 inside WSL, or install Git for Windows so that Claude Code runs the hooks through

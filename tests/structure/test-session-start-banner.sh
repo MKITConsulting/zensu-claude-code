@@ -7,7 +7,7 @@
 set -u
 
 # Pins the SessionStart "Zensu active" banner + agent primer (0.4.0):
-# user banner via stdout, agent primer via additionalContext, both gated by
+# user banner via systemMessage, agent primer via additionalContext, both gated by
 # hooks.sessionBanner and firing only on fresh starts (startup/clear).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -89,6 +89,19 @@ export ZENSU_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"
 
 OUT_START="$(printf '%s' '{"source":"startup"}' | bash "$BANNER" 2>/dev/null)"
 [ -n "$OUT_START" ] && check "B10 banner emits on source=startup" PASS || check "B10 banner emits on source=startup" FAIL
+if printf '%s' "$OUT_START" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ try { const j=JSON.parse(s);
+    const h=j.hookSpecificOutput||{};
+    const ok = typeof j.systemMessage==="string"
+      && j.systemMessage.split("\n").some(l=>/^zensu: Zensu PLM v\S+ active/.test(l))
+      && h.hookEventName==="SessionStart" && h.additionalContext===j.systemMessage;
+    process.exit(ok?0:1); } catch(_){ process.exit(1); } });
+'; then
+  check "B10b banner reaches the user as systemMessage and the model as the same additionalContext" PASS
+else
+  check "B10b banner reaches the user as systemMessage and the model as the same additionalContext" FAIL
+fi
 
 OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
@@ -195,7 +208,10 @@ PS_EXPECTED="$(node -e '
   const environment = { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" };
   process.stdout.write(m.bannerLine(manifest, environment, process.platform) || m.steerLine(manifest, environment, process.platform));
 ' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$HOOKS_JSON" 2>/dev/null)"
-PS_REAL="$(printf '%s' '{"source":"startup"}' | CLAUDE_CODE_USE_POWERSHELL_TOOL=1 bash "$BANNER" 2>/dev/null | grep -E '^zensu: (⚠ )?PowerShell tool' || true)"
+PS_REAL="$(printf '%s' '{"source":"startup"}' | CLAUDE_CODE_USE_POWERSHELL_TOOL=1 bash "$BANNER" 2>/dev/null | node -e '
+  let s = ""; process.stdin.on("data", (c) => { s += c; });
+  process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(s).systemMessage); } catch (_) { process.exit(1); } });
+' 2>/dev/null | grep -E '^zensu: (⚠ )?PowerShell tool' || true)"
 { [ -n "$PS_EXPECTED" ] && [ "$PS_REAL" = "$PS_EXPECTED" ]; } \
   && check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json" PASS \
   || check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json (banner: $PS_REAL; module: $PS_EXPECTED)" FAIL

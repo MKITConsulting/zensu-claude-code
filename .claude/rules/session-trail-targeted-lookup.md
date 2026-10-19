@@ -65,7 +65,8 @@ other admitted transcript to find its siblings.
   `forkOwnCwd`; a probe that took a fork's first cwd as its directory would skip the fork beside
   a session in its own worktree and list it beside its parent.
 - `CCD_RECORD_PATHS` has two writers, `ccdIndex` and `ccdApp`, and both keep the last match in
-  walk order; `openTaskChips` calls `ccdApp` and then reads the path.
+  walk order; `desktopRecordOf` calls `ccdApp` and then reads the path once, for `openTaskChips`,
+  `linkedSessions` and `unreadReports` alike.
 - `ccdAppEntry` is the one desktop-entry builder, and `ccdIndex` and `ccdApp` both call it.
   `DR3` in the verdict suite derives the stored key set from it and fails when either walk
   builds its entry another way.

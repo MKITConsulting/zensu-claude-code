@@ -1,7 +1,7 @@
 #!/bin/bash
-# UserPromptSubmit + SubagentStart hook — injects the best-solution-first rule as
-# hookSpecificOutput.additionalContext so every process carries it: the main thread
-# on EVERY prompt, and every spawned subagent at spawn time.
+# SessionStart + UserPromptSubmit + SubagentStart hook — injects the best-solution-first
+# rule as hookSpecificOutput.additionalContext so every process carries it: the main
+# thread at every session start, a one-line reminder on EVERY prompt, every subagent at spawn.
 #
 # The `user-prompt-` prefix names the primary recurring channel; the SubagentStart
 # leg is the reach extension, exactly as session-start-evidence-discipline.sh names
@@ -21,9 +21,10 @@
 #
 # Deliberately different from session-start-evidence-discipline.sh in two ways: it IS
 # switchable (hooks.bestSolutionFirst, default on) because it directs how a decision is
-# presented rather than asserting a correctness invariant, and it fires on the prompt
-# channel rather than only at session start — a rule that fades over a long session
-# fades exactly when an agent starts optimizing for the smallest disturbance.
+# presented rather than asserting a correctness invariant, and it also fires on the
+# prompt channel, as a one-line reminder, rather than only at session start — a rule
+# that fades over a long session fades exactly when an agent starts optimizing for the
+# smallest disturbance.
 #
 # Deliberately different from user-prompt-context-nudge.sh in two ways: no de-bounce
 # band (the moment an agent is about to frame a question is not observable in advance,
@@ -117,12 +118,14 @@ ZENSU_BEST_SOLUTION_ENABLED="$ZENSU_BEST_SOLUTION_ENABLED" \
 ZENSU_RULE_BLOCK_LIB="$ZENSU_RULE_BLOCK_LIB" node -e '
   const OPEN = "<!-- zensu:best-solution-first -->";
   const CLOSE = "<!-- /zensu:best-solution-first -->";
+  const REMINDER_OPEN = "<!-- zensu:best-solution-first-reminder -->";
+  const REMINDER_CLOSE = "<!-- /zensu:best-solution-first-reminder -->";
   try {
     const fs = require("fs");
     const payload = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) process.exit(0);
     const event = payload.hook_event_name;
-    if (event !== "UserPromptSubmit" && event !== "SubagentStart") process.exit(0);
+    if (event !== "UserPromptSubmit" && event !== "SessionStart" && event !== "SubagentStart") process.exit(0);
 
     // The config opt-out is scoped to the MAIN-THREAD leg. `zensu_hook_enabled`
     // resolves the merged config and a project-local `.zensu/config.json` wins per
@@ -141,11 +144,14 @@ ZENSU_RULE_BLOCK_LIB="$ZENSU_RULE_BLOCK_LIB" node -e '
     // a cross-carrier equality check, which proves the copies agree rather than
     // that they are right and cannot be driven from a unit layer at all.
     const { readRuleBlock } = require(process.env.ZENSU_RULE_BLOCK_LIB);
-    const { block } = readRuleBlock(process.env.ZENSU_BEST_SOLUTION_RULE_FILE, OPEN, CLOSE);
+    const reminder = event === "UserPromptSubmit";
+    const { block } = readRuleBlock(process.env.ZENSU_BEST_SOLUTION_RULE_FILE,
+      reminder ? REMINDER_OPEN : OPEN, reminder ? REMINDER_CLOSE : CLOSE);
     if (!block) process.exit(0);
 
-    const directive = "Zensu best-solution-first — binding for every process in this "
-      + "session, main thread and subagents alike. " + block;
+    const directive = reminder ? "Zensu " + block
+      : "Zensu best-solution-first — binding for every process in this "
+        + "session, main thread and subagents alike. " + block;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: event,

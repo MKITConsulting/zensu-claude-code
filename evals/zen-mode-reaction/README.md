@@ -1,8 +1,9 @@
 # evals/zen-mode-reaction — model reaction to the zen-mode contract
 
 Grades how the model REACTS to the zen-mode contract that
-[`hooks/user-prompt-zen-mode.sh`](../../hooks/user-prompt-zen-mode.sh) injects on every prompt while a
-session carries a zen-mode marker.
+[`hooks/user-prompt-zen-mode.sh`](../../hooks/user-prompt-zen-mode.sh) injects while a session carries a
+zen-mode marker: the full contract on the first prompt of a context generation, and a short body on
+every later prompt of it.
 
 This suite matters more here than for most hooks. zen-mode has no single mechanical outcome to check —
 its entire value IS the model's behaviour. The deterministic suite
@@ -35,14 +36,23 @@ can prove the contract is *obeyed*.
   The reply must mark the failed step `✗` and never a tick, leave the deliberately dropped step OFF
   the line rather than marking it failed, and still say in prose what went wrong — the mark governs
   the position only, and a compressed report that omits a problem is a wrong report.
+- **`short-contract-compliance.yaml`, `short-safety-carve-out.yaml` and `short-anchor-multi-step.yaml`** —
+  the same three tasks under the short body that replaces the full contract on every later prompt of a
+  context generation (see [`.claude/rules/prompt-ledger.md`](../../.claude/rules/prompt-ledger.md)). No
+  full contract precedes it here, so each scenario grades whether the short body carries the behaviour
+  by itself, the worst case of a long context in which the full contract has faded. Each carries the
+  graders of its twin byte for byte, so a twin passing where its short scenario fails points at the
+  short body and at nothing else.
 
 **The graders themselves are unit-tested.** Every javascript assertion body in this directory is
 extracted and COMPILED by `tests/structure/zen-anchor-assertions.test.js`, driven from
-`tests/structure/test-zen-mode.sh` (which CI does run). Sixteen of the twenty-three are also RUN
-against canned replies and pinned to a pass/fail vector: both anchor scenarios and this suite's
-safety carve-out. The seven in `contract-compliance.yaml` and `precedence-over-compression.yaml`
+`tests/structure/test-zen-mode.sh` (which CI does run). Sixteen of the twenty-three in the five full-contract
+scenarios are also RUN against canned replies and pinned to a pass/fail vector: both anchor scenarios
+and this suite's safety carve-out. The seven in `contract-compliance.yaml` and `precedence-over-compression.yaml`
 reach the compile check only, which cannot see a logic defect — say "compile-checked", never
-"tested", of those. That closes the gap this suite's
+"tested", of those. The sixteen graders of the three `short-` scenarios are byte-identical copies of
+their twins' graders, and the unit file fails when a copy diverges, so each copy is exactly as tested,
+or as merely compile-checked, as its original. That closes the gap this suite's
 local-only status would otherwise leave: before it, a logically broken grader satisfied every
 structure check and surfaced only on a manual promptfoo run. Two real defects were found that way —
 a step-list branch that could never match a `-` bullet, and a tick guard that only fired on three
@@ -56,7 +66,9 @@ hardcoded English step names.
   [`tests/structure/test-promptfoo-zen-mode.sh`](../../tests/structure/test-promptfoo-zen-mode.sh) pins
   that the copied text still matches the hook, so the scenarios cannot silently drift from the shipped
   wording. A scenario whose anchor reads `none` carries the shorter rule 6 the hook emits while no
-  chain is armed, and that suite captures it by firing the hook.
+  chain is armed, and that suite captures it by firing the hook. A `short-` scenario carries the short
+  body instead, and that suite reads the armed short body from the hook and captures its none variant
+  by firing the hook a second time in the same session.
 - **No `llm-rubric`/grader** — matching every eval in this repo. Assertions are `type: javascript` over
   the model output, keyed on measurable properties (line counts, article density, question marks, literal
   markers). `repeat: 3` averages model variance.

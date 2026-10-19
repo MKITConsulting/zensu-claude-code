@@ -33,7 +33,7 @@ PROMPT="$(printf '%s' "$INPUT" | node -e '
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-origin.sh"
 case "$(zensu_prompt_origin "$PROMPT" "$INPUT")" in
-  task-notification|ci-monitor-event|bash-input|slash-command) exit 0 ;;
+  task-notification|agent-message|ci-monitor-event|bash-input|slash-command) exit 0 ;;
 esac
 
 KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '
@@ -55,6 +55,23 @@ KEYWORD_TEXT="$(printf '%s\n' "$PROMPT" | awk '
 
 printf '%s' "$KEYWORD_TEXT" | grep -qiE '(^|[^[:alnum:]])(zensu|product|feature|roadmap|milestone|bootstrap|ghost.?scan|journey|tier)(s|es|ing|ed)?([^[:alnum:]]|$)' || exit 0
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-prompt-ledger.sh"
+ROUTER_SESSION_ID="$(printf '%s' "$INPUT" | node -e '
+  try {
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
+    process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
+ROUTER_KEY=''
+if [ -n "$ROUTER_SESSION_ID" ]; then
+  ROUTER_KEY="$(zensu_resolve_session_id "$ROUTER_SESSION_ID" 2>/dev/null)" || ROUTER_KEY=''
+fi
+if zensu_prompt_ledger_has "$ROUTER_KEY" router; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Zensu planning notice (the full notice given earlier in this context still applies): this prompt contains a product/planning keyword. If it is a genuine request to plan, track, bootstrap, scan or manage Zensu features, roadmap, journeys or tiers, your very next action is to ask the user the three project-context triage questions (is the code built, is there a plan or spec document, does the plan hold unbuilt items) instead of guessing them, before reading any file or launching a search; asking is read-only and allowed in Plan mode. Then route in this thread yourself: fresh code with a plan document to /zensu:bootstrap, built code without a plan to /zensu:ghost-scan, built code whose plan holds unbuilt items to the hybrid sequence, never delegating mutations to a child or running Zensu CLI mutations freelance. A request to continue, resume, conduct or status-check one feature already tracked in Zensu skips the triage and goes to /zensu:pilot. An ordinary coding, UI, design, debugging, refactor or content task that merely mentions such a word ignores this notice and is answered normally."}}'
+  exit 0
+fi
+
 cat <<'JSON'
 {
   "hookSpecificOutput": {
@@ -63,4 +80,5 @@ cat <<'JSON'
   }
 }
 JSON
+zensu_prompt_ledger_mark "$ROUTER_KEY" router
 exit 0
