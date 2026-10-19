@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record shape is the contract in `hooks/usage-feed-contract.json`. The module uses Claude Code's
   early-access hooks module API, which Anthropic can switch off for installed plugins; the feed
   then writes nothing and the Session Hub keeps reading limits from Claude's usage popover.
+- **work orders**: a work-order session now names its branch with the order's `branch_prefix`
+  (`wo-` today) instead of `zensu/work-`, which Zensu refused with `invalid_branch`, so a real
+  order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
+  to the Zensu host that issued the session token, unless the CLI config the session reads stores
+  that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
+  now stops with exit 3 instead of retrying. That CLI config must hold the host only, never a
+  login, because without the session token the CLI falls back to a stored login. The work-order
+  gate also denies `zensu work list`, `questions`, `policy get` and `repositories list`, which
+  Zensu refuses for a session token, and points at the order file instead. It now also denies the
+  usual spellings that set, change or remove `ZENSU_API_URL`, `--api-url` on `zensu`, and `env -i`
+  or `exec -c`, which drop the session token.
 - **PowerShell tool**: Zensu's shell hooks now also fire for Claude Code's PowerShell tool, which
   is on by default on Windows for claude.ai and Console accounts. Each one judges a PowerShell
   command or refuses it. The CLI write-gate judges a literal `zensu` call and denies one it cannot

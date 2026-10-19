@@ -132,6 +132,7 @@ else
 fi
 
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 OUT_PRE="$(payload "$SESSION" AskUserQuestion | bash "$PRE_HOOK" 2>&1)"; RC_PRE=$?
 OUT_PUSH="$(payload "$SESSION" Bash 'git push origin main' | bash "$PRE_HOOK" 2>&1)"; RC_PUSH=$?
 OUT_POST="$(payload "$SESSION" Bash 'git status' | bash "$POST_HOOK" 2>&1)"; RC_POST=$?
@@ -179,6 +180,10 @@ printenv
 echo "$ZENSU_SESSION_TOKEN"
 git status
 zensu work get 1 --json
+zensu work list
+zensu work questions --plan p1
+zensu work policy get --product p1
+zensu work repositories list --product p1
 COMMANDS
   wo_fake_set "$FAKE_ZENSU_STATE" 'state.questions.push({ id: "q-answer-1", work_order_id: state.order.id, category: "scope", question: "Should archived widgets be listed?", status: "answered", answer: "List active widgets only." })'
   for lease in "$PROJECT"/.zensu/state/work-order/lease-*.json; do
@@ -201,9 +206,10 @@ else
   check "G4 in work-order mode the prompt tools and the chip tool are denied (rc=$RC $(cat "$SBOX/denials.txt" 2>/dev/null | cut -c1-200))" FAIL
 fi
 DENIED_BASH="$(grep -c "	deny	" "$SBOX/bash.txt" 2>/dev/null)"
-if [ "$DENIED_BASH" = "6" ] && grep -q "^git status	none" "$SBOX/bash.txt" && grep -q "^zensu work get 1 --json	none" "$SBOX/bash.txt" \
-  && grep '^git push origin HEAD' "$SBOX/bash.txt" | grep -qF 'zensu-work-order.sh --push'; then
-  check "G5 raw pushes, merges, human-gate verbs and token reads are denied while ordinary commands pass silently" PASS
+if [ "$DENIED_BASH" = "10" ] && grep -q "^git status	none" "$SBOX/bash.txt" && grep -q "^zensu work get 1 --json	none" "$SBOX/bash.txt" \
+  && grep '^git push origin HEAD' "$SBOX/bash.txt" | grep -qF 'zensu-work-order.sh --push' \
+  && [ "$(grep -c 'orderFile in the --start summary' "$SBOX/bash.txt")" = "4" ]; then
+  check "G5 raw pushes, merges, human-gate verbs, token reads and the verbs Zensu refuses a session token are denied while ordinary commands pass silently" PASS
 else
   check "G5 raw pushes, merges, human-gate verbs and token reads are denied (denied=$DENIED_BASH $(cut -c1-120 "$SBOX/bash.txt" 2>/dev/null | tr '\n' '|'))" FAIL
 fi
@@ -221,12 +227,11 @@ fi
 ORDER_P="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 SESSION_P1="wo-gates-session-0003"
 RUN_P1="run_gates_plan_1"
-BRANCH_P="zensu/work-bbbbbbbb"
+BRANCH_P="wo-bbbbbbbb"
 (
   new_project planner
   source "$BASELINE" "$SESSION_P1" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER_P" "$SESSION_P1" required implement
-  wo_fake_set "$FAKE_ZENSU_STATE" 'state.order.repository = "https://github.com/acme/widgets"'
   bash "$WRAPPER" --start --order "$ORDER_P" >/dev/null 2>&1 || exit 91
   git -C "$PROJECT" checkout -q -b "$BRANCH_P"
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN_P1" --work-order "$ORDER_P" >/dev/null 2>&1 || exit 92
@@ -253,7 +258,7 @@ else
   check "G7 a required plan approval commits, pushes, attaches and blocks (rc=$RC bind=$(cat "$SBOX/plan-bind.rc" 2>/dev/null) plan=$(cat "$SBOX/plan.rc" 2>/dev/null) stage=$(cat "$SBOX/plan.stage" 2>/dev/null) $(cat "$SBOX/plan.err" 2>/dev/null))" FAIL
 fi
 
-wo_fake_set "$FAKE_ZENSU_STATE" 'state.approvals.push({ spec_hash: state.order.spec_hash }); state.events.push({ id: "approved-1", client_event_id: null, event_type: "approved", detail: { subject: "implementation_plan", spec_hash: state.order.spec_hash } }); state.mode = "live"; state.order.status = "claimed"; state.order.blocked_kind = null; state.order.blocked_reason = null; state.order.attempt = 2; state.order.client_session_id = "wo-gates-session-0004"'
+wo_fake_set "$FAKE_ZENSU_STATE" 'state.approvals.push({ spec_hash: state.order.spec_hash }); state.events.push({ id: "approved-1", client_event_id: null, event_type: "approved", attempt: state.order.attempt, occurred_at: new Date(Date.now() - 300000).toISOString(), created_at: new Date().toISOString(), detail: { subject: "implementation_plan", spec_hash: state.order.spec_hash } }); state.mode = "live"; state.order.status = "claimed"; state.order.blocked_kind = null; state.order.blocked_reason = null; state.order.attempt = 2; state.order.client_session_id = "wo-gates-session-0004"'
 SESSION_P2="wo-gates-session-0004"
 RUN_P2="run_gates_plan_2"
 (

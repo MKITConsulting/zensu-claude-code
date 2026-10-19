@@ -28,12 +28,36 @@ the session's marker in `.zensu/state/work-order/` binds its Session Control key
 ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
-`--drain` derives the stages from the run record and the outbox file keeps only the highest rank
-Zensu accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`.
+`--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
+accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception
+is `inflight`: up to four block, `ready_for_merge` or question sends that Zensu has not answered
+yet. Each enters it before its first attempt, so a renewal in another process, the launcher's
+watchdog among them, finds it while the sender still retries. Every route that meets a lost lease
+goes through `loseLease`, which replays them before it writes `lost-`, because after Zensu ended a
+session a replay under a stored `client_event_id` is the only call it still answers. The
+safe-sentence resend of a block therefore keeps the first send's `client_event_id`; a refused `422`
+stores nothing. A replay without an answer keeps the send and, while the local lease lasts, writes
+`leaseRefusal` into the outbox instead of `lost-`; once the lease time has run out it writes
+`lost-`. The gate's forge branch denies on `leaseRefusal`, with its own reason that sends the model
+to `--renew --force`, and `recordLease` clears it. `sendEvent` records the lease only for an answer
+Zensu did not mark as a replay, because a replay renews nothing and must not lift the fence.
+`forgeWriteVerdict` ignores it on purpose, because `--ask`, `--followup` and `--bind-spec` check it
+before they resend, and a resend is a replay. Every helper verb that gets the verdict `ended` back
+maps it through `endedResult`; the post-tool hook builds its own notice from the ended marker.
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
 and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is
-transient. The error table lives in `skills/work/references/protocol.md`.
+transient, except at `--start`, where a CLI line matching `SESSION_TOKEN_HOST_RE` or
+`SESSION_TOKEN_SHAPE_RE` exits 3. The error table lives in `skills/work/references/protocol.md`.
+
+**Sites that move with the CLI and the service.** `SESSION_TOKEN_HOST_RE` and
+`SESSION_TOKEN_SHAPE_RE` match the two messages of `sessionTokenTarget` in zensu-cli, and the fake's
+`requireSessionToken` copies both word for word; a CLI rewording sends `--start` back to exit 7
+while every suite stays green. The fake's `proseViolation` ports the service's content guard, and
+its `redactChanges` the service's `Redact`, which backs the `invalid_url` link check.
+`DEFAULT_BRANCH_PREFIX` in the runtime and `BRANCH_PREFIX` in the fake mirror the service's
+work-order branch prefix, `wo-`. A change on the service side means changing the fake with it, or
+the suites keep passing against behavior Zensu no longer has.
 
 **A work-order run keys its team review by the order, not by the run**:
 `team-review:v1:<sha256(canonical({headSha,orderId}))>`. A key derived from the run, as decision
@@ -86,7 +110,10 @@ version; never bump it by hand.
 
 **Known gaps, accepted and named:**
 
-- The gate reads command text; a script the session writes and then runs is not judged.
+- The gate reads command text; a script the session writes and then runs is not judged. It reads
+  each command three ways, with plain single quotes and with the ANSI-C quoting of bash and of zsh,
+  so its deny set never shrinks below the plain reading; a reading the shell does not use can only
+  add a deny.
 - `--review-import` trusts a marker by its digest and reads only the first part of a review.
 - A nonterminal run of another order in a reused checkout still holds a new run off.
 - Native Windows is unverified. The launcher's process-group handling is POSIX only, and the five

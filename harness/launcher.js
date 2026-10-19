@@ -15,7 +15,9 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 const VALUE_OPTIONS = new Set(['order', 'session-id', 'project', 'claude', 'permission-mode', 'settings', 'mcp-config', 'plugin-dir', 'log']);
 const EXIT_CODES = Object.freeze({ success: 0, failure: 1, cancelled: 143 });
 const USAGE = 'usage: launcher.js --order <order-id> --session-id <client-session-id> [--project <dir>] [--claude <executable>] '
-  + '[--permission-mode <mode>] [--settings <file>] [--mcp-config <file>] [--plugin-dir <dir>] [--log <file>] [-- <claude arguments>]';
+  + '[--permission-mode <mode>] [--settings <file>] [--mcp-config <file>] [--plugin-dir <dir>] [--log <file>] [-- <claude arguments>]\n'
+  + 'environment: ZENSU_SESSION_TOKEN, the session token of the claim, and ZENSU_API_URL, the Zensu host that issued it, '
+  + 'unless the zensu CLI config the session reads stores that host; that config must hold the host only, never a login';
 
 function boundedNumber(env, name, fallback, min, max) {
   const value = Number(env[name]);

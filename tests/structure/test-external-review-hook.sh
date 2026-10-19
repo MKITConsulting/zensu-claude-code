@@ -98,6 +98,13 @@ if grep -qF 'first run `CLAUDE_PLUGIN_DATA="{plugin_data}" bash "{plugin_root}/h
 else
   check "X27 step 3 and the operator account launch the copy --external-review --stage prints, never the template under the plugin root" FAIL
 fi
+RERUN_SUFFIXES="$(grep -cF 're-run with --root set to ${verdict.rerun}`' "$PLUGIN_DIR/hooks/lib/external-review-v1.js")"
+if grep -qF 'only a `reason=root` answer whose advice ends in `re-run with --root set to …` is first re-run once with the root that advice names' "$SKILL_FILE" \
+  && [ "$RERUN_SUFFIXES" -ge 4 ]; then
+  check "X27b step 3 re-runs a root refusal whose advice ends in the module's re-run suffix before it falls back to the panel" PASS
+else
+  check "X27b step 3 re-run trigger (module suffixes=$RERUN_SUFFIXES)" FAIL
+fi
 rm -f "$SKILL_FILE"
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
@@ -336,14 +343,16 @@ else
   check "X9c tree off (off=$TREE_OFF judge-off=$TREE_JUDGE_OFF)" FAIL
 fi
 
+TOP_RERUN="re-run with --root set to the top level that git -C <project root> rev-parse --show-toplevel prints"
 rm -f "$STAGED_EXPECTED"
 STAGE_OFF="$(ZENSU_CONFIG="$OFF_CONFIG" bash "$LOG" --external-review --stage --root "$PROJ" </dev/null 2>/dev/null)"
 STAGE_JUDGE_OFF="$(ZENSU_CONFIG="$JUDGE_OFF_CONFIG" bash "$LOG" --external-review --stage --root "$PROJ" </dev/null 2>/dev/null)"
 STAGE_SUBDIR="$(bash "$LOG" --external-review --stage --root "$PROJ/src" </dev/null 2>/dev/null)"
 if [ "$STAGE_OFF" = "EXTERNAL REVIEW — stage=unavailable reason=disabled" ] \
   && [ "$STAGE_JUDGE_OFF" = "EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled" ] \
-  && [ "$STAGE_SUBDIR" = "EXTERNAL REVIEW — stage=unavailable reason=root" ] && [ ! -e "$STAGED_EXPECTED" ]; then
-  check "X9d --stage stages no copy while the import or the judge is off or the root does not hold the project" PASS
+  && [ "$STAGE_SUBDIR" = "EXTERNAL REVIEW — stage=unavailable reason=root layout=subdirectory — the review root lies below the root of this session's work tree, so its tree would cover only part of it; $TOP_RERUN" ] \
+  && [ ! -e "$STAGED_EXPECTED" ]; then
+  check "X9d --stage stages no copy while the import or the judge is off or the root is below the work tree's top level" PASS
 else
   check "X9d stage off (off=$STAGE_OFF judge-off=$STAGE_JUDGE_OFF subdir=$STAGE_SUBDIR)" FAIL
 fi
@@ -371,11 +380,109 @@ fi
 
 OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$PROJ/src" 2>/dev/null)"; RC=$?
 OUT2="$(printf '../escape.js\n' | bash "$LOG" --external-review --root "$PROJ" 2>/dev/null)"
-if [ "$RC" -eq 0 ] && [ "$OUT" = "EXTERNAL REVIEW — status=unavailable reason=root" ] \
+if [ "$RC" -eq 0 ] && [ "$OUT" = "EXTERNAL REVIEW — status=unavailable reason=root layout=subdirectory — the review root lies below the root of this session's work tree, so its tree would cover only part of it; $TOP_RERUN" ] \
   && [ "$OUT2" = "EXTERNAL REVIEW — status=unavailable reason=unsafe-path" ]; then
-  check "X11 a root that does not contain the project and an escaping path answer unavailable" PASS
+  check "X11 a root below the work tree's top level names its layout and the top level, and an escaping path answers unavailable" PASS
 else
   check "X11 unavailable (out=$OUT out2=$OUT2)" FAIL
+fi
+
+ln -s "$PROJ" "$WORK/project-link"
+UNRESOLVED_LINE="reason=root layout=unresolved-root — the review root is not an absolute, symlink-free path to an existing directory; $TOP_RERUN"
+OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$WORK/missing" 2>/dev/null)"
+OUT2="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$WORK/project-link" --result "$RUN_OUTPUT" 2>/dev/null)"
+TREE_OUT="$(bash "$LOG" --external-review --tree --root "$WORK/missing" </dev/null 2>/dev/null)"
+if [ -L "$WORK/project-link" ] && [ "$OUT" = "EXTERNAL REVIEW — status=unavailable $UNRESOLVED_LINE" ] \
+  && [ "$OUT2" = "EXTERNAL REVIEW — status=unavailable $UNRESOLVED_LINE" ] \
+  && [ "$TREE_OUT" = "EXTERNAL REVIEW — tree=unavailable $UNRESOLVED_LINE" ]; then
+  check "X11e a missing root and a symbolic link to the project, both refused by the path transport, are named unresolved by the module" PASS
+else
+  check "X11e unresolved root (out=$OUT link=$OUT2 tree=$TREE_OUT)" FAIL
+fi
+
+OTHER_REPO="$WORK/other-repo"
+mkdir -p "$OTHER_REPO"
+git -C "$OTHER_REPO" init -q
+git -C "$OTHER_REPO" config user.email t@example.invalid
+git -C "$OTHER_REPO" config user.name tester
+printf 'one\n' > "$OTHER_REPO/b.js"
+git -C "$OTHER_REPO" add -A
+git -C "$OTHER_REPO" -c commit.gpgsign=false commit -qm baseline
+NESTED_WT="$PROJ/nested/other-review"
+git -C "$OTHER_REPO" worktree add -q -b review "$NESTED_WT" 2>/dev/null
+NESTED_ADVICE="the review root is a separate git work tree nested inside this session's work tree, and a chain reviews one work tree; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it"
+OUT="$(printf 'b.js\n' | bash "$LOG" --external-review --root "$NESTED_WT" --result "$RUN_OUTPUT" 2>/dev/null)"; RC=$?
+TREE_OUT="$(bash "$LOG" --external-review --tree --root "$NESTED_WT" </dev/null 2>/dev/null)"; RC2=$?
+if [ -f "$NESTED_WT/b.js" ] && [ "$RC" -eq 0 ] && [ "$RC2" -eq 0 ] \
+  && [ "$OUT" = "EXTERNAL REVIEW — status=unavailable reason=root layout=nested-work-tree — $NESTED_ADVICE" ] \
+  && [ "$TREE_OUT" = "EXTERNAL REVIEW — tree=unavailable reason=root layout=nested-work-tree — $NESTED_ADVICE" ]; then
+  check "X11b a worktree of another repository nested in the session's work tree is refused by name in both modes and imports nothing" PASS
+else
+  check "X11b nested work tree (rc=$RC rc2=$RC2 out=$OUT tree=$TREE_OUT)" FAIL
+fi
+
+SIBLING="$WORK/sibling-repo"
+mkdir -p "$SIBLING"
+git -C "$SIBLING" init -q
+ENCLOSING_LINE="reason=root layout=enclosing — the review root encloses this session's work tree, so its tree and change times would not be this session's; $TOP_RERUN"
+OUT="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$WORK" --result "$RUN_OUTPUT" 2>/dev/null)"
+OUT2="$(printf 'src/a.js\n' | bash "$LOG" --external-review --root "$SIBLING" 2>/dev/null)"
+TREE_OUT="$(bash "$LOG" --external-review --tree --root "$WORK" </dev/null 2>/dev/null)"
+if [ "$OUT" = "EXTERNAL REVIEW — status=unavailable $ENCLOSING_LINE" ] && [ "$TREE_OUT" = "EXTERNAL REVIEW — tree=unavailable $ENCLOSING_LINE" ] \
+  && [ "$OUT2" = "EXTERNAL REVIEW — status=unavailable reason=root layout=outside — the review root lies outside this session's work tree, where no reviewer of this session can read; this review runs the aspect panel, and a workflow review of that directory imports only in a session started in it" ]; then
+  check "X11c a directory enclosing the session's work tree and a sibling repository are refused by name, and the enclosing one imports nothing" PASS
+else
+  check "X11c enclosing and outside (out=$OUT out2=$OUT2 tree=$TREE_OUT)" FAIL
+fi
+
+FOLDER="$WORK/folder-project"
+mkdir -p "$FOLDER/service"
+git -C "$FOLDER/service" init -q
+git -C "$FOLDER/service" config user.email t@example.invalid
+git -C "$FOLDER/service" config user.name tester
+printf 'one\n' > "$FOLDER/service/index.js"
+git -C "$FOLDER/service" add -A
+git -C "$FOLDER/service" -c commit.gpgsign=false commit -qm baseline
+export ZENSU_TEST_PLUGIN_DATA="$WORK/folder-data"
+export CLAUDE_PROJECT_DIR="$FOLDER"
+cd "$FOLDER" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "external-review-folder" || { check "X11d folder session baseline" FAIL; finish; exit 1; }
+FOLDER_ADVICE="the review root is a git work tree inside this session's project folder, which is not a git work tree itself, and a chain reviews one root; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it"
+OUT="$(printf 'index.js\n' | bash "$LOG" --external-review --root "$FOLDER/service" 2>/dev/null)"
+TREE_OUT="$(bash "$LOG" --external-review --tree --root "$FOLDER/service" </dev/null 2>/dev/null)"
+OWN_TREE="$(bash "$LOG" --external-review --tree --root "$FOLDER" </dev/null 2>/dev/null)"
+if [ "$OUT" = "EXTERNAL REVIEW — status=unavailable reason=root layout=nested-in-folder — $FOLDER_ADVICE" ] \
+  && [ "$TREE_OUT" = "EXTERNAL REVIEW — tree=unavailable reason=root layout=nested-in-folder — $FOLDER_ADVICE" ] \
+  && [ "$OWN_TREE" = "EXTERNAL REVIEW — tree=unavailable reason=not-a-git-work-tree" ]; then
+  check "X11d a session in a folder outside git accepts only that folder and refuses a repository inside it by name" PASS
+else
+  check "X11d folder session (out=$OUT tree=$TREE_OUT own=$OWN_TREE)" FAIL
+fi
+
+SUBTOP="$WORK/subdirectory-session"
+mkdir -p "$SUBTOP/pkg/src"
+git -C "$SUBTOP" init -q
+git -C "$SUBTOP" config user.email t@example.invalid
+git -C "$SUBTOP" config user.name tester
+printf '.zensu/*\n.session-control-test/\n' > "$SUBTOP/.gitignore"
+printf 'one\n' > "$SUBTOP/pkg/src/a.js"
+git -C "$SUBTOP" add -A
+git -C "$SUBTOP" -c commit.gpgsign=false commit -qm baseline
+export ZENSU_TEST_PLUGIN_DATA="$WORK/subdirectory-data"
+export CLAUDE_PROJECT_DIR="$SUBTOP/pkg"
+cd "$SUBTOP/pkg" || exit 1
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "external-review-subdirectory" || { check "X11f subdirectory session baseline" FAIL; finish; exit 1; }
+SUB_TREE="$(bash "$LOG" --external-review --tree --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_ID="$(printf '%s\n' "$SUB_TREE" | sed -n 's/^EXTERNAL REVIEW — tree=\([0-9a-f][0-9a-f]*\)$/\1/p')"
+SUB_STAGE="$(bash "$LOG" --external-review --stage --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_COPY="$SUBTOP/pkg/.zensu/state/zensu-review-v1-$ZENSU_SESSION_KEY.js"
+SUB_AFTER="$(bash "$LOG" --external-review --tree --root "$SUBTOP" </dev/null 2>/dev/null)"
+SUB_VISIBLE="$(git -C "$SUBTOP" ls-files --others --exclude-standard -- pkg/.zensu)"
+if [ "${#SUB_ID}" -ge 40 ] && [ "$SUB_STAGE" = "EXTERNAL REVIEW — stage=ok tree=$SUB_ID script=$SUB_COPY" ] \
+  && cmp -s "$SUB_COPY" "$TEMPLATE_FILE" && [ "$SUB_AFTER" = "$SUB_TREE" ] && [ -n "$SUB_VISIBLE" ]; then
+  check "X11f a session started in a subdirectory stages into its own .zensu/state, which git sees, while the tree of the top level stays put" PASS
+else
+  check "X11f subdirectory session (tree=$SUB_TREE stage=$SUB_STAGE after=$SUB_AFTER visible=$SUB_VISIBLE)" FAIL
 fi
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
