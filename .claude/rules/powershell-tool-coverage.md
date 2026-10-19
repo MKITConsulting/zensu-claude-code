@@ -145,11 +145,15 @@ green row would be a false all-clear.
   module requires it lazily for `spellings()`; the doctor report requires it. PC5a, PC5b and PC5c
   pin the three hook loads, and P2p9 the doctor's. A failed load in the source-write parser is
   caught and denies with its own text (WP17); in the consent module it refuses the call.
-- `UNIX_ALIASES` holds the aliases PowerShell 7 defines outside Windows: the `BuiltInAliases` list
-  of `InitialSessionState.cs` without its `#if !UNIX` and `#if !CORECLR` entries, plus `fhx`,
-  `gcb`, `gtz` and `scb`, which cmdlets declare and `CreateDefault()` adds when it imports the
-  engine snap-ins. `ALIASES` equals the alias rows of PowerShell's own `DefaultCommands.Tests.ps1`
-  and `UNIX_ALIASES` its `CoreUnix` rows (both read at `v7.6.6`, 2026-10-19). The conformance case
+- `UNIX_ALIASES` holds the aliases a PowerShell 7 session defines outside Windows: the
+  `BuiltInAliases` list of `InitialSessionState.cs` without its `#if !UNIX` and `#if !CORECLR`
+  entries, plus `fhx`, `gcb`, `gtz` and `scb`, which cmdlets declare and the Utility and
+  Management manifests export. `ALIASES` holds every alias row of PowerShell's own
+  `DefaultCommands.Tests.ps1` and `UNIX_ALIASES` equals its `CoreUnix` rows (both read at
+  `v7.6.6`, 2026-10-19). `ALIASES` also holds `ral`: `Remove-Alias` declares it, and
+  `CreateDefault()` defines it when it imports the engine snap-ins, but the Utility manifest
+  exports only `fhx`, so that table lists no `ral` and `UNIX_ALIASES` leaves it to a native
+  program. The conformance case failed on `ubuntu-latest` for it in CI run 39297604179. It
   checks on a non-Windows host that each `UNIX_ALIASES` entry exists there.
 - The consent prefilter's PowerShell arm and its `tr -d` set, which now strips backticks, and
   `strippedText` in the consent module move together; the hook fallbacks strip backticks too.
@@ -167,7 +171,7 @@ green row would be a false all-clear.
 red team found: property setters, `.ForEach` with a method name, literal concatenations and a
 Unicode dash before `-h`. Its conformance case parses the
 corpus with `[System.Management.Automation.Language.Parser]::ParseInput`, requires every
-`CommandAst` name among the analyzer's commands and every `Get-Alias` entry in `ALIASES`; it is
+`CommandAst` name among the analyzer's commands and every alias `CreateDefault()` defines in `ALIASES`; it is
 required on win32 and skipped where no PowerShell is installed. It reads the host's major version
 and analyzes in the matching reading, so a 5.1 host is held to the 5.1 decoding; on a Linux host
 with `pwsh`, such as the `ubuntu-latest` runners, it runs against PowerShell 7. Its registry entry

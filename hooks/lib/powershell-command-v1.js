@@ -166,6 +166,7 @@ const ALIASES = Object.freeze({
   pushd: 'push-location',
   pwd: 'get-location',
   r: 'invoke-history',
+  ral: 'remove-alias',
   rbp: 'remove-psbreakpoint',
   rcie: 'register-cimindicationevent',
   rcim: 'remove-ciminstance',
