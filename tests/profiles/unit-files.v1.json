@@ -42,9 +42,9 @@
       "summary": "The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory."
     },
     {
-      "path": "tests/structure/external-review-v1.test.js", "registered": 41, "skips": {"win32": 3},
+      "path": "tests/structure/external-review-v1.test.js", "registered": 47, "skips": {"win32": 5},
       "runs": [{ "driver": "tests/structure/test-external-review-hook.sh" }],
-      "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, and the freshness check against changed files."
+      "summary": "External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named."
     },
     {
       "path": "tests/structure/finding-verify-v1.test.js", "registered": 28,
@@ -254,10 +254,10 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 38,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 81,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the DONE delivery order, the gate and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,

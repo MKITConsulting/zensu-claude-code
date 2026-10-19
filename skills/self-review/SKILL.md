@@ -171,10 +171,9 @@ A CRITICAL finding from a re-review is a must-fix only when its FINDING REPRODUC
 whenever the chain logged one for it; NOT-REPRODUCED and NOT-TESTABLE findings go to `## Open`.
 
 The review chain may have deferred findings instead of re-reviewing them, but only while
-`hooks.reviewConvergence` is enabled: resolve it against the `TOP` from Phase 1, because this
-Bash carries no `CLAUDE_PROJECT_DIR` and would otherwise skip the project config the review
-hook reads, with
-`ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off'`,
+`hooks.reviewConvergence` is enabled: resolve it against the `PROJECT_ROOT` from Phase 1, as
+the review hook does, because this Bash carries no `CLAUDE_PROJECT_DIR`, with
+`ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$PROJECT_ROOT" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off'`,
 and on `off` skip this paragraph and add no ledger rows to `## Open`. On `on`, run
 `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$TOP"`
 over the run log of the `/zensu:tdd` chain this stage closes: the log that chain has been
