@@ -256,7 +256,10 @@ fi
 
 PS_BANNER_OUT="$(session_payload \
   | CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" CLAUDE_CODE_USE_POWERSHELL_TOOL=1 \
-    bash "$PLUGIN/hooks/session-start-banner.sh" 2>"$RAW_TMP/banner-powershell.err")"
+    bash "$PLUGIN/hooks/session-start-banner.sh" 2>"$RAW_TMP/banner-powershell.err" | node -e '
+  let s = ""; process.stdin.on("data", (c) => { s += c; });
+  process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(s).systemMessage); } catch (_) { process.exit(1); } });
+' 2>/dev/null)"
 PS_EXPECTED="$(cd -P -- "$PLUGIN" && node -e '
   const coverage = require("./hooks/lib/shell-tool-coverage-v1.js");
   const manifest = JSON.parse(require("node:fs").readFileSync("./hooks/hooks.json", "utf8"));
