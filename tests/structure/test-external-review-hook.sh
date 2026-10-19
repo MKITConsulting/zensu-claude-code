@@ -11,7 +11,7 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 REGISTRATION="$PLUGIN_DIR/hooks/lib/hook-registration-v1.js"
 CAPABILITY="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -50,22 +50,7 @@ WORK="$(mktemp -d 2>/dev/null)" || { check "X0 scratch dir" FAIL; finish; exit 1
 trap 'rm -rf "$WORK"' EXIT
 WORK="$(cd -P "$WORK" && pwd -P)"
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "X0b the unit suite passes (node --test external-review-v1.test.js)" PASS
-else
-  check "X0b the unit suite passes (node --test external-review-v1.test.js)" FAIL
-  sed -n '1,60p' "$WORK/unit.out"
-fi
-if unit_cases_registered_floor "$WORK/unit.out" 41; then
-  check "X0c the unit suite registered at least 41 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "X0c the unit suite registered at least 41 cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if UNIT_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "X0d the SUITE-OVERVIEW Blocks cell matches what external-review-v1.test.js registers" PASS
-else
-  check "X0d $UNIT_OVERVIEW" FAIL
-fi
+unit_check "X0b the external-review unit file passes" "$UNIT"
 
 REG="$(node -e '
   const reg = require(process.argv[1]);
@@ -531,7 +516,7 @@ arm stop-control || { check "X12 arm" FAIL; finish; exit 1; }
 CONTROL_OUT="$(stop_payload stop-control | bash "$STOP" 2>/dev/null)"
 CONTROL_REASON="$(printf '%s' "$CONTROL_OUT" | reason)"
 if [ "$(printf '%s' "$CONTROL_OUT" | decision)" = "block" ] \
-  && printf '%s' "$CONTROL_REASON" | grep -qF "fan out the review panel's zensu:review-aspect agents" \
+  && printf '%s' "$CONTROL_REASON" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel" \
   && printf '%s' "$CONTROL_REASON" | grep -qF -- '--external-review'; then
   check "X12 control: an armed chain without background work blocks and names the panel and the import path" PASS
 else
@@ -719,4 +704,5 @@ else
   check "X24 bound or adopting chain (unbound=$UNBOUND_PROBE bound=$BOUND_PROBE adopted=$ADOPTED_PROBE err=$(cat "$WORK/probe-bound.err" "$WORK/probe-unbound.err" "$WORK/probe-adopted.err"))" FAIL
 fi
 
+unit_check_done "X0z every unit file the registry gives this suite was graded"
 finish

@@ -43,7 +43,7 @@ Work these in order. Depth scales to the mission; the skeleton does not.
 
 **3 — Write the doc.** Emit the wargame to the output path in the canonical structure. Write for the executor: concrete, blind-runnable, no open questions left as prose.
 
-**4 — Red-team, then converge.** Attack your own plan. Record the attack that failed (proof of strength) and the attack that landed plus its patch. For `/goal` missions, run the **cohort-until-parity loop** (`references/goal-contract.md`) — and for **code / feature / audit** missions, that cohort IS the Zensu review chain (`zensu:review-aspect` ×5 + `zensu:code-reviewer`), not ad-hoc verifiers.
+**4 — Red-team, then converge.** Attack your own plan. Record the attack that failed (proof of strength) and the attack that landed plus its patch. For `/goal` missions, run the **cohort-until-parity loop** (`references/goal-contract.md`) — and for **code / feature / audit** missions, that cohort IS the Zensu review chain (the `zensu:review-aspect` panel + `zensu:code-reviewer`), not ad-hoc verifiers.
 
 **5 — Grade.** Grade the doc against all 8 SUCCESS points; fix any that fail before declaring done. Record the self-grade in the doc. (Persisting the grade onto the Zensu feature and the release gate is Phase 2 — not yet wired.)
 

@@ -122,14 +122,13 @@ if command -v node >/dev/null 2>&1; then
   # DRIFT — a false red naming the wrong cause — while the rc branch, added to
   # preserve that output, printed none of it.
   P8_TMP="$(mktemp -d -t zenp8-none-XXXXXX)"
-  P8_NONE="$(
-    export CLAUDE_PLUGIN_DATA="$P8_TMP/plugin-data"
-    mkdir -p "$CLAUDE_PLUGIN_DATA" "$P8_TMP/project"
-    node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"startup",session_id:process.argv[1],cwd:process.argv[2]}))' "zenp8-$$" "$P8_TMP/project" \
-      | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
-        bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null 2>&1
+  mkdir -p "$P8_TMP/plugin-data" "$P8_TMP/project"
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:"startup",session_id:process.argv[1],cwd:process.argv[2]}))' "zenp8-$$" "$P8_TMP/project" \
+    | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P8_TMP/plugin-data" env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+      bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null 2>&1
+  p8_directive() {
     node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:"where are we?"}))' "zenp8-$$" \
-      | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P8_TMP/project" ZENSU_CONFIG="$P8_TMP/no-such-config.json" \
+      | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P8_TMP/plugin-data" CLAUDE_PROJECT_DIR="$P8_TMP/project" ZENSU_CONFIG="$P8_TMP/no-such-config.json" \
         bash "$HOOK" 2>/dev/null \
       | node -e '
         let s = "";
@@ -139,10 +138,12 @@ if command -v node >/dev/null 2>&1; then
           catch (_) {}
         });
       ' 2>/dev/null
-  )"
+  }
+  P8_NONE="$(p8_directive)"
+  P8_NONE_SHORT="$(p8_directive)"
   rm -rf "$P8_TMP"
   P8_ERR="$(mktemp -t zenp8-XXXXXX)"
-  DRIFT="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" NONE_DIRECTIVE="$P8_NONE" node -e '
+  DRIFT="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" NONE_DIRECTIVE="$P8_NONE" NONE_SHORT_DIRECTIVE="$P8_NONE_SHORT" node -e '
     const fs = require("fs");
     const path = require("path");
     let hook;
@@ -152,6 +153,8 @@ if command -v node >/dev/null 2>&1; then
       .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
     const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
     if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
+    const shortActive = blocks.filter((s) => s.startsWith("zen-mode is ACTIVE"))[1];
+    if (!shortActive) { process.stdout.write("hook-has-no-short-ACTIVE-directive"); process.exit(0); }
     const norm = (s) => s.replace(/\s+/g, " ").trim();
     const want = norm(active);
     // ONE dynamic field: the anchor token the hook substitutes at emit time. The
@@ -176,6 +179,14 @@ if command -v node >/dev/null 2>&1; then
     const noneHead = noneWant.includes(MARKER) ? noneWant.slice(0, noneWant.indexOf(MARKER) + MARKER.length) : "";
     if (!noneHead) { process.stdout.write("hook-none-variant-not-captured"); process.exit(0); }
     if (noneHead === head) { process.stdout.write("hook-none-variant-still-carries-the-anchor-clause"); process.exit(0); }
+    const shortWant = norm(shortActive);
+    if (!shortWant.includes(MARKER)) { process.stdout.write("hook-short-directive-carries-no-anchor-marker"); process.exit(0); }
+    const shortHead = shortWant.slice(0, shortWant.indexOf(MARKER) + MARKER.length);
+    const shortNoneWant = norm(process.env.NONE_SHORT_DIRECTIVE || "");
+    const shortNoneHead = shortNoneWant.includes(MARKER) ? shortNoneWant.slice(0, shortNoneWant.indexOf(MARKER) + MARKER.length) : "";
+    if (!shortNoneHead) { process.stdout.write("hook-short-none-variant-not-captured"); process.exit(0); }
+    if (shortNoneHead === noneHead) { process.stdout.write("hook-second-prompt-carries-the-same-none-directive-as-the-first"); process.exit(0); }
+    if (shortNoneHead === shortHead) { process.stdout.write("hook-short-none-variant-still-carries-the-anchor-clause"); process.exit(0); }
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.DIR).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { process.stdout.write("scenarios-dir-unreadable"); process.exit(0); }
@@ -186,27 +197,36 @@ if command -v node >/dev/null 2>&1; then
     try {
       registered = (fs.readFileSync(process.env.CFG, "utf8").match(/file:\/\/scenarios\/[^\s]+\.yaml/g) || []).length;
     } catch (_) { process.stdout.write("config-unreadable"); process.exit(0); }
-    if (registered < 5) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
+    if (registered < 8) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
     if (scenarios.length < registered) {
       process.stdout.write("directory-has-" + scenarios.length + "-scenarios-but-config-registers-" + registered);
       process.exit(0);
     }
+    const variants = [
+      { name: "full", head, none: false, short: false },
+      { name: "full-none", head: noneHead, none: true, short: false },
+      { name: "short", head: shortHead, none: false, short: true },
+      { name: "short-none", head: shortNoneHead, none: true, short: true },
+    ];
+    const carried = new Set();
     const bad = [];
     for (const f of scenarios) {
       const p = path.join(process.env.DIR, f);
       let text;
       try { text = fs.readFileSync(p, "utf8"); } catch (_) { bad.push(f + ":unreadable"); continue; }
       const flat = norm(text);
-      if (flat.includes(head)) {
-        const rest = flat.slice(flat.indexOf(head) + head.length).trim();
-        if (!producible.some((t) => t !== "none" && rest.startsWith(t))) bad.push(f + ":anchor-token-not-producible");
-      } else if (flat.includes(noneHead)) {
-        const rest = flat.slice(flat.indexOf(noneHead) + noneHead.length).trim();
+      const v = variants.find((x) => flat.includes(x.head));
+      if (!v) { bad.push(f); continue; }
+      if (v.short !== f.startsWith("short-")) { bad.push(f + ":carries-the-" + v.name + "-directive"); continue; }
+      carried.add(v.name);
+      const rest = flat.slice(flat.indexOf(v.head) + v.head.length).trim();
+      if (v.none) {
         if (!/^none(?:\s|<|$)/.test(rest)) bad.push(f + ":none-variant-carries-a-token");
-      } else {
-        bad.push(f);
+      } else if (!producible.some((t) => t !== "none" && rest.startsWith(t))) {
+        bad.push(f + ":anchor-token-not-producible");
       }
     }
+    for (const x of variants) if (!carried.has(x.name)) bad.push("no-scenario-carries-the-" + x.name + "-directive");
     // A POSITIVE sentinel, not an empty string. With `bad.join(",")` alone,
     // "nothing drifted" and "the program threw before it could decide" are the
     // same observation — and stderr was discarded, so the throw left no trace
@@ -220,7 +240,7 @@ if command -v node >/dev/null 2>&1; then
   if [ "$P8_RC" -ne 0 ]; then
     check "P8 directive comparison could not run (node exit $P8_RC): ${P8_STDERR:-<no stderr>} — not an all-clear" FAIL
   elif [ "$DRIFT" = "OK" ]; then
-    check "P8 every scenario embeds the hook's ACTIVE directive verbatim (no copy drift)" PASS
+    check "P8 every scenario embeds the hook's ACTIVE directive verbatim, the full contract or, in a short- scenario, the short body (no copy drift)" PASS
   else
     check "P8 scenario text has drifted from hooks/user-prompt-zen-mode.sh: ${DRIFT:-<empty output, program produced no verdict>}" FAIL
   fi

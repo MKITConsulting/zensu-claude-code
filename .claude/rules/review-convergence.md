@@ -70,7 +70,7 @@ RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
 **FAIL-OPEN IS THE CONTRACT.** The classification runs only for a re-review launched from the
 post-review directive AND only when `review-round-scope-v1.js` and `review-ledger-v1.js` both
 answer `status=ok`. Any other answer routes that review exactly as before and logs
-`CONVERGENCE UNAVAILABLE — <reason>`. The Stop-hook resume directive is deliberately unchanged,
+`CONVERGENCE UNAVAILABLE — <reason>`. The Stop-hook resume directive has no convergence clause,
 so a resumed review also routes as before. The routing read answers `degraded` on a malformed
 `FINDING LEDGER` line (an anchor carrying a backtick, `$(` or `${` included), more than
 `MAX_ENTRIES` entries, an unreadable or out-of-root log, an earlier-round registration of a new

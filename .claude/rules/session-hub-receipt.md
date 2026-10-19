@@ -24,6 +24,14 @@ accepts, is a contract change: give it a new `contract` number and change the Hu
 `test-session-hub-receipt.sh` R3 pins the file byte for byte, and the unit suite requires the
 module's constants to equal it.
 
+**A capability the Hub reads goes into a key of its own, never into a larger `takeover.contract`.**
+`contract_of` in the Hub's `src-tauri/src/plugin.rs` checks only `schemaVersion`, `takeover` and
+`receipts`, so an added top-level key leaves every current Hub supported, while a `takeover.contract`
+above 1 makes it refuse the plugin as newer. `linkedSessions` is the first such key: it tells the
+Hub that the takeover offers the moved session's linked sessions and which lineage ledger proves a
+continuation (`.claude/rules/session-trail-linked-sessions.md`). The unit suite checks its
+directory and schema against `ledgerPaths` and `LEDGER_SCHEMA_VERSION`.
+
 **The grammar is exact.** The raw prompt, or the command-tag spelling with `command-name`
 `/zensu:session-trail` and `command-args` `takeover <session id> --all --receipt <token>`, after
 leading `<system-reminder>` blocks. The session id is a lowercase hyphenated UUID and the token 32

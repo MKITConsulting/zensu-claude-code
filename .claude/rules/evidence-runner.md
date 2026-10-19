@@ -189,8 +189,8 @@ max-rounds hand-offs interpolate them), the routed-round sentence of step 10 in
 the `FS-A` pins and F16 to F19 in `tests/structure/test-full-suite-gate.sh`, `S17` in
 `tests/structure/test-post-review-tdd-scope.sh`, the `MR` checks in
 `evals/config-gate/test-review-convergence-directive.sh`, C22 and C23 in
-`tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` count in
-`tests/SUITE-OVERVIEW.md`.
+`tests/structure/test-full-suite-ci.sh`, and the `evidence-run-v1.test.js` entry in
+`tests/profiles/unit-files.v1.json`.
 
 **Known gaps**: on Windows the group kill is a best-effort `taskkill /T /F` and stays
 unverified until a Windows run measures it. `mutated-during-run` lists paths only when

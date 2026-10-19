@@ -123,6 +123,11 @@ if (JSON.stringify(uniqueSorted(classified)) !== JSON.stringify(actualStructure)
 }
 NODE
 
+if ! node "$TESTS_DIR/structure/lib-unit-registry.js" census --root "$ROOT" >&2; then
+  printf '%s\n' 'unit-file registry census failed; refusing execution' >&2
+  exit 2
+fi
+
 # The partition itself: longest-processing-time first over the inventory the gate
 # above just certified complete. Every shard computes the identical split from the
 # same two checked-in files, so no two shards can disagree about who owns a suite

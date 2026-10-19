@@ -21,7 +21,7 @@ SCOPE_LIB="$ROOT/hooks/lib/review-round-scope-v1.js"
 ASPECT_LIB="$ROOT/hooks/lib/aspect-activation-v1.js"
 SCOPE_UNIT="$ROOT/tests/structure/review-round-scope-v1.test.js"
 ASPECT_UNIT="$ROOT/tests/structure/aspect-activation-v1.test.js"
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 
 source "$ROOT/tests/structure/lib-skill-text.sh"
 TDD_MD="$(skill_text_file "$ROOT/skills/tdd")"
@@ -56,26 +56,8 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-# --- Unit drivers -----------------------------------------------------------
-# tests/run-all.sh discovers only structure/test-*.sh, so an undriven *.test.js
-# is never executed by the tree runner. Floor on the REGISTERED total: it is the
-# platform-independent number and it is what catches a unit file emptied,
-# renamed, or never collecting a case.
-SCOPE_OUT="$(cd "$ROOT" && node --test "$SCOPE_UNIT" 2>&1)"
-SCOPE_RC=$?
-[ "$SCOPE_RC" -eq 0 ] && check "I1 review-round-scope unit suite passes ($(unit_cases_report_text "$SCOPE_OUT"))" PASS \
-                      || check "I1 review-round-scope unit suite passes" FAIL
-unit_cases_registered_floor_text "$SCOPE_OUT" 24 \
-  && check "I1a review-round-scope unit suite registers its cases ($UNIT_CASES_TESTS)" PASS \
-  || check "I1a review-round-scope unit suite registers its cases ($UNIT_CASES_TESTS)" FAIL
-
-ASPECT_OUT="$(cd "$ROOT" && node --test "$ASPECT_UNIT" 2>&1)"
-ASPECT_RC=$?
-[ "$ASPECT_RC" -eq 0 ] && check "I2 aspect-activation unit suite passes ($(unit_cases_report_text "$ASPECT_OUT"))" PASS \
-                       || check "I2 aspect-activation unit suite passes" FAIL
-unit_cases_registered_floor_text "$ASPECT_OUT" 12 \
-  && check "I2a aspect-activation unit suite registers its cases ($UNIT_CASES_TESTS)" PASS \
-  || check "I2a aspect-activation unit suite registers its cases ($UNIT_CASES_TESTS)" FAIL
+unit_check "I1 the review-round-scope unit file passes" "$SCOPE_UNIT"
+unit_check "I2 the aspect-activation unit file passes" "$ASPECT_UNIT"
 
 # --- Fail-open contract, driven through the real CLIs ------------------------
 # The source pins below cannot see a helper that still SAYS fail-open while
@@ -170,6 +152,7 @@ check "I28 configuration.md names the unlogged-edit gap" "$(grep_ok "$CONFIG_DOC
 check "I29 configuration.md names the path-shaped classifier gap" "$(grep_ok "$CONFIG_DOC" 'the classifier is path-shaped')"
 
 rm -f "$TDD_MD"
+unit_check_done "I2z every unit file the registry gives this suite was graded"
 echo "----"
 echo "test-incremental-review-rounds: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
