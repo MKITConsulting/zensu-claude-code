@@ -363,12 +363,14 @@ exit-2 cause under its existing "did not complete" contract.
 
 **Known gaps, accepted and named:**
 
-- **A RELATIVE foreign claim is ungradeable and stays so.** `src/index.ts` from a sibling
-  repository is textually identical to an anchor claim, and where the anchor holds a dirty
-  file of that name it grades as LANDED — a false green INSIDE the audit, in the exact
-  direction stage 1 exists to close. Only the stage 2 root label closes it; `X6` in
-  `tests/structure/test-edit-landing-audit.sh` pins the current behaviour so the gap cannot
-  be mistaken for detection.
+- **A RELATIVE claim naming a SIBLING repository's file is ungradeable and stays so.**
+  `src/index.ts` from a sibling repository is textually identical to an anchor claim, and
+  where the anchor holds a dirty file of that name it grades as LANDED — a false green INSIDE
+  the audit, in the exact direction stage 1 exists to close. Only the stage 2 root label
+  closes it; `X6` in `tests/structure/test-edit-landing-audit.sh` pins the current behaviour
+  so the gap cannot be mistaken for detection, and `X6a` pins that a relative claim climbing
+  into the sibling with `..` keeps the anchor's grading as well. A relative claim into a work
+  tree NESTED under the anchor is not this gap: it is placed (the redactor bullet below).
 - **The claim-armed scope needs a channel.** With neither `--plan` nor a receipt — the
   flag-free recovery spelling of `--tdd-complete` — a zero-change chain keeps the
   pre-stage-1 exemption, silently, because nothing identifies its run log.
@@ -391,11 +393,17 @@ exit-2 cause under its existing "did not complete" contract.
   position always does to a list that grows.
   `zensu-log.sh append` passes every message through `zensu-artifact-redact-v1.js` and `.log` is a
   redaction bucket, so a claim naming a sibling repository under `$HOME` is rewritten to `~/...`
-  BEFORE it lands in the run log. The `/*` arm in `normalize_claim` is the only entry to
-  `absolute_claim_verdict`, so that claim never matches it, no `foreign-root` line is emitted and
-  the doctor topology row cannot fire for the topology the spec's own worked example uses. Roots
-  outside BOTH `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` —
-  survive redaction and the feature works correctly on them. Say WHICH HALF is universally live,
+  BEFORE it lands in the run log. `absolute_claim_verdict` has two callers, `normalize_claim` and
+  the `--inventory` loop, and each hands it only an absolute claim, a `<project>` claim
+  `unredact_claim` rebuilt, or a relative claim `place_relative_claim` rebuilt (below). `~` is
+  never rebuilt, so that claim stays relative, reaches no work tree nested under the repository
+  top, and is graded against the anchor's change set (`EDIT NOT LANDED`): no `foreign-root` line is
+  emitted and the doctor topology row cannot fire for the topology the spec's own worked example
+  uses. A root survives redaction only outside `$HOME`, the project root AND every residual home
+  prefix: rule 3 rewrites `/Users/<seg>`, `/home/<seg>` and `/root` to `<home>`, which
+  `unredact_claim` refuses, so a sibling under another user's home or under `/root` grades a
+  generic `UNVERIFIED` that names no root and yields no `foreign-root` line. On `/opt`, `/srv` or
+  a CI checkout under `/builds` the feature works correctly. Say WHICH HALF is universally live,
   never that stage 1 detects cross-repository work in general. **The `<project>` direction is
   the same interaction running the OTHER way, and it is closed by PLACING the claim, not by
   stripping it, which is why this bullet must not be read as covering it.** Rule 1 of the
@@ -404,13 +412,10 @@ exit-2 cause under its existing "did not complete" contract.
   in `zensu-edit-landing.sh` strips the placeholder, refuses an empty, absolute or `..`-climbing
   remainder, and rebuilds the claim under `PROJECT_ABS` before `absolute_claim_verdict` places
   it, in `normalize_claim` and in the `--inventory` loop alike, so the redacted spelling gets the
-  verdict its absolute spelling gets. A stripped remainder graded as a bare relative path skips
-  two things the absolute arm does. It never reaches `nested_worktree_of`, so a claim into a
-  repository nested under the anchor grades `EDIT LANDED (untracked-by-design)` with exit 0 where
-  the anchor ignores that directory, `EDIT NOT LANDED` where it does not, and yields no
-  `foreign-root` line. And it resolves against git's top level, so in a session whose project root
-  sits below the repository top it names a DIFFERENT file: a dirty same-named file at the top
-  grades an unlanded claim `EDIT LANDED`. **The rebuild root is `PROJECT_ABS`, never `REPO_ROOT`**:
+  verdict its absolute spelling gets. Grading the stripped remainder as a bare relative path
+  would resolve it against git's top level, so in a session whose project root sits below the
+  repository top it would name a DIFFERENT file: a dirty same-named file at the top would grade an
+  unlanded claim `EDIT LANDED`. **The rebuild root is `PROJECT_ABS`, never `REPO_ROOT`**:
   the placeholder denotes the root the writer derived from the log path, which is the `--project`
   root in every shipped caller. In that subdirectory topology the audit can therefore accept a
   claim it used to refuse, because it now grades the file the author named. `X16b`–`X16f` in
@@ -418,14 +423,52 @@ exit-2 cause under its existing "did not complete" contract.
   and pin the nested repository both ignored and not ignored, the in-anchor claim beside it and
   the inventory line; `X16g` pins the rebuild root against a dirty same-named file at the
   repository top. `X18`, `X27` and `X27b` pin the in-anchor strip, the backslash spelling and the
-  `..` refusal. The `~` half stays a stated bound: `$HOME` names any home-rooted path, including a
-  genuine sibling repository, and nothing records the home the writer redacted against.
-  `X16`/`X16a` pin it through the production writer too; every other fixture in that file writes
-  with `printf`, which matches no redaction rule, which is why the suite was green against an
-  input shape the production writer rarely produces. The durable fix for the rest is to
+  `..` refusal. **A bare RELATIVE claim is placed too, against the repository top.**
+  `place_relative_claim` runs right after `unredact_claim` in both callers and joins a relative
+  claim to `REPO_CANON`, the repository top that the claim contract in
+  `skills/tdd/references/execution.md` names and that the grader resolves relative claims against;
+  joining `PROJECT_ABS` would ask, in a session whose project root sits below the top, about a
+  file the grader never reads (`X35`/`X35a`). When `absolute_claim_verdict` places the join in a
+  work tree nested under the anchor (`foreign` or `undetermined` with a value under `REPO_CANON`),
+  the claim is rebuilt as that absolute path and the absolute arm grades it with the verdict
+  already computed (`PLACED_VERDICT`, so the walk runs once): `UNVERIFIED (foreign root)` naming
+  the nested root plus a `foreign-root` line, or `UNVERIFIED (undetermined root)` plus an inventory
+  fault (`X38`/`X38a`). A kind the dispatch does not know is rebuilt as well, so the absolute arm's
+  closed case refuses it. Every other answer keeps the relative spelling and its existing grading:
+  an in-anchor claim, the `X6` sibling bound, and a relative claim that resolves OUT of the anchor
+  with `..` or through a symlink, whose sibling root therefore goes unreported (`X6a`, a named
+  bound). **A fork-free pre-check decides whether the walk runs at all.**
+  `relative_claim_may_nest` walks the claim's components top-down below `REPO_CANON` with `[ -d ]`,
+  `[ -L ]` and `[ -e .git ]`, stops at the first component that does not exist, and asks for the
+  walk only on a symlink, a `.git` entry, or a `.`, `..` or empty segment; a nested `.git` or a
+  symlink can only sit on an existing directory, so its "no" is complete. The cost is the reason:
+  200 claims through the walk took 4.1 s on macOS, the doctor stops the inventory child at 5 s and
+  `--tdd-complete` does too wherever `timeout` or `gtimeout` exists, and local run logs reach 694
+  claimed files (p99 129). `X37` counts `dirname` spawns through a `PATH` stub and requires twenty
+  in-anchor claims to spawn no more than one. Stopping at the first missing component also keeps
+  a malformed claim, such as a space-separated file list with 75 slashes found in a local log, on
+  its old verdict instead of exhausting the 64-level budget. **A submodule is a nested work
+  tree.** Its checkout carries a gitfile `.git`, the anchor's change set lists only the gitlink,
+  and `check-ignore` refuses a path inside it with exit 128, so a claim naming a file inside it
+  could only grade `EDIT NOT LANDED` against the anchor, with a remedy nobody can perform. It
+  grades `UNVERIFIED (foreign root)` naming the submodule root instead, as its absolute spelling
+  already did. A claim naming the submodule path itself is the anchor's own gitlink and grades
+  against the anchor's change set, `EDIT LANDED` when the submodule moved, and a claim under an
+  uninitialized submodule, which has no `.git`, grades as before (`X36`–`X36b`). `X16h`–`X16l`
+  build their run log through the production writer and pin a relative claim into the nested
+  repository both ignored and not ignored, the in-anchor claim beside it and the inventory line;
+  `X34` pins the symlink into the nested tree. The `~` half stays a stated bound: `$HOME` names
+  any home-rooted path, including a genuine sibling repository, and nothing records the home the
+  writer redacted against. `X16`/`X16a` pin it through the production writer too. `X16`–`X16l`
+  and `X34`–`X36b` write their run log through the production writer; every other fixture in that
+  file writes it raw, with `printf` or a heredoc, which matches no redaction rule and cannot show
+  what the production writer does to a claim. The durable fix for the rest is to
   un-substitute `<home>` and `~` against the same roots the redactor used, before classifying, the
   way `<project>` now is. **Version: `patch`**: no schema field, strict key set, hook, matcher,
-  config key or attestation moves, and the receipt keeps its shape.
+  config key or attestation moves, and the receipt keeps its shape. The audit now fails a
+  relative nested claim it used to pass as `EDIT LANDED (untracked-by-design)`, so re-running it
+  over the same log after an in-lineage upgrade can turn a clean receipt unclean — the audit doing
+  its job, as with the dash-class change above.
 - **The no-bound-key topology row withholds the green summary.** It is `WARN`, and `line()`
   counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so any session
   whose binding does not resolve, in a project that has ever written an edit-landing receipt,

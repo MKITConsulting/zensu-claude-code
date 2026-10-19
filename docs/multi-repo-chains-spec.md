@@ -5,7 +5,7 @@
 requirement on a logged claim), `hooks/lib/zensu-edit-landing.sh` (a claim resolving
 outside the audited root fails the audit and names the foreign root, plus the
 read-only `--inventory` mode its two consumers share) and
-`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE both `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not. See the fourth known gap in `CLAUDE.md` §"Multi-Repo Stage 1". The carrier question of §6.1.1 was ANSWERED on
+`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE every home directory and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not, and one under another user's home or `/root` becomes `<home>` and names no root either. See the redactor gap in `CLAUDE.md` §"Multi-Repo Stage 1". The carrier question of §6.1.1 was ANSWERED on
 2026-09-20 — the Session Control record, sealed by an interactive confirmation at
 arming, behind a containment gate on the Bash channel into the plugin-data store —
 but the answer is a decision, not a mechanism: stage 2 must not be implemented
@@ -681,8 +681,9 @@ are what the doctor row's read-only contract rests on). `tests/structure/test-do
 carries the topology row and its negatives (the `P1tp` family). Both are named as FAMILIES
 rather than as ranges: an endpoint is a hand-maintained numeral wearing a range's clothes,
 and both of these were appended past inside the change that wrote them. Two bounds ship with them and are not
-closed by stage 1: a relative foreign claim still grades against the anchor, and the
-claim-armed scope needs either `--plan` or a receipt to locate the run log — the
+closed by stage 1: a relative claim naming a sibling repository's file still grades
+against the anchor (one into a work tree nested under the anchor is placed and
+reported), and the claim-armed scope needs either `--plan` or a receipt to locate the run log — the
 flag-free recovery spelling keeps the pre-stage-1 zero-change exemption.
 
 ### Stage 2
