@@ -64,17 +64,43 @@ the Claude Desktop 2.42304.0 bundle on 2026-10-18 and not driven live:
   with `CHIP_BACKGROUND`, a fixed text that names where the task came from.
 - A `fork` keeps `context` `fork` and takes neither a background nor `use_worktree`; a boolean
   `useWorktree` is carried as `use_worktree` otherwise.
-- A chip with a `cwd` is proposed without it when the folder is one of the old session's folders
-  (`originCwd` and `cwd` of the record, the row's `cwd` and `wt`), inside one or around one;
-  otherwise it is marked **list** with `why` `folder`. A chip with no prompt left once cleaned is
-  marked **list** with `why` `prompt`.
+- A chip with a `cwd` is proposed without it only when `options.checkout` answers `true` for
+  that folder: the folder lies in the old session's repository. `false` marks it **list** with
+  `why` `folder`; no answer, and a folder that is relative or carries a control character, mark it
+  **list** with `why` `folder-unmeasured`, and `checkout` is never called with such a value. A
+  chip with no prompt left once cleaned is marked **list** with `why` `prompt`.
 - `options.sameRepository` `false` marks every other chip **list** with `why` `repository`,
-  because a proposal starts in the proposing session's folder. `cmdTakeover` measures it with
-  `chipRepository`: the repository root of the folder takeover runs in against that of the old
-  worktree or recorded `cwd`, each from `rev-parse --git-common-dir` through `repoRootOf`, the two
-  canonicalized together by `canonicalPair`. `--no-git`, a folder outside any repository and an
-  old checkout that is gone leave it `null`, and `cmdHandoff` never measures it, because its
-  reader is unknown; `takeover --json` carries it as `openChips.sameRepository`.
+  because a proposal starts in the proposing session's folder.
+
+**Same checkout means the same repository, never a nested path.** Both verdicts come from
+`repositoryVerdicts(r, here)` in `trail.mjs`, the one source that the chips and the linked
+sessions (`.claude/rules/session-trail-linked-sessions.md`) share:
+
+- The old session's repository is the first measurable one of ONE folder list,
+  `[r.wt, r.cwd, o.originCwd, o.cwd]`: the transcript's worktree and cwd, then the record's
+  `originCwd` and `cwd`, so a removed worktree falls back to the checkout the record names.
+- A folder's repository is `repoRootOf`: `rev-parse --git-common-dir` through `git()` with
+  `READ_ONLY_GIT`, memoized per folder in `REPO_ROOTS`. Two roots are compared by
+  `sameRepositoryOf`, which canonicalizes them together with `canonicalPair`, and a missing root
+  on either side answers `null`. A worktree anywhere on disk is the same repository; a
+  repository nested in the old checkout, a submodule included, is another one.
+- `repositoryOf` answers `null` before any `stat` or git call for a folder that opens with two
+  separators: a Windows network path, a `\\?\` or `\\.\` device path, or a POSIX `//` spelling.
+  A chip's `cwd` is model-authored, and measuring a network path would make `takeover` reach
+  that host and wait on it.
+- `checkout(folder)` compares a folder with the old session's repository. `sameRepository`
+  compares the folder `takeover` runs in, `process.cwd()`, with it, and `cmdHandoff` passes no
+  folder, so a handoff brief measures every chip folder but never its unknown reader. Once the
+  old session's repository is measured, a receiving folder git places in no repository answers
+  `false` like another repository does, because only a measured match may let a proposal start
+  in this session's folder; with no measurable folder of the old session it stays `null`.
+- `--no-git` changes neither verdict. `references/commands.md` states that `takeover` and
+  `handoff` run their git calls regardless, and a speed flag must not decide where work starts.
+  `takeover --json` carries the receiving verdict as `openChips.sameRepository`.
+
+Path nesting, the rule before this one, counted every folder below a session rooted in a broad
+folder such as the home directory as that session's checkout, and every folder of a nested
+repository as the outer one's.
 
 **The chip text never changes a call.** Both briefs tell the model to propose chips only while
 it works in a checkout of the old session's repository, to never start a chip, and to propose a
@@ -112,19 +138,26 @@ the place.
   `references/disclosure.md` and the data-source table in `SKILL.md` name the carried chips.
 - The work-order gate denies `mcp__ccd_session__start_session` beside
   `mcp__ccd_session__spawn_task` (`.claude/rules/work-order-mode.md`).
-- `chipProposal\(` and `chipRepository\(` are entries of `L61_OK` in
-  `tests/structure/test-session-trail-lineage.sh`, because both calls name `r.cwd` and `r.wt`.
-  Keep those folders inline in the two calls; a local variable or a renamed function turns `L61`
-  red.
+- `firstRepositoryOf\(` is the entry of `L61_OK` in `tests/structure/test-session-trail-lineage.sh`
+  for the one call that names `r.wt` and `r.cwd`, the folder list in `repositoryVerdicts`. Keep
+  that list inline in the call; a local variable or a renamed function turns `L61` red.
+  `chipProposal` and the linked-session reader take verdicts, never folders of the row.
 
-**Pins.** `CH1` to `CH7` in `tests/structure/test-session-trail-verdict.sh` pin the read, the
-offer and expiry filters, the control strip, the proposal per chip kind, the record's own
-`originCwd` and `cwd` beside the transcript worktree, the listed chip, the widened fence, the
-title, background and why blocks of both briefs, the repository and never-start sentences, the
-absence of `spawn_task`, the step order in `references/takeover.md`, and in `CH7` the repository
-check from another repository, from the old one and under `--no-git`.
-`tests/structure/linked-sessions-v1.test.js` drives `chipProposal`; its `registered` count in
-`tests/profiles/unit-files.v1.json` is exact.
+**Pins.** `CH1` to `CH7` in `tests/structure/test-session-trail-verdict.sh` run against a real
+repository with worktrees for the transcript, the record's `cwd`, a sibling and the session that
+takes over. They pin the read, the offer and expiry filters, the control strip, the proposal per
+chip kind, the record's own `originCwd` and `cwd` beside the transcript worktree, a sibling
+worktree outside every folder of the old session that is proposed, a repository nested in the
+old checkout and another repository that are listed with `folder`, a gone folder listed with
+`folder-unmeasured`, the widened fence, the title, background and why blocks of both briefs, the
+repository and never-start sentences, the absence of `spawn_task`, the step order in
+`references/takeover.md`, and in `CH7` the repository check from another repository, also under
+`--no-git`, from a folder in no repository and from the old one. `CH8` takes the old repository
+from the record's `originCwd` once the transcript worktree is gone, `CH9` is its control with no
+folder of the old session left, and `CH10` lists a chip whose folder opens with two separators.
+`tests/structure/linked-sessions-v1.test.js` drives
+`chipProposal` with stub verdicts; its `registered` count in `tests/profiles/unit-files.v1.json`
+is exact.
 
 **Known gaps, accepted and named:**
 
@@ -135,19 +168,30 @@ check from another repository, from the old one and under `--no-git`.
   but no hook verifies that every chip was proposed, and none checks a chip call's arguments:
   the call line and the never-start sentence are the only guard against a chip whose text asks
   for a start. A PreToolUse check would add a hook that can deny, which is a `minor` release.
-- **The receiving repository is measured only by `takeover` with git.** Under `--no-git`, from a
-  folder outside any repository, once the old checkout is gone and in every handoff brief, the
-  model compares the repositories itself, as both briefs tell it to.
+- **The receiving repository is measured only by `takeover`.** Once every folder of the old
+  session is gone, and in every handoff brief, the model compares the repositories itself, as
+  both briefs tell it to.
+- **Every folder the records name is measured where it lies.** `takeover` and `handoff` run
+  `stat` and `git rev-parse --git-common-dir` in the old session's record folders, every chip
+  `cwd` and the `originCwd` of every listed linked session, on the `--no-record` plan pass and
+  under `--no-git` too, as `references/disclosure.md` states. Only a folder that opens with two
+  separators is skipped: a mounted network share on POSIX (`/Volumes/…`, an automounted
+  `/net/…`) is measured like a local folder, and its `stat` has no timeout of its own before
+  git's 8 s.
+- **The receiving folder is the working directory of the `takeover` process**, not the folder
+  Claude Desktop records for the session that runs it. A session whose shell moved into the old
+  session's repository while its own folder is another one reads as the same repository.
+- **An unmeasurable chip folder is listed**, a removed worktree of the old repository included,
+  because only a measured verdict may let a proposal start in this session's folder.
+- **The first measurable folder names the old session's repository.** A session whose folders
+  span two repositories is judged by the first of `r.wt`, `r.cwd`, `originCwd` and `cwd` that git
+  measures, and a folder of the other repository is listed.
 - **A chip's tl;dr, model, effort and permission mode are not carried.** Claude Desktop derives a
   proposal's tl;dr from its prompt, and the card starts with the receiving session's settings.
 - **A fork forks the receiving session's conversation**, which holds the takeover brief rather
   than the old transcript.
-- **A folder inside the old checkout is not carried**, so such a chip starts at the receiving
+- **A folder inside the old repository is not carried**, so such a chip starts at the receiving
   session's project root.
-- **The checkout test is path nesting, not repository identity**, as it is for linked sessions.
-  A session rooted in a broad folder such as the home directory counts every chip folder below it
-  as its own, so such a chip is proposed for the receiving session's project instead of being
-  listed. Comparing git common directories would fix both readers together.
 - **Every Claude Desktop rule above is one bundle build's reading.** The record shape was first
   read from Claude Desktop 2.31226.1 and the proposal fields from 2.42304.0 on macOS; the Windows
   and Linux store paths remain the inferred candidates of `ccdStoreCandidates`.

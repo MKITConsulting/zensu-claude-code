@@ -1940,7 +1940,7 @@ L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
 # rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
 # findPlanDocs/nearestRepoRoot/releaseSubject take it as a filesystem path, Set/toLowerCase build
 # a match structure, and ===/!==/typeof/.length compare it.
-L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|chipProposal\(|chipRepository\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|firstRepositoryOf\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
 # The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
 # raw interpolation on one of those four lines stays visible.
 # Comment lines are excluded: they describe the rule rather than render anything,

@@ -25,6 +25,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
   `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
   now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. `takeover --json` adds
+  `sameRepository` to `linkedSessions`, and `--no-git` no longer skips the repository check of
+  `takeover`.
 
 ## [0.28.0] - 2026-10-21
 
