@@ -1,36 +1,5 @@
 {
   "schemaVersion": 1,
   "shiftDays": 45,
-  "entries": [
-    {
-      "file": "tests/structure/acceptance-verify-v1.test.js",
-      "test": "idle sessions are swept and the current and fresh ones are kept",
-      "dependency": "file-mtime",
-      "reason": "sweepIdleSessions compares the kernel-set mtime of the fresh session directory, written moments earlier on the real clock, with Date.now(); shifted 45 days ahead, that directory reads as idle past the 14-day idleSessionMs and is swept."
-    },
-    {
-      "file": "tests/structure/external-review-v1.test.js",
-      "test": "stopWait waits a bounded number of times per session and expires an old counter",
-      "dependency": "file-mtime",
-      "reason": "stopWait first runs sweepStaleWaits, which compares the kernel-set mtime of the wait counter, written moments earlier on the real clock, with Date.now(); shifted 45 days ahead, the counter reads as older than the 24-hour waitTtlMs and is swept, so every wait counts from 1."
-    },
-    {
-      "file": "tests/structure/external-review-v1.test.js",
-      "test": "main never writes stdout in record mode and always answers in check, tree and stop-wait modes",
-      "dependency": "file-mtime",
-      "reason": "its stop-wait leg runs sweepStaleWaits, which compares the kernel-set mtime of the wait counter, written moments earlier on the real clock, with Date.now(); shifted 45 days ahead, the counter is swept before each wait, so the fourth wait never reaches the limit."
-    },
-    {
-      "file": "tests/structure/external-review-v1.test.js",
-      "test": "stale wait counters are swept and fresh ones are kept",
-      "dependency": "file-mtime",
-      "reason": "sweepStaleWaits compares the kernel-set mtime of the fresh wait counter, written moments earlier on the real clock, with Date.now(); shifted 45 days ahead, the fresh counter reads as older than the 24-hour waitTtlMs and is swept together with the stale one."
-    },
-    {
-      "file": "tests/structure/external-review-v1.test.js",
-      "test": "freshness sees a restored modification time and a deleted changed file",
-      "dependency": "file-mtime",
-      "reason": "check takes a changed file's change time as max(mtime, ctime), and the kernel sets ctime on the real clock while the launch is recorded at the shifted Date.now(); shifted 45 days ahead, a restored mtime one day before the launch reads as older than the launch, so the review reads as fresh."
-    }
-  ]
+  "entries": []
 }

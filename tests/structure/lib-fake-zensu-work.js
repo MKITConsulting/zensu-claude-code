@@ -63,6 +63,26 @@ const MAKE_TARGET_RE = /^make [a-z][a-z0-9_-]*$/;
 const SCRIPT_FILE_RE = /^[\w.-]+\.(py|js|mjs|cjs|ts|sh|bash|zsh|rb|pl|php|go|jar|sql)$/;
 const LEADING_MARKER_RE = /^(?:>[ \t]*|(?:[-*+\u2022]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)/;
 const FIELD_SPLIT_RE = new RegExp(`${RE2_SPACE}+`);
+const SECRET_RES = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY/,
+  /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{22,}\b/,
+  /\bglpat-[A-Za-z0-9_-]{20,}\b/,
+  /\b(AKIA|ASIA)[0-9A-Z]{16}\b/,
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/,
+  /\bsk-ant-[A-Za-z0-9_-]{20,}/,
+  /\bsk-(proj-)?[A-Za-z0-9_-]{20,}/,
+  /\b(sk|rk)_(live|test)_[A-Za-z0-9]{16,}\b/,
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+  /\bzsk_[0-9a-f]{16,}\b/,
+  /\bzst_[A-Za-z0-9_-]{20,}/,
+  /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  /:\/\/[^/\s:@]+:[^/\s@]+@/,
+];
+const REDACT_SPACE = '[\\t\\n\\f\\r \\p{Z}\\u0085]';
+const BEARER_RE = new RegExp(`\\b(bearer${REDACT_SPACE}+)([A-Za-z0-9._~+/=-]{16,})`, 'iu');
+const BASIC_TOKEN_RE = new RegExp(`(\\bauthorization["']?${REDACT_SPACE}*[:=]${REDACT_SPACE}*["']?)?\\b(basic${REDACT_SPACE}+)([A-Za-z0-9+/]{8,}={0,2})`, 'giu');
+const ASSIGNMENT_RE = new RegExp(`\\b((?:[A-Za-z0-9]+[_-])*[A-Za-z0-9]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret))(["']?${REDACT_SPACE}*(?::=|=>|[:=])${REDACT_SPACE}*["']?)([^\\t\\n\\f\\r \\p{Z}\\u0085"',;]{6,})`, 'giu');
 const CLI_VERSION = '0.8.0-fake';
 const DEFAULT_API_URL = 'https://api.zensu.dev';
 const PLAN_PATH_RE = /^[\p{L}\p{Nd}._\-\/+@~()[\]{}=, ]+$/u;
@@ -125,6 +145,13 @@ function apiFail(status, code, message) {
 }
 
 function printJson(value) {
+  if (state && Number.isSafeInteger(state.dropAnswers) && state.dropAnswers > 0 && argv[0] === 'work' && (argv[1] === 'event' || argv[1] === 'ask')) {
+    state.dropAnswers -= 1;
+    save(state);
+    process.stderr.write('error: read tcp 127.0.0.1:52144->127.0.0.1:18080: read: connection reset by peer\n');
+    if (argv.includes('--json')) process.stderr.write(`${JSON.stringify({ error: { message: 'read: connection reset by peer' } })}\n`);
+    process.exit(1);
+  }
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
   process.exit(0);
 }
@@ -160,7 +187,9 @@ function parseFlags(args) {
       if (value === undefined) usage(`flag needs an argument: --${name}`);
       index += 1;
     }
-    if (multi.has(name)) {
+    if (name === 'requirement') {
+      flags[name] = [...(flags[name] || []), ...String(value).split(',')];
+    } else if (multi.has(name)) {
       flags[name] = [...(flags[name] || []), value];
     } else {
       flags[name] = value;
@@ -243,7 +272,7 @@ function answered() {
 }
 
 function decisionLog() {
-  return (state.questions || []).filter((question) => question.work_plan_id === state.order.work_plan_id && question.scope === 'plan' && isAnswered(question));
+  return (state.questions || []).filter((question) => question.work_plan_id === state.order.work_plan_id && question.scope === 'plan' && question.status === 'answered');
 }
 
 function hasDiff(lines) {
@@ -505,10 +534,42 @@ function applyStage(flags, clientEventId) {
   return event;
 }
 
+function isBasicCredential(token) {
+  const trimmed = token.replace(/=+$/, '');
+  if (trimmed.length % 4 === 1) return false;
+  let text = null;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(trimmed, 'base64'));
+  } catch (_) {
+    return false;
+  }
+  return text.includes(':') && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
+}
+
+function redactChanges(text) {
+  if (SECRET_RES.some((pattern) => pattern.test(text)) || BEARER_RE.test(text)) return true;
+  if ([...text.matchAll(BASIC_TOKEN_RE)].some((match) => match[1] || isBasicCredential(match[3]))) return true;
+  return [...text.matchAll(ASSIGNMENT_RE)].some((match) => !match[3].startsWith('[REDACTED'));
+}
+
 function applyArtifact(flags, clientEventId) {
   const kinds = ['plan', 'report', 'evidence', 'pr', 'other'];
   if (!kinds.includes(flags.artifact)) apiFail(422, 'invalid_detail', 'detail.kind must be one of plan, report, evidence, pr, other');
   if (!flags.url && !flags.path) apiFail(422, 'invalid_detail', 'an artifact names a url or a path');
+  if (flags.url) {
+    const url = String(flags.url);
+    if (url.length > 2048) apiFail(422, 'invalid_url', 'detail.url is too long');
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch (_) {
+      parsed = null;
+    }
+    if (!parsed || parsed.protocol !== 'https:' || !parsed.host || parsed.username || parsed.password) {
+      apiFail(422, 'invalid_url', 'detail.url must be an https link without credentials');
+    }
+    if (redactChanges(url)) apiFail(422, 'invalid_url', 'detail.url must not carry a secret');
+  }
   if (flags.sha !== undefined && !/^[0-9a-fA-F]{7,64}$/.test(flags.sha)) apiFail(422, 'invalid_sha', 'detail.sha must be a commit SHA');
   guardProse('detail.summary', flags.summary, false);
   runtimeCap();
@@ -548,6 +609,22 @@ function applyBlocked(flags, clientEventId) {
   });
 }
 
+function probeOutbox(clientEventId) {
+  if (typeof state.outboxProbe !== 'string') return;
+  let inflight = [];
+  try {
+    const outbox = JSON.parse(fs.readFileSync(state.outboxProbe, 'utf8'));
+    inflight = (Array.isArray(outbox.inflight) ? outbox.inflight : []).map((record) => {
+      const args = Array.isArray(record.args) ? record.args : [];
+      return args.indexOf('--client-event-id') >= 0 ? args[args.indexOf('--client-event-id') + 1] : null;
+    });
+  } catch (_) {
+    inflight = [];
+  }
+  state.outboxSeen = [...(Array.isArray(state.outboxSeen) ? state.outboxSeen : []), { id: clientEventId || null, inflight }];
+  save(state);
+}
+
 function workEvent(flags) {
   const selected = ['stage', 'artifact', 'blocked'].filter((name) => flags[name] !== undefined);
   if (selected.length !== 1) usage('exactly one of --stage, --artifact or --blocked is required');
@@ -555,6 +632,7 @@ function workEvent(flags) {
   if (flags.blocked !== undefined && !flags.reason) usage('--blocked needs --reason');
   requireSessionToken('work event');
   requireOrder(flags._[0]);
+  probeOutbox(flags['client-event-id']);
   injected('event', flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   flags['client-event-id'] = clientEventId;
@@ -596,6 +674,7 @@ function workAsk(flags) {
   if (!flags.blocking && !flags['default-option']) usage('--default-option is required unless --blocking is set');
   requireSessionToken('work ask');
   requireOrder(flags._[0]);
+  probeOutbox(flags['client-event-id']);
   injected('ask');
   validateQuestion(flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
@@ -649,10 +728,14 @@ function workFollowup(flags) {
   injected('followup');
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   const prior = state.events.find((event) => event.client_event_id === clientEventId);
-  if (prior) printJson({ event: prior, order: publicOrder(), replay: true });
-  requireLive();
+  if (sessionEnded()) {
+    if (prior) printJson({ event: prior, order: publicOrder(), replay: true });
+    apiFail(401, 'invalid_session_token', 'session token expired or revoked');
+  }
   guardProse('title', flags.title, true, 200);
   guardProse('rationale', flags.rationale, true);
+  if (prior) printJson({ event: prior, order: publicOrder(), replay: true });
+  requireLive();
   state.followups = state.followups || [];
   if (state.followups.filter((entry) => entry.attempt === state.order.attempt).length >= 20) {
     apiFail(409, 'followup_limit_reached', 'an attempt reports at most 20 follow-ups');
@@ -688,12 +771,19 @@ function pulseStart(flags) {
   if (sessionEnded()) apiFail(401, 'invalid_session_token', 'session token expired or revoked');
   requireOrder(flags['work-order']);
   injected('pulse');
-  state.pulse = { attempt: state.order.attempt, clientName: flags['client-name'] || null, clientVersion: flags['client-version'] || null };
+  const previous = state.pulse && state.pulse.attempt === state.order.attempt && typeof state.pulse.id === 'string' ? state.pulse : null;
+  state.pulse = {
+    attempt: state.order.attempt,
+    clientName: flags['client-name'] || null,
+    clientVersion: flags['client-version'] || null,
+    id: previous ? previous.id : null,
+    startedAt: previous ? previous.startedAt : iso(now()),
+  };
   save(state);
   if (state.trackingDisabled) printJson({ status: 'tracking_disabled' });
   state.pulse.id = state.pulse.id || crypto.randomUUID();
   save(state);
-  printJson({ id: state.pulse.id, work_order_id: state.order.id, attempt: state.order.attempt, created: true, started_at: iso(now()), ended_at: null });
+  printJson({ id: state.pulse.id, work_order_id: state.order.id, attempt: state.order.attempt, created: !previous, started_at: state.pulse.startedAt, ended_at: null });
 }
 
 function main() {

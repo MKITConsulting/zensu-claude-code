@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const mod = await import(new URL('../../hooks/lib/session-hub-receipt-v1.mjs', import.meta.url));
+const lineage = await import(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
 const contract = JSON.parse(fs.readFileSync(new URL('../../skills/session-trail/handover-contract.json', import.meta.url), 'utf8'));
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-receipt-unit-')));
@@ -93,6 +94,18 @@ test('the module speaks the command and directory its handover contract declares
   assert.equal(contract.receipts.directory, mod.RECEIPT_DIRECTORY);
   assert.equal(contract.receipts.schemaVersion, mod.RECEIPT_SCHEMA_VERSION);
   assert.equal(`${contract.takeover.prefix}${SID}${contract.takeover.suffix}${contract.takeover.receipt}${TOKEN}`, RAW);
+});
+
+test('the linked-sessions capability names the lineage ledger a takeover writes, beside an unchanged takeover contract', () => {
+  assert.deepEqual(Object.keys(contract), ['schemaVersion', 'takeover', 'receipts', 'linkedSessions']);
+  assert.equal(contract.takeover.contract, 1);
+  assert.deepEqual(contract.linkedSessions, {
+    contract: 1,
+    lineage: { directory: 'zensu/session-lineage/v1/edges', schemaVersion: 1 },
+  });
+  const root = path.join(os.tmpdir(), 'zensu-receipt-unit-root');
+  assert.equal(path.relative(root, lineage.ledgerPaths(root).edges).split(path.sep).join('/'), contract.linkedSessions.lineage.directory);
+  assert.equal(contract.linkedSessions.lineage.schemaVersion, lineage.LEDGER_SCHEMA_VERSION);
 });
 
 test('the config root follows CLAUDE_CONFIG_DIR and falls back to ~/.claude', () => {

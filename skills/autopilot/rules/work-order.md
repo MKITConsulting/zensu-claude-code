@@ -79,8 +79,11 @@ These steps differ:
 
 - **Every push** runs `"$WO" --push`, never `git push`. That holds inside `/zensu:pr-fix-findings`
   and in the validate loop too: where those steps push, run `--push` instead. Exit 8 from `--push`
-  means the remote branch does not hold the head Zensu recorded; never force past it, finish with
-  `--reason`.
+  names its cause on stderr; never force past it. A working branch without the order's prefix means
+  you left the order's branch: check out the `workBranch` of the `--start` summary and run `--push`
+  again, unless the order's pull request was merged or closed, which ends the order with `--reason`.
+  Every other exit 8, such as a remote that moved past the head Zensu recorded or a head Zensu
+  refused to record, ends the order with `--reason`.
 - **Opening the pull request** (Phase 1 step 3): commit, run `"$WO" --push`, persist
   `PR_OPEN_REQUESTED`, then run
   `"$WO" --open-pr --title "<title>" --body-file "<absolute path>"` instead of the driver's

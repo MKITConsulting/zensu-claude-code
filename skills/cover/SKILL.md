@@ -128,8 +128,21 @@ itself, and runs them one at a time where the probe reports a shared test DB or 
    (lean, the default: `correctness` with its test checks emphasized, `design`, `security`;
    `hooks.reviewPanel: full`: `conventions`, `bugs`, `architecture`, `tests` (emphasized),
    `security`) over the changed test files, merge their findings in this thread, consolidate
-   through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. `--no-review`
-   skips this (degrade + note).
+   through a single `zensu:code-reviewer` spawn, and fix the findings in-thread. Give each
+   `zensu:review-aspect` spawn and the `zensu:code-reviewer` spawn the same `REVIEW PACKET v1`
+   that `/zensu:tdd` step 10.2c defines
+   (`${CLAUDE_PLUGIN_ROOT}/skills/tdd/references/review-chain.md`), including its rule for a
+   review that did not run Phase 6. This skill fills these fields:
+   - `requirements_baseline`: the `AC-###` IDs resolved under `--from-acs`, each deprecated
+     one marked as such, else `none`.
+   - `test_evidence`: the command, exit status and verbatim summary line of each Phase 3
+     step 1 suite run, plus each Phase 2 test written as `xfail`/skip with the bug it records.
+   - `build_evidence`: `not run — /zensu:cover runs no build`.
+   - `coverage_evidence`: the coverage the stack already measured for the changed test
+     targets, else `not run — <reason>`.
+   - `edit_landing_evidence`: `not run — /zensu:cover keeps no run log`.
+
+   `--no-review` skips this (degrade + note).
 
 **Not TDD — no phase-gate, no deferred marker.** cover **does not arm the phase-gate** (it
 never runs `--tdd-begin`) and records **no** `--pending-review` marker. It drives the review

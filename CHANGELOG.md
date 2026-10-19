@@ -9,6 +9,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **session-trail linked sessions**: a takeover now continues the old session's open linked
+  sessions, the sessions it started in Claude Desktop. Both briefs list them under *Linked
+  sessions*, read from the records in the old session's Claude Desktop folder, each with its kind,
+  whether it is started and why not, and the `start_session` call that starts it; `takeover --json`
+  carries them as `linkedSessions`. The plan confirmation names them, and after the yes the session
+  that takes over starts each side and task-chip session in that same turn, at most eight per
+  takeover, so that Claude links it to the new session. Each started session takes its old
+  counterpart over and confirms its own plan with its own user. A user fork starts only when the
+  user names it; a side question (`btw`), a session over SSH, a detached session and one that a
+  confirmed lineage edge already continues stay behind. The briefs also quote the newest eight
+  reports the linked sessions queued that the old session never read (*Reports not yet read*,
+  `unreadReports` under `--json`). `skills/session-trail/handover-contract.json` declares the
+  capability as `linkedSessions` with the lineage ledger's directory and schema, and leaves
+  `takeover.contract` at 1, so every current Zensu Session Hub keeps accepting the plugin.
+- **Claude Code 2.1.296**: the plugin now requires Claude Code 2.1.296 or newer, because it
+  ships a hooks module beside its classic hooks. An older Claude Code skips the module and still
+  runs every classic hook and skill. Measured on 2.1.280 with the plugin installed from a
+  marketplace, the skip prints nothing into `claude -p` output and is named only in the
+  `--debug-file` log.
+- **usage feed**: the new `hooks/usage-feed.ts` module writes the session's rate-limit reading
+  for the Zensu Session Hub, and only while `<config root>/zensu/session-hub/v1/usage/` already
+  exists (`CLAUDE_CONFIG_DIR` when it names an absolute path, else `~/.claude`). The Session Hub
+  creates that directory; the module never does, so nothing is written without the Hub. Each
+  `<session id>.json` holds the schema version, the session id, the time of the reading and, per
+  rate-limit window, its name, the percentage used and the reset time, nothing else. It is
+  written when Claude Code measures the session after a response, at the end of every turn, and
+  whenever a window moves; never when a session starts and never while it is idle. The
+  record shape is the contract in `hooks/usage-feed-contract.json`. The module uses Claude Code's
+  early-access hooks module API, which Anthropic can switch off for installed plugins; the feed
+  then writes nothing and the Session Hub keeps reading limits from Claude's usage popover.
+- **work orders**: a work-order session now names its branch with the order's `branch_prefix`
+  (`wo-` today) instead of `zensu/work-`, which Zensu refused with `invalid_branch`, so a real
+  order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
+  to the Zensu host that issued the session token, unless the CLI config the session reads stores
+  that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
+  now stops with exit 3 instead of retrying. That CLI config must hold the host only, never a
+  login, because without the session token the CLI falls back to a stored login. The work-order
+  gate also denies `zensu work list`, `questions`, `policy get` and `repositories list`, which
+  Zensu refuses for a session token, and points at the order file instead. It now also denies the
+  usual spellings that set, change or remove `ZENSU_API_URL`, `--api-url` on `zensu`, and `env -i`
+  or `exec -c`, which drop the session token.
+
+## [0.27.0] - 2026-10-17
+
+### Added
+
+- **hooks**: Send each prompt contract in full once per context generation (#419)
+- **review**: Add an independent second judge run and two cross-cutting reviewer rules (#457)
+- **verify-feature**: Verify every kind of application through nine drivers (#383)
+- **capability**: Grant named neutral subagents a guarded Bash inside the allowlist (#446)
+
+### Changed
+
+- **clock-shift**: Put the five allowlisted file-time tests on one clock (#462)
+- **external-review**: Set the recent staged copy's mtime from the injected clock (#461)
+- **structure**: Let one registry own every unit file's declared facts (#460)
+- **pulse**: State that Pulse never records error messages (#438)
+- **windows**: Move versioned-plugin-upgrade to the front of windows-shard-7 (#451)
+- Correct the Windows shell support statement (#447)
+- Fix the Windows shell-guard cases and TL8's negative delta (#448)
+- **session-control**: Raise the run.sh floor to the measured win32 count (#444)
+- **session-trail**: Resolve id selectors without indexing every transcript (#443)
+- **session-trail**: Correct the oneLine comments that predate its boundText delegation (#441)
+- **session-trail**: Correct what takeover --json adds over the brief (#442)
+- **work-order**: Skip the work-order suites on native Windows (#437)
+- **changelog**: List #430 and #436 in the 0.26.0 notes (#440)
+
+### Fixed
+
+- **hooks**: Close the review-handoff, gate-timeout, banner and guidance gaps (#409)
+- **external-review**: Stage the review template inside the working directory (#454)
+- **capability**: Refuse quoted helper paths and detached tmux or screen sessions (#456)
+- **edit-landing**: Place a <project>-redacted claim like its absolute spelling (#455)
+- **hooks**: Read the hook payload from stdin in five hooks (#450)
+- **session-trail**: Resolve a forked session's worktree and branch from its own records (#445)
+- **session-control**: Hold a kernel-exclusive holder marker for win32 lock liveness (#433)
+- **session-trail**: Stop index rewrites, fsmonitor hooks and diff drivers in the source worktree (#439)
+
+### Upgrade notes
+
 - **subagent shell**: a neutral subagent that reports an `agent_type` (`Explore`,
   `general-purpose`, and a workflow agent when it reports one, which no live run has measured
   yet) may now run `Bash` behind an accident guard, so a workflow's workers can build and run
@@ -34,14 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `bash -c` body, a heredoc a shell reads, `eval` or a command substitution inside a parameter
   expansion is now gated like a plain one, and every command the token scan denied before is still
   denied.
-- **work orders**: a work-order session now names its branch with the order's `branch_prefix`
-  (`wo-` today) instead of `zensu/work-`, which Zensu refused with `invalid_branch`, so a real
-  order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
-  to the Zensu host that issued the session token, unless the CLI config the session reads stores
-  that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
-  now stops with exit 3 instead of retrying. The work-order gate also denies `zensu work list`,
-  `questions`, `policy get` and `repositories list`, which Zensu refuses for a session token, and
-  points at the order file instead.
 
 ## [0.26.0] - 2026-10-12
 

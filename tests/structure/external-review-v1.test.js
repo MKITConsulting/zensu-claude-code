@@ -754,10 +754,12 @@ test('stopWait waits a bounded number of times per session and expires an old co
   const data = tempDir('data');
   const running = { background_tasks: [{ id: '1', type: 'workflow', status: 'running', name: 'review-changes' }, { id: '2', type: 'workflow', status: 'running', name: 'bad name' }] };
   const options = { pluginData: data, sessionKey: SESSION, now: BASE };
+  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
   for (let count = 1; count <= 3; count += 1) {
     const result = xr.stopWait(running, options);
     assert.equal(result.wait, true);
     assert.equal(result.line, `wait count=${count} max=3 workflows=2 names=review-changes`);
+    setMtime(waitFile, options.now);
   }
   const limited = xr.stopWait(running, options);
   assert.equal(limited.wait, false);
@@ -766,7 +768,6 @@ test('stopWait waits a bounded number of times per session and expires an old co
   const later = xr.stopWait(running, { ...options, now: options.now + 25 * 60 * 60 * 1000 });
   assert.equal(later.wait, true);
   assert.equal(later.count, 1);
-  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
   assert.equal(fs.existsSync(waitFile), true);
   fs.unlinkSync(waitFile);
   assert.equal(xr.stopWait(running, options).count, 1);
@@ -827,14 +828,14 @@ test('main never writes stdout in record mode and always answers in check, tree 
   assert.equal(xr.main(['tree'], { ...env, ZENSU_XR_ROOT: '/definitely/not/here' }, { write }), 0);
   assert.equal(written.join(''), 'EXTERNAL REVIEW — tree=unavailable reason=root\n');
   written.length = 0;
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
+  const waitEnv = { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' };
+  const runningInput = { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write };
+  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
+  for (let count = 1; count <= 3; count += 1) {
+    assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);
+    setMtime(waitFile, Date.now());
+  }
+  assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);
   assert.match(written.at(-1), /^nowait reason=limit .* max=3\n$/);
   written.length = 0;
   assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION }, { stdin: 'not json', write }), 0);
@@ -913,6 +914,7 @@ test('stage sweeps the copies other sessions left idle past the idle window and 
   for (const file of [idle, recent, unrelated]) fs.writeFileSync(file, SCRIPT);
   const now = Date.now();
   setMtime(idle, now - xr.LIMITS.idleSessionMs - 60000);
+  setMtime(recent, now - xr.LIMITS.idleSessionMs + 60000);
   setMtime(unrelated, now - xr.LIMITS.idleSessionMs - 60000);
   const staged = xr.stageTemplate(stageOptions(root, { now }));
   assert.equal(staged.status, 'ok');
@@ -1060,9 +1062,10 @@ test('a script path is read only as a bounded regular file that is not a link', 
 test('stale wait counters are swept and fresh ones are kept', () => {
   const data = tempDir('data');
   const running = { background_tasks: [{ id: '1', type: 'workflow', status: 'running' }] };
-  xr.stopWait(running, { pluginData: data, sessionKey: SESSION });
-  xr.stopWait(running, { pluginData: data, sessionKey: OTHER_SESSION });
   const waits = path.join(data, 'external-review', 'v1', 'waits');
+  xr.stopWait(running, { pluginData: data, sessionKey: SESSION });
+  setMtime(path.join(waits, `${SESSION}.json`), Date.now());
+  xr.stopWait(running, { pluginData: data, sessionKey: OTHER_SESSION });
   setMtime(path.join(waits, `${OTHER_SESSION}.json`), Date.now() - 2 * 24 * 60 * 60 * 1000);
   assert.equal(xr.sweepStaleWaits(path.join(data, 'external-review', 'v1')), 1);
   assert.equal(fs.existsSync(path.join(waits, `${SESSION}.json`)), true);
@@ -1074,22 +1077,29 @@ function pause(ms) {
   while (Date.now() < until) { }
 }
 
+function kernelNow() {
+  const probe = path.join(tempDir('clock'), 'probe');
+  fs.writeFileSync(probe, '');
+  return Math.floor(fs.statSync(probe).mtimeMs);
+}
+
 test('freshness sees a restored modification time and a deleted changed file', () => {
   const data = tempDir('data');
   const root = project();
   fs.writeFileSync(path.join(root, 'src', 'b.js'), 'module.exports = 2;\n');
   pause(30);
-  const run = launchedRun(data, Date.now());
+  const launchedAt = kernelNow();
+  const run = launchedRun(data, launchedAt);
   assert.equal(xr.check(checkOptions(data, root, { changedText: 'src/a.js\nsrc/b.js\n', resultFile: run.outputFile })).status, 'ok');
   pause(30);
-  setMtime(path.join(root, 'src', 'a.js'), Date.now() - 24 * 60 * 60 * 1000);
+  setMtime(path.join(root, 'src', 'a.js'), launchedAt - 24 * 60 * 60 * 1000);
   assert.equal(xr.check(checkOptions(data, root, { resultFile: run.outputFile })).status, 'stale');
 
   const second = tempDir('data');
   const other = project();
   fs.writeFileSync(path.join(other, 'src', 'b.js'), 'module.exports = 2;\n');
   pause(30);
-  xr.recordLaunch(payload(), { CLAUDE_PLUGIN_DATA: second }, { now: Date.now() });
+  xr.recordLaunch(payload(), { CLAUDE_PLUGIN_DATA: second }, { now: kernelNow() });
   pause(30);
   fs.unlinkSync(path.join(other, 'src', 'b.js'));
   const deleted = xr.check(checkOptions(second, other, { changedText: 'src/a.js\nsrc/b.js\n' }));

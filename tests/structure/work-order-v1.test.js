@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const MODULE = path.join(__dirname, '..', '..', 'hooks', 'lib', 'work-order-v1.js');
 const FAKE = path.join(__dirname, 'lib-fake-zensu-work.js');
@@ -32,6 +32,8 @@ function sandbox() {
     FAKE_ZENSU_CALLS: callsFile,
     ZENSU_SESSION_TOKEN: TOKEN,
     ZENSU_API_URL: 'http://127.0.0.1:9',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
     ZENSU_WORK_ORDER_RETRY_MS: '1',
     ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '50',
   };
@@ -180,6 +182,7 @@ test('the status and code are read when context follows the suffix and the messa
   assert.equal(flagError.status, null);
   assert.equal(flagError.code, null);
   assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(wo.classifyFailure(flagError)), 'the zensu CLI failed without a status: unknown flag --bogus');
 });
 
 test('clientEventId is deterministic, prefixed and inside the backend pattern', () => {
@@ -362,6 +365,25 @@ test('the fake refuses a stage branch outside the order branch prefix, as the se
   assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
 });
 
+test('the fake refuses an artifact link the service redaction would change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const sha = 'e'.repeat(40);
+  const send = (url, key) => wo.sendEvent(context, ['--artifact', 'plan', '--path', `.zensu/plans/${ORDER}.md`, '--sha', sha, '--url', url,
+    '--client-event-id', wo.clientEventId('artifact', key)], { env: box.env });
+  for (const [url, key] of [
+    [`https://gitlab.acme-secret:8443/acme/widgets/-/blob/${sha}/.zensu/plans/${ORDER}.md`, 'host-port'],
+    ['https://example.com/plan?token=abcdef12', 'token'],
+    ['https://user:pass@example.com/plan', 'credentials'],
+    [`https://github.com/acme/sk-payments-gateway-service/blob/${sha}/.zensu/plans/${ORDER}.md`, 'secret-name'],
+  ]) {
+    const refused = send(url, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_url', url);
+  }
+  assert.equal(send(`https://github.com/acme/widgets/blob/${sha}/.zensu/plans/${ORDER}.md`, 'plain').verdict, wo.VERDICTS.OK);
+});
+
 test('the fake takes the pull request links the service takes and refuses the rest', () => {
   const box = sandbox();
   const context = startedContext(box, { order: { repository: 'gitlab.com/acme/widgets', status: 'implementing' } });
@@ -396,9 +418,16 @@ test('the fake answers an expired lease with 401 and speaks the service response
   const filed = wo.runZensu(['work', 'followup', ORDER, '--title', 'Cache the list', '--rationale', 'It is read on every request.', '--severity', 'low',
     '--client-event-id', wo.clientEventId('f', 'shape'), '--json'], { env: box.env });
   assert.deepEqual(Object.keys(filed.json).sort(), ['event', 'order', 'replay']);
+  const linked = box.fake().pulse.id;
   const pulse = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
   assert.match(pulse.json.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(pulse.json.work_order_id, ORDER);
+  assert.deepEqual([pulse.json.id, pulse.json.created], [linked, false]);
+  box.mutate((state) => { state.order.attempt = 2; });
+  const next = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
+  assert.equal(next.json.created, true);
+  assert.notEqual(next.json.id, linked);
+  box.mutate((state) => { state.order.attempt = 1; });
   const events = wo.runZensu(['work', 'events', ORDER, '--page', '1', '--per-page', '50', '--json'], { env: box.env });
   assert.deepEqual(Object.keys(events.json).sort(), ['data', 'page', 'perPage', 'total']);
   box.mutate((state) => { state.now = Date.now() + 3600000; });
@@ -427,7 +456,7 @@ test('the fake counts follow-ups per attempt, as the service does', () => {
 test('push refuses a working branch without the order branch prefix before any forge write', () => {
   const box = sandbox();
   const context = startedContext(box, { order: { status: 'implementing' } });
-  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
   const git = (...args) => execFileSync('git', ['-C', box.project, ...args], { encoding: 'utf8', env: gitEnv });
   git('init', '-q');
   git('checkout', '-q', '-b', 'feature/widgets');
@@ -470,6 +499,13 @@ test('start stops with exit 3 when the session environment names no Zensu host f
   box.mutate((state) => { state.failNext = [{ command: 'get', status: 503, code: 'unavailable', times: 1 }]; });
   const transient = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(transient.exit, wo.EXIT.TRANSIENT);
+  const malformed = wo.start({ env: { ...box.env, ZENSU_SESSION_TOKEN: 'bad' }, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(malformed.exit, wo.EXIT.NO_CLI, malformed.message);
+  assert.match(malformed.message, /must hold a work order session token/);
+  assert.match(malformed.message, /zst_ session token of its claim/);
+  assert.doesNotMatch(malformed.message, /ZENSU_API_URL/);
+  assert.equal(wo.describeFailure({ status: null, message: 'unknown flag: --bogus\n' }), 'the zensu CLI failed without a status: unknown flag: --bogus');
+  assert.equal(wo.describeFailure({ status: null, message: '' }), 'no answer from Zensu');
 });
 
 test('an unsupported kind ends with blocked(worker_error) naming the kind', () => {
@@ -605,7 +641,15 @@ function writeRun(box, stage, events) {
   fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({ runId: RUN, stage, events, evidence }));
 }
 
-const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+function writeBoundRun(box, stage = 'PLANNING', events = DONE_LEDGER.slice(0, 1)) {
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({
+    runId: RUN, stage, events, evidence: {}, workOrder: { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) },
+  }));
+}
+
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
 
 function gitProject(box, branch = `wo-${ORDER.slice(0, 8)}`) {
   const remote = path.join(box.root, 'remote.git');
@@ -776,10 +820,316 @@ test('a block reason Zensu refuses as prose is sent once more as a safe sentence
   writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
   const result = wo.finish(context, { env: box.env, reason: 'npm test fails on the integration branch, so the change cannot be validated.' });
   assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the stated reason as prose/);
   const order = box.fake().order;
   assert.equal(order.blocked_kind, 'worker_error');
   assert.equal(order.blocked_reason, 'The session ended before its Autopilot run reached a ready pull request.');
   assert.equal(wo.readState(context.files.ended).delivered, true);
+  const blocks = stageCalls(box).filter((call) => call.blocked === 'worker_error');
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].id, blocks[1].id);
+});
+
+test('a working branch without the order prefix is left out of drained stages and ready_for_merge, which Zensu then accepts', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box, 'main');
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const calls = stageCalls(box);
+  assert.ok(calls.some((call) => call.stage === 'pr_open'));
+  assert.ok(calls.some((call) => call.stage === 'ready_for_merge'));
+  assert.equal(calls.filter((call) => call.argv.includes('--branch')).length, 0);
+  assert.equal(box.fake().order.status, 'ready_for_merge');
+});
+
+test('a DONE run whose ready_for_merge Zensu refuses ends blocked with worker_error naming it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the ready_for_merge stage \(status 422, code invalid_pr_url\)/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /ready for merge stage with code invalid_pr_url/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 1);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('a refused stage on a DONE run is named in the block, also when the stated reason or the Stop fallback would hide it', () => {
+  for (const variant of ['prose', 'stop']) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+    assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK, variant);
+    writeRun(box, 'DONE', DONE_LEDGER);
+    box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+    if (variant === 'prose') {
+      const result = wo.finish(context, { env: box.env, reason: 'gh pr view shows the pull request open, but Zensu refused its link.' });
+      assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+    } else {
+      let decided = null;
+      for (let stop = 0; stop < 5; stop += 1) {
+        decided = wo.stopDecision(context, { env: box.env });
+        if (decided.decision !== 'block') break;
+      }
+      assert.equal(decided.decision, 'allow');
+    }
+    const order = box.fake().order;
+    assert.equal(order.blocked_kind, 'worker_error', variant);
+    assert.match(order.blocked_reason, /pr open stage with code invalid_pr_url/, variant);
+  }
+});
+
+test('a terminal event whose answer never arrived is replayed on the next renewal instead of reading as a lost lease', () => {
+  const block = sandbox();
+  const blockContext = startedContext(block);
+  wo.markerRun(blockContext, RUN);
+  writeRun(block, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(blockContext, { env: block.env }).verdict, wo.VERDICTS.OK);
+  block.mutate((state) => { state.dropAnswers = 1000; });
+  const unanswered = wo.finish(blockContext, { env: block.env, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(unanswered.exit, wo.EXIT.TRANSIENT, unanswered.message);
+  assert.equal(block.fake().order.blocked_kind, 'worker_error');
+  assert.ok(wo.readState(blockContext.files.outbox).inflight);
+  block.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(blockContext, { env: block.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(blockContext.files.lost), null);
+  assert.deepEqual([wo.readState(blockContext.files.ended).kind, wo.readState(blockContext.files.ended).delivered], ['blocked:worker_error', true]);
+  assert.deepEqual(wo.readState(blockContext.files.outbox).inflight, []);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.TRANSIENT);
+  merge.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(mergeContext, { env: merge.env, force: true }).verdict, 'ended');
+  assert.deepEqual([wo.readState(mergeContext.files.ended).kind, wo.readState(mergeContext.files.ended).outcome], ['ready_for_merge', 'success']);
+
+  const asked = sandbox();
+  const askContext = startedContext(asked);
+  asked.mutate((state) => { state.dropAnswers = 1000; });
+  const question = wo.ask(askContext, { env: asked.env, category: 'clarification', question: 'Should deleted widgets stay visible to admins?', blocking: true });
+  assert.equal(question.exit, wo.EXIT.TRANSIENT, question.message);
+  assert.match(question.message, /the zensu CLI failed without a status: read: connection reset by peer/);
+  asked.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(askContext, { env: asked.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(askContext.files.ended).kind, 'blocked:question');
+
+  const revoked = sandbox();
+  const revokedContext = startedContext(revoked);
+  wo.markerRun(revokedContext, RUN);
+  writeRun(revoked, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(revokedContext, { env: revoked.env }).verdict, wo.VERDICTS.OK);
+  revoked.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(revokedContext, { env: revoked.env, reason: 'The gates fail on a missing database migration.' }).exit, wo.EXIT.TRANSIENT);
+  revoked.mutate((state) => { state.dropAnswers = 0; state.mode = 'revoked'; });
+  assert.equal(wo.renew(revokedContext, { env: revoked.env, force: true }).verdict, wo.VERDICTS.LOST);
+  assert.ok(wo.readState(revokedContext.files.lost));
+});
+
+function unansweredBlock(box, context) {
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(context, { env: box.env, reason: 'The gates fail on a missing database migration.' }).exit, wo.EXIT.TRANSIENT);
+}
+
+test('a replay without an answer keeps the send for the next renewal, and every route that meets the ended session replays it first', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const unanswered = wo.renew(context, { env: box.env, force: true });
+  assert.equal(unanswered.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(context, { env: box.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const refused = sandbox();
+  const refusedContext = startedContext(refused);
+  wo.markerRun(refusedContext, RUN);
+  writeRun(refused, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(refusedContext, { env: refused.env }).verdict, wo.VERDICTS.OK);
+  writeRun(refused, 'DONE', DONE_LEDGER);
+  refused.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; state.dropAnswers = 1000; });
+  assert.equal(wo.finish(refusedContext, { env: refused.env }).exit, wo.EXIT.TRANSIENT);
+  refused.mutate((state) => { state.dropAnswers = 0; });
+  const again = wo.finish(refusedContext, { env: refused.env });
+  assert.equal(again.exit, wo.EXIT.ENDED, again.message);
+  assert.equal(wo.readState(refusedContext.files.lost), null);
+  assert.deepEqual([wo.readState(refusedContext.files.ended).kind, wo.readState(refusedContext.files.ended).delivered], ['blocked:worker_error', true]);
+
+  const pushed = sandbox();
+  const pushContext = startedContext(pushed);
+  unansweredBlock(pushed, pushContext);
+  pushed.mutate((state) => { state.dropAnswers = 0; });
+  const push = wo.push(pushContext, { env: pushed.env });
+  assert.equal(push.exit, wo.EXIT.ENDED, push.message);
+  assert.match(push.message, /\(blocked:worker_error\); no push/);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.TRANSIENT);
+  merge.mutate((state) => { state.dropAnswers = 0; });
+  const update = wo.postToolUpdate(mergeContext, { tool_name: 'Read', tool_input: {} }, { env: merge.env, now: () => Date.now() + 120000 });
+  assert.match(update.additionalContext, /Zensu recorded ready_for_merge for work order/);
+  assert.doesNotMatch(update.additionalContext, /blocked/);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
+});
+
+test('a refused lease whose replay gets no answer closes the forge fence until a renewal succeeds, and records the loss once the lease time has run out', () => {
+  const comment = { tool_name: 'Bash', tool_input: { command: 'gh pr comment 7 --body done' } };
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const fenced = wo.gateDecision(context, comment, { env: box.env, now: () => Date.now() + 120000 });
+  assert.equal(fenced && fenced.code, 'lease');
+  assert.match(fenced.reason, /Zensu refused the lease of work order \S+ \(invalid_session_token\), and an unanswered send still waits for its replay/);
+  assert.match(fenced.reason, /may run until a lease renewal succeeds\. Run zensu-work-order\.sh --renew --force/);
+  assert.doesNotMatch(fenced.reason, /may run any more/);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  assert.equal(wo.gateDecision(context, { tool_name: 'Bash', tool_input: { command: 'git status' } }, { env: box.env, now: () => Date.now() + 120000 }), null);
+  assert.equal(wo.renew(context, { env: box.env, force: true, now: Date.now() + 1801000 }).verdict, wo.VERDICTS.LOST);
+  assert.equal(wo.readState(context.files.lost).code, 'invalid_session_token');
+
+  const flaky = sandbox();
+  const flakyContext = startedContext(flaky);
+  flaky.mutate((state) => { state.dropAnswers = 1; });
+  const asked = wo.ask(flakyContext, { env: flaky.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' });
+  assert.equal(asked.exit, wo.EXIT.TRANSIENT, asked.message);
+  flaky.mutate((state) => { state.dropAnswers = 1; state.failNext = [{ command: 'heartbeat', status: 409, code: 'stale_attempt', times: 1 }]; });
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }).code, 'lease');
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.OK);
+  assert.equal(wo.readState(flakyContext.files.outbox).leaseRefusal, null);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }), null);
+  assert.equal(wo.readState(flakyContext.files.lost), null);
+
+  const replayed = sandbox();
+  const replayContext = startedContext(replayed);
+  wo.markerRun(replayContext, RUN);
+  writeRun(replayed, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  replayed.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.drain(replayContext, { env: replayed.env }).verdict, wo.VERDICTS.TRANSIENT);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(replayContext, { env: replayed.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' }).exit, wo.EXIT.TRANSIENT);
+  replayed.mutate((state) => { state.staleAttempt = true; state.dropAnswers = 1; });
+  const renewedAt = wo.readState(replayContext.files.lease).lastSuccessAt;
+  wo.postToolUpdate(replayContext, { tool_name: 'Read', tool_input: {} }, { env: replayed.env, now: () => Date.now() + 61000 });
+  assert.equal(wo.readState(replayContext.files.outbox).deliveredRank, 1);
+  assert.ok(wo.readState(replayContext.files.outbox).leaseRefusal);
+  assert.equal(wo.readState(replayContext.files.lease).lastSuccessAt, renewedAt);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  const held = wo.gateDecision(replayContext, comment, { env: replayed.env, now: () => Date.now() + 63000 });
+  assert.equal(held && held.code, 'lease');
+  assert.match(held.reason, /\(stale_attempt\), and an unanswered send still waits for its replay/);
+  assert.equal(wo.readState(replayContext.files.lost), null);
+});
+
+test('a terminal send is in the outbox before its first attempt, so a renewal that meets the ended session meanwhile replays it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1; });
+  let watchdog = null;
+  let pending = null;
+  const now = () => {
+    const at = Date.now();
+    if (!watchdog && box.fake().order.status === 'blocked') {
+      pending = wo.readState(context.files.outbox).inflight;
+      watchdog = wo.renew(context, { env: box.env, force: true });
+    }
+    return at;
+  };
+  const env = { ...box.env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '60000' };
+  const finished = wo.finish(context, { env, now, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(Array.isArray(pending) && pending.length, 1);
+  assert.equal(watchdog && watchdog.verdict, 'ended');
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(finished.exit, wo.EXIT.ENDED, finished.message);
+  assert.match(finished.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)$/);
+  assert.deepEqual(wo.readState(context.files.outbox).inflight, []);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.outboxProbe = mergeContext.files.outbox; });
+  const asked = wo.ask(mergeContext, { env: merge.env, category: 'clarification', question: 'Should the changelog name the new widget?', defaultOption: 'yes' });
+  assert.equal(asked.exit, wo.EXIT.OK, asked.message);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
+  const seen = merge.fake().outboxSeen;
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen.map((call) => Boolean(call.id) && call.inflight.includes(call.id)), [true, true]);
+  assert.deepEqual(wo.readState(mergeContext.files.outbox).inflight, []);
+});
+
+test('the drain, renew, bind-spec and plan-approval helpers name the ended kind when a replay ends the session under them', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  const cli = (...argv) => spawnSync(process.execPath, [MODULE, ...argv], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  const renewed = cli('renew', '--force');
+  assert.equal(renewed.status, wo.EXIT.ENDED, renewed.stderr);
+  assert.match(renewed.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(context.files.lost), null);
+  const drained = cli('drain');
+  assert.equal(drained.status, wo.EXIT.ENDED, drained.stderr);
+  assert.match(drained.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+
+  const bound = sandbox();
+  const boundContext = startedContext(bound);
+  wo.markerRun(boundContext, RUN);
+  writeBoundRun(bound);
+  bound.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(boundContext, { env: bound.env, category: 'scope', question: 'Should the export include archived widgets?', blocking: true }).exit, wo.EXIT.TRANSIENT);
+  const spec = wo.bindSpec(boundContext, { env: bound.env, runId: RUN });
+  assert.equal(spec.exit, wo.EXIT.ENDED, spec.message);
+  assert.match(spec.message, /Zensu ended the session of work order \S+ \(blocked:spec_change\)/);
+
+  const planned = sandbox();
+  const planContext = startedContext(planned);
+  unansweredBlock(planned, planContext);
+  planned.mutate((state) => { state.dropAnswers = 0; });
+  writeRun(planned, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  fs.mkdirSync(path.join(planned.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(planned.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const approval = wo.planApproval(planContext, { env: planned.env });
+  assert.equal(approval.exit, wo.EXIT.ENDED, approval.message);
+  assert.match(approval.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(planContext.files.lost), null);
 });
 
 test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
@@ -849,6 +1199,29 @@ test('a plan artifact whose summary Zensu refuses is sent once more with the fix
   assert.equal(box.fake().order.blocked_kind, 'plan_approval');
 });
 
+test('a plan link Zensu refuses as invalid_url is dropped, and the artifact goes once more with path and commit only', () => {
+  const box = sandbox();
+  const context = startedContext(box, {
+    policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
+    order: { repository: 'github.com/acme/sk-payments-gateway-service' },
+  });
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the payment list.\n');
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const sent = box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event' && argv.includes('--artifact'));
+  assert.deepEqual(sent.map((argv) => argv.includes('--url')), [true, false]);
+  const artifacts = box.fake().events.filter((event) => event.event_type === 'artifact');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].detail.url, undefined);
+  assert.equal(artifacts[0].detail.path, `.zensu/plans/${ORDER}.md`);
+  assert.equal(result.value.link, null);
+  assert.equal(box.fake().order.blocked_kind, 'plan_approval');
+});
+
 test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [
@@ -881,11 +1254,7 @@ test('bind-spec blocks an order Zensu marked spec_stale although its spec hash i
   const box = sandbox();
   const context = startedContext(box);
   wo.markerRun(context, RUN);
-  const dir = path.join(box.project, '.zensu', 'state');
-  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({
-    runId: RUN, stage: 'PLANNING', events: DONE_LEDGER.slice(0, 1), evidence: {},
-    workOrder: { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) },
-  }));
+  writeBoundRun(box);
   box.mutate((state) => { state.order.spec_stale = true; });
   const result = wo.bindSpec(context, { env: box.env, runId: RUN });
   assert.equal(result.exit, wo.EXIT.ENDED, result.message);
@@ -893,6 +1262,88 @@ test('bind-spec blocks an order Zensu marked spec_stale although its spec hash i
   assert.equal(order.blocked_kind, 'worker_error');
   assert.match(order.blocked_reason, /spec changed while the session ran/);
   assert.equal(stageCalls(box).filter((call) => call.stage === 'implementing').length, 0);
+});
+
+test('bind-spec refuses a working branch without the order branch prefix before it sends any event', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box, 'feature/widgets');
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(result.exit, wo.EXIT.REFUSED, result.message);
+  assert.match(result.message, /feature\/widgets does not start with wo-/);
+  assert.match(result.message, /workBranch/);
+  assert.equal(stageCalls(box).length, 0);
+  assert.equal(wo.readState(context.files.ended), null);
+});
+
+test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec-change block keeps a refusal or a lost lease apart', () => {
+  for (const verb of ['bindSpec', 'planApproval']) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeBoundRun(box);
+    fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+    fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+    box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_autopilot_run_id', times: 1 }]; });
+    const result = wo[verb](context, { env: box.env, runId: RUN });
+    assert.equal(result.exit, wo.EXIT.REFUSED, `${verb}: ${result.message}`);
+    assert.match(result.message, /refused the planning stage \(status 422, code invalid_autopilot_run_id\)/, verb);
+  }
+  for (const [status, code, exit, said, times] of [
+    [422, 'field_not_allowed', wo.EXIT.REFUSED, /spec changed during the session; Zensu refused the block \(status 422, code field_not_allowed\); end the session/, 1],
+    [401, 'invalid_session_token', wo.EXIT.LOST, /the lease is lost, so the block could not be reported \(status 401, code invalid_session_token\)/, 2],
+  ]) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeBoundRun(box);
+    box.mutate((state) => { state.order.spec_stale = true; state.failNext = [{ command: 'event', flag: 'blocked', status, code, times }]; });
+    const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+    assert.equal(result.exit, exit, `${code}: ${result.message}`);
+    assert.match(result.message, said);
+    assert.notEqual(box.fake().order.status, 'blocked', code);
+    if (exit === wo.EXIT.LOST) {
+      assert.ok(wo.readState(context.files.lost), code);
+    } else {
+      assert.equal(wo.readState(context.files.ended), null, code);
+      assert.equal(wo.readState(context.files.lost), null, code);
+    }
+  }
+  const quiet = sandbox();
+  const quietContext = startedContext(quiet);
+  wo.markerRun(quietContext, RUN);
+  writeBoundRun(quiet);
+  assert.equal(wo.drain(quietContext, { env: quiet.env }).verdict, wo.VERDICTS.OK);
+  quiet.mutate((state) => { state.order.spec_stale = true; state.dropAnswers = 1000; });
+  const pending = wo.bindSpec(quietContext, { env: quiet.env, runId: RUN });
+  assert.equal(pending.exit, wo.EXIT.TRANSIENT, pending.message);
+  assert.match(pending.message, /the block is not delivered yet \(the zensu CLI failed without a status: read: connection reset by peer\); run --bind-spec again/);
+});
+
+test('bind-spec hands over a plan-wide decision made after --start, and an automatic answer is no plan-wide decision', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  const sibling = { work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'plan', category: 'product_decision' };
+  box.mutate((state) => {
+    state.questions = [
+      { ...sibling, id: 'q-auto', question: 'Which date format do lists use?', answer: 'Lists use the ISO date format.', status: 'auto_answered' },
+      { ...sibling, id: 'q-later', question: 'Which currency do prices use?', answer: 'Prices are in euro across the plan.', status: 'answered' },
+    ];
+  });
+  const bound = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(bound.exit, wo.EXIT.OK, bound.message);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Prices are in euro across the plan/);
+  assert.doesNotMatch(update.additionalContext, /ISO date format/);
+  const read = wo.runZensu(['work', 'get', ORDER, '--json'], { env: box.env });
+  assert.deepEqual(read.json.decision_log.map((entry) => entry.id), ['q-later']);
+  const decided = wo.planDecisions({ decision_log: [{ id: 'q-auto', status: 'auto_answered' }, { id: 'q-later', status: 'answered' }] });
+  assert.deepEqual(decided.map((entry) => [entry.id, entry.planWide]), [['q-later', true]]);
 });
 
 test('the plan blob link takes the scheme-less repository Zensu stores and an https one alike', () => {
@@ -981,6 +1432,61 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'env -u ZENSU_SESSION_TOKEN zensu work get 1': 'token',
     'export ZENSU_SESSION_TOKEN=abc': 'token',
     'cat /proc/self/environ': 'token',
+    'env -i HOME=x zensu work get 1': 'token',
+    'env - HOME=x zensu products list': 'token',
+    'env --ignore-environment zensu work get 1': 'token',
+    'env -vi zensu work get 1': 'token',
+    'zensu --api-url https://h work event 1 --stage implementing': 'token-host',
+    "zensu --api-url '' work heartbeat 1": 'token-host',
+    'zensu --api-url=https://h work get 1': 'token-host',
+    'ZENSU_API_URL=https://h zensu work get 1': 'token-host',
+    'CLAUDE_PLUGIN_DATA=x ZENSU_API_URL=https://h bash "$WO" --start --order 1': 'token-host',
+    'export ZENSU_API_URL=https://h': 'token-host',
+    'unset ZENSU_API_URL': 'token-host',
+    'env -u ZENSU_API_URL zensu work get 1': 'token-host',
+    "zensu $'work' event 1 --stage ready_for_merge": 'helper-verb',
+    'zensu $"work" heartbeat 1': 'helper-verb',
+    "zensu $'\\x77ork' heartbeat 1": 'helper-verb',
+    "$'git' push origin HEAD": 'push',
+    "gh $'pr' create --fill": 'open-pr',
+    "bash -c -- 'git push'": 'shell-option',
+    "bash -c -e 'zensu work event 1'": 'shell-option',
+    "echo $'\\c'; git push origin HEAD": 'push',
+    "echo $'\\c\\\\'; git push origin HEAD; echo 'x'": 'push',
+    "echo $$'\\'; git push origin HEAD; echo 'x'": 'push',
+    "zensu $'work\\0' heartbeat 1": 'helper-verb',
+    "zensu $'wo\\0x'rk heartbeat 1": 'helper-verb',
+    "$'git\\0' push origin HEAD": 'push',
+    "zensu work$'\\0'x heartbeat 1": 'helper-verb',
+    "echo $'it\\'s'; git push origin HEAD": 'push',
+    "echo $'x\\'; git push origin HEAD #'": 'push',
+    "bash -c +x 'git push origin HEAD'": 'shell-option',
+    "bash -co pipefail 'git push origin HEAD'": 'shell-option',
+    "bash +c 'git push origin HEAD'": 'push',
+    "bash -o pipefail -c 'git push origin HEAD'": 'push',
+    "eval -- 'git push origin HEAD'": 'push',
+    'env -vu ZENSU_SESSION_TOKEN zensu work get 1': 'token',
+    'env -vu ZENSU_API_URL zensu work get 1': 'token-host',
+    'env --ignore-env zensu work get 1': 'token',
+    'env --uns=ZENSU_API_URL zensu work get 1': 'token',
+    "env -S 'git push origin HEAD'": 'push',
+    'env -C . git push origin HEAD': 'push',
+    'env -P /usr/bin git push origin HEAD': 'push',
+    'exec -c zensu work get 1': 'token',
+    'printf -v ZENSU_API_URL %s https://h': 'token-host',
+    'printf -v ZENSU_SESSION_TOKEN %s x': 'token',
+    'read ZENSU_API_URL': 'token-host',
+    'read -r ZENSU_SESSION_TOKEN': 'token',
+    'for ZENSU_API_URL in https://h; do zensu work get 1; done': 'token-host',
+    'declare -n ref=ZENSU_API_URL': 'token-host',
+    'declare -gn ref=ZENSU_SESSION_TOKEN': 'token',
+    'local -n ref=ZENSU_API_URL': 'token-host',
+    'let ZENSU_API_URL=1': 'token-host',
+    'let ZENSU_SESSION_TOKEN++': 'token',
+    "let 'ZENSU_API_URL[0]=1'": 'token-host',
+    'let x=ZENSU_API_URL=1': 'token-host',
+    'let 1,ZENSU_SESSION_TOKEN=1': 'token',
+    'let ++ZENSU_API_URL': 'token-host',
   };
   for (const [command, code] of Object.entries(denied)) {
     const analysis = wo.analyzeBash(command);
@@ -991,7 +1497,10 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'git status', 'git commit -m "do not git push here"', 'git log --oneline -3', 'printenv PATH', 'set -e',
     'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
     'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
-    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1',
+    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1', 'echo $ZENSU_API_URL', "echo $'a\\tb'", 'env -0 zensu work get 1',
+    'bash scripts/test.sh -race -v', "read -r -d $'\\0' line", 'printf -v line %s x', 'read -r answer', 'for f in a b; do echo $f; done',
+    'bash -lc "git status"', 'local key=ZENSU_API_URL', 'export KEY=ZENSU_API_URL', 'declare name=ZENSU_SESSION_TOKEN',
+    'declare +n ref=ZENSU_API_URL', 'let ZENSU_API_URL_COUNT=5', 'let NO_ZENSU_SESSION_TOKEN=1',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
   assert.equal(wo.analyzeBash('gh pr view 7').forge, true);
@@ -1020,6 +1529,7 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
   assert.match(lost.reason, /stale_attempt/);
+  assert.match(lost.reason, /may run any more\. Run zensu-work-order\.sh --finish once and end the session/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
 });
 
@@ -1070,7 +1580,6 @@ test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {
     [{ options: ['pg-boss', 'x'.repeat(301)] }, /at most 300 bytes/],
     [{ options: ['pg-boss', ' '] }, /every --option needs text/],
     [{ requirements: ['AC-1'] }, /must look like AC-001/],
-    [{ requirements: ['AC-001,AC-002'] }, /one id per flag/],
   ];
   for (const [overrides, rule] of cases) {
     const result = wo.ask(context, { ...base, ...overrides });
@@ -1078,6 +1587,19 @@ test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {
     assert.match(result.message, rule);
   }
   assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+});
+
+test('ask takes one requirement id per flag, while the fake splits a comma-joined value as the CLI does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const refused = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should deleted widgets stay visible?', options: ['no', 'yes'], defaultOption: 'no', requirements: ['AC-001,AC-002'] });
+  assert.equal(refused.exit, wo.EXIT.USAGE);
+  assert.match(refused.message, /one id per flag/);
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+  const split = wo.runZensu(['work', 'ask', ORDER, '--category', 'clarification', '--question', 'Should deleted widgets stay visible?',
+    '--option', 'no', '--default-option', 'no', '--requirement', 'AC-001,AC-002', '--client-event-id', wo.clientEventId('ask', 'split'), '--json'], { env: box.env });
+  assert.equal(split.exitCode, 0, split.message);
+  assert.deepEqual(box.fake().questions[0].requirement_ids, ['AC-001', 'AC-002']);
 });
 
 test('the fake refuses a question the way the service does', () => {
@@ -1194,6 +1716,12 @@ test('a refused question or follow-up names the rule Zensu gave and what to shor
   assert.equal(asked.exit, wo.EXIT.REFUSED);
   assert.match(asked.message, /question: command_line/);
   assert.match(asked.message, /rewrite it as plain prose and ask again/);
+  const filed = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'The list is read on every request.', severity: 'low' });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+  const refiled = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'npm install fails on the list page', severity: 'low' });
+  assert.equal(refiled.exit, wo.EXIT.REFUSED, refiled.message);
+  assert.match(refiled.message, /rationale: command_line/);
+  assert.equal(box.fake().followups.length, 1);
 });
 
 test('the post-tool update hands answers over once and ends the session on a blocked direct ask', () => {

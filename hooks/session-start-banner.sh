@@ -1,6 +1,6 @@
 #!/bin/bash
 # SessionStart hook — user-facing "Zensu is active" banner + usage hints.
-# Plain stdout (shown to the user, like session-start-pulse.sh). Fires only on
+# JSON: systemMessage for the user, additionalContext for the model. Fires only on
 # fresh starts (source=startup/clear); silent on resume/compact to avoid spam.
 # Gated by hooks.sessionBanner (default on). Companion: session-start-primer.sh
 # (model-facing orientation via additionalContext).
@@ -36,6 +36,8 @@ fi
 case "$SOURCE" in
   resume|compact) exit 0 ;;
 esac
+
+_zensu_banner_lines() {
 
 # The ONE line in this file that reports a permission decision rather than a usage hint, so
 # it sits ABOVE the sessionBanner gate: that flag is a NOISE control ("hide this banner",
@@ -161,7 +163,7 @@ case "$_ZENSU_ROUTE_DEFAULT" in
     ;;
 esac
 
-[ -n "$_ZENSU_BANNER_QUIET" ] && exit 0
+[ -n "$_ZENSU_BANNER_QUIET" ] && return 0
 
 # Consent mode announces that a PROMPT will appear, never a capability the plugin
 # granted itself — so it sits BELOW the sessionBanner gate, unlike the reviewer-spawn
@@ -211,4 +213,24 @@ else
   echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need it. Install: curl -fsSL https://zensu.dev/install.sh | sh  then: zensu auth login."
 fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
+}
+
+_ZENSU_BANNER_TEXT="$(_zensu_banner_lines)"
+[ -n "$_ZENSU_BANNER_TEXT" ] || exit 0
+if command -v node >/dev/null 2>&1; then
+  _ZENSU_BANNER_JSON="$(printf '%s' "$_ZENSU_BANNER_TEXT" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      process.stdout.write(JSON.stringify({
+        systemMessage: s,
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: s }
+      }));
+    });
+  ' 2>/dev/null)" && [ -n "$_ZENSU_BANNER_JSON" ] && {
+    printf '%s\n' "$_ZENSU_BANNER_JSON"
+    exit 0
+  }
+fi
+printf '%s\n' "$_ZENSU_BANNER_TEXT"
 exit 0

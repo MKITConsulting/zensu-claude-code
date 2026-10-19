@@ -26,8 +26,9 @@ skill needs a work order id.
   never open a task chip. A question goes to Zensu (see "Questions"); a follow-up idea goes to Zensu
   as a follow-up.
 - **The token is not yours to read.** Never print, echo, unset or override `ZENSU_SESSION_TOKEN`,
-  never run `env`, `printenv` or `set`, and never run `zensu auth`. The helpers read the token from
-  the environment themselves.
+  never run `env`, `printenv` or `set`, and never run `zensu auth`. Never set, change or remove
+  `ZENSU_API_URL`, and never pass `--api-url`. The helpers read the token and its host from the
+  environment themselves.
 - **Every forge write goes through the helper.** Never run `git push`, `gh pr create`,
   `gh pr merge`, `glab mr create` or `glab mr merge` yourself. Use `--push` and `--open-pr` below.
   They renew the lease first and refuse once the lease is lost.
@@ -149,7 +150,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --finish
 - Any other end: pass one plain sentence that says why the order cannot be finished here:
   `--finish --reason "<sentence>"`. The helper reports the order as `blocked` with `worker_error`
   and that sentence, cancels the local Autopilot run and exits 6. Write the sentence for the person
-  who reads it in Zensu: no command lines, no code, no secrets.
+  who reads it in Zensu: no command lines, no code, no secrets, and no tool name followed by its
+  subcommand, such as `npm test`, which Zensu reads as a command line. When Zensu refuses the
+  sentence anyway, the helper sends a fixed sentence instead and says so in its exit-6 line.
 - An Autopilot run that is `BLOCKED` or `CANCELLED` finishes without `--reason`; the block reason is
   derived from the run.
 

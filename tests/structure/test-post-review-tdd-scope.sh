@@ -319,6 +319,59 @@ OUT_NEW="$(run_hook "$S8" zensu:code-reviewer "$(review_prompt "$NEW_VALID_TICKE
   && check "S8b late completion from a prior chain cannot mutate the re-armed chain" PASS \
   || check "S8b late completion from a prior chain cannot mutate the re-armed chain" FAIL
 
+run_hook_with_status() {
+  local sid="$1" prompt="$2" status="$3" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" PROMPT="$prompt" STATUS="$status" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      tool_input: {subagent_type: "zensu:code-reviewer", prompt: process.env.PROMPT},
+      tool_response: {status: process.env.STATUS, agentId: "a4d2c8f1e0b3a297"},
+      session_id: process.env.SID
+    }));
+  ' | bash "$HOOK" 2>/dev/null
+}
+
+start_session background
+S8C="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S8C"
+log --tdd-complete --session "$S8C"
+S8C_TICKET="$(issue_ticket "$S8C")"
+S8C_PROMPT="$(review_prompt "$S8C_TICKET" 'merged findings')"
+S8C_STATE="$(state "$S8C")"
+S8C_BEFORE="$(digest "$S8C_STATE")"
+OUT_ASYNC="$(run_hook_with_status "$S8C" "$S8C_PROMPT" async_launched)"
+S8C_AFTER="$(digest "$S8C_STATE")"
+ASYNC_CONTEXT="$(printf '%s' "$OUT_ASYNC" | node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const h = JSON.parse(s).hookSpecificOutput;
+      process.stdout.write(h.hookEventName === "PostToolUse" ? h.additionalContext : "");
+    } catch (_) { process.stdout.write(""); }
+  });
+')"
+case "$ASYNC_CONTEXT" in
+  *"async_launched"*"ticket was NOT consumed"*"run_in_background: false"*) ASYNC_DIRECTIVE=yes ;;
+  *) ASYNC_DIRECTIVE=no ;;
+esac
+case "$ASYNC_CONTEXT" in
+  *"just finished"*) ASYNC_DIRECTIVE=no ;;
+esac
+[ "$ASYNC_DIRECTIVE" = yes ] && [ "$S8C_AFTER" = "$S8C_BEFORE" ] \
+  && [ "$(ticket_consumed "$S8C")" = "false" ] && [ "$(review_round "$S8C")" = "0" ] \
+  && check "S8c a background launch keeps the ticket and asks for a foreground reviewer" PASS \
+  || check "S8c a background launch keeps the ticket and asks for a foreground reviewer (directive=$ASYNC_DIRECTIVE consumed=$(ticket_consumed "$S8C") round=$(review_round "$S8C"))" FAIL
+OUT_DONE="$(run_hook_with_status "$S8C" "$S8C_PROMPT" completed)"
+printf '%s' "$OUT_DONE" | grep -q 'just finished' \
+  && [ "$(ticket_consumed "$S8C")" = "true" ] && [ "$(review_round "$S8C")" = "1" ] \
+  && check "S8d the foreground completion of the same ticket is routed" PASS \
+  || check "S8d the foreground completion of the same ticket is routed" FAIL
+
 # State remains session-local even when another canonical baseline becomes current.
 start_session session-a
 S9A="$STARTED_SESSION_KEY"

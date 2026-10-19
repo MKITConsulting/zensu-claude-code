@@ -125,6 +125,8 @@ echo "== Behaviour: nodeDepsStructureTests decides which structure suites report
 FIX="$WORK/runner"
 mkdir -p "$FIX/tests/structure" "$FIX/tests/profiles"
 cp "$RUN_ALL" "$FIX/tests/run-all.sh"
+cp "$PLUGIN_DIR/tests/structure/lib-unit-registry.js" "$FIX/tests/structure/lib-unit-registry.js"
+printf '{"schemaVersion":1,"files":[]}\n' > "$FIX/tests/profiles/unit-files.v1.json"
 for SUITE in test-deps-ci.sh test-deps-local.sh test-plain-ci.sh; do
   printf '#!/bin/bash\nexit 0\n' > "$FIX/tests/structure/$SUITE"
 done
@@ -158,6 +160,31 @@ for ENTRY in '' '"nodeDepsStructureTests":["test-deps-ci.sh","test-deps-ci.sh"],
 done
 [ -z "$REFUSED" ]
 check "D7 run-all refuses an absent nodeDepsStructureTests, a duplicate entry and an unclassified one before any suite runs${REFUSED:+ (accepted:$REFUSED)}" "$(verdict $?)"
+fixture_manifest '"nodeDepsStructureTests":["test-deps-ci.sh","test-deps-local.sh"],'
+printf "const test = require('node:test');\ntest('stray', () => {});\n" > "$FIX/tests/structure/stray.test.js"
+STRAY='{"path":"tests/structure/stray.test.js","registered":1,"runs":[{"driver":"tests/structure/test-plain-ci.sh"}],"summary":"a stray unit file"}'
+CENSUS_ACCEPTED=""
+census_refuses() {
+  local label="$1" files="$2" needle="$3" rc
+  printf '{"schemaVersion":1,"files":[%s]}\n' "$files" > "$FIX/tests/profiles/unit-files.v1.json"
+  bash "$FIX/tests/run-all.sh" --ci > "$WORK/census.out" 2> "$WORK/census.err"
+  rc=$?
+  { [ "$rc" -eq 2 ] && grep -qF -- "$needle" "$WORK/census.err" \
+    && grep -qF 'unit-file registry census failed; refusing execution' "$WORK/census.err" \
+    && ! grep -q 'structure/test-' "$WORK/census.out"; } \
+    || CENSUS_ACCEPTED="$CENSUS_ACCEPTED $label(rc=$rc)"
+}
+census_refuses unregistered '' 'tests/structure/stray.test.js: no entry in tests/profiles/unit-files.v1.json; add one'
+census_refuses missing-file "$STRAY,"'{"path":"tests/structure/gone.test.js","registered":1,"runs":[{"driver":"tests/structure/test-plain-ci.sh"}],"summary":"gone"}' '(tests/structure/gone.test.js): the file does not exist'
+census_refuses duplicate "$STRAY,$STRAY" 'duplicate path tests/structure/stray.test.js at entries 0 and 1'
+census_refuses registered-zero '{"path":"tests/structure/stray.test.js","registered":0,"runs":[{"driver":"tests/structure/test-plain-ci.sh"}],"summary":"a stray unit file"}' 'registered must be an integer of at least 1, got 0'
+[ -z "$CENSUS_ACCEPTED" ]
+check "D7b run-all refuses an unregistered unit file, an entry for a missing file, a duplicate entry and registered 0 on stderr before any suite runs${CENSUS_ACCEPTED:+ (accepted:$CENSUS_ACCEPTED)}" "$(verdict $?)"
+printf '{"schemaVersion":1,"files":[%s]}\n' "$STRAY" > "$FIX/tests/profiles/unit-files.v1.json"
+bash "$FIX/tests/run-all.sh" --ci > "$WORK/census-ok.txt" 2>&1
+CENSUS_OK_RC=$?
+{ [ "$CENSUS_OK_RC" -eq 0 ] && grep -q 'PASS  structure/test-plain-ci.sh' "$WORK/census-ok.txt"; }
+check "D7c a registry that matches the unit files lets every suite run" "$(verdict $?)"
 
 echo "== Source scan: every npm-dependent structure suite is in nodeDepsStructureTests =="
 SCAN="$WORK/npm-scan.js"

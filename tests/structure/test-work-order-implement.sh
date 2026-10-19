@@ -226,6 +226,7 @@ SESSION2="wo-implement-session-0002"
 RUN2="run_impl_0002"
 (
   new_project beta
+  git -C "$PROJECT" checkout -q -b "wo-77777777"
   source "$BASELINE" "$SESSION2" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER2" "$SESSION2" required implement
   : > "$FAKE_ZENSU_CALLS"

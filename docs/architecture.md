@@ -16,7 +16,7 @@ main-thread skills       /zensu:tdd         Zensu Dashboard
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
-**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only) → consume-mode code-reviewer → auto-fix loop → self-review.
+**Layer 2 — Implementation (HOW is it built securely?):** `/zensu:tdd` runs in the main thread in vanilla implementation mode by default. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is available via `hooks.tddImplementation:true` and enforced by the PreToolUse RED→IMPL→GREEN FSM gate (`pre-edit-tdd-reminder.sh`); `/zensu:tdd-mode` switches the same discipline for one session without touching config, and a specification can request it per run with a single `TDD-MODE: strict` line. Both modes keep the evidence audits and the Stop-enforced read-only review chain: parallel specialist aspects (three by default, five with `hooks.reviewPanel: full`) → optional judge (default on; on the lean panel for the first review only, and on any review the Stop hook resumes) → consume-mode code-reviewer → auto-fix loop → self-review.
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -96,7 +96,7 @@ It reaches every process through three deliberately redundant carriers, because 
 
 The hook reads the block out of the canonical file at run time rather than carrying its own copy, so it cannot drift from the `agents/*.md` and `skills/*/SKILL.md` prompt carriers when the rule is reworded. (The carrier population is pinned as `EXPECTED_AGENTS` + `EXPECTED_SKILLS` in `tests/structure/test-evidence-discipline.sh`; it is deliberately not restated as a literal here, because a numeral goes stale on every new skill and nothing fails closed on it.)
 
-It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, whose `subagentShell` key only withdraws the subagent shell grant and never disables the gate, `pre-write-plugin-data-guard.sh`, the browser consent pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
+It is the only **advisory, context-injecting** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, whose `subagentShell` key only withdraws the subagent shell grant and never disables the gate, `pre-write-plugin-data-guard.sh`, the browser consent pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks, and `session-start-prompt-ledger.sh`, which injects nothing and only resets the ledger three flagged hooks read), but those are enforcement or plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
 
 **The block names no file, on purpose.** A `reviewer-readonly-v1` subagent resolves tool paths against the *project* root, not the plugin root, so a `docs/evidence-discipline.md` pointer inside the block could only ever resolve into the repository under review — letting a hostile repo plant that path and have its own text ingested as the authoritative rule. The two leased `evidence-worker-v1` agents would additionally burn a bounded turn on a read their lease denies. So the block declares itself complete and forbids any workspace file claiming to be the rule from overriding it; agents act on the block, humans and the hook read the file.
 
@@ -137,7 +137,7 @@ work rather than filed as issues; the injected-block bound was found in review. 
 was their only record and is now the record that all three closed. A divergence with no owner is how a pattern permanently
 forks.
 
-[`docs/best-solution-first.md`](best-solution-first.md) is the second instance: **when you put choices in front of the user, the option set must contain the solution you would defend as best for them over the long run, and that option must come first.** Its carrier is `hooks/user-prompt-best-solution-first.sh`, on `UserPromptSubmit` — every prompt, for the whole session — and on `SubagentStart`, so every spawned child gets it too.
+[`docs/best-solution-first.md`](best-solution-first.md) is the second instance: **when you put choices in front of the user, the option set must contain the solution you would defend as best for them over the long run, and that option must come first.** Its carrier is `hooks/user-prompt-best-solution-first.sh`, on `SessionStart` — every source, so it returns after `/compact` and `/clear` — and on `SubagentStart`, so every spawned child gets it too, with a one-line reminder of it on `UserPromptSubmit`, every prompt, for the whole session.
 
 Three things differ from evidence discipline, each deliberate:
 
@@ -145,11 +145,11 @@ Three things differ from evidence discipline, each deliberate:
 |------|---------------------|---------------------|
 | Carriers | three (hook, `agents/*.md`, `skills/*/SKILL.md`) | one on the subagent leg (the hook); zen-mode carries a partial second copy on the main thread |
 | Config flag | none by design | `hooks.bestSolutionFirst`, default on |
-| Main-thread event | `SessionStart` | `UserPromptSubmit`, every prompt |
+| Main-thread event | `SessionStart` | `SessionStart` for the block, `UserPromptSubmit` for a one-line reminder on every prompt |
 
-The **flag** exists because this rule governs how a decision is *presented*, not whether a claim is *true*; a project may reasonably turn it off, and one that does still receives evidence discipline. The consequence to keep in view is that the project-local config wins per key, so a repository under review can silence it for the subagents reviewing it — acceptable for a presentation rule, and precisely why evidence discipline reads no configuration at all.
+The **flag** exists because this rule governs how a decision is *presented*, not whether a claim is *true*; a project may reasonably turn it off, and one that does still receives evidence discipline. The consequence to keep in view is that the project-local config wins per key, so a repository can silence the main-thread injection for whoever opens it — acceptable for a presentation rule. It cannot silence the subagents reviewing it, because the `SubagentStart` leg ignores the flag; evidence discipline goes further and reads no configuration at all.
 
-The **per-prompt** event, rather than `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
+The **per-prompt** reminder, on top of `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. The full block arrives once per context generation; the reminder keeps the rule's two halves and its precedence on every prompt at about a fifth of the block's length. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
 **What it costs, measured rather than asserted — and exactly one of these figures is
 enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emitted length
@@ -161,8 +161,9 @@ the 1756-character half is unpinned with them. Every OTHER number here — the s
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
-suite to keep it honest. Driving the hook directly, each injection
-is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
+suite to keep it honest. Driving the hook directly, the block
+injection is **1756 characters / 1764 bytes** of `additionalContext`, identical on the
+`SessionStart` and `SubagentStart` legs, and the prompt leg's reminder is 354 characters. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
 injects about 3.1 K characters on the same prompt channel while no chain is armed and about 4.4 K
 while one is, because its rule 6 shrinks to one sentence when the anchor reads `none`. `Z30` and
@@ -170,9 +171,9 @@ while one is, because its rule 6 shrinks to one sentence when the anchor reads `
 they read the hook and never open this document, so the numbers written here are hand-derived
 like every other one below, and age the same way. `C6` above stays the only figure a check reads
 out of this paragraph. A full-panel `/zensu:tdd` review round
-(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge and a code-reviewer, so
+(`hooks.reviewPanel: full`) spawns five `review-aspect` agents plus a judge (two on the first review by default) and a code-reviewer, so
 the `SubagentStart` leg adds about **at least** 12 KB across one fan-out; the default lean panel
-spawns three aspects and runs the judge on the first review only — more with repo-custom personas, and again per auto-fix
+spawns three aspects and runs the judge on the first review only (twice side by side while `hooks.reviewJudgeSecondRun` is on) and on any review the Stop hook resumes — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
 to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds a chain needs at
@@ -180,24 +181,31 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and seven hooks are registered on it.
-`tests/structure/test-user-prompt-budget.sh` drives every one of them on four prompt kinds — a
-typed request, a background-task notification, a shell input behind a system reminder, and a
-CI-monitor event — and holds each hook and each sum under declared ceilings, so treat that suite,
-not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
+on every prompt with no de-bounce, and seven hooks are registered on it. Three of them send their
+full text only once per context generation and a short line after that, through the prompt
+ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
+`tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a
+typed request, a background-task notification, a subagent hand-back, a shell input behind a
+system reminder, and a CI-monitor event, for the first prompt of a session and for a repeat — and holds each hook and
+each sum under declared ceilings, so treat that suite, not this paragraph, as the measurement. Four hooks emit text on an ordinary turn:
 `user-prompt-tdd-reminder.sh` (about 5.0 K characters strict and 5.5 K vanilla plus the paths of
-the helper command it renders, on typed requests and slash commands with arguments while no chain
-is armed, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, only when such a prompt
-carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
-`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above, on every prompt kind because the reply is
-user-visible) and this hook (1,756 characters, on every prompt kind for the same reason). Two emit
+the helper command it renders, on the first typed request or slash command with arguments of a
+generation while no chain is armed, about 2.4 K on later ones, a decided line of about 1.4 to 1.5 K on
+every prompt while the route is decided, and a note under 400 characters on a CI-monitor event), `user-prompt-intent-router.sh` (2,131 characters, then 1,102 later in the generation, only when such
+a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
+`user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
+that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
+characters, on every prompt kind for the same reason). Two emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
 takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
-costs about **12.5 K characters per turn**, and a task notification or shell input about 4.9 K
-(5.2 K for a CI-monitor event); `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
+costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
+one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or
+shell input about 3.5 K, then 1.8 K (3.8 K, then 2.1 K for a CI-monitor event). The generation also receives this
+hook's 1,756-character block once at `SessionStart`, so its first turn costs about 12.8 K in all,
+slightly more than one turn did before; `hooks/lib/zensu-prompt-origin.sh` is what tells them apart, and
 before it every harness prompt paid the typed figure. All operands are character counts. That is
 the real price of "resident rather than periodic", and it should be argued on those numbers rather
 than on the fan-out figure.
@@ -215,7 +223,7 @@ Worth stating for anyone re-measuring: a session running an *installed* plugin d
 hook that exists only in a development worktree, so the leg cannot be observed from such a session
 at all. The figures above come from driving the hook directly, not from watching it fire.
 
-**Carrier count, stated precisely.** On `SubagentStart` this hook is the only carrier. On the main thread `hooks/user-prompt-zen-mode.sh` carries a partial second copy — the ranking obligation and its anti-inflation counterweight, not the whole block — because its brevity contract would otherwise license the very omission the rule forbids. That copy is hand-written rather than read from the marker block, which is a drift seam: `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin it from this side, and zen-mode's own suite pins nothing, so a zen-mode author can break it and still see green. Note also what the fallback cannot do: zen-mode exits for any non-main principal and is not registered on `SubagentStart`, so turning this hook off silences the rule for every spawned child with nothing left carrying it there.
+**Carrier count, stated precisely.** On `SubagentStart` this hook is the only carrier. On the main thread `hooks/user-prompt-zen-mode.sh` carries a partial second copy — the ranking obligation and its anti-inflation counterweight, not the whole block — because its brevity contract would otherwise license the very omission the rule forbids. That copy is hand-written rather than read from the marker block, which is a drift seam: `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin the full contract from this side, and Z101/Z103 in `tests/structure/test-zen-mode.sh` pin the short body zen-mode sends on every later prompt of a context generation. Note also what the fallback cannot do: zen-mode exits for any non-main principal and is not registered on `SubagentStart`, and the subagent leg does not need it: that leg ignores `hooks.bestSolutionFirst`, so every spawned child keeps the block whatever the flag says.
 
 The **single carrier on the subagent leg** is the honest weak spot. Its failure modes are silent absence with one exception — a mismatched inherited `CLAUDE_PLUGIN_ROOT` exits `2` on stderr, as below; among them an unknown event, a malformed payload, a missing `node`, a config library that is absent, symlinked, or fails to load, and a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed — every one exits `0` with no output, and no downstream check notices a reminder that never arrived. In particular a block re-wrapped across two markdown lines is not truncated — it is dropped entirely. The only place that shape becomes a hard failure is build time, which is why `tests/structure/test-best-solution-first.sh` drives all five malformed-block refusals against the hook's own parser and pins each clause of the block separately.
 
@@ -296,7 +304,7 @@ on it. What the suite enforces is the 9,000-character ceiling, never the host's 
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-1    → Load context, plan implementation
 3. /zensu:tdd                → Guided main-thread implementation (vanilla; opt-in strict RED→GREEN)
-4. review chain              → 3 or 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-hook guaranteed)
+4. review chain              → 3 or 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-enforced)
 5. auto-fix loop             → Critical findings fixed in-thread (Important ones too under hooks.autoFixSeverity important or all, otherwise parked for the self-review), then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off); with hooks.criticalReproduction a re-review CRITICAL routes only when a failing test reproduces it
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
