@@ -27,7 +27,7 @@ key. Each is written to a temporary file and renamed into place.
 | `marker-` | `--start` | order id, attempt, kind, repository, spec hash, plan-approval policy |
 | `order-` | `--start`, `--bind-spec` | the last `zensu work get` answer |
 | `lease-` | every successful renewal or event | lease seconds, last success time, recorded head, order status |
-| `outbox-` | `--autopilot-begin`, `--drain`, and a block, `ready_for_merge` or question send without an answer | the bound Autopilot run id, the highest stage rank Zensu accepted, and up to four block, `ready_for_merge` or question sends that got no answer |
+| `outbox-` | `--autopilot-begin`, `--drain`, a block, `ready_for_merge` or question send, and a refused lease whose replay got no answer | the bound Autopilot run id, the highest stage rank Zensu accepted, up to four block, `ready_for_merge` or question sends Zensu has not answered yet, and the code of a refused lease while their replay waits |
 | `answers-` | renewals, `--start`, `--bind-spec` | answers to this order's non-blocking questions and the plan-wide decisions of `decision_log` not yet shown to the model |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
@@ -178,7 +178,8 @@ Outside work-order mode all three print nothing and exit 0.
   command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
   of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
   and the command string, which it cannot judge. It renews the lease when due, and once the lease is
-  lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call. It never allows
+  lost or the session ended it denies every `gh`, `glab` and `zensu-vcs.sh` call, as it does while
+  Zensu refused the lease and a send without an answer still waits for its replay. It never allows
   anything.
 - `post-work-order.sh` (every tool) renews the lease when due, drains the outbox, hands pending
   answers to the model, and ends the session when a direct `zensu work ask` blocked the order. It
@@ -230,12 +231,15 @@ message says that the stated reason was replaced. Any other final answer to a bl
 `ended-`, so a later `--finish` reports the block again, and the Stop hook still lets the session
 stop after its budget.
 
-A block, `ready_for_merge` or question send that got no answer stays in `outbox-`. Before any helper
-records a lost lease, whether a renewal, a stage or block event, a question, a follow-up or the order
-read met it, it replays those sends under their `client_event_id`: Zensu answers a replay even after
-it ended the session, so a block it stored ends the session as delivered instead of as a lost lease.
-A replay without an answer keeps the send and records no loss, so the next call tries again. A
-replay Zensu refuses leaves the lease lost. A helper whose call ends the session this way reports
+A block, `ready_for_merge` or question send enters `outbox-` before its first attempt and stays there
+until Zensu answered it. Before any helper or the launcher records a lost lease, whether a renewal, a
+stage or block event, a question, a follow-up or the order read met it, it replays those sends under
+their `client_event_id`: Zensu answers a replay even after it ended the session, so a block it stored
+ends the session as delivered instead of as a lost lease, also while the helper that sent it still
+retries. A replay without an answer keeps the send and records no loss while the local lease lasts,
+so the next call tries again; meanwhile the gate denies every `gh`, `glab` and `zensu-vcs.sh` call,
+and a renewal that succeeds lifts that again. Once the lease time has run out, the loss is recorded.
+A replay Zensu refuses leaves the lease lost. A helper whose call ends the session this way reports
 the ended kind, with exit 0 for a successful ending of `--finish` or `--plan-approval` and exit 6
 otherwise.
 

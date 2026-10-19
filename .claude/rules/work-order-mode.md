@@ -30,12 +30,18 @@ ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
 `--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
 accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception
-is `inflight`: up to four block, `ready_for_merge` or question sends that got no answer. Every route
-that meets a lost lease goes through `loseLease`, which replays them before it writes `lost-`,
-because after Zensu ended a session a replay under a stored `client_event_id` is the only call it
-still answers. A replay without an answer writes nothing and keeps the send. The safe-sentence
-resend of a block therefore keeps the first send's `client_event_id`; a refused `422` stores
-nothing. A caller that gets the verdict `ended` back maps it through `endedResult`.
+is `inflight`: up to four block, `ready_for_merge` or question sends that Zensu has not answered
+yet. Each enters it before its first attempt, so a renewal in another process, the launcher's
+watchdog among them, finds it while the sender still retries. Every route that meets a lost lease
+goes through `loseLease`, which replays them before it writes `lost-`, because after Zensu ended a
+session a replay under a stored `client_event_id` is the only call it still answers. The
+safe-sentence resend of a block therefore keeps the first send's `client_event_id`; a refused `422`
+stores nothing. A replay without an answer keeps the send and, while the local lease lasts, writes
+`leaseRefusal` into the outbox instead of `lost-`; once the lease time has run out it writes
+`lost-`. The gate's forge branch denies on `leaseRefusal` and `recordLease` clears it.
+`forgeWriteVerdict` ignores it on purpose, because `--ask`, `--followup` and `--bind-spec` check it
+before they resend, and a resend is a replay. Every helper verb that gets the verdict `ended` back
+maps it through `endedResult`; the post-tool hook builds its own notice from the ended marker.
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
 and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is

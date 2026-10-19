@@ -609,6 +609,22 @@ function applyBlocked(flags, clientEventId) {
   });
 }
 
+function probeOutbox(clientEventId) {
+  if (typeof state.outboxProbe !== 'string') return;
+  let inflight = [];
+  try {
+    const outbox = JSON.parse(fs.readFileSync(state.outboxProbe, 'utf8'));
+    inflight = (Array.isArray(outbox.inflight) ? outbox.inflight : []).map((record) => {
+      const args = Array.isArray(record.args) ? record.args : [];
+      return args.indexOf('--client-event-id') >= 0 ? args[args.indexOf('--client-event-id') + 1] : null;
+    });
+  } catch (_) {
+    inflight = [];
+  }
+  state.outboxSeen = [...(Array.isArray(state.outboxSeen) ? state.outboxSeen : []), { id: clientEventId || null, inflight }];
+  save(state);
+}
+
 function workEvent(flags) {
   const selected = ['stage', 'artifact', 'blocked'].filter((name) => flags[name] !== undefined);
   if (selected.length !== 1) usage('exactly one of --stage, --artifact or --blocked is required');
@@ -616,6 +632,7 @@ function workEvent(flags) {
   if (flags.blocked !== undefined && !flags.reason) usage('--blocked needs --reason');
   requireSessionToken('work event');
   requireOrder(flags._[0]);
+  probeOutbox(flags['client-event-id']);
   injected('event', flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;
   flags['client-event-id'] = clientEventId;
@@ -657,6 +674,7 @@ function workAsk(flags) {
   if (!flags.blocking && !flags['default-option']) usage('--default-option is required unless --blocking is set');
   requireSessionToken('work ask');
   requireOrder(flags._[0]);
+  probeOutbox(flags['client-event-id']);
   injected('ask');
   validateQuestion(flags);
   const clientEventId = flags['client-event-id'] || `cli-${crypto.randomBytes(12).toString('hex')}`;

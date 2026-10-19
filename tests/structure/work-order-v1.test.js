@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const MODULE = path.join(__dirname, '..', '..', 'hooks', 'lib', 'work-order-v1.js');
 const FAKE = path.join(__dirname, 'lib-fake-zensu-work.js');
@@ -998,6 +998,117 @@ test('a replay without an answer keeps the send for the next renewal, and every 
   assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
 });
 
+test('a refused lease whose replay gets no answer closes the forge fence until a renewal succeeds, and records the loss once the lease time has run out', () => {
+  const comment = { tool_name: 'Bash', tool_input: { command: 'gh pr comment 7 --body done' } };
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const fenced = wo.gateDecision(context, comment, { env: box.env, now: () => Date.now() + 120000 });
+  assert.equal(fenced && fenced.code, 'lease');
+  assert.match(fenced.reason, /Zensu refused the lease of work order \S+ \(invalid_session_token\), and an unanswered send still waits for its replay/);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  assert.equal(wo.gateDecision(context, { tool_name: 'Bash', tool_input: { command: 'git status' } }, { env: box.env, now: () => Date.now() + 120000 }), null);
+  assert.equal(wo.renew(context, { env: box.env, force: true, now: Date.now() + 1801000 }).verdict, wo.VERDICTS.LOST);
+  assert.equal(wo.readState(context.files.lost).code, 'invalid_session_token');
+
+  const flaky = sandbox();
+  const flakyContext = startedContext(flaky);
+  flaky.mutate((state) => { state.dropAnswers = 1; });
+  const asked = wo.ask(flakyContext, { env: flaky.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' });
+  assert.equal(asked.exit, wo.EXIT.TRANSIENT, asked.message);
+  flaky.mutate((state) => { state.dropAnswers = 1; state.failNext = [{ command: 'heartbeat', status: 409, code: 'stale_attempt', times: 1 }]; });
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }).code, 'lease');
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.OK);
+  assert.equal(wo.readState(flakyContext.files.outbox).leaseRefusal, null);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }), null);
+  assert.equal(wo.readState(flakyContext.files.lost), null);
+});
+
+test('a terminal send is in the outbox before its first attempt, so a renewal that meets the ended session meanwhile replays it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1; });
+  let watchdog = null;
+  let pending = null;
+  const now = () => {
+    const at = Date.now();
+    if (!watchdog && box.fake().order.status === 'blocked') {
+      pending = wo.readState(context.files.outbox).inflight;
+      watchdog = wo.renew(context, { env: box.env, force: true });
+    }
+    return at;
+  };
+  const env = { ...box.env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '60000' };
+  const finished = wo.finish(context, { env, now, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(Array.isArray(pending) && pending.length, 1);
+  assert.equal(watchdog && watchdog.verdict, 'ended');
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(finished.exit, wo.EXIT.ENDED, finished.message);
+  assert.match(finished.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)$/);
+  assert.deepEqual(wo.readState(context.files.outbox).inflight, []);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.outboxProbe = mergeContext.files.outbox; });
+  const asked = wo.ask(mergeContext, { env: merge.env, category: 'clarification', question: 'Should the changelog name the new widget?', defaultOption: 'yes' });
+  assert.equal(asked.exit, wo.EXIT.OK, asked.message);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
+  const seen = merge.fake().outboxSeen;
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen.map((call) => Boolean(call.id) && call.inflight.includes(call.id)), [true, true]);
+  assert.deepEqual(wo.readState(mergeContext.files.outbox).inflight, []);
+});
+
+test('the drain, renew, bind-spec and plan-approval helpers name the ended kind when a replay ends the session under them', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  const cli = (...argv) => spawnSync(process.execPath, [MODULE, ...argv], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  const renewed = cli('renew', '--force');
+  assert.equal(renewed.status, wo.EXIT.ENDED, renewed.stderr);
+  assert.match(renewed.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(context.files.lost), null);
+  const drained = cli('drain');
+  assert.equal(drained.status, wo.EXIT.ENDED, drained.stderr);
+  assert.match(drained.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+
+  const bound = sandbox();
+  const boundContext = startedContext(bound);
+  wo.markerRun(boundContext, RUN);
+  writeBoundRun(bound);
+  bound.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(boundContext, { env: bound.env, category: 'scope', question: 'Should the export include archived widgets?', blocking: true }).exit, wo.EXIT.TRANSIENT);
+  const spec = wo.bindSpec(boundContext, { env: bound.env, runId: RUN });
+  assert.equal(spec.exit, wo.EXIT.ENDED, spec.message);
+  assert.match(spec.message, /Zensu ended the session of work order \S+ \(blocked:spec_change\)/);
+
+  const planned = sandbox();
+  const planContext = startedContext(planned);
+  unansweredBlock(planned, planContext);
+  planned.mutate((state) => { state.dropAnswers = 0; });
+  writeRun(planned, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  fs.mkdirSync(path.join(planned.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(planned.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const approval = wo.planApproval(planContext, { env: planned.env });
+  assert.equal(approval.exit, wo.EXIT.ENDED, approval.message);
+  assert.match(approval.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(planContext.files.lost), null);
+});
+
 test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
   const box = sandbox();
   const context = startedContext(box);
@@ -1157,15 +1268,15 @@ test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec
     assert.equal(result.exit, wo.EXIT.REFUSED, `${verb}: ${result.message}`);
     assert.match(result.message, /refused the planning stage \(status 422, code invalid_autopilot_run_id\)/, verb);
   }
-  for (const [status, code, exit, said] of [
-    [422, 'field_not_allowed', wo.EXIT.REFUSED, /spec changed during the session; Zensu refused the block \(status 422, code field_not_allowed\); end the session/],
-    [401, 'invalid_session_token', wo.EXIT.LOST, /the lease is lost, so the block could not be reported \(status 401, code invalid_session_token\)/],
+  for (const [status, code, exit, said, times] of [
+    [422, 'field_not_allowed', wo.EXIT.REFUSED, /spec changed during the session; Zensu refused the block \(status 422, code field_not_allowed\); end the session/, 1],
+    [401, 'invalid_session_token', wo.EXIT.LOST, /the lease is lost, so the block could not be reported \(status 401, code invalid_session_token\)/, 2],
   ]) {
     const box = sandbox();
     const context = startedContext(box);
     wo.markerRun(context, RUN);
     writeBoundRun(box);
-    box.mutate((state) => { state.order.spec_stale = true; state.failNext = [{ command: 'event', flag: 'blocked', status, code, times: 1 }]; });
+    box.mutate((state) => { state.order.spec_stale = true; state.failNext = [{ command: 'event', flag: 'blocked', status, code, times }]; });
     const result = wo.bindSpec(context, { env: box.env, runId: RUN });
     assert.equal(result.exit, exit, `${code}: ${result.message}`);
     assert.match(result.message, said);
@@ -1345,7 +1456,14 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'read -r ZENSU_SESSION_TOKEN': 'token',
     'for ZENSU_API_URL in https://h; do zensu work get 1; done': 'token-host',
     'declare -n ref=ZENSU_API_URL': 'token-host',
+    'declare -gn ref=ZENSU_SESSION_TOKEN': 'token',
+    'local -n ref=ZENSU_API_URL': 'token-host',
     'let ZENSU_API_URL=1': 'token-host',
+    'let ZENSU_SESSION_TOKEN++': 'token',
+    "let 'ZENSU_API_URL[0]=1'": 'token-host',
+    'let x=ZENSU_API_URL=1': 'token-host',
+    'let 1,ZENSU_SESSION_TOKEN=1': 'token',
+    'let ++ZENSU_API_URL': 'token-host',
   };
   for (const [command, code] of Object.entries(denied)) {
     const analysis = wo.analyzeBash(command);
@@ -1358,7 +1476,8 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
     "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1', 'echo $ZENSU_API_URL', "echo $'a\\tb'", 'env -0 zensu work get 1',
     'bash scripts/test.sh -race -v', "read -r -d $'\\0' line", 'printf -v line %s x', 'read -r answer', 'for f in a b; do echo $f; done',
-    'bash -lc "git status"',
+    'bash -lc "git status"', 'local key=ZENSU_API_URL', 'export KEY=ZENSU_API_URL', 'declare name=ZENSU_SESSION_TOKEN',
+    'declare +n ref=ZENSU_API_URL', 'let ZENSU_API_URL_COUNT=5', 'let NO_ZENSU_SESSION_TOKEN=1',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
   assert.equal(wo.analyzeBash('gh pr view 7').forge, true);

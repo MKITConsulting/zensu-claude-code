@@ -82,7 +82,7 @@ decision made later reaches the next session of the order, not the running one.
 task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
 the `zensu work` and `zensu plan` verbs a worker session must not call, the usual spellings that
 print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`,
-and `--api-url` on `zensu`. Each denial says why and, where a helper verb does the job, names it. Once the lease is lost it also denies every forge command. It renews the lease when due
+and `--api-url` on `zensu`. Each denial says why and, where a helper verb does the job, names it. Once the lease is lost, or while Zensu refused it and a send without an answer still waits for its replay, it also denies every forge command. It renews the lease when due
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.
 
