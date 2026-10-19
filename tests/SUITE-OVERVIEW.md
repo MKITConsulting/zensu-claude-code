@@ -396,7 +396,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/clock-shift-v1.test.js` | 19 | – | `test-clock-shift.sh` | The shifted-clock preload and runner that the scheduled clock-shift pass uses. |
 | `structure/deferred-review-claim-cases.test.js` | 11 | – | `test-windows-ci-contract.sh` (metadata, all) | The deferred-review claim case table. |
 | `structure/evidence-run-v1.test.js` | 80 | win32 3 | `test-evidence-run.sh` | The evidence runner: the record schema and store, the tree fingerprint, verdict states, retention and the run directory. |
-| `structure/external-review-v1.test.js` | 41 | win32 3 | `test-external-review-hook.sh` | External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, and the freshness check against changed files. |
+| `structure/external-review-v1.test.js` | 47 | win32 5 | `test-external-review-hook.sh` | External review import: the Workflow launch record, its bounds and retention, the template staged inside the working directory, the freshness check against changed files, and the review root bound to the session's work tree with every other layout named. |
 | `structure/finding-verify-v1.test.js` | 28 | – | `test-finding-verification.sh` | The finding-verification grading module. |
 | `structure/fixture-mutation-watch.test.js` | 19 | – | `test-eval-harness-units.sh` | Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends. |
 | `structure/full-suite-ci-v1.test.js` | 28 | – | `test-full-suite-ci.sh` | Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict. |
