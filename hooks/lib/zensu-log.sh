@@ -439,9 +439,9 @@ case "${1:-}" in
     _xr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" \
       || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-data"; exit 0; }
     _xr_root_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_xr_root" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — $_xr_none reason=root"; exit 0; }
+      || _xr_root_native=""
     _xr_project="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — $_xr_none reason=project-root"; exit 0; }
+      || _xr_project=""
     _xr_result_native=""
     if [ -n "$_xr_result" ]; then
       _xr_result_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$(dirname -- "$_xr_result")" 2>/dev/null)" \

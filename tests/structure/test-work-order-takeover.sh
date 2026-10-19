@@ -139,7 +139,7 @@ new_project() {
 ORDER="99999999-9999-4999-8999-999999999999"
 SESSION="wo-takeover-session-0001"
 RUN="run_take_0002"
-BRANCH="zensu/work-99999999"
+BRANCH="wo-99999999"
 STALE_OWNER="scv1_$(printf 'c%.0s' $(seq 1 64))"
 SPEC_HASH="$(printf 'a%.0s' $(seq 1 64))"
 
@@ -166,7 +166,7 @@ STALE_FILE="$PROJECT/.zensu/state/autopilot-run-${STALE_RUN}.json"
 wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER" "$SESSION" auto implement
 wo_fake_set "$FAKE_ZENSU_STATE" "
   state.order.attempt = 2;
-  state.order.status = 'reviewing';
+  state.order.status = 'claimed';
   state.order.branch = '$BRANCH';
   state.order.pr_url = 'https://github.com/acme/widgets/pull/7';
   state.order.pr_number = 7;
@@ -175,6 +175,7 @@ wo_fake_set "$FAKE_ZENSU_STATE" "
 "
 printf '{"number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","headRefName":"%s","baseRefName":"main"}\n' "$BRANCH" > "$FAKE_GH_DIR/pr.json"
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 
 bash "$WRAPPER" --start --order "$ORDER" >"$SBOX/start.out" 2>"$SBOX/start.err"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(json_get "$SBOX/start.out" 'value.attempt')" = "2" ] \
@@ -194,11 +195,11 @@ RUN_FILE="$PROJECT/.zensu/state/autopilot-run-${RUN}.json"
 bash "$WRAPPER" --bind-spec --run "$RUN" >"$SBOX/bind.out" 2>"$SBOX/bind.err"; RC2=$?
 if [ "$RC" -eq 0 ] && [ "$RC2" -eq 0 ] && [ "$(json_get "$RUN_FILE" 'value.stage')" = "AWAIT_TDD" ] \
   && [ "$(json_get "$RUN_FILE" 'value.workOrder.attempt')" = "2" ] \
-  && ! stage_calls | grep -q 'implementing' \
-  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status')" = "reviewing" ]; then
-  check "T2 the new attempt begins a fresh run and binds its spec without sending a stage behind the order" PASS
+  && [ "$(stage_calls)" = "planning implementing" ] \
+  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status')" = "implementing" ]; then
+  check "T2 the new attempt, claimed again at claimed, begins a fresh run and reports planning and implementing again" PASS
 else
-  check "T2 the new attempt binds its spec on an order at reviewing (begin=$RC bind=$RC2 stages=$(stage_calls) $(cat "$SBOX/begin.err" "$SBOX/bind.err"))" FAIL
+  check "T2 the new attempt binds its spec on an order claimed again (begin=$RC bind=$RC2 stages=$(stage_calls) $(cat "$SBOX/begin.err" "$SBOX/bind.err"))" FAIL
 fi
 
 CHAIN="chain_take_0001"
@@ -215,6 +216,7 @@ printf 'body\n' > "$SBOX/body.md"
 bash "$WRAPPER" --push >"$SBOX/push.out" 2>"$SBOX/push.err"; PUSH_RC=$?
 bash "$WRAPPER" --open-pr --title "Take over" --body-file "$SBOX/body.md" >"$SBOX/open.out" 2>"$SBOX/open.err"; RC=$?
 if [ "$READY" = true ] && [ "$PUSH_RC" -eq 0 ] && [ "$RC" -eq 0 ] \
+  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.events.filter(e => e.event_type === "stage" && e.to_status === "implementing" && e.head_sha === state.order.head_sha).length')" = "1" ] \
   && [ "$(json_get "$SBOX/open.out" 'value.value.imported')" = "true" ] \
   && [ "$(json_get "$SBOX/open.out" 'value.value.number')" = "7" ] \
   && [ "$(json_get "$SBOX/open.out" 'value.value.head')" = "$PR_HEAD" ] \
@@ -274,7 +276,8 @@ if apply_event take-findings FINDINGS_CLEARED "{\"headSha\":\"$PR_HEAD\",\"unres
   bash "$WRAPPER" --finish >"$SBOX/finish.out" 2>"$SBOX/finish.err"; RC=$?
   if [ "$RC" -eq 0 ] && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status')" = "ready_for_merge" ] \
     && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.head_sha')" = "$PR_HEAD" ] \
-    && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.pr_number')" = "7" ]; then
+    && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.pr_number')" = "7" ] \
+    && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.events.filter(e => e.event_type === "stage" && e.to_status === "pr_open").length')" = "1" ]; then
     check "T8 a run with an imported review delivers and reports ready_for_merge on the order's pull request and head" PASS
   else
     check "T8 a run with an imported review reports ready_for_merge (rc=$RC status=$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status') $(cat "$SBOX/finish.err"))" FAIL
@@ -289,15 +292,15 @@ RUN2="run_take_fresh_0001"
 (
   new_project beta
   RUN="$RUN2"
-  git -C "$PROJECT" checkout -q -b "zensu/work-13131313"
+  git -C "$PROJECT" checkout -q -b "wo-13131313"
   printf 'x\n' > "$PROJECT/x.txt"
   git -C "$PROJECT" add x.txt
   git -C "$PROJECT" commit -q -m "feat: x"
   HEAD2="$(git -C "$PROJECT" rev-parse HEAD)"
-  git -C "$PROJECT" push -q origin "zensu/work-13131313"
+  git -C "$PROJECT" push -q origin "wo-13131313"
   source "$BASELINE" "$SESSION2" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER2" "$SESSION2" auto implement
-  wo_fake_set "$FAKE_ZENSU_STATE" "state.order.branch = 'zensu/work-13131313'; state.order.head_sha = '$HEAD2';"
+  wo_fake_set "$FAKE_ZENSU_STATE" "state.order.branch = 'wo-13131313'; state.order.head_sha = '$HEAD2';"
   rm -f "$FAKE_GH_DIR/pr.json" "$FAKE_GH_DIR/created"
   reviews_json "$(marker_for "$ORDER" "$REVIEW_HEAD")" > "$FAKE_GH_DIR/reviews.json"
   bash "$WRAPPER" --start --order "$ORDER2" >/dev/null 2>&1 || exit 91
@@ -343,19 +346,19 @@ RUN3="run_take_closed_0001"
 (
   new_project gamma
   RUN="$RUN3"
-  git -C "$PROJECT" checkout -q -b "zensu/work-14141414"
+  git -C "$PROJECT" checkout -q -b "wo-14141414"
   printf 'y\n' > "$PROJECT/y.txt"
   git -C "$PROJECT" add y.txt
   git -C "$PROJECT" commit -q -m "feat: y"
   HEAD3="$(git -C "$PROJECT" rev-parse HEAD)"
-  git -C "$PROJECT" push -q origin "zensu/work-14141414"
+  git -C "$PROJECT" push -q origin "wo-14141414"
   source "$BASELINE" "$SESSION3" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER3" "$SESSION3" auto implement
   wo_fake_set "$FAKE_ZENSU_STATE" "
-    state.order.attempt = 2; state.order.status = 'pr_open'; state.order.branch = 'zensu/work-14141414';
+    state.order.attempt = 2; state.order.status = 'claimed'; state.order.branch = 'wo-14141414';
     state.order.pr_url = 'https://github.com/acme/widgets/pull/9'; state.order.pr_number = 9; state.order.head_sha = '$HEAD3';
   "
-  printf '{"number":9,"url":"https://github.com/acme/widgets/pull/9","state":"CLOSED","headRefName":"zensu/work-14141414","baseRefName":"main"}\n' > "$FAKE_GH_DIR/pr.json"
+  printf '{"number":9,"url":"https://github.com/acme/widgets/pull/9","state":"CLOSED","headRefName":"wo-14141414","baseRefName":"main"}\n' > "$FAKE_GH_DIR/pr.json"
   rm -f "$FAKE_GH_DIR/created"
   bash "$WRAPPER" --start --order "$ORDER3" >/dev/null 2>&1 || exit 91
   bash "$LOG_HELPER" --autopilot-begin --run "$RUN3" --work-order "$ORDER3" --cover false --validate false >/dev/null 2>&1 || exit 92
