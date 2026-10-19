@@ -68,8 +68,9 @@ Bash tool while the PowerShell tool may be active. While that tool may be active
 `shell tools:` row of `/zensu:doctor` warns when a hook fires for `Bash` but not for
 `PowerShell`; once every such hook covers `PowerShell`, it warns when the analyzer does not load.
 Names built at run time from variables, character codes or subexpressions, script files,
-interpreter code, and a `zensu` call that cmd.exe finds in an argument of another batch file stay
-unread, as names built at run time do in Bash.
+interpreter code, a command registered to run later, such as a scheduled task, and a `zensu` call
+that cmd.exe finds in an argument of another batch file stay unread, as names built at run time do
+in Bash.
 To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`; see
 [Platform Support](operations.md#platform-support).
 

@@ -50,7 +50,8 @@ unrecognized) and `absent`; `TRUTHY` and `FALSY` are a hand copy of the host's l
 `hooks/lib/powershell-command-v1.js` has no dependencies and never throws at a caller: `analyze()`
 returns `fault` for an unterminated construct, an unbalanced group, a text over `MAX_TEXT_LENGTH`,
 and nesting past `MAX_DEPTH` or `MAX_RECORDS`. It over-reports command positions, resolves the
-built-in aliases through `ALIASES` (the union of Windows PowerShell 5.1 and PowerShell 7), and
+default aliases through `ALIASES` (the union of those Windows PowerShell 5.1 and PowerShell 7
+define on Windows and Unix, the CIM module's and the ones cmdlets declare included), and
 normalizes names through `normalizeCommandName`. Every argument is literal or not; a word built at
 run time keeps its literal `prefix`, and `literals` holds every decoded string, so a name check
 also sees a backtick or `u{}` spelling. `joinConcatenations` joins a `+` between two string
@@ -74,8 +75,9 @@ Three verdicts:
 
 - `zensuInvocations` for the CLI gate: each literal `zensu` call with its verbatim words, a word
   built at run time as `OPAQUE_ARGUMENT` (NUL). It answers `unjudged`, never "no call", when the text names
-  `zensu` and holds a dynamic call target, a launcher, a definition, an unsafe method call, a
-  fault, or a nested shell it cannot read. A literal argument that Windows PowerShell 5.1 or
+  `zensu` and holds a dynamic call target, a launcher (`LAUNCHERS`; `Invoke-CimMethod` and
+  `Invoke-WmiMethod` count, because `Win32_Process.Create` starts a process), a definition, an
+  unsafe method call, a fault, or a nested shell it cannot read. A literal argument that Windows PowerShell 5.1 or
   cmd.exe would hand to `zensu` differently (`nativeArgumentReason`) is unjudged too: a double
   quote, which 5.1 can split into more arguments, and, because a batch-file `zensu` goes through
   cmd.exe, a `%name%` reference or a cmd.exe operator (`&`, `|`, `<`, `>`, `^`) in an argument
@@ -134,7 +136,7 @@ green row would be a false all-clear.
 ## Coupled sites
 
 - The matcher spelling: both groups in `hooks/hooks.json`, `CONSENT_MATCHER` and `CONSENT_TOOLS`,
-  B3, W4, P1, R0c, V3, the `registered_check` of `tests/e2e-source-write-gate/run.sh`, P1vl7, and
+  B3, W4, P1, P1b, R0c, V3, the `registered_check` of `tests/e2e-source-write-gate/run.sh`, P1vl7, and
   `bashGroup` in `evals/session-control/lib/upgrade-hook-contract.js`. Matcher reads go through
   `hostMatcherCovers`; never compare the matcher string.
 - The sibling loads: `bash-source-write-parse.js` requires the analyzer lazily and only for a
@@ -143,9 +145,12 @@ green row would be a false all-clear.
   module requires it lazily for `spellings()`; the doctor report requires it. PC5a, PC5b and PC5c
   pin the three hook loads, and P2p9 the doctor's. A failed load in the source-write parser is
   caught and denies with its own text (WP17); in the consent module it refuses the call.
-- `UNIX_ALIASES` is the `BuiltInAliases` list of PowerShell's `InitialSessionState.cs` without
-  its `#if !UNIX` and `#if !CORECLR` entries (read on `master`, 2026-10-14). The conformance case
-  checks on a non-Windows host that each entry exists there.
+- `UNIX_ALIASES` holds the aliases PowerShell 7 defines outside Windows: the `BuiltInAliases` list
+  of `InitialSessionState.cs` without its `#if !UNIX` and `#if !CORECLR` entries, plus `fhx`,
+  `gcb`, `gtz` and `scb`, which cmdlets declare and `CreateDefault()` adds when it imports the
+  engine snap-ins. `ALIASES` equals the alias rows of PowerShell's own `DefaultCommands.Tests.ps1`
+  and `UNIX_ALIASES` its `CoreUnix` rows (both read at `v7.6.6`, 2026-10-19). The conformance case
+  checks on a non-Windows host that each `UNIX_ALIASES` entry exists there.
 - The consent prefilter's PowerShell arm and its `tr -d` set, which now strips backticks, and
   `strippedText` in the consent module move together; the hook fallbacks strip backticks too.
 - `OPAQUE_ARGUMENT` and the `__unjudged__` line between the gate's inline node and its shell side.
@@ -164,7 +169,10 @@ Unicode dash before `-h`. Its conformance case parses the
 corpus with `[System.Management.Automation.Language.Parser]::ParseInput`, requires every
 `CommandAst` name among the analyzer's commands and every `Get-Alias` entry in `ALIASES`; it is
 required on win32 and skipped where no PowerShell is installed. It reads the host's major version
-and analyzes in the matching reading, so a 5.1 host is held to the 5.1 decoding. Its driver
+and analyzes in the matching reading, so a 5.1 host is held to the 5.1 decoding; on a Linux host
+with `pwsh`, such as the `ubuntu-latest` runners, it runs against PowerShell 7. Its registry entry
+declares 17 cases and one skip on `darwin`, `linux` and `root`, measured where no PowerShell is
+installed, and none on `win32`, where the case is required. Its driver
 `tests/structure/test-powershell-tool-coverage.sh` runs on `windows-shard-3`. The per-hook
 PowerShell cases are B40-B41 (B40x2-B40x7 for the 5.1 readings and the native arguments),
 WP1-WP17, F8p-F8p6, V70-V70g, H17g5-H17g6, R7p-R7pd, PS1-PS6, the work-order gate and post
@@ -186,11 +194,13 @@ P2p1-P2p9.
   script path.
 - Script files, interpreter code (`node -e`, `python -c`), and an alias, function or variable an
   earlier tool call defined are not read.
+- A command registered to run later, such as a scheduled task whose action names `zensu` in a
+  string, is not judged.
 - The doctor and adoption commands are recognized in Bash spelling only. In a bind failure a
   PowerShell call gets the named deny, and both stay reachable through the Bash tool.
 - "Use the Bash tool" is not actionable when a user denies Bash while forcing the PowerShell tool.
-- The conformance case and the analyzer's Windows behavior run only on Windows CI; no session with
-  the PowerShell tool on was observed live.
+- The conformance case runs only on CI, against Windows PowerShell 5.1 on Windows and PowerShell 7
+  on the Ubuntu runners; no session with the PowerShell tool on was observed live.
 - On Windows with the variable unset, a Bedrock, Vertex or Foundry session sees the banner line
   although the host keeps the tool off there.
 - No ports. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included.

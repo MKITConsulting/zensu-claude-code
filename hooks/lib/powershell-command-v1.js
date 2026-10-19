@@ -94,9 +94,13 @@ const ALIASES = Object.freeze({
   gal: 'get-alias',
   gbp: 'get-psbreakpoint',
   gc: 'get-content',
+  gcai: 'get-cimassociatedinstance',
   gcb: 'get-clipboard',
   gci: 'get-childitem',
+  gcim: 'get-ciminstance',
+  gcls: 'get-cimclass',
   gcm: 'get-command',
+  gcms: 'get-cimsession',
   gcs: 'get-pscallstack',
   gdr: 'get-psdrive',
   gerr: 'get-error',
@@ -120,6 +124,7 @@ const ALIASES = Object.freeze({
   gwmi: 'get-wmiobject',
   h: 'get-history',
   history: 'get-history',
+  icim: 'invoke-cimmethod',
   icm: 'invoke-command',
   iex: 'invoke-expression',
   ihy: 'invoke-history',
@@ -144,12 +149,16 @@ const ALIASES = Object.freeze({
   mp: 'move-itemproperty',
   mv: 'move-item',
   nal: 'new-alias',
+  ncim: 'new-ciminstance',
+  ncms: 'new-cimsession',
+  ncso: 'new-cimsessionoption',
   ndr: 'new-psdrive',
   ni: 'new-item',
   nmo: 'new-module',
   npssc: 'new-pssessionconfigurationfile',
   nsn: 'new-pssession',
   nv: 'new-variable',
+  nwsn: 'new-psworkflowsession',
   ogv: 'out-gridview',
   oh: 'out-host',
   popd: 'pop-location',
@@ -158,7 +167,10 @@ const ALIASES = Object.freeze({
   pwd: 'get-location',
   r: 'invoke-history',
   rbp: 'remove-psbreakpoint',
+  rcie: 'register-cimindicationevent',
+  rcim: 'remove-ciminstance',
   rcjb: 'receive-job',
+  rcms: 'remove-cimsession',
   rcsn: 'receive-pssession',
   rd: 'remove-item',
   rdr: 'remove-psdrive',
@@ -184,6 +196,7 @@ const ALIASES = Object.freeze({
   sbp: 'set-psbreakpoint',
   sc: 'set-content',
   scb: 'set-clipboard',
+  scim: 'set-ciminstance',
   select: 'select-object',
   set: 'set-variable',
   shcm: 'show-command',
@@ -212,12 +225,12 @@ const ALIASES = Object.freeze({
 
 const UNIX_ALIASES = new Set([
   '%', '?', 'cd', 'chdir', 'clc', 'clhy', 'cli', 'clp', 'cls', 'clv', 'copy', 'cpi', 'cvpa', 'dbp', 'del', 'dir', 'ebp',
-  'echo', 'epal', 'epcsv', 'erase', 'etsn', 'exsn', 'fc', 'fl', 'foreach', 'ft', 'fw', 'gal', 'gbp', 'gc', 'gci', 'gcm',
-  'gcs', 'gdr', 'gerr', 'ghy', 'gi', 'gjb', 'gl', 'gm', 'gmo', 'gp', 'gps', 'gpv', 'group', 'gsn', 'gu', 'gv', 'h',
-  'history', 'icm', 'iex', 'ihy', 'ii', 'ipal', 'ipcsv', 'ipmo', 'irm', 'iwr', 'md', 'measure', 'mi', 'move', 'mp',
-  'nal', 'ndr', 'ni', 'nmo', 'nsn', 'nv', 'oh', 'popd', 'pushd', 'pwd', 'r', 'rbp', 'rcjb', 'rcsn', 'rd', 'rdr', 'ren',
-  'ri', 'rjb', 'rmo', 'rni', 'rnp', 'rp', 'rsn', 'rv', 'rvpa', 'sajb', 'sal', 'saps', 'sbp', 'select', 'set', 'si',
-  'sl', 'sls', 'sp', 'spjb', 'spps', 'sv', 'type', 'where', 'wjb',
+  'echo', 'epal', 'epcsv', 'erase', 'etsn', 'exsn', 'fc', 'fhx', 'fl', 'foreach', 'ft', 'fw', 'gal', 'gbp', 'gc', 'gcb',
+  'gci', 'gcm', 'gcs', 'gdr', 'gerr', 'ghy', 'gi', 'gjb', 'gl', 'gm', 'gmo', 'gp', 'gps', 'gpv', 'group', 'gsn', 'gtz',
+  'gu', 'gv', 'h', 'history', 'icm', 'iex', 'ihy', 'ii', 'ipal', 'ipcsv', 'ipmo', 'irm', 'iwr', 'md', 'measure', 'mi',
+  'move', 'mp', 'nal', 'ndr', 'ni', 'nmo', 'nsn', 'nv', 'oh', 'popd', 'pushd', 'pwd', 'r', 'rbp', 'rcjb', 'rcsn', 'rd',
+  'rdr', 'ren', 'ri', 'rjb', 'rmo', 'rni', 'rnp', 'rp', 'rsn', 'rv', 'rvpa', 'sajb', 'sal', 'saps', 'sbp', 'scb',
+  'select', 'set', 'si', 'sl', 'sls', 'sp', 'spjb', 'spps', 'sv', 'type', 'where', 'wjb',
 ]);
 
 const READ_ONLY_COMMANDS = new Set([
@@ -243,8 +256,8 @@ const DEFINITION_WRITE_COMMANDS = new Set(['copy-item', 'new-item', 'rename-item
 const LOCATION_COMMANDS = new Set(['set-location', 'push-location']);
 const DRIVE_COMMANDS = new Set(['new-psdrive']);
 const LAUNCHERS = new Set([
-  'add-type', 'invoke-command', 'invoke-expression', 'invoke-history', 'invoke-item', 'start-job', 'start-process',
-  'start-threadjob',
+  'add-type', 'invoke-cimmethod', 'invoke-command', 'invoke-expression', 'invoke-history', 'invoke-item',
+  'invoke-wmimethod', 'start-job', 'start-process', 'start-threadjob',
 ]);
 const NESTED_SHELLS = new Set([
   'bash', 'busybox', 'cmd', 'dash', 'doas', 'env', 'fish', 'gsudo', 'ksh', 'nice', 'nohup', 'powershell',
