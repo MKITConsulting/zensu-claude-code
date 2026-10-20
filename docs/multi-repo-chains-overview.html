@@ -186,7 +186,7 @@
   ships the detect-and-refuse half: the terminus judges the edit-landing receipt's verdict, a logged
   claim arms that requirement even when the anchor's tree is clean, a claim resolving outside the
   audited root fails the audit and names the foreign root, and <code>/zensu:doctor</code> carries a
-  topology row. <strong>Which half of stage 1 is universally live is narrower than “stage 1 is implemented”:</strong> the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still beginning with <code>/</code>. A foreign root outside both <code>$HOME</code> and the project root is detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not. Nothing else here is
+  topology row. <strong>Which half of stage 1 is universally live is narrower than “stage 1 is implemented”:</strong> the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still beginning with <code>/</code>. A foreign root outside every home directory and the project root is detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not, and one under another user's home or <code>/root</code> becomes <code>&lt;home&gt;</code> and names no root either. Nothing else here is
   implemented. The carrier question of the specification's §6.1.1 was answered on
   2026-09-20 — the Session Control record, sealed by an interactive confirmation at arming, behind a
   containment gate on the Bash channel into the plugin-data store — but that is a decision, not a
@@ -290,7 +290,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:940 · zensu-log.sh:1525</p>
+      <p class="src">zensu-edit-landing.sh:984 · zensu-log.sh:1525</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>

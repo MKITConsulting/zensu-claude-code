@@ -847,9 +847,9 @@ whether browser verification is enforced, not only when a row is red.
   run log is REDACTED on the way in: a claim under `$HOME` is
   rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
   no longer an absolute path when the audit reads it, no foreign root is derived
-  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
-  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
-  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  and no row can fire. A sibling in another home or `/root` becomes `<home>`; only siblings
+  outside every home — `/opt`, `/srv`, `/builds` — reach the row. Say
+  WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
 - **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
   session's delivery route is already decided, so the plan-approval hook and the
