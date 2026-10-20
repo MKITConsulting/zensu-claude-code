@@ -631,6 +631,52 @@ HB_COLLECT="$(helper "$DATA" "$SESSION" collect --lease-id "$HB_ID" --agent-id h
   || check "collect returns the handed-back result" FAIL
 helper "$DATA" "$SESSION" close --lease-id "$HB_ID" >/dev/null
 
+HB_DIRECT="$(MODULE="$PLUGIN/hooks/lib/review-evidence-lease-v1.js" node -e '
+  const lease = require(process.env.MODULE);
+  const inputs = [{ message: "x", to: "main" }, {}, { message: { text: "x" } }, null, ["x"]];
+  const reasons = inputs.map((input) => lease.toolViolation({
+    agent_type: "zensu:plan-review-worker", agent_id: "direct-agent",
+    tool_name: "SubagentHandback", tool_input: input,
+  }, {}));
+  const expected = "evidence-worker-v1 may invoke SubagentHandback only with exactly one string field, message";
+  process.stdout.write(reasons.every((reason) => reason === expected) ? "ok" : JSON.stringify(reasons));
+')"
+[ "$HB_DIRECT" = ok ] \
+  && check "the lease module refuses a malformed handback shape on its own, before any lease lookup" PASS \
+  || check "the lease module must refuse a malformed handback shape on its own (got: ${HB_DIRECT:-<empty>})" FAIL
+
+EXP_OUT="$(helper "$DATA" "$SESSION" create --kind plan-review \
+  --files-manifest "$WORKSPACE/FILES.txt" --safe-subtrees-manifest "$WORKSPACE/ROOTS.txt" \
+  --max-workers 1 2>/dev/null)"
+EXP_ID="${EXP_OUT#lease_id=}"
+EXP_RECORD="$(record_file "$DATA" "$SESSION" "$EXP_ID")"
+bind_worker "$DATA" "$SESSION" expiry-agent zensu:plan-review-worker >/dev/null 2>&1
+RECORD="$EXP_RECORD" MODULE="$PLUGIN/hooks/lib/review-evidence-lease-v1.js" node -e '
+  const fs=require("node:fs"); const lease=require(process.env.MODULE);
+  const j=JSON.parse(fs.readFileSync(process.env.RECORD,"utf8"));
+  j.expires_at_ms=Date.now()-1; j.revision+=1;
+  fs.writeFileSync(process.env.RECORD, `${JSON.stringify(lease.sealRecord(j))}\n`);
+'
+EXP_DIGEST="$(file_digest "$EXP_RECORD")"
+EXP_HB_REASON="$(gate_reason "$DATA" "$SESSION" expiry-agent zensu:plan-review-worker SubagentHandback \
+  "$(handback_input "$(valid_plan_result expiry-role)")")"
+case "$EXP_HB_REASON" in
+  *'evidence-worker-v1 lease is expired'*)
+    check "a bound worker's handback on an expired lease is denied" PASS ;;
+  *) check "a bound worker's handback on an expired lease must be denied (got: ${EXP_HB_REASON:-<empty>})" FAIL ;;
+esac
+if stop_worker "$DATA" "$SESSION" expiry-agent zensu:plan-review-worker \
+    "$(valid_plan_result expiry-role)" >/dev/null 2> "$TMP/expired-stop.err"; then
+  check "a bound worker's SubagentStop on an expired lease must be refused" FAIL
+elif grep -qF 'worker binding is no longer active' "$TMP/expired-stop.err" \
+    && [ "$(file_digest "$EXP_RECORD")" = "$EXP_DIGEST" ] \
+    && [ "$(worker_state "$EXP_RECORD" expiry-agent)" = 'bound:0:-' ]; then
+  check "a bound worker's SubagentStop on an expired lease is refused and leaves the record unchanged" PASS
+else
+  check "a bound worker's SubagentStop on an expired lease must be refused with the inactive-binding reason ($(worker_state "$EXP_RECORD" expiry-agent))" FAIL
+fi
+helper "$DATA" "$SESSION" close --lease-id "$EXP_ID" >/dev/null
+
 # PR results are additionally bound to the immutable name-status inventory.
 PRSPACE="$TMP/pr-review-workspace"
 mkdir -p "$PRSPACE"
