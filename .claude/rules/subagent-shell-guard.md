@@ -160,7 +160,8 @@ grows past 64 directories is denied (`directories`).
 - `Bash` only. The five other shell names have no guard, G8 pins the six-name `COMMAND_TOOLS`
   set and its arity, and `isShellCall` matches `Bash` alone. `Monitor` stays outside the grant:
   the allowlist leaves it out, and `test-reviewer-capability-gate.sh` pins the allowlist deny for
-  a named neutral child's `Monitor` command.
+  a named neutral child's `Monitor` command. `PowerShell` is no `COMMAND_TOOLS` name either: the
+  allowlist denies it to every non-main principal, which PS1 to PS6 pin.
 - The allowlist deny for an unlisted tool (`hostProfileAllowance`) lists `Bash behind an
   accident guard` while `grantRefusal` admits the caller and leaves it out otherwise, so it never
   contradicts the SubagentStart context, which tells a named neutral agent it may run `Bash`.

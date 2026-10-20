@@ -2178,6 +2178,8 @@ function gateReason(orderId, finding) {
       return `${lead} ${finding.detail} puts an option between -c and the command string, which the gate cannot judge. Put the command string right after -c.`;
     case 'lease':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run any more. Run zensu-work-order.sh --finish once and end the session.`;
+    case 'powershell':
+      return `${lead} The PowerShell tool is not available here, because this gate judges Bash commands only. Run the command through the Bash tool.`;
     case 'lease-refused':
       return `${lead} ${finding.detail}. No push, pull request or other forge command may run until a lease renewal succeeds. Run zensu-work-order.sh --renew --force and follow its exit code: after exit 0 run the command again, after exit 4 or 6 run zensu-work-order.sh --finish once and end the session, and after exit 7 follow the exit table of /zensu:work.`;
     default:
@@ -2195,6 +2197,7 @@ function gateDecision(context, payload, { env = process.env, now = Date.now } = 
   const tool = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   if (ASK_TOOLS.has(tool)) return { code: 'ask', reason: gateReason(orderId, bashFinding('ask', null)) };
   if (CHIP_TOOLS.has(tool)) return { code: 'chip', reason: gateReason(orderId, bashFinding('chip', null)) };
+  if (tool === 'PowerShell') return { code: 'powershell', reason: gateReason(orderId, bashFinding('powershell', null)) };
   let analysis = { deny: null, forge: false };
   if (tool === 'Bash') {
     analysis = analyzeBash(isObject(payload.tool_input) ? payload.tool_input.command : '');
