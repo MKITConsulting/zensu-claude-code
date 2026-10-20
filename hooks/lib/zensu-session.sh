@@ -716,7 +716,7 @@ _zensu_adoption_refusal_remedy() {
     (plugin-data-mismatch)
       printf '%s' 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward' ;;
     (record-unreadable)
-      printf '%s' 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change — and adoption cannot tell those apart; /zensu:adopt-session prints the full diagnosis, and a fresh Claude Code session is the way forward' ;;
+      printf '%s' 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change; /zensu:adopt-session names why each record reader refused it, and a fresh Claude Code session is the way forward' ;;
     (executing-runtime-unidentified)
       printf '%s' 'The running installation declares no usable version, so repair the plugin installation first' ;;
     (opted-out)

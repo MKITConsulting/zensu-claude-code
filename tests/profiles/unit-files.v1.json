@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 217, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 226, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
@@ -164,7 +164,7 @@
       "summary": "The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals."
     },
     {
-      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 59,
+      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 63,
       "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
       "summary": "The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows."
     },

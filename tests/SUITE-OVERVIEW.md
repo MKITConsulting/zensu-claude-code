@@ -388,7 +388,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 
 | Unit file | Registered | Skips | Driven by | Summary |
 |---|---|---|---|---|
-| `session-control/session-control-core-v1.test.js` | 217 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
+| `session-control/session-control-core-v1.test.js` | 226 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
 | `structure/acceptance-verify-v1.test.js` | 26 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
 | `structure/aspect-activation-v1.test.js` | 21 | – | `test-incremental-review-rounds.sh` | Review-aspect activation: which review perspectives a round activates for a given change. |
 | `structure/chain-recovery-v1.test.js` | 21 | – | `test-chain-recover.sh` | The chain shape lattice and the rearm-receipt predicate. |
@@ -418,7 +418,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/reviewer-spawn-denial-v1.test.js` | 37 | win32 2 | `test-stop-enforcer-self-review-routing.sh` | Host-refused reviewer spawns: tool_use_id keying, the host error flag, the marker prefix and the read bounds. |
 | `structure/route-short-line-graders.test.js` | 38 | – | `test-route-short-line-eval.sh` | The route short-line eval: the decision probe and its Bash classifier, the transcript and envelope parsers, and every grader in both directions. |
 | `structure/rule-block-v1.test.js` | 10 | win32 2 | `test-best-solution-first.sh` | The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals. |
-| `structure/session-adopt-report-v1.test.js` | 59 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
+| `structure/session-adopt-report-v1.test.js` | 63 | – | `test-versioned-plugin-upgrade.sh` | The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows. |
 | `structure/session-auto-adopt-v1.test.js` | 44 | – | `test-versioned-plugin-upgrade.sh` | Automatic adoption across a lineage break: the ladder, every refusal and unavailable arm, and the lock. |
 | `structure/session-control-lineage.test.js` | 13 | – | `test-versioned-plugin-upgrade.sh` | The runtime-lineage axis: same major (same minor while the major is 0), never backwards, and a sibling plugin root. |
 | `structure/session-hub-receipt-v1.test.js` | 13 | – | `test-session-hub-receipt.sh` | The Session Hub takeover receipt: the command token, the refused prompt shapes and the receipt fields. |

@@ -4778,7 +4778,7 @@ function bindingLine() {
     case 'bound':
       return line(OK, 'binding: this session has a valid Session Control record — stateful tools can run');
     case 'unbound':
-      return line(BAD, 'binding: this session has no valid Session Control record — every stateful Zensu tool fails closed; start a fresh Claude Code session');
+      return line(BAD, 'binding: this session has no valid Session Control record — every stateful Zensu tool fails closed; /zensu:adopt-session, which writes nothing without --confirm, names the cause (for an unreadable record, why each record reader refused it); start a fresh Claude Code session');
     // A record that is valid in every other respect, pointing at a directory
     // that is gone. Naming the path matters: the remedy is only actionable if the
     // user is told which directory, and the generic unbound line above would send
