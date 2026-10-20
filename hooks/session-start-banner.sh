@@ -225,10 +225,23 @@ else
   fi
 fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
+_ZENSU_CLI_PROBE=""
+if command -v node >/dev/null 2>&1; then
+  _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e 'process.exitCode = require("./zensu-cli-version-v1.js").cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""
+fi
+_ZENSU_CLI_STATE="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^state=//p')"
+_ZENSU_CLI_VERSION="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^version=//p')"
+_ZENSU_CLI_FLOOR="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^floor=//p')"
 if command -v zensu >/dev/null 2>&1; then
-  echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."
+  case "$_ZENSU_CLI_STATE" in
+    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release Zensu skills support: older releases print only the first 100 ghost-scan candidates and read only the first page of wiki lists. Upgrade: brew upgrade --cask zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
+    (ok) echo "zensu: CLI ready ($(command -v zensu), $_ZENSU_CLI_VERSION) — Zensu skills drive it. On an auth error run: zensu auth login." ;;
+    (*) echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login." ;;
+  esac
 else
-  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need it. Install: curl -fsSL https://zensu.dev/install.sh | sh  then: zensu auth login."
+  _ZENSU_CLI_NEED="it"
+  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later"
+  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex — then: zensu auth login."
 fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 }

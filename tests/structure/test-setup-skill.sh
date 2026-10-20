@@ -120,6 +120,74 @@ else
   check "P8b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
+ZC_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js"
+ZC_FLOOR="$(node -e 'process.stdout.write(require(process.argv[1]).MIN_VERSION)' "$ZC_MODULE" 2>/dev/null)"
+PILOT_MD="$PLUGIN_DIR/skills/pilot/SKILL.md"
+if [ -n "$ZC_FLOOR" ] && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-version-v1.js" --lookup' "$SKILL_MD" \
+  && grep -qF '`state=old`' "$SKILL_MD" && grep -qF "zensu-cli $ZC_FLOOR or later" "$SKILL_MD" && grep -qF 'Warn only: continue either way.' "$SKILL_MD"; then
+  check "P9a Phase 0 checks the version floor through the version module and only warns" PASS
+else
+  check "P9a Phase 0 checks the version floor through the version module and only warns" FAIL
+fi
+if grep -qF 'prints `Not logged in` (it exits 0' "$SKILL_MD"; then
+  check "P9b Phase 1 treats Not logged in on exit 0 as not authenticated" PASS
+else
+  check "P9b Phase 1 treats Not logged in on exit 0 as not authenticated" FAIL
+fi
+if grep -qF 'or printing `Not logged in`' "$PILOT_MD"; then
+  check "P9c /zensu:pilot treats Not logged in from zensu auth status as not authenticated" PASS
+else
+  check "P9c /zensu:pilot treats Not logged in from zensu auth status as not authenticated" FAIL
+fi
+if grep -qF 'On `cwd-relative`' "$SKILL_MD" && grep -qF 'skip Phase 1, because' "$SKILL_MD" && grep -qF '`absent` (the shell found' "$SKILL_MD"; then
+  check "P9d Phase 0 skips Phase 1 when PATH reaches zensu through a relative entry, and names the absent state" PASS
+else
+  check "P9d Phase 0 skips Phase 1 when PATH reaches zensu through a relative entry, and names the absent state" FAIL
+fi
+
+ZC_FACTS="$(node -e 'const m = require(process.argv[1]); process.stdout.write([m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell].join("\n"))' "$ZC_MODULE" 2>/dev/null)"
+ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
+ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
+ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
+ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
+zc_names_all() {
+  [ -n "$ZC_BREW" ] && [ -n "$ZC_BREW_UP" ] && [ -n "$ZC_SCRIPT" ] && [ -n "$ZC_PS" ] || return 1
+  local escaped_script escaped_ps
+  escaped_script="$(printf '%s' "$ZC_SCRIPT" | sed 's/|/\\|/')"
+  escaped_ps="$(printf '%s' "$ZC_PS" | sed 's/|/\\|/')"
+  grep -qF "$ZC_BREW" "$1" && grep -qF "$ZC_BREW_UP" "$1" \
+    && { grep -qF "$ZC_SCRIPT" "$1" || grep -qF "$escaped_script" "$1"; } \
+    && { grep -qF "$ZC_PS" "$1" || grep -qF "$escaped_ps" "$1"; }
+}
+ZC_SITES_BAD=""
+for zc_site in README.md docs/operations.md skills/setup/SKILL.md hooks/session-start-banner.sh; do
+  zc_names_all "$PLUGIN_DIR/$zc_site" || ZC_SITES_BAD="$ZC_SITES_BAD $zc_site"
+done
+[ -z "$ZC_SITES_BAD" ] && check "P10a README, the operations troubleshooting row, /zensu:setup and the banner name the module's install and upgrade commands" PASS \
+  || check "P10a an install or upgrade command of the module is missing from:$ZC_SITES_BAD" FAIL
+if [ -n "$ZC_FLOOR" ] && [ "$(grep -cF "zensu-cli $ZC_FLOOR or later" "$README_MD")" -ge 2 ] \
+  && grep -qF "older than $ZC_FLOOR" "$PLUGIN_DIR/docs/operations.md" && grep -qF "names zensu-cli $ZC_FLOOR" "$PLUGIN_DIR/docs/work-order-mode.md"; then
+  check "P10b README Install and Requirements, the operations row and the work-order doc name the module's floor" PASS
+else
+  check "P10b README Install and Requirements, the operations row and the work-order doc name the module's floor" FAIL
+fi
+ZC_FULL="- Zensu CLI $ZC_FLOOR or later on \`PATH\`: \`$ZC_BREW\`, \`$ZC_SCRIPT\`, or on Windows \`$ZC_PS\`; upgrade with \`$ZC_BREW_UP\` or by running the installer again"
+ZC_SKILLS_BAD=""
+for zc_skill in bootstrap implement pulse security-review docs; do
+  grep -qF -- "$ZC_FULL" "$PLUGIN_DIR/skills/$zc_skill/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD $zc_skill"
+done
+grep -qF -- "- Zensu CLI $ZC_FLOOR or later on \`PATH\`; see \`/zensu:doctor\` for install/upgrade hints" "$PLUGIN_DIR/skills/ghost-scan/SKILL.md" || ZC_SKILLS_BAD="$ZC_SKILLS_BAD ghost-scan"
+[ -n "$ZC_FLOOR" ] && [ -z "$ZC_SKILLS_BAD" ] && check "P10c the six skill prerequisites name the module's floor; five name the install commands and ghost-scan, on the shrink-only body allowlist, names /zensu:doctor" PASS \
+  || check "P10c a skill prerequisite does not match the module's floor or install commands:$ZC_SKILLS_BAD" FAIL
+ZC_STALE="$(grep -lF 'Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`)' "$PLUGIN_DIR"/skills/*/SKILL.md 2>/dev/null | tr '\n' ' ')"
+[ -z "$ZC_STALE" ] && check "P10d no skill keeps the curl-only install prerequisite" PASS || check "P10d a skill keeps the curl-only install prerequisite: $ZC_STALE" FAIL
+ZC_REASON="$(node -e 'process.stdout.write(require(process.argv[1]).FLOOR_REASON)' "$ZC_MODULE" 2>/dev/null)"
+if [ -n "$ZC_REASON" ] && grep -qF -- "$ZC_REASON" "$PLUGIN_DIR/hooks/session-start-banner.sh" && tr '\n' ' ' < "$README_MD" | grep -qF -- "$ZC_REASON"; then
+  check "P10e the banner and the README Requirements state the module's reason for the floor" PASS
+else
+  check "P10e the banner and the README Requirements state the module's reason for the floor" FAIL
+fi
+
 echo "----"
 echo "test-setup-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
