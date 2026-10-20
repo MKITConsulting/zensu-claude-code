@@ -80,8 +80,9 @@ config key or attestation moves.
   skills are indented the same way.
 - **Three probes never see the project config.** The tdd, plan-review and pr-team-review probes run
   without `CLAUDE_PROJECT_DIR`, which the Bash tool does not carry, so a project-level
-  `hooks.reviewJudge` or `hooks.findingVerification` is ignored. The self-review probe sets it from
-  `$TOP`. That predates this change and is not fixed by it. The later `hooks.aspectActivation` probe
-  in step 3 of `skills/tdd/references/review-chain.md` passes `CLAUDE_PROJECT_DIR="{project_root}"`
-  and is pinned whole by `I11` in `tests/structure/test-incremental-review-rounds.sh`.
+  `hooks.reviewJudge` or `hooks.findingVerification` is ignored. The self-review probe sets it to
+  the bound project root. That predates this change and is not fixed by it. The later
+  `hooks.aspectActivation` probe in step 3 of `skills/tdd/references/review-chain.md` passes
+  `CLAUDE_PROJECT_DIR="{project_root}"` and is pinned whole by `I11` in
+  `tests/structure/test-incremental-review-rounds.sh`.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not checked.

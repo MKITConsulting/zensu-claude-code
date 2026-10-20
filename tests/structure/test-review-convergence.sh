@@ -215,7 +215,8 @@ check "R25b self-review reads the chain's own run log" "$(grep_ok "$SELF_REVIEW_
 check "R25c self-review reads the ledger leniently inside the project root" "$(grep_ok "$SELF_REVIEW_MD" 'review-ledger-v1.js" --report --log <run-log> --root')"
 check "R25d self-review never shell-expands a ledger line" "$(grep_ok "$SELF_REVIEW_MD" 'fed by a heredoc whose delimiter is quoted, never through `--message`')"
 check "R25e self-review appends its fixed lines through the stdin verb" "$(grep_ok "$SELF_REVIEW_MD" 'append --log <run-log> --message-stdin')"
-check "R25f self-review reads the ledger only while reviewConvergence is on" "$(grep_ok "$SELF_REVIEW_MD" 'zensu_hook_enabled reviewConvergence && echo on || echo off')"
+R25F_PROBE='`ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$PROJECT_ROOT" bash -c '\''source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off'\''`'
+check "R25f self-review reads the ledger only while reviewConvergence is on, resolved against the bound project root" "$(grep_ok "$SELF_REVIEW_MD" "$R25F_PROBE")"
 check "R25g self-review takes parked entries as candidates" "$(grep_ok "$SELF_REVIEW_MD" '`routed-unfixed` or `parked`, and every `deferred` entry rated IMPORTANT or CRITICAL')"
 check "R25h self-review fixes a supported parked entry whatever the must-fix bar says" "$(grep_ok "$SELF_REVIEW_MD" 'whatever the must-fix bar above says')"
 check "R25i self-review reports the candidates it fixed without a re-review" "$(grep_ok "$SELF_REVIEW_MD" 'how many of them this stage fixed without a re-review')"
