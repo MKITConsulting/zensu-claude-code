@@ -1,8 +1,11 @@
 ---
 paths:
   - "hooks/lib/reviewer-capability-v1.js"
+  - "hooks/lib/review-evidence-lease-v1.js"
+  - "hooks/lib/review-evidence-hook-v1.js"
   - "hooks/pre-reviewer-capability-gate.sh"
   - "tests/structure/test-reviewer-capability-gate.sh"
+  - "tests/structure/test-review-worker-evidence-lease.sh"
 ---
 
 # Reviewer Capability Gate: Host Report Tool (`SubagentHandback`)
@@ -16,15 +19,20 @@ parent "The subagent ended without delivering a report through SubagentHandback"
 schema is `{ message: string }`; there is no recipient parameter; the host frames the text as
 untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "flag"`.
 
-**The decision.** `HOST_HANDBACK_TOOL` is admitted for exactly the two read-only profiles in
-`HANDBACK_PROFILES`, `reviewer-readonly-v1` and `zensu-plm-readonly-v1`:
+**The decision.** `HOST_HANDBACK_TOOL` is admitted with a free-text report for exactly the two
+read-only profiles in `HANDBACK_PROFILES`, `reviewer-readonly-v1` and `zensu-plm-readonly-v1`,
+and with nothing but their lease-validated JSON result for the two evidence workers
+(§"The evidence workers hand back their JSON result" below):
 
 - **Exact name.** Case-sensitive. `SendMessage`, case variants, padded names and MCP look-alikes
   stay denied, and the suite pins each.
 - **Exact input shape.** One string field, `message`, and nothing else. The admission rests on
   the premise that the tool carries text to the caller and does nothing more. The shape check
   enforces that premise instead of trusting it: a host that adds a recipient, attachment or
-  path parameter fails closed rather than silently widening a read-only principal.
+  path parameter fails closed rather than silently widening a read-only principal. The
+  predicate is `handbackInputValid` in `review-evidence-lease-v1.js`, exported beside
+  `HANDBACK_TOOL`; `handbackViolation` calls it for every profile, so the reviewers, the PLM
+  and the workers cannot drift apart.
 - **No content policing.** An empty message is left to the host's own validation. A report may
   quote protected paths or `*** Update File:` lines. `protectedAccessViolation` is NOT run on
   the handback, because `pathInputs` reads a quoted patch header as a path and would deny a
@@ -59,7 +67,7 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
   `templates/workflows/zensu-review-v1.js` rests on it: its finders and refuters run as
   `zensu:review-aspect` under `reviewer-readonly-v1`. The tool left the `HOST_NON_READ_TOOLS`
   roster; case variants and look-alike MCP names stay denied, and the evidence workers stay on
-  their lease trio. **Version: `patch`** — the gate denies strictly less.
+  their lease trio plus the handback. **Version: `patch`** — the gate denies strictly less.
 
 **Not in the frontmatter.** `agents/*.md` keep `tools: Read, Grep, Glob`. The host injects
 the tool itself, after the frontmatter filter. `confinedByFrontmatter` in
@@ -67,14 +75,71 @@ the tool itself, after the frontmatter filter. `confinedByFrontmatter` in
 is exactly the trio, so adding the tool there would silently drop every reviewer from the
 spawn grant.
 
-**The evidence workers are excluded on purpose.** `zensu:plan-review-worker` and
-`zensu:pr-review-worker` go through `toolViolation` in `review-evidence-lease-v1.js`, which keeps
-its own `ALLOWED_TOOLS` trio. Their result is read from `SubagentStop`'s
-`last_assistant_message` and must be one pure JSON object. A worker that handed its JSON back
-and then stopped would leave that message without the JSON, and the lease generation would
-void. Measured on 51 denied `pr-review-worker` transcripts: after one to four denied handback
-attempts, every one ended with its pure-JSON result as final text. Admitting the tool for
-workers first needs the `SubagentStop` reader to take the result from the handback.
+**The evidence workers hand back their JSON result.** `zensu:plan-review-worker` and
+`zensu:pr-review-worker` go through `toolViolation` in `review-evidence-lease-v1.js`, which
+admits `HANDBACK_TOOL` beside its `ALLOWED_TOOLS` trio. Read out of the 2.1.305 bundle:
+`SubagentStop`'s `last_assistant_message` is the text blocks of the last assistant message
+joined by a newline, so a worker that hands its JSON back leaves that field without the JSON;
+`SubagentHandback` ends the turn (`endsTurn`); and the turn-end path runs the `SubagentStop`
+hooks even when it injects the `[handback-send-enforce]` nudge, at most three per agent. The
+lease therefore takes the result at the one point where the plugin sees the handed-back text,
+the `PreToolUse` call. The exclusion this replaces cost turns: in the work-order smoke run of
+2026-10-20 (plugin `757f80c6`, claude 2.1.301, auto mode, six pr-review seats) the gate denied 15
+handbacks, one to four per seat, the host nudged the seats, and each seat used 9 to 11 tool
+calls; every seat still ended with its JSON as final text. Earlier, 51 denied `pr-review-worker`
+transcripts showed the same pattern.
+
+- **Gate first.** The `EVIDENCE_WORKER` branch of `judgePrincipal` runs `handbackViolation`
+  for `HOST_HANDBACK_TOOL` before it calls `toolViolation`, and `toolViolation` repeats the
+  exact-name and exact-shape check for its own callers. The suite pins the two name literals
+  equal. Every other tool of a worker is denied with
+  `… only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the JSON result`.
+- **The same validation as the final text.** A bound or retrying worker's message goes
+  through `parseWorkerResult` with the label `SubagentHandback message`, then through the
+  claimed-role check. A pass completes the binding with the write the `SubagentStop` path makes
+  (`completeWorker`, `result_attempts` plus one), so the record gains no key and finalize and
+  collect read it unchanged. A failure is denied with the validation reason and writes nothing.
+  It costs no strike: the two-strike ladder bounds the block loop a `SubagentStop` forces, a
+  deny forces no continuation, and `maxTurns: 24` bounds the retries.
+- **Completed means create-once.** A completed worker's handback is allowed only when its
+  message parses to the stored result (the same `result_sha256`), and it writes nothing; every
+  other message is denied. This is the path a worker takes when its final text completed it at
+  `SubagentStop` and the host's nudge then asks it for the handback. Every other tool stays
+  revoked.
+- **`SubagentStop` after a handback.** For a completed worker `storeWorkerResult` answers
+  before it looks at the lease state: a final text that parses to a different valid result is
+  still refused as create-once, and anything else (absent, empty, prose, the same result) is
+  accepted and changes nothing. The order matters because the handback completes the worker
+  before its own `SubagentStop`, and a main thread that acts on the delivered report can
+  finalize the lease in between.
+- **Worker texts.** Both agent definitions, the two SubagentStart contexts
+  (`renderEvidenceWorkerContext` in `session-control-core-v1.js` and the start line of
+  `review-evidence-hook-v1.js`), the `SubagentStop` block reason, both spawn prompts and the
+  descriptions in `skills/pr-team-review/` and `skills/plan-review/SKILL.md` name the handback
+  as the channel and the final message as the fallback where the host offers no such tool.
+  `skills/plan-review/SKILL.md` sits on the shrink-only allowlist of
+  `tests/structure/test-skill-text-budget.sh`, so its entry moves with any edit there.
+- **Coupled sites.** `tests/structure/test-reviewer-capability-gate.sh` pins the names, the
+  shapes, the hand-off to the lease and the shared literal;
+  `tests/structure/test-review-worker-evidence-lease.sh` pins the allow, the rejections, the
+  identical re-send, create-once, the resultless `SubagentStop`, the late `SubagentStop` after
+  finalize and the PR path binding. The worker sentences are pinned by P4i and P15b in
+  `test-pr-team-review-skill.sh`, P3a and P10b in `test-plan-review-skill.sh` and the agent
+  checks of `test-reviewer-readonly-v1.sh`.
+  `evals/session-control/lib/evidence-worker-contract.js` matches the deny prefix
+  `only Read, Grep, and Glob` and the `create-once` reason.
+- **Known gaps.** The result is stored before the host executes the call. When another
+  `PreToolUse` hook denies the call, or the host's call fails because the caller is gone, the
+  lease holds the result while the caller received no report; the main thread collects from the
+  lease either way, and the worker may re-send the identical result. The `PreToolUse` payload of
+  a worker's handback was not captured live, and no live run has measured the new path yet.
+- **Version: `patch`.** Walked against `.claude/rules/runtime-lineage.md`: no context-record or
+  workflow-state field; the lease record's strict key sets are unchanged, because the handback
+  writes only the fields `storeWorkerResult` writes; no hook added, removed or re-matched; no
+  config key; no attestation change. The gate denies strictly less: the handback is admitted
+  where it was denied, and a completed worker's `SubagentStop` is accepted where its final text
+  carried no result or the lease was already sealed. The release that carries the change still
+  takes the strictest class among its commits.
 
 **Neutral children** (`host-profile-v1`) get an ALLOWLIST, not a denylist. `neutralViolation`
 admits a tool only when it is in `HOST_PROFILE_TOOLS`, is named in
@@ -185,7 +250,8 @@ a failure, read the new bundle for the report tool's name and input schema, then
 
 Operator-facing accounts that move with this decision: `docs/session-control.md` (the
 `SubagentHandback` item), `docs/gates.md` §"Reviewer-Spawn Grant" and §"Vanished Working
-Directory", the capability-gate row in `docs/configuration.md`, the reviewer-boundary paragraph
-in `docs/review-chain.md`, the PLM row in `docs/operations.md`, and the L03 item in
-`docs/session-control-release-gate.md`. The suite requires the literal in `session-control.md`,
+Directory", the capability-gate row in `docs/configuration.md`, the reviewer-boundary paragraph,
+the two worker rows and the result-capture sentence in `docs/review-chain.md`, the identity
+paragraph of `docs/tdd-manager-workflow.md`, the PLM row in `docs/operations.md`, and the L03
+item in `docs/session-control-release-gate.md`. The suite requires the literal in `session-control.md`,
 `gates.md`, `configuration.md` and `review-chain.md`.

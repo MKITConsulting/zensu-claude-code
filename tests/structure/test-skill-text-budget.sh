@@ -13,7 +13,7 @@ autopilot 32777
 doctor 92023
 gauntlet-loop 31693
 ghost-scan 27945
-plan-review 32855
+plan-review 32846
 self-review 33009
 verify-feature 39856
 ALLOW

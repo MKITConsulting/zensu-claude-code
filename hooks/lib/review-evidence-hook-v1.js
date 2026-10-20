@@ -47,7 +47,7 @@ function start() {
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SubagentStart',
-      additionalContext: `evidence-worker-v1 bound: kind=${kind}. Read only exact leased files; Grep/Glob only exact leased traversal roots; return one raw schema-valid JSON object. No private lease or session selector is exposed.`,
+      additionalContext: `evidence-worker-v1 bound: kind=${kind}. Read only exact leased files; Grep/Glob only exact leased traversal roots; return one raw schema-valid JSON object, as the whole message of ${leases.HANDBACK_TOOL} when the host offers that tool, else as your entire final message. No private lease or session selector is exposed.`,
     },
   })}\n`);
 }
@@ -64,7 +64,7 @@ function stop() {
   if (outcome.action === 'block') {
     process.stdout.write(`${JSON.stringify({
       decision: 'block',
-      reason: `Your evidence-worker result was rejected: ${outcome.reason}. Reply once more with exactly one raw schema-valid JSON object for the assigned kind and role; no Markdown fence, preface, or suffix.`,
+      reason: `Your evidence-worker result was rejected: ${outcome.reason}. Deliver exactly one raw schema-valid JSON object for the assigned kind and role once more, as the whole message of ${leases.HANDBACK_TOOL} when the host offers that tool, else as your entire final message; no Markdown fence, preface, or suffix.`,
     })}\n`);
   }
 }

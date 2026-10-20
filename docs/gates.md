@@ -274,7 +274,9 @@ instruction that cannot succeed until its cap releases the guard.
   `StructuredOutput` (see
   [Session Control](session-control.md)) — and confines its reads to the project
   root. For an `EVIDENCE_WORKER` principal it applies the worker's private evidence lease
-  instead: the read trio on leased paths only, and no report tool.
+  instead: the read trio on leased paths only, plus `SubagentHandback` carrying exactly the
+  worker's one schema-valid JSON result, which the lease validates and stores before the host
+  delivers it.
   It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
@@ -918,7 +920,8 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
 
 - **The main thread** returns before any path rule runs, so a vanished `cwd` does not deny it.
 - **An evidence worker** resolves its leased paths against the recorded project root, so its
-  verdict is decided by its lease and is the same with or without the directory.
+  verdict is decided by its lease and is the same with or without the directory; its
+  `SubagentHandback` result resolves no path at all.
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
   them to report to the main thread rather than retry. A reviewer and a PLM subagent can do

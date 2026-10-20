@@ -90,7 +90,8 @@ done
 if [ -f "$WORKER_MD" ] \
    && grep -qE '^name: *pr-review-worker *$' "$WORKER_MD" \
    && grep -qE '^tools: *Read, Grep, Glob *$' "$WORKER_MD" \
-   && grep -qF 'Your entire final assistant message must be exactly one raw JSON object' "$WORKER_MD" \
+   && grep -qF 'When the host gives you `SubagentHandback`, make one call to it your last step,' "$WORKER_MD" \
+   && grep -qF 'entire final assistant message must be exactly one raw JSON object.' "$WORKER_MD" \
    && grep -qF 'with `kind` exactly `pr-review` and `role`' "$WORKER_MD" \
    && grep -qF 'You have no command, write, task, messaging, team,' "$WORKER_MD" \
    && jq -e '.agents | index("./agents/pr-review-worker.md")' "$PLUGIN_JSON" >/dev/null 2>&1; then
@@ -543,7 +544,7 @@ fi
 if printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'use `Read` only' \
    && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'use `Grep` and `Glob` only' \
    && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'You have no write, task, messaging, nested-agent, Skill, MCP, Web, or command capability' \
-   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'entire final assistant message' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'when the host offers `SubagentHandback`, make one call to it your last step with that object as its whole `message`; otherwise make the object your entire final assistant message' \
    && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'one raw JSON object' \
    && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'with `kind` exactly `pr-review` and `role` exactly `<role-id>`'; then
   check "P15b worker contract is leased Read/Grep/Glob plus exact raw JSON final output" PASS

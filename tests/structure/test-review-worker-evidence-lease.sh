@@ -176,6 +176,54 @@ assert_gate() {
     || check "$label (expected $expected, got $actual)" FAIL
 }
 
+gate_reason() {
+  local data="$1" session="$2" agent_id="$3" agent_type="$4" tool="$5" input="$6"
+  pre_payload "$session" "$agent_id" "$agent_type" "$tool" "$input" \
+    | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$data" bash "$GATE" 2>/dev/null \
+    | node -e '
+      let s=""; process.stdin.on("data",c=>s+=c); process.stdin.on("end",()=>{
+        try { process.stdout.write(String(JSON.parse(s).hookSpecificOutput?.permissionDecisionReason || "")); }
+        catch { process.stdout.write(""); }
+      });
+    '
+}
+
+handback_input() {
+  MESSAGE_VALUE="$1" node -e 'process.stdout.write(JSON.stringify({ message: process.env.MESSAGE_VALUE }))'
+}
+
+record_file() {
+  local data="$1" session="$2" lease_id="$3" key
+  key="$(node -e 'process.stdout.write(require(process.argv[1]).sessionKey(process.argv[2]))' \
+    "$PLUGIN/hooks/lib/session-control-core-v1.js" "$session")"
+  printf '%s/review-evidence/v1/records/%s/%s.json' "$data" "$key" "$lease_id"
+}
+
+file_digest() {
+  node -e '
+    const fs=require("node:fs"); const crypto=require("node:crypto");
+    process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));
+  ' "$1"
+}
+
+worker_state() {
+  RECORD_FILE="$1" AGENT_KEY="$2" node -e '
+    const record=JSON.parse(require("node:fs").readFileSync(process.env.RECORD_FILE,"utf8"));
+    const worker=record.workers[process.env.AGENT_KEY] || {};
+    process.stdout.write(`${worker.status}:${worker.result_attempts}:${worker.result ? worker.result.role : "-"}`);
+  '
+}
+
+stop_without_text() {
+  local data="$1" session="$2" agent_id="$3" agent_type="$4"
+  SESSION_VALUE="$session" AGENT_ID="$agent_id" AGENT_TYPE="$agent_type" PROJECT_VALUE="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "SubagentStop", session_id: process.env.SESSION_VALUE,
+      cwd: process.env.PROJECT_VALUE, agent_id: process.env.AGENT_ID, agent_type: process.env.AGENT_TYPE,
+    }));
+  ' | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$data" bash "$STOP"
+}
+
 valid_plan_result() {
   local role="$1"
   ROLE="$role" node -e 'process.stdout.write(JSON.stringify({
@@ -377,11 +425,24 @@ FINALIZE_OUT="$(helper "$DATA" "$SESSION" finalize --lease-id "$LEASE_ID" 2>/dev
 [ "$FINALIZE_OUT" = "sealed=$LEASE_ID" ] \
   && check "finalize seals exactly max_workers completed results after full revalidation" PASS \
   || check "finalize seals exactly max_workers completed results after full revalidation" FAIL
-if stop_worker "$DATA" "$SESSION" plan-agent-1 zensu:plan-review-worker "$PLAN_JSON" \
-    >/dev/null 2>&1; then
-  check "SubagentStop is denied after finalize" FAIL
+SEALED_RECORD="$(record_file "$DATA" "$SESSION" "$LEASE_ID")"
+SEALED_DIGEST="$(file_digest "$SEALED_RECORD")"
+LATE_OUT="$(stop_worker "$DATA" "$SESSION" plan-agent-1 zensu:plan-review-worker "$PLAN_JSON" 2>/dev/null)"
+LATE_STATUS=$?
+if [ "$LATE_STATUS" -eq 0 ] && [ -z "$LATE_OUT" ] \
+    && [ "$(file_digest "$SEALED_RECORD")" = "$SEALED_DIGEST" ]; then
+  check "a completed worker's repeated SubagentStop after finalize changes nothing" PASS
 else
-  check "SubagentStop is denied after finalize" PASS
+  check "a completed worker's repeated SubagentStop after finalize changes nothing (status $LATE_STATUS)" FAIL
+fi
+if stop_worker "$DATA" "$SESSION" plan-agent-1 zensu:plan-review-worker \
+    "$(valid_plan_result changed-role)" >/dev/null 2> "$TMP/late-conflict.err"; then
+  check "a different result after finalize is refused as create-once" FAIL
+elif grep -qF 'completed worker result is create-once' "$TMP/late-conflict.err" \
+    && [ "$(file_digest "$SEALED_RECORD")" = "$SEALED_DIGEST" ]; then
+  check "a different result after finalize is refused as create-once" PASS
+else
+  check "a different result after finalize is refused with the create-once reason" FAIL
 fi
 COLLECTED="$(helper "$DATA" "$SESSION" collect --kind plan-review --agent-id plan-agent-1 \
   --expected-role feasibility-soundness 2>/dev/null)"
@@ -468,6 +529,108 @@ else
 fi
 helper "$DATA" "$SESSION" close --lease-id "$DUP_ID" >/dev/null
 
+HB_OUT="$(helper "$DATA" "$SESSION" create --kind plan-review \
+  --files-manifest "$WORKSPACE/FILES.txt" --safe-subtrees-manifest "$WORKSPACE/ROOTS.txt" \
+  --max-workers 3 2>/dev/null)"
+HB_ID="${HB_OUT#lease_id=}"
+HB_RECORD="$(record_file "$DATA" "$SESSION" "$HB_ID")"
+for HB_AGENT in hb-agent hb-final-agent hb-dup-agent; do
+  bind_worker "$DATA" "$SESSION" "$HB_AGENT" zensu:plan-review-worker >/dev/null 2>&1
+done
+HB_JSON="$(valid_plan_result handback-role)"
+HB_DIGEST="$(file_digest "$HB_RECORD")"
+HB_FENCED_REASON="$(gate_reason "$DATA" "$SESSION" hb-agent zensu:plan-review-worker SubagentHandback \
+  "$(handback_input "$(printf '```json\n%s\n```' "$HB_JSON")")")"
+case "$HB_FENCED_REASON" in
+  *'evidence-worker-v1 SubagentHandback message was rejected: review-evidence-lease-v1: SubagentHandback message must be one pure JSON object without fences or prose.'*)
+    check "a fenced handback is denied by the final text's pure-JSON rule" PASS ;;
+  *) check "a fenced handback must be denied by the pure-JSON rule (got: ${HB_FENCED_REASON:-<empty>})" FAIL ;;
+esac
+HB_EXTRA_KEY="$(HB_JSON="$HB_JSON" node -e '
+  process.stdout.write(JSON.stringify({ ...JSON.parse(process.env.HB_JSON), unexpected: true }));
+')"
+HB_SCHEMA_REASON="$(gate_reason "$DATA" "$SESSION" hb-agent zensu:plan-review-worker SubagentHandback \
+  "$(handback_input "$HB_EXTRA_KEY")")"
+case "$HB_SCHEMA_REASON" in
+  *'plan-review result contains unknown key "unexpected"'*)
+    check "a schema-invalid handback is denied by the final text's schema rule" PASS ;;
+  *) check "a schema-invalid handback must be denied by the schema rule (got: ${HB_SCHEMA_REASON:-<empty>})" FAIL ;;
+esac
+HB_SHAPE_INPUT="$(HB_JSON="$HB_JSON" node -e '
+  process.stdout.write(JSON.stringify({ message: process.env.HB_JSON, to: "main" }));
+')"
+HB_SHAPE_REASON="$(gate_reason "$DATA" "$SESSION" hb-agent zensu:plan-review-worker SubagentHandback \
+  "$HB_SHAPE_INPUT")"
+[ "$HB_SHAPE_REASON" = 'reviewer-capability-v1 deny: evidence-worker-v1 may invoke SubagentHandback only with exactly one string field, message' ] \
+  && check "a handback with a second input field is denied for its shape" PASS \
+  || check "a handback with a second input field must be denied for its shape (got: ${HB_SHAPE_REASON:-<empty>})" FAIL
+[ "$(file_digest "$HB_RECORD")" = "$HB_DIGEST" ] && [ "$(worker_state "$HB_RECORD" hb-agent)" = 'bound:0:-' ] \
+  && check "denied handbacks leave the lease record byte-identical and the worker bound" PASS \
+  || check "denied handbacks must leave the lease record byte-identical and the worker bound" FAIL
+assert_gate "a valid handback is allowed" allow "$DATA" "$SESSION" hb-agent \
+  zensu:plan-review-worker SubagentHandback "$(handback_input "$HB_JSON")"
+HB_STATE="$(worker_state "$HB_RECORD" hb-agent)"
+[ "$HB_STATE" = 'completed:1:handback-role' ] \
+  && check "the allowed handback completes the binding with its validated result" PASS \
+  || check "the allowed handback must complete the binding with its result (got: $HB_STATE)" FAIL
+HB_DIGEST="$(file_digest "$HB_RECORD")"
+assert_gate "a completed worker may hand its identical result back again" allow "$DATA" "$SESSION" hb-agent \
+  zensu:plan-review-worker SubagentHandback "$(handback_input "$HB_JSON")"
+HB_RESEND_REASON="$(gate_reason "$DATA" "$SESSION" hb-agent zensu:plan-review-worker SubagentHandback \
+  "$(handback_input "$(valid_plan_result other-role)")")"
+case "$HB_RESEND_REASON" in
+  *"evidence-worker-v1 already stored this worker's result, which is create-once"*)
+    check "a completed worker's different handback is denied as create-once" PASS ;;
+  *) check "a completed worker's different handback must be denied as create-once (got: ${HB_RESEND_REASON:-<empty>})" FAIL ;;
+esac
+HB_STOP_OUT="$(stop_without_text "$DATA" "$SESSION" hb-agent zensu:plan-review-worker 2>/dev/null)"
+HB_STOP_STATUS=$?
+HB_PROSE_OUT="$(stop_worker "$DATA" "$SESSION" hb-agent zensu:plan-review-worker 'Result delivered.' 2>/dev/null)"
+HB_PROSE_STATUS=$?
+if [ "$HB_STOP_STATUS" -eq 0 ] && [ -z "$HB_STOP_OUT" ] && [ "$HB_PROSE_STATUS" -eq 0 ] \
+    && [ -z "$HB_PROSE_OUT" ] && [ "$(file_digest "$HB_RECORD")" = "$HB_DIGEST" ]; then
+  check "SubagentStop after a handback accepts a final text without a result and changes nothing" PASS
+else
+  check "SubagentStop after a handback must accept a resultless final text silently (status $HB_STOP_STATUS/$HB_PROSE_STATUS)" FAIL
+fi
+if stop_worker "$DATA" "$SESSION" hb-agent zensu:plan-review-worker "$(valid_plan_result other-role)" \
+    >/dev/null 2> "$TMP/handback-conflict.err"; then
+  check "SubagentStop after a handback refuses a different result as create-once" FAIL
+elif grep -qF 'completed worker result is create-once' "$TMP/handback-conflict.err"; then
+  check "SubagentStop after a handback refuses a different result as create-once" PASS
+else
+  check "SubagentStop after a handback refuses a different result with the create-once reason" FAIL
+fi
+HB_FINAL_JSON="$(valid_plan_result final-text-role)"
+stop_worker "$DATA" "$SESSION" hb-final-agent zensu:plan-review-worker "$HB_FINAL_JSON" >/dev/null 2>&1
+assert_gate "a worker its final text completed may hand that same result back when the host asks" allow \
+  "$DATA" "$SESSION" hb-final-agent zensu:plan-review-worker SubagentHandback "$(handback_input "$HB_FINAL_JSON")"
+HB_DUP_REASON="$(gate_reason "$DATA" "$SESSION" hb-dup-agent zensu:plan-review-worker SubagentHandback \
+  "$(handback_input "$HB_JSON")")"
+HB_DUP_STATE="$(worker_state "$HB_RECORD" hb-dup-agent)"
+case "$HB_DUP_STATE|$HB_DUP_REASON" in
+  'bound:0:-|'*'worker result role "handback-role" was already claimed'*)
+    check "a handback claiming another worker's role is denied and leaves the worker bound" PASS ;;
+  *) check "a handback claiming another worker's role must be denied (got: $HB_DUP_STATE ${HB_DUP_REASON:-<empty>})" FAIL ;;
+esac
+assert_gate "the worker's handback with a role of its own is allowed" allow "$DATA" "$SESSION" hb-dup-agent \
+  zensu:plan-review-worker SubagentHandback "$(handback_input "$(valid_plan_result own-role)")"
+HB_FINALIZE="$(helper "$DATA" "$SESSION" finalize --lease-id "$HB_ID" 2>/dev/null)"
+[ "$HB_FINALIZE" = "sealed=$HB_ID" ] \
+  && check "handed-back results finalize like final-text results" PASS \
+  || check "handed-back results must finalize like final-text results (got: ${HB_FINALIZE:-<empty>})" FAIL
+HB_SEALED_DIGEST="$(file_digest "$HB_RECORD")"
+HB_LATE_OUT="$(stop_without_text "$DATA" "$SESSION" hb-dup-agent zensu:plan-review-worker 2>/dev/null)"
+HB_LATE_STATUS=$?
+[ "$HB_LATE_STATUS" -eq 0 ] && [ -z "$HB_LATE_OUT" ] && [ "$(file_digest "$HB_RECORD")" = "$HB_SEALED_DIGEST" ] \
+  && check "a handback worker's SubagentStop arriving after finalize leaves the sealed record unchanged" PASS \
+  || check "a handback worker's SubagentStop arriving after finalize must leave the sealed record unchanged (status $HB_LATE_STATUS)" FAIL
+HB_COLLECT="$(helper "$DATA" "$SESSION" collect --lease-id "$HB_ID" --agent-id hb-agent \
+  --expected-role handback-role 2>/dev/null)"
+[ "$HB_COLLECT" = "$HB_JSON" ] && check "collect returns the handed-back result" PASS \
+  || check "collect returns the handed-back result" FAIL
+helper "$DATA" "$SESSION" close --lease-id "$HB_ID" >/dev/null
+
 # PR results are additionally bound to the immutable name-status inventory.
 PRSPACE="$TMP/pr-review-workspace"
 mkdir -p "$PRSPACE"
@@ -499,6 +662,24 @@ PR_COLLECT="$(helper "$DATA" "$SESSION" collect --kind pr-review --agent-id pr-a
 [ "$PR_COLLECT" = "$PR_JSON" ] && check "corrected PR result validates and collects" PASS \
   || check "corrected PR result validates and collects" FAIL
 helper "$DATA" "$SESSION" close --lease-id "$PR_ID" >/dev/null
+
+PR_HB_OUT="$(helper "$DATA" "$SESSION" create --kind pr-review \
+  --files-manifest "$PRSPACE/FILES.txt" --safe-subtrees-manifest "$PRSPACE/ROOTS.txt" \
+  --name-status-file "$PRSPACE/NAME_STATUS.txt" \
+  --changed-production-files-file "$PRSPACE/CHANGED_PRODUCTION.txt" \
+  --max-workers 1 2>/dev/null)"
+PR_HB_ID="${PR_HB_OUT#lease_id=}"
+bind_worker "$DATA" "$SESSION" pr-handback-agent zensu:pr-review-worker >/dev/null 2>&1
+PR_HB_REASON="$(gate_reason "$DATA" "$SESSION" pr-handback-agent zensu:pr-review-worker SubagentHandback \
+  "$(handback_input "$(valid_pr_result bug-hunter src/not-changed.js)")")"
+case "$PR_HB_REASON" in
+  *'inline finding path is outside the bound name-status set'*)
+    check "a PR handback with an inline path outside name-status is denied" PASS ;;
+  *) check "a PR handback with an inline path outside name-status must be denied (got: ${PR_HB_REASON:-<empty>})" FAIL ;;
+esac
+assert_gate "a PR handback inside name-status is allowed" allow "$DATA" "$SESSION" pr-handback-agent \
+  zensu:pr-review-worker SubagentHandback "$(handback_input "$(valid_pr_result bug-hunter src/app.js)")"
+helper "$DATA" "$SESSION" close --lease-id "$PR_HB_ID" >/dev/null
 
 # A code fence inside a finding body is content, not a wrapper. The pr-team-review personas
 # are instructed to emit fenced snippets in an inline finding's `body`, so a guard that

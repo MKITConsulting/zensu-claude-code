@@ -347,7 +347,8 @@ The plugin-scoped reviewers, the two evidence workers and `zensu:zensu-plm` expo
 only the host's `Read`, `Grep`, and `Glob` tools. The `PreToolUse` gate repeats
 that allowlist after context revalidation and admits two host tools beside it,
 the `SubagentHandback` report tool and the workflow result tool `StructuredOutput`,
-for the reviewers and the PLM only: no shell,
+for the reviewers and the PLM, and the report tool alone for the evidence workers,
+whose message must be their one lease-validated JSON result: no shell,
 Git, control, MCP, or other tool is available to those identities, and the
 evidence workers stay inside their private lease. Other `host-profile-v1` children keep,
 of the tools their agent frontmatter and the Claude host grant, only the gate's

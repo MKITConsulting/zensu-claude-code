@@ -51,7 +51,8 @@ if grep -qF 'subagent_type: zensu:plan-review-worker' "$SKILL_MD" \
    && [ -f "$WORKER_MD" ] \
    && grep -qE '^name: *plan-review-worker *$' "$WORKER_MD" \
    && grep -qE '^tools: *Read, Grep, Glob *$' "$WORKER_MD" \
-   && grep -qF 'Your entire final assistant message must be exactly one raw JSON object' "$WORKER_MD" \
+   && grep -qF 'When the host gives you `SubagentHandback`, make one call to it your last step,' "$WORKER_MD" \
+   && grep -qF 'entire final assistant message must be exactly one raw JSON object.' "$WORKER_MD" \
    && grep -qF 'with `kind` exactly `plan-review` and `role`' "$WORKER_MD" \
    && grep -qF '≤ 6 blockers, ≤ 12 improvements, ≤ 16 questions, and ≤ 16 strengths' "$SKILL_MD" \
    && grep -qF 'You have no command, write, task, messaging, team,' "$WORKER_MD" \
@@ -189,7 +190,7 @@ fi
 if printf '%s' "$INJECTION_BLOCK" | grep -qF 'you may use `Read`' \
    && printf '%s' "$INJECTION_BLOCK" | grep -qF 'you may use `Grep` and `Glob` only' \
    && printf '%s' "$INJECTION_BLOCK" | grep -qF 'You have no write, task, messaging, nested-agent, Skill, MCP, Web, or command capability' \
-   && printf '%s' "$INJECTION_BLOCK" | grep -qF 'entire final assistant message' \
+   && printf '%s' "$INJECTION_BLOCK" | grep -qF 'Return your verdict as the `message` of a final `SubagentHandback` call when the host offers that tool, else as your entire final assistant message' \
    && printf '%s' "$INJECTION_BLOCK" | grep -qF 'one raw JSON object' \
    && printf '%s' "$INJECTION_BLOCK" | grep -qF 'Set `kind` exactly to `plan-review` and `role` exactly to `<persona-id>`'; then
   check "P10b worker contract is leased Read/Grep/Glob plus exact raw JSON final output" PASS

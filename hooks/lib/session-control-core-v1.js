@@ -3745,9 +3745,9 @@ function renderEvidenceWorkerContext(contextInput) {
     `project_root=${JSON.stringify(context.project_root)}`,
     `runtime_digest=${context.runtime_digest}`,
     'principal=evidence-worker-v1.',
-    'Only Read, Grep, and Glob are available and every call is confined by a private, agent-bound evidence lease.',
+    'Only Read, Grep, and Glob are available, plus SubagentHandback to deliver the result, and every call is confined by a private, agent-bound evidence lease.',
     'No lease id, plugin-data path, raw session id, private selector, command, mutation, messaging, task, nested-agent, Skill, MCP, Web, or memory capability is available.',
-    'Return exactly one raw schema-valid JSON result for the assigned kind and role.',
+    'Return exactly one raw schema-valid JSON result for the assigned kind and role, as the whole message of SubagentHandback when the host offers that tool, else as the entire final message.',
   ].join(' ');
 }
 

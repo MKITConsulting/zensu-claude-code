@@ -4,7 +4,7 @@
 
 ## Shared Output Schema
 
-Every persona returns exactly one raw JSON object as its entire final assistant message with this shape. No Markdown fence, preface, suffix, or keys beyond this schema and the role-specific extension declared below are allowed. The private collector validates the object, and only the main thread may then materialize it as `$WORKDIR/<role>.json`:
+Every persona returns exactly one raw JSON object with this shape, as the whole `message` of its `SubagentHandback` call when the host offers that tool and otherwise as its entire final assistant message. No Markdown fence, preface, suffix, or keys beyond this schema and the role-specific extension declared below are allowed. The private collector validates the object, and only the main thread may then materialize it as `$WORKDIR/<role>.json`:
 
 ```json
 {

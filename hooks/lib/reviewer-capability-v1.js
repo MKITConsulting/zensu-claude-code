@@ -801,10 +801,7 @@ const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 
 function handbackViolation(payload, profile) {
-  const keys = Object.keys(payload.tool_input);
-  if (keys.length === 1 && keys[0] === 'message' && typeof payload.tool_input.message === 'string') {
-    return null;
-  }
+  if (evidenceLeases.handbackInputValid(payload.tool_input)) return null;
   return `${profile} may invoke ${HOST_HANDBACK_TOOL} only with exactly one string field, message`;
 }
 
@@ -1096,6 +1093,10 @@ function judgePrincipal(payload, bound, principal) {
   let trusted = bound;
   if (principal === principals.PRINCIPALS.MAIN) return null;
   if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
+    if (payload.tool_name === HOST_HANDBACK_TOOL) {
+      const shapeViolation = handbackViolation(payload, 'evidence-worker-v1');
+      if (shapeViolation) return shapeViolation;
+    }
     try {
       const violation = evidenceLeases.toolViolation(payload, trusted);
       if (!violation) return null;
