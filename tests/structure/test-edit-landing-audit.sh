@@ -1088,6 +1088,77 @@ INV_RDEEP="$(run_audit --inventory --log "$DN_DIR/deep.log" --project "$NRD_A")"
 RC_INV_RDEEP=$?
 { [ "$RC_INV_RDEEP" -eq 2 ] && printf '%s' "$INV_RDEEP" | grep -qF -- '--inventory did not complete'; }
 check "X38a --inventory over that claim refuses to complete rather than shorten its foreign-root list" "$(verdict $?)"
+DN_DOT_LIST="./src/a.ts"
+i=1
+while [ "$i" -lt 20 ]; do DN_DOT_LIST="$DN_DOT_LIST, ./src/f$i.ts"; i=$((i+1)); done
+printf '%s\n' "[10:00:34] S60 IMPL completed — files: $DN_DOT_LIST" > "$DN_DIR/dot.log"
+if [ "${DN_ONE:-0}" -gt 0 ] 2>/dev/null; then
+  DN_DOT="$(dirname_calls "$DN_DIR/dot.log")"
+  [ "$DN_DOT" -eq "$DN_ONE" ]
+  check "X37b twenty ./-spelled in-anchor relative claims spawn no more dirname than one ($DN_DOT = $DN_ONE): a . segment is skipped, never walked" "$(verdict $?)"
+else
+  check "X37b SKIPPED — this host did not route dirname through the PATH stub" PASS
+fi
+MAL_DOT="./src/f1.ts"
+i=2
+while [ "$i" -le 40 ]; do MAL_DOT="$MAL_DOT ./src/f$i.ts"; i=$((i+1)); done
+MAL_SLASH="src//f1.ts"
+i=2
+while [ "$i" -le 70 ]; do MAL_SLASH="$MAL_SLASH src//f$i.ts"; i=$((i+1)); done
+printf '%s\n' "[10:00:35] S61 IMPL completed — files: $MAL_DOT" > "$DN_DIR/malformed-dot.log"
+printf '%s\n' "[10:00:36] S62 IMPL completed — files: $MAL_SLASH" > "$DN_DIR/malformed-slash.log"
+OUT_MDOT="$(run_audit --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" --receipt -)"
+run_audit --inventory --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" >/dev/null 2>&1
+RC_INV_MDOT=$?
+{ printf '%s' "$OUT_MDOT" | grep -qF 'EDIT NOT LANDED — S61:' \
+  && ! printf '%s' "$OUT_MDOT" | grep -qF 'UNVERIFIED (undetermined root) — S61:' \
+  && [ "$RC_INV_MDOT" -eq 0 ]; }
+check "X39 a malformed list of ./-spelled paths stops at its first missing component: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+OUT_MSL="$(run_audit --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" --receipt -)"
+run_audit --inventory --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" >/dev/null 2>&1
+RC_INV_MSL=$?
+{ printf '%s' "$OUT_MSL" | grep -qF 'EDIT NOT LANDED — S62:' \
+  && ! printf '%s' "$OUT_MSL" | grep -qF 'UNVERIFIED (undetermined root) — S62:' \
+  && [ "$RC_INV_MSL" -eq 0 ]; }
+check "X39a the same list spelled with empty segments stops there too: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+KILL_DIR="$WORK/inventory-kill"
+KILL_A="$KILL_DIR/anchor"
+mkdir -p "$KILL_DIR/stub"
+new_repo "$KILL_A" && mkdir -p "$KILL_A/src"
+printf '.zensu/\n' > "$KILL_A/.gitignore"
+printf 'v1\n' > "$KILL_A/src/a.ts"
+{ G "$KILL_A" add -A && G "$KILL_A" commit -qm base; } >/dev/null 2>&1
+new_repo "$KILL_A/slowtree/repo" && mkdir -p "$KILL_A/slowtree/repo/src"
+cat > "$KILL_DIR/stub/dirname" <<STUB
+#!/bin/sh
+case "\$1" in
+  (*slowtree*)
+    if [ ! -e "$KILL_DIR/walking" ]; then
+      echo \$\$ > "$KILL_DIR/walking"
+      exec sleep 10
+    fi
+    ;;
+esac
+exec "$(command -v dirname)" "\$@"
+STUB
+chmod +x "$KILL_DIR/stub/dirname"
+printf '%s\n' "[10:00:37] S63 IMPL completed — files: slowtree/repo/src/f1.ts, slowtree/repo/src/f2.ts, slowtree/repo/src/f3.ts" > "$KILL_DIR/kill.log"
+PATH="$KILL_DIR/stub:$PATH" bash "$LIB" --inventory --log "$KILL_DIR/kill.log" --project "$KILL_A" > "$KILL_DIR/out" 2>/dev/null </dev/null &
+KILL_PID=$!
+i=0
+while [ "$i" -lt 300 ] && [ ! -s "$KILL_DIR/walking" ]; do sleep 0.1; i=$((i+1)); done
+if [ -s "$KILL_DIR/walking" ]; then
+  kill -TERM "$KILL_PID" 2>/dev/null
+  kill "$(cat "$KILL_DIR/walking")" 2>/dev/null
+  wait "$KILL_PID"
+  KILL_RC=$?
+  { [ "$KILL_RC" -eq 143 ] && grep -qx 'claimed-files=3' "$KILL_DIR/out"; }
+  check "X40 an --inventory child stopped by TERM while it walks a claim has already printed claimed-files=, the lower bound --tdd-complete arms on (rc=$KILL_RC)" "$(verdict $?)"
+else
+  kill "$KILL_PID" 2>/dev/null
+  wait "$KILL_PID" 2>/dev/null
+  check "X40 SKIPPED — this host did not route dirname through the PATH stub" PASS
+fi
 
 echo "== Harness hygiene =="
 # `check` counts anything that is not the literal `PASS` as a FAILURE, and the

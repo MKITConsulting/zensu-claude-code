@@ -121,7 +121,11 @@ SHORTENED the `--inventory` foreign-root list on the other. `INV_CLAIM_BUDGET` (
 inventory loop the same way. Both dispatches — `normalize_claim`'s and the `--inventory` `case`
 — ENUMERATE the known-silent kinds and REFUSE the residual, which is the part to keep: a naive
 catch-all faults on every ordinary in-root claim and makes `--inventory` exit 2 on every normal
-chain. The product of the two budgets is NOT bounded (roughly 10^5 spawns at the maximum) and
+chain. A THIRD `case` reads the same answer, `place_relative_claim`'s, and it only decides whether
+a relative claim is rebuilt: it keeps `in-root`, `unrooted` and a `foreign` or `undetermined`
+value outside `REPO_CANON` relative, and rebuilds the rest, an unknown kind included, so that kind
+still reaches the absolute arm's refusal. It keys on the value being a path under `REPO_CANON`,
+so a kind whose value stops being such a path must revisit that `case` too. The product of the two budgets is NOT bounded (roughly 10^5 spawns at the maximum) and
 the watchdog above the child has no deadline on a host without `timeout`, so a shared
 total-probe counter is the standing fix and is not taken.
 
@@ -393,9 +397,11 @@ exit-2 cause under its existing "did not complete" contract.
   position always does to a list that grows.
   `zensu-log.sh append` passes every message through `zensu-artifact-redact-v1.js` and `.log` is a
   redaction bucket, so a claim naming a sibling repository under `$HOME` is rewritten to `~/...`
-  BEFORE it lands in the run log. `absolute_claim_verdict` has two callers, `normalize_claim` and
-  the `--inventory` loop, and each hands it only an absolute claim, a `<project>` claim
-  `unredact_claim` rebuilt, or a relative claim `place_relative_claim` rebuilt (below). `~` is
+  BEFORE it lands in the run log. `absolute_claim_verdict` has three call sites:
+  `place_relative_claim` hands it the repository-top join of every relative claim its pre-check
+  flags (below), and `normalize_claim` and the `--inventory` loop hand it an absolute claim or a
+  `<project>` claim `unredact_claim` rebuilt, reusing `PLACED_VERDICT` for a relative claim
+  `place_relative_claim` rebuilt. `~` is
   never rebuilt, so that claim stays relative, reaches no work tree nested under the repository
   top, and is graded against the anchor's change set (`EDIT NOT LANDED`): no `foreign-root` line is
   emitted and the doctor topology row cannot fire for the topology the spec's own worked example
@@ -439,15 +445,25 @@ exit-2 cause under its existing "did not complete" contract.
   with `..` or through a symlink, whose sibling root therefore goes unreported (`X6a`, a named
   bound). **A fork-free pre-check decides whether the walk runs at all.**
   `relative_claim_may_nest` walks the claim's components top-down below `REPO_CANON` with `[ -d ]`,
-  `[ -L ]` and `[ -e .git ]`, stops at the first component that does not exist, and asks for the
-  walk only on a symlink, a `.git` entry, or a `.`, `..` or empty segment; a nested `.git` or a
-  symlink can only sit on an existing directory, so its "no" is complete. The cost is the reason:
+  `[ -L ]` and `[ -e .git ]`: it skips a `.` or empty segment, judges every other one, `..`
+  included, where it stands on the filesystem, stops at the first component that does not exist,
+  and asks for the walk only on a symlink or a `.git` entry. A nested `.git` or a symlink can only
+  sit on an existing directory and a component after a missing one resolves nowhere, so its "no"
+  is complete; a `..` that climbs back to the repository top meets the anchor's own `.git` and only
+  costs a walk that places the claim where it resolves. The cost is the reason:
   200 claims through the walk took 4.1 s on macOS, the doctor stops the inventory child at 5 s and
   `--tdd-complete` does too wherever `timeout` or `gtimeout` exists, and local run logs reach 694
   claimed files (p99 129). `X37` counts `dirname` spawns through a `PATH` stub and requires twenty
-  in-anchor claims to spawn no more than one. Stopping at the first missing component also keeps
-  a malformed claim, such as a space-separated file list with 75 slashes found in a local log, on
-  its old verdict instead of exhausting the 64-level budget. **A submodule is a nested work
+  in-anchor claims to spawn no more than one, and `X37b` the same for twenty `./`-spelled ones.
+  Stopping at the first missing component also keeps a malformed claim, such as a space-separated
+  file list with 75 slashes found in a local log, on its old verdict instead of exhausting the
+  64-level budget, whatever `.` or empty segments it carries (`X39`/`X39a`). **The walk can still
+  outrun the deadline**, at about 240 claims that reach a nested tree or a symlink by that
+  measurement, so `--inventory` prints `claimed-files=` from a counting pass BEFORE it classifies
+  any claim: a child the deadline stops has already handed `--tdd-complete` the lower bound it
+  arms on, and the verb then discloses `CLAIM INVENTORY INCOMPLETE` instead of completing
+  unarmed (`X40` pins the count line of a stopped child). The doctor row discards a timed-out
+  answer, so for such a log it reads "did not complete" rather than naming the roots. **A submodule is a nested work
   tree.** Its checkout carries a gitfile `.git`, the anchor's change set lists only the gitlink,
   and `check-ignore` refuses a path inside it with exit 128, so a claim naming a file inside it
   could only grade `EDIT NOT LANDED` against the anchor, with a remedy nobody can perform. It

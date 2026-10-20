@@ -59,13 +59,15 @@ when it is unset, is an open question (§11).
 **The edit-landing audit already takes a `--project` argument** — it defaults to
 `CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:90`) and
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:241-266`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:940`), while
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:984`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
 (`hooks/lib/zensu-log.sh:1525`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
-named as a foreign root rather than reported as unresolvable, while a RELATIVE
-foreign claim stays indistinguishable from an anchor claim — the gap §5 names.
+named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
+claim that, joined at the repository top, lands in a work tree nested under the
+anchor, while a RELATIVE claim naming a SIBLING repository's file stays
+indistinguishable from an anchor claim — the gap §5 names.
 
 **The receipt gate was scoped by the anchor's change count — SUPERSEDED by stage 1,
 item 2.** As read for this document, `zensu-log.sh` counted `git diff --name-only
@@ -188,9 +190,11 @@ below are behavior now; the pins are named at the end of §10.
 4. A `/zensu:doctor` row names the topology: claims logged against a root that is
    not the anchor.
 
-**Item 3 is partial by construction, and saying so is part of stage 1.** Only an
-*absolute* foreign claim can be recognised without the stage-2 label. A relative
-claim from a code root (`src/foo.ts`) is textually indistinguishable from an anchor
+**Item 3 is partial by construction, and saying so is part of stage 1.** Without
+the stage-2 label a foreign claim is recognised only where the filesystem places it:
+an *absolute* claim, or a relative claim that, joined at the repository top, lands
+in a work tree nested under the anchor. A relative claim from a sibling code root
+(`src/foo.ts`) is textually indistinguishable from an anchor
 claim that never landed — and where the anchor happens to hold a dirty file at the
 same repo-relative path, which `src/index.ts` or `package.json` routinely will
 across sibling repositories, the foreign claim resolves against the anchor's file
@@ -419,7 +423,7 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:940` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:984` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1574`, `:118-119` |

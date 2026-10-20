@@ -561,17 +561,18 @@ unredact_claim() {
 }
 
 relative_claim_may_nest() {
-  local dir="$REPO_CANON" rest="$1"
-  case "/$rest/" in
-    *//*|*/./*|*/../*) return 0 ;;
-  esac
+  local dir="$REPO_CANON" rest="$1" seg
   while :; do
     case "$rest" in
       */*) ;;
       *) return 1 ;;
     esac
-    dir="$dir/${rest%%/*}"
+    seg="${rest%%/*}"
     rest="${rest#*/}"
+    case "$seg" in
+      ''|.) continue ;;
+    esac
+    dir="$dir/$seg"
     [ -d "$dir" ] || return 1
     if [ -L "$dir" ] || [ -e "$dir/.git" ]; then return 0; fi
   done
@@ -819,6 +820,13 @@ if [ "$INVENTORY" -eq 1 ]; then
   [ -z "$GIT_FAULT" ] \
     || INV_FAULT="$(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT") ($(render_claim_value "$GIT_FAULT")), so the anchor every absolute claim is placed against is unknown"
   INV_ROOTS="$(mktemp)" || die "mktemp failed"
+  INV_COUNT=0
+  while IFS="$(printf '\t')" read -r step raw; do
+    [ -n "${raw// /}" ] || continue
+    [ "$INV_COUNT" -lt "$INV_CLAIM_BUDGET" ] || break
+    INV_COUNT=$((INV_COUNT + 1))
+  done < "$CLAIMS_FILE"
+  printf 'claimed-files=%s\n' "$INV_COUNT"
   while IFS="$(printf '\t')" read -r step raw; do
     [ -n "${raw// /}" ] || continue
     if [ "$INV_CLAIMS" -ge "$INV_CLAIM_BUDGET" ]; then
@@ -893,7 +901,6 @@ if [ "$INVENTORY" -eq 1 ]; then
         ;;
     esac
   done < "$CLAIMS_FILE"
-  printf 'claimed-files=%s\n' "$INV_CLAIMS"
   # Sort into a variable rather than into a pipeline: a pipeline's status is the
   # LAST command's, so `sort | while` reported the loop's success and swallowed
   # the sort's failure.
