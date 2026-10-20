@@ -644,6 +644,57 @@ function detectControlMutation(cmd) {
   return "";
 }
 
+const POWERSHELL_CONTROL_MAIN =
+  "This check keeps model commands from rebinding Claude Code's Session Control inputs and from writing " +
+  "the file behind CLAUDE_ENV_FILE, and it refuses a PowerShell command it cannot rule out doing either. " +
+  "Rewrite the command without that construct, or run it through the Bash tool; a rebind is refused there as well.";
+const POWERSHELL_CONTROL_CHILD =
+  "This check keeps model commands from rebinding Claude Code's Session Control inputs and from writing " +
+  "the file behind CLAUDE_ENV_FILE, and it refuses a PowerShell command it cannot rule out doing either. " +
+  "Do not retry it; report the need to the main thread instead.";
+
+const POWERSHELL_UNLOADED =
+  "the PowerShell analyzer hooks/lib/powershell-command-v1.js could not be loaded";
+
+function powershellUnloadedVerdict(mode, child) {
+  if (mode === "control") {
+    return "Blocked a PowerShell command because " + POWERSHELL_UNLOADED + ", so this check cannot rule out that " +
+      "the command rebinds a Session Control input. " +
+      (child ? "Do not retry it; report the need to the main thread instead."
+        : "Run the command through the Bash tool, and reinstall the plugin to restore the check.");
+  }
+  if (mode === "targets") return "WRITE-TARGET (unevaluated: " + POWERSHELL_UNLOADED + ")";
+  return "Blocked a PowerShell command because " + POWERSHELL_UNLOADED + ". " +
+    "Run it through the Bash tool, or change files with Edit or Write, and reinstall the plugin." + OPT_IN_NOTE;
+}
+
+function powershellVerdict(cmd, mode, child) {
+  let powershell = null;
+  try {
+    powershell = require("./powershell-command-v1.js");
+  } catch (_error) {
+    return powershellUnloadedVerdict(mode, child);
+  }
+  if (mode === "control") {
+    const envFile = process.env.CLAUDE_ENV_FILE || "";
+    const reason = powershell.controlVerdict(cmd, {
+      names: Array.from(CONTROL_BINDINGS),
+      refersToEnvFile: (text) => commandRefersToControlPath(text, envFile)
+    });
+    if (!reason) return "";
+    return "Blocked a PowerShell command because " + reason + ". " +
+      (child ? POWERSHELL_CONTROL_CHILD : POWERSHELL_CONTROL_MAIN);
+  }
+  const verdict = powershell.readOnlyVerdict(cmd);
+  if (verdict.readOnly) return "";
+  if (mode === "targets") {
+    return "WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only, because " + verdict.reason + ")";
+  }
+  return "Blocked a PowerShell command that the source-write rules cannot judge, because " + verdict.reason + ". " +
+    "Rules (A), (B) and (C) read Bash commands only, so a PowerShell command passes this gate only when it is " +
+    "provably read-only. Run it through the Bash tool, or change files with Edit or Write." + OPT_IN_NOTE;
+}
+
 function main() {
   let cmd = "";
   let cwd0 = "";
@@ -659,15 +710,20 @@ function main() {
   if (raw === undefined || raw === "") {
     try { raw = fs.readFileSync(0, "utf8"); } catch (e) { raw = ""; }
   }
+  let tool = "";
+  let child = false;
   try {
     const j = JSON.parse(raw || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
     if (typeof j.cwd === "string") cwd0 = j.cwd;
+    if (typeof j.tool_name === "string") tool = j.tool_name;
+    child = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
   } catch (e) {
     return "";
   }
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
+  if (tool === "PowerShell") return powershellVerdict(cmd, process.env.BSWG_MODE || "", child);
   if (process.env.BSWG_MODE === "control") return detectControlMutation(cmd);
   // `targets` runs the FULL default parse and diverges at exactly TWO points —
   // check both when changing either:

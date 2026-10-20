@@ -43,10 +43,12 @@ log "Plugin dir: $PLUGIN_DIR"
 registered_check() {
   node -e '
     const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+    const reg=require(process.argv[2]);
     const pres=(h.hooks.PreToolUse||[]);
-    const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
+    const covers=(e,tool)=>reg.hostMatcherCovers(e.matcher,tool)===reg.REGISTRATION.REGISTERED;
+    const ok=pres.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
     process.exit(ok?0:1);
-  ' "$HOOKS_JSON" 2>/dev/null
+  ' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null
 }
 
 if [ "$MODE" = "--self-check" ]; then

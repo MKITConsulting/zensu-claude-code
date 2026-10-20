@@ -76,6 +76,7 @@
     "test-post-review-outer-ownership-root.sh",
     "test-post-review-self-review-handoff.sh",
     "test-post-review-tdd-scope.sh",
+    "test-powershell-tool-coverage.sh",
     "test-pr-fix-findings-skill.sh",
     "test-pr-team-review-skill.sh",
     "test-pre-edit-hook-mirror.sh",

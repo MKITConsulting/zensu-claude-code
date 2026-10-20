@@ -71,29 +71,31 @@ other hooks skip their checks.
 | Windows with WSL | Install and start `claude` inside the WSL terminal, not from PowerShell or CMD; Claude Code then runs its Linux build. CI tests Linux, not WSL itself. |
 | Native Windows without Git Bash | Not supported: Claude Code then runs the hooks in PowerShell. |
 
-On native Windows with Git for Windows, set two environment variables, either in
-the environment that starts Claude Code or in the `env` block of your user
-settings file `~/.claude/settings.json`, which applies in every project (write
-each backslash of a Windows path twice there):
+On native Windows with Git for Windows, two environment variables matter. Set
+them either in the environment that starts Claude Code or in the `env` block of
+your user settings file `~/.claude/settings.json`, which applies in every
+project (write each backslash of a Windows path twice there):
 
 - `CLAUDE_CODE_GIT_BASH_PATH`, the path of Git Bash's `bash.exe`, but only if
   Claude Code cannot find Git Bash on its own.
-- `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`, always. For claude.ai and Console
+- `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`, optional. For claude.ai and Console
   accounts, Claude Code turns its
   [PowerShell tool](https://code.claude.com/docs/en/tools-reference#powershell-tool)
   on by default once Git for Windows is installed, and Claude then routes shell
   commands through it. The default arrives with Claude Code's feature flags, so
   the first session after an install or upgrade can lack the tool while later
-  sessions have it.
+  sessions have it. Set the variable to keep Claude on the Bash tool.
 
-A command that Claude runs through the PowerShell tool skips every hook Zensu
-registers for the Bash tool: the [CLI write-gate](gates.md#cli-write-gate), the
-Session Control rebind check and the opt-in
-[source-write gate](gates.md#source-write-gate) that share one hook, the
-[secret scan](gates.md#secret-scan) of shell commands, the
-[browser consent gate](gates.md#browser-consent-gate), and the path redaction
-that runs after a shell command. The same holds wherever the PowerShell tool is
-turned on, including macOS, Linux and WSL, where it is opt-in.
+Zensu's shell hooks see a command that Claude runs through the PowerShell tool
+as well. The [CLI write-gate](gates.md#cli-write-gate), the Session Control
+rebind check and the opt-in [source-write gate](gates.md#source-write-gate) that
+share one hook, the [secret scan](gates.md#secret-scan), the
+[browser consent gate](gates.md#browser-consent-gate), the path redaction that
+runs after a shell command and the work-order gate each judge a PowerShell
+command or refuse it, and every refusal names the Bash tool, which stays
+available. [Shell Tools](gates.md#shell-tools) says what each gate does with a
+PowerShell command. The same holds wherever the PowerShell tool is turned on,
+including macOS, Linux and WSL, where it is opt-in.
 
 Known gaps on native Windows:
 - `/zensu:doctor` and `/zensu:adopt-session` are not exempt when Session Control
@@ -116,7 +118,7 @@ week. No CI job starts Claude Code itself, none runs on macOS, and none uses WSL
 | `zensu` CLI not found | Install the CLI (`curl -fsSL https://zensu.dev/install.sh \| sh`) and ensure it is on `PATH` — the session banner warns when it is missing |
 | Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](../README.md#self-hosting)), and that `zensu auth status` shows a logged-in session |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `echo "$ZENSU_API_KEY" \| zensu auth login --with-token -` — see [API Key (CI/CD)](../README.md#api-key-cicd) |
-| Hook errors on Windows, or a Zensu gate that does not fire there | Run Claude Code inside WSL, or install Git for Windows so that Claude Code runs the hooks through Git Bash; if it cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH`. With Git Bash, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`, because Zensu's shell-command gates do not see commands that Claude runs through the PowerShell tool. Make sure your shell profile prints nothing: Git Bash sources it for hook commands too, and output ahead of a hook's JSON makes Claude Code ignore that JSON decision. If every tool call is refused with `zensu: reviewer capability gate unavailable`, check that `node` is on the `PATH` of the environment that starts Claude Code. See [Platform Support](#platform-support). |
+| Hook errors on Windows, or a Zensu gate that does not fire there | Run Claude Code inside WSL, or install Git for Windows so that Claude Code runs the hooks through Git Bash; if it cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH`. When a Zensu gate refuses a PowerShell command, run it through the Bash tool, or set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` to keep Claude on the Bash tool. Make sure your shell profile prints nothing: Git Bash sources it for hook commands too, and output ahead of a hook's JSON makes Claude Code ignore that JSON decision. If every tool call is refused with `zensu: reviewer capability gate unavailable`, check that `node` is on the `PATH` of the environment that starts Claude Code. See [Platform Support](#platform-support). |
 | Planning agent cannot mutate Zensu state | Expected: `zensu:zensu-plm` receives neutral `host-profile-v1` context but its agent definition exposes only `Read`/`Grep`/`Glob`, and the enforcement gate adds nothing beyond them except the host's `SubagentHandback` report tool and the workflow result tool `StructuredOutput`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
 | OAuth login not opening | Check your default browser settings |
 | Review chain will not advance (`--review-ticket` refuses, `--current-review-ticket` reports nothing, `/zensu:reset-review-limit` not applicable) | Run `zensu-log.sh --chain-status` (or `/zensu:doctor`) to read the chain shape and its supported next command. Only a receipt that disagrees with its own workflow document is a true wedge; `/zensu:recover-chain`, from the session that owns the chain, repairs exactly that and nothing else. Never arm a fresh chain to work around a lock or commit failure — those report their own message and leave the budget intact. |

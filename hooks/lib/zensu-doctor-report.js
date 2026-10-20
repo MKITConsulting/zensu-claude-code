@@ -458,7 +458,7 @@ function toolBlock() {
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
   if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits its target origins, and every route on them, without a prompt in every permission mode, and lets pages request its network-only origins, if any, while it denies every navigation command that names one; any other origin is asked at the permission prompt where one can be shown and denied under bypass permissions or dontAsk');
-  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per session for each new loopback origin of a zensu-verify playwright-cli session and at every browser start for a remote HTTPS origin, then admits every route on an approved origin; under bypass permissions or dontAsk a remote origin needs the policy; a runtime recipe is present');
+  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash and PowerShell matcher asks you once per session for each new loopback origin of a zensu-verify playwright-cli session and at every browser start for a remote HTTPS origin, then admits every route on an approved origin; under bypass permissions or dontAsk a remote origin needs the policy; a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run; a remote run needs no recipe');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
   else if (v === 'policy-invalid') line(BAD, 'verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the browser consent gate denies every zensu-verify navigation until you fix that value or unset it to fall back to consent mode');
@@ -528,6 +528,47 @@ function pluginBlock() {
   }
   if (!missing.length && !unwired.length) {
     line(OK, 'hooks wiring: all ' + Object.keys(wired).length + ' hooks referenced in hooks.json exist on disk');
+  }
+  shellToolRow(hj.data);
+}
+
+var SHELL_TOOL_STATE_TEXT = {
+  on: 'the PowerShell tool is enabled here (CLAUDE_CODE_USE_POWERSHELL_TOOL)',
+  default: 'this is Windows, where the PowerShell tool is on by default for claude.ai and Console accounts',
+  off: 'the PowerShell tool is off here (CLAUDE_CODE_USE_POWERSHELL_TOOL=0)',
+  absent: 'the PowerShell tool is not enabled on this host, where it is opt-in through CLAUDE_CODE_USE_POWERSHELL_TOOL=1',
+};
+
+function shellToolRow(manifest) {
+  var mod = null;
+  try { mod = require('./shell-tool-coverage-v1.js'); } catch (_error) { mod = null; }
+  if (!mod) {
+    line(WARN, 'shell tools: not checked — hooks/lib/shell-tool-coverage-v1.js could not be loaded, so this is a missing check rather than an all-clear; reinstall the plugin');
+    return;
+  }
+  var coverage = mod.shellCoverage(manifest);
+  if (coverage === null) {
+    line(WARN, 'shell tools: not checked — hooks.json has a shape this check cannot read, so this is a missing check rather than an all-clear');
+    return;
+  }
+  var injected = env.ZDOC_POWERSHELL_TOOL || '';
+  var state = mod.POWERSHELL_STATE_VALUES.indexOf(injected) !== -1 ? injected : mod.powershellToolState(env, process.platform);
+  if (!coverage.gaps.length) {
+    var probe = null;
+    try { probe = require('./powershell-command-v1.js').analyze('Get-ChildItem'); } catch (_error) { probe = null; }
+    if (!probe || probe.fault !== null) {
+      line(WARN, 'shell tools: all ' + coverage.hooks.length + ' hooks that fire for the Bash tool also fire for the PowerShell tool, but hooks/lib/powershell-command-v1.js could not be loaded, so the Session Control check refuses every PowerShell command; reinstall the plugin');
+      return;
+    }
+    line(OK, 'shell tools: all ' + coverage.hooks.length + ' hooks that fire for the Bash tool also fire for the PowerShell tool');
+    return;
+  }
+  var names = mod.gapNames(coverage);
+  var lead = 'shell tools: ' + names.length + ' hook(s) fire for the Bash tool but not for the PowerShell tool (' + names.join(', ') + ')';
+  if (mod.mayRunPowerShell(state)) {
+    line(WARN, lead + ', and ' + SHELL_TOOL_STATE_TEXT[state] + ', so the commands Claude runs through PowerShell skip them — ' + mod.REMEDY);
+  } else {
+    line(OK, lead + '; ' + SHELL_TOOL_STATE_TEXT[state]);
   }
 }
 

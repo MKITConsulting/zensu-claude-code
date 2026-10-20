@@ -567,7 +567,7 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
       const probes = [["consent hook", mod.consentHookRegistered(process.cwd())], ["consent recorder", mod.consentRecorderRegistered(process.cwd())]];
       process.stdout.write(probes
         .filter((probe) => probe[1] !== REGISTERED)
-        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on the Bash matcher")
+        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on a matcher that covers Bash and PowerShell")
         .join("; "));
     ' 2>/dev/null)"; then
     ZDOC_VERIFY=unavailable
