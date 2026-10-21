@@ -232,6 +232,35 @@ function playwrightCliMeasuredVersion() {
 function playwrightPinnedInstall(measured) {
   return '`npm install -g @playwright/cli' + (measured ? '@' + measured : '') + '`';
 }
+function zensuCliVersionModule() {
+  try {
+    var info = fs.lstatSync(path.join(__dirname, 'zensu-cli-version-v1.js'));
+    if (!info.isFile()) return null;
+    return require('./zensu-cli-version-v1.js');
+  } catch (_error) {
+    return null;
+  }
+}
+function zensuInstallClause(mod) {
+  if (!mod) return "; the install commands could not be read, because the plugin's module hooks/lib/zensu-cli-version-v1.js did not load — reinstall the plugin";
+  return '; install zensu-cli ' + mod.MIN_VERSION + ' or later with `' + mod.INSTALL.homebrew + '`, `' + mod.INSTALL.script + '` or, on Windows, `' + mod.INSTALL.powershell + '`';
+}
+function zensuVersionRow(mod, state, version) {
+  if (!state) return;
+  if (!mod) {
+    line(WARN, "zensu CLI version: not judged — the plugin's version module hooks/lib/zensu-cli-version-v1.js could not be loaded; reinstall the plugin");
+    return;
+  }
+  var floor = mod.MIN_VERSION;
+  var v = mod.validVersion(String(version)) ? String(version) : '';
+  var upgrade = 'upgrade with `' + mod.INSTALL.homebrewUpgrade + '`, or run the installer again: `' + mod.INSTALL.script + '` or, on Windows, `' + mod.INSTALL.powershell + '`';
+  if (state === mod.STATES.OK && v) line(OK, 'zensu CLI version: ' + v + ' — at or above ' + floor + ', the oldest release this plugin supports');
+  else if (state === mod.STATES.OLD && v) line(WARN, 'zensu CLI version: ' + v + ' is older than ' + floor + ', the oldest release this plugin supports — ' + mod.FLOOR_REASON + '; ' + upgrade);
+  else if (state === mod.STATES.DEV) line(WARN, 'zensu CLI version: a development build, which names no release — the ' + floor + ' floor was not checked');
+  else if (state === mod.STATES.CWD_RELATIVE) line(WARN, 'zensu CLI version: PATH reaches zensu through an empty or relative entry, which the shell reads against the working directory of each call — it was not run, so the ' + floor + ' floor was not checked; remove that entry from PATH, or move it behind the directory that holds zensu');
+  else if (state === mod.STATES.ABSENT) line(WARN, 'zensu CLI version: the shell found zensu but the version probe found none on PATH, as happens with a shell function or alias named zensu — the ' + floor + ' floor was not checked');
+  else line(WARN, 'zensu CLI version: `zensu --version` printed no version this report could read — the ' + floor + ' floor was not checked');
+}
 // The wrapper's REASON reaches a rendered line, and it carries a free-form cause rather than
 // a state word, so it gets its own bound instead of the state filter above: a newline plus one of
 // this report's own severity glyphs forges an extra row, which is the one thing a reader of the
@@ -410,9 +439,12 @@ function configFiles() {
 function toolBlock() {
   block('CLI & tooling');
   var z = env.ZDOC_ZENSU || 'absent';
+  var zv = zensuCliVersionModule();
   if (z === 'authed') line(OK, 'zensu CLI: installed and authenticated');
   else if (z === 'present') line(WARN, 'zensu CLI: installed but not authenticated — run `zensu auth login`');
-  else line(WARN, 'zensu CLI: not found on PATH — feature tracking commands will be unavailable');
+  else if (z === 'unchecked') line(WARN, 'zensu CLI: PATH reaches zensu through an empty or relative entry, which the shell reads against the working directory of each call — it was not run, so neither its login nor its version was checked; remove that entry from PATH, or move it behind the directory that holds zensu');
+  else line(WARN, 'zensu CLI: not found on PATH — feature tracking commands will be unavailable' + zensuInstallClause(zv));
+  if (z === 'authed' || z === 'present') zensuVersionRow(zv, env.ZDOC_ZENSU_VERSION_STATE || '', env.ZDOC_ZENSU_VERSION || '');
 
   var n = env.ZDOC_NODE || '';
   if (n) line(OK, 'node: ' + n);

@@ -386,6 +386,52 @@ else
   check "B15 emitted command executes with inert quoted root and plugin data (parse=$SPECIAL_PARSE_RC command=$SPECIAL_COMMAND_RC exec=$SPECIAL_EXEC_RC marker=$SPECIAL_MARKER_OK)" FAIL
 fi
 rm -rf "$SPECIAL_BASE"
+
+ZC_BASE="$(mktemp -d -t zensu-banner-cli-XXXXXX)"
+ZC_FAKE="$ZC_BASE/fake"
+ZC_NODE_ONLY="$ZC_BASE/node-only"
+ZC_LOG="$ZC_BASE/calls.log"
+mkdir -p "$ZC_FAKE" "$ZC_NODE_ONLY"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'printf "%s\n" "$ZC_VERSION_LINE"' > "$ZC_FAKE/zensu"
+chmod +x "$ZC_FAKE/zensu"
+ln -s "$(command -v node)" "$ZC_NODE_ONLY/node"
+ZC_FLOOR="$(node -e 'process.stdout.write(require(process.argv[1]).MIN_VERSION)' "$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js")"
+zc_banner() {
+  printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZENSU_NO_UPDATE_CHECK PATH="$1" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$2" bash "$BANNER" 2>/dev/null
+}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "B16a-B16e the CLI line reads a shell-script zensu for its version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    ZC_OLD="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" 'zensu 0.9.0 (commit abc1234, built now)')"
+    case "$ZC_OLD" in
+      *"zensu CLI 0.9.0 ($ZC_FAKE/zensu) is older than $ZC_FLOOR"*'brew upgrade --cask zensu'*'curl -fsSL https://zensu.dev/install.sh | sh'*'irm https://zensu.dev/install.ps1 | iex'*)
+        check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" PASS ;;
+      *) check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" FAIL ;;
+    esac
+    ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
+    case "$ZC_CALLS" in
+      '1|--version ') check "B16b the banner runs zensu --version once, with the update check off" PASS ;;
+      *) check "B16b the banner runs zensu --version once, with the update check off (got: $ZC_CALLS)" FAIL ;;
+    esac
+    case "$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)")" in
+      *"CLI ready ($ZC_FAKE/zensu, $ZC_FLOOR)"*) check "B16c a CLI at the floor names its version on the ready line" PASS ;;
+      *) check "B16c a CLI at the floor names its version on the ready line" FAIL ;;
+    esac
+    rm -f "$ZC_LOG"
+    ZC_RELATIVE="$(cd "$ZC_BASE" && zc_banner "fake:$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" 'zensu 0.9.0 (commit abc1234, built now)')"
+    if [ ! -s "$ZC_LOG" ] && printf '%s' "$ZC_RELATIVE" | grep -qF 'CLI ready (' && ! printf '%s' "$ZC_RELATIVE" | grep -qF 'is older than'; then
+      check "B16d a zensu that PATH reaches through a relative entry is never run at session start" PASS
+    else
+      check "B16d a zensu that PATH reaches through a relative entry is never run at session start" FAIL
+    fi
+    case "$(zc_banner "$ZC_NODE_ONLY:/usr/bin:/bin" '')" in
+      *"'zensu' CLI not found on PATH — Zensu skills need zensu-cli $ZC_FLOOR or later. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex"*)
+        check "B16e a missing CLI names the floor and the three install commands" PASS ;;
+      *) check "B16e a missing CLI names the floor and the three install commands" FAIL ;;
+    esac
+    ;;
+esac
+rm -rf "$ZC_BASE"
 rm -rf "$PRIMER_DATA_BASE"
 
 echo "----"

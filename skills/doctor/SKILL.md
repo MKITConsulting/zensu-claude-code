@@ -23,7 +23,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 ## What it checks
 
-- **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
+- **CLI & tooling** — the zensu CLI (auth, version), node, the code-forge CLI (gh or glab) and
   its auth resolved from the repo's provider, whether playwright-cli is installed and its
   version, and the browser consent gate's registration on both shell tools.
 - **Plugin integrity** — hooks.json wired to files on disk, Bash-to-PowerShell hook
@@ -70,7 +70,7 @@ CAS workflow documents are never deleted.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
+(`command -v`, `--version`, `zensu auth status`). The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
 package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
 within four directories of the resolved binary — without running it. A manifest that names
@@ -372,7 +372,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
-- **⚠️ zensu not authenticated** → `zensu auth login`.
+- **zensu CLI** rows → read `references/zensu-cli.md`.
 - **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
   manifest beside the binary is the one the browser consent gate was measured against, and
   `/zensu:verify-feature` drives the browser through it. The manifest vouches for the package,

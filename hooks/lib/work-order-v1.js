@@ -810,9 +810,10 @@ const SESSION_TOKEN_SHAPE_RE = /ZENSU_SESSION_TOKEN must hold/;
 
 function probe({ env = process.env } = {}) {
   const outcome = runZensu(['work', '--help'], { env, timeoutMs: 15000 });
-  if (outcome.missing) return { ok: false, reason: 'the zensu CLI is not on PATH; install zensu-cli 0.8.0 or later' };
+  const floor = require('./zensu-cli-version-v1.js').MIN_VERSION;
+  if (outcome.missing) return { ok: false, reason: `the zensu CLI is not on PATH; install zensu-cli ${floor} or later` };
   if (outcome.exitCode !== 0) {
-    return { ok: false, reason: 'the installed zensu CLI has no `zensu work` command; install zensu-cli 0.8.0 or later' };
+    return { ok: false, reason: `the installed zensu CLI has no \`zensu work\` command; install zensu-cli ${floor} or later` };
   }
   return { ok: true, reason: null };
 }
