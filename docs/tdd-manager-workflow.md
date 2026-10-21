@@ -42,6 +42,8 @@ the directory the Bash tool starts in is no longer the bound root. For the same 
 project command the skill prescribes — test runs, checkpoints, the build, coverage and the mtime
 `stat` — runs as `cd "{project_root}" && <command>`, while `--evidence-run` needs no prefix: it
 runs its command in the bound root whenever the working directory lies outside that work tree.
+The review chain's flag probes pass it as `CLAUDE_PROJECT_DIR` for the same reason, so they read
+the project `.zensu/config.json` of the bound root.
 The `cd` carries no `--`: the root is absolute, and the source-write gate takes the token after
 `cd` as the directory, so `cd --` would scope its checks to a directory named `--`.
 The verb refuses a root holding a double quote, a dollar sign, a backtick or a backslash, because

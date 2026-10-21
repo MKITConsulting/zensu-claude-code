@@ -184,11 +184,30 @@ if grep -qF "[Panel-FP-neutralized — do not fix]" "$TDD_MD" && grep -qF "never
 else
   check "P3g visible neutralization tag, CRITICAL never dropped, all severity modes exempt" FAIL
 fi
-if grep -qF 'zensu_hook_enabled reviewJudge && echo on || echo off' "$TDD_MD"; then
-  check "P3h flag resolved via the config-lib seam (real merge semantics)" PASS
+IFS= read -r P3H_PROBE <<'PROBE'
+ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewJudge && echo on || echo off'
+PROBE
+if grep -qF -- "$P3H_PROBE" "$TDD_MD"; then
+  check "P3h flag resolved via the config-lib seam against the bound project root (real merge semantics)" PASS
 else
-  check "P3h flag resolved via the config-lib seam (real merge semantics)" FAIL
+  check "P3h flag resolved via the config-lib seam against the bound project root (real merge semantics)" FAIL
 fi
+P3H_WORK="$(mktemp -d "${TMPDIR:-/tmp}/review-judge-p3h.XXXXXX")"
+mkdir -p "$P3H_WORK/home" "$P3H_WORK/overlay/.zensu" "$P3H_WORK/plain"
+printf '%s\n' '{"hooks":{"reviewJudge":false}}' > "$P3H_WORK/overlay/.zensu/config.json"
+p3h_run() {
+  local c="${P3H_PROBE//\{plugin_root\}/$PLUGIN_DIR}"
+  c="${c//\{project_root\}/$1}"
+  ( cd "$P3H_WORK" && env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P3H_WORK/home" bash -c "$c" ) 2>/dev/null
+}
+P3H_OVERLAY="$(p3h_run "$P3H_WORK/overlay")"
+P3H_PLAIN="$(p3h_run "$P3H_WORK/plain")"
+if [ "$P3H_OVERLAY" = "off" ] && [ "$P3H_PLAIN" = "on" ]; then
+  check "P3h2 the rendered probe reads a project-level hooks.reviewJudge from {project_root}" PASS
+else
+  check "P3h2 the rendered probe reads a project-level hooks.reviewJudge from {project_root} (overlay='$P3H_OVERLAY' plain='$P3H_PLAIN')" FAIL
+fi
+rm -rf "$P3H_WORK"
 STEP_4B="$(grep -F '    4b. **Judge second pass' "$TDD_MD")"
 P3J_OK=true
 for needle in \
@@ -262,13 +281,18 @@ if grep -qF '| `reviewJudgeSecondRun` |' "$CONFIG_DOC" \
   && grep -qF 'When `false`, the first review runs one judge, as before. Default `true`.' "$CONFIG_DOC" \
   && grep -qF 'two on the first review while `reviewJudgeSecondRun` is on' "$CONFIG_DOC" \
   && grep -qF 'is logged as `JUDGE SECOND RUN RULE BREACH — <what>`' "$CONFIG_DOC" \
-  && grep -qF 'not from a project `.zensu/config.json`, a known gap it shares with `reviewJudge` and `findingVerification`' "$CONFIG_DOC" \
   && grep -qF 'a first judge run that fails falls back to the full panel, while the independent second run writes no gaps' "$CONFIG_DOC" \
   && grep -qF '(`hooks.reviewJudgeSecondRun`, default on)' "$REVIEW_DOC" \
   && grep -qF 'findings but never gaps, and its failure only logs `JUDGE SECOND RUN UNAVAILABLE`.' "$REVIEW_DOC"; then
   check "P5d the configuration and review-chain docs describe the second judge run" PASS
 else
   check "P5d the configuration and review-chain docs describe the second judge run" FAIL
+fi
+if grep -qF 'the flag probes in `/zensu:tdd`, `/zensu:plan-review` and `/zensu:pr-team-review` set it to the bound project root of the session' "$CONFIG_DOC" \
+  && ! grep -qF 'a known gap it shares with `reviewJudge` and `findingVerification`' "$CONFIG_DOC"; then
+  check "P5f the configuration doc anchors the skill flag probes on the bound project root and names no project-config gap" PASS
+else
+  check "P5f the configuration doc anchors the skill flag probes on the bound project root and names no project-config gap" FAIL
 fi
 if grep -qF 'disables the mode may lower its severity by one level, never below IMPORTANT, and never drops the' "$SEVERITY_DOC" \
   && grep -qF 'finding; that is the only case in which a defect that fits CRITICAL is rated IMPORTANT.' "$SEVERITY_DOC" \
