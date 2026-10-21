@@ -17,9 +17,9 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 { INPUT="$(cat)"; } 2>/dev/null
 command -v node >/dev/null 2>&1 || exit 0
 
-SESSION_ID="$(PAYLOAD="$INPUT" node -e '
+SESSION_ID="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
     if (j && j.hook_event_name === "SessionStart" && typeof j.session_id === "string") {
       process.stdout.write(j.session_id);
     }

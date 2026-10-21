@@ -237,6 +237,26 @@ for t in $ZENSU_WORK_ORDER_SESSION_TOOL_NAMES; do
 done
 [ "$S_FAIL" -eq 0 ] && check "C5 the write-gate's work-order session tools are exactly the mutations among the verbs the work-order gate lets through" PASS || check "C5 work-order session tools drift from SESSION_WORK_VERBS ($S_FAIL)" FAIL
 
+CLI_MAP="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
+WO_PLAN_VERBS="$(node -e 'process.stdout.write([...require(process.argv[1]).HUMAN_PLAN_VERBS].join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/work-order-v1.js" 2>/dev/null)"
+MAP_PLAN_VERBS="$(grep -oE '"plan [a-z-]+"' "$CLI_MAP" | sed -E 's/"plan ([a-z-]+)"/\1/' | sort -u | tr '\n' ' ')"
+MAP_THIRDS="$(grep -oE '^[[:space:]]+[a-z-]+\)[[:space:]]+echo' "$CLI_MAP" | sed -E 's/^[[:space:]]+([a-z-]+)\).*/\1/' | sort -u | tr '\n' ' ')"
+H_FAIL=0
+[ -n "$WO_PLAN_VERBS" ] || { H_FAIL=1; echo "      HUMAN_PLAN_VERBS could not be read from hooks/lib/work-order-v1.js"; }
+[ -n "$MAP_PLAN_VERBS" ] && [ -n "$MAP_THIRDS" ] || { H_FAIL=1; echo "      the plan verbs or the group subcommands could not be read from hooks/lib/zensu-cli-map.sh"; }
+for v in $(printf '%s\n' $WO_PLAN_VERBS $MAP_PLAN_VERBS | sort -u); do
+  human=no
+  for third in "" $MAP_THIRDS; do
+    zensu_is_human_decision_tool "$(zensu_cli_to_tool plan "$v" "$third")" && human=yes
+  done
+  listed=no
+  case " $WO_PLAN_VERBS " in
+    *" $v "*) listed=yes ;;
+  esac
+  [ "$human" = "$listed" ] || { H_FAIL=$((H_FAIL+1)); echo "      zensu plan $v: records a person's decision=$human, in HUMAN_PLAN_VERBS=$listed"; }
+done
+[ "$H_FAIL" -eq 0 ] && check "C6 the work-order gate's HUMAN_PLAN_VERBS are exactly the plan verbs that record a person's decision" PASS || check "C6 HUMAN_PLAN_VERBS drift from the human-decision plan tools ($H_FAIL)" FAIL
+
 if command -v node >/dev/null 2>&1; then
   check "AP0 node is available for the argument-placeholder lint" PASS
 else

@@ -17,9 +17,9 @@
 # under Limits and CLAUDE.md states as a known gap.
 
 zensu_worktree_keep_read_field() {
-  PAYLOAD="$1" FIELD="$2" node -e '
+  printf '%s' "$1" | FIELD="$2" node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const v = j[process.env.FIELD];
       process.stdout.write(typeof v === "string" ? v : "");
     } catch (_) { process.stdout.write(""); }

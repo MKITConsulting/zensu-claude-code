@@ -202,7 +202,20 @@ grows past 64 directories is denied (`directories`).
   run, and its false positive on a heredoc line fed to `cat`. The gate
   runs the walker only when the command holds `zensu` as a word of its own, runs the token scan
   alone when the module cannot load, and keeps only the first line of a verb word, so a word that
-  decodes to a line break cannot add a line to its tab-separated output.
+  decodes to a line break cannot add a line to its tab-separated output. Its node child emits each
+  distinct line once (a `Set`), because the walker and the token scan find the same invocation, and
+  the shell resolves the workflow's tools once per run (`zensu_workflow_tools`), so the cost of a
+  call no longer grows with repeated invocations. Before either reading runs it compares the
+  payload with the binder's exported `MAX_PAYLOAD_BYTES` and turns an oversized Bash command that
+  names `zensu` into the size deny of `zensu_emit_oversized_payload_deny`.
+- The parse stays linear in the command length. `braceSpan` is one stack pass that keeps the
+  leftmost brace group holding a comma, `endWord` keeps a per-command flag for leading
+  assignments, the shell `-c` flag in the walker and in `commandItemViolation` goes through
+  `shortFlagsInclude`, `withoutComments` blanks every comment in one join, and the gate trims
+  quotes with `unquoted`. Two stars around a literal in one
+  regex, or a rescan from every opening character, is the shape to avoid. The unit test "the
+  parser stays linear on adversarial input" and B51 in `tests/structure/test-bash-zensu-gate.sh`
+  run each shape under a 15 s budget.
 - Guidance stays conservative. Skill text keeps every gate, every test whose result counts as
   evidence, every commit and every `zensu` call with the main thread, because the grant can be
   switched off, the guard can refuse, and the guard's helper rule refuses a subagent
