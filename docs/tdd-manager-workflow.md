@@ -375,8 +375,10 @@ chains, rejects symlink aliases and unsafe roots, and snapshots identity/content
 metadata. Every leased `Read`/`Grep`/`Glob` call revalidates that snapshot, so a
 replacement, symlink swap, or other TOCTOU drift fails closed. The workers have
 no file mutation, task, messaging, nested-agent, Skill, MCP, Web, or command
-capability. They return one raw JSON final message with exact `kind` and `role`;
-`SubagentStop` captures it privately, and collection binds the host worker id,
+capability. They return one raw JSON object with exact `kind` and `role`, as the
+`message` of `SubagentHandback` when the host offers that tool, else as their final
+message; the capability gate's `SubagentHandback` validation or `SubagentStop`
+captures it privately, and collection binds the host worker id,
 kind, role, size, and schema before the main thread may materialize it. The lease
 closes after collection and on every failure path. Repository instructions,
 diffs, source text, overlays, and refinement context remain untrusted data and

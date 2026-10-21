@@ -86,7 +86,7 @@
   vars: { scenario_id: evidence-worker-exact-grep, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExactGrepAllowed' }
 - description: "C44 an active lease authorizes Glob only at an exact safe subtree"
   vars: { scenario_id: evidence-worker-exact-glob, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExactGlobAllowed' }
-- description: "C45 dedicated workers deny every non-read tool family including command, mutation, orchestration, web, skill, and MCP"
+- description: "C45 dedicated workers deny every non-read tool family including command, mutation, orchestration, web, skill, and MCP; beside the reads only the lease-validated SubagentHandback result call is admitted"
   vars: { scenario_id: evidence-worker-all-tool-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:CapabilityMatrix:AllNonReadToolsDenied' }
 - description: "C46 a lease denies Read of an existing but nonlisted file inside an allowed subtree"
   vars: { scenario_id: evidence-worker-nonlisted-read-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:NonlistedReadDenied' }

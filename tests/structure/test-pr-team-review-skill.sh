@@ -580,9 +580,9 @@ if grep -qF 'Reviewer Evidence and Capability Contract' "$PERSONAS_MD" \
    && ! grep -qF 'Write `OUTPUT`' "$PERSONAS_MD" \
    && ! grep -qE 'grep -r|find +"?\$WORKTREE' "$PERSONAS_MD" \
    && ! grep -qF 'run the coverage tool ONLY' "$PERSONAS_MD"; then
-  check "P15d persona templates are dedicated, untrusted-data-safe, final-message-only contracts" PASS
+  check "P15d persona templates are dedicated, untrusted-data-safe, single-JSON-result contracts" PASS
 else
-  check "P15d persona templates are dedicated, untrusted-data-safe, final-message-only contracts" FAIL
+  check "P15d persona templates are dedicated, untrusted-data-safe, single-JSON-result contracts" FAIL
 fi
 
 # A finding on a file outside the diff is wanted, but only the forge's inline channel is

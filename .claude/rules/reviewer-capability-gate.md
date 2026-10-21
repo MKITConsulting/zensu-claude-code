@@ -89,10 +89,14 @@ handbacks, one to four per seat, the host nudged the seats, and each seat used 9
 calls; every seat still ended with its JSON as final text. Earlier, 51 denied `pr-review-worker`
 transcripts showed the same pattern.
 
-- **Gate first.** The `EVIDENCE_WORKER` branch of `judgePrincipal` runs `handbackViolation`
-  for `HOST_HANDBACK_TOOL` before it calls `toolViolation`, and `toolViolation` repeats the
-  exact-name and exact-shape check for its own callers. The suite pins the two name literals
-  equal. Every other tool of a worker is denied with
+- **Gate first, one writer.** The `EVIDENCE_WORKER` branch of `judgePrincipal` runs
+  `handbackViolation` for `HOST_HANDBACK_TOOL`, then hands the call to `admitHandback`, the
+  one lease entry point that stores a handed-back result. Every other tool goes to
+  `toolViolation`, which writes nothing: asked about a handback, it answers the same verdict
+  without storing the result, so a caller that only wants a verdict cannot complete a worker.
+  Both repeat the exact-name and exact-shape check for their own callers. `HOST_HANDBACK_TOOL`
+  takes its value from the lease module's `HANDBACK_TOOL`, so the name has one owner, and the
+  suite pins that derivation. Every other tool of a worker is denied with
   `… only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the JSON result`.
 - **The same validation as the final text.** A bound or retrying worker's message goes
   through `parseWorkerResult` with the label `SubagentHandback message`, then through the
@@ -100,7 +104,12 @@ transcripts showed the same pattern.
   (`completeWorker`, `result_attempts` plus one), so the record gains no key and finalize and
   collect read it unchanged. A failure is denied with the validation reason and writes nothing.
   It costs no strike: the two-strike ladder bounds the block loop a `SubagentStop` forces, a
-  deny forces no continuation, and `maxTurns: 24` bounds the retries.
+  deny forces no continuation, and `maxTurns: 24` bounds the retries. A write that fails is
+  denied with the fixed reason `evidence-worker-v1 could not store the SubagentHandback result;
+  call SubagentHandback once more with the same JSON object`, never the filesystem error: that
+  message carries the lease id and the plugin-data path, which the worker is never told. A
+  rename that landed before the error leaves the worker completed, so the identical re-send
+  then takes the completed branch.
 - **Completed means create-once.** A completed worker's handback is allowed only when its
   message parses to the stored result (the same `result_sha256`), and it writes nothing; every
   other message is denied. This is the path a worker takes when its final text completed it at
@@ -120,14 +129,22 @@ transcripts showed the same pattern.
   `skills/plan-review/SKILL.md` sits on the shrink-only allowlist of
   `tests/structure/test-skill-text-budget.sh`, so its entry moves with any edit there.
 - **Coupled sites.** `tests/structure/test-reviewer-capability-gate.sh` pins the names, the
-  shapes, the hand-off to the lease and the shared literal;
-  `tests/structure/test-review-worker-evidence-lease.sh` pins the allow, the rejections, the
-  identical re-send, create-once, the resultless `SubagentStop`, the late `SubagentStop` after
-  finalize and the PR path binding. The worker sentences are pinned by P4i and P15b in
-  `test-pr-team-review-skill.sh`, P3a and P10b in `test-plan-review-skill.sh` and the agent
-  checks of `test-reviewer-readonly-v1.sh`.
+  shapes, the hand-off to the lease and the derivation of `HOST_HANDBACK_TOOL`;
+  `tests/structure/test-review-worker-evidence-lease.sh` pins the allow from a bound and from a
+  retrying worker, the rejections, the identical re-send, create-once, the resultless
+  `SubagentStop`, the late `SubagentStop` after finalize, the PR path binding, the write-free
+  verdict of `toolViolation`, the path-free write failure of `admitHandback`, and the handback
+  clause of the SubagentStart line, the evidence-worker context and the correction request. The
+  worker sentences are pinned by P4i and P15b in `test-pr-team-review-skill.sh`, P3a and P10b in
+  `test-plan-review-skill.sh` and the agent checks of `test-reviewer-readonly-v1.sh`. The persona
+  templates in `skills/pr-team-review/rules/reviewer-personas.md` name no channel, so the
+  contract block of `references/spawn.md` is the one place a pr-review worker's prompt names it.
   `evals/session-control/lib/evidence-worker-contract.js` matches the deny prefix
-  `only Read, Grep, and Glob` and the `create-once` reason.
+  `only Read, Grep, and Glob` and the `create-once` reason; the C45 description in
+  `evals/session-control/scenarios/catalog.yaml` and the contract summary in
+  `evals/session-control/README.md` name the admitted handback. No contract scenario drives a
+  worker handback yet: the Promptfoo harness runs locally only, and the structure suites above,
+  which CI runs, pin the behaviour.
 - **Known gaps.** The result is stored before the host executes the call. When another
   `PreToolUse` hook denies the call, or the host's call fails because the caller is gone, the
   lease holds the result while the caller received no report; the main thread collects from the
@@ -231,11 +248,15 @@ of that release's commits — see `.claude/rules/runtime-lineage.md`.
 Claude Code host bundle it finds: `claude` on `PATH`, and on macOS every desktop-app bundle
 under `~/Library/Application Support/Claude/claude-code/`. It takes each bundle's
 `// Version:` marker and, from 2.1.269 on (the oldest local build measured to carry the
-name), requires the quoted literal of `HOST_HANDBACK_TOOL`. A host that renames or drops the
-tool fails there, and a synthetic control proves the check can fail. CI runners carry no host
-bundle, so CI prints a SKIP line; the check fails loudly only where the host is installed. On
-a failure, read the new bundle for the report tool's name and input schema, then update
-`HOST_HANDBACK_TOOL`, the shape check, the docs the suite scans, and this file together.
+name), requires the quoted literal of `HANDBACK_TOOL` in `review-evidence-lease-v1.js`, the one
+owner `HOST_HANDBACK_TOOL` takes its value from. A host that renames or drops the tool fails
+there, and a synthetic control proves the check can fail. CI runners carry no host bundle, so
+CI prints a SKIP line; the check fails loudly only where the host is installed. On a failure,
+read the new bundle for the report tool's name and input schema, then update `HANDBACK_TOOL`,
+the shape check `handbackInputValid`, the docs the suite scans, the prose spellings that do not
+interpolate the constant (the two `renderEvidenceWorkerContext` sentences in
+`session-control-core-v1.js`, both agent definitions, both spawn prompts and the persona
+contract sentence), and this file together.
 
 **Known gaps.**
 
@@ -252,6 +273,8 @@ Operator-facing accounts that move with this decision: `docs/session-control.md`
 `SubagentHandback` item), `docs/gates.md` §"Reviewer-Spawn Grant" and §"Vanished Working
 Directory", the capability-gate row in `docs/configuration.md`, the reviewer-boundary paragraph,
 the two worker rows and the result-capture sentence in `docs/review-chain.md`, the identity
-paragraph of `docs/tdd-manager-workflow.md`, the PLM row in `docs/operations.md`, and the L03
-item in `docs/session-control-release-gate.md`. The suite requires the literal in `session-control.md`,
+paragraph and the worker-lease paragraph of `docs/tdd-manager-workflow.md`, the PLM row in
+`docs/operations.md`, the evidence-worker backstop sentence of `docs/gates.md` §"Reviewer-Spawn
+Grant", and the L03 item, the dedicated-worker item and the lease-collection item in
+`docs/session-control-release-gate.md`. The suite requires the literal in `session-control.md`,
 `gates.md`, `configuration.md` and `review-chain.md`.

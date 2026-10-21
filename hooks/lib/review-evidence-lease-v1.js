@@ -1720,7 +1720,7 @@ function handbackRejection(reason) {
     + 'kind and role as its whole message; no Markdown fence, preface, or suffix.';
 }
 
-function acceptHandback(locations, record, agentId, worker, message) {
+function acceptHandback(locations, record, agentId, worker, message, commit) {
   let result;
   try {
     result = parseWorkerResult(message, record.kind, record.allowed_pr_paths,
@@ -1731,23 +1731,19 @@ function acceptHandback(locations, record, agentId, worker, message) {
   if (claimedRole(record, agentId, result.role)) {
     return handbackRejection(`worker result role "${result.role}" was already claimed`);
   }
+  if (!commit) return null;
   worker.result_attempts += 1;
   completeWorker(worker, result);
   record.revision += 1;
-  atomicWriteRecord(locations.records, record);
+  try {
+    atomicWriteRecord(locations.records, record);
+  } catch (_) {
+    return `evidence-worker-v1 could not store the ${HANDBACK_TOOL} result; call ${HANDBACK_TOOL} once more with the same JSON object`;
+  }
   return null;
 }
 
-function toolViolation(payload, binding) {
-  const kind = kindForAgentType(payload.agent_type);
-  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
-  const handback = payload.tool_name === HANDBACK_TOOL;
-  if (!handback && !ALLOWED_TOOLS.has(payload.tool_name)) {
-    return `evidence-worker-v1 cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HANDBACK_TOOL} to deliver the JSON result`;
-  }
-  if (handback && !handbackInputValid(payload.tool_input)) {
-    return `evidence-worker-v1 may invoke ${HANDBACK_TOOL} only with exactly one string field, message`;
-  }
+function judgeLeasedWorker(payload, binding, kind, judge) {
   let agentId;
   try { agentId = requireSafeText(payload.agent_id, 'worker agent_id', 512); } catch (error) {
     return error.message;
@@ -1759,44 +1755,75 @@ function toolViolation(payload, binding) {
         && Object.prototype.hasOwnProperty.call(record.workers, agentId));
       if (matching.length !== 1) return 'evidence-worker-v1 has no unique bound lease';
       const record = matching[0];
-      const worker = record.workers[agentId];
       if (record.status !== 'active') return 'evidence-worker-v1 lease is revoked';
       if (record.expires_at_ms <= Date.now()) return 'evidence-worker-v1 lease is expired';
-      if (handback && worker.agent_type === payload.agent_type && worker.status === 'completed') {
-        const candidate = candidateResultHash(record, payload.tool_input.message, `${HANDBACK_TOOL} message`);
-        if (candidate === worker.result_sha256) return null;
-        return `evidence-worker-v1 already stored this worker's result, which is create-once; hand back that same JSON object unchanged or end the run`;
-      }
-      if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
-        return 'evidence-worker-v1 agent binding is inactive or mismatched';
-      }
-      if (handback) return acceptHandback(locations, record, agentId, worker, payload.tool_input.message);
-
-      if (payload.tool_name === 'Read') {
-        const rawPath = payload.tool_input.file_path ?? payload.tool_input.path;
-        if (typeof rawPath !== 'string') return 'evidence-worker-v1 Read requires one explicit file_path';
-        const requested = canonicalToolPath(rawPath, binding.projectRoot, 'Read file_path', 'file');
-        const entry = record.exact_files.find((candidate) => candidate.path === requested);
-        if (!entry) return 'evidence-worker-v1 Read path is not an exact leased file';
-        revalidateExactFile(entry);
-        return null;
-      }
-
-      if (typeof payload.tool_input.path !== 'string') {
-        return `evidence-worker-v1 ${payload.tool_name} requires an explicit leased path`;
-      }
-      const requested = canonicalToolPath(payload.tool_input.path, binding.projectRoot,
-        `${payload.tool_name} path`, 'directory');
-      const entry = record.safe_roots.find((candidate) => candidate.path === requested);
-      if (!entry) return `evidence-worker-v1 ${payload.tool_name} path is not an exact leased traversal root`;
-      const patternViolation = traversalPatternViolation(payload);
-      if (patternViolation) return patternViolation;
-      revalidateSafeRoot(entry);
-      return null;
+      return judge(locations, record, agentId, record.workers[agentId]);
     });
   } catch (error) {
     return `evidence-worker-v1 validation failed: ${error.message}`;
   }
+}
+
+function handbackVerdict(payload, binding, commit) {
+  const kind = kindForAgentType(payload.agent_type);
+  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
+  if (!handbackInputValid(payload.tool_input)) {
+    return `evidence-worker-v1 may invoke ${HANDBACK_TOOL} only with exactly one string field, message`;
+  }
+  return judgeLeasedWorker(payload, binding, kind, (locations, record, agentId, worker) => {
+    if (worker.agent_type === payload.agent_type && worker.status === 'completed') {
+      const candidate = candidateResultHash(record, payload.tool_input.message, `${HANDBACK_TOOL} message`);
+      if (candidate === worker.result_sha256) return null;
+      return `evidence-worker-v1 already stored this worker's result, which is create-once; hand back that same JSON object unchanged or end the run`;
+    }
+    if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
+      return 'evidence-worker-v1 agent binding is inactive or mismatched';
+    }
+    return acceptHandback(locations, record, agentId, worker, payload.tool_input.message, commit);
+  });
+}
+
+function admitHandback(payload, binding) {
+  if (payload.tool_name !== HANDBACK_TOOL) {
+    return `evidence-worker-v1 cannot deliver a result through ${payload.tool_name}; only ${HANDBACK_TOOL} delivers it`;
+  }
+  return handbackVerdict(payload, binding, true);
+}
+
+function toolViolation(payload, binding) {
+  const kind = kindForAgentType(payload.agent_type);
+  if (!kind) return 'evidence-worker-v1 has an unknown agent type';
+  if (payload.tool_name === HANDBACK_TOOL) return handbackVerdict(payload, binding, false);
+  if (!ALLOWED_TOOLS.has(payload.tool_name)) {
+    return `evidence-worker-v1 cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HANDBACK_TOOL} to deliver the JSON result`;
+  }
+  return judgeLeasedWorker(payload, binding, kind, (locations, record, agentId, worker) => {
+    if (worker.agent_type !== payload.agent_type || !['bound', 'retry'].includes(worker.status)) {
+      return 'evidence-worker-v1 agent binding is inactive or mismatched';
+    }
+
+    if (payload.tool_name === 'Read') {
+      const rawPath = payload.tool_input.file_path ?? payload.tool_input.path;
+      if (typeof rawPath !== 'string') return 'evidence-worker-v1 Read requires one explicit file_path';
+      const requested = canonicalToolPath(rawPath, binding.projectRoot, 'Read file_path', 'file');
+      const entry = record.exact_files.find((candidate) => candidate.path === requested);
+      if (!entry) return 'evidence-worker-v1 Read path is not an exact leased file';
+      revalidateExactFile(entry);
+      return null;
+    }
+
+    if (typeof payload.tool_input.path !== 'string') {
+      return `evidence-worker-v1 ${payload.tool_name} requires an explicit leased path`;
+    }
+    const requested = canonicalToolPath(payload.tool_input.path, binding.projectRoot,
+      `${payload.tool_name} path`, 'directory');
+    const entry = record.safe_roots.find((candidate) => candidate.path === requested);
+    if (!entry) return `evidence-worker-v1 ${payload.tool_name} path is not an exact leased traversal root`;
+    const patternViolation = traversalPatternViolation(payload);
+    if (patternViolation) return patternViolation;
+    revalidateSafeRoot(entry);
+    return null;
+  });
 }
 
 function parseCli(argv) {
@@ -1888,6 +1915,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  admitHandback,
   bindWorker,
   collectLease,
   createLease,

@@ -481,7 +481,7 @@ assert_case "scoped judge reviewer may return a workflow result through Structur
 assert_case "bare reviewer fixture may return a workflow result through StructuredOutput" allow review-aspect StructuredOutput '{}'
 assert_case "scoped PLM may return a workflow result through StructuredOutput" allow zensu:zensu-plm StructuredOutput '{"answer":"x"}'
 PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer workflow result resolves no path, so a vanished cwd cannot block it" allow zensu:review-aspect StructuredOutput '{"findings":[]}'
-assert_case "evidence worker stays on the bare read trio without StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
+assert_case "evidence worker cannot invoke StructuredOutput" deny zensu:pr-review-worker StructuredOutput '{"result":"x"}'
 assert_case "reviewer cannot invoke a case variant of StructuredOutput" deny zensu:review-aspect structuredoutput '{}'
 assert_case "reviewer cannot invoke an MCP tool named like StructuredOutput" deny zensu:review-aspect mcp__evil__StructuredOutput '{}'
 assert_case "reviewer cannot invoke a case variant of SubagentHandback" deny zensu:code-reviewer subagenthandback "$HANDBACK_REPORT"
@@ -917,11 +917,16 @@ else
   check "foreign-installation fixture could not be minted" FAIL
 fi
 
-HANDBACK_LITERAL="$(sed -n "s/^const HOST_HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$POLICY")"
+HANDBACK_LITERAL="$(sed -n "s/^const HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$PLUGIN/hooks/lib/review-evidence-lease-v1.js")"
 if [ "$HANDBACK_LITERAL" = SubagentHandback ]; then
-  check "the gate declares SubagentHandback as its one host report tool" PASS
+  check "the evidence lease declares SubagentHandback as the one host report tool" PASS
 else
-  check "the gate must declare HOST_HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+  check "the evidence lease must declare HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+fi
+if grep -qx 'const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;' "$POLICY"; then
+  check "the gate takes its host report tool name from the evidence lease" PASS
+else
+  check "the gate must take HOST_HANDBACK_TOOL from evidenceLeases.HANDBACK_TOOL" FAIL
 fi
 READ_TRIO_LITERAL="$(sed -n "s/^const REVIEWER_READ_TOOLS = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
 if [ "$READ_TRIO_LITERAL" = "'Read', 'Grep', 'Glob'" ]; then
@@ -934,12 +939,6 @@ if [ "$HANDBACK_PROFILES_LITERAL" = "'reviewer-readonly-v1', 'zensu-plm-readonly
   check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a free-text report back" PASS
 else
   check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a free-text report back (got: ${HANDBACK_PROFILES_LITERAL:-<none>})" FAIL
-fi
-LEASE_HANDBACK_LITERAL="$(sed -n "s/^const HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$PLUGIN/hooks/lib/review-evidence-lease-v1.js")"
-if [ -n "$HANDBACK_LITERAL" ] && [ "$LEASE_HANDBACK_LITERAL" = "$HANDBACK_LITERAL" ]; then
-  check "the evidence lease admits the same host report tool name as the gate" PASS
-else
-  check "the evidence lease must admit the gate's host report tool name (gate: ${HANDBACK_LITERAL:-<none>}, lease: ${LEASE_HANDBACK_LITERAL:-<none>})" FAIL
 fi
 for doc in docs/session-control.md docs/gates.md docs/configuration.md docs/review-chain.md; do
   if [ -n "$HANDBACK_LITERAL" ] && grep -qF "$HANDBACK_LITERAL" "$PLUGIN/$doc"; then
@@ -992,7 +991,7 @@ host_handback_verdicts() {
       } else if (bundle.indexOf(needle) >= 0) {
         console.log(`PASS\thost ${version} still defines the ${literal} report tool the reviewer gate admits`);
       } else {
-        console.log(`FAIL\thost ${version} no longer defines ${literal}: its subagent report tool was renamed or removed, so zensu reviewers deliver no report; re-measure the bundle and update HOST_HANDBACK_TOOL`);
+        console.log(`FAIL\thost ${version} no longer defines ${literal}: its subagent report tool was renamed or removed, so zensu reviewers deliver no report; re-measure the bundle and update HANDBACK_TOOL in review-evidence-lease-v1.js`);
       }
     }
   ' "${HANDBACK_LITERAL:-SubagentHandback}" 2.1.269 "$@"

@@ -796,7 +796,7 @@ function neutralViolation(payload, trusted) {
   return null;
 }
 
-const HOST_HANDBACK_TOOL = 'SubagentHandback';
+const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;
 const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 
@@ -1087,18 +1087,21 @@ function main() {
 
 // The per-principal capability judgement, after the bind and the workflow
 // revalidation have both passed. RETURNS the deny reason, or null for an allow —
-// it writes nothing itself, so the caller owns the run's single JSON object. The
+// it prints nothing itself, so the caller owns the run's single JSON object. The
 // branch order is unchanged.
 function judgePrincipal(payload, bound, principal) {
   let trusted = bound;
   if (principal === principals.PRINCIPALS.MAIN) return null;
   if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
-    if (payload.tool_name === HOST_HANDBACK_TOOL) {
+    const handback = payload.tool_name === HOST_HANDBACK_TOOL;
+    if (handback) {
       const shapeViolation = handbackViolation(payload, 'evidence-worker-v1');
       if (shapeViolation) return shapeViolation;
     }
     try {
-      const violation = evidenceLeases.toolViolation(payload, trusted);
+      const violation = handback
+        ? evidenceLeases.admitHandback(payload, trusted)
+        : evidenceLeases.toolViolation(payload, trusted);
       if (!violation) return null;
       return violation.startsWith('evidence-worker-v1') ? violation : `evidence-worker-v1 ${violation}`;
     } catch (error) {

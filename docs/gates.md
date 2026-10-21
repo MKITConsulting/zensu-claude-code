@@ -281,7 +281,7 @@ instruction that cannot succeed until its cap releases the guard.
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
   backstop this grant has; for the two evidence workers that backstop is the lease's
-  `toolViolation`.
+  `toolViolation`, and `admitHandback` for their `SubagentHandback` call.
 - **The grant covers the CALL, not only the identity.** Only `tool_name` and
   `tool_input.subagent_type` are examined; every other input field travels unexamined,
   including `prompt` and `isolation: "worktree"` — and that last one is a host-performed

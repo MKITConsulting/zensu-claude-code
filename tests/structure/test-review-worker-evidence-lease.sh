@@ -307,6 +307,9 @@ if printf '%s' "$START_OUT" | grep -qF 'evidence-worker-v1 bound' \
 else
   check "SubagentStart binds without exposing lease or session selectors" FAIL
 fi
+printf '%s' "$START_OUT" | grep -qF 'return one raw schema-valid JSON object, as the whole message of SubagentHandback when the host offers that tool, else as your entire final message' \
+  && check "SubagentStart names SubagentHandback as the worker's result channel" PASS \
+  || check "SubagentStart must name SubagentHandback as the worker's result channel" FAIL
 
 SESSION_CONTEXT_OUT="$(hook_payload SubagentStart "$SESSION" plan-agent-context zensu:plan-review-worker \
   | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$DATA" \
@@ -317,6 +320,12 @@ if printf '%s' "$SESSION_CONTEXT_OUT" | grep -qF 'principal=evidence-worker-v1' 
   check "Session Control renders the distinct evidence-worker principal without selectors" PASS
 else
   check "Session Control renders the distinct evidence-worker principal without selectors" FAIL
+fi
+if printf '%s' "$SESSION_CONTEXT_OUT" | grep -qF 'Only Read, Grep, and Glob are available, plus SubagentHandback to deliver the result' \
+  && printf '%s' "$SESSION_CONTEXT_OUT" | grep -qF 'Return exactly one raw schema-valid JSON result for the assigned kind and role, as the whole message of SubagentHandback when the host offers that tool, else as the entire final message.'; then
+  check "the evidence-worker context names SubagentHandback as the result channel" PASS
+else
+  check "the evidence-worker context must name SubagentHandback as the result channel" FAIL
 fi
 
 assert_gate "worker may Read an exact leased file" allow "$DATA" "$SESSION" plan-agent-1 \
@@ -490,6 +499,9 @@ if printf '%s' "$FIRST_INVALID" | grep -q '"decision":"block"'; then
 else
   check "first malformed final result blocks exactly one correction" FAIL
 fi
+printf '%s' "$FIRST_INVALID" | grep -qF 'once more, as the whole message of SubagentHandback when the host offers that tool, else as your entire final message' \
+  && check "the correction request names SubagentHandback as the result channel" PASS \
+  || check "the correction request must name SubagentHandback as the result channel" FAIL
 SECOND_INVALID="$(stop_worker "$DATA" "$SESSION" invalid-agent zensu:plan-review-worker \
   '{"kind":"plan-review","role":"x","extra":true}' 2>/dev/null)"
 [ -z "$SECOND_INVALID" ] && check "second malformed result records failure without a stop loop" PASS \
@@ -531,10 +543,10 @@ helper "$DATA" "$SESSION" close --lease-id "$DUP_ID" >/dev/null
 
 HB_OUT="$(helper "$DATA" "$SESSION" create --kind plan-review \
   --files-manifest "$WORKSPACE/FILES.txt" --safe-subtrees-manifest "$WORKSPACE/ROOTS.txt" \
-  --max-workers 3 2>/dev/null)"
+  --max-workers 5 2>/dev/null)"
 HB_ID="${HB_OUT#lease_id=}"
 HB_RECORD="$(record_file "$DATA" "$SESSION" "$HB_ID")"
-for HB_AGENT in hb-agent hb-final-agent hb-dup-agent; do
+for HB_AGENT in hb-agent hb-final-agent hb-dup-agent hb-retry-agent hb-preview-agent; do
   bind_worker "$DATA" "$SESSION" "$HB_AGENT" zensu:plan-review-worker >/dev/null 2>&1
 done
 HB_JSON="$(valid_plan_result handback-role)"
@@ -603,8 +615,13 @@ else
 fi
 HB_FINAL_JSON="$(valid_plan_result final-text-role)"
 stop_worker "$DATA" "$SESSION" hb-final-agent zensu:plan-review-worker "$HB_FINAL_JSON" >/dev/null 2>&1
+HB_FINAL_STATE="$(worker_state "$HB_RECORD" hb-final-agent)"
+HB_FINAL_DIGEST="$(file_digest "$HB_RECORD")"
 assert_gate "a worker its final text completed may hand that same result back when the host asks" allow \
   "$DATA" "$SESSION" hb-final-agent zensu:plan-review-worker SubagentHandback "$(handback_input "$HB_FINAL_JSON")"
+[ "$HB_FINAL_STATE" = 'completed:1:final-text-role' ] && [ "$(file_digest "$HB_RECORD")" = "$HB_FINAL_DIGEST" ] \
+  && check "the final text completed that worker, and its identical handback left the record unchanged" PASS \
+  || check "the final text must complete that worker and its identical handback must leave the record unchanged (got: $HB_FINAL_STATE)" FAIL
 HB_DUP_REASON="$(gate_reason "$DATA" "$SESSION" hb-dup-agent zensu:plan-review-worker SubagentHandback \
   "$(handback_input "$HB_JSON")")"
 HB_DUP_STATE="$(worker_state "$HB_RECORD" hb-dup-agent)"
@@ -615,6 +632,68 @@ case "$HB_DUP_STATE|$HB_DUP_REASON" in
 esac
 assert_gate "the worker's handback with a role of its own is allowed" allow "$DATA" "$SESSION" hb-dup-agent \
   zensu:plan-review-worker SubagentHandback "$(handback_input "$(valid_plan_result own-role)")"
+HB_RETRY_JSON="$(valid_plan_result retry-role)"
+HB_RETRY_BLOCK="$(stop_worker "$DATA" "$SESSION" hb-retry-agent zensu:plan-review-worker \
+  "$(printf '```json\n%s\n```' "$HB_RETRY_JSON")" 2>/dev/null)"
+HB_RETRY_BEFORE="$(worker_state "$HB_RECORD" hb-retry-agent)"
+assert_gate "a retrying worker's valid handback is allowed" allow "$DATA" "$SESSION" hb-retry-agent \
+  zensu:plan-review-worker SubagentHandback "$(handback_input "$HB_RETRY_JSON")"
+HB_RETRY_AFTER="$(worker_state "$HB_RECORD" hb-retry-agent)"
+HB_RETRY_ERROR="$(RECORD_FILE="$HB_RECORD" node -e '
+  const record=JSON.parse(require("node:fs").readFileSync(process.env.RECORD_FILE,"utf8"));
+  process.stdout.write(Object.prototype.hasOwnProperty.call(record.workers["hb-retry-agent"],"result_error") ? "present" : "none");
+')"
+case "$HB_RETRY_BLOCK|$HB_RETRY_BEFORE|$HB_RETRY_AFTER|$HB_RETRY_ERROR" in
+  *'"decision":"block"'*'|retry:1:-|completed:2:retry-role|none')
+    check "a handback after one rejected final text completes the retrying worker on its second attempt and clears its error" PASS ;;
+  *) check "a handback after one rejected final text must complete the retrying worker (got: $HB_RETRY_BEFORE -> $HB_RETRY_AFTER, error $HB_RETRY_ERROR)" FAIL ;;
+esac
+HB_PREVIEW_JSON="$(valid_plan_result preview-role)"
+HB_PREVIEW="$(MODULE="$PLUGIN/hooks/lib/review-evidence-lease-v1.js" \
+  HOOK_SESSION="$PLUGIN/hooks/lib/claude-hook-session-v1.js" RECORD_FILE="$HB_RECORD" \
+  PREVIEW_JSON="$HB_PREVIEW_JSON" CLAUDE_PLUGIN_ROOT="$(bash "$HOST_PATH" "$PLUGIN")" CLAUDE_PLUGIN_DATA="$DATA" \
+  CLAUDE_CODE_SESSION_ID="$SESSION" node -e '
+  const fs = require("node:fs");
+  const lease = require(process.env.MODULE);
+  const binding = require(process.env.HOOK_SESSION).resolveHookSession(
+    { session_id: process.env.CLAUDE_CODE_SESSION_ID }, process.env);
+  const payload = {
+    agent_type: "zensu:plan-review-worker", agent_id: "hb-preview-agent",
+    tool_name: "SubagentHandback", tool_input: { message: process.env.PREVIEW_JSON },
+  };
+  const read = () => fs.readFileSync(process.env.RECORD_FILE, "utf8");
+  const before = read();
+  const preview = lease.toolViolation(payload, binding);
+  const previewUnchanged = read() === before;
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    const error = new Error(`EIO: i/o error, rename ${from} -> ${to}`);
+    error.code = "EIO";
+    throw error;
+  };
+  let failure;
+  try { failure = lease.admitHandback(payload, binding); } finally { fs.renameSync = rename; }
+  const failureUnchanged = read() === before;
+  const wrongTool = lease.admitHandback({ ...payload, tool_name: "Read" }, binding);
+  const committed = lease.admitHandback(payload, binding);
+  process.stdout.write(JSON.stringify({ preview, previewUnchanged, failure, failureUnchanged, wrongTool, committed }));
+')"
+HB_PREVIEW_VERDICT="$(HB_PREVIEW="$HB_PREVIEW" DATA_ROOT="$DATA" node -e '
+  let r; try { r = JSON.parse(process.env.HB_PREVIEW); } catch { process.stdout.write("unparseable"); process.exit(0); }
+  const failureText = "evidence-worker-v1 could not store the SubagentHandback result; call SubagentHandback once more with the same JSON object";
+  const problems = [];
+  if (r.preview !== null || r.previewUnchanged !== true) problems.push("preview");
+  if (r.failure !== failureText || r.failureUnchanged !== true || String(r.failure).includes(process.env.DATA_ROOT)) problems.push("failure");
+  if (r.wrongTool !== "evidence-worker-v1 cannot deliver a result through Read; only SubagentHandback delivers it") problems.push("wrong-tool");
+  if (r.committed !== null) problems.push("commit");
+  process.stdout.write(problems.length ? problems.join(",") : "ok");
+')"
+HB_PREVIEW_STATE="$(worker_state "$HB_RECORD" hb-preview-agent)"
+case "$HB_PREVIEW_VERDICT|$HB_PREVIEW_STATE" in
+  'ok|completed:1:preview-role')
+    check "toolViolation previews a valid handback without writing, a failed write answers a path-free retry reason, and admitHandback stores the result" PASS ;;
+  *) check "toolViolation must preview without writing and admitHandback must store with a path-free failure reason (got: $HB_PREVIEW_VERDICT, $HB_PREVIEW_STATE)" FAIL ;;
+esac
 HB_FINALIZE="$(helper "$DATA" "$SESSION" finalize --lease-id "$HB_ID" 2>/dev/null)"
 [ "$HB_FINALIZE" = "sealed=$HB_ID" ] \
   && check "handed-back results finalize like final-text results" PASS \
@@ -629,6 +708,10 @@ HB_COLLECT="$(helper "$DATA" "$SESSION" collect --lease-id "$HB_ID" --agent-id h
   --expected-role handback-role 2>/dev/null)"
 [ "$HB_COLLECT" = "$HB_JSON" ] && check "collect returns the handed-back result" PASS \
   || check "collect returns the handed-back result" FAIL
+HB_RETRY_COLLECT="$(helper "$DATA" "$SESSION" collect --lease-id "$HB_ID" --agent-id hb-retry-agent \
+  --expected-role retry-role 2>/dev/null)"
+[ "$HB_RETRY_COLLECT" = "$HB_RETRY_JSON" ] && check "collect returns the retrying worker's handed-back result" PASS \
+  || check "collect returns the retrying worker's handed-back result" FAIL
 helper "$DATA" "$SESSION" close --lease-id "$HB_ID" >/dev/null
 
 HB_DIRECT="$(MODULE="$PLUGIN/hooks/lib/review-evidence-lease-v1.js" node -e '
