@@ -1,6 +1,8 @@
 ---
 paths:
   - "skills/*/SKILL.md"
+  - "skills/tdd/references/review-chain.md"
+  - "skills/pr-team-review/references/debate.md"
   - "tests/structure/test-skill-workflow-markers.sh"
 ---
 
@@ -58,9 +60,31 @@ miss on fixtures, and `AP10` requires the exact finding count, so a probe that o
 too. Each arm was bite-tested: ignoring the digit lookahead, the code mask, the allowlist, the
 declared names or the fence marking turns its own check red.
 
-**Coupled sites.** The five probes — `skills/self-review/SKILL.md` Phase 3, `skills/tdd/references/review-chain.md`
-steps 4b and 4c, `skills/plan-review/SKILL.md` step 3b and `skills/pr-team-review/references/debate.md`
-step 4b — keep the substrings `R25f`, `P3h`, `P2c` and `P4i` pin. `ZENSU_ROOT` is read by nothing else in
+**The probes read the bound project's config.** `cfg()` in `hooks/lib/zensu-config.sh` overlays a
+project `.zensu/config.json` only from `CLAUDE_PROJECT_DIR`, and the model's Bash tool does not carry
+that variable, so every probe passes it. The anchor is the Session Control record's project root, the
+path `zensu-log.sh --project-root` prints, because the hooks read the same keys there:
+`post-review-tdd-delegate.sh` exports it from `zensu_resolve_project_dir` before it reads
+`reviewPanel`, `findingVerification` and `criticalReproduction`, and the review packet gate's
+`reviewPacketGate` and `reviewJudge`, and the `zensu-log.sh` bind exports it before
+`--external-review` reads `reviewJudge`. `/zensu:tdd` passes `{project_root}` from Phase 0.
+`/zensu:plan-review` and `/zensu:pr-team-review` resolve it inline through `$(… zensu-log.sh
+--project-root)`, never from their `$REPO`: plan-review's is the working directory, which after
+`/zensu:adopt-session --reanchor` is not the bound root, and pr-team-review's is the reviewed
+repository, which can be a clone outside the session whose committed config would then switch the
+Finding Verification Gate off for a review published under the user's name. `/zensu:self-review`
+passes the `PROJECT_ROOT` its Phase 1 reads from `zensu-log.sh --project-root`.
+
+**Coupled sites.** The probes, and the checks that pin each: `skills/self-review/SKILL.md` Phase 3
+(`R25f` in `tests/structure/test-review-convergence.sh`); `skills/tdd/references/review-chain.md`
+step 3 (`LC3k`, same suite), step 4b (`P3h` in `tests/structure/test-review-judge.sh`, and `P3h2`
+runs it against a project overlay), step 4c (`P2c` in `tests/structure/test-finding-verification.sh`);
+`skills/plan-review/SKILL.md` step 3b and `skills/pr-team-review/references/debate.md` step 4b
+(`P4i`). Each of those pins holds the whole command, so a probe that drops the `CLAUDE_PROJECT_DIR`
+assignment fails it. The second run in step 4b and stage 3 of step 4c resolve their flags "the
+same way" as the probe before them, and `P3j` and `LC2k` pin that wording. The operator accounts
+are item 2 of the resolution order in `docs/configuration.md` (`P5f`) and the `{project_root}`
+paragraph of `docs/tdd-manager-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothing else in
 the plugin; pick another name if that ever changes, because the probe hands it to every child the
 sourced library starts.
 
@@ -78,10 +102,10 @@ config key or attestation moves.
   string and a block list; any other YAML form of `arguments` goes unread.
 - **Indented code blocks are not code to the probe**, because list continuation lines in these
   skills are indented the same way.
-- **Two probes never see the project config.** The plan-review and pr-team-review probes run
-  without `CLAUDE_PROJECT_DIR`, which the Bash tool does not carry, so a project-level
-  `hooks.reviewJudge` or `hooks.findingVerification` is ignored there. The tdd probes in
-  `skills/tdd/references/review-chain.md` set it from `{project_root}` and the self-review probe
-  to the bound project root, because the post-review hook's consume gate reads the project config
-  and a probe that ignored it ran a review the gate then judged by another configuration.
+- **A refused `--project-root` reads the global config only.** In plan-review and pr-team-review
+  the substitution is then empty, `cfg()` skips the overlay and the probe answers from
+  `~/.zensu/config.json` and `ZENSU_CONFIG`, as it did before the probes passed the root, with the
+  verb's refusal on stderr. The verb refuses when the binding is unavailable, which both skills
+  already needed for their review-evidence lease, and for a root holding a double quote, a dollar
+  sign, a backtick or a backslash.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not checked.
