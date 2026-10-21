@@ -343,7 +343,7 @@ merged findings: none" "- Verdict: PASS" | bash "$POSTREV" >"$WORK/hook" 2>&1
   echo "== The review chain's config probes read the project config =="
   PROBE_PROJECT="$WORK/p-probe"
   mkdir -p "$PROBE_PROJECT/.zensu" "$WORK/probe-home"
-  printf '{"hooks":{"reviewPanel":"full","reviewJudge":false,"findingVerification":false}}\n' > "$PROBE_PROJECT/.zensu/config.json"
+  printf '{"hooks":{"reviewPanel":"full","reviewJudge":false,"findingVerification":false,"aspectActivation":false}}\n' > "$PROBE_PROJECT/.zensu/config.json"
   PROBES_OK=1; PROBE_COUNT=0
   while IFS= read -r probe; do
     PROBE_COUNT=$((PROBE_COUNT+1))
@@ -354,8 +354,8 @@ merged findings: none" "- Verdict: PASS" | bash "$POSTREV" >"$WORK/hook" 2>&1
       (*) [ "$out" = off ] || PROBES_OK=0 ;;
     esac
   done < <(grep -o 'ZENSU_ROOT="{plugin_root}"[^`]*' "$ROOT/skills/tdd/references/review-chain.md")
-  if [ "$PROBE_COUNT" -eq 3 ] && [ "$PROBES_OK" -eq 1 ]; then
-    check "RP20 every review-chain config probe the consume gate shares reads the project config" PASS
+  if [ "$PROBE_COUNT" -eq 4 ] && [ "$PROBES_OK" -eq 1 ]; then
+    check "RP20 every review-chain config probe reads the project config" PASS
   else
     check "RP20 review-chain probes (count=$PROBE_COUNT ok=$PROBES_OK)" FAIL
   fi
