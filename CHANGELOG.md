@@ -48,8 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
 - **session-trail**: Continue a taken-over session's linked sessions (#464)
 
+### Changed
+
+- **tdd-phase**: Run the external lease's path checks inside the lock process (#478)
+
 ### Fixed
 
+- **hooks**: Find a shell's -c flag in linear time in the work-order and consent gates (#481)
 - **skills**: Define the fallback for hosts with the task tools switched off (#473)
 - **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
 - **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
