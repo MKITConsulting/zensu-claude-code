@@ -268,4 +268,72 @@ else
   check "I17 a stale attempt is detected before the push (rc=$RC push=$(cat "$SBOX/push3.rc" 2>/dev/null) remote=$(cat "$SBOX/push3.remote" 2>/dev/null))" FAIL
 fi
 
+ORDER4="99999999-9999-4999-8999-999999999999"
+SESSION4="wo-implement-session-0004"
+RUN4="run_impl_0004"
+LEASE_HELPER="$PLUGIN_DIR/hooks/lib/zensu-review-evidence.sh"
+SEAT_START="$PLUGIN_DIR/hooks/review-evidence-subagent-start.sh"
+SEAT_STOP="$PLUGIN_DIR/hooks/review-evidence-subagent-stop.sh"
+(
+  new_project delta
+  source "$BASELINE" "$SESSION4" || exit 90
+  wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER4" "$SESSION4" auto implement
+  bash "$WRAPPER" --start --order "$ORDER4" >/dev/null 2>&1 || exit 91
+  git -C "$PROJECT" checkout -q -b "wo-99999999"
+  bash "$LOG_HELPER" --autopilot-begin --run "$RUN4" --work-order "$ORDER4" >/dev/null 2>&1 || exit 92
+  bash "$WRAPPER" --bind-spec --run "$RUN4" >/dev/null 2>&1 || exit 93
+  REVIEW="$SBOX/delta-review"
+  mkdir -p "$PROJECT/src" "$REVIEW" && chmod 700 "$REVIEW"
+  printf 'const value = 1;\n' > "$PROJECT/src/app.js"
+  printf '%s\n' "$PROJECT/src/app.js" > "$REVIEW/FILES.txt"
+  printf '%s\n' "$PROJECT/src" > "$REVIEW/ROOTS.txt"
+  printf 'M\tsrc/app.js\n' > "$REVIEW/NAME-STATUS.txt"
+  printf 'src/app.js\n' > "$REVIEW/CHANGED.txt"
+  bash "$LEASE_HELPER" create --kind pr-review --files-manifest "$REVIEW/FILES.txt" \
+    --safe-subtrees-manifest "$REVIEW/ROOTS.txt" --name-status-file "$REVIEW/NAME-STATUS.txt" \
+    --changed-production-files-file "$REVIEW/CHANGED.txt" --max-workers 1 --ttl-seconds 600 \
+    >/dev/null 2>"$SBOX/delta-lease.err" || exit 94
+  seat_payload() {
+    EVENT="$1" SESSION_VALUE="$SESSION4" PROJECT_VALUE="$PROJECT" MESSAGE="${2:-}" node -e '
+      const payload = { hook_event_name: process.env.EVENT, session_id: process.env.SESSION_VALUE,
+        cwd: process.env.PROJECT_VALUE, agent_id: "agent-bug-hunter", agent_type: "zensu:pr-review-worker" };
+      if (process.env.EVENT === "SubagentStop") payload.last_assistant_message = process.env.MESSAGE;
+      process.stdout.write(JSON.stringify(payload));
+    '
+  }
+  seat_payload SubagentStart | bash "$SEAT_START" >/dev/null 2>&1 || exit 95
+  STOP4="{\"hook_event_name\":\"Stop\",\"session_id\":\"$SESSION4\"}"
+  for n in 1 2 3 4; do
+    printf '%s' "$STOP4" | bash "$STOP_HOOK" > "$SBOX/delta.wait$n" 2>/dev/null
+  done
+  cat "$PROJECT"/.zensu/state/work-order/stop-*.json > "$SBOX/delta.state" 2>/dev/null
+  RESULT='{"kind":"pr-review","role":"bug-hunter","verdict_hint":"approve","summary":"No blocking issue found.","inline_findings":[],"overall_notes":[],"positives":[]}'
+  seat_payload SubagentStop "$RESULT" | bash "$SEAT_STOP" >/dev/null 2>&1 || exit 96
+  for n in 1 2 3 4; do
+    printf '%s' "$STOP4" | bash "$STOP_HOOK" > "$SBOX/delta.after$n" 2>/dev/null
+  done
+); RC=$?
+WAITS_OK=true
+for n in 1 2 3 4; do
+  grep -q '"decision":"block"' "$SBOX/delta.wait$n" 2>/dev/null \
+    && grep -q '1 review seat of this session is still in flight' "$SBOX/delta.wait$n" || WAITS_OK=false
+done
+if [ "$RC" -eq 0 ] && [ "$WAITS_OK" = true ] && [ "$(json_get "$SBOX/delta.state" 'value.count')" = "0" ]; then
+  check "I18 the Stop hook reads the session's evidence lease and counts none of four stops while a review seat is in flight" PASS
+else
+  check "I18 the Stop hook reads the session's evidence lease and counts none of four stops while a review seat is in flight (rc=$RC wait1=$(cat "$SBOX/delta.wait1" 2>/dev/null) state=$(cat "$SBOX/delta.state" 2>/dev/null) lease=$(cat "$SBOX/delta-lease.err" 2>/dev/null))" FAIL
+fi
+AFTER_OK=true
+for n in 1 2 3; do
+  grep -q '"decision":"block"' "$SBOX/delta.after$n" 2>/dev/null \
+    && grep -q '3 stops in a row without progress' "$SBOX/delta.after$n" || AFTER_OK=false
+done
+if [ "$RC" -eq 0 ] && [ "$AFTER_OK" = true ] && [ ! -s "$SBOX/delta.after4" ] \
+  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status')" = "blocked" ] \
+  && [ "$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.blocked_kind')" = "worker_error" ]; then
+  check "I19 once the seat's result lands, three stops without progress block and the fourth reports the order blocked" PASS
+else
+  check "I19 once the seat's result lands, three stops without progress block and the fourth reports the order blocked (rc=$RC after1=$(cat "$SBOX/delta.after1" 2>/dev/null) after4=$(cat "$SBOX/delta.after4" 2>/dev/null) status=$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status'))" FAIL
+fi
+
 finish

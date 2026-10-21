@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Zensu refuses for a session token, and points at the order file instead. It now also denies the
   usual spellings that set, change or remove `ZENSU_API_URL`, `--api-url` on `zensu`, and `env -i`
   or `exec -c`, which drop the session token.
+- **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
+  while its team review runs. A change in one of the session's review evidence leases (a seat
+  bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
+  while a review seat is still in flight does not count toward the three-stop budget until the
+  lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
+  three times without progress after that still ends the order as blocked.
 
 ## [0.27.0] - 2026-10-17
 

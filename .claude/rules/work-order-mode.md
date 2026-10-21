@@ -100,9 +100,37 @@ process, never inside a bound session, and it loads the digested runtime from `h
 only production caller, so removing or renaming the module breaks the launcher, not only a test. `test-harness-launcher.sh` H12 drives the
 module's unit file.
 
+**The Stop budget counts review progress, and waits on review seats by time.** `stopDecision`
+ends the order after three Stops in a row with one progress key. The ledger part of that key,
+`<runId>:<events.length>`, stands still for a whole team review: the seats run in the background,
+the main thread ends turns, and the ledger moves only at `TEAM_REVIEW_PUBLISHED`. The 2026-10-20
+smoke saw two Stops during one review, with three seats finished between them. So the key gains
+`#<progress>`, the summed revisions of the session's evidence leases (`leaseProgress` in
+`hooks/lib/review-evidence-lease-v1.js`), which every create, bind, result, seal and close raises;
+and a Stop while an active lease has a bound or retrying seat before
+`min(expires_at_ms, created_at_ms + MAX_TTL_SECONDS * 1000)` blocks without counting. The wait is
+bounded by that deadline rather than by a Stop count, because the lease TTL is the plugin's own
+ceiling on a review, and how often the main thread stops while it waits depends on how it waits,
+not on how long the seats take. After the
+deadline, three Stops without progress end the order as before. A read that fails returns no
+progress: the Stop reuses the recorded key of the same ledger part and counts, so a fault never
+resets the count or extends the wait. The reader takes no lease lock, creates no directory, skips
+the temp entries `atomicWriteRecord` leaves (`TEMP_RECORD_RE` mirrors that name) and refuses any
+other entry, as `listRecords` does. The stop verb binds through `resolveHookSession` with the
+executing plugin root as `CLAUDE_PLUGIN_ROOT`, as `zensu_bind_hook_session` does, and reads a
+second time after a failure. Only a nonterminal run reads the store. Pins: the five Stop cases in
+`tests/structure/work-order-v1.test.js` and `I18` and `I19` in
+`tests/structure/test-work-order-implement.sh`, which drive the real hooks.
+
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.
+
+**Version of the review-progress Stop budget: `patch`.** The stop state keeps its `{count, seen}`
+shape; only the value of `seen` gains a suffix, and a runtime that meets the other spelling resets
+its count once. The lease module gains two read-only exports and no record field or key set. No
+hook, matcher, config key or attestation moves, and the Stop hook returns the same block decision
+it returned before.
 
 **Known gaps, accepted and named:**
 
@@ -116,3 +144,11 @@ version; never bump it by hand.
   work-order suites skip there, because Node cannot start their shell-script fake `zensu` without a
   shell. `tests/profiles/windows-native-structure.v1.json` lists all five as excluded.
 - `usage` lines and the cost cap belong to slice S4, other order kinds to slice S9.
+- The Autopilot interceptor in `hooks/stop-chain-enforcer.sh` still caps a stage at 12 Stops
+  (`autopilot_increment_stop_budget_capped`), and only a stage move resets that count, so a review
+  wait that needs more Stops ends the run `BLOCKED` there; the work-order Stop hook then reports
+  the order blocked.
+- Every Stop of a session with a nonterminal run now binds once more in Node, which measures the
+  runtime digest again. The added latency is unmeasured.
+- A session can write the lease store with a shell command, so a forged record can stretch a wait
+  to its recorded creation time plus 3600 s, as a deliberate write can defeat every plugin store.

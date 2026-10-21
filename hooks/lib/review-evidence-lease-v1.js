@@ -15,6 +15,7 @@ const hostPaths = require('./claude-path-v1.js');
 const SCHEMA = 'zensu.review-evidence-lease';
 const SCHEMA_VERSION = 1;
 const LEASE_ID_RE = /^rel1_[a-f0-9]{32}$/;
+const TEMP_RECORD_RE = /^\.rel1_[a-f0-9]{32}\.[0-9]+\.[a-f0-9]{16}\.tmp$/;
 const ROLE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HASH_RE = /^sha256:[a-f0-9]{64}$/;
 const ALLOWED_KINDS = new Set(['plan-review', 'pr-review']);
@@ -24,6 +25,7 @@ const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 128 * 1024;
 const MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_TTL_SECONDS = 3600;
 
 // The store prefix, named once. This module OWNS the layout; the superseded-lease
 // sweep in review-evidence-sweep-v1.js has to traverse exactly the chain storage()
@@ -1065,6 +1067,37 @@ function activeRecord(records, kind, now = Date.now()) {
   return active[0] || null;
 }
 
+function leaseProgress(binding, now = Date.now()) {
+  const pluginData = canonicalExisting(binding.pluginData, 'CLAUDE_PLUGIN_DATA', 'directory').canonical;
+  const records = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', binding.sessionKey);
+  const summary = { progress: 0, inFlight: 0, deadlineMs: null };
+  let stat;
+  try {
+    stat = fs.lstatSync(records);
+  } catch (error) {
+    if (error.code === 'ENOENT') return summary;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory() || fs.realpathSync.native(records) !== records) {
+    fail('private lease record directory is unsafe');
+  }
+  for (const name of fs.readdirSync(records).sort()) {
+    if (TEMP_RECORD_RE.test(name)) continue;
+    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
+    if (!LEASE_ID_RE.test(leaseId)) fail('private lease record directory contains an unexpected entry');
+    const record = readRecord(path.join(records, name), binding, { skipActiveWorkspaceValidation: true });
+    if (record.lease_id !== leaseId) fail('lease filename and record id do not match');
+    summary.progress += record.revision;
+    const deadline = Math.min(record.expires_at_ms, record.created_at_ms + MAX_TTL_SECONDS * 1000);
+    if (record.status !== 'active' || deadline <= now) continue;
+    const seats = Object.values(record.workers).filter((worker) => worker.status === 'bound' || worker.status === 'retry').length;
+    if (seats === 0) continue;
+    summary.inFlight += seats;
+    summary.deadlineMs = Math.max(summary.deadlineMs === null ? deadline : summary.deadlineMs, deadline);
+  }
+  return summary;
+}
+
 function manifestPaths(file, label) {
   const snapshot = readFileSnapshot(file, label, MAX_MANIFEST_BYTES);
   let text;
@@ -1180,8 +1213,8 @@ function createLease(binding, options) {
   if (!Number.isInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 32) {
     fail('--max-workers must be an integer from 1 through 32');
   }
-  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 3600) {
-    fail('--ttl-seconds must be an integer from 60 through 3600');
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > MAX_TTL_SECONDS) {
+    fail(`--ttl-seconds must be an integer from 60 through ${MAX_TTL_SECONDS}`);
   }
 
   const exactInputs = [
@@ -1836,6 +1869,7 @@ module.exports = {
   createLease,
   finalizeLease,
   kindForAgentType,
+  leaseProgress,
   parseWorkerResult,
   sealRecord,
   storeWorkerResult,
@@ -1846,6 +1880,7 @@ module.exports = {
   // compared source spellings rather than behaviour.
   LEASE_ID_RE,
   MAX_RECORD_BYTES,
+  MAX_TTL_SECONDS,
   REVIEW_EVIDENCE_SEGMENTS,
   ensurePrivateDirectory,
   leaseRecordIsOwned,

@@ -93,10 +93,19 @@ a direct `zensu work ask` blocked the order.
 ## The Stop hook
 
 `hooks/stop-work-order.sh` keeps a work-order session from ending without a reported outcome. It
-blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without a
-new Autopilot ledger event end the order on its own: it reports `ready_for_merge` for a `DONE` run and
+blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without
+progress end the order on its own: it reports `ready_for_merge` for a `DONE` run and
 `blocked(worker_error)` for any other, then lets the session stop. A lost lease ends the session
 without a report.
+
+Progress is a new Autopilot ledger event or a change in one of the session's review evidence
+leases: a seat bound, a worker result recorded, a lease sealed or closed. A team review spawns its
+seats in the background and the ledger moves only when the review is published, so the lease is
+what shows that the review advances. While an active lease still has a seat in flight, a bound or
+retrying worker, a Stop is blocked without counting. That wait ends when the last seat reports or
+when the lease stops taking results: at its expiry, and at the latest 3600 seconds after it was
+created. After that, three Stops without progress end the order as before. A lease store the hook
+cannot read counts as no progress, so a fault never extends the wait.
 
 ## The launcher and the manifest
 

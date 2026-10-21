@@ -158,7 +158,8 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --finish
 
 Exit 0 and exit 6 both end the session. The Stop hook blocks a session that tries to end without a
 reported outcome, and after three stops without progress it reports the order as blocked on its
-own.
+own. A change in one of the session's review evidence leases counts as progress, and a stop while a
+review seat is still in flight does not count until the lease stops taking that seat's result.
 
 ## Reference Files
 
