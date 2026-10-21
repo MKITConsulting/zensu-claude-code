@@ -162,7 +162,8 @@ SESSION_W="wo-gates-session-0002"
   source "$BASELINE" "$SESSION_W" || exit 90
   wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER_W" "$SESSION_W" auto implement
   bash "$WRAPPER" --start --order "$ORDER_W" >/dev/null 2>&1 || exit 91
-  for tool in AskUserQuestion EnterPlanMode ExitPlanMode mcp__ccd_session__spawn_task mcp__ccd_session__start_session; do
+  for tool in AskUserQuestion EnterPlanMode ExitPlanMode mcp__ccd_session__spawn_task mcp__ccd_session__start_session \
+    mcp__ccd_session__hand_off_to_session mcp__ccd_session__move_to_cloud; do
     printf '%s\t' "$tool" >> "$SBOX/denials.txt"
     payload "$SESSION_W" "$tool" | bash "$PRE_HOOK" 2>/dev/null | decision_of >> "$SBOX/denials.txt"
     printf '\n' >> "$SBOX/denials.txt"
@@ -198,13 +199,15 @@ COMMANDS
   echo "$?" > "$SBOX/post1.rc"
 ); RC=$?
 ASK_LINE="$(grep '^AskUserQuestion' "$SBOX/denials.txt" 2>/dev/null)"
-if [ "$RC" -eq 0 ] && [ "$(grep -c "	deny	" "$SBOX/denials.txt")" = "5" ] \
+if [ "$RC" -eq 0 ] && [ "$(grep -c "	deny	" "$SBOX/denials.txt")" = "7" ] \
   && printf '%s' "$ASK_LINE" | grep -qF "zensu work ask $ORDER_W" \
   && grep '^mcp__ccd_session__spawn_task' "$SBOX/denials.txt" | grep -qF "zensu work followup $ORDER_W" \
-  && grep '^mcp__ccd_session__start_session' "$SBOX/denials.txt" | grep -qF "zensu work followup $ORDER_W"; then
-  check "G4 in work-order mode the prompt tools and both session tools are denied with the zensu work ask and followup routes" PASS
+  && grep '^mcp__ccd_session__start_session' "$SBOX/denials.txt" | grep -qF "zensu work followup $ORDER_W" \
+  && grep '^mcp__ccd_session__hand_off_to_session' "$SBOX/denials.txt" | grep -qF "zensu work followup $ORDER_W" \
+  && grep '^mcp__ccd_session__move_to_cloud' "$SBOX/denials.txt" | grep -qF "zensu work followup $ORDER_W"; then
+  check "G4 in work-order mode the prompt tools and the four session tools are denied with the zensu work ask and followup routes" PASS
 else
-  check "G4 in work-order mode the prompt tools and both session tools are denied (rc=$RC $(cat "$SBOX/denials.txt" 2>/dev/null | cut -c1-200))" FAIL
+  check "G4 in work-order mode the prompt tools and the four session tools are denied (rc=$RC $(cat "$SBOX/denials.txt" 2>/dev/null | cut -c1-200))" FAIL
 fi
 DENIED_BASH="$(grep -c "	deny	" "$SBOX/bash.txt" 2>/dev/null)"
 if [ "$DENIED_BASH" = "10" ] && grep -q "^git status	none" "$SBOX/bash.txt" && grep -q "^zensu work get 1 --json	none" "$SBOX/bash.txt" \
