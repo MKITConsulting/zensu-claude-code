@@ -248,7 +248,7 @@ The rendered stage line is `AUTOPILOT-STAGE: FIX_FINDINGS`.
 ## Workflow
 
 Three phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has a live
-progress view.
+progress view. If neither tool can be loaded, say so once and skip the tasks.
 
 ### Phase 0 — Probe & Plan  (the ONLY interactive gate)
 
@@ -431,8 +431,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    tests** (one test per active `AC-###` ID, keyed by the ID; deprecated ACs are skipped),
    then persist `COVERAGE_PASSED`; on failure use `COVERAGE_FAILED` and the bound TDD
    return path. This turns the
-   throwaway live validation into a permanent regression net in the same PR. Off by default;
-   the live validate↔fix loop above is unchanged.
+   throwaway live validation into a permanent regression net in the same PR.
 
 ### Phase 2 — Deliver
 

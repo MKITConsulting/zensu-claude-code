@@ -27,7 +27,7 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
 - *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
 - *"The user said 'no questions', so I'll make my best guess"* → LIE. In standalone mode, the Phase-1-3b coverage-tool ask is the precedent: ask anyway. In delegated mode, persist the specified `BLOCK` and report it without guessing. See Phase 1.5.
-- *"Tasks are just UI noise — the log already tracks progress"* → LIE. The Task list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `TaskCreate`/`TaskUpdate` leaves the user blind to where you are. Create the step tasks in Phase 3, flip their status in Phase 4 — same discipline as the log.
+- *"Tasks are just UI noise — the log already tracks progress"* → LIE. The Task list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `TaskCreate`/`TaskUpdate` leaves the user blind to where you are. Create the step tasks in Phase 3, flip their status in Phase 4 — same discipline as the log. The one exception is a host with the task tools switched off, as `SKILL.md` Phase 0 step 4 defines it.
 
 ### Hard Bans
 

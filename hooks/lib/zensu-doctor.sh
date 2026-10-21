@@ -6,20 +6,25 @@
 # the shell — `command -v` and auth-status exit codes are a shell concern — then
 # hands the results to zensu-doctor-report.js (env ZDOC_*), which reads the
 # plugin manifest/hooks, the effective config, and the session state dir and
-# renders a four-block ✅/⚠️/❌ table. NOTHING here writes; the script always
-# exits 0 (a probe that errors degrades to a warning row, never a failure).
+# renders a four-block ✅/⚠️/❌ table. The script writes nothing itself. Every
+# zensu call runs with ZENSU_NO_UPDATE_CHECK=1, because the CLI takes /dev/null for
+# a terminal and its update check would call GitHub and write version-check.json;
+# `zensu auth status` may still store the identity it decodes from a stored token
+# in the CLI's own hosts.json. The script always exits 0 (a probe that errors
+# degrades to a warning row, never a failure).
 #
 # Every ZDOC_* is set with `:=` so a caller (the structure test, or /zensu:doctor
 # directly) can inject a fixed toolchain verdict; real
 # probing only fills the gaps left unset. That claim scopes to the EXPORTED inputs
 # the renderer reads, not to derived locals such as ZDOC_ROOT or ZDOC_SESSION_PAIR.
-# Two GROUPS of the exported ones are exceptions, on purpose.
+# Three GROUPS of the exported ones are exceptions, on purpose.
 # ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
 # unconditionally rather than seeded, because their meaning depends on a verdict
 # reached further down and an inherited value would survive the branches that
 # never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION,
 # ZDOC_PLAYWRIGHT_SOURCE, ZDOC_PLAYWRIGHT_OWNER and ZDOC_VERIFY_REASON are re-derived
-# unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected.
+# unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected, and ZDOC_ZENSU_VERSION and
+# ZDOC_ZENSU_VERSION_STATE unless ZDOC_ZENSU is injected.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -137,12 +142,35 @@ export ZDOC_WORKTREE_KEEP
 
 # zensu CLI: installed? authenticated? (auth probe is best-effort + quiet)
 if [ -z "${ZDOC_ZENSU:-}" ]; then
+  ZDOC_ZENSU_VERSION=""
+  ZDOC_ZENSU_VERSION_STATE=""
   if command -v zensu >/dev/null 2>&1; then
-    if zensu auth status >/dev/null 2>&1; then ZDOC_ZENSU=authed; else ZDOC_ZENSU=present; fi
+    ZDOC_ZENSU_LIB="$(bash "$DIR/zensu-host-path.sh" "$DIR" 2>/dev/null)" || ZDOC_ZENSU_LIB=""
+    ZDOC_ZENSU_PROBE=""
+    if [ -n "$ZDOC_ZENSU_LIB" ]; then
+      ZDOC_ZENSU_PROBE="$(ZDOC_ZENSU_MODULE="$ZDOC_ZENSU_LIB/zensu-cli-version-v1.js" node -e 'process.exitCode = require(process.env.ZDOC_ZENSU_MODULE).cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" \
+        || ZDOC_ZENSU_PROBE=""
+    fi
+    ZDOC_ZENSU_VERSION_STATE="$(printf '%s\n' "$ZDOC_ZENSU_PROBE" | sed -n 's/^state=//p')"
+    ZDOC_ZENSU_VERSION="$(printf '%s\n' "$ZDOC_ZENSU_PROBE" | sed -n 's/^version=//p')"
+    [ -n "$ZDOC_ZENSU_VERSION_STATE" ] || ZDOC_ZENSU_VERSION_STATE=unread
+    if [ "$ZDOC_ZENSU_VERSION_STATE" = cwd-relative ]; then
+      ZDOC_ZENSU=unchecked
+    else
+      ZDOC_ZENSU_AUTH="$(ZENSU_NO_UPDATE_CHECK=1 zensu auth status </dev/null 2>/dev/null)" && ZDOC_ZENSU_AUTH_RC=0 || ZDOC_ZENSU_AUTH_RC=$?
+      case "$ZDOC_ZENSU_AUTH_RC:$ZDOC_ZENSU_AUTH" in
+        (0:*'Not logged in'*) ZDOC_ZENSU=present ;;
+        (0:*) ZDOC_ZENSU=authed ;;
+        (*) ZDOC_ZENSU=present ;;
+      esac
+    fi
   else
     ZDOC_ZENSU=absent
   fi
 fi
+ZDOC_ZENSU_VERSION="${ZDOC_ZENSU_VERSION:-}"
+ZDOC_ZENSU_VERSION_STATE="${ZDOC_ZENSU_VERSION_STATE:-}"
+export ZDOC_ZENSU_VERSION ZDOC_ZENSU_VERSION_STATE
 
 # node: version string (empty when absent)
 if [ -z "${ZDOC_NODE:-}" ]; then
@@ -567,7 +595,7 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
       const probes = [["consent hook", mod.consentHookRegistered(process.cwd())], ["consent recorder", mod.consentRecorderRegistered(process.cwd())]];
       process.stdout.write(probes
         .filter((probe) => probe[1] !== REGISTERED)
-        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on the Bash matcher")
+        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on a matcher that covers Bash and PowerShell")
         .join("; "));
     ' 2>/dev/null)"; then
     ZDOC_VERIFY=unavailable

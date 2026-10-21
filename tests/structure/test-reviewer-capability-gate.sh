@@ -672,6 +672,18 @@ case "$MONITOR_OFF_REASON" in
   *)
     check "a withdrawn grant must leave Bash out of the allowlist deny (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
 esac
+assert_case "PS1 a named neutral agent's PowerShell command stays outside the shell grant" deny general-purpose PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS2 a reviewer's PowerShell command is denied" deny zensu:review-aspect PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS3 the PLM's PowerShell command is denied" deny zensu-plm PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS4 an evidence worker's PowerShell command is denied" deny zensu:pr-review-worker PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS5 the main thread's PowerShell command passes the capability gate" allow - PowerShell '{"command":"Get-ChildItem"}'
+POWERSHELL_REASON="$(deny_reason general-purpose PowerShell '{"command":"Get-ChildItem"}')"
+case "$POWERSHELL_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke PowerShell; a neutral subagent may use only "*)
+    check "PS6 a named neutral agent's PowerShell command gets the allowlist deny, because the grant covers Bash alone" PASS ;;
+  *)
+    check "PS6 a PowerShell command must get the allowlist deny (got: ${POWERSHELL_REASON:-<empty>})" FAIL ;;
+esac
 GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
 GUARD_REASON="$(deny_reason general-purpose Bash '{"command":"git clean -fdx"}')"
 case "$GUARD_REASON" in
