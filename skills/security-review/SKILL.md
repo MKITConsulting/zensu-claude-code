@@ -25,9 +25,9 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 - Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`); that list pages at 20 with no page flag, so when its `total` exceeds the returned `data` length, resolve against `zensu journeys suggest --product <product-id>` instead.
+- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`).
 
-Most commands accept `--json`, but not all — `zensu security posture` has no `--json` flag and always prints JSON. Run `zensu security <verb> --help` for the actual flag set rather than assuming one.
+Every `zensu` command this skill runs except `zensu auth` accepts `--json`, and the reads such as `zensu security posture` print JSON without it. Run `zensu security <verb> --help` for the actual flag set rather than assuming one.
 
 ## Workflow
 
@@ -101,7 +101,7 @@ For each recommended and implemented security test, run `zensu security add-test
 Run `zensu security review <feature-id>` with:
 - `--reviewer` (required): Reviewer identifier (e.g. "claude-code" or username)
 - `--status` (required): approved | rejected | conditional
-- `--review-type` (optional): manual | automated | external (default: manual)
+- `--type` (optional): manual | automated | external (default: manual)
 - `--findings` (optional): Review findings summary
 - `--conditions` (optional): Conditions for conditional approval
 
