@@ -25,11 +25,11 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 - **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
   its auth resolved from the repo's provider, whether playwright-cli is installed and its
-  version, and the browser consent gate's registration on the Bash matcher.
-- **Plugin integrity** — hooks.json wired to files on disk, and plugin.json ↔
-  marketplace.json version sync.
-- **Config** — valid JSON, the quoted-boolean trap where "true"/"false" as a string is
-  silently ignored by strict === checks, and whether the permission rules in
+  version, and the browser consent gate's registration on both shell tools.
+- **Plugin integrity** — hooks.json wired to files on disk, Bash-to-PowerShell hook
+  coverage, and plugin.json ↔ marketplace.json version sync.
+- **Config** — valid JSON, quoted booleans that strict === checks ignore, and whether the
+  permission rules in
   ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal before any chain
   has wedged.
 - **Session state** — the state dir is writable; canonical CAS workflow documents are valid;
@@ -432,7 +432,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   origins, if any, but no navigation command may open one. Other origins are asked, or denied
   under bypass permissions or dontAsk. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
-  registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
+  registered on both shell tools, and a runtime recipe (`.zensu/runtime.yaml` or
   `.zensu/autopilot.yaml`) is present. The permission prompt asks the user once per session for
   each new loopback origin of a `zensu-verify` session, and at every browser start for a remote
   HTTPS origin, which under bypass permissions or dontAsk needs the policy.
@@ -458,8 +458,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
   `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
   hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
-  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
-  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  does not register the GATE or the RECORDER on a matcher that covers Bash and PowerShell, a
+  registration there could not be determined, or the pair's registration probe did not complete.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
@@ -847,9 +847,9 @@ whether browser verification is enforced, not only when a row is red.
   run log is REDACTED on the way in: a claim under `$HOME` is
   rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
   no longer an absolute path when the audit reads it, no foreign root is derived
-  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
-  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
-  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  and no row can fire. A sibling in another home or `/root` becomes `<home>`; only siblings
+  outside every home — `/opt`, `/srv`, `/builds` — reach the row. Say
+  WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
 - **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
   session's delivery route is already decided, so the plan-approval hook and the
