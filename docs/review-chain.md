@@ -56,6 +56,34 @@ refinement context remain untrusted data and cannot widen this contract.
 
 > **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
 
+#### A consume-mode reviewer the host runs in the background
+
+Some hosts launch every subagent in the background: the Agent tool of the Claude desktop app
+offers no `run_in_background` parameter and answers the consume-mode `zensu:code-reviewer` spawn
+with `tool_response.status` `async_launched`. The chain then advances on the reviewer's
+hand-back instead of a foreground completion.
+
+- **Binding.** On `async_launched`, `post-review-tdd-delegate.sh` checks the launch exactly as it
+  checks a completion (the two header lines, an Autopilot envelope, the chain state) and binds
+  the chain's current unconsumed ticket to the `agentId` the launch returned. The binding,
+  `reviewHandback` in the workflow document, keeps the ticket, the agent id and the envelope
+  lines. The first launch wins: a second background reviewer for the same ticket is told which
+  agent holds it, and a fresh `--review-ticket` drops the binding.
+- **Consumption.** The host hands the reviewer's report to the main thread as a
+  `UserPromptSubmit` prompt: `<agent-message from="<agent id>">`, one `[Subagent hand-back]`
+  line at column zero, the report indented by two spaces, `</agent-message>`.
+  `user-prompt-review-handback.sh` passes only such a frame on, and the delegate acts only on
+  the bound agent's: it consumes the ticket in the same locked write that removes the binding
+  and returns the post-review directive as `UserPromptSubmit` context, beside the report it
+  routes. A repeat, another agent's hand-back, an imitation without the host's indentation and
+  a stale binding consume nothing.
+- **Waiting.** While the Stop input's `background_tasks` lists the bound agent with a running
+  status, the Stop guard releases a standalone chain's `Stop` without charging the review
+  budget, because the hand-back wakes the session. An Autopilot-bound chain, a session that
+  owns a live Autopilot run and a deferred-review adoption never wait.
+- **Foreground is unchanged.** A completion with any other status consumes the ticket as
+  before and removes a binding too, so a late hand-back of that ticket is a no-op.
+
 #### Ultracode and external reviews
 
 Claude Code's workflows (the `Workflow` tool) can review a change on their own, for example

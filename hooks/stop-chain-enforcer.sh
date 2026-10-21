@@ -717,6 +717,34 @@ external_review_workflow_wait() {
   return 0
 }
 
+review_handback_wait() {
+  local lib verdict pending claim native_state
+  REVIEW_HANDBACK_AGENT=""
+  case "$INPUT" in
+    *'"background_tasks"'*) ;;
+    *) return 1 ;;
+  esac
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  grep -qF '"reviewHandback"' "$STATE_FILE" 2>/dev/null || return 1
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-handback-v1.js"
+  [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  native_state="$(_tdd_native_project_path "$STATE_FILE" 2>/dev/null)" || return 1
+  verdict="$(printf '%s' "$INPUT" | zensu_run_bounded node "$lib" stop-wait --state "$native_state" 2>/dev/null)" || return 1
+  case "$verdict" in
+    "wait agent="?*) REVIEW_HANDBACK_AGENT="${verdict#wait agent=}" ;;
+    *) return 1 ;;
+  esac
+  case "$REVIEW_HANDBACK_AGENT" in
+    *[!A-Za-z0-9_-]*) REVIEW_HANDBACK_AGENT=""; return 1 ;;
+  esac
+  return 0
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1687,6 +1715,14 @@ if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; 
   outer_finish
   if [ "${DECISION_EMITTED:-false}" != "true" ]; then
     echo "zensu chain-enforcer: releasing this Stop while ${EXTERNAL_REVIEW_WAIT_WORKFLOWS} background workflow(s) run (${EXTERNAL_REVIEW_WAIT_NAMES}); wait ${EXTERNAL_REVIEW_WAIT_COUNT} of ${EXTERNAL_REVIEW_WAIT_MAX}. The review chain stays armed: when the workflow reports back, import a finished review through --external-review or resume the /zensu:tdd Phase 6 review sequence." >&2
+  fi
+  exit 0
+fi
+
+if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && review_handback_wait; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    echo "zensu chain-enforcer: releasing this Stop while the consume-mode zensu:code-reviewer runs in the background as agent ${REVIEW_HANDBACK_AGENT}. The review chain stays armed: that agent's hand-back consumes the review ticket and brings the post-review instructions." >&2
   fi
   exit 0
 fi

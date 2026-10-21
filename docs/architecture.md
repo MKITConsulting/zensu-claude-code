@@ -199,7 +199,9 @@ characters, on every prompt kind for the same reason). Two emit
 only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
 `user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
-takeover command. With
+takeover command. `user-prompt-review-handback.sh` emits only on the hand-back of the background
+`zensu:code-reviewer` its chain bound to a review ticket, where it carries the post-review directive
+the foreground completion used to carry. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or

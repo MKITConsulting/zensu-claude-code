@@ -4,8 +4,11 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 HOOK="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+HANDBACK_HOOK="$PLUGIN_DIR/hooks/user-prompt-review-handback.sh"
+STOP_HOOK="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 PHASE="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
@@ -319,58 +322,250 @@ OUT_NEW="$(run_hook "$S8" zensu:code-reviewer "$(review_prompt "$NEW_VALID_TICKE
   && check "S8b late completion from a prior chain cannot mutate the re-armed chain" PASS \
   || check "S8b late completion from a prior chain cannot mutate the re-armed chain" FAIL
 
-run_hook_with_status() {
-  local sid="$1" prompt="$2" status="$3" payload_sid="$1"
+run_launch() {
+  local sid="$1" prompt="$2" status="$3" agent="${4-}" payload_sid="$1"
   if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
     payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
   fi
-  SID="$payload_sid" PROMPT="$prompt" STATUS="$status" node -e '
+  SID="$payload_sid" PROMPT="$prompt" STATUS="$status" AGENT="$agent" node -e '
+    const response = {status: process.env.STATUS, isAsync: process.env.STATUS === "async_launched"};
+    if (process.env.AGENT !== "") response.agentId = process.env.AGENT;
     process.stdout.write(JSON.stringify({
       hook_event_name: "PostToolUse",
       tool_name: "Agent",
       tool_input: {subagent_type: "zensu:code-reviewer", prompt: process.env.PROMPT},
-      tool_response: {status: process.env.STATUS, agentId: "a4d2c8f1e0b3a297"},
+      tool_response: response,
       session_id: process.env.SID
     }));
   ' | bash "$HOOK" 2>/dev/null
 }
 
-start_session background
-S8C="$STARTED_SESSION_KEY"
-log --tdd-begin --session "$S8C"
-log --tdd-complete --session "$S8C"
-S8C_TICKET="$(issue_ticket "$S8C")"
-S8C_PROMPT="$(review_prompt "$S8C_TICKET" 'merged findings')"
-S8C_STATE="$(state "$S8C")"
-S8C_BEFORE="$(digest "$S8C_STATE")"
-OUT_ASYNC="$(run_hook_with_status "$S8C" "$S8C_PROMPT" async_launched)"
-S8C_AFTER="$(digest "$S8C_STATE")"
-ASYNC_CONTEXT="$(printf '%s' "$OUT_ASYNC" | node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
+handback_prompt() {
+  printf '<agent-message from="%s">\n' "$1"
+  printf '%s\n' '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:'
+  printf '%s\n' "${2:-# Code Review Report}" "" "- Verdict: PASS" | sed 's/^/  /'
+  printf '%s' '</agent-message>'
+}
+
+run_handback() {
+  local sid="$1" prompt="$2" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" PROMPT="$prompt" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "UserPromptSubmit",
+      prompt: process.env.PROMPT,
+      session_id: process.env.SID
+    }));
+  ' | bash "$HANDBACK_HOOK" 2>/dev/null
+}
+
+context_of() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const h = JSON.parse(s).hookSpecificOutput;
+        process.stdout.write(`${h.hookEventName}\n${h.additionalContext}`);
+      } catch (_) {}
+    });
+  '
+}
+
+binding_of() {
+  FILE="$(state "$1")" node -e '
     try {
-      const h = JSON.parse(s).hookSpecificOutput;
-      process.stdout.write(h.hookEventName === "PostToolUse" ? h.additionalContext : "");
-    } catch (_) { process.stdout.write(""); }
-  });
-')"
-case "$ASYNC_CONTEXT" in
-  *"async_launched"*"ticket was NOT consumed"*"run_in_background: false"*) ASYNC_DIRECTIVE=yes ;;
-  *) ASYNC_DIRECTIVE=no ;;
+      const b = JSON.parse(require("fs").readFileSync(process.env.FILE, "utf8")).reviewHandback;
+      process.stdout.write(b === undefined ? "absent" : `${b.ticket} ${b.agentId} ${b.envelope.length}`);
+    } catch (_) { process.stdout.write("invalid"); }
+  '
+}
+
+stop_with_tasks() {
+  local sid="$1" tasks="$2" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" TASKS="$tasks" node -e '
+    const payload = {hook_event_name: "Stop", session_id: process.env.SID, stop_hook_active: false};
+    if (process.env.TASKS !== "absent") payload.background_tasks = JSON.parse(process.env.TASKS);
+    process.stdout.write(JSON.stringify(payload));
+  ' | bash "$STOP_HOOK"
+}
+
+stop_decision() {
+  stop_with_tasks "$1" "$2" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try { process.stdout.write(JSON.parse(s.trim()).decision === "block" ? "block" : "allow"); }
+      catch (_) { process.stdout.write("allow"); }
+    });
+  '
+}
+
+reviewer_tasks() {
+  printf '[{"id":"%s","type":"subagent","status":"%s","description":"consume-mode review","agent_type":"zensu:code-reviewer"}]' "$1" "${2:-running}"
+}
+
+AGENT_A=a84666756e22c9750
+AGENT_B=ab257b34050b043c4
+
+start_session background
+H="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$H"
+log --tdd-complete --session "$H"
+H_TICKET="$(issue_ticket "$H")"
+H_PROMPT="$(review_prompt "$H_TICKET" 'merged findings')"
+H_STATE="$(state "$H")"
+H1_OUT="$(run_launch "$H" "$H_PROMPT" async_launched "$AGENT_A" | context_of)"
+H_BOUND="$(digest "$H_STATE")"
+case "$H1_OUT" in
+  "PostToolUse"$'\n'*"runs in the background as agent $AGENT_A"*"hand-back"*) H1_TEXT=yes ;;
+  *) H1_TEXT=no ;;
 esac
-case "$ASYNC_CONTEXT" in
-  *"just finished"*) ASYNC_DIRECTIVE=no ;;
+[ "$H1_TEXT" = yes ] && [ "$(binding_of "$H")" = "$H_TICKET $AGENT_A 0" ] \
+  && [ "$(ticket_consumed "$H")" = "false" ] && [ "$(review_round "$H")" = "0" ] \
+  && check "H1 a background launch binds its ticket to the agent and leaves it unconsumed" PASS \
+  || check "H1 a background launch binds its ticket to the agent and leaves it unconsumed (text=$H1_TEXT binding=$(binding_of "$H") consumed=$(ticket_consumed "$H"))" FAIL
+
+H2_OUT="$(run_launch "$H" "$H_PROMPT" async_launched "$AGENT_A" | context_of)"
+case "$H2_OUT" in *"runs in the background as agent $AGENT_A"*) H2_TEXT=yes ;; *) H2_TEXT=no ;; esac
+[ "$H2_TEXT" = yes ] && [ "$(digest "$H_STATE")" = "$H_BOUND" ] \
+  && check "H2 a repeated delivery of the same launch is idempotent" PASS \
+  || check "H2 a repeated delivery of the same launch is idempotent (text=$H2_TEXT)" FAIL
+
+H3_OUT="$(run_launch "$H" "$H_PROMPT" async_launched "$AGENT_B" | context_of)"
+case "$H3_OUT" in *"already bound to agent $AGENT_A"*) H3_TEXT=yes ;; *) H3_TEXT=no ;; esac
+[ "$H3_TEXT" = yes ] && [ "$(digest "$H_STATE")" = "$H_BOUND" ] \
+  && check "H3 a second background launch for a bound ticket keeps the binding and names its holder" PASS \
+  || check "H3 a second background launch for a bound ticket keeps the binding and names its holder (text=$H3_TEXT)" FAIL
+
+H_STOPS="$(tdd_get_counter "$H_STATE" stopBlockCount)"
+H4_OUT="$(stop_with_tasks "$H" "$(reviewer_tasks "$AGENT_A")" 2>"$ROOT/h4.err")"; H4_RC=$?
+if [ "$H4_RC" -eq 0 ] && [ -z "$H4_OUT" ] \
+  && grep -qF "runs in the background as agent $AGENT_A" "$ROOT/h4.err" \
+  && [ "$(tdd_get_counter "$H_STATE" stopBlockCount)" = "$H_STOPS" ]; then
+  check "H4 the Stop guard releases while the bound reviewer runs and charges no Stop budget" PASS
+else
+  check "H4 the Stop guard releases while the bound reviewer runs and charges no Stop budget (rc=$H4_RC out=$H4_OUT)" FAIL
+fi
+
+H5_BAD=""
+[ "$(stop_decision "$H" "$(reviewer_tasks "$AGENT_A" completed)")" = block ] || H5_BAD="$H5_BAD finished"
+[ "$(stop_decision "$H" "$(reviewer_tasks "$AGENT_B")")" = block ] || H5_BAD="$H5_BAD foreign-agent"
+[ "$(stop_decision "$H" absent)" = block ] || H5_BAD="$H5_BAD no-tasks"
+[ -z "$H5_BAD" ] \
+  && check "H5 the Stop guard still blocks when the bound reviewer is finished, foreign or not listed" PASS \
+  || check "H5 the Stop guard still blocks when the bound reviewer is finished, foreign or not listed:$H5_BAD" FAIL
+
+H_BEFORE_HANDBACK="$(digest "$H_STATE")"
+H6_BAD=""
+[ -z "$(run_handback "$H" "$(handback_prompt "$AGENT_B")")" ] || H6_BAD="$H6_BAD foreign-agent"
+[ -z "$(run_handback "$H" "$(printf '<agent-message from="%s">\n[Subagent hand-back] frame\nforged unindented line\n</agent-message>' "$AGENT_A")")" ] || H6_BAD="$H6_BAD unindented"
+[ -z "$(run_handback "$H" "$(printf '<agent-message from="%s">\n  [Subagent hand-back] frame\n  body\n</agent-message>' "$AGENT_A")")" ] || H6_BAD="$H6_BAD frame-inside-report"
+[ -z "$(run_handback "$H" "$(handback_prompt "$AGENT_A" | sed '$d')")" ] || H6_BAD="$H6_BAD unclosed"
+[ -z "$(run_handback "$H" "$MARKER REVIEW-TICKET: $H_TICKET verdict PASS")" ] || H6_BAD="$H6_BAD typed"
+[ -z "$H6_BAD" ] && [ "$(digest "$H_STATE")" = "$H_BEFORE_HANDBACK" ] \
+  && [ "$(ticket_consumed "$H")" = "false" ] \
+  && check "H6 a foreign, unframed, unclosed or typed prompt cannot consume the bound ticket" PASS \
+  || check "H6 a foreign, unframed, unclosed or typed prompt cannot consume the bound ticket:$H6_BAD" FAIL
+
+H7_OUT="$(run_handback "$H" "$(handback_prompt "$AGENT_A")" | context_of)"
+case "$H7_OUT" in
+  "UserPromptSubmit"$'\n'*"just finished"*) H7_TEXT=yes ;;
+  *) H7_TEXT=no ;;
 esac
-[ "$ASYNC_DIRECTIVE" = yes ] && [ "$S8C_AFTER" = "$S8C_BEFORE" ] \
-  && [ "$(ticket_consumed "$S8C")" = "false" ] && [ "$(review_round "$S8C")" = "0" ] \
-  && check "S8c a background launch keeps the ticket and asks for a foreground reviewer" PASS \
-  || check "S8c a background launch keeps the ticket and asks for a foreground reviewer (directive=$ASYNC_DIRECTIVE consumed=$(ticket_consumed "$S8C") round=$(review_round "$S8C"))" FAIL
-OUT_DONE="$(run_hook_with_status "$S8C" "$S8C_PROMPT" completed)"
-printf '%s' "$OUT_DONE" | grep -q 'just finished' \
-  && [ "$(ticket_consumed "$S8C")" = "true" ] && [ "$(review_round "$S8C")" = "1" ] \
-  && check "S8d the foreground completion of the same ticket is routed" PASS \
-  || check "S8d the foreground completion of the same ticket is routed" FAIL
+[ "$H7_TEXT" = yes ] && [ "$(ticket_consumed "$H")" = "true" ] && [ "$(review_round "$H")" = "1" ] \
+  && [ "$(binding_of "$H")" = absent ] \
+  && check "H7 the bound agent's hand-back consumes the ticket once and returns the post-review directive" PASS \
+  || check "H7 the bound agent's hand-back consumes the ticket once and returns the post-review directive (text=$H7_TEXT consumed=$(ticket_consumed "$H") round=$(review_round "$H"))" FAIL
+
+H_CONSUMED="$(digest "$H_STATE")"
+[ -z "$(run_handback "$H" "$(handback_prompt "$AGENT_A")")" ] \
+  && [ -z "$(run_launch "$H" "$H_PROMPT" async_launched "$AGENT_B")" ] \
+  && [ "$(digest "$H_STATE")" = "$H_CONSUMED" ] && [ "$(review_round "$H")" = "1" ] \
+  && check "H8 a repeated hand-back and a launch for the consumed ticket are byte-stable no-ops" PASS \
+  || check "H8 a repeated hand-back and a launch for the consumed ticket are byte-stable no-ops" FAIL
+
+if log --code-review-done --session "$H" --claimed-review-ticket "$H_TICKET" \
+  && log --chain-done --session "$H" --claimed-review-ticket "$H_TICKET" \
+  && [ "$(state_value "$H_STATE" chainDone)" = "true" ]; then
+  check "H9 a chain whose consume-mode reviewer ran in the background closes through --chain-done --claimed-review-ticket" PASS
+else
+  check "H9 a chain whose consume-mode reviewer ran in the background closes through --chain-done --claimed-review-ticket" FAIL
+fi
+
+start_session background-unbound
+HU="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HU"
+log --tdd-complete --session "$HU"
+HU_TICKET="$(issue_ticket "$HU")"
+HU_OUT="$(run_launch "$HU" "$(review_prompt "$HU_TICKET")" async_launched "" | context_of)"
+case "$HU_OUT" in *"could not be bound"*"--review-ticket"*) HU_TEXT=yes ;; *) HU_TEXT=no ;; esac
+[ "$HU_TEXT" = yes ] && [ "$(binding_of "$HU")" = absent ] && [ "$(ticket_consumed "$HU")" = "false" ] \
+  && check "H10 a background launch without a usable agent id records nothing and says the chain cannot advance" PASS \
+  || check "H10 a background launch without a usable agent id records nothing and says the chain cannot advance (text=$HU_TEXT)" FAIL
+
+start_session background-foreground
+HF="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HF"
+log --tdd-complete --session "$HF"
+HF_TICKET="$(issue_ticket "$HF")"
+HF_PROMPT="$(review_prompt "$HF_TICKET" 'merged findings')"
+run_launch "$HF" "$HF_PROMPT" async_launched "$AGENT_A" >/dev/null
+HF_BOUND="$(binding_of "$HF")"
+HF_DONE="$(run_launch "$HF" "$HF_PROMPT" completed "" | context_of)"
+HF_LATE="$(run_handback "$HF" "$(handback_prompt "$AGENT_A")")"
+case "$HF_DONE" in "PostToolUse"$'\n'*"just finished"*) HF_TEXT=yes ;; *) HF_TEXT=no ;; esac
+[ "$HF_BOUND" = "$HF_TICKET $AGENT_A 0" ] && [ "$HF_TEXT" = yes ] && [ -z "$HF_LATE" ] \
+  && [ "$(ticket_consumed "$HF")" = "true" ] && [ "$(review_round "$HF")" = "1" ] \
+  && [ "$(binding_of "$HF")" = absent ] \
+  && check "H11 a foreground completion still routes, removes the binding, and the late hand-back is a no-op" PASS \
+  || check "H11 a foreground completion still routes, removes the binding, and the late hand-back is a no-op (bound=$HF_BOUND text=$HF_TEXT late=$HF_LATE)" FAIL
+
+start_session background-reset
+HR="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HR"
+log --tdd-complete --session "$HR"
+HR_T1="$(issue_ticket "$HR")"
+run_launch "$HR" "$(review_prompt "$HR_T1")" async_launched "$AGENT_A" >/dev/null
+HR_B1="$(binding_of "$HR")"
+HR_T2="$(issue_ticket "$HR")"
+HR_B2="$(binding_of "$HR")"
+run_launch "$HR" "$(review_prompt "$HR_T2")" async_launched "$AGENT_B" >/dev/null
+HR_B3="$(binding_of "$HR")"
+log --tdd-begin --session "$HR"
+HR_B4="$(binding_of "$HR")"
+log --tdd-complete --session "$HR"
+HR_T3="$(issue_ticket "$HR")"
+run_launch "$HR" "$(review_prompt "$HR_T3")" async_launched "$AGENT_A" >/dev/null
+HR_B5="$(binding_of "$HR")"
+log --tdd-reset --session "$HR"
+HR_B6="$(binding_of "$HR")"
+[ "$HR_B1" = "$HR_T1 $AGENT_A 0" ] && [ "$HR_B2" = absent ] && [ "$HR_B3" = "$HR_T2 $AGENT_B 0" ] \
+  && [ "$HR_B4" = absent ] && [ "$HR_B5" = "$HR_T3 $AGENT_A 0" ] && [ "$HR_B6" = absent ] \
+  && check "H12 a fresh ticket, --tdd-begin and --tdd-reset remove the binding" PASS \
+  || check "H12 a fresh ticket, --tdd-begin and --tdd-reset remove the binding ($HR_B1|$HR_B2|$HR_B3|$HR_B4|$HR_B5|$HR_B6)" FAIL
+
+start_session background-invalid
+HI="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HI"
+log --tdd-complete --session "$HI"
+HI_TICKET="$(issue_ticket "$HI")"
+run_launch "$HI" "$(review_prompt "$HI_TICKET")" async_launched "$AGENT_A" >/dev/null
+HI_VALID="$(tdd_state_status "$(state "$HI")")"
+FILE="$(state "$HI")" node -e '
+  const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  s.reviewHandback.extra = true;
+  fs.writeFileSync(process.env.FILE, JSON.stringify(s, null, 2));
+'
+HI_INVALID="$(tdd_state_status "$(state "$HI")")"
+[ "$HI_VALID" = valid ] && [ "$HI_INVALID" = invalid ] \
+  && check "H13 the workflow document validates reviewHandback with an exact key set" PASS \
+  || check "H13 the workflow document validates reviewHandback with an exact key set ($HI_VALID then $HI_INVALID)" FAIL
 
 # State remains session-local even when another canonical baseline becomes current.
 start_session session-a
@@ -573,6 +768,37 @@ if [ "$CLOSE_PASS_HITS" -eq 2 ] \
 else
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction (hits: $CLOSE_PASS_HITS)" FAIL
 fi
+
+source "$STATE_LIB"
+BOUND_PROJECT="$ROOT/bound-project"
+mkdir -p "$BOUND_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd "$BOUND_PROJECT" && pwd -P)"
+start_session background-bound
+HB="$STARTED_SESSION_KEY"
+HB_RUN=handback_bound_run
+HB_CHAIN=handback-bound-chain
+HB_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+autopilot_begin_run "$HB_RUN" "$HB" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1
+autopilot_apply_event "$HB_RUN" "plan-$HB_RUN" PLAN_APPROVED "{\"approvedPlanSha256\":\"$HB_SHA\"}" \
+  "$CLAUDE_PROJECT_DIR" "$HB" >/dev/null 2>&1
+log --tdd-begin --session "$HB" --autopilot-run "$HB_RUN" --autopilot-attempt 1 \
+  --autopilot-return-stage GATES --chain-id "$HB_CHAIN"
+log --tdd-complete --session "$HB" --autopilot-run "$HB_RUN" --autopilot-attempt 1 \
+  --autopilot-return-stage GATES --chain-id "$HB_CHAIN"
+HB_TICKET="$(issue_ticket "$HB")"
+HB_PROMPT="$(printf '%s\nREVIEW-TICKET: %s\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=%s attempt=1 chain=%s\nAUTOPILOT-STAGE: GATES\nfixture' \
+  "$MARKER" "$HB_TICKET" "$HB_RUN" "$HB_CHAIN")"
+run_launch "$HB" "$HB_PROMPT" async_launched "$AGENT_A" >/dev/null
+HB_BOUND="$(binding_of "$HB")"
+HB_OUT="$(run_handback "$HB" "$(handback_prompt "$AGENT_A")" | context_of)"
+case "$HB_OUT" in
+  "UserPromptSubmit"$'\n'*"just finished"*"Official Autopilot handoff envelope"*"AUTOPILOT-BINDING: run=$HB_RUN attempt=1 chain=$HB_CHAIN"*) HB_TEXT=yes ;;
+  *) HB_TEXT=no ;;
+esac
+[ -n "$HB_TICKET" ] && [ "$HB_BOUND" = "$HB_TICKET $AGENT_A 3" ] && [ "$HB_TEXT" = yes ] \
+  && [ "$(ticket_consumed "$HB")" = "true" ] && [ "$(review_round "$HB")" = "1" ] \
+  && check "H14 an Autopilot-bound background reviewer binds its envelope and its hand-back routes with the official envelope" PASS \
+  || check "H14 an Autopilot-bound background reviewer binds its envelope and its hand-back routes with the official envelope (ticket=$HB_TICKET bound=$HB_BOUND text=$HB_TEXT consumed=$(ticket_consumed "$HB"))" FAIL
 
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"
