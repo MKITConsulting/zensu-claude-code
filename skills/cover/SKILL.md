@@ -65,7 +65,7 @@ the coverage tdd's per-step tests already produced and fills only the remaining 
 
 ## Workflow
 
-Four phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has a live view.
+Four phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has a live view. If neither tool can be loaded, the host has them switched off: say so once, naming `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`, and skip the tasks.
 
 ### Phase 0 — Scope & Probe  (interactive ONLY if scope/framework is ambiguous)
 
