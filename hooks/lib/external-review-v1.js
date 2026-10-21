@@ -44,6 +44,7 @@ const RECORD_KEYS = Object.freeze([
 ]);
 const RESULT_SCHEMA = 'zensu-review-result/v1';
 const TEMPLATE_FILE = path.join(__dirname, '..', '..', 'templates', 'workflows', 'zensu-review-v1.js');
+const STAGED_TEMPLATE_PREFIX = `${path.basename(TEMPLATE_FILE, '.js')}-`;
 const RESULT_KEYS = Object.freeze(['agents', 'ceiling', 'dropped', 'findings', 'lenses', 'schema', 'tree']);
 const RESULT_AGENT_KEYS = Object.freeze(['failed', 'finished', 'started']);
 const RESULT_DROPPED_KEYS = Object.freeze(['count', 'kind', 'lens', 'reason']);
@@ -98,6 +99,18 @@ const LIMITS = Object.freeze({
   maxResultText: 16 * 1024,
   maxReasonChars: 300,
   maxPrintedText: 2000,
+});
+const ROOT_ADVICE = Object.freeze({
+  'nested-work-tree': () => "the review root is a separate git work tree nested inside this session's work tree, and a chain reviews one work tree; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it",
+  'nested-in-folder': () => "the review root is a git work tree inside this session's project folder, which is not a git work tree itself, and a chain reviews one root; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it",
+  outside: () => "the review root lies outside this session's work tree, where no reviewer of this session can read; this review runs the aspect panel, and a workflow review of that directory imports only in a session started in it",
+  enclosing: (verdict) => `the review root encloses this session's work tree, so its tree and change times would not be this session's; re-run with --root set to ${verdict.rerun}`,
+  subdirectory: (verdict) => `the review root lies below the root of this session's work tree, so its tree would cover only part of it; re-run with --root set to ${verdict.rerun}`,
+  'unresolved-root': (verdict) => `the review root is not an absolute, symlink-free path to an existing directory; re-run with --root set to ${verdict.rerun}`,
+  'unresolved-project-root': () => "this session's project root is not an absolute, symlink-free path to an existing directory; run /zensu:doctor",
+  undetermined: (verdict) => (verdict.rerun
+    ? `the work tree of the review root could not be determined, and a root other than this session's own is refused whatever its layout; re-run with --root set to ${verdict.rerun}`
+    : "the work tree of this session's project root could not be determined; fix the cause the detail names and re-run"),
 });
 
 class ExternalReviewError extends Error {
@@ -532,7 +545,7 @@ function recordLaunch(payload, env = process.env, options = {}) {
 
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative === '' || (relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative));
 }
 
 function canonicalDirectoryOrNull(value) {
@@ -545,6 +558,40 @@ function canonicalDirectoryOrNull(value) {
   } catch {
     return null;
   }
+}
+
+function workTreeTopOf(directory) {
+  let evidence;
+  try {
+    evidence = require('./evidence-run-v1.js');
+  } catch {
+    return { top: null, reason: 'tree-module' };
+  }
+  return evidence.workTreeTop(directory);
+}
+
+function resolveRoot(options) {
+  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
+  if (!projectRoot) return { layout: 'unresolved-project-root' };
+  const topOf = options.topOf || workTreeTopOf;
+  const own = topOf(projectRoot);
+  if (own.reason) return { layout: 'undetermined', detail: own.reason };
+  const anchor = own.top || projectRoot;
+  const rerun = own.top ? 'the top level that git -C <project root> rev-parse --show-toplevel prints' : "this session's project root";
+  const root = canonicalDirectoryOrNull(options.root);
+  if (!root) return { layout: 'unresolved-root', rerun };
+  if (root === anchor) return { root };
+  if (isInside(root, anchor)) return { layout: 'enclosing', rerun };
+  if (!isInside(anchor, root)) return { layout: 'outside' };
+  const other = topOf(root);
+  if (other.reason) return { layout: 'undetermined', detail: other.reason, rerun };
+  if (other.top && other.top !== anchor) return { layout: own.top ? 'nested-work-tree' : 'nested-in-folder' };
+  return { layout: 'subdirectory', rerun };
+}
+
+function rootRefusal(verdict) {
+  const detail = verdict.detail ? ` detail=${token(verdict.detail)}` : '';
+  return `reason=root layout=${verdict.layout}${detail} — ${ROOT_ADVICE[verdict.layout](verdict)}`;
 }
 
 function existingRecordsDirectory(pluginData, sessionKey) {
@@ -840,7 +887,12 @@ function progressCounts(progress) {
   return { started: latest.size, finished, failed: latest.size - finished, lost: 0 };
 }
 
-function currentTree(root) {
+function projectStateExclusion(root, projectRoot) {
+  if (typeof projectRoot !== 'string' || projectRoot === root || !isInside(root, projectRoot)) return [];
+  return [`${path.relative(root, projectRoot).split(path.sep).join('/')}/.zensu`];
+}
+
+function currentTree(root, projectRoot) {
   let evidence;
   try {
     evidence = require('./evidence-run-v1.js');
@@ -850,7 +902,7 @@ function currentTree(root) {
   let scratch = null;
   try {
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-xr-'));
-    return evidence.computeTree(root, scratch);
+    return evidence.computeTree(root, scratch, undefined, projectStateExclusion(root, projectRoot));
   } catch {
     return { tree: null, reason: 'tree-scratch' };
   } finally {
@@ -899,6 +951,89 @@ function templateDigest(file = TEMPLATE_FILE, limits = LIMITS) {
   return loaded.invalid ? null : digest(loaded.text);
 }
 
+function stagedTemplateName(sessionKey) {
+  return `${STAGED_TEMPLATE_PREFIX}${sessionKey}.js`;
+}
+
+function isStagedTemplateName(name) {
+  return name.startsWith(STAGED_TEMPLATE_PREFIX) && name.endsWith('.js')
+    && SESSION_KEY_RE.test(name.slice(STAGED_TEMPLATE_PREFIX.length, -3));
+}
+
+function projectStateDirectory(projectRoot) {
+  let current = projectRoot;
+  for (const segment of core.WORKFLOW_STATE_SEGMENTS) {
+    current = path.join(current, segment);
+    try {
+      fs.mkdirSync(current, { mode: 0o700 });
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') return null;
+    }
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+  }
+  return canonicalDirectoryOrNull(current);
+}
+
+function sweepStagedTemplates(directory, keep, limits, now) {
+  let names;
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return 0;
+  }
+  let swept = 0;
+  for (const name of names) {
+    if (name === keep || !isStagedTemplateName(name)) continue;
+    try {
+      const file = path.join(directory, name);
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || now - stat.mtimeMs <= limits.idleSessionMs) continue;
+      fs.unlinkSync(file);
+      swept += 1;
+    } catch { }
+  }
+  return swept;
+}
+
+function stageUnavailable(reason) {
+  return { status: 'unavailable', reason, line: `${LOG_PREFIX} stage=unavailable reason=${reason}` };
+}
+
+function stageTemplate(options, limits = LIMITS) {
+  if (!options.enabled) return stageUnavailable('disabled');
+  if (options.judge === false) return stageUnavailable('review-judge-disabled');
+  const placed = resolveRoot(options);
+  if (placed.layout) return { status: 'unavailable', reason: 'root', line: `${LOG_PREFIX} stage=unavailable ${rootRefusal(placed)}` };
+  const root = placed.root;
+  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
+  if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return stageUnavailable('session');
+  const current = (options.treeOf || currentTree)(root, projectRoot);
+  if (!current || typeof current.tree !== 'string' || !TREE_ID_RE.test(current.tree)) {
+    return stageUnavailable(token(current && current.reason));
+  }
+  const template = readBoundedFile(options.templateFile || TEMPLATE_FILE, limits.maxScriptFileBytes);
+  if (template.invalid) return stageUnavailable('template-unreadable');
+  const directory = projectStateDirectory(projectRoot);
+  if (!directory) return stageUnavailable('state-directory');
+  const name = stagedTemplateName(options.sessionKey);
+  let script;
+  try {
+    script = writeFileAtomic(directory, name, template.text);
+  } catch {
+    return stageUnavailable('write-failed');
+  }
+  const staged = readBoundedFile(script, limits.maxScriptFileBytes);
+  if (staged.invalid || digest(staged.text) !== digest(template.text)) return stageUnavailable('digest-mismatch');
+  sweepStagedTemplates(directory, name, limits, options.now === undefined ? Date.now() : options.now);
+  return { status: 'ok', tree: current.tree, script, line: `${LOG_PREFIX} stage=ok tree=${current.tree} script=${script}` };
+}
+
 function judgeResult(record, options, limits) {
   const expected = templateDigest(options.templateFile || TEMPLATE_FILE, limits);
   if (expected === null) return { status: 'unavailable', reason: 'template-unreadable' };
@@ -915,7 +1050,7 @@ function judgeResult(record, options, limits) {
   const problem = validateReviewResult(run.result, limits);
   if (problem) return { status: 'unavailable', reason: 'foreign-shape', detail: problem };
   const result = run.result;
-  const current = (options.treeOf || currentTree)(options.root);
+  const current = (options.treeOf || currentTree)(options.root, options.projectRoot);
   let treeState = 'unverified';
   if (current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)) {
     if (current.tree !== result.tree) {
@@ -967,9 +1102,9 @@ function check(options, limits = LIMITS) {
   if (options.changedText === null) return unavailable('change-set-too-large');
   if (typeof options.sessionKey !== 'string' || !SESSION_KEY_RE.test(options.sessionKey)) return unavailable('session');
   if (typeof options.pluginData !== 'string' || options.pluginData === '') return unavailable('plugin-data');
-  const root = canonicalDirectoryOrNull(options.root);
-  const projectRoot = canonicalDirectoryOrNull(options.projectRoot);
-  if (!root || !projectRoot || !isInside(root, projectRoot)) return unavailable('root');
+  const placed = resolveRoot(options);
+  if (placed.layout) return { status: 'unavailable', lines: [`${LOG_PREFIX} status=unavailable ${rootRefusal(placed)}`] };
+  const root = placed.root;
   const parsed = parseChangedPaths(options.changedText, limits);
   if (parsed.error) return unavailable(parsed.error);
   if (parsed.paths.length === 0) return unavailable('empty-change-set');
@@ -1016,7 +1151,7 @@ function check(options, limits = LIMITS) {
     return { status: 'unavailable', lines };
   }
   const head = `launches=${fresh.length}/${valid.length} selected=${launchLabel(selected.record)} id=${selected.id} last-change=${iso(changes.newest)} ${counts}`;
-  const verdict = judgeResult(selected.record, { ...options, root, changedPaths: parsed.paths }, limits);
+  const verdict = judgeResult(selected.record, { ...options, root, projectRoot: canonicalDirectoryOrNull(options.projectRoot), changedPaths: parsed.paths }, limits);
   if (verdict.status !== 'ok' && verdict.status !== 'degraded') {
     lines[0] = `${LOG_PREFIX} status=${verdict.status} reason=${verdict.reason} ${head}${verdict.detail ? ` detail=${token(verdict.detail)}` : ''}`;
     return { status: verdict.status, lines };
@@ -1154,22 +1289,39 @@ function main(argv, env = process.env, io = {}) {
   if (mode === 'tree') {
     let line;
     try {
-      const root = canonicalDirectoryOrNull(env.ZENSU_XR_ROOT);
-      const projectRoot = canonicalDirectoryOrNull(env.ZENSU_XR_PROJECT_ROOT);
       if (env.ZENSU_XR_ENABLED === '0') {
         line = `${LOG_PREFIX} tree=unavailable reason=disabled`;
       } else if (env.ZENSU_XR_JUDGE === '0') {
         line = `${LOG_PREFIX} tree=unavailable reason=review-judge-disabled`;
-      } else if (!root || !projectRoot || !isInside(root, projectRoot)) {
-        line = `${LOG_PREFIX} tree=unavailable reason=root`;
       } else {
-        const current = currentTree(root);
-        line = current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)
-          ? `${LOG_PREFIX} tree=${current.tree}`
-          : `${LOG_PREFIX} tree=unavailable reason=${token(current && current.reason)}`;
+        const placed = resolveRoot({ root: env.ZENSU_XR_ROOT, projectRoot: env.ZENSU_XR_PROJECT_ROOT });
+        if (placed.layout) {
+          line = `${LOG_PREFIX} tree=unavailable ${rootRefusal(placed)}`;
+        } else {
+          const current = currentTree(placed.root, canonicalDirectoryOrNull(env.ZENSU_XR_PROJECT_ROOT));
+          line = current && typeof current.tree === 'string' && TREE_ID_RE.test(current.tree)
+            ? `${LOG_PREFIX} tree=${current.tree}`
+            : `${LOG_PREFIX} tree=unavailable reason=${token(current && current.reason)}`;
+        }
       }
     } catch {
       line = `${LOG_PREFIX} tree=unavailable reason=fault`;
+    }
+    write(`${line}\n`);
+    return 0;
+  }
+  if (mode === 'stage') {
+    let line;
+    try {
+      line = stageTemplate({
+        enabled: env.ZENSU_XR_ENABLED !== '0',
+        judge: env.ZENSU_XR_JUDGE !== '0',
+        sessionKey: env.ZENSU_XR_SESSION_KEY,
+        projectRoot: env.ZENSU_XR_PROJECT_ROOT,
+        root: env.ZENSU_XR_ROOT,
+      }).line;
+    } catch {
+      line = `${LOG_PREFIX} stage=unavailable reason=fault`;
     }
     write(`${line}\n`);
     return 0;
@@ -1188,7 +1340,7 @@ function main(argv, env = process.env, io = {}) {
     write(`${result.line}\n`);
     return 0;
   }
-  process.stderr.write('usage: external-review-v1.js record|check|tree|stop-wait\n');
+  process.stderr.write('usage: external-review-v1.js record|check|tree|stage|stop-wait\n');
   return 2;
 }
 
@@ -1220,9 +1372,12 @@ module.exports = {
   buildRecord,
   recordLaunch,
   parseChangedPaths,
+  resolveRoot,
   newestChangeTime,
   validateReviewResult,
   templateDigest,
+  stagedTemplateName,
+  stageTemplate,
   runRecordPath,
   readRunRecord,
   journalCounts,

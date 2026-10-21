@@ -10,7 +10,8 @@ const { msysDrivePrefix } = require('./claude-path-v1.js');
 const hookRegistration = require('./hook-registration-v1.js');
 const cliVersion = require('./playwright-cli-version-v1.js');
 
-const CONSENT_MATCHER = 'Bash';
+const CONSENT_MATCHER = 'Bash|PowerShell';
+const CONSENT_TOOLS = Object.freeze(['Bash', 'PowerShell']);
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
 const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
 const { REGISTRATION } = hookRegistration;
@@ -157,6 +158,7 @@ const REASONS = Object.freeze({
   NEW_ORIGIN: 'new-origin-needs-consent',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
+  POWERSHELL_NOT_JUDGED: 'a zensu-verify browser call runs through the Bash tool only, because this gate judges Bash command text; re-issue it as one plain playwright-cli call through the Bash tool, and to search or commit text that merely names playwright-cli and a zensu-verify session, use the Grep tool or a message file',
 });
 const SHAPE_REASONS = Object.freeze([
   'NOT_PLAIN', 'ARGUMENT_UNEXPANDED', 'SESSION_UNRESOLVED', 'SESSION_UNEXPANDED', 'CLI_NOT_BARE', 'WRAPPER', 'LAUNCHER', 'ENV_ASSIGNMENT',
@@ -166,13 +168,13 @@ const FINAL_REASONS = Object.freeze([
   'AMBIENT_TEXT', 'REDEFINED', 'COMMAND_DENIED', 'FLAG_DENIED', 'CONFIG_REQUIRED', 'OPEN_OUTSIDE_CONFIG', 'BROWSER_NOT_CHROMIUM',
   'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NOT_POLICY_KIND', 'NETWORK_ONLY_NAVIGATION', 'NOT_POLICY_NETWORK_ONLY',
   'NETWORK_ONLY_NEEDS_POLICY', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
-  'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED',
+  'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED', 'POWERSHELL_NOT_JUDGED',
 ]);
 const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
 const SHAPE_TEXTS = new Set(SHAPE_REASONS.map((key) => REASONS[key]));
 
 function strippedText(text) {
-  return String(text).replace(/\\\r?\n/g, '').replace(/['"\\]/g, '');
+  return String(text).replace(/\\\r?\n/g, '').replace(/['"\\`]/g, '');
 }
 
 function normalizedText(text) {
@@ -1371,9 +1373,27 @@ function commandOf(payload) {
   return input && typeof input === 'object' && typeof input.command === 'string' ? input.command : null;
 }
 
+function powershellMarked(text, env) {
+  let spelled;
+  try {
+    spelled = require('./powershell-command-v1.js').spellings(text);
+  } catch (_error) {
+    return true;
+  }
+  const marks = commandMarkers(spelled, env);
+  return marks.cli && marks.session;
+}
+
 function runPre(payload, env, out, err) {
   if (!payload || typeof payload !== 'object' || typeof payload.tool_name !== 'string') {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE })));
+    return true;
+  }
+  if (payload.tool_name === 'PowerShell') {
+    const input = payload.tool_input;
+    const text = input && typeof input === 'object' && typeof input.command === 'string' ? input.command : '';
+    if (!powershellMarked(text, env)) return false;
+    out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED })));
     return true;
   }
   const command = commandOf(payload);
@@ -1399,6 +1419,7 @@ function runPost(payload, env, err) {
     err.write(`zensu: verify consent memory not written (${REASONS.PAYLOAD_UNREADABLE})\n`);
     return { ok: false, reason: REASONS.PAYLOAD_UNREADABLE };
   }
+  if (payload.tool_name === 'PowerShell') return { ok: true, skipped: 'powershell-call' };
   const command = commandOf(payload);
   if (command === null) return { ok: true, skipped: 'not-a-bash-call' };
   const response = payload.tool_response;
@@ -1449,7 +1470,7 @@ function hookRegistered(pluginRoot, event, hookFile) {
   }
   return hookRegistration.registration(manifest, {
     event,
-    tools: [CONSENT_MATCHER],
+    tools: [...CONSENT_TOOLS],
     names: (command) => command.includes(`/hooks/${hookFile}`),
     reading: hookRegistration.READINGS.HOST,
   });
@@ -1482,6 +1503,7 @@ module.exports = {
   CLI_MARKERS,
   CONSENT_HOOK_FILE,
   CONSENT_MATCHER,
+  CONSENT_TOOLS,
   CONSENT_RECORDER_FILE,
   DECIDED_BY,
   FINAL_REASONS,

@@ -41,32 +41,8 @@ reject_text() {
   fi
 }
 
-# WORKING TREE, not HEAD. Driven first: tests/run-all.sh discovers only
-# test-*.sh, so this is the only path by which the wrapper's executable coverage
-# runs at all, and a later timeout must not be able to drop it.
-RUN_STEP_TEST="$ROOT/tests/structure/release-run-step.test.js"
-if [ -f "$RUN_STEP_TEST" ]; then
-  RUN_STEP_OUT="$(node --test "$RUN_STEP_TEST" 2>&1)"
-  RUN_STEP_RC=$?
-  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ tests 11`, and that mark is
-  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old pattern
-  # read nothing, `${RUN_STEP_CASES:-0}` resolved to 0, and this check reported a green
-  # unit suite as failing on every macOS run. The first field is the only thing that varies
-  # between node's reporters (`#` on the TAP one), so matching one space-free token covers
-  # both without depending on the locale at all.
-  RUN_STEP_CASES="$(printf '%s\n' "$RUN_STEP_OUT" | sed -n 's/^[^ ]* tests \([0-9]*\)$/\1/p' | head -1)"
-  # The floor is the REGISTRATION step for a new case: raise this number in the
-  # same commit that adds one. Without it a case can be added and then deleted
-  # again with this driver still green.
-  if [ "$RUN_STEP_RC" -eq 0 ] && [ "${RUN_STEP_CASES:-0}" -ge 11 ]; then
-    check "run_step behavioural suite passes ($RUN_STEP_CASES cases)" PASS
-  else
-    check "run_step behavioural suite passes (rc=$RUN_STEP_RC cases=${RUN_STEP_CASES:-none})" FAIL
-    printf '%s\n' "$RUN_STEP_OUT" | tail -20
-  fi
-else
-  check "run_step behavioural suite exists" FAIL
-fi
+. "$ROOT/tests/structure/lib-unit-registry.sh"
+unit_check "run_step behavioural unit file passes" "$ROOT/tests/structure/release-run-step.test.js"
 
 VERSION="$(jq -r '.version' "$PLUGIN" 2>/dev/null)"
 expect_jq "Production source uses the official GitHub source type" "$MARKETPLACE" \
@@ -249,6 +225,8 @@ if [ -n "$EARLY_SETTING_LINE" ] && [ -n "$GATE_LINE" ] && [ -n "$LATE_SETTING_LI
 else
   check "Settings check, exact-main gate, final settings check, and publication are ordered" FAIL
 fi
+
+unit_check_done "every unit file the registry gives this suite was graded"
 
 printf '%s\n' '----' "test-immutable-marketplace-release: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

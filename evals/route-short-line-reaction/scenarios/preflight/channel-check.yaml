@@ -1,0 +1,11 @@
+description: "Preflight: proves the harness before any graded run. A random nonce directive goes through the same UserPromptSubmit channel as the lines under test, so a first line that equals it shows the channel delivers. The user asks for a Skill call, so a denied Skill call whose result carries the probe's own reason shows that the PreToolUse probe intercepts even under --dangerously-skip-permissions."
+vars:
+  route_source: nonce
+  user_message: "Call the Skill tool with skill zensu:zensu-help now, then tell me in one sentence what it covers."
+  expected_shape: nonce
+  expected_field: n/a
+assert:
+  - type: javascript
+    value: file://assertions/nonce-first-line.js
+  - type: javascript
+    value: file://assertions/interception.js

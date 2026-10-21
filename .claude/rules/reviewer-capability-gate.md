@@ -86,7 +86,8 @@ consulted file that cannot be read; the consulted files are the `ZENSU_CONFIG` f
 is set, else the global file and the project overlay): `hostProfileToolViolation` routes it through `shellViolation` before the `COMMAND_TOOLS`
 deny, and `.claude/rules/subagent-shell-guard.md` documents the grant, the guard and their gaps.
 The guard prevents accidents and is not a sandbox. `Monitor` is not part of that grant and stays
-denied with every other tool outside the list. The six-name
+denied with every other tool outside the list; that deny names `Bash` in its list only while the
+grant admits the caller. The six-name
 `COMMAND_TOOLS` denylist and the Zensu-only MCP check it replaced let every command-executing
 MCP tool through (`ctx_execute`, `ctx_execute_file`, `ctx_batch_execute`, `run_in_terminal`,
 `browser_run_code_unsafe`), and the host's `Monitor`, whose `command` input is a shell script,

@@ -455,7 +455,7 @@ function injectCandidateHookContractFaultForTest(rootInput, fault) {
   };
   const bashGroup = () => {
     const group = (groups.PreToolUse || []).find(({ matcher, hooks }) => (
-      matcher === 'Bash'
+      String(matcher || '').split('|').includes('Bash')
       && hooks.some(
         (hook) => canonicalHookBasename(hook.command) === 'pre-bash-zensu-gate.sh',
       )

@@ -407,7 +407,12 @@ case "${1:-}" in
         --root) _xr_root="${2:-}"; shift 2 || break ;;
         --launch) _xr_launch="${2:-}"; shift 2 || break ;;
         --result) _xr_result="${2:-}"; shift 2 || break ;;
-        --tree) _xr_mode="tree"; shift ;;
+        --tree|--stage)
+          if [ "$_xr_mode" != "check" ]; then
+            echo "zensu-log.sh --external-review: --tree and --stage exclude each other" >&2
+            exit 2
+          fi
+          _xr_mode="${1#--}"; shift ;;
         *) echo "zensu-log.sh --external-review: unknown argument: $1" >&2; exit 2 ;;
       esac
     done
@@ -415,8 +420,8 @@ case "${1:-}" in
       echo "zensu-log.sh --external-review: --root <repository top level> is required" >&2
       exit 2
     fi
-    if [ "$_xr_mode" = "tree" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
-      echo "zensu-log.sh --external-review: --tree takes only --root" >&2
+    if [ "$_xr_mode" != "check" ] && { [ -n "$_xr_launch" ] || [ -n "$_xr_result" ]; }; then
+      echo "zensu-log.sh --external-review: --$_xr_mode takes only --root" >&2
       exit 2
     fi
     if [ "$_xr_mode" = "check" ] && [ -t 0 ]; then
@@ -424,7 +429,7 @@ case "${1:-}" in
       exit 2
     fi
     _xr_none="status=unavailable"
-    [ "$_xr_mode" = "tree" ] && _xr_none="tree=unavailable"
+    [ "$_xr_mode" != "check" ] && _xr_none="$_xr_mode=unavailable"
     if ! command -v node >/dev/null 2>&1; then
       echo "EXTERNAL REVIEW — $_xr_none reason=node"
       exit 0
@@ -434,9 +439,9 @@ case "${1:-}" in
     _xr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" \
       || { echo "EXTERNAL REVIEW — $_xr_none reason=plugin-data"; exit 0; }
     _xr_root_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_xr_root" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — $_xr_none reason=root"; exit 0; }
+      || _xr_root_native=""
     _xr_project="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" 2>/dev/null)" \
-      || { echo "EXTERNAL REVIEW — $_xr_none reason=project-root"; exit 0; }
+      || _xr_project=""
     _xr_result_native=""
     if [ -n "$_xr_result" ]; then
       _xr_result_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$(dirname -- "$_xr_result")" 2>/dev/null)" \
@@ -460,7 +465,7 @@ case "${1:-}" in
     ZENSU_XR_ROOT="$_xr_root_native" \
     ZENSU_XR_LAUNCH="$_xr_launch" \
     ZENSU_XR_RESULT="$_xr_result_native" \
-      node -e 'const tree = process.env.ZENSU_XR_MODE === "tree"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(tree ? "EXTERNAL REVIEW — tree=unavailable reason=module\n" : "EXTERNAL REVIEW — status=unavailable reason=module\n"); process.exit(0); } process.exitCode = m.main([tree ? "tree" : "check"]);'
+      node -e 'const mode = ["tree", "stage"].includes(process.env.ZENSU_XR_MODE) ? process.env.ZENSU_XR_MODE : "check"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(`EXTERNAL REVIEW — ${mode === "check" ? "status" : mode}=unavailable reason=module\n`); process.exit(0); } process.exitCode = m.main([mode]);'
     exit $?
     ;;
   --acceptance-record|--acceptance-status)

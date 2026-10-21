@@ -848,9 +848,41 @@ STUB
     check "P13-S8b writable fixture ancestors fail closed (home=$RC_HOME_OVERLAP reservation=$RC_RESERVATION_OVERLAP)" FAIL
   fi
   rm -rf "$STUB_OVERLAP_DIR" "$SRC_OVERLAP_DIR"
+
+  STUB_P13S8C_DIR="$(mktemp -d)"
+  cat >"$STUB_P13S8C_DIR/claude" <<'STUB'
+#!/bin/bash
+real="$(cd "$TMPDIR" 2>/dev/null && pwd -P)"
+probe="$(mktemp "$TMPDIR/hook-probe.XXXXXX" 2>/dev/null)" && rm -f "$probe" && tmp=writable || tmp=denied
+mkdir -p "$CLAUDE_CODE_TMPDIR/claude-probe" 2>/dev/null && pwd -P >|"$CLAUDE_CODE_TMPDIR/claude-probe-cwd" 2>/dev/null \
+  && internal=writable || internal=denied
+same=no
+[ "$TMPDIR" = "$TMP" ] && [ "$TMPDIR" = "$TEMP" ] && [ "$TMPDIR" = "$CLAUDE_CODE_TMPDIR" ] && same=yes
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"tmp=%s canonical=%s internal=%s same=%s"}]}}\n' \
+  "$tmp" "$([ -n "$real" ] && [ "$real" = "$TMPDIR" ] && echo yes || echo no)" "$internal" "$same"
+printf '{"type":"result","result":"ok"}\n'
+exit 0
+STUB
+  chmod +x "$STUB_P13S8C_DIR/claude"
+  SRC_P13S8C_DIR="$(mktemp -d -t p13s8c-src-XXXXXX)"
+  printf 'seeded\n' >"$SRC_P13S8C_DIR/marker.txt"
+  OPT_P13S8C="$(printf '{"config":{"working_dir":"%s","init_git":true}}' "$SRC_P13S8C_DIR")"
+  OUT_P13S8C=$(env PATH="$STUB_P13S8C_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8C" 2>&1)
+  RC_P13S8C=$?
+  if [ "$RC_P13S8C" = 0 ] \
+    && printf '%s\n' "$OUT_P13S8C" | grep -qF 'tmp=writable canonical=yes internal=writable same=yes'; then
+    check "P13-S8c live init_git sandbox gives Claude and its hooks one canonical writable temp directory" PASS
+  elif [ "$RC_P13S8C" = 2 ] \
+    && exact_isolated_failure "$OUT_P13S8C" "$WATCH_START_FAILURE" "tmp="; then
+    check "P13-S8c sandbox temp integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
+  else
+    check "P13-S8c live init_git sandbox temp directory is canonical and writable (rc=$RC_P13S8C, out=${OUT_P13S8C:0:400})" FAIL
+  fi
+  rm -rf "$STUB_P13S8C_DIR" "$SRC_P13S8C_DIR"
   else
     check "P13-S8 live immutable-fixture integration skipped because the host forbids fs.watch; production remains fail-closed" PASS
     check "P13-S8b writable-root integration skipped because the host forbids the prerequisite immutable watcher" PASS
+    check "P13-S8c sandbox temp integration skipped because the host forbids the prerequisite immutable watcher" PASS
   fi
 fi
 
@@ -926,6 +958,37 @@ if [ "$P14_EMPTY" = '{}' ]; then
   check "P14-S2 empty argv[2] still defaults to {}" PASS
 else
   check "P14-S2 empty argv[2] default (got '$P14_EMPTY')" FAIL
+fi
+
+P15_DIR="$(mktemp -d)"
+printf '{}\n' > "$P15_DIR/settings.json"
+ln -s "$P15_DIR/settings.json" "$P15_DIR/link.json"
+P15_OUT="$(ZENSU_WRAPPER_SETTINGS="$P15_DIR/settings.json" DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1)"
+P15_RC=$?
+if [ "$P15_RC" -eq 0 ] && printf '%s\n' "$P15_OUT" | grep -qF -- "--settings  $(printf '%q' "$P15_DIR/settings.json")"; then
+  check "P15-S1 ZENSU_WRAPPER_SETTINGS adds --settings with the named file" PASS
+else
+  check "P15-S1 ZENSU_WRAPPER_SETTINGS adds --settings with the named file (rc=$P15_RC, out=${P15_OUT:0:300})" FAIL
+fi
+P15_BAD=""
+for P15_CASE in "settings.json|must be an absolute path" "$P15_DIR/link.json|must name a regular file that is not a symlink" \
+  "$P15_DIR/missing.json|must name a regular file that is not a symlink"; do
+  P15_VALUE="${P15_CASE%%|*}"
+  P15_WANT="${P15_CASE#*|}"
+  P15_ERR="$(ZENSU_WRAPPER_SETTINGS="$P15_VALUE" DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1 >/dev/null)"
+  P15_RC=$?
+  { [ "$P15_RC" -eq 64 ] && printf '%s' "$P15_ERR" | grep -qF -- "ZENSU_WRAPPER_SETTINGS $P15_WANT"; } || P15_BAD="$P15_BAD [$P15_VALUE rc=$P15_RC]"
+done
+P15_ERR="$(ZENSU_RESET_REVIEW_LIMIT_ATTESTATION=1 ZENSU_RESET_REVIEW_LIMIT_SCENARIO=reset-cas-happy ZENSU_WRAPPER_SETTINGS="$P15_DIR/settings.json" \
+  DRY_RUN=1 bash "$WRAPPER" 'p' '{"config":{"init_git":true}}' 2>&1 >/dev/null)"
+P15_RC=$?
+{ [ "$P15_RC" -eq 64 ] && printf '%s' "$P15_ERR" | grep -qF 'cannot be combined with the reset-review-limit attestation'; } || P15_BAD="$P15_BAD [reset rc=$P15_RC]"
+if DRY_RUN=1 bash "$WRAPPER" 'p' '{}' 2>&1 | grep -qF -- '--settings'; then P15_BAD="$P15_BAD [--settings without the variable]"; fi
+rm -rf "$P15_DIR"
+if [ -z "$P15_BAD" ]; then
+  check "P15-S2 ZENSU_WRAPPER_SETTINGS refuses a relative, linked or missing file and the reset attestation with 64, and no run without it gets --settings" PASS
+else
+  check "P15-S2 ZENSU_WRAPPER_SETTINGS refusals:$P15_BAD" FAIL
 fi
 
 echo "----"

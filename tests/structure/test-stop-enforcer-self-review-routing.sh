@@ -20,7 +20,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
-. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
+. "$(dirname "$0")/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -64,45 +64,7 @@ start_session() {
   STARTED_PROJECT_ROOT="$ZENSU_PROJECT_ROOT"
 }
 
-# The scanner's own properties — structural keying by tool_use_id, the host
-# error flag, the tail bound, and every degrade-to-none failure mode — cannot be
-# observed through the hook. Drive its unit suite from here so the tree runner,
-# which only discovers tests/structure/test-*.sh, still covers them. Exit 0
-# alone would also accept a file that registers zero cases, so the pass count is
-# asserted too, and a failure prints which case failed.
-#
-# Deliberately FIRST, before any scenario. This suite is the most expensive one
-# in the Windows profile, and a TIMED_OUT shard still reports every check it
-# reached — so whatever sits at the tail is what silently goes unverified. At the
-# tail this was the entire unit suite, the only coverage those properties have
-# anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
-UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
-T26_UNIT="$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js"
-T26_FLOOR="$(unit_overview_declared "${T26_UNIT##*/}")"
-if node --test "$T26_UNIT" >"$UNIT_OUT" 2>&1; then
-  # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
-  # and the reporter-ordering caveat. This block used to carry its own copy of that
-  # expression, byte-identical to the one in test-bash-source-write-gate.sh W3a;
-  # both now delegate, so the next correction to it has exactly one site.
-  UNIT_PASS="$(unit_summary_field pass "$UNIT_OUT")"
-  UNIT_TOTAL="$(unit_summary_field tests "$UNIT_OUT")"
-  # The total is the real floor; the pass floor is lower because the symlink and
-  # FIFO cases skip themselves where the platform cannot create one.
-  if [ -n "$T26_FLOOR" ] && [ "$UNIT_TOTAL" -ge "$T26_FLOOR" ] && [ "$UNIT_PASS" -ge $((T26_FLOOR - 2)) ]; then
-    check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
-  else
-    check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases (want >= ${T26_FLOOR:-<no overview row>} registered, at most two of them skipped)" FAIL
-  fi
-else
-  echo "--- reviewer-spawn-denial-v1 unit failures ---"
-  grep -B2 -A 20 '^not ok' "$UNIT_OUT" | head -60
-  check "T26 reviewer-spawn-denial-v1 unit suite passes" FAIL
-fi
-if T26_OVERVIEW="$(unit_overview_check "$T26_UNIT")"; then
-  check "T26-overview the SUITE-OVERVIEW Blocks cell matches what ${T26_UNIT##*/} registers ($T26_FLOOR)" PASS
-else
-  check "T26-overview $T26_OVERVIEW" FAIL
-fi
+unit_check "T26 the reviewer-spawn-denial unit file passes" "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js"
 
 # --- Scenario 1: codeReviewDone=false -> force code-reviewer (unchanged) ---
 SID1_RAW="stop-cr-pending"
@@ -604,6 +566,22 @@ if printf '%s' "$REASON8" | grep -qF "$IN_SCOPE_NEEDLE" \
 else
   check "T38 the resume directive renders the in-scope sentence, naming all three spawns" FAIL
 fi
+ASPECT_LIB="$PLUGIN_DIR/hooks/lib/aspect-activation-v1.js"
+LEAN_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).LEAN_ASPECTS.join(", "))' "$ASPECT_LIB")"
+FULL_PANEL_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).ASPECTS.join(", "))' "$ASPECT_LIB")"
+if [ -n "$LEAN_PANEL_LIST" ] \
+  && printf '%s' "$REASON8" | grep -qF "build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c" \
+  && ! printf '%s' "$REASON8" | grep -qF 'five zensu:review-aspect'; then
+  check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" PASS
+else
+  check "T60 the default resume directive fans out every perspective of the lean panel, as aspect-activation-v1.js defines it" FAIL
+fi
+if printf '%s' "$REASON8" | grep -qF "second 'REVIEW-TICKET: <ticket>', followed by the complete REVIEW PACKET v1 and then the merged findings." \
+  && ! printf '%s' "$REASON8" | grep -qF 'the merged findings + build/test status'; then
+  check "T62 the standalone resume directive hands the reviewer the REVIEW PACKET v1 before the merged findings" PASS
+else
+  check "T62 the standalone resume directive hands the reviewer the REVIEW PACKET v1 before the merged findings" FAIL
+fi
 
 # The two negatives are anchored on a POSITIVE that proves each reason was
 # actually captured — an empty or unset capture satisfies a bare `!` and reports
@@ -1069,12 +1047,19 @@ t59_run() {
   printf '%s' '{"session_id":"'"$T59_RAW"'","transcript_path":"'"$TRANSCRIPT_CLEAR"'","hook_event_name":"Stop"}' \
     | env -u ZENSU_CONFIG HOME="$T59_HOME" CLAUDE_PROJECT_DIR="$T59_AMBIENT" bash "$STOP" 2>/dev/null | reason
 }
-printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_PROJECT/.zensu/config.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false,"reviewPanel":"full"}}' > "$T59_PROJECT/.zensu/config.json"
 T59_RECORD_OUT="$(t59_run)"
 rm -f "$T59_PROJECT/.zensu/config.json"
-printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_AMBIENT/.zensu/config.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false,"reviewPanel":"full"}}' > "$T59_AMBIENT/.zensu/config.json"
 T59_AMBIENT_OUT="$(t59_run)"
 rm -f "$T59_AMBIENT/.zensu/config.json"
+if [ -n "$FULL_PANEL_LIST" ] && [ -n "$LEAN_PANEL_LIST" ] \
+  && printf '%s' "$T59_RECORD_OUT" | grep -qF "fan out one zensu:review-aspect agent per perspective of the full review panel (${FULL_PANEL_LIST}), plus the repo-local personas" \
+  && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "fan out one zensu:review-aspect agent per perspective of the lean review panel (${LEAN_PANEL_LIST}), plus the repo-local personas"; then
+  check "T61 the record root's hooks.reviewPanel selects the resume directive's panel, the ambient root's does not" PASS
+else
+  check "T61 the record root's hooks.reviewPanel selects the resume directive's panel, the ambient root's does not" FAIL
+fi
 if printf '%s' "$T59_RECORD_OUT" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
   && ! printf '%s' "$T59_RECORD_OUT" | grep -qF "$IN_SCOPE_NEEDLE" \
   && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "$IN_SCOPE_NEEDLE"; then
@@ -1083,6 +1068,8 @@ else
   check "T59 the record root's config overlay governs the flag, the ambient root's does not" FAIL
 fi
 
+
+unit_check_done "T26z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-stop-enforcer-self-review-routing: $PASS PASS / $FAIL FAIL"

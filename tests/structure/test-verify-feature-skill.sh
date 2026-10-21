@@ -763,7 +763,7 @@ else
 fi
 DOCTOR_FLAT="$(tr '\n' ' ' < "$DOCTOR_SKILL" | tr -s ' ')"
 READINESS_MISSING=""
-grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the installed `playwright-cli` manifest names the measured version, and no empty or relative PATH entry comes before or holds `playwright-cli`; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" || READINESS_MISSING="$READINESS_MISSING [skill: registration, measured version and PATH-entry refusals]"
+grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks for Bash and PowerShell, the installed `playwright-cli` manifest names the measured version, and no empty or relative PATH entry comes before or holds `playwright-cli`; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" || READINESS_MISSING="$READINESS_MISSING [skill: registration, measured version and PATH-entry refusals]"
 grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: literal label]"
 grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: do not start until the row clears]"
 if [ -z "$READINESS_MISSING" ]; then
@@ -1203,25 +1203,9 @@ if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <
 else
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
-RESOURCES_OUT="$(node --test --test-reporter=tap "$RESOURCES_UNIT" 2>&1)"
-RESOURCES_RC=$?
-RESOURCES_REGISTERED="$(printf '%s\n' "$RESOURCES_OUT" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
-RESOURCES_CELL="$(sed -n 's/^| `verify-run-resources.test.js` | \([0-9][0-9]*\) |.*/\1/p' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
-if [ "$RESOURCES_RC" = "0" ]; then
-  check "P11a the run-resource helper's unit suite passes" PASS
-else
-  check "P11a the run-resource helper's unit suite passes (rc=$RESOURCES_RC)" FAIL
-fi
-if [ "${RESOURCES_REGISTERED:-}" = "18" ]; then
-  check "P11b the unit file registers exactly its 18 cases" PASS
-else
-  check "P11b the unit file registers exactly its 18 cases (registered=${RESOURCES_REGISTERED:-<none>})" FAIL
-fi
-if [ -n "${RESOURCES_REGISTERED:-}" ] && [ "${RESOURCES_CELL:-}" = "$RESOURCES_REGISTERED" ]; then
-  check "P11c the SUITE-OVERVIEW Blocks cell equals the registered case count ($RESOURCES_CELL)" PASS
-else
-  check "P11c the SUITE-OVERVIEW Blocks cell equals the registered case count (cell=${RESOURCES_CELL:-<none>} registered=${RESOURCES_REGISTERED:-<none>})" FAIL
-fi
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "P11 the run-resource helper's unit file passes" "$RESOURCES_UNIT"
+unit_check_done "P11z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-verify-feature-skill: $PASS PASS / $FAIL FAIL"
