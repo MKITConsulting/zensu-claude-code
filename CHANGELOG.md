@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such as `zensu features $FLAGS create` no longer hides the verb. In a work-order session the gate
   leaves `zensu work ask` and `zensu work followup` to the work-order gate. `ZENSU_MCP_GATE=off`
   still lets a deliberate one-off through.
+- **work-order gate**: a work-order session can no longer push a work plan or accept or dismiss a
+  plan follow-up, which are a person's decisions like approving a plan. The gate now finds the noun
+  and the verb of a `zensu` call the way the CLI does, so a value flag or an empty word in front of
+  them, as in `zensu --reason x plan abandon <id>`, no longer hides a denied command, and it reads
+  `zensu work repos` like `zensu work repositories`. A `zensu` call that the CLI itself refuses, with
+  a flag, argument, validation or setup error, is no longer retried as if Zensu had not answered:
+  the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
+  that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
+  `zensu auth login`, which cannot help there.
 
 ## [0.27.0] - 2026-10-17
 
