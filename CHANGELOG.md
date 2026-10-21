@@ -17,6 +17,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
   that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
   bound session's project config, never the reviewed repository's.
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
+  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+  `read_widget_context`, which neither start nor move work, so
+  `mcp__ccd_session__hand_off_to_session`,
+  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
+  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
+  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
+  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
+  session in the cloud and archives it here, and a message asks another session to take work up,
+  so each took the order's work out of its lease. The operator account now names the routes the
+  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
+  pull request.
 - **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
   while its team review runs. A change in one of the session's review evidence leases (a seat
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
