@@ -336,4 +336,98 @@ else
   check "I19 once the seat's result lands, three stops without progress block and the fourth reports the order blocked (rc=$RC after1=$(cat "$SBOX/delta.after1" 2>/dev/null) after4=$(cat "$SBOX/delta.after4" 2>/dev/null) status=$(wo_fake_get "$FAKE_ZENSU_STATE" 'state.order.status'))" FAIL
 fi
 
+ORDER5="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+SESSION5="wo-implement-session-0005"
+RUN5="run_impl_0005"
+CHAIN_HOOK="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+(
+  new_project echo
+  source "$BASELINE" "$SESSION5" || exit 90
+  wo_fake_seed "$FAKE_ZENSU_STATE" "$ORDER5" "$SESSION5" auto implement
+  bash "$WRAPPER" --start --order "$ORDER5" >/dev/null 2>&1 || exit 91
+  git -C "$PROJECT" checkout -q -b "wo-aaaaaaaa"
+  bash "$LOG_HELPER" --autopilot-begin --run "$RUN5" --work-order "$ORDER5" >/dev/null 2>&1 || exit 92
+  bash "$WRAPPER" --bind-spec --run "$RUN5" >/dev/null 2>&1 || exit 93
+  REVIEW="$SBOX/echo-review"
+  mkdir -p "$PROJECT/src" "$REVIEW" && chmod 700 "$REVIEW"
+  printf 'const value = 1;\n' > "$PROJECT/src/app.js"
+  printf '%s\n' "$PROJECT/src/app.js" > "$REVIEW/FILES.txt"
+  printf '%s\n' "$PROJECT/src" > "$REVIEW/ROOTS.txt"
+  printf 'M\tsrc/app.js\n' > "$REVIEW/NAME-STATUS.txt"
+  printf 'src/app.js\n' > "$REVIEW/CHANGED.txt"
+  bash "$LEASE_HELPER" create --kind pr-review --files-manifest "$REVIEW/FILES.txt" \
+    --safe-subtrees-manifest "$REVIEW/ROOTS.txt" --name-status-file "$REVIEW/NAME-STATUS.txt" \
+    --changed-production-files-file "$REVIEW/CHANGED.txt" --max-workers 1 --ttl-seconds 600 \
+    >/dev/null 2>"$SBOX/echo-lease.err" || exit 94
+  seat_payload() {
+    EVENT="$1" SESSION_VALUE="$SESSION5" PROJECT_VALUE="$PROJECT" MESSAGE="${2:-}" node -e '
+      const payload = { hook_event_name: process.env.EVENT, session_id: process.env.SESSION_VALUE,
+        cwd: process.env.PROJECT_VALUE, agent_id: "agent-bug-hunter", agent_type: "zensu:pr-review-worker" };
+      if (process.env.EVENT === "SubagentStop") payload.last_assistant_message = process.env.MESSAGE;
+      process.stdout.write(JSON.stringify(payload));
+    '
+  }
+  seat_payload SubagentStart | bash "$SEAT_START" >/dev/null 2>&1 || exit 95
+  STOP5="{\"hook_event_name\":\"Stop\",\"session_id\":\"$SESSION5\"}"
+  RUN_FILE="$PROJECT/.zensu/state/autopilot-run-$RUN5.json"
+  both_stops() {
+    printf '%s' "$STOP5" | bash "$CHAIN_HOOK" > "$SBOX/echo.chain.$1" 2>/dev/null
+    printf '%s' "$STOP5" | bash "$STOP_HOOK" > "$SBOX/echo.order.$1" 2>/dev/null
+    json_get "$RUN_FILE" 'value.stopBudget.count' > "$SBOX/echo.budget.$1"
+    cat "$PROJECT"/.zensu/state/work-order/stop-*.json > "$SBOX/echo.state.$1" 2>/dev/null
+  }
+  for n in 1 2 3 4; do both_stops "wait$n"; done
+  json_get "$RUN_FILE" 'value.stage' > "$SBOX/echo.stage"
+  json_get "$RUN_FILE" 'value.nextActionCode' > "$SBOX/echo.action"
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const records = process.argv[1];
+    const files = fs.readdirSync(records).flatMap((key) => fs.readdirSync(path.join(records, key))
+      .filter((name) => /^rel1_[a-f0-9]{32}\.json$/.test(name)).map((name) => path.join(records, key, name)));
+    if (files.length !== 1) process.exit(1);
+    const lease = JSON.parse(fs.readFileSync(files[0], "utf8"));
+    process.stdout.write(new Date(Math.min(lease.expires_at_ms, lease.created_at_ms + 3600 * 1000)).toISOString());
+  ' "$CLAUDE_PLUGIN_DATA/review-evidence/v1/records" > "$SBOX/echo.until" || exit 97
+  chmod 750 "$CLAUDE_PLUGIN_DATA/review-evidence/v1/records"
+  both_stops broken
+  chmod 700 "$CLAUDE_PLUGIN_DATA/review-evidence/v1/records"
+  both_stops wait5
+  RESULT='{"kind":"pr-review","role":"bug-hunter","verdict_hint":"approve","summary":"No blocking issue found.","inline_findings":[],"overall_notes":[],"positives":[]}'
+  seat_payload SubagentStop "$RESULT" | bash "$SEAT_STOP" >/dev/null 2>&1 || exit 96
+  for n in 1 2; do both_stops "after$n"; done
+); RC=$?
+budget_of() { cat "$SBOX/echo.budget.$1" 2>/dev/null; }
+order_count_of() { json_get "$SBOX/echo.state.$1" 'value.count'; }
+WAITS_OK=true
+UNTIL5="$(cat "$SBOX/echo.until" 2>/dev/null)"
+NEXT5="stage=$(cat "$SBOX/echo.stage" 2>/dev/null); nextActionCode=$(cat "$SBOX/echo.action" 2>/dev/null); stopBlock=uncounted."
+case "$UNTIL5" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z) ;; *) WAITS_OK=false ;; esac
+for n in 1 2 3 4 5; do
+  grep -q '"decision":"block"' "$SBOX/echo.chain.wait$n" 2>/dev/null \
+    && grep -qF "$NEXT5" "$SBOX/echo.chain.wait$n" \
+    && grep -qF "1 review seat of this session is still in flight and their evidence lease takes results until $UNTIL5, so this Stop does not count against the stage budget of 12" "$SBOX/echo.chain.wait$n" \
+    && grep -q '1 review seat of this session is still in flight' "$SBOX/echo.order.wait$n" \
+    && grep -qF "their evidence lease takes results until $UNTIL5" "$SBOX/echo.order.wait$n" || WAITS_OK=false
+done
+if [ "$RC" -eq 0 ] && [ "$WAITS_OK" = true ] && [ "$(budget_of wait4)" = "0" ] && [ "$(order_count_of wait4)" = "0" ]; then
+  check "I20 the Autopilot Stop interceptor and the work-order Stop hook both block four stops while a review seat is in flight, name the stage's next action and the lease deadline, and neither counts them" PASS
+else
+  check "I20 the Autopilot Stop interceptor and the work-order Stop hook both block four stops while a review seat is in flight, name the stage's next action and the lease deadline, and neither counts them (rc=$RC next=$NEXT5 until=$UNTIL5 chain1=$(cat "$SBOX/echo.chain.wait1" 2>/dev/null) budget=$(budget_of wait4) order=$(order_count_of wait4) lease=$(cat "$SBOX/echo-lease.err" 2>/dev/null))" FAIL
+fi
+if [ "$RC" -eq 0 ] && grep -q 'stopBlock=1/12' "$SBOX/echo.chain.broken" 2>/dev/null \
+  && [ "$(budget_of broken)" = "1" ] && [ "$(order_count_of broken)" = "1" ] \
+  && [ "$(budget_of wait5)" = "1" ] && [ "$(order_count_of wait5)" = "1" ]; then
+  check "I21 a lease store the hooks cannot read counts the stop in both, and the wait resumes once the store is readable again" PASS
+else
+  check "I21 a lease store the hooks cannot read counts the stop in both, and the wait resumes once the store is readable again (rc=$RC chain=$(cat "$SBOX/echo.chain.broken" 2>/dev/null) budget=$(budget_of broken)/$(budget_of wait5) order=$(order_count_of broken)/$(order_count_of wait5))" FAIL
+fi
+if [ "$RC" -eq 0 ] && grep -q 'stopBlock=2/12' "$SBOX/echo.chain.after1" 2>/dev/null \
+  && grep -q 'stopBlock=3/12' "$SBOX/echo.chain.after2" 2>/dev/null \
+  && [ "$(budget_of after2)" = "3" ] && [ "$(order_count_of after1)" = "1" ] && [ "$(order_count_of after2)" = "2" ]; then
+  check "I22 once the seat's result lands, both Stop hooks count every stop again" PASS
+else
+  check "I22 once the seat's result lands, both Stop hooks count every stop again (rc=$RC chain=$(cat "$SBOX/echo.chain.after2" 2>/dev/null) budget=$(budget_of after2) order=$(order_count_of after1)/$(order_count_of after2))" FAIL
+fi
+
 finish

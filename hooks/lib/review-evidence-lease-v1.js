@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const hookSession = require('./claude-hook-session-v1.js');
 const hostPaths = require('./claude-path-v1.js');
+const core = require('./session-control-core-v1.js');
 
 const SCHEMA = 'zensu.review-evidence-lease';
 const SCHEMA_VERSION = 1;
@@ -28,6 +29,7 @@ const MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE_TOTAL_BYTES = 256 * 1024 * 1024;
 const MAX_TTL_SECONDS = 3600;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
+const LEASE_READ_ATTEMPTS = 2;
 
 // The store prefix, named once. This module OWNS the layout; the superseded-lease
 // sweep in review-evidence-sweep-v1.js has to traverse exactly the chain storage()
@@ -1107,6 +1109,47 @@ function leaseProgress(binding, now = Date.now()) {
   return summary;
 }
 
+function hookLeaseProgress(payload, { env = process.env, now = Date.now, read = leaseProgress } = {}) {
+  let binding;
+  try {
+    binding = hookSession.resolveHookSession(
+      payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {},
+      { ...env, CLAUDE_PLUGIN_ROOT: path.resolve(__dirname, '..', '..') },
+    );
+  } catch (_) {
+    return null;
+  }
+  for (let attempt = 0; attempt < LEASE_READ_ATTEMPTS; attempt += 1) {
+    try {
+      return read(binding, now());
+    } catch (_) {
+      continue;
+    }
+  }
+  return null;
+}
+
+function hookLeaseWait(payload, options = {}) {
+  const env = options.env || process.env;
+  const sessionId = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.session_id : null;
+  if (typeof sessionId === 'string' && typeof env.CLAUDE_PLUGIN_DATA === 'string' && path.isAbsolute(env.CLAUDE_PLUGIN_DATA)) {
+    let records = null;
+    try {
+      records = path.join(env.CLAUDE_PLUGIN_DATA, ...REVIEW_EVIDENCE_SEGMENTS, 'records', core.sessionKey(sessionId));
+    } catch (_) {
+      records = null;
+    }
+    if (records !== null) {
+      try {
+        fs.lstatSync(records);
+      } catch (error) {
+        if (error && error.code === 'ENOENT') return { progress: 0, inFlight: 0, deadlineMs: null };
+      }
+    }
+  }
+  return hookLeaseProgress(payload, options);
+}
+
 function manifestPaths(file, label) {
   const snapshot = readFileSnapshot(file, label, MAX_MANIFEST_BYTES);
   let text;
@@ -1877,6 +1920,8 @@ module.exports = {
   collectLease,
   createLease,
   finalizeLease,
+  hookLeaseProgress,
+  hookLeaseWait,
   kindForAgentType,
   leaseProgress,
   parseWorkerResult,

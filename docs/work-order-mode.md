@@ -132,10 +132,11 @@ cannot read counts as no progress, so a fault never extends the wait. The hook r
 strictly as the review workers write it: a lease whose review workspace is gone fails the read,
 and a lease dated more than 60 seconds ahead of the clock holds no seat in flight.
 
-This budget belongs to the work-order hook. The Autopilot Stop hook runs in the same Stop and
-still counts every Stop against its own budget of 12 Stops per stage, which only a stage move
-resets. A review wait that takes more Stops than that ends the run `BLOCKED` there, and this hook
-then reports the order blocked.
+The Autopilot Stop hook runs in the same Stop and counts every Stop against its own budget of
+12 Stops per stage, which only a stage move resets. It reads the same lease and skips that count
+while a seat is in flight, so a review wait exhausts neither budget; once no seat is in flight,
+both count again. A store either hook cannot read counts the Stop in that hook, and so does an
+Autopilot read that does not finish within five seconds where `timeout` or `gtimeout` is installed.
 
 ## The launcher and the manifest
 
@@ -211,5 +212,5 @@ raw output to a file there; nothing else keeps it.
   command there is refused.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.
 - A session can write its own review evidence lease store with a shell command, so a forged
-  record can fake progress or hold a review wait open, as a deliberate write can defeat every
-  plugin store. The Autopilot stage budget still ends such a run.
+  record can fake progress or hold a review wait open in both Stop hooks, as a deliberate write
+  can defeat every plugin store.

@@ -1554,7 +1554,7 @@ test('a review wait whose seats never report ends the order within three stops a
     assert.equal(decided.decision, 'block');
     assert.match(decided.reason, /2 review seats of this session are still in flight/);
     assert.ok(decided.reason.includes(until), decided.reason);
-    assert.match(decided.reason, /does not count against this work order's stop budget, but the Autopilot run still counts every stop/);
+    assert.match(decided.reason, /does not count against this work order's stop budget or the Autopilot run's stage budget/);
   }
   assert.equal(JSON.parse(fs.readFileSync(context.files.stop, 'utf8')).count, 0);
   const late = () => wo.stopDecision(context, { env: box.env, review: () => lease.read(open.deadlineMs) });
@@ -1774,29 +1774,83 @@ test('a lease whose review workspace is gone fails the read, so its seat holds n
   assert.equal(box.fake().order.blocked_kind, 'worker_error');
 });
 
-test('the stop verb binds the hook payload under the executing plugin root, reads the lease once more after a failure and answers nothing when the binding or both reads fail', (t) => {
-  assert.equal(wo.reviewLeaseProgress({}, { env: {} }), null);
+test('the hook-side lease reader binds the payload under the executing plugin root, reads once more after a failure and answers nothing when the binding or both reads fail', (t) => {
+  assert.equal(LEASE.hookLeaseProgress({}, { env: {} }), null);
   const hookSession = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'claude-hook-session-v1.js'));
-  const binding = { sessionKey: 'scv1_stub' };
+  let binding = { sessionKey: 'scv1_stub' };
   const binds = [];
   t.mock.method(hookSession, 'resolveHookSession', (payload, env) => {
     binds.push({ payload, root: env.CLAUDE_PLUGIN_ROOT, marker: env.MARKER });
     return binding;
   });
   const answers = [];
-  t.mock.method(LEASE, 'leaseProgress', (bound, now) => {
+  const read = (bound, now) => {
     assert.equal(bound, binding);
     const next = answers.shift();
     if (next instanceof Error) throw next;
     return { ...next, now };
-  });
+  };
   answers.push(new Error('busy'), { progress: 4, inFlight: 1, deadlineMs: 9 });
-  assert.deepEqual(wo.reviewLeaseProgress({ session_id: 's' }, { env: { MARKER: 'm' }, now: () => 7 }), { progress: 4, inFlight: 1, deadlineMs: 9, now: 7 });
+  assert.deepEqual(LEASE.hookLeaseProgress({ session_id: 's' }, { env: { MARKER: 'm' }, now: () => 7, read }), { progress: 4, inFlight: 1, deadlineMs: 9, now: 7 });
   assert.deepEqual(binds, [{ payload: { session_id: 's' }, root: path.resolve(__dirname, '..', '..'), marker: 'm' }]);
   answers.push(new Error('busy'), new Error('busy'), { progress: 1, inFlight: 0, deadlineMs: null });
-  assert.equal(wo.reviewLeaseProgress('not a payload', { env: {}, now: () => 7 }), null);
+  assert.equal(LEASE.hookLeaseProgress('not a payload', { env: {}, now: () => 7, read }), null);
   assert.equal(answers.length, 1);
   assert.deepEqual(binds[1].payload, {});
+  const box = sandbox();
+  startedContext(box);
+  const lease = reviewLease(box, 1);
+  lease.bind('bug-hunter');
+  binding = lease.binding;
+  const expected = lease.read();
+  assert.equal(expected.inFlight, 1);
+  assert.deepEqual(LEASE.hookLeaseProgress({ session_id: 's' }, { env: {} }), expected);
+});
+
+test('the wait mode of the evidence hook prints the seats in flight and the lease deadline only while a seat is in flight', () => {
+  const evidenceHook = path.join(__dirname, '..', '..', 'hooks', 'lib', 'review-evidence-hook-v1.js');
+  const { waitLine } = require(evidenceHook);
+  assert.equal(waitLine({ progress: 9, inFlight: 2, deadlineMs: Date.UTC(2026, 9, 21, 20, 0, 0) }), '2\t2026-10-21T20:00:00.000Z\n');
+  const quiet = [
+    null,
+    { progress: 9, inFlight: 0, deadlineMs: null },
+    { progress: 9, inFlight: 1, deadlineMs: null },
+    { progress: 9, inFlight: -1, deadlineMs: 5 },
+    { progress: 9, inFlight: 1.5, deadlineMs: 5 },
+    { progress: 9, inFlight: 1, deadlineMs: 8640000000000001 },
+  ];
+  for (const progress of quiet) assert.equal(waitLine(progress), '', JSON.stringify(progress));
+  const run = (payload) => spawnSync(process.execPath, [evidenceHook, 'wait'], {
+    input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH },
+  });
+  const refused = run({ hook_event_name: 'SubagentStop', session_id: 'wo-wait-session' });
+  assert.equal(refused.status, 1);
+  assert.equal(refused.stdout, '');
+  const unbound = run({ hook_event_name: 'Stop', session_id: 'wo-wait-session' });
+  assert.equal(unbound.status, 0);
+  assert.equal(unbound.stdout, '');
+});
+
+test('the wait entry answers no seat without binding while the session has no evidence store, and binds once the store exists', (t) => {
+  const hookSession = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'claude-hook-session-v1.js'));
+  const core = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'session-control-core-v1.js'));
+  const binds = [];
+  t.mock.method(hookSession, 'resolveHookSession', (payload) => {
+    binds.push(payload);
+    throw new Error('unbound');
+  });
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'wo-wait-store-'));
+  t.after(() => fs.rmSync(data, { recursive: true, force: true }));
+  const payload = { hook_event_name: 'Stop', session_id: 'wo-wait-store-session' };
+  assert.deepEqual(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: data } }), { progress: 0, inFlight: 0, deadlineMs: null });
+  assert.equal(binds.length, 0);
+  assert.equal(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: 'relative/data' } }), null);
+  assert.equal(LEASE.hookLeaseWait({ hook_event_name: 'Stop' }, { env: { CLAUDE_PLUGIN_DATA: data } }), null);
+  assert.equal(binds.length, 2);
+  fs.mkdirSync(path.join(data, 'review-evidence', 'v1', 'records', core.sessionKey(payload.session_id)), { recursive: true, mode: 0o700 });
+  assert.equal(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: data } }), null);
+  assert.equal(binds.length, 3);
+  assert.deepEqual(binds[2], payload);
 });
 
 test('binding answers only for this session\'s order and the push refuses before any write when the lease is stale', () => {

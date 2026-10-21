@@ -2629,7 +2629,6 @@ function planApproval(context, { env = process.env, now = Date.now } = {}) {
 
 const STOP_BLOCK_BUDGET = 3;
 const STOP_RETRY_BUDGET_MS = 20000;
-const LEASE_READ_ATTEMPTS = 2;
 
 function leaseView(review) {
   if (typeof review !== 'function') return null;
@@ -2655,7 +2654,7 @@ function stopReason(context, state, leases) {
     const seats = leases.inFlight === 1 ? '1 review seat of this session is' : `${leases.inFlight} review seats of this session are`;
     const until = isoTime(leases.deadlineMs);
     const deadline = until ? `, and their evidence lease takes results until ${until}` : '';
-    return `${lead} ${seats} still in flight${deadline}; a stop while a seat is in flight does not count against this work order's stop budget, but the Autopilot run still counts every stop against its budget for the stage. Their results arrive as task notifications: continue the work once they are in, or end the order with zensu-work-order.sh --finish --reason and one plain sentence when it cannot be finished. ${ask}`;
+    return `${lead} ${seats} still in flight${deadline}; a stop while a seat is in flight does not count against this work order's stop budget or the Autopilot run's stage budget. Their results arrive as task notifications: continue the work once they are in, or end the order with zensu-work-order.sh --finish --reason and one plain sentence when it cannot be finished. ${ask}`;
   }
   return `${lead} A work order session ends only after it reported ready_for_merge or a block. Continue the work, or end it with the finish step of /zensu:work: zensu-work-order.sh --finish once the run is DONE, or the same command with --reason and one plain sentence to stop the order. ${ask} After ${STOP_BLOCK_BUDGET} stops in a row without progress, meaning no new Autopilot ledger event and no change in a review evidence lease of this session, the session reports the order as blocked on its own.`;
 }
@@ -2687,26 +2686,6 @@ function stopDecision(context, { env = process.env, now = Date.now, review = nul
   const bounded = { ...env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: String(Math.min(retrySettings(env).budgetMs, STOP_RETRY_BUDGET_MS)) };
   const closed = finish(context, { env: bounded, now, reason: terminalRun ? null : 'The session stopped without reporting the outcome of its work order.' });
   return { decision: 'allow', cancelRun: closed.cancelRun || runToCancel(context), exit: closed.exit };
-}
-
-function reviewLeaseProgress(payload, { env = process.env, now = Date.now } = {}) {
-  let binding;
-  try {
-    binding = require('./claude-hook-session-v1.js').resolveHookSession(isObject(payload) ? payload : {}, {
-      ...env,
-      CLAUDE_PLUGIN_ROOT: path.resolve(__dirname, '..', '..'),
-    });
-  } catch (_) {
-    return null;
-  }
-  for (let attempt = 0; attempt < LEASE_READ_ATTEMPTS; attempt += 1) {
-    try {
-      return require('./review-evidence-lease-v1.js').leaseProgress(binding, now());
-    } catch (_) {
-      continue;
-    }
-  }
-  return null;
 }
 
 const REPEATABLE_OPTIONS = new Set(['option', 'requirement', 'path']);
@@ -2909,7 +2888,7 @@ function dispatchCli(argv, env) {
   if (verb === 'plan-approval') return emit(planApproval(context, { env }));
   if (verb === 'stop') {
     const payload = readStdinJson();
-    const decided = stopDecision(context, { env, review: () => reviewLeaseProgress(payload, { env }) });
+    const decided = stopDecision(context, { env, review: () => require('./review-evidence-lease-v1.js').hookLeaseProgress(payload, { env }) });
     if (env.WO_EMIT === 'hook') {
       process.stdout.write(`${decided.cancelRun || ''}\n`);
       if (decided.decision === 'block') process.stdout.write(`${JSON.stringify({ decision: 'block', reason: decided.reason })}\n`);
@@ -2957,7 +2936,6 @@ module.exports = {
   readRunRecord,
   releasePlan,
   reviewImport,
-  reviewLeaseProgress,
   shellCommands,
   stopDecision,
   workOrderReviewKey,

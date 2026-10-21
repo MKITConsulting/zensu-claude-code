@@ -22,9 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
   while a review seat is still in flight does not count toward the three-stop budget until the
   lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
-  three times without progress after that still ends the order as blocked. The Autopilot run still
-  counts each of these Stops against its budget of 12 per stage, so a review wait that takes more
-  Stops than that still blocks the run.
+  three times without progress after that still ends the order as blocked.
+- **autopilot**: a Stop of a durable Autopilot run no longer counts against the stage budget of 12
+  Stops while the session's review evidence lease has a review seat in flight, so a long PR team
+  review no longer moves a healthy run to `BLOCKED` with `STOP_BUDGET_EXHAUSTED`. The block names
+  the seats and the time the lease stops taking results and reads `stopBlock=uncounted`. Once no
+  seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
+  again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
+  `gtimeout` is installed, counts the Stop as before.
 
 ## [0.28.0] - 2026-10-21
 

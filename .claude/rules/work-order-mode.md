@@ -7,6 +7,7 @@ paths:
   - "hooks/post-work-order.sh"
   - "hooks/stop-work-order.sh"
   - "hooks/lib/review-evidence-lease-v1.js"
+  - "hooks/lib/review-evidence-hook-v1.js"
   - "harness/**"
   - "skills/work/**"
   - "skills/autopilot/rules/work-order.md"
@@ -171,11 +172,27 @@ counts instead of waiting on a seat that can no longer report. It skips the temp
 `atomicWriteRecord` leaves (`temporaryRecordName` builds the name, and `TEMP_RECORD_RE` is
 composed from the same `LEASE_ID_PATTERN`) and refuses any other entry. A lease whose
 `created_at_ms` lies more than `MAX_CLOCK_SKEW_MS` (60 s) ahead of the reader's clock holds no
-seat in flight. The stop verb binds through `resolveHookSession` with the executing plugin root as
+seat in flight. One function binds a hook payload and reads the store: `hookLeaseProgress` in the
+lease module binds through `resolveHookSession` with the executing plugin root as
 `CLAUDE_PLUGIN_ROOT`, as `zensu_bind_hook_session` does, and reads a second time after a failure.
-Only a nonterminal run reads the store. Pins: the Stop and lease-reader cases in
-`tests/structure/work-order-v1.test.js` and `I18` and `I19` in
-`tests/structure/test-work-order-implement.sh`, which drive the real hooks.
+It binds without the automatic adoption: it writes nothing, and both callers run it after their
+Stop hook's own `zensu_bind_hook_session`, which adopts (`.claude/rules/automatic-adoption.md`).
+The work-order stop verb calls it, and so does the Autopilot interceptor: `outer_finish` in
+`hooks/stop-chain-enforcer.sh` runs `outer_review_wait`, the `wait` mode of
+`hooks/lib/review-evidence-hook-v1.js`, before `autopilot_increment_stop_budget_capped`, and while
+that mode prints a seat count it blocks through `outer_stage_block` with `stopBlock=uncounted` and
+claims no stage budget. The `wait` mode enters through `hookLeaseWait`, which answers "no seat"
+from one `lstat`, without binding, when the session has no records directory in the store, and in
+every other case binds and reads as `hookLeaseProgress` does: the interceptor runs on every Stop it
+would count, and a session that never created a lease has nothing to read. The child runs through `zensu_run_bounded`; an expired, failed or empty
+answer counts the Stop as before. Both hooks therefore wait on one predicate; each reads it once
+per Stop, so a store that changes between the two reads can count one Stop in one hook only. Only
+a nonterminal run reads the store. Pins: the Stop, lease-reader, wait-mode and wait-entry cases in
+`tests/structure/work-order-v1.test.js`; `I18` to `I22` in
+`tests/structure/test-work-order-implement.sh`, which drive the real hooks, with `I20` to `I22`
+running both Stop hooks of the group through a wait, an unreadable store and the seat's result;
+and `S1c` in `tests/structure/test-autopilot-stop-enforcer.sh`, which waits on a real lease with
+two seats bound by the real SubagentStart hook while the stage also owes a head update.
 
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
@@ -183,10 +200,11 @@ version; never bump it by hand.
 
 **Version of the review-progress Stop budget: `patch`.** The stop state keeps its `{count, seen}`
 shape; only the value of `seen` gains a suffix, and a runtime that finds the bare spelling of the
-same ledger key keeps its count. The lease module gains three exports that write nothing
-(`leaseProgress`, `MAX_TTL_SECONDS`, `temporaryRecordName`) and no record field or key set. No
-hook, matcher, config key or attestation moves, and the Stop hook returns the same block decision
-it returned before.
+same ledger key keeps its count. The lease module gains only exports that write nothing
+(`leaseProgress`, `hookLeaseProgress`, `hookLeaseWait`, `MAX_TTL_SECONDS`, `temporaryRecordName`)
+and no record field or key set. No hook, matcher, config key or attestation moves, and both Stop hooks return
+the same block decision they returned before. The Autopilot run's `stopBudget` keeps its shape;
+the interceptor only skips an increment, and the evidence hook gains a mode, not a registration.
 
 **Known gaps, accepted and named:**
 
@@ -200,14 +218,17 @@ it returned before.
   work-order suites skip there, because Node cannot start their shell-script fake `zensu` without a
   shell. `tests/profiles/windows-native-structure.v1.json` lists all five as excluded.
 - `usage` lines and the cost cap belong to slice S4, other order kinds to slice S9.
-- The Autopilot interceptor in `hooks/stop-chain-enforcer.sh` still caps a stage at 12 Stops
-  (`autopilot_increment_stop_budget_capped`), and only a stage move resets that count, so a review
-  wait that needs more Stops ends the run `BLOCKED` there; the work-order Stop hook then reports
-  the order blocked.
-- Every Stop of a session with a nonterminal run now binds once more in Node, which measures the
-  runtime digest again. The added latency is unmeasured.
+- Every Stop of a session with a nonterminal run now binds once more in Node in the work-order
+  hook, and every Stop the Autopilot interceptor would count spawns the evidence hook's wait mode,
+  which binds once more when the session has a records directory in the store; each bind measures
+  the runtime digest again. The added latency is unmeasured.
+- The wait child is bounded only where `zensu_run_bounded` finds `timeout` or `gtimeout`. Base
+  macOS has neither, so there it runs inside the Stop hook's own deadline
+  (`.claude/rules/stop-latency.md`) and nothing shorter. Where a watchdog exists, a child that
+  misses its 5 s under heavy load prints nothing, and that Stop counts against the stage budget
+  although a seat was in flight.
 - A session can write the lease store with a shell command, so a forged record can fake progress
-  or hold a wait open, dated at most 60 s ahead of the clock each time it is written, as a
-  deliberate write can defeat every plugin store. The Autopilot stage cap still ends such a run.
-- The durable fix for the 12-Stop cap above, letting the Autopilot interceptor skip its
-  stage-budget increment while the session's lease reports a seat in flight, is not implemented.
+  or hold a wait open in both Stop hooks, dated at most 60 s ahead of the clock each time it is
+  written, as a deliberate write can defeat every plugin store.
+- The inner chain's own Stop budget (`tdd_increment_stop_budget`) does not read the lease; a team
+  review runs after the inner chain closed, so no review wait reaches it.
