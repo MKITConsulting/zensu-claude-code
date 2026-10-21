@@ -27,6 +27,19 @@ the session's marker in `.zensu/state/work-order/` binds its Session Control key
 0. A hook that answered `allow` there would skip the user's permission prompts, so none of them
 ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 
+**The CLI write-gate leaves `ask` and `followup` to this gate.** `pre-bash-zensu-gate.sh` calls
+`zensu_work_order_hook bound`, which runs the side-effect-free `bound` verb of `work-order-v1.js`
+behind the same D32 test, and when it answers `bound` the write-gate does not deny
+`zensu work ask` or `zensu work followup`. Every other `zensu` mutation follows the write-gate's
+ordinary rules in a work-order session: a person's decision and a work-order protocol verb are
+denied even inside a skill window, but a window passes the other mutations it declares and the
+inline `ZENSU_MCP_GATE=off` one-off passes any of them, because this gate refuses neither. The
+deny of a person's decision in a bound session points to a work-order question, since no person
+is there. `SESSION_WORK_VERBS` is exported because `test-skill-workflow-markers.sh` C5
+holds the write-gate's `ZENSU_WORK_ORDER_SESSION_TOOL_NAMES` to it: a verb added to
+`SESSION_WORK_VERBS` must map to a read or to one of those session tools
+(`.claude/rules/cli-command-classification.md`).
+
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
 `--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
 accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception
@@ -47,13 +60,42 @@ maps it through `endedResult`; the post-tool hook builds its own notice from the
 
 **The CLI prints the backend's error code**, and the runtime reads the `--json` error line first
 and the first `(status N, code X)` group second (zensu-cli PR 26). A failure without a status is
-transient, except at `--start`, where a CLI line matching `SESSION_TOKEN_HOST_RE` or
-`SESSION_TOKEN_SHAPE_RE` exits 3. The error table lives in `skills/work/references/protocol.md`.
+transient only when it shows that no answer came: the CLI did not finish, printed no `error:` line,
+or its line matches `NO_ANSWER_RE` (Go's `<Method> "<url>": …` transport error, `reading response
+body`, `invalid … response|list`, or a network failure such as `connection refused`). Every other
+status-less error the CLI printed itself is a refusal by the CLI: `classifyFailure` answers
+`FINAL`, so `sendEvent` sends it once, and `cliRefusal` lets each message name the zensu CLI as the
+refuser through `refusedText`, with the CLI's line in place of a status and code. `--start` exits 3
+on it (after the two `SESSION_TOKEN_*` lines, which keep their own advice), the other helpers exit
+8, and a refused heartbeat writes `lost-` with the code `cli_refused`. The inverse reading, a list
+of refusal messages with everything else transient, was rejected: zensu-cli has dozens of
+validation messages and adds more, while Go's transport error has one shape. A crash prints no
+`error:` line and stays transient, with its first stderr line quoted. The error table lives in
+`skills/work/references/protocol.md`.
+
+**The gate reads a `zensu` call's words as cobra v1.10.2 does.** `zensuCommandWords` mirrors the
+subcommand search of zensu-cli v0.10.0, the same rule as the CLI write-gate's parser
+(`.claude/rules/cli-command-classification.md`): no group defines a flag, so every `--flag` and
+every two-character `-f` without `=` takes the next word, an empty word is skipped and `--` ends
+the search. `WORK_VERB_ALIASES` maps the CLI's one `zensu work` alias, `repos`, to `repositories`.
+`HUMAN_PLAN_VERBS` lists every plan verb whose tool `ZENSU_HUMAN_DECISION_TOOL_NAMES` holds, and
+`test-skill-workflow-markers.sh` C6 holds the two equal, as C5 does for `SESSION_WORK_VERBS`.
+
+**No SessionStart text tells a token session to run `zensu auth login`.** While
+`ZENSU_SESSION_TOKEN` is set, zensu-cli sends the session token and never the stored login
+(`sessionTokenTarget`), and no person can sign in, so the primer substitutes `__ZENSU_CLI_AUTH__`
+with nothing and the banner drops `_ZENSU_CLI_AUTH_HINT` and `_ZENSU_CLI_LOGIN_STEP`. The test is
+the token's presence, not the bound marker, because `/zensu:work` writes the marker after the
+session started, when the primer has already run. `test-session-start-banner.sh` B12d and B16f
+hold both texts.
 
 **Sites that move with the CLI and the service.** `SESSION_TOKEN_HOST_RE` and
 `SESSION_TOKEN_SHAPE_RE` match the two messages of `sessionTokenTarget` in zensu-cli, and the fake's
-`requireSessionToken` copies both word for word; a CLI rewording sends `--start` back to exit 7
-while every suite stays green. The fake's `proseViolation` ports the service's content guard, and
+`requireSessionToken` copies both word for word; a CLI rewording turns them into the generic exit-3
+refusal while every suite stays green. `NO_ANSWER_RE` copies Go's `url.Error` shape and zensu-cli's
+`reading response body` and `invalid … response` wordings: a CLI that rewords a transport failure
+makes it final, so the session stops on it instead of retrying. The fake's `usage` and the
+injected `cli` refusal print the CLI's own `error:` line and `--json` line. The fake's `proseViolation` ports the service's content guard, and
 its `redactChanges` the service's `Redact`, which backs the `invalid_url` link check.
 `DEFAULT_BRANCH_PREFIX` in the runtime and `BRANCH_PREFIX` in the fake mirror the service's
 work-order branch prefix, `wo-`. A change on the service side means changing the fake with it, or

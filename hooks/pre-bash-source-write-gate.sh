@@ -217,7 +217,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # to run still denies, so a crash cannot degrade into a blanket allow.
     if ! UNBOUND_TARGETS="$(
       cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-      BSWG_MODE=targets PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+      BSWG_MODE=targets PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
     )"; then
       emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause. ${OPT_IN_NOTE}"
       exit 0

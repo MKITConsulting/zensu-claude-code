@@ -2245,6 +2245,7 @@ OUT="$(run_report_binding bound)"
 case "$OUT" in *'binding: this session has a valid Session Control record'*) check "P1ac bound session renders a ✅ binding row" PASS ;; *) check "P1ac bound session binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unbound)"
 case "$OUT" in *'every stateful Zensu tool fails closed'*) check "P1ad unbound session renders a ❌ binding row" PASS ;; *) check "P1ad unbound session binding row (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'/zensu:adopt-session, which writes nothing without --confirm, names the cause (for an unreadable record, why each record reader refused it); start a fresh Claude Code session'*) check "P1ad6 the unbound row names /zensu:adopt-session as the read-only report of the cause" PASS ;; *) check "P1ad6 unbound row names no read-only cause report (got: $OUT)" FAIL ;; esac
 # A record whose recorded project root is gone is NOT the no-record state and
 # must not be reported as one. Both sub-branches matter: with a path it renders
 # the parenthesised directory the user has to re-create, and with the path

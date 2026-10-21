@@ -48,9 +48,10 @@ source, never a shared README.
   `/zensu:implement`). A doc grounded in code needs code to read — a feature with
   zero linked source can only yield a stub, which this skill refuses to publish.
 
-Every command accepts `--json` for machine-readable output; run
-`zensu <noun> <verb> --help` for the full flag set. This skill is credential-blind
-and host-agnostic — it never hardcodes a SaaS URL and never prints a token.
+Every `zensu` command this skill runs except `zensu auth` accepts `--json` for
+machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
+This skill is credential-blind and host-agnostic — it never hardcodes a SaaS URL
+and never prints a token.
 
 ## Arguments
 
@@ -137,12 +138,8 @@ thread).
       (add `--status <s>` when `--status` was given). `--component` is filtered
       **client-side** — the list command scopes by product, so select the
       component's features from the JSON yourself; do not pass a `--component`
-      flag the CLI does not have. The response is a `{data, total, page, perPage}`
-      envelope **paginated at 20, and the CLI exposes no page flag** — when
-      `total` exceeds the returned `data` length, take the full catalog from
-      `zensu journeys suggest --product <product-id>` (its `features` array holds
-      every feature) and filter it yourself. Never let a batch silently cover
-      only the first page; report the batch size against `total`.
+      flag the CLI does not have. The CLI reads every page, so the envelope's
+      `data` array holds the product's whole catalog; report the batch size.
    2. **Idempotency — skip what is already done.** For each feature read
       `docs_complete`. Skip every feature already `docs_complete` unless `--force`
       is set. `log` the skipped count and ids: a skipped feature must read
@@ -158,8 +155,7 @@ For each feature to document:
    `estimated_effort` (may live on the latest revision), `slug`, `number`,
    `product_id`, and `docs_complete`. Derive the required `doc_type`(s) from the
    table above. `<feature-id>` must be the feature **UUID** (a slug or KEY-N id
-   fails with `invalid feature id (status 400)`), and the command takes no
-   `--json` flag — it always prints JSON.
+   fails with `invalid feature id (status 400)`).
 2. `zensu doc gen-context <feature-id> --doc-type <type>` — the aggregated
    authoring **context map**: linked source-file paths, symbols, subfeatures,
    security posture, tiers, journeys, existing docs. Per
@@ -300,9 +296,8 @@ never published green.
 
 | Command | Phase | Purpose |
 |---|---|---|
-| `zensu features list` | 1 | Load the batch feature set (scope by product; filter component/status client-side; pages at 20) |
-| `zensu journeys suggest` | 1 | Full feature catalog when the list envelope's `total` exceeds one page |
-| `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only, no `--json` flag) |
+| `zensu features list` | 1 | Load the batch feature set (scope by product; filter component client-side) |
+| `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only) |
 | `zensu doc gen-context` | 2 | Aggregated authoring context map (paths + posture, not source); only the main thread runs it, and Phase 3 reads its output |
 | `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
 

@@ -25,15 +25,15 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 - Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`); that list pages at 20 with no page flag, so when its `total` exceeds the returned `data` length, resolve against `zensu journeys suggest --product <product-id>` instead.
+- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`).
 
-Most commands accept `--json`, but not all — `zensu security posture` has no `--json` flag and always prints JSON. Run `zensu security <verb> --help` for the actual flag set rather than assuming one.
+Every `zensu` command this skill runs except `zensu auth` accepts `--json`, and the reads such as `zensu security posture` print JSON without it. Run `zensu security <verb> --help` for the actual flag set rather than assuming one.
 
 ## Workflow
 
 Execute these steps in order. The classification MUST be set first as all subsequent analysis depends on it.
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "set_security_classification,analyze_feature_security,add_security_test,generate_threat_model,complete_security_review"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu security classify` / `zensu security analyze` / `zensu security add-test` / `zensu security threat-model` / `zensu security review` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after the final step, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "set_security_classification,add_security_test,complete_security_review"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu security classify` / `zensu security add-test` / `zensu security review` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after the final step, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
 ### Step 1: Set Security Classification
 
@@ -101,7 +101,7 @@ For each recommended and implemented security test, run `zensu security add-test
 Run `zensu security review <feature-id>` with:
 - `--reviewer` (required): Reviewer identifier (e.g. "claude-code" or username)
 - `--status` (required): approved | rejected | conditional
-- `--review-type` (optional): manual | automated | external (default: manual)
+- `--type` (optional): manual | automated | external (default: manual)
 - `--findings` (optional): Review findings summary
 - `--conditions` (optional): Conditions for conditional approval
 

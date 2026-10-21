@@ -181,8 +181,48 @@ test('the status and code are read when context follows the suffix and the messa
   const flagError = wo.cliOutcome({ status: 1, stdout: '', stderr: 'error: unknown flag --bogus\n{"error":{"message":"unknown flag --bogus"}}\n' });
   assert.equal(flagError.status, null);
   assert.equal(flagError.code, null);
-  assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.TRANSIENT);
-  assert.equal(wo.describeFailure(wo.classifyFailure(flagError)), 'the zensu CLI failed without a status: unknown flag --bogus');
+  assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.FINAL);
+  assert.equal(wo.describeFailure(wo.classifyFailure(flagError)), 'the zensu CLI refused the call: unknown flag --bogus');
+});
+
+test('a CLI error without a status is final unless it shows that no answer came, and its own line is quoted', () => {
+  const classify = (stderr, status = 1) => wo.classifyFailure(wo.cliOutcome({ status, stdout: '', stderr }));
+  const withJson = (message) => `error: ${message}\n${JSON.stringify({ error: { message } })}\n`;
+  for (const message of [
+    'unknown flag: --autopilot-stage',
+    'flag needs an argument: --stage',
+    'invalid argument "x" for "--pr-number" flag: strconv.ParseInt: parsing "x": invalid syntax',
+    'accepts 1 arg(s), received 0',
+    '--blocked needs --reason',
+    'exactly one of --stage, --artifact or --blocked is required',
+  ]) {
+    for (const stderr of [withJson(message), `error: ${message}\n`]) {
+      const failure = classify(stderr);
+      assert.equal(failure.verdict, wo.VERDICTS.FINAL, message);
+      assert.equal(wo.describeFailure(failure), `the zensu CLI refused the call: ${message}`);
+    }
+  }
+  for (const message of [
+    'Post "http://127.0.0.1:9/api/work-orders/x/events": dial tcp 127.0.0.1:9: connect: connection refused',
+    'Get "https://zensu.example/api/work-orders/x": context deadline exceeded (Client.Timeout exceeded while awaiting headers)',
+    'Post "https://zensu.example/api/work-orders/x/heartbeat": EOF',
+    'reading response body: unexpected EOF',
+    'invalid event response: unexpected end of JSON input',
+    'read tcp 127.0.0.1:52144->127.0.0.1:18080: read: connection reset by peer',
+  ]) {
+    const failure = classify(withJson(message));
+    assert.equal(failure.verdict, wo.VERDICTS.TRANSIENT, message);
+    assert.equal(wo.describeFailure(failure), `the zensu CLI failed without a status: ${message}`);
+  }
+  const crash = classify('panic: runtime error: index out of range [3] with length 3\n\ngoroutine 1 [running]:\nmain.main()\n', 2);
+  assert.equal(crash.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(crash), 'the zensu CLI failed without a status: panic: runtime error: index out of range [3] with length 3');
+  const killed = wo.classifyFailure(wo.cliOutcome({ status: null, signal: 'SIGKILL', stdout: '', stderr: '' }));
+  assert.equal(killed.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(killed), 'no answer from Zensu');
+  const late = wo.classifyFailure(wo.cliOutcome({ error: Object.assign(new Error('spawnSync zensu ETIMEDOUT'), { code: 'ETIMEDOUT' }) }));
+  assert.equal(late.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(late), 'the zensu CLI failed without a status: the zensu CLI did not answer in time');
 });
 
 test('clientEventId is deterministic, prefixed and inside the backend pattern', () => {
@@ -255,6 +295,33 @@ test('loadContext is inert without the token or the marker and refuses a marker 
   const bound = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
   assert.equal(bound.fault, null);
   assert.equal(bound.marker.orderId, ORDER);
+});
+
+test('the bound verb answers bound only for a marker that binds this session and writes nothing', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  const bound = () => spawnSync(process.execPath, [MODULE, 'bound'], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  let answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: wo.sessionKeyOf('another-session-99'), orderId: ORDER, attempt: 1 });
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  fs.writeFileSync(files.marker, '{');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const before = fs.readFileSync(files.marker, 'utf8');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.OK, answer.stderr);
+  assert.equal(answer.stdout, '\nbound\n');
+  assert.equal(fs.readFileSync(files.marker, 'utf8'), before);
+  assert.deepEqual(box.calls(), []);
 });
 
 test('state files refuse symlinks, hard links, oversized bodies and foreign schemas', () => {
@@ -1509,6 +1576,69 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
   assert.equal(wo.analyzeBash('zensu-vcs.sh --pr-state 7').forge, true);
 });
 
+test('the Bash analysis reads the zensu command words as cobra does, so no flag value or empty word hides the noun or the verb', () => {
+  const denied = {
+    'zensu --head-sha abc work confirm-merge 1234': ['human-gate', 'zensu work confirm-merge'],
+    'zensu --reason x plan abandon p1': ['human-gate', 'zensu plan abandon'],
+    'zensu -o x plan approve p1': ['human-gate', 'zensu plan approve'],
+    "zensu '' plan approve p1": ['human-gate', 'zensu plan approve'],
+    'zensu plan --product p1 finalize p1': ['human-gate', 'zensu plan finalize'],
+    'zensu --title t work heartbeat 1234': ['helper-verb', 'zensu work heartbeat'],
+    'zensu --product p1 work list': ['order-file', 'zensu work list'],
+    'zensu work --product p1 policy get': ['order-file', 'zensu work policy get'],
+    'zensu work policy --product p1 set --plan-approval auto': ['human-gate', 'zensu work policy set'],
+    'zensu --x y auth login': ['auth', null],
+    'zensu --json=true plan approve p1': ['human-gate', 'zensu plan approve'],
+    'zensu -vq plan approve p1': ['human-gate', 'zensu plan approve'],
+  };
+  for (const [command, [code, detail]] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, code, command);
+    assert.equal(analysis.deny.detail, detail, command);
+  }
+  for (const command of ['zensu --question q work ask 1234', 'zensu work --category scope ask 1234', 'zensu -- plan approve p1', 'zensu plan -- approve p1']) {
+    assert.equal(wo.analyzeBash(command).deny, null, command);
+  }
+});
+
+test('the Bash analysis denies every plan verb that records a person\'s decision, push and followup included, and passes the plan reads', () => {
+  const denied = {
+    'zensu plan push plan.md': 'zensu plan push',
+    'zensu plan followup accept p1 f1': 'zensu plan followup accept',
+    'zensu plan followup dismiss p1 f1': 'zensu plan followup dismiss',
+    'zensu plan approve p1': 'zensu plan approve',
+    'zensu plan finalize p1': 'zensu plan finalize',
+    'zensu plan abandon p1': 'zensu plan abandon',
+    'zensu plan confirm-merge p1 --head-sha abc': 'zensu plan confirm-merge',
+  };
+  for (const [command, detail] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, 'human-gate', command);
+    assert.equal(analysis.deny.detail, detail, command);
+  }
+  for (const command of ['zensu plan status p1', 'zensu plan list', 'zensu plan followups p1']) {
+    assert.equal(wo.analyzeBash(command).deny, null, command);
+  }
+});
+
+test('the Bash analysis treats the repos alias of zensu work repositories like the full name', () => {
+  const pairs = [
+    ['zensu work repos list --product p1', 'zensu work repositories list --product p1', 'order-file', 'zensu work repositories list'],
+    ['zensu work repos add --product p1 --repository r', 'zensu work repositories add --product p1 --repository r', 'human-gate', 'zensu work repositories add'],
+    ['zensu work repos remove --product p1 --repository r', 'zensu work repositories remove --product p1 --repository r', 'human-gate', 'zensu work repositories remove'],
+  ];
+  for (const [alias, full, code, detail] of pairs) {
+    for (const command of [alias, full]) {
+      const analysis = wo.analyzeBash(command);
+      assert.ok(analysis.deny, command);
+      assert.equal(analysis.deny.code, code, command);
+      assert.equal(analysis.deny.detail, detail, command);
+    }
+  }
+});
+
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
@@ -1575,6 +1705,47 @@ test('ask continues with the default, and a blocking question ends the session',
   assert.equal(ended.outcome, 'success');
   assert.equal(ended.kind, 'blocked:question');
   assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a call the zensu CLI refuses is sent once and never retried, and a refused heartbeat fences the lease as cli_refused', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const env = { ...box.env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '3000' };
+  const eventCalls = () => box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event').length;
+  const before = eventCalls();
+  box.mutate((state) => { state.failNext = [{ command: 'event', cli: 'unknown flag: --autopilot-stage', times: 20 }]; });
+  const sent = wo.sendEvent(context, ['--stage', 'planning', '--client-event-id', 'zcc-cli-refused-0001'], { env });
+  assert.equal(sent.verdict, wo.VERDICTS.FINAL);
+  assert.equal(wo.describeFailure(sent.failure), 'the zensu CLI refused the call: unknown flag: --autopilot-stage');
+  assert.equal(eventCalls(), before + 1);
+  assert.equal(wo.readState(context.files.lost), null);
+  box.mutate((state) => { state.failNext = [{ command: 'heartbeat', cli: 'unknown flag: --json' }]; });
+  const beat = wo.renew(context, { env, force: true });
+  assert.equal(beat.verdict, wo.VERDICTS.LOST);
+  assert.equal(wo.readState(context.files.lost).code, 'cli_refused');
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a helper that meets a CLI refusal names the CLI and its line: exit 3 at --start, exit 8 and no pending send for a question', () => {
+  const box = sandbox();
+  box.seed({ failNext: [{ command: 'get', cli: 'unknown flag: --json' }] });
+  const refusedStart = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(refusedStart.exit, wo.EXIT.NO_CLI, refusedStart.message);
+  assert.equal(refusedStart.message, 'the zensu CLI refused the order read (unknown flag: --json); the session cannot run the order with this zensu CLI');
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'get').length, 1);
+  assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+
+  const asked = sandbox();
+  const context = startedContext(asked);
+  asked.mutate((state) => { state.failNext = [{ command: 'ask', cli: 'unknown flag: --requirement' }]; });
+  const question = wo.ask(context, { env: asked.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' });
+  assert.equal(question.exit, wo.EXIT.REFUSED, question.message);
+  assert.equal(question.message, 'the zensu CLI refused the question (unknown flag: --requirement); continue with your default option, or finish with --reason when the work cannot go on');
+  assert.deepEqual(wo.readState(context.files.outbox).inflight, []);
+  asked.mutate((state) => { state.failNext = [{ command: 'ask', status: 422, code: 'field_not_allowed', message: 'the question names a field Zensu does not take' }]; });
+  const backend = wo.ask(context, { env: asked.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' });
+  assert.equal(backend.exit, wo.EXIT.REFUSED, backend.message);
+  assert.match(backend.message, /^Zensu refused the question \(status 422, code field_not_allowed\): the question names a field Zensu does not take/);
 });
 
 test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {

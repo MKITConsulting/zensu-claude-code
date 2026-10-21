@@ -206,6 +206,7 @@ function injected(command, flags = {}) {
   entry.times = (entry.times || 1) - 1;
   if (entry.times <= 0) queue.splice(index, 1);
   save(state);
+  if (entry.cli) usage(entry.cli);
   apiFail(entry.status, entry.code, entry.message || `injected failure for ${command}`);
 }
 
