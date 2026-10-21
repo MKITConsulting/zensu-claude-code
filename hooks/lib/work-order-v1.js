@@ -2085,7 +2085,7 @@ function analyzeBash(command, depth = 0) {
     }
     if (SHELL_INTERPRETERS.has(name) || name === 'eval') {
       const optionEnd = name === 'eval' ? 0 : interpreterOptionEnd(args);
-      const at = args.slice(0, optionEnd).findIndex((arg) => /^[-+][A-Za-z]*c[A-Za-z]*$/.test(arg));
+      const at = args.slice(0, optionEnd).findIndex((arg) => /^[-+][A-Za-z]+$/.test(arg) && arg.includes('c'));
       if (at >= 0 && (/[oOR]/.test(args[at].slice(1)) || /^[-+]/.test(String(args[at + 1] || '')))) {
         result.deny = bashFinding('shell-option', `${name} ${args.slice(at, at + 2).join(' ')}`);
         return result;

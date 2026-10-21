@@ -1639,6 +1639,16 @@ test('the Bash analysis treats the repos alias of zensu work repositories like t
   }
 });
 
+test('the Bash analysis stays linear on a long shell flag', () => {
+  const expression = `JSON.stringify(require(${JSON.stringify(MODULE)}).analyzeBash('bash -' + 'c'.repeat(400000) + '1 x'))`;
+  const run = spawnSync(process.execPath, ['-e', `process.stdout.write(${expression});`], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(run.status, 0, run.signal || (run.error && run.error.code) || run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), { deny: null, forge: false });
+  for (const command of ["bash -cx 'git push origin main'", "bash +xc 'git push origin main'"]) {
+    assert.equal(wo.analyzeBash(command).deny.code, 'push', command);
+  }
+});
+
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
