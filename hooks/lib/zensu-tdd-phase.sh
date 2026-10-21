@@ -3847,7 +3847,12 @@ tdd_seed_deferred_review() {
   # A deferred review is a fresh, already-implemented chain generation. Reuse
   # the atomic begin transaction so ticket/flags, round counter, and Stop budget
   # are reset together even when the previous generation already terminated.
-  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
+  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim" || return $?
+  if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && command -v node >/dev/null 2>&1; then
+    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js" reset \
+      --root "$ZENSU_PROJECT_ROOT" --session "$session_id" >/dev/null 2>&1 || true
+  fi
+  return 0
 }
 
 # Git Bash serializes exported functions into the Windows process environment.

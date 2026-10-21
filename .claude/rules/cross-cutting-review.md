@@ -109,9 +109,9 @@ or re-matched, no attestation change, and the key is read permissively.
 - Two runs of one definition stay correlated; the reading-order switch decorrelates them only as
   far as the model follows it.
 - "The same defect at the same `file:line`" is the main thread's judgment, like the panel merge.
-- The step-4b probe reads `~/.zensu/config.json` and `ZENSU_CONFIG` but not a project
-  `.zensu/config.json`, because the Bash tool carries no `CLAUDE_PROJECT_DIR`; `reviewJudge` and
-  `findingVerification` share the gap (`.claude/rules/skill-argument-placeholders.md`).
+- The step-4b probe reads the project `.zensu/config.json` only because it sets
+  `CLAUDE_PROJECT_DIR="{project_root}"` itself; the Bash tool carries no such variable, and the
+  plan-review and pr-team-review probes still lack it (`.claude/rules/skill-argument-placeholders.md`).
 - A lean fix-round re-review runs `correctness` alone, so a fix round that drops an account
   predicate meets step 6 but no inherited-guarantee check.
 - `JUDGE SECOND RUN UNAVAILABLE` and `JUDGE SECOND RUN RULE BREACH` are run-log lines, not

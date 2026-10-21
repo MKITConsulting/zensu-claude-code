@@ -5,9 +5,10 @@ completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, and which a logged
 claim arms even when the anchor's tree is clean (discipline patch 10 in
 [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here — and TWO
-terminus refusals at `--chain-done`, §Full-Suite Gate and §Acceptance Verification Gate.
-Eight of the ten are
+and §Requirements-Table Gate below, which has its own section here — THREE
+terminus refusals at `--chain-done`, §Terminal Edit-Landing Gate, §Full-Suite Gate and
+§Acceptance Verification Gate, and ONE consume-time refusal in the review chain,
+§Review Packet Gate. Ten of the twelve are
 convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
 two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
 escape hatch, and neither is a security boundary on its own: the first closes one
@@ -1020,6 +1021,152 @@ plan must carry a usable `## Requirements` table.
   `ZENSU_EDIT_LANDING_GATE=off` — exempting a session from one must not disarm the other, and
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
+
+## Review Packet Gate
+
+Every reviewer of one `/zensu:tdd` review round reads one canonical evidence packet, and the
+consume-mode review does not advance the chain without a substantive primary judge report when
+step 4b requires one. Two helpers and the post-review hook carry it.
+
+- **The packet.** `hooks/lib/review-packet-v1.js create --root <project root> --session <key>
+  --input <json> [--baseline <sha>]` refuses unless the session's chain is active,
+  implementation-complete and not yet closed. It runs `zensu-edit-landing.sh --check-receipt
+  --allow-unclean`, so a receipt the tree has outgrown is refused with the audit command to run,
+  while a receipt that records unlanded, pending or unverified claims is carried rather than
+  cleared: a bare `<step> WIRED` entry the audit graded counts as an unverified claim, and a
+  receipt whose latest audit did not complete is carried with `audit=incomplete` on its receipt
+  line. Two generations need no receipt. A chain whose bypass ledger records
+  `ZENSU_EDIT_LANDING_GATE`, or a `create` call made with that switch set to `off`, gets the
+  receipt line `escaped (…)`. A deferred review the Stop hook adopted and that holds no receipt
+  gets `none (not run — …)`; one that holds a receipt is checked like any other chain. It takes
+  `changed_files` from the canonical change set (a project outside git lists them in the input
+  and gets a content snapshot instead), binds the tree with the evidence runner's fingerprint, and
+  renders the seven model-written fields as indented blocks, so no field line can forge the
+  `REVIEW PACKET v1` or `END REVIEW PACKET v1` boundary. With a receipt, the change set is taken
+  against the baseline the edit-landing audit recorded, and a `--baseline` that differs from it is
+  refused; the `change_set:` line names where the baseline came from (`baseline_source=receipt`,
+  `argument` or `none`). A tree the fingerprint cannot measure, such as one with more than 20000
+  untracked files, is bound by its reason and shown as `tree=unverified (<reason>)`. The
+  model-written fields may take 192 KiB together (`shorten its summaries` otherwise) and the
+  changed-file list 1 MiB (`review a change this large in smaller chains`), so a large change set
+  never reads as long summaries. The block carries a receipt line derived from the receipt bytes
+  and is stored under the round's review number in `.zensu/state/review-gate-<key>/`; `show`
+  prints it again. An unchanged block keeps its creation time, and a changed one replaces it.
+  After a successful `create` the command removes its `--input` file when that file lies in a
+  `.zensu/reviews/` directory of the project, because the input carries model-written summaries
+  and `.zensu/` is often committed; `finding-verify-v1.js --input` does the same with the findings
+  file it graded. An input elsewhere, or one that failed to parse, is left in place.
+- **The records.** On every `zensu:review-aspect`, `zensu:review-judge` and `zensu-review-*`
+  completion of an implementation-complete chain, `post-review-tdd-delegate.sh` records the
+  round, the role (a primary or a second judge run, by the `judge_run: second` last line), the
+  report heading, the digest of the one packet block in the prompt and, for a primary judge, whether
+  its report is substantive: status `completed`, a `## Aspect: judge` heading with a `JUDGE-<n>`
+  finding or `- (no findings)`, and no line starting with `REVIEW PACKET INVALID`. The report is
+  read from `handbackReport.text` when the reviewer delivered it through `SubagentHandback`,
+  otherwise from the text content. A run whose block differs from the canonical one gets advice
+  at once, naming the first differing line.
+- **The consume refusal.** Before the hook claims a review ticket it refuses, with the ticket
+  left unconsumed and the cause and remedy in `additionalContext`, when the round has no
+  canonical packet, when the consume prompt's block is missing, duplicated or differs, when the
+  tree, the change set or the receipt changed after `create` (for a packet that recorded no
+  receipt, when an audit wrote one after `create`), when the latest run of a recorded
+  reviewer saw another block or completed before the block was created, when no recorded reviewer
+  reported on the block at all, or when `hooks.reviewJudge` is on, the review is the first one or
+  the panel is `full`, and no primary judge run returned a substantive report on the block after
+  it was created. A second judge run never stands in. Two failed primary runs on one block turn
+  the remedy into a stop: keep both results and report the chain as pending. A consume report
+  that starts a line with `REVIEW PACKET INVALID` is refused whatever the packet state. Every
+  remedy names the full `node <plugin root>/hooks/lib/review-packet-v1.js show` or `create`
+  command with the project root and the session key, and the seven fields a `create` input holds.
+  A workflow document the gate cannot read or validate holds the claim without a word, the way the
+  hook already treats a malformed or foreign document.
+- **Only the live ticket is judged.** The hook hands the gate the consume prompt's review ticket.
+  A completion whose ticket is not the chain's live, unconsumed ticket, or that arrives after the
+  code review was marked done, passes the gate as `not-current-ticket`; the ticket claim after it
+  then refuses that completion without a word, as it did before the gate existed, so a duplicate
+  or late completion never reads as a refusal of the current round.
+- **What engages it.** A chain generation engages the gate once it has a canonical packet or a
+  recorded reviewer run, or when a consume prompt carries a packet block. `--tdd-begin` removes
+  the previous generation's store, and so does the Stop hook when it seeds an adopted deferred
+  review. A `--review-rearm` and a `--chain-done` that reopens the review of a minted zero-change
+  ticket remove it too, because both restart the round count at 0 and the store is keyed by
+  round. A reset that fails prints `REVIEW GATE RESET UNAVAILABLE` and leaves the transition in
+  place. A consume review with no packet block and no reviewer run
+  recorded in the generation claims its ticket as before.
+- **Escape.** `hooks.reviewPacketGate: false` records nothing and checks nothing. It is a
+  config key, not a ledgered environment escape.
+
+Known bounds: a reviewer whose latest run completed before the round's packet was created blocks
+the consume review until it runs again on the block, so a hand-built block spawned before `create`
+is refused rather than counted; a report
+without an `## Aspect:` heading has no reviewer identity and cannot be superseded or block; the
+store sits in the session-writable `.zensu/state/`, so a Bash write can forge a record, as for
+every plugin store; a deferred review in a session that still holds an earlier generation's
+receipt is judged by that receipt, because only `--tdd-begin` retires one; and the judge's report
+is read from the PostToolUse `tool_response`, whose `handbackReport` shape was measured on Claude
+Code 2.1.299.
+
+## Terminal Edit-Landing Gate
+
+`--tdd-complete` accepts a clean edit-landing receipt. This gate checks at `--chain-done` that the
+receipt still describes the chain that closes. It runs `zensu-edit-landing.sh --check-receipt
+--project <root> --session <key>`, which grades nothing and writes nothing.
+
+- **What fresh means.** The receipt is clean and carries the audit scope of this session and
+  project root. It names this session's run log, and that log still starts with the bytes the
+  audit read. Every claim the log now holds is one the receipt graded, and so is every bare
+  `WIRED` entry. The audited repository root is unchanged, every claimed file still hashes to what the
+  audit saw, and the working tree has the fingerprint the audit measured. Ordinary lines appended
+  to the run log after the audit, such as acceptance records, ledger lines and review notes, keep
+  the receipt fresh.
+- **What it prints.** `EDIT LANDING RECEIPT STALE — <cause>.`, then `Run: <audit command>` with
+  the bound project root, run log and session key, then the recovery guidance: keep the
+  original inputs or omit them, and add `--predicates` with current proofs where a claim is
+  pending. A value the command cannot carry safely is printed as a placeholder. A refusal exits
+  `1` and leaves the chain open.
+- **Where it applies.** The ticket-bound standalone terminus, evaluated together with the
+  full-suite and acceptance gates so one call names every refusal; the unqualified terminus when
+  the change count is zero or cannot be evaluated; and a bound Autopilot chain that closes with
+  outcome `pass`. Outcomes `max-rounds` and `no-changes` are not gated. A chain without a receipt
+  is exempt only while its change count is zero or cannot be evaluated (no `git`, a root outside a
+  work tree, a HEAD that names no commit). On such a count a receipt exempts the chain too when it
+  records `claims: 0` and the claim inventory of its run log completes with `claimed-files=0`, the
+  two inputs on which `--tdd-complete` arms, so a step 5b audit of a chain that claimed nothing
+  never wedges the zero-change terminus; a claim logged after that audit arms the gate again. An
+  inventory that does not complete arms the gate when its partial count is above zero, and
+  otherwise refuses with its own cause, `EDIT LANDING — … the claim inventory over its run log did
+  not complete …`, naming the `--inventory` command that shows why. That is stricter than
+  `--tdd-complete`, where an inventory that answered nothing leaves the requirement on the change
+  set alone, because this gate is the last point at which a claim logged after the audit can be
+  caught. With changes it refuses with `no edit-landing receipt exists for this session`, and when
+  git cannot list the changes the refusal names git, not the audit.
+- **A tree the fingerprint cannot measure.** More than 20000 untracked files, or more than 512 MiB
+  of them, leave the evidence runner's fingerprint without a tree id. The audit then seals the
+  receipt with no tree id and the reason, and the audit and every freshness check print
+  `TREE UNVERIFIED — <reason>; the receipt binds the run log and the claimed files, not the rest of
+  the working tree.` The receipt stays fresh while the reason stays the same, so a change outside
+  the claimed files is not detected there; the terminus prints the line beside its verdict. A git
+  failure is still a fault, never an unverified tree.
+- **Audit bounds.** Each bound refuses the audit with its remedy in the message:
+
+  | Bound | Limit | Remedy |
+  |---|---|---|
+  | Claimed files in one run log | 2000 | name each file once per step, or arm a new generation with `--tdd-begin`, which starts an empty audit scope |
+  | Literals in one predicate list | 100, each at most 4096 bytes | prove the claim with fewer, shorter literals |
+  | File a literal predicate reads | 8 MiB | withdraw that claim with `CLAIM WITHDRAWN` |
+  | Claimed files hashed by one audit | 64 MiB in total | claim source files rather than generated artifacts, or arm a new generation |
+  | Receipt with its audit scope | 4 MiB | claim fewer files in this generation, or arm a new generation |
+  | Working audit scope | 16 MiB | the same |
+  | Run log | none | read in 1 MiB chunks, so a long log never refuses |
+
+  The predicate document and the `--dirty-before` list are read up to 4 MiB each.
+- **Bypass** with `ZENSU_EDIT_LANDING_GATE=off`, the switch that also exempts `--tdd-complete`.
+  The escape is recorded in the bypass ledger only where the gate applies, and a chain whose
+  ledger already records it is not gated again.
+- **What it does not prove.** The receipt and the run log are ordinary files in the project tree,
+  so the gate stops a chain from closing on a stale receipt by accident, not a model that writes
+  one on purpose. A file no claim names is covered only by the tree fingerprint, and without a
+  receipt nothing locates the run log of a chain whose change count is zero.
 
 ## Full-Suite Gate
 

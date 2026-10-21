@@ -1203,6 +1203,31 @@ if grep -qF 'read `rules/browser-verification.md` section 1 before that call.' <
 else
   check "P10n consent reads the browser rule before the first browser call and never writes the consent memory" FAIL
 fi
+ACCEPTANCE_RULE="$SKILL_DIR/rules/acceptance-evidence.md"
+ACCEPTANCE_FLAT="$(tr '\n' ' ' < "$ACCEPTANCE_RULE" 2>/dev/null | tr -s ' ')"
+if [ -f "$ACCEPTANCE_RULE" ] && grep -qF 'prints only' "$SKILL_MD" \
+  && grep -qF 'what `rules/acceptance-evidence.md` allows, because the evidence runner prints the tail of its' "$SKILL_MD" \
+  && ! grep -qF 'discards its' "$SKILL_MD" \
+  && grep -qF 'Print at most 20 such lines of at most 160 characters each.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'a fixed check name, such as `total-rounding`, never built from input or output;' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'a loopback port alone proves nothing.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'Never redact a log with a pattern and call the rest safe.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'keep the plain discarding form' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'A setup or launch failure does not show that the criterion fails: record `partial` with its category.' <<<"$ACCEPTANCE_FLAT"; then
+  check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" PASS
+else
+  check "P12 an exit-code check prints only the bounded synthetic diagnostics of rules/acceptance-evidence.md, never raw output" FAIL
+fi
+if grep -qF 'that file also says how one run backs several ACs.' <<<"$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')" \
+  && grep -qF 'Run it once and record each criterion it covers on its own, citing the same `er1_…` id:' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'never run the identical check again per criterion only to get another record id.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'never which criterion the check asserted: keeping that mapping honest is yours.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'After any edit the run backs nothing; run the check again.' <<<"$ACCEPTANCE_FLAT" \
+  && grep -qF 'A failed run backs no `pass`.' <<<"$ACCEPTANCE_FLAT"; then
+  check "P12a one observed acceptance run backs every criterion it asserts, each recorded on its own, until the tree changes" PASS
+else
+  check "P12a one observed acceptance run backs every criterion it asserts, each recorded on its own, until the tree changes" FAIL
+fi
 . "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 unit_check "P11 the run-resource helper's unit file passes" "$RESOURCES_UNIT"
 unit_check_done "P11z every unit file the registry gives this suite was graded"

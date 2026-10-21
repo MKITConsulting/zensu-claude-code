@@ -14,8 +14,8 @@ doctor 92025
 gauntlet-loop 31693
 ghost-scan 27945
 plan-review 32855
-self-review 33032
-verify-feature 39856
+self-review 32999
+verify-feature 39855
 ALLOW
 )"
 

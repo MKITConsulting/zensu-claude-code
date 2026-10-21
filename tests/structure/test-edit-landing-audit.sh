@@ -15,6 +15,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$PLUGIN_DIR/tests/structure/lib-skill-text.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
+SCOPE_UNIT="$PLUGIN_DIR/tests/structure/edit-landing-scope-v1.test.js"
 SKILL_TDD="$(skill_text_file "$PLUGIN_DIR/skills/tdd")"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh"
 
@@ -64,6 +66,7 @@ run_audit() { bash "$LIB" "$@" 2>&1; }
 echo "== Library exists and validates its input =="
 [ -f "$LIB" ]
 check "L1 hooks/lib/zensu-edit-landing.sh exists" "$(verdict $?)"
+unit_check "ES1 the persistent audit-scope unit file passes" "$SCOPE_UNIT"
 run_audit --log "$WORK/nope.log" >/dev/null 2>&1
 [ $? -eq 2 ]
 check "L2 a missing run log is a usage error (exit 2), not a silent pass" "$(verdict $?)"
@@ -238,10 +241,11 @@ printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT — git rev-parse --
 check "G2a the fault line names the git command, its exit status and git's own refusal" "$(verdict $?)"
 ! printf '%s\n' "$GF_OUT" | grep -qE '^(EDIT LANDED|EDIT NOT LANDED|PENDING PREDICATE|UNVERIFIED|EDIT LANDING AUDIT —)'
 check "G2b no claim verdict and no tally line reach the output, not even the bare WIRED one" "$(verdict $?)"
-[ ! -e "$GF_RECEIPT" ]
-check "G2c no receipt stands for the run: the earlier clean receipt was removed" "$(verdict $?)"
-printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'the earlier receipt at '
-check "G2d the fault line names the receipt it removed" "$(verdict $?)"
+{ [ -f "$GF_RECEIPT" ] && grep -qF '"clean":false' "$GF_RECEIPT" && grep -qF '"auditFailure":"The latest audit did not complete because git failed' "$GF_RECEIPT" \
+  && grep -qF '"auditScope":{' "$GF_RECEIPT"; }
+check "G2c no clean receipt stands for the run: the earlier one is marked nonclean and keeps its audit scope" "$(verdict $?)"
+printf '%s\n' "$GF_OUT" | grep -F 'EDIT LANDING AUDIT FAULT' | grep -qF 'was marked nonclean and keeps its audit scope for the retry'
+check "G2d the fault line names the receipt it marked nonclean" "$(verdict $?)"
 GF_X_OUT="$(foreign_owner_excepted bash "$LIB" --log "$GF/run.log" --project "$GF" --session "$GF_KEY" 2>&1)"; GF_X_RC=$?
 { [ "$GF_X_RC" -eq 1 ] && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDED — S1: a.txt' \
   && printf '%s' "$GF_X_OUT" | grep -qF 'EDIT LANDING AUDIT — claims=2' && [ -f "$GF_RECEIPT" ]; }
@@ -1518,7 +1522,38 @@ OUT_DS_C="$(LC_ALL=C bash "$LIB" --log "$MR/dash.log" --project "$MR/anchor" --r
 printf '%s' "$OUT_DS_C" | grep -qF 'claims=5 '
 check "X33f the dash spellings match the same way under LC_ALL=C" "$(verdict $?)"
 
+echo "== The missing-session refusal binds this host's Session Control record =="
+SB="$WORK/session-bound"
+new_repo "$SB"
+printf '.zensu/\n' > "$SB/.gitignore"
+printf 'v1\n' > "$SB/a.txt"
+G "$SB" add -A >/dev/null 2>&1; G "$SB" commit -qm base >/dev/null 2>&1
+printf 'v2\n' > "$SB/a.txt"
+SB_SID="edit-landing-bind-$$"
+( export CLAUDE_PROJECT_DIR="$SB"
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SB_SID" ) >/dev/null 2>&1
+SB_DATA="$SB/.session-control-test/plugin-data"
+SB_ROOT="$(cd "$SB" && pwd -P)"
+SB_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "$SB_SID")"
+CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" CLAUDE_PROJECT_DIR="$SB" \
+  bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin >/dev/null 2>&1
+SB_OTHER="$WORK/session-other"
+mkdir -p "$SB_OTHER/.zensu/logs"
+printf 'S1 IMPL completed — files: a.txt\n' > "$SB_OTHER/.zensu/logs/run.log"
+SB_OUT="$(CLAUDE_CODE_SESSION_ID="$SB_SID" CLAUDE_PLUGIN_DATA="$SB_DATA" \
+  bash "$LIB" --log "$SB_OTHER/.zensu/logs/run.log" --project "$SB_OTHER" 2>&1)"; SB_RC=$?
+{ [ "$SB_RC" -eq 2 ] \
+  && printf '%s' "$SB_OUT" | grep -qF 'AUDIT SESSION REQUIRED — an active workflow requires the explicit --session operand' \
+  && printf '%s' "$SB_OUT" | grep -qF -- "--project $SB_ROOT --session $SB_KEY" \
+  && ! printf '%s' "$SB_OUT" | grep -qF 'EDIT LANDING AUDIT —'; }
+check "ES2 a chain armed in this host's Session Control record refuses a session-less audit of another project and names the bound root (rc=$SB_RC)" "$(verdict $?)"
+SB_CTRL="$(env -u CLAUDE_PLUGIN_DATA CLAUDE_CODE_SESSION_ID="$SB_SID" \
+  bash "$LIB" --log "$SB_OTHER/.zensu/logs/run.log" --project "$SB_OTHER" 2>&1)"; SB_CTRL_RC=$?
+{ [ "$SB_CTRL_RC" -ne 2 ] && printf '%s' "$SB_CTRL" | grep -qF 'STANDALONE AUDIT'; }
+check "ES2-control without the plugin data the gate looks only at the audited project, which holds no chain (rc=$SB_CTRL_RC)" "$(verdict $?)"
+
 rm -f "$SKILL_TDD" "$TDD_SKILL"
 echo "----"
+unit_check_done "ESz every unit file the registry gives this suite was graded"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]

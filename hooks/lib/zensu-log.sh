@@ -175,6 +175,16 @@ _zensu_evr_node() {
     node -e 'require(process.env.ZENSU_EVR_LIB).main([process.env.ZENSU_EVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_EVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
 }
 
+_zensu_review_gate_reset() {
+  local verb="${1:-}" session="${2:-}" consequence="${3:-}"
+  if node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js" reset \
+      --root "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" --session "$session" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "zensu-log.sh ${verb}: REVIEW GATE RESET UNAVAILABLE — ${consequence}" >&2
+  return 0
+}
+
 _zensu_full_suite_ticket_matches() {
   local current
   current="$(tdd_claimed_review_ticket "$(tdd_state_file "${1:-}" 2>/dev/null)" 2>/dev/null)" || return 1
@@ -324,6 +334,87 @@ _zensu_acceptance_gate() {
   [ "$rc" -eq 0 ] && return 0
   [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
   echo "zensu-log.sh --chain-done: the chain stays open; resolve the ACCEPTANCE refusal above, then run --chain-done again." >&2
+  return 1
+}
+
+_ZENSU_INVENTORY_LOG=""
+_zensu_receipt_claims_nothing() {
+  local receipt="$1" root="$2" lib native_lib native_receipt native_root claims log_rel inventory count inv_rc=0
+  local landing="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh"
+  local bounded="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
+  lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/edit-landing-receipt-v1.js"
+  native_lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
+  native_receipt="$(_tdd_native_path "$receipt" 2>/dev/null || printf '%s' "$receipt")"
+  native_root="$(_tdd_native_path "$root" 2>/dev/null || printf '%s' "$root")"
+  claims="$(ZENSU_ELR_LIB="$native_lib" ZENSU_ELR_RECEIPT="$native_receipt" \
+    node -e 'process.exitCode = require(process.env.ZENSU_ELR_LIB).main(["receipt-claims"])' 2>/dev/null)" || return 1
+  [ "$claims" = "0" ] || return 1
+  log_rel="$(ZENSU_ELR_LIB="$native_lib" ZENSU_ELR_RECEIPT="$native_receipt" ZENSU_ELR_PROJECT_ROOT="$native_root" \
+    node -e 'process.exitCode = require(process.env.ZENSU_ELR_LIB).main(["receipt-log"])' 2>/dev/null)" || return 1
+  [ -n "$log_rel" ] || return 1
+  if ! command -v zensu_run_bounded >/dev/null 2>&1 && [ -f "$bounded" ] && [ ! -L "$bounded" ] && [ -r "$bounded" ]; then
+    . "$bounded" 2>/dev/null || true
+  fi
+  if command -v zensu_run_bounded >/dev/null 2>&1; then
+    inventory="$(zensu_run_bounded bash "$landing" --inventory --log "$root/$log_rel" --project "$root" 2>/dev/null)" || inv_rc=$?
+  else
+    echo "zensu-log.sh --chain-done: CLAIM INVENTORY UNBOUNDED — the shared watchdog ladder ($bounded) could not be loaded, so the claim inventory ran with no deadline." >&2
+    inventory="$(bash "$landing" --inventory --log "$root/$log_rel" --project "$root" 2>/dev/null)" || inv_rc=$?
+  fi
+  count="$(printf '%s\n' "$inventory" | sed -n 's/^claimed-files=//p' | head -1)"
+  [ "$inv_rc" -ne 0 ] || [ "$count" != "0" ] || return 0
+  case "$count" in
+    (''|*[!0-9]*) ;;
+    (*) [ "$count" -eq 0 ] || return 1 ;;
+  esac
+  _ZENSU_INVENTORY_LOG="$root/$log_rel"
+  return 2
+}
+
+_zensu_terminal_edit_landing_gate() {
+  local session="$1" receipt changes state lines rc=0 claims_rc=0
+  command -v tdd_edit_landing_receipt >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  receipt="$(tdd_edit_landing_receipt "$session" 2>/dev/null)" || receipt=""
+  if [ -z "$receipt" ]; then
+    echo "zensu-log.sh --chain-done: EDIT LANDING — this session's edit-landing receipt path cannot be resolved, so the chain stays open." >&2
+    return 1
+  fi
+  changes="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+  case "$changes" in
+    (0|unknown)
+      if [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+        return 0
+      fi
+      _zensu_receipt_claims_nothing "$receipt" "$CLAUDE_PROJECT_DIR" || claims_rc=$?
+      [ "$claims_rc" -ne 0 ] || return 0
+      ;;
+  esac
+  if [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ]; then
+    tdd_record_bypass "$session" ZENSU_EDIT_LANDING_GATE >/dev/null 2>&1 || true
+    return 0
+  fi
+  state="$(tdd_state_file "$session" 2>/dev/null)" || state=""
+  if [ -n "$state" ] && tdd_bypass_recorded "$state" ZENSU_EDIT_LANDING_GATE; then
+    return 0
+  fi
+  if [ "$claims_rc" -eq 2 ]; then
+    printf 'zensu-log.sh --chain-done: EDIT LANDING — this session'"'"'s edit-landing receipt records no claims, but the claim inventory over its run log did not complete, so a claim logged after that audit cannot be ruled out; the chain stays open. Run: bash %q --inventory --log %q --project %q to see the cause, resolve it, then run --chain-done again.\n' \
+      "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" "$_ZENSU_INVENTORY_LOG" "$CLAUDE_PROJECT_DIR" >&2
+    return 1
+  fi
+  if [ "${changes:-}" = "unavailable" ] && [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+    echo "zensu-log.sh --chain-done: EDIT LANDING — this session has no edit-landing receipt, and git could not list this worktree's changes against HEAD, so whether the chain changed files cannot be checked; the chain stays open. Run git diff --name-only HEAD in the project root to see the git error and resolve it, then run the edit-landing audit and --chain-done again." >&2
+    return 1
+  fi
+  lines="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh" --check-receipt \
+    --project "$CLAUDE_PROJECT_DIR" --session "$session" 2>&1 >/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    [ -z "$lines" ] || printf '%s\n' "$lines" >&2
+    return 0
+  fi
+  [ -n "$lines" ] && printf '%s\n' "$lines" >&2
+  echo "zensu-log.sh --chain-done: the chain stays open; re-run the edit-landing audit named above with current predicate proofs, then run --chain-done again." >&2
   return 1
 }
 
@@ -1482,6 +1573,8 @@ case "${1:-}" in
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi
           zensu_external_review_wait_reset "$session_val"
+          _zensu_review_gate_reset "--tdd-begin" "$session_val" \
+            "the previous generation's review packets and reviewer records could not be removed; this chain's review rounds still compare against packets created after this point."
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
@@ -2338,8 +2431,10 @@ case "${1:-}" in
             echo "zensu-log.sh --review-rearm: Autopilot binding was supplied for a standalone chain" >&2
             exit 2
           fi
-          tdd_rearm_review "$session_val" "$claimed_ticket_val"
-          exit $?
+          tdd_rearm_review "$session_val" "$claimed_ticket_val" || exit $?
+          _zensu_review_gate_reset "--review-rearm" "$session_val" \
+            "the review packets and reviewer records of the rounds before this rearm could not be removed; a restarted round's consume review may then be refused for a reviewer run that predates its packet."
+          exit 0
         fi
         [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
           echo "zensu-log.sh --review-rearm: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
@@ -2365,6 +2460,8 @@ case "${1:-}" in
           echo "zensu-log.sh --review-rearm: composite outer/inner rearm rejected stale or corrupt state" >&2
           exit 1
         }
+        _zensu_review_gate_reset "--review-rearm" "$session_val" \
+          "the review packets and reviewer records of the rounds before this rearm could not be removed; a restarted round's consume review may then be refused for a reviewer run that predates its packet."
         exit 0
         ;;
       --chain-done)
@@ -2394,6 +2491,7 @@ case "${1:-}" in
                 (''|0|unknown)
                   if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
                     chain_gate_rc=0
+                    _zensu_terminal_edit_landing_gate "$session_val" || chain_gate_rc=1
                     _zensu_full_suite_gate "$session_val" || chain_gate_rc=1
                     _zensu_acceptance_gate "$session_val" || chain_gate_rc=1
                     [ "$chain_gate_rc" -eq 0 ] || exit 1
@@ -2406,6 +2504,8 @@ case "${1:-}" in
                   zensu_state_failure_hint --chain-done "$session_val"
                   exit "$chain_done_rc"
                 }
+                _zensu_review_gate_reset "--chain-done" "$session_val" \
+                  "the review packets and reviewer records of the reopened review could not be removed; its restarted rounds' consume reviews may then be refused for a reviewer run that predates their packet."
                 if [ "$chain_change_count" = "unavailable" ]; then
                   echo "zensu-log.sh --chain-done: refusing to close a chain that no reviewer saw. Its self-review ticket was minted for an unqualified --code-review-done mark, and that mark stands only while the worktree reports no changed file — but git could not list this worktree's changes against HEAD, so that cannot be checked. The chain's review is reopened: run git diff --name-only HEAD in the project root to see the git error and resolve it, then resume the /zensu:tdd Phase 6 review sequence, issue a ticket with --review-ticket and spawn zensu:code-reviewer." >&2
                 else
@@ -2417,6 +2517,9 @@ case "${1:-}" in
               [ -n "$_avg_lines" ] && printf '%s\n' "$_avg_lines" >&2
             else
               chain_change_count="$(_zensu_unqualified_change_count "$CLAUDE_PROJECT_DIR")"
+              case "$chain_change_count" in
+                (0|unknown) _zensu_terminal_edit_landing_gate "$session_val" || exit 1 ;;
+              esac
               tdd_mark_unclaimed_review "$session_val" chainDone "$chain_change_count" || {
                 chain_done_rc=$?
                 [ "$chain_done_rc" -eq 4 ] || {
@@ -2433,6 +2536,7 @@ case "${1:-}" in
             fi
           fi
           zensu_render_terminus_bypasses "$session_val"
+          echo "CHAIN CLOSED — render the final report only; this generation runs no further self-review, fix round or terminus."
           exit 0
         fi
         [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
@@ -2463,6 +2567,7 @@ case "${1:-}" in
           pass)
             if [ "$claimed_ticket_seen" != "true" ] \
               || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+              _zensu_terminal_edit_landing_gate "$session_val" || exit 1
               _zensu_full_suite_gate "$session_val" || exit 1
               _zensu_acceptance_gate "$session_val" 1 "$(_zensu_autopilot_validate_option "$done_run")" || exit 1
             fi

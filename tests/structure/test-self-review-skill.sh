@@ -83,8 +83,8 @@ for bucket in "Positive" "Improvements" "Risks"; do
 done
 
 # Terminal-stage mechanics.
-grep -qF 'git -C "$TOP" -c core.quotePath=false diff --name-only HEAD' "$SKILL_MD" && grep -qF 'git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard' "$SKILL_MD" \
-  && check "V7 lists session changes via the repo-root-anchored diff + untracked union" PASS || check "V7 anchored changed-file union" FAIL
+grep -qF 'node "$ROOT/hooks/lib/review-packet-v1.js" changes --root "$PROJECT_ROOT" --baseline "${BASELINE_SHA:-}"' "$SKILL_MD" && grep -qF 'Never re-spell a subset' "$SKILL_MD" \
+  && check "V7 lists session changes through the canonical change set of review-packet-v1.js" PASS || check "V7 canonical change set" FAIL
 grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed latch" PASS || check "V8 selfReviewFixed latch" FAIL
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL
@@ -124,6 +124,15 @@ if printf '%s\n' "$PHASE4_REGION" | grep -qF 'The pass-2 invocation MUST carry t
   check "V10c self-review pass 2 explicitly preserves ticket and Autopilot binding" PASS
 else
   check "V10c pass-2 generation evidence" FAIL
+fi
+GUARD_REGION="$(sed -n '/^## Generation guard/,/^An Autopilot-bound handoff MUST/p' "$SKILL_MD")"
+if printf '%s\n' "$GUARD_REGION" | grep -qF 'hooks/lib/zensu-log.sh" --chain-status' \
+  && printf '%s\n' "$GUARD_REGION" | grep -qF '`"shape":"chain-closed"`' \
+  && printf '%s\n' "$GUARD_REGION" | grep -qF 'run nothing else' \
+  && node -e 'process.exit(require(process.argv[1]).INERT_SHAPES.includes("chain-closed") ? 0 : 1)' "$PLUGIN_DIR/hooks/lib/chain-recovery-v1.js"; then
+  check "V10d a closed generation is report-only before any binding check or phase" PASS
+else
+  check "V10d closed-generation fast path in the generation guard" FAIL
 fi
 grep -qF '## Self-Review Summary' "$SKILL_MD" && check "V11 renders ## Self-Review Summary report section" PASS || check "V11 Self-Review Summary section" FAIL
 

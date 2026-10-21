@@ -78,8 +78,10 @@ config key or attestation moves.
   string and a block list; any other YAML form of `arguments` goes unread.
 - **Indented code blocks are not code to the probe**, because list continuation lines in these
   skills are indented the same way.
-- **Three probes never see the project config.** The tdd, plan-review and pr-team-review probes run
+- **Two probes never see the project config.** The plan-review and pr-team-review probes run
   without `CLAUDE_PROJECT_DIR`, which the Bash tool does not carry, so a project-level
-  `hooks.reviewJudge` or `hooks.findingVerification` is ignored. The self-review probe sets it from
-  `$TOP`. That predates this change and is not fixed by it.
+  `hooks.reviewJudge` or `hooks.findingVerification` is ignored there. The tdd probes in
+  `skills/tdd/references/review-chain.md` set it from `{project_root}` and the self-review probe
+  from `$TOP`, because the post-review hook's consume gate reads the project config and a probe
+  that ignored it ran a review the gate then judged by another configuration.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not checked.

@@ -9265,6 +9265,26 @@ esac
 # Restore the ordinary foreign claim for the cases below.
 printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
 
+# P1tp13 — a receipt that carries its audit scope outgrows the 4 KiB note bound; the row read
+# it through the note reader and called it unreadable until it took the receipt module's own
+# bounded reader. The fixture must be larger than that bound, or the check proves nothing.
+node -e '
+  const dirty = Array.from({ length: 200 }, (_, index) => `src/generated/file-${index}.ts`);
+  process.stdout.write(JSON.stringify({ schema: "edit-landing-v2", session: "x", log: ".zensu/logs/run.log", claims: 1,
+    clean: false, auditScope: { schema: "edit-landing-scope-v1", dirty } }) + "\n");
+' > "$TOPO_RECEIPT"
+TOPO_BIG_BYTES="$(wc -c < "$TOPO_RECEIPT" | tr -d ' ')"
+TOPO_OUT_BIG="$(run_report_topo)"
+if [ "$TOPO_BIG_BYTES" -le 4096 ]; then
+  check "P1tp13 the scoped receipt fixture is only $TOPO_BIG_BYTES bytes, so it proves nothing" FAIL
+else
+  case "$TOPO_OUT_BIG" in
+    *"⚠️  topology: this session's audited run log claims edits under"*"$TOPO_SIB_ABS"*)
+      check "P1tp13 a receipt whose audit scope outgrows 4 KiB is still read, and its foreign claim is named" PASS ;;
+    *) check "P1tp13 a scoped receipt larger than 4 KiB (got: $(printf '%s' "$TOPO_OUT_BIG" | grep -F 'topology:'))" FAIL ;;
+  esac
+fi
+
 # P1tp9/P1tp10 — the two ways the inventory channel used to read as a CLEAN
 # topology. `pluginDir()` resolves to this renderer's own tree, so if the row is
 # executing at all the feature IS installed: an ENOENT on the inventory command

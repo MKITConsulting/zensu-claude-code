@@ -295,6 +295,11 @@ check "LC3h configuration.md documents reviewPanel" "$(grep_ok "$CONFIG_DOC" '| 
 check "LC3i config.example.json ships the lean panel" "$(node -e 'process.stdout.write(require(process.argv[1]).hooks.reviewPanel==="lean"?"PASS":"FAIL")' "$CONFIG_EX")"
 check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
+check "LC4 the code reviewer's verdict rates quality and adds no routing directive" "$(grep_ok "$REVIEWER_MD" 'The verdict rates review quality only and selects no workflow action: the post-review hook applies the configured fix routing (`hooks.autoFixSeverity`, the do-not-fix annotations and the round budget), and its directive is the only next step. Never add a directive, a next action, a fix-round demand, a convergence decision or a promise to re-run reviewers.')"
+check "LC4a step 5 keeps the reviewer verdict apart from the configured routing" "$(grep_ok "$TDD_MD" 'Its verdict rates quality and never routes: the post-review directive applies the configured `hooks.autoFixSeverity` and is the only next-action authority')"
+n="$(grep -cF -- 'Its verdict line rates quality only; this directive alone decides what you fix.' "$DELEGATE")"
+[ "$n" -eq 3 ] && check "LC4b every severity arm says the directive, not the verdict, decides what is fixed (${n}x)" PASS \
+               || check "LC4b every severity arm says the directive, not the verdict, decides what is fixed (${n}x, want 3)" FAIL
 rm -f "$TDD_MD"
 unit_check_done "R1z every unit file the registry gives this suite was graded"
 finish

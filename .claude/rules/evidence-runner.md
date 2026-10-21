@@ -51,7 +51,17 @@ Never exclude `.zensu` with a `:(exclude)` pathspec on `add`: once `.zensu/` is
 gitignored, which is the normal case, `add` fails with "paths are ignored" and every
 tree came out unverified. Git runs with the `_tc_git` scrub list and `LC_ALL=C`, because
 its reason text reaches committed run-log lines. Over 20000 untracked files or 512 MiB,
-or on a git failure, the record carries no tree and names the reason.
+or on a git failure, the record carries no tree and names the reason. The two size limits also
+answer `limited: true`, so the edit-landing receipt and the review packet can seal such a tree as
+unverified with its reason (`TREE UNVERIFIED — …`) while a git failure stays a fault there. `computeTree` takes an
+options argument whose `workflowStateAtEveryDepth: true` excludes every `.zensu` directory at any
+depth (the `:(exclude,glob)**/.zensu/**` pathspec on the untracked listing and
+`:(glob)**/.zensu/**` on the `git rm --cached`), never through a pathspec on `add`. The
+edit-landing receipt and the review packet pass it, because a project root nested below the
+repository top writes its run log and its state into `<project>/.zensu/`, which the top-level
+`.zensu` exclusion does not reach, so every log append and packet write would otherwise make the
+receipt and the packet stale. The evidence runner, the external-review import and the acceptance
+gate keep the default, which excludes only the top-level `.zensu`.
 
 **The copy keeps the real index's atime and mtime.** git trusts a stat match only when the
 entry's mtime is older than the index file's own mtime (the racy-git check), so a copy with a

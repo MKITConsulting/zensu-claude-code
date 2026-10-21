@@ -399,6 +399,13 @@ function pluginDir() {
   if (env.ZENSU_DOCTOR_PLUGIN_DIR) return env.ZENSU_DOCTOR_PLUGIN_DIR;
   return path.resolve(__dirname, '..', '..');
 }
+function editLandingReceiptModule() {
+  try {
+    return require(path.join(pluginDir(), 'hooks', 'lib', 'edit-landing-receipt-v1.js'));
+  } catch (e) {
+    return null;
+  }
+}
 function configFiles() {
   if (env.ZENSU_CONFIG) return [env.ZENSU_CONFIG];
   var files = [];
@@ -5425,7 +5432,7 @@ function claimInventory(logFile, projectRoot) {
 // A receipt exists in this project's state directory, whoever wrote it. Used
 // ONLY to decide whether the no-key arm below has anything to disclose: it
 // cannot tell whose session the receipt belongs to, and the row says so.
-function someClaimReceiptPresent(projectRoot) {
+function someClaimReceiptPresent(projectRoot, nameRe) {
   var dir = path.join(projectRoot, '.zensu', 'state');
   var names;
   // The same preamble `auditedRunLog` applies to the neighbouring directory,
@@ -5444,7 +5451,7 @@ function someClaimReceiptPresent(projectRoot) {
   } catch (e) { return false; }
   try { names = fs.readdirSync(dir); } catch (e) { return false; }
   for (var i = 0; i < names.length; i += 1) {
-    if (/^edit-landing-.+\.json$/.test(names[i])) return true;
+    if (nameRe.test(names[i])) return true;
   }
   return false;
 }
@@ -5453,6 +5460,14 @@ function someClaimReceiptPresent(projectRoot) {
 // not reach one — never silence, which for a diagnostic reads as a clean topology. The
 // branch comments below carry the reasoning for the two arms that were silent once.
 function claimTopologyRow(projectRoot, ownKey) {
+  var receiptLib = editLandingReceiptModule();
+  if (!receiptLib || typeof receiptLib.receiptFile !== 'function' || typeof receiptLib.readBoundedJson !== 'function'
+      || !(receiptLib.RECEIPT_NAME_RE instanceof RegExp)) {
+    if (env.ZENSU_DOCTOR_PLUGIN_DIR) return;
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — the edit-landing '
+      + 'receipt reader could not be loaded from this plugin tree. That is a missing check, not an all-clear.');
+    return;
+  }
   // `currentSessionKey()` is empty for every binding verdict except `bound`, so
   // this branch is an orphaned project root, an incompatible runtime or a pruned
   // installation. Returning silently there made the row indistinguishable from a
@@ -5469,7 +5484,7 @@ function claimTopologyRow(projectRoot, ownKey) {
   // every non-`bound` session in every project, including ones that never ran
   // an audit.
   if (ownKey === '') {
-    if (someClaimReceiptPresent(projectRoot)) {
+    if (someClaimReceiptPresent(projectRoot, receiptLib.RECEIPT_NAME_RE)) {
       line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — no bound '
         + 'session key is available, so the receipt could not be located. An edit-landing receipt '
         + 'IS present in ' + foldPath(path.join(projectRoot, '.zensu', 'state'))
@@ -5479,10 +5494,15 @@ function claimTopologyRow(projectRoot, ownKey) {
     }
     return;
   }
-  var receipt = path.join(projectRoot, '.zensu', 'state', 'edit-landing-' + ownKey + '.json');
-  var parsed = readNoteJson(receipt);
-  if (parsed === NOTE_MISSING) return;
-  if (!parsed || typeof parsed !== 'object') {
+  var loaded;
+  try {
+    loaded = receiptLib.readBoundedJson(receiptLib.receiptFile(projectRoot, ownKey), receiptLib.MAX_RECEIPT_BYTES);
+  } catch (e) {
+    loaded = { invalid: 'unreadable' };
+  }
+  if (loaded.absent) return;
+  var parsed = loaded.value;
+  if (loaded.invalid || !parsed || typeof parsed !== 'object') {
     line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — its '
       + 'edit-landing receipt is present but could not be read (it is not a plain file of '
       + 'bounded size, or it does not parse). That is a missing check, not an all-clear.');
