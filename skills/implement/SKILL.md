@@ -22,7 +22,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A feature ID to implement. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — a `KEY-N` id or a slug fails with `invalid feature id (status 400)`. Resolve it first (see Step 1).
 

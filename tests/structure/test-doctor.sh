@@ -37,6 +37,10 @@ for f in "$HELPER" "$REPORT" "$SKILL_MD" "$PLUGIN_JSON" "$README"; do
 done
 check "P0 all target files exist" PASS
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "P0zv the zensu-cli version unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-version-v1.test.js"
+unit_check_done "P0zw every unit file the registry gives this suite was graded"
+
 # P2 — structure/doc pins (no node needed)
 if head -1 "$HELPER" | grep -qF '#!/bin/bash'; then
   check "P2a helper carries a bash shebang" PASS
@@ -10474,6 +10478,104 @@ case "$OUT_WK37" in
     check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code" PASS ;;
   *) check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code (got: $(printf '%s' "$OUT_WK37" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
+ZC_BIN="$SBOX/zc-bin"
+ZC_LOG="$SBOX/zc.log"
+mkdir -p "$ZC_BIN"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'case "$1" in' '  --version) printf "%s\n" "$ZC_VERSION_LINE" ;;' '  auth) printf "%s\n" "$ZC_AUTH_LINE"; exit "${ZC_AUTH_RC:-0}" ;;' 'esac' > "$ZC_BIN/zensu"
+chmod +x "$ZC_BIN/zensu"
+ZC_FACTS="$(DOCTOR_ZC_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js" node -e 'const m = require(process.env.DOCTOR_ZC_MODULE); process.stdout.write([m.MIN_VERSION, m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell].join("\n"))')"
+ZC_FLOOR="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
+ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
+ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
+ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
+ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 5p)"
+zc_wrap() {
+  env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE -u ZENSU_NO_UPDATE_CHECK \
+    PATH="$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$1" ZC_AUTH_LINE="$2" ZC_AUTH_RC="${3:-0}" \
+    ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    bash "$HELPER" 2>/dev/null
+}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P8z1-P8z8 the wrapper reads a shell-script zensu for its auth state and version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    rm -f "$ZC_LOG"
+    ZC_OUT="$(zc_wrap 'zensu 0.9.0 (commit abc1234, built 2026-10-13T15:09:40Z)' 'Not logged in. Run `zensu auth login`.')"
+    case "$ZC_OUT" in *'⚠️  zensu CLI: installed but not authenticated — run `zensu auth login`'*) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" PASS ;; *) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" FAIL ;; esac
+    case "$ZC_OUT" in *"⚠️  zensu CLI version: 0.9.0 is older than $ZC_FLOOR, the oldest release this plugin supports"*"\`$ZC_BREW_UP\`"*"\`$ZC_SCRIPT\`"*"\`$ZC_PS\`"*) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" PASS ;; *) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" FAIL ;; esac
+    ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
+    case "$ZC_CALLS" in '1|--version 1|auth status ') check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off" PASS ;; *) check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off (got: $ZC_CALLS)" FAIL ;; esac
+    ZC_OK="$(zc_wrap "zensu $ZC_FLOOR (commit abc1234, built now)" 'Logged in to https://api.zensu.dev as dev@example.com')"
+    case "$ZC_OK" in *'✅  zensu CLI: installed and authenticated'*) check "P8z4 a logged-in auth status reads as authenticated" PASS ;; *) check "P8z4 a logged-in auth status reads as authenticated" FAIL ;; esac
+    case "$ZC_OK" in *"✅  zensu CLI version: $ZC_FLOOR — at or above $ZC_FLOOR"*) check "P8z5 a CLI at the floor renders OK" PASS ;; *) check "P8z5 a CLI at the floor renders OK" FAIL ;; esac
+    case "$(zc_wrap "zensu $ZC_FLOOR (commit abc1234, built now)" 'boom' 1)" in *'⚠️  zensu CLI: installed but not authenticated'*) check "P8z6 an auth status that exits non-zero reads as not authenticated" PASS ;; *) check "P8z6 an auth status that exits non-zero reads as not authenticated" FAIL ;; esac
+    case "$(zc_wrap 'zensu dev (commit none, built unknown)' 'Logged in to https://api.zensu.dev as dev@example.com')" in *"⚠️  zensu CLI version: a development build, which names no release — the $ZC_FLOOR floor was not checked"*) check "P8z7 a development build warns that the floor was not checked" PASS ;; *) check "P8z7 a development build warns that the floor was not checked" FAIL ;; esac
+    rm -f "$ZC_LOG"
+    ZC_INJECTED="$(env PATH="$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" bash "$HELPER" 2>/dev/null)"
+    if [ ! -s "$ZC_LOG" ] && ! printf '%s' "$ZC_INJECTED" | grep -qF 'zensu CLI version'; then
+      check "P8z8 an injected ZDOC_ZENSU runs no zensu and renders no version row" PASS
+    else
+      check "P8z8 an injected ZDOC_ZENSU runs no zensu and renders no version row (got: $(cat "$ZC_LOG" 2>/dev/null))" FAIL
+    fi
+    case "$(zc_wrap 'zensu version unknown' 'Logged in to https://api.zensu.dev as dev@example.com')" in *"⚠️  zensu CLI version: \`zensu --version\` printed no version this report could read — the $ZC_FLOOR floor was not checked"*) check "P8z11 a version output without a version line renders the unread row" PASS ;; *) check "P8z11 a version output without a version line renders the unread row" FAIL ;; esac
+    ZC_CWD="$SBOX/zc-cwd"
+    mkdir -p "$ZC_CWD/zc-rel"
+    cp "$ZC_BIN/zensu" "$ZC_CWD/zc-rel/zensu"
+    rm -f "$ZC_LOG"
+    ZC_REL_OUT="$(cd "$ZC_CWD" && env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE -u ZENSU_NO_UPDATE_CHECK \
+      PATH="zc-rel:$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="zensu $ZC_FLOOR (commit abc1234, built now)" ZC_AUTH_LINE='Logged in to https://api.zensu.dev as dev@example.com' ZC_AUTH_RC=0 \
+      ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" bash "$HELPER" 2>/dev/null)"
+    if [ ! -s "$ZC_LOG" ] && printf '%s' "$ZC_REL_OUT" | grep -qF '⚠️  zensu CLI: PATH reaches zensu through an empty or relative entry' \
+      && printf '%s' "$ZC_REL_OUT" | grep -qF 'neither its login nor its version was checked' && ! printf '%s' "$ZC_REL_OUT" | grep -qF 'zensu CLI version'; then
+      check "P8z12 a zensu that PATH reaches through a relative entry is never run, and the row says neither login nor version was checked" PASS
+    else
+      check "P8z12 a zensu that PATH reaches through a relative entry is never run, and the row says neither login nor version was checked (got calls: $(cat "$ZC_LOG" 2>/dev/null))" FAIL
+    fi
+    ZC_NODE_ONLY="$SBOX/zc-node-only"
+    mkdir -p "$ZC_NODE_ONLY"
+    ln -sf "$(command -v node)" "$ZC_NODE_ONLY/node"
+    ZC_FN_OUT="$(zensu() { printf '%s\n' 'Logged in to https://api.zensu.dev as dev@example.com'; }; export -f zensu
+      env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE \
+      PATH="$ZC_NODE_ONLY:/usr/bin:/bin" ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" "$BASH" "$HELPER" 2>/dev/null)"
+    case "$ZC_FN_OUT" in *"⚠️  zensu CLI version: the shell found zensu but the version probe found none on PATH"*) check "P8z13 a shell function named zensu with no binary on PATH renders the absent row" PASS ;; *) check "P8z13 a shell function named zensu with no binary on PATH renders the absent row" FAIL ;; esac
+    ;;
+esac
+case "$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")" in *"⚠️  zensu CLI: not found on PATH — feature tracking commands will be unavailable; install zensu-cli $ZC_FLOOR or later with \`$ZC_BREW\`, \`$ZC_SCRIPT\` or, on Windows, \`$ZC_PS\`"*) check "P8z9 the not-found row names the floor and the three install commands from the module" PASS ;; *) check "P8z9 the not-found row names the floor and the three install commands from the module" FAIL ;; esac
+if ! grep -qF 'NOTHING here writes' "$HELPER" && grep -qF 'hosts.json' "$HELPER" && grep -qF 'ZENSU_NO_UPDATE_CHECK=1 zensu auth status' "$HELPER"; then
+  check "P8z10 the helper no longer claims that nothing writes, names hosts.json, and runs auth status with the update check off" PASS
+else
+  check "P8z10 the helper no longer claims that nothing writes, names hosts.json, and runs auth status with the update check off" FAIL
+fi
+ZC_COPY="$SBOX/zc-plug-copy"
+mkdir -p "$ZC_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$ZC_COPY/hooks/lib"
+rm -f "$ZC_COPY/hooks/lib/zensu-cli-version-v1.js"
+zc_copied_report() {
+  env ZDOC_ZENSU="$1" ZDOC_ZENSU_VERSION_STATE="$2" ZDOC_ZENSU_VERSION="$3" ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$ZC_COPY/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+if zc_copied_report absent '' '' | grep -qF "the install commands could not be read, because the plugin's module hooks/lib/zensu-cli-version-v1.js did not load — reinstall the plugin" \
+  && zc_copied_report authed ok "$ZC_FLOOR" | grep -qF "⚠️  zensu CLI version: not judged — the plugin's version module hooks/lib/zensu-cli-version-v1.js could not be loaded; reinstall the plugin"; then
+  check "P8z14 without the version module the not-found row and the version row say the module did not load" PASS
+else
+  check "P8z14 without the version module the not-found row and the version row say the module did not load" FAIL
+fi
+ZC_REF="$PLUGIN_DIR/skills/doctor/references/zensu-cli.md"
+ZC_ROW_MISSING=""
+for ZC_ROW in 'zensu CLI: installed and authenticated' 'zensu CLI: installed but not authenticated' 'zensu CLI: PATH reaches zensu through an empty or relative entry' 'zensu CLI: not found on PATH' \
+  'zensu CLI version: a development build' 'zensu CLI version: the shell found zensu but the version probe found none on PATH' \
+  'zensu CLI version: `zensu --version` printed no version this report could read' 'zensu CLI version: PATH reaches zensu through an empty or relative entry' 'zensu CLI version: not judged' \
+  'is older than' 'at or above'; do
+  grep -qF -- "$ZC_ROW" "$REPORT" && grep -qF -- "$ZC_ROW" "$ZC_REF" || ZC_ROW_MISSING="$ZC_ROW_MISSING [$ZC_ROW]"
+done
+if [ -z "$ZC_ROW_MISSING" ] && grep -qF 'read `references/zensu-cli.md`' "$SKILL_MD"; then
+  check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names" PASS
+else
+  check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names (missing:$ZC_ROW_MISSING)" FAIL
+fi
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"

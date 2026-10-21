@@ -295,6 +295,11 @@
       "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
     },
     {
+      "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 8},
+      "runs": [{ "driver": "tests/structure/test-doctor.sh" }],
+      "summary": "The zensu-cli version floor: the version line, the floor comparison, and a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does."
+    },
+    {
       "path": "tests/structure/zensu-doctor-invocation.test.js", "registered": 27,
       "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
       "summary": "The /zensu:doctor invocation allowlist."
