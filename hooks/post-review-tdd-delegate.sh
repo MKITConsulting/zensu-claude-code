@@ -64,7 +64,9 @@ case "$SUBAGENT_TYPE" in
       });
     ' <<<"$INPUT" 2>/dev/null)"
     GATE_SESSION="$(zensu_resolve_session_id "$GATE_SESSION")" || exit 0
-    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js" record \
+    GATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+    GATE_LIB="$(bash "$GATE_LIB/zensu-host-path.sh" "$GATE_LIB" 2>/dev/null || printf '%s' "$GATE_LIB")"
+    node "$GATE_LIB/review-gate-v1.js" record \
       --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$GATE_SESSION" <<<"$INPUT" 2>/dev/null
     exit 0
     ;;
@@ -291,13 +293,15 @@ if zensu_hook_enabled reviewPacketGate; then
   zensu_hook_enabled reviewJudge && GATE_JUDGE=on
   GATE_PANEL="$(zensu_review_panel)"
   GATE_RC=0
-  GATE_VERDICT="$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js" check \
+  GATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+  GATE_LIB="$(bash "$GATE_LIB/zensu-host-path.sh" "$GATE_LIB" 2>/dev/null || printf '%s' "$GATE_LIB")"
+  GATE_VERDICT="$(node "$GATE_LIB/review-gate-v1.js" check \
     --root "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" --session "$SESSION_ID" \
     --judge "$GATE_JUDGE" --panel "$GATE_PANEL" --ticket "$REVIEW_TICKET" <<<"$INPUT" 2>&1)" || GATE_RC=$?
   if [ "$GATE_RC" -ne 0 ]; then
     [ "$GATE_RC" -ne 3 ] || exit 0
     if [ "$GATE_RC" -ne 1 ]; then
-      GATE_SHOW="$(printf 'node %q show --root %q --session %q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-packet-v1.js" \
+      GATE_SHOW="$(printf 'node %q show --root %q --session %q' "$GATE_LIB/review-packet-v1.js" \
         "${ZENSU_PROJECT_ROOT:-$PROJECT_ROOT}" "$SESSION_ID")"
       GATE_VERDICT="REVIEW INCOMPLETE — the review gate could not check this consume review (${GATE_VERDICT#review-gate-v1: }). The review ticket was NOT consumed and the review chain did not advance. Next: resolve the cause, then spawn zensu:code-reviewer again with the same two header lines and the block ${GATE_SHOW} prints."
     fi

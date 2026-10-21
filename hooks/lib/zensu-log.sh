@@ -177,7 +177,9 @@ _zensu_evr_node() {
 
 _zensu_review_gate_reset() {
   local verb="${1:-}" session="${2:-}" consequence="${3:-}"
-  if node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js" reset \
+  local lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-gate-v1.js"
+  lib="$(_tdd_native_path "$lib" 2>/dev/null || printf '%s' "$lib")"
+  if node "$lib" reset \
       --root "${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}" --session "$session" >/dev/null 2>&1; then
     return 0
   fi
