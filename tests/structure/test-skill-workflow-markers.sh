@@ -5,6 +5,8 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" 2>/dev/null || true
 source "${CLAUDE_PLUGIN_ROOT}/tests/structure/lib-skill-text.sh" 2>/dev/null || true
+CLI_NOUN_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).NOUN_ALIASES).map((pair) => pair.join("=")).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
+CLI_VERB_ALIASES="$(node -e 'process.stdout.write(Object.entries(require(process.argv[1]).VERB_ALIASES).flatMap(([noun, aliases]) => Object.entries(aliases).map(([alias, verb]) => noun + ":" + alias + "=" + verb)).join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-words-v1.js" 2>/dev/null)"
 
 # Flags a skill that calls a Zensu mutation outside the --workflow-begin/-end
 # markers. Detects two forms: a `zensu <noun> <verb>` CLI invocation that maps to
@@ -19,15 +21,16 @@ skill_cli_mutations() {
 }
 
 skill_cli_tools() {
-  local f="$1" line rest noun verb third
+  local f="$1" line rest noun verb third pair
   for line in $(grep -oE 'zensu +[a-z][a-z-]+ +[a-z][a-z-]+( +[a-z][a-z-]+)?' "$f" | sed -E 's/ +/=/g'); do
     rest="${line#zensu=}"; noun="${rest%%=*}"; rest="${rest#*=}"; verb="${rest%%=*}"; third=""
     case "$rest" in *=*) third="${rest#*=}" ;; esac
-    case "$noun" in                                                # normalize CLI noun aliases (mirror the gate's ALIAS map)
-      product) noun=products ;; feature) noun=features ;; subfeature) noun=subfeatures ;;
-      roadmaps) noun=roadmap ;; tier) noun=tiers ;; sec) noun=security ;;
-      journey) noun=journeys ;; mock) noun=mocks ;; docs) noun=doc ;; kb) noun=knowledge ;; wiki-pages) noun=wiki ;;
-    esac
+    for pair in $CLI_NOUN_ALIASES; do
+      if [ "${pair%%=*}" = "$noun" ]; then noun="${pair#*=}"; break; fi
+    done
+    for pair in $CLI_VERB_ALIASES; do
+      if [ "${pair%%=*}" = "$noun:$verb" ]; then verb="${pair#*=}"; break; fi
+    done
     zensu_cli_to_tool "$noun" "$verb" "$third"
   done
 }
@@ -71,6 +74,25 @@ if zensu_is_zensu_tool "mcpGate" 2>/dev/null || zensu_is_mutation_tool "hooks" 2
   check "T-nontool non-tool token not classified as tool/mutation" FAIL
 else
   check "T-nontool non-tool token not classified as tool/mutation" PASS
+fi
+
+case " $CLI_NOUN_ALIASES " in
+  *" sec=security "*) check "T-alias the CLI noun aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-alias the CLI noun aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_NOUN_ALIASES')" FAIL ;;
+esac
+case " $CLI_VERB_ALIASES " in
+  *" work:repos=repositories "*) check "T-verbalias the CLI verb aliases come from hooks/lib/zensu-cli-words-v1.js" PASS ;;
+  *) check "T-verbalias the CLI verb aliases could not be read from hooks/lib/zensu-cli-words-v1.js (got '$CLI_VERB_ALIASES')" FAIL ;;
+esac
+VA_FX="$(mktemp -t skillverb-XXXXXX)"
+printf 'Run `zensu work pol set p1` here.\n' > "$VA_FX"
+VA_PLANTED="$(CLI_VERB_ALIASES="work:pol=policy" skill_cli_tools "$VA_FX")"
+VA_BARE="$(CLI_VERB_ALIASES="" skill_cli_tools "$VA_FX")"
+rm -f "$VA_FX"
+if [ "$VA_PLANTED" = "set_automation_policy" ] && [ -z "$VA_BARE" ]; then
+  check "T-verbalias-apply a verb alias in the module's table reaches the map in its canonical spelling" PASS
+else
+  check "T-verbalias-apply verb alias normalization (planted='$VA_PLANTED' bare='$VA_BARE')" FAIL
 fi
 
 FXD="$(mktemp -d -t skillmark-XXXXXX)"

@@ -464,7 +464,8 @@ inside WSL, or install Git for Windows so that Claude Code runs the hooks throug
 Git Bash, whichever terminal you start `claude` from. Native Windows without Git
 Bash is not supported. With Git Bash, Claude Code may run shell commands through
 its PowerShell tool; Zensu's shell-command gates judge those too and refuse a
-PowerShell command they cannot judge, naming the Bash tool. To keep Claude on
+PowerShell command they cannot judge, naming the Bash tool, or the reinstall
+when the plugin installation is incomplete. To keep Claude on
 the Bash tool, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` in the environment that
 starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the

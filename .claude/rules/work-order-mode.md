@@ -1,6 +1,7 @@
 ---
 paths:
   - "hooks/lib/work-order-v1.js"
+  - "hooks/lib/zensu-cli-words-v1.js"
   - "hooks/lib/zensu-work-order.sh"
   - "hooks/lib/zensu-work-order-hook.sh"
   - "hooks/pre-work-order-gate.sh"
@@ -75,12 +76,26 @@ validation messages and adds more, while Go's transport error has one shape. A c
 `error:` line and stays transient, with its first stderr line quoted. The error table lives in
 `skills/work/references/protocol.md`.
 
-**The gate reads a `zensu` call's words as cobra v1.10.2 does.** `zensuCommandWords` mirrors the
-subcommand search of zensu-cli v0.10.0, the same rule as the CLI write-gate's parser
-(`.claude/rules/cli-command-classification.md`): no group defines a flag, so every `--flag` and
-every two-character `-f` without `=` takes the next word, an empty word is skipped and `--` ends
-the search. `WORK_VERB_ALIASES` maps the CLI's one `zensu work` alias, `repos`, to `repositories`.
-`HUMAN_PLAN_VERBS` lists every plan verb whose tool `ZENSU_HUMAN_DECISION_TOOL_NAMES` holds, and
+**The gate reads a `zensu` call's words through `hooks/lib/zensu-cli-words-v1.js`**, the one owner
+of the rule it shares with the CLI write-gate (`.claude/rules/cli-command-classification.md`).
+`commandWords` is the subcommand search of cobra v1.10.2 as zensu-cli v0.10.0 uses it: no group
+defines a flag, so every `--flag` and every two-character `-f` without `=` takes the next word, an
+empty word is skipped and `--` ends the search. `commandNoun` gives the canonical noun, and
+`commandVerb` maps the CLI's one `zensu work` alias, `repos`, to `repositories`, and `isGroup` says
+whether the verb is itself a group, so a denial names its third word (`zensu work policy set`). The
+gate requires the module lazily inside its `zensu` branch, after the `--api-url` check, and when
+the module cannot load or lacks any one of those four functions it denies, with the `reader`
+finding, every call that holds a word that could name a subcommand. `couldNameSubcommand` decides
+that by the word's own shape, as the CLI write-gate does: a word counts unless it is empty, a flag,
+a redirection, a bare number or a path (it holds a `/`). So the target of a redirection and its
+descriptor number, which `shellCommands` keeps among the words, do not count when they hold a `/`
+or are a bare number. A call without such a word, such as `command -v zensu >/dev/null 2>&1`, a
+bare `zensu` or `zensu --version 2>&1`, cannot reach a subcommand and passes, while a flag's value
+such as `--title t` still counts. A top-level require is the wrong place:
+`work-order-v1.js` would then fail to load, and a work-order hook whose `node` run fails prints
+nothing, so every rule of the gate would fall silent. The unit case `the Bash analysis denies every
+zensu call that can name a subcommand when the word reader cannot load` drives a copy of the module
+without its sibling, and one copy per function beside a sibling that lacks it. `HUMAN_PLAN_VERBS` lists every plan verb whose tool `ZENSU_HUMAN_DECISION_TOOL_NAMES` holds, and
 `test-skill-workflow-markers.sh` C6 holds the two equal, as C5 does for `SESSION_WORK_VERBS`.
 
 **No SessionStart text tells a token session to run `zensu auth login`.** While
