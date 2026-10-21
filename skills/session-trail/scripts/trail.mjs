@@ -12,7 +12,7 @@ import {
   removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
-import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
+import { recordText, runIdOf, familyWalk, decideLinked, continuationsStartedBy, presetMap, unreadReportsOf, isoOf, chipProposal, CHIP_WHY, LINKED_START_CAP, LINKED_KIND_LABELS, LINKED_WHY, LINKED_CWD_WHY, REPORT_TEXT_MAX } from './linked-sessions-v1.mjs';
 
 // Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
 // hooks/lib/claude-path-v1.js as the ONE MSYS drive rule in this repo, and a
@@ -233,7 +233,7 @@ const READ_ONLY_GIT = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c'
 
 function git(cwd, args) {
   try {
-    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', [...READ_ONLY_GIT, ...args], { cwd, env: gitChildEnvironment(), encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
@@ -5144,8 +5144,9 @@ function repositoryVerdicts(r, here) {
   const o = own.record && typeof own.record === 'object' ? own.record : {};
   const old = firstRepositoryOf([r.wt, r.cwd, o.originCwd, o.cwd]);
   return {
+    oldRepositoryMeasured: old !== null,
     sameRepository: here && old ? sameRepositoryOf(repositoryOf(here), old) === true : null,
-    checkout: (folder) => sameRepositoryOf(repositoryOf(folder), old),
+    checkout: (folder) => (old ? sameRepositoryOf(repositoryOf(folder), old) : null),
   };
 }
 
@@ -5170,7 +5171,7 @@ function openTaskChips(r, verdicts) {
         useWorktree: typeof c.useWorktree === 'boolean' ? c.useWorktree : null,
         expiresAt: Number.isFinite(c.expiresAt) ? c.expiresAt : null,
       };
-      return { ...chip, ...chipProposal(chip, verdicts) };
+      return { ...chip, ...chipProposal(c, verdicts) };
     });
   return { measured: true, reason: null, sameRepository, chips };
 }
@@ -5216,13 +5217,13 @@ function startedContinuations() {
 const LINKED_NONE = Object.freeze({ cap: LINKED_START_CAP, total: 0, truncated: false, archived: 0, detached: 0, unreadable: 0, ledgerTruncated: null, ledgerError: null, schemaNewer: null, sessions: [] });
 
 function linkedSessions(r, verdicts) {
-  const { sameRepository } = verdicts;
+  const { sameRepository, oldRepositoryMeasured } = verdicts;
   const own = desktopRecordOf(r.sessionId);
-  if (own.reason) return { measured: false, reason: own.reason, ...LINKED_NONE, sameRepository };
+  if (own.reason) return { measured: false, reason: own.reason, ...LINKED_NONE, sameRepository, oldRepositoryMeasured };
   const family = familyRecords(path.dirname(own.file));
-  if (!family.listed) return { measured: false, reason: 'its Claude Desktop folder could not be listed', ...LINKED_NONE, sameRepository };
+  if (!family.listed) return { measured: false, reason: 'its Claude Desktop folder could not be listed', ...LINKED_NONE, sameRepository, oldRepositoryMeasured };
   const walk = familyWalk(own.record, family.records);
-  if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable, sameRepository };
+  if (!walk) return { measured: false, reason: 'its Claude Desktop record names no desktop session id', ...LINKED_NONE, unreadable: family.unreadable, sameRepository, oldRepositoryMeasured };
   const led = walk.open.some((node) => typeof node.record.cliSessionId === 'string') ? ledgerRead() : null;
   const decided = decideLinked(walk, {
     edges: led ? led.edges : [],
@@ -5238,6 +5239,7 @@ function linkedSessions(r, verdicts) {
     reason: null,
     cap: LINKED_START_CAP,
     ...decided,
+    oldRepositoryMeasured,
     unreadable: family.unreadable,
     ledgerTruncated: led ? led.truncated : null, ledgerError: led ? led.directoryError : null, schemaNewer: led ? led.schemaNewer : null,
   };
@@ -5297,20 +5299,13 @@ function openChipLines(state, when) {
 
 const LINKED_DECISION_LABELS = Object.freeze({ start: 'start', 'if-named': 'if named', later: 'later', stays: 'stays' });
 
-function linkedCheckoutLine(entry) {
+function linkedCheckoutLine(entry, oldRepositoryMeasured) {
   if (entry.sameCheckout === true) return 'the same repository as the session taken over';
   if (entry.sameCheckout === false) return 'another repository than the session taken over';
-  if (entry.folder) return 'unknown, because the repository of its folder could not be measured';
-  return 'unknown, because its record names no usable folder';
-}
-
-function linkedPlaceLine(entry, sameRepository) {
-  if (!entry.start) return null;
-  if (!entry.start.cwd) return entry.folder ? '- it starts without `cwd`, because the takeover that printed this brief ran in the old session\'s repository; pass the folder below as `cwd` when this session works outside that repository' : null;
-  if (entry.sameCheckout !== true) return null;
-  return sameRepository === false
-    ? '- it starts in its own folder, because the takeover that printed this brief ran outside the old session\'s repository'
-    : '- it starts in its own folder, because this brief did not measure the repository this session works in';
+  if (!entry.folder) return 'unknown, because its record names no usable folder';
+  return oldRepositoryMeasured === false
+    ? 'unknown, because the repository of the session taken over could not be measured'
+    : 'unknown, because the repository of its folder could not be measured';
 }
 
 function linkedSessionLines(state, when) {
@@ -5339,9 +5334,8 @@ function linkedSessionLines(state, when) {
     if (createdAt) L.push(`- created: ${createdAt}`);
     if (entry.sessionId) L.push(`- Claude Code session: \`${briefPath(entry.sessionId)}\``);
     if (entry.sessionId && entry.start) L.push(`- takeover command: \`/zensu:session-trail takeover ${briefPath(entry.sessionId)} --all\``);
-    L.push(`- checkout: ${linkedCheckoutLine(entry)}`);
-    const place = linkedPlaceLine(entry, state.sameRepository);
-    if (place) L.push(place);
+    L.push(`- checkout: ${linkedCheckoutLine(entry, state.oldRepositoryMeasured)}`);
+    if (entry.cwdWhy) L.push(`- ${LINKED_CWD_WHY[entry.cwdWhy]}`);
     if (entry.sharedCheckout) L.push('- it shared its parent\'s checkout there, and here it gets a worktree of its own');
     if (entry.throughArchived) L.push('- reached through an archived linked session, so it attaches to this session');
     if (entry.preset) {
@@ -6096,6 +6090,17 @@ function cmdAdopt(opts) {
   // ONE exported `whereAdviceLines` rather than a second hand-copy of those two lines.
   print('');
   for (const line of whereLines) print(line);
+}
+
+function gitChildEnvironment() {
+  let gitEnvironment = null;
+  try {
+    ({ gitEnvironment } = requireFromHere('../../../hooks/lib/worktree-keep-v1.js'));
+  } catch { gitEnvironment = null; }
+  if (typeof gitEnvironment !== 'function') {
+    fail('hooks/lib/worktree-keep-v1.js could not be loaded, so git cannot run with its repository variables cleared — the plugin tree is incomplete');
+  }
+  return gitEnvironment(process.env);
 }
 
 function worktreeKeepModules() {

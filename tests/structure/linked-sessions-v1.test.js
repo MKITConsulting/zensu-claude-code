@@ -181,6 +181,35 @@ test('the checkout is the repository verdict, never the path, and a start omits 
   assert.equal(decide([child(1)], {}).sessions[0].folder, REPO);
 });
 
+test('the module names why a start carries or leaves out cwd, and the start follows that reason', () => {
+  const verdicts = new Map([[REPO, true], ['/work/sibling-wt', true], ['/work/other', false]]);
+  const checkout = (folder) => (verdicts.has(folder) ? verdicts.get(folder) : null);
+  const records = [
+    child(1),
+    child(2, { originCwd: '/work/sibling-wt' }),
+    child(3, { originCwd: '/work/other' }),
+    child(4, { originCwd: `${REPO}/gone` }),
+    child(5, { originCwd: 'relative/path' }),
+    child(6, {}, { btw: true }),
+  ];
+  const expected = {
+    true: ['same-repository', 'same-repository', null, null, null, null],
+    false: ['receiver-elsewhere', 'receiver-elsewhere', null, null, null, null],
+    null: ['receiver-unmeasured', 'receiver-unmeasured', null, null, null, null],
+  };
+  for (const sameRepository of [true, false, null]) {
+    const state = decide(records, { checkout, sameRepository });
+    assert.deepEqual(state.sessions.map((entry) => entry.cwdWhy), expected[String(sameRepository)], String(sameRepository));
+    for (const entry of state.sessions.filter((e) => e.start)) {
+      assert.equal('cwd' in entry.start, entry.folder !== null && entry.cwdWhy !== 'same-repository', `${entry.run} ${sameRepository}`);
+    }
+  }
+  assert.deepEqual(Object.keys(mod.LINKED_CWD_WHY), ['same-repository', 'receiver-elsewhere', 'receiver-unmeasured']);
+  assert.ok(mod.LINKED_CWD_WHY['same-repository'].startsWith('it starts without `cwd`'));
+  assert.ok(mod.LINKED_CWD_WHY['receiver-elsewhere'].includes('ran outside the old session\'s repository'));
+  assert.ok(mod.LINKED_CWD_WHY['receiver-unmeasured'].includes('did not measure the repository this session works in'));
+});
+
 test('a linked session without a usable folder waits for the user to name it, and the verdict never sees its value', () => {
   const seen = [];
   const checkout = (folder) => {
@@ -386,14 +415,18 @@ test('a chip folder counts as the checkout taken over by its repository verdict 
   for (const cwd of ['/work/main/nested-repo', '/work/other']) {
     assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout }), { proposal: null, why: 'folder' }, cwd);
   }
-  for (const cwd of ['/work/main/gone', 'relative/path', '/work/main\nx', '  ']) {
-    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout }), { proposal: null, why: 'folder-unmeasured' }, cwd);
+  for (const cwd of ['/work/main/gone', 'relative/path', '  ']) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout }), { proposal: null, why: 'folder-unmeasured' }, JSON.stringify(cwd));
+  }
+  for (const cwd of ['/work/main\nx', `/work/main${ESC}`, `/work/main${C1}`, `/work/main${LS}`, ESC]) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, { checkout, sameRepository: false }), { proposal: null, why: 'folder-unsafe' }, JSON.stringify(cwd));
   }
   assert.deepEqual(seen, ['/work/main', '/work/main/pkg', '/work/wt-sibling', '/work/main/nested-repo', '/work/other', '/work/main/gone']);
   assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }), { proposal: null, why: 'folder-unmeasured' });
   assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }, { checkout: () => 'yes' }), { proposal: null, why: 'folder-unmeasured' });
   assert.ok(mod.CHIP_WHY.folder.includes('another repository'));
   assert.ok(mod.CHIP_WHY['folder-unmeasured'].includes('could not be measured'));
+  assert.ok(mod.CHIP_WHY['folder-unsafe'].includes('control characters') && mod.CHIP_WHY['folder-unsafe'].includes('no start may pass as `cwd`'));
 });
 
 test('a chip whose prompt is empty once cleaned is listed rather than proposed', () => {

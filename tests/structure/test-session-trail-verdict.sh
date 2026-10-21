@@ -2607,7 +2607,7 @@ mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
   cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -5624,7 +5624,7 @@ else
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
     cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
-    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
   }
@@ -7373,7 +7373,7 @@ git -C "$CH7_OLD" init -q >/dev/null 2>&1
 git -C "$CH7_OTHER" init -q >/dev/null 2>&1
 HOME="$FAKE" node -e '
 const fs = require("node:fs"), path = require("node:path");
-const [home, store, sid, wt] = process.argv.slice(1);
+const [home, store, sid, wt, other] = process.argv.slice(1);
 const iso = new Date(Date.now() - 3600000).toISOString();
 const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
 fs.mkdirSync(dir, { recursive: true });
@@ -7383,28 +7383,51 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
 ].join("\n") + "\n");
 fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({
   sessionId: `local_${sid}`, cliSessionId: sid, isArchived: false, title: "repository fixture",
-  backgroundTaskSuggestions: [{ id: "task_00000011", title: "Repository chip", tldr: "Carried within one repository.", prompt: "Repository prompt.", createdAt: 1 }],
+  backgroundTaskSuggestions: [
+    { id: "task_00000011", title: "Repository chip", tldr: "Carried within one repository.", prompt: "Repository prompt.", createdAt: 1 },
+    { id: "task_00000014", title: "Old folder chip", tldr: "It names the old repository.", prompt: "Old folder prompt.", cwd: wt, createdAt: 2 },
+    { id: "task_00000015", title: "Foreign folder chip", tldr: "It names another repository.", prompt: "Foreign folder prompt.", cwd: other, createdAt: 3 },
+    { id: "task_00000016", title: "Escaped folder chip", tldr: "Its folder carries an escape.", prompt: "Escaped folder prompt.", cwd: wt + String.fromCharCode(27), createdAt: 4 },
+  ],
 }));
-' "$FAKE" "$CH_STORE" "$CH7_SID" "$CH7_OLD" 2>/dev/null
+' "$FAKE" "$CH_STORE" "$CH7_SID" "$CH7_OLD" "$CH7_OTHER" 2>/dev/null
 ch7_parse() { node -e '
 let s = "";
 process.stdin.on("data", (d) => { s += d; }).on("end", () => {
-  try { const o = JSON.parse(s).openChips; const c = o.chips[0] || {}; process.stdout.write(`${o.sameRepository}:${c.why}:${c.proposal ? "propose" : "list"}`); } catch { process.stdout.write("unparseable"); }
+  try { const o = JSON.parse(s).openChips; process.stdout.write(`${o.sameRepository}:${o.chips.map((c) => `${c.why}/${c.proposal ? "propose" : "list"}`).join(",")}`); } catch { process.stdout.write("unparseable"); }
 });
 '; }
+ch7_shown() { node -e '
+const wt = process.argv[1];
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const c = JSON.parse(s).openChips.chips.find((chip) => chip.title === "Escaped folder chip") || {}; process.stdout.write(c.cwd === wt ? "cleaned" : `other:${JSON.stringify(c.cwd)}`); } catch { process.stdout.write("unparseable"); }
+});
+' "$1"; }
 CH7_OTHER_GOT="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
 CH7_SAME_GOT="$( (cd "$CH7_OLD" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
 CH7_NOGIT_GOT="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record --no-git --json 2>/dev/null) | ch7_parse)"
 CH7_PLAIN_GOT="$( (cd "$CH7_PLAIN" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
 CH7_MD="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record 2>/dev/null) )"
 CH_BAD=""
-[ "$CH7_OTHER_GOT" = "false:repository:list" ] || CH_BAD="$CH_BAD other=$CH7_OTHER_GOT"
-[ "$CH7_SAME_GOT" = "true:null:propose" ] || CH_BAD="$CH_BAD same=$CH7_SAME_GOT"
-[ "$CH7_NOGIT_GOT" = "false:repository:list" ] || CH_BAD="$CH_BAD no-git=$CH7_NOGIT_GOT"
-[ "$CH7_PLAIN_GOT" = "false:repository:list" ] || CH_BAD="$CH_BAD plain-directory=$CH7_PLAIN_GOT"
+[ "$CH7_OTHER_GOT" = "false:repository/list,repository/list,folder/list,folder-unsafe/list" ] || CH_BAD="$CH_BAD other=$CH7_OTHER_GOT"
+[ "$CH7_SAME_GOT" = "true:null/propose,null/propose,folder/list,folder-unsafe/list" ] || CH_BAD="$CH_BAD same=$CH7_SAME_GOT"
+CH7_SHOWN="$( (cd "$CH7_OLD" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_shown "$CH7_OLD")"
+[ "$CH7_SHOWN" = "cleaned" ] || CH_BAD="$CH_BAD escaped-folder-shown=$CH7_SHOWN"
+[ "$CH7_NOGIT_GOT" = "$CH7_OTHER_GOT" ] || CH_BAD="$CH_BAD no-git=$CH7_NOGIT_GOT"
+[ "$CH7_PLAIN_GOT" = "$CH7_OTHER_GOT" ] || CH_BAD="$CH_BAD plain-directory=$CH7_PLAIN_GOT"
 printf '%s\n' "$CH7_MD" | grep -qxF '### Chip 1: list' || CH_BAD="$CH_BAD list-heading-absent"
 printf '%s\n' "$CH7_MD" | grep -qxF -- "- why: the takeover that printed this brief ran outside the repository of the session taken over, and a proposal starts in this session's folder" || CH_BAD="$CH_BAD why-absent"
-[ -z "$CH_BAD" ] && check "CH7 a takeover run from another repository or from a folder in none lists every chip, under --no-git too, while one run from the old session's repository proposes it" PASS || check "CH7 repository check:$CH_BAD" FAIL
+printf '%s\n' "$CH7_MD" | grep -qxF -- '- why: it names a folder whose recorded spelling carries control characters, so any folder shown here is a cleaned spelling that no start may pass as `cwd`, and a proposal cannot carry a folder' || CH_BAD="$CH_BAD unsafe-why-absent"
+[ -z "$CH_BAD" ] && check "CH7 a takeover run from another repository or from a folder in none lists every chip, under --no-git too, with why repository only where its folder would let it be proposed, while one run from the old session's repository proposes those, and a chip whose record folder carries a control character is listed folder-unsafe from both with its cleaned spelling shown" PASS || check "CH7 repository check:$CH_BAD" FAIL
+
+CH13_DIR="$( (cd "$CH7_OTHER" && GIT_DIR="$CH7_OLD/.git" trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+CH13_COMMON="$( (cd "$CH7_OTHER" && GIT_COMMON_DIR="$CH7_OLD/.git" trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+if [ "$CH13_DIR" = "$CH7_OTHER_GOT" ] && [ "$CH13_COMMON" = "$CH7_OTHER_GOT" ]; then
+  check "CH13 an exported GIT_DIR or GIT_COMMON_DIR changes no chip verdict, because every git call clears the variables that override the folder it runs in" PASS
+else
+  check "CH13 an exported git variable changed a verdict: GIT_DIR=$CH13_DIR GIT_COMMON_DIR=$CH13_COMMON plain=$CH7_OTHER_GOT" FAIL
+fi
 
 CH8_SID=cdcdcdcd-0000-0000-0000-0000000000c5
 CH9_SID=cdcdcdcd-0000-0000-0000-0000000000c6
@@ -7462,6 +7485,49 @@ case "$CH8_GOT" in *":true:none:"*) ;; *) CH_BAD="$CH_BAD fallback-checkout=$CH8
 case "$CH8_GOT" in
   *":folder-unmeasured:true:none:null:other") check "CH10 a folder that opens with two separators is never measured, so its chip is listed and its linked session carries it as cwd" PASS ;;
   *) check "CH10 doubled separator: $CH8_GOT" FAIL ;;
+esac
+
+ch_old_measured() { node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { process.stdout.write(String(JSON.parse(s).linkedSessions.oldRepositoryMeasured)); } catch { process.stdout.write("unparseable"); }
+});
+'; }
+CH8_MD="$( (cd "$CH_TAKER" && trailrun takeover "$CH8_SID" --all --no-record 2>/dev/null) )"
+CH9_MD="$( (cd "$CH_TAKER" && trailrun takeover "$CH9_SID" --all --no-record 2>/dev/null) )"
+CH_FOLDER_SIDE='- checkout: unknown, because the repository of its folder could not be measured'
+CH_OLD_SIDE='- checkout: unknown, because the repository of the session taken over could not be measured'
+CH_BAD=""
+[ "$( (cd "$CH_TAKER" && trailrun takeover "$CH8_SID" --all --no-record --json 2>/dev/null) | ch_old_measured)" = "true" ] || CH_BAD="$CH_BAD fallback-flag"
+[ "$( (cd "$CH_TAKER" && trailrun takeover "$CH9_SID" --all --no-record --json 2>/dev/null) | ch_old_measured)" = "false" ] || CH_BAD="$CH_BAD bare-flag"
+[ "$(printf '%s\n' "$CH8_MD" | grep -cxF -- "$CH_FOLDER_SIDE")" = "1" ] || CH_BAD="$CH_BAD folder-side=$(printf '%s\n' "$CH8_MD" | grep -cxF -- "$CH_FOLDER_SIDE")"
+printf '%s\n' "$CH8_MD" | grep -qxF -- "$CH_OLD_SIDE" && CH_BAD="$CH_BAD old-side-with-a-measured-repository"
+[ "$(printf '%s\n' "$CH9_MD" | grep -cxF -- "$CH_OLD_SIDE")" = "2" ] || CH_BAD="$CH_BAD old-side=$(printf '%s\n' "$CH9_MD" | grep -cxF -- "$CH_OLD_SIDE")"
+printf '%s\n' "$CH9_MD" | grep -qxF -- "$CH_FOLDER_SIDE" && CH_BAD="$CH_BAD folder-side-without-a-measured-repository"
+[ -z "$CH_BAD" ] && check "CH11 an unmeasured checkout names the side that could not be measured: the linked session's folder when the old repository was measured, the old session's repository when it was not" PASS || check "CH11 unmeasured checkout lines:$CH_BAD" FAIL
+
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) skip "CH12 a git wrapper on PATH does not stand in for node's git on this host" ;;
+  *)
+    CH_GIT_DIR="$FAKE/git-wrap"
+    CH_GIT_LOG="$FAKE/git-wrap.log"
+    CH_REAL_GIT="$(command -v git)"
+    mkdir -p "$CH_GIT_DIR"
+    printf '#!/bin/sh\npwd -P >> "%s"\nexec "%s" "$@"\n' "$CH_GIT_LOG" "$CH_REAL_GIT" > "$CH_GIT_DIR/git"
+    chmod +x "$CH_GIT_DIR/git"
+    CH_SIBLING_REAL="$(cd "$CH_SIBLING" && pwd -P)"
+    : > "$CH_GIT_LOG"
+    (cd "$CH_TAKER" && PATH="$CH_GIT_DIR:$PATH" trailrun takeover "$CH9_SID" --all --no-record --json >/dev/null 2>&1)
+    CH9_SIBLING_RUNS="$(grep -cxF -- "$CH_SIBLING_REAL" "$CH_GIT_LOG" || true)"
+    : > "$CH_GIT_LOG"
+    (cd "$CH_TAKER" && PATH="$CH_GIT_DIR:$PATH" trailrun takeover "$CH8_SID" --all --no-record --json >/dev/null 2>&1)
+    CH8_SIBLING_RUNS="$(grep -cxF -- "$CH_SIBLING_REAL" "$CH_GIT_LOG" || true)"
+    if [ "$CH9_SIBLING_RUNS" = "0" ] && [ "${CH8_SIBLING_RUNS:-0}" -ge 1 ]; then
+      check "CH12 with the old session's repository unmeasured, takeover runs no git in a chip or linked-session folder, while the control with a measured repository does" PASS
+    else
+      check "CH12 git runs in the sibling folder: unmeasured=$CH9_SIBLING_RUNS measured=$CH8_SIBLING_RUNS" FAIL
+    fi
+    ;;
 esac
 
 LS_HOME="$FAKE/ls-home"
@@ -7611,7 +7677,7 @@ printf '%s\n' "$LS_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass i
 printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac' || LS_BAD="$LS_BAD ssh-why-absent"
 [ "$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')" = "2" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')"
 [ "$(printf '%s\n' "$LS_MD" | grep -cxF 'folder:')" = "11" ] || LS_BAD="$LS_BAD folder-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'folder:')"
-[ "$(printf '%s\n' "$LS_MD" | grep -cxF -- "- it starts without \`cwd\`, because the takeover that printed this brief ran in the old session's repository; pass the folder below as \`cwd\` when this session works outside that repository")" = "11" ] || LS_BAD="$LS_BAD reader-condition-lines"
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF -- "- it starts without \`cwd\`, because the takeover that printed this brief ran in the old session's repository; pass its \`folder\` as \`cwd\` when this session works outside that repository")" = "11" ] || LS_BAD="$LS_BAD reader-condition-lines"
 printf '%s\n' "$LS_MD" | grep -qF "such a session lists its \`folder\` instead, which you pass as \`cwd\` when this session works outside that repository" || LS_BAD="$LS_BAD folder-rule-absent"
 printf '%s\n' "$LS_MD" | grep -qF -- '- it starts in its own folder' && LS_BAD="$LS_BAD place-line-in-same-repository"
 case "$LS_MD" in *"$(printf '\033')"*) LS_BAD="$LS_BAD esc-survived" ;; esac

@@ -34,6 +34,12 @@ export const LINKED_WHY = Object.freeze({
   cap: `more than ${LINKED_START_CAP} linked sessions qualify, so it starts only when the user asks for it in a later message`,
 });
 
+export const LINKED_CWD_WHY = Object.freeze({
+  'same-repository': 'it starts without `cwd`, because the takeover that printed this brief ran in the old session\'s repository; pass its `folder` as `cwd` when this session works outside that repository',
+  'receiver-elsewhere': 'it starts in its own folder, because the takeover that printed this brief ran outside the old session\'s repository',
+  'receiver-unmeasured': 'it starts in its own folder, because this brief did not measure the repository this session works in',
+});
+
 export const START_BACKGROUND = 'The session that started this one took over another Claude Code session and continues its work. That session had started linked sessions of its own, and this is one of them, started again so that Claude links it to the session that now continues the work. Continue only this linked session\'s own work, never the work of the session that started you.';
 
 export const CHIP_BACKGROUND = 'An earlier Claude Code session proposed this task as a task chip. The session that started this one took that session\'s work over and carried the chip over unchanged, so the task below is the earlier session\'s own brief. Check the files and the state it names before you act on it, because the work may have moved on since it was written.';
@@ -41,6 +47,7 @@ export const CHIP_BACKGROUND = 'An earlier Claude Code session proposed this tas
 export const CHIP_WHY = Object.freeze({
   folder: 'it names a folder in another repository than the session taken over, and a proposal cannot carry a folder',
   'folder-unmeasured': 'it names a folder whose repository could not be measured against that of the session taken over, and a proposal cannot carry a folder',
+  'folder-unsafe': 'it names a folder whose recorded spelling carries control characters, so any folder shown here is a cleaned spelling that no start may pass as `cwd`, and a proposal cannot carry a folder',
   prompt: 'its prompt is empty once control characters are removed, and a proposal needs one',
   repository: 'the takeover that printed this brief ran outside the repository of the session taken over, and a proposal starts in this session\'s folder',
 });
@@ -133,8 +140,9 @@ function proposalParts(text) {
 export function chipProposal(chip, options = {}) {
   const c = chip && typeof chip === 'object' ? chip : {};
   const o = options && typeof options === 'object' ? options : {};
-  const cwd = recordText(c.cwd);
+  const cwd = typeof c.cwd === 'string' ? c.cwd : '';
   if (cwd) {
+    if (UNSAFE_VALUE.test(cwd)) return { proposal: null, why: 'folder-unsafe' };
     const verdict = checkoutOf(o.checkout, folderOf(cwd));
     if (verdict === false) return { proposal: null, why: 'folder' };
     if (verdict !== true) return { proposal: null, why: 'folder-unmeasured' };
@@ -228,7 +236,13 @@ function presetOf(presets, id) {
   return { id, name: hit ? hit.name : null, kind: hit ? hit.kind : null };
 }
 
-function startCall(entry, sameRepository) {
+function cwdWhyOf(entry, sameRepository) {
+  if (!entry.folder || entry.sameCheckout !== true) return null;
+  if (sameRepository === true) return 'same-repository';
+  return sameRepository === false ? 'receiver-elsewhere' : 'receiver-unmeasured';
+}
+
+function startCall(entry, cwdWhy) {
   const title = startTitle(entry.title, entry.name);
   const call = {
     initiation: 'user_asked',
@@ -239,7 +253,7 @@ function startCall(entry, sameRepository) {
     prompt: startPrompt(entry.sessionId, title),
     background: START_BACKGROUND,
   };
-  if (entry.folder && !(entry.sameCheckout === true && sameRepository === true)) call.cwd = entry.folder;
+  if (entry.folder && cwdWhy !== 'same-repository') call.cwd = entry.folder;
   return call;
 }
 
@@ -287,6 +301,7 @@ export function decideLinked(walk, options = {}) {
       decision = 'later';
       why = 'cap';
     }
+    const cwdWhy = decision === 'stays' ? null : cwdWhyOf(entry, sameRepository);
     return {
       run: entry.run,
       sessionId: entry.sessionId,
@@ -303,7 +318,8 @@ export function decideLinked(walk, options = {}) {
       continued,
       decision,
       why,
-      start: decision === 'stays' ? null : startCall(entry, sameRepository),
+      cwdWhy,
+      start: decision === 'stays' ? null : startCall(entry, cwdWhy),
     };
   });
   return {

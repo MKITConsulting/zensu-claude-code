@@ -23,8 +23,8 @@ snapshot it grepped out of the old transcript.
 **The record is the source, never the transcript.** `ccdIndex` and `ccdApp` both remember a
 record's path in `CCD_RECORD_PATHS`, the last match in walk order winning in both, and
 `openTaskChips` reads that file again when a brief is built, through `desktopRecordOf`, whose one
-read also serves the linked sessions (`.claude/rules/session-trail-linked-sessions.md`), so the
-list is the queue at takeover time. It keeps every entry except an `offer`, which is a
+read also serves `repositoryVerdicts` and the linked sessions
+(`.claude/rules/session-trail-linked-sessions.md`), so the list is the queue at takeover time. It keeps every entry except an `offer`, which is a
 side-session offer bound to a live waiter, and a proposal whose `expiresAt` has passed, which
 Claude Desktop resolves as expired at its next sweep. It strips C0, C1 and line-separator
 characters from the text and keeps `context`, `useWorktree` and `expiresAt`. A missing store, a
@@ -66,9 +66,14 @@ the Claude Desktop 2.42304.0 bundle on 2026-10-18 and not driven live:
   `useWorktree` is carried as `use_worktree` otherwise.
 - A chip with a `cwd` is proposed without it only when `options.checkout` answers `true` for
   that folder: the folder lies in the old session's repository. `false` marks it **list** with
-  `why` `folder`; no answer, and a folder that is relative or carries a control character, mark it
-  **list** with `why` `folder-unmeasured`, and `checkout` is never called with such a value. A
-  chip with no prompt left once cleaned is marked **list** with `why` `prompt`.
+  `why` `folder`; no answer, and a relative folder, mark it **list** with `why`
+  `folder-unmeasured`. A folder that carries a control character is marked **list** with `why`
+  `folder-unsafe` before any verdict, because the brief and `--json` show only its cleaned
+  spelling, which is another folder, and the why text says no start may pass that as `cwd`.
+  `checkout` is never called with either kind of value. `openTaskChips` hands `chipProposal` the
+  raw record entry, which cleans every other field itself, so the test reads the record's raw
+  `cwd` and never the shorter path the cleaning leaves. A chip with no prompt left once cleaned is
+  marked **list** with `why` `prompt`.
 - `options.sameRepository` `false` marks every other chip **list** with `why` `repository`,
   because a proposal starts in the proposing session's folder.
 
@@ -88,6 +93,9 @@ sessions (`.claude/rules/session-trail-linked-sessions.md`) share:
   separators: a Windows network path, a `\\?\` or `\\.\` device path, or a POSIX `//` spelling.
   A chip's `cwd` is model-authored, and measuring a network path would make `takeover` reach
   that host and wait on it.
+- With no measurable folder of the old session, `checkout` answers `null` without a `stat` or a
+  git call, so no chip or linked-session folder is measured for a verdict that cannot be reached;
+  `oldRepositoryMeasured` reports which case applies.
 - `checkout(folder)` compares a folder with the old session's repository. `sameRepository`
   compares the folder `takeover` runs in, `process.cwd()`, with it, and `cmdHandoff` passes no
   folder, so a handoff brief measures every chip folder but never its unknown reader. Once the
@@ -152,9 +160,15 @@ old checkout and another repository that are listed with `folder`, a gone folder
 `folder-unmeasured`, the widened fence, the title, background and why blocks of both briefs, the
 repository and never-start sentences, the absence of `spawn_task`, the step order in
 `references/takeover.md`, and in `CH7` the repository check from another repository, also under
-`--no-git`, from a folder in no repository and from the old one. `CH8` takes the old repository
-from the record's `originCwd` once the transcript worktree is gone, `CH9` is its control with no
-folder of the old session left, and `CH10` lists a chip whose folder opens with two separators.
+`--no-git`, from a folder in no repository and from the old one, with chips whose folders lie in
+the old and in another repository and one whose record folder carries an escape, which is listed
+`folder-unsafe` from both with its cleaned spelling shown. `CH8` takes the old repository from the record's `originCwd`
+once the transcript worktree is gone, `CH9` is its control with no folder of the old session
+left, `CH10` lists a chip whose folder opens with two separators, `CH11` pins both unmeasured
+checkout lines, `CH12` proves with a logging git wrapper that `CH9`'s takeover runs no git in
+a chip or linked-session folder while `CH8`'s does, and `CH13` runs `CH7`'s takeover from another
+repository with `GIT_DIR` and with `GIT_COMMON_DIR` exported and requires the verdicts of the run
+without them.
 `tests/structure/linked-sessions-v1.test.js` drives
 `chipProposal` with stub verdicts; its `registered` count in `tests/profiles/unit-files.v1.json`
 is exact.
@@ -172,9 +186,10 @@ is exact.
   session is gone, and in every handoff brief, the model compares the repositories itself, as
   both briefs tell it to.
 - **Every folder the records name is measured where it lies.** `takeover` and `handoff` run
-  `stat` and `git rev-parse --git-common-dir` in the old session's record folders, every chip
-  `cwd` and the `originCwd` of every listed linked session, on the `--no-record` plan pass and
-  under `--no-git` too, as `references/disclosure.md` states. Only a folder that opens with two
+  `stat` and `git rev-parse --git-common-dir` in the old session's folders, the transcript's first
+  and then its desktop record's, until one of them answers, and, once one has, in every chip `cwd`
+  and the `originCwd` of every listed linked session, on the `--no-record` plan pass and under
+  `--no-git` too, as `references/disclosure.md` states. Only a folder that opens with two
   separators is skipped: a mounted network share on POSIX (`/Volumes/…`, an automounted
   `/net/…`) is measured like a local folder, and its `stat` has no timeout of its own before
   git's 8 s.

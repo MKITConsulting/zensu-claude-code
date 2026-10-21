@@ -38,8 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder, and a linked session without a usable folder waits for the user to name it (`why`
   `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
   session that opens a written brief from elsewhere passes it. A folder that opens with two
-  separators, such as a Windows network path, is never measured. `takeover --json` adds
-  `sameRepository` to `linkedSessions`, and `--no-git` no longer skips the repository check of
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
   `takeover`.
 
 ## [0.28.0] - 2026-10-21

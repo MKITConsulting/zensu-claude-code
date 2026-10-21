@@ -2012,7 +2012,16 @@ fi
 # suppress a line, never surface one, so it must report itself rather than widen
 # the filter silently. Fails, never skips, on zero.
 L61_STALE=""
-for alt in 'oneLine' 'flatPath' 'briefPath' 'briefShellArg' 'writeAnchor' 'rel\(' 'path\.' 'gitState' 'gitDiffText' 'findPlanDocs' 'nearestRepoRoot' 'new Set\(' '===' '!==' '\.toLowerCase' 'const r ' 'r\.cwd !== r\.wt'; do
+L61_INNER="${L61_OK#(}"
+L61_INNER="${L61_INNER%)}"
+IFS='|' read -r -a L61_ALTS <<< "$L61_INNER"
+L61_JOINED="$(IFS='|'; printf '(%s)' "${L61_ALTS[*]}")"
+if [ "${#L61_ALTS[@]}" -gt 1 ] && [ "$L61_JOINED" = "$L61_OK" ]; then
+  check "L61d-control the stale-entry list is derived from L61_OK and reproduces it (${#L61_ALTS[@]} entries)" PASS
+else
+  check "L61d-control the stale-entry list does not reproduce L61_OK (${#L61_ALTS[@]} entries), so L61d checks another list" FAIL
+fi
+for alt in "${L61_ALTS[@]}"; do
   if [ "$(grep -cE "$L61_PAT" "$L61_SRC" 2>/dev/null || echo 0)" = "0" ]; then break; fi
   HITS="$(grep -E "$L61_PAT" "$L61_SRC" | grep -cE "$alt" || true)"
   [ "$HITS" = "0" ] && L61_STALE="$L61_STALE $alt"
