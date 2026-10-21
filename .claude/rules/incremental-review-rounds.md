@@ -110,8 +110,10 @@ assignments of `hooks/post-review-tdd-delegate.sh` and ALL THREE severity arms t
 them, which are verbatim-identical by contract (`P3b` in `test-finding-verification.sh` counts
 `step 4c Finding Verification Gate` in exactly three lines, so a one-sided edit there fails in a
 suite named for something else, and `R16` in `test-review-convergence.sh` keeps both
-interpolations out of the convergence clause); the two config keys in `config.example.json`; and
-the operator accounts in `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`
+interpolations out of the convergence clause); the two config keys in `config.example.json`; both
+keys again in `evals/route-short-line-reaction/eval-config.json`, which must switch off every key
+a hook reads (`RS5` in `test-route-short-line-eval.sh`), so the delegate's two reads put them there;
+and the operator accounts in `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`
 and `docs/tdd-manager-workflow.md`. `tests/structure/test-incremental-review-rounds.sh` pins all of
 it, runs the step 3 probe against a project config (`I11c`, `I11d`), renders the delegate with
 `aspectActivation` off and with `incrementalReviewRounds` off in every severity arm (`I30` to
