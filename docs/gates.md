@@ -162,8 +162,14 @@ cannot parse. The gate is scoped to its threat model (a low-context agent writin
 *real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
 is **localhost** — a throwaway dev/test DB where the conventions are meaningless. It reads that backend from
 `--api-url <url>` given as two words, or from `ZENSU_API_URL` as an inline prefix or in the hook's own
-environment; a `--help`, `-h` or `--api-url` word right after a word the shell expands at run time is read as that
-word's value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
+environment. Without a two-word `--api-url` it also takes the one-word `--api-url=<url>`, but only in a call it
+reads in full: every such word, as the CLI receives it, names `localhost`, `127.0.0.1` or `0.0.0.0` with at
+most a port and a plain path, stands ahead of any `--` and right after no word that starts with `-` and holds no
+`=`, and the command holds no `$`, backtick, brace, carriage return, glob character (`*`, `?`, `[`), `xargs` or
+`watch`, on Windows no backslash, and no `zensu` call the shell model does not find, such as one inside an `ssh`
+string or any call while that model cannot load. In a
+Bash command a `--help`, `-h` or two-word `--api-url` word right after a word the shell expands at run time is
+read as that word's value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound

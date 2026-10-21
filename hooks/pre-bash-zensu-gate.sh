@@ -98,6 +98,20 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   function isDynamic(t) {
     return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
   }
+  const PLAIN_LOCAL_URL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::[0-9]{1,5})?(?:\/[A-Za-z0-9._~\/-]*)?(?![\s\S])/i;
+  function oneWordLocal(raw, exact) {
+    const words = exact ? raw : raw.map(unquoted), end = words.indexOf("--");
+    if (words.indexOf("--api-url") !== -1 || raw.some((w) => isDynamic(w) || w.indexOf(OPQ) !== -1)) return false;
+    let found = false;
+    for (let i = 0; i < words.length; i++) {
+      if (!words[i].startsWith("--api-url=")) continue;
+      const before = i > 0 ? words[i - 1] : "";
+      if ((end !== -1 && i > end) || (before.length > 1 && before.charAt(0) === "-" && before.indexOf("=") === -1)) return false;
+      if (!PLAIN_LOCAL_URL.test(exact ? words[i].slice(10) : unquoted(words[i].slice(10)))) return false;
+      found = true;
+    }
+    return found;
+  }
   function dynamicReadings(c) {
     if (!c.rest.some(isDynamic)) return [];
     const skipped = c.rest.filter((t) => !isDynamic(t)), consumed = [];
@@ -105,7 +119,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       if (isDynamic(c.rest[i])) { i++; continue; }
       consumed.push(c.rest[i]);
     }
-    return [{ envp: c.envp, rest: skipped }, { envp: c.envp, rest: consumed }];
+    return [{ envp: c.envp, rest: skipped, derived: true }, { envp: c.envp, rest: consumed, derived: true }];
   }
   function tokenInvocations() {
     const found = [];
@@ -138,13 +152,20 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     return found.invocations;
   }
   let invocations = ps ? psInvocations() : tokenInvocations();
+  let modeled = -1;
   if (!ps) try {
-    invocations = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
+    const walked = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
       .filter((c) => c.name === "zensu")
-      .map((c) => ({ envp: c.environment, rest: c.words }))
-      .concat(invocations);
+      .map((c) => ({ envp: c.environment, rest: c.words, exact: true }));
+    modeled = walked.length;
+    invocations = walked.concat(invocations);
   } catch (_) {}
   invocations = invocations.concat(...invocations.map(dynamicReadings));
+  const plain = cmd.replace(/\\\n/g, "").replace(/[\\\x22\x27]/g, "");
+  const oneWordTrusted = !/[\x24\x60{*?[\r]/.test(cmd)
+    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/i.test(plain)
+    && !(process.platform === "win32" && cmd.indexOf("\\") !== -1)
+    && (ps || modeled === (plain.match(/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/gi) || []).length);
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -155,6 +176,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     let apiUrl = envp.ZENSU_API_URL || "";
     const ai = rest.indexOf("--api-url");
     if (ai !== -1 && typeof rest[ai + 1] === "string") apiUrl = unquoted(rest[ai + 1]);
+    if (ai === -1 && oneWordTrusted && !invocation.derived && oneWordLocal(rest, ps || invocation.exact === true)) continue;
     if (!apiUrl) apiUrl = process.env.ZAPI || "";
     if (isLocalUrl(apiUrl)) continue;                                              // localhost/dev backend → conventions moot, not the tracked product
     let noun = "", k = 0;
