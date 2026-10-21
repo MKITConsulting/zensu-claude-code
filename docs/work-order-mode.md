@@ -86,6 +86,15 @@ and `--api-url` on `zensu`. Each denial says why and, where a helper verb does t
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.
 
+The Zensu CLI write-gate (`hooks/pre-bash-zensu-gate.sh`), which runs in every session, leaves
+`zensu work ask` and `zensu work followup` to this gate while the session is bound to a work order:
+it asks the work-order hook library whether this session's marker binds it, the same test that
+wakes the work-order hooks. Every other `zensu` mutation follows the write-gate's ordinary rules
+there: a person's decision and a work-order protocol verb are denied even inside a skill window,
+any other mutation passes only inside a window that declares it, and the deliberate
+`ZENSU_MCP_GATE=off` one-off passes any of them. `/zensu:work` itself opens no window. In a bound
+session the deny reason of a person's decision points to a work-order question instead of a user.
+
 `hooks/post-work-order.sh` runs after every tool call. It renews the lease when due, sends the
 stages the Autopilot ledger reached, hands pending answers to the model, and ends the session when
 a direct `zensu work ask` blocked the order.

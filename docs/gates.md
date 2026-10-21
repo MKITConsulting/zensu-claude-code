@@ -77,15 +77,29 @@ To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`;
 ## CLI Write-Gate
 
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
-updating features, security classifications, tiers, journeys, revisions, …) run directly
-on the main thread is **denied by default** — it must run inside a skill that declared its
-work, so "freelance" writes cannot bypass the dedup, user-journey, baseline-revision and
-security-review conventions the skills enforce. Reads and telemetry are always allowed.
+updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
+work orders, work plans, …) run directly on the main thread is **denied by default** — it must
+run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
+user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
+telemetry are always allowed. A command that records a decision the person makes — creating,
+approving, requeuing, cancelling or confirming the merge of a work order, pushing, approving,
+finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing its
+follow-ups, answering or overturning a question, setting the automation policy and adding,
+updating or removing a repository — is denied with a reason that leaves the command to the
+person instead of naming a skill, even inside a skill window that declares it, and so is a verb of
+the work-order protocol. When one command holds several denied invocations, the reason follows a
+person's decision first, then a work-order verb.
 
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
 name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
-source of truth. It reads the command twice and gates every invocation either reading finds. The
+source of truth. It finds the subcommand the way cobra, the CLI's command library, does: a flag
+without `=` takes the next word, an empty word is skipped and `--` ends the search, so
+`zensu features --product p1 create` counts as a create. Where the verb is itself a command group
+(`work policy`, `work repositories` or `repos`, `plan followup`), the third word picks the
+command. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
+once as if it were empty and once as if it were a value flag that takes the next word, so
+`zensu features $FLAGS create` counts as a create too. It reads the command twice and gates every invocation either reading finds. The
 shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
 invocation behind a wrapper such as `timeout`, `nice -n`, `env -i` or `xargs`, in a loop or `if`
 body, in a `bash -c` body or a heredoc a shell reads, in `eval`, and in a command substitution,
@@ -110,7 +124,9 @@ flowchart TD
     C -->|"yes (escape hatch)"| ALLOW
     C -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
     E -->|"yes"| ALLOW
-    E -->|"no"| DENY(["DENY<br/>run the matching skill<br/>in the interactive main thread"])
+    E -->|"no"| W{"zensu work ask / followup<br/>in a bound work-order session?"}
+    W -->|"yes (the work-order gate decides)"| ALLOW
+    W -->|"no"| DENY(["DENY<br/>run the matching skill<br/>in the interactive main thread,<br/>or leave a decision to the person"])
 
     style A fill:#4a9eff,color:#fff
     style ALLOW fill:#51cf66,color:#fff
@@ -134,10 +150,17 @@ cannot parse. The gate is scoped to its threat model (a low-context agent writin
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
-report the operation to the main thread, which runs it through the matching skill. A structure
+report the operation to the main thread, which runs it through the matching skill. In a bound
+work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
+gate, which allows them there ([Work-order mode](work-order-mode.md)). Every other mutation
+follows the ordinary rules in that session, where `/zensu:work` opens no window, and the deny of a
+person's decision points to a work-order question instead of a user. A work-order protocol command
+denied anywhere else gets a reason that names the worker and the `/zensu:work` helper, and a
+subagent's deny adds that it reports the need to the main thread. A structure
 test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
-`--workflow-end` markers, so a new skill cannot silently regress the contract.
+`--workflow-end` markers, or runs one its window does not declare, so a new skill cannot silently
+regress the contract.
 
 ## Source-Write Gate
 
