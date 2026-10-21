@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+
 ## [0.28.0] - 2026-10-21
 
 ### Added

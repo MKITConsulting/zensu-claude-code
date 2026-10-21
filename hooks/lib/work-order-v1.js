@@ -1651,7 +1651,7 @@ function releasePlan(projectRoot, orderId, belowAttempt) {
 const TOKEN_VARIABLE = 'ZENSU_SESSION_TOKEN';
 const HOST_VARIABLE = 'ZENSU_API_URL';
 const ASK_TOOLS = new Set(['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
-const CHIP_TOOLS = new Set(['mcp__ccd_session__spawn_task']);
+const CHIP_TOOLS = new Set(['mcp__ccd_session__spawn_task', 'mcp__ccd_session__start_session']);
 const SHELL_KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', 'for', 'select', 'case', 'esac', 'function', 'coproc']);
 const SHELL_WRAPPERS = new Set(['command', 'builtin', 'exec', 'env', 'sudo', 'doas', 'nohup', 'nice', 'time', 'timeout', 'gtimeout', 'stdbuf', 'xargs']);
 const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
@@ -2204,7 +2204,7 @@ function gateReason(orderId, finding) {
     case 'ask':
       return `${lead} Nobody can answer a prompt or approve a plan here. Put the question to Zensu with the ask step of /zensu:work (zensu-work-order.sh --ask), which sends zensu work ask ${orderId} with a category, the question and, unless the question blocks, the option you continue with. Zensu binds the plan through zensu-work-order.sh --bind-spec, never plan mode.`;
     case 'chip':
-      return `${lead} A task chip reaches nobody. File the follow-up with Zensu through zensu-work-order.sh --followup, which sends zensu work followup ${orderId} with a title, a rationale and a severity.`;
+      return `${lead} A task chip and a session started or proposed from here reach nobody. File the follow-up with Zensu through zensu-work-order.sh --followup, which sends zensu work followup ${orderId} with a title, a rationale and a severity.`;
     case 'push':
       return `${lead} A raw git push is not allowed. Run zensu-work-order.sh --push: it renews the lease, pushes with a lease against the head Zensu recorded for the order and reports the new head.`;
     case 'open-pr':

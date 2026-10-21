@@ -1652,6 +1652,7 @@ test('the Bash analysis stays linear on a long shell flag', () => {
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__start_session')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
   assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
@@ -1663,6 +1664,10 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   }
   const chip = wo.gateDecision(context, payload('mcp__ccd_session__spawn_task'), { env: box.env });
   assert.match(chip.reason, new RegExp(`zensu work followup ${ORDER}`));
+  const start = wo.gateDecision(context, payload('mcp__ccd_session__start_session'), { env: box.env });
+  assert.equal(start.code, 'chip');
+  assert.match(start.reason, new RegExp(`zensu work followup ${ORDER}`));
+  assert.match(start.reason, /session started or proposed from here/);
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);

@@ -170,8 +170,9 @@ session continues with `--bind-spec`.
 
 Outside work-order mode all three print nothing and exit 0.
 
-- `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
-  `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
+- `pre-work-order-gate.sh` (every tool) denies the prompt tools, both Claude Desktop session
+  tools (`spawn_task` and `start_session`), a raw `git push`, `gh pr create`, `glab mr create`,
+  every merge, `zensu auth`, `zensu work event` and
   `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
   `followup`, every `zensu plan` verb that records a person's decision (`push`, `approve`,
   `finalize`, `abandon`, `confirm-merge` and `followup accept|dismiss`), and a command that prints, reads, unsets or overrides

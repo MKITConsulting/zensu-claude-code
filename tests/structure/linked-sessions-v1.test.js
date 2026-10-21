@@ -290,3 +290,68 @@ test('record text loses C0, C1 and the line separators but keeps tabs and newlin
   assert.equal(mod.isoOf(Number.MAX_VALUE), null);
   assert.equal(mod.isoOf('1'), null);
 });
+
+const MERGED_HEAD = 'Background (from the session that started this one):\n';
+
+test('a chip from before proposals is proposed fresh with the fixed background and a title cut to 59 characters', () => {
+  const { proposal, why } = mod.chipProposal({ title: 'L'.repeat(70), tldr: 'Why it matters.', prompt: `Do the thing.${ESC}[2K` }, [REPO]);
+  assert.equal(why, null);
+  assert.deepEqual(proposal, { initiation: 'own_initiative', context: 'fresh', title: `${'L'.repeat(58)}…`, prompt: 'Do the thing.[2K', background: mod.CHIP_BACKGROUND });
+  assert.equal(Array.from(proposal.title).length, mod.START_TITLE_MAX);
+  assert.ok(mod.CHIP_BACKGROUND.trim().length >= 80, `background has ${mod.CHIP_BACKGROUND.trim().length} characters`);
+  assert.equal(mod.chipProposal({ title: '', tldr: '\n  First line of the tl;dr.\nSecond.', prompt: 'p' }).proposal.title, 'First line of the tl;dr.');
+  assert.equal(mod.chipProposal({ title: ' ', tldr: '', prompt: '\nOnly the prompt names it.\nMore.' }).proposal.title, 'Only the prompt names it.');
+  for (const field of ['cwd', 'name', 'preset', 'host', 'environment', 'use_worktree', 'tldr']) assert.equal(field in proposal, false, field);
+});
+
+test('a fresh proposal gets its own background and brief back, and keeps its worktree choice', () => {
+  const background = 'B'.repeat(80);
+  const merged = `${MERGED_HEAD}${background}\n\nTask:\nFix the parser.\n\nTask:\nkeep this line`;
+  const { proposal } = mod.chipProposal({ title: 'Parser', prompt: merged, context: 'fresh', useWorktree: false }, [REPO]);
+  assert.deepEqual(proposal, { initiation: 'own_initiative', context: 'fresh', title: 'Parser', prompt: 'Fix the parser.\n\nTask:\nkeep this line', background, use_worktree: false });
+  assert.equal(`${MERGED_HEAD}${proposal.background}\n\nTask:\n${proposal.prompt}`, merged);
+  assert.equal(mod.chipProposal({ title: 'x', prompt: merged, context: 'fresh', useWorktree: true }).proposal.use_worktree, true);
+  const short = `${MERGED_HEAD}too short\n\nTask:\nBrief.`;
+  assert.deepEqual(mod.chipProposal({ title: 'x', prompt: short, context: 'fresh' }).proposal, { initiation: 'own_initiative', context: 'fresh', title: 'x', prompt: short, background: mod.CHIP_BACKGROUND });
+  assert.deepEqual(mod.chipProposal({ title: 'x', prompt: merged }).proposal.prompt, merged);
+  assert.equal(mod.chipProposal({ title: 'x', prompt: 'Plain brief.', context: 'fresh' }).proposal.background, mod.CHIP_BACKGROUND);
+});
+
+test('a fork proposal stays a fork, with neither background nor worktree choice', () => {
+  const background = 'B'.repeat(80);
+  assert.deepEqual(mod.chipProposal({ title: 'Fork it', prompt: 'Look again.', context: 'fork', useWorktree: true }, [REPO]).proposal, { initiation: 'own_initiative', context: 'fork', title: 'Fork it', prompt: 'Look again.' });
+  assert.equal(mod.chipProposal({ title: 'f', prompt: `${MERGED_HEAD}${background}\n\nTask:\nBrief.`, context: 'fork' }).proposal.prompt, `${MERGED_HEAD}${background}\n\nTask:\nBrief.`);
+});
+
+test('a chip in the checkout taken over is proposed without its folder, and a chip elsewhere is listed', () => {
+  const folders = ['/work/main/.claude/worktrees/x', null, 'relative/path', 7];
+  for (const cwd of ['/work/main/.claude/worktrees/x', '/work/main/.claude/worktrees/x/sub', '/work/main']) {
+    const { proposal, why } = mod.chipProposal({ title: 't', prompt: 'p', cwd }, folders);
+    assert.equal(why, null, cwd);
+    assert.equal('cwd' in proposal, false, cwd);
+  }
+  for (const cwd of ['/work/other', '/work/main/.claude/worktrees/xy', 'relative/path', '/work/main\nx']) {
+    assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd }, folders), { proposal: null, why: 'folder' }, cwd);
+  }
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }), { proposal: null, why: 'folder' });
+  assert.equal(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/work/main' }, [null, '/work/main/a']).why, null);
+  assert.ok(mod.CHIP_WHY.folder.includes('folder'));
+});
+
+test('a chip whose prompt is empty once cleaned is listed rather than proposed', () => {
+  assert.deepEqual(mod.chipProposal({ title: 'Only a title', prompt: `${ESC}${C1}${LS}` }, [REPO]), { proposal: null, why: 'prompt' });
+  assert.deepEqual(mod.chipProposal(null), { proposal: null, why: 'prompt' });
+  assert.deepEqual(mod.chipProposal({ title: 'Elsewhere', prompt: '', cwd: '/elsewhere' }, [REPO]), { proposal: null, why: 'folder' });
+  assert.ok(mod.CHIP_WHY.prompt.includes('prompt'));
+});
+
+test('every chip is listed when this session works in another repository, and only then', () => {
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p' }, [REPO], { sameRepository: false }), { proposal: null, why: 'repository' });
+  assert.deepEqual(mod.chipProposal({ title: 'f', prompt: 'p', context: 'fork' }, [REPO], { sameRepository: false }), { proposal: null, why: 'repository' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: 'p', cwd: '/elsewhere' }, [REPO], { sameRepository: false }), { proposal: null, why: 'folder' });
+  assert.deepEqual(mod.chipProposal({ title: 't', prompt: `${ESC}` }, [REPO], { sameRepository: false }), { proposal: null, why: 'prompt' });
+  for (const options of [{ sameRepository: true }, { sameRepository: null }, {}, undefined, null]) {
+    assert.equal(mod.chipProposal({ title: 't', prompt: 'p' }, [REPO], options).why, null, JSON.stringify(options));
+  }
+  assert.ok(mod.CHIP_WHY.repository.includes('another repository'));
+});
