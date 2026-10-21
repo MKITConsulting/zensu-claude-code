@@ -468,6 +468,27 @@ case "${1:-}" in
       node -e 'const mode = ["tree", "stage"].includes(process.env.ZENSU_XR_MODE) ? process.env.ZENSU_XR_MODE : "check"; let m; try { m = require(process.env.ZENSU_XR_LIB); } catch (e) { process.stdout.write(`EXTERNAL REVIEW — ${mode === "check" ? "status" : mode}=unavailable reason=module\n`); process.exit(0); } process.exitCode = m.main([mode]);'
     exit $?
     ;;
+  --review-consume)
+    _rc_ticket=""
+    _rc_ticket_seen=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --ticket)
+          if [ "$_rc_ticket_seen" = true ] || [ $# -lt 2 ]; then
+            echo "zensu-log.sh --review-consume: duplicate/missing --ticket" >&2
+            exit 2
+          fi
+          _rc_ticket_seen=true; _rc_ticket="$2"; shift 2 ;;
+        *) echo "zensu-log.sh --review-consume: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_rc_ticket" ]; then
+      echo "zensu-log.sh --review-consume: --ticket <the REVIEW-TICKET of the background reviewer> is required" >&2
+      exit 2
+    fi
+    exec bash "${CLAUDE_PLUGIN_ROOT}/hooks/post-review-tdd-delegate.sh" --background-consume "$_rc_ticket"
+    ;;
   --acceptance-record|--acceptance-status)
     avr_verb="$1"
     avr_start=""
@@ -1482,6 +1503,7 @@ case "${1:-}" in
             echo "zensu-log.sh --tdd-begin: FULL SUITE SNAPSHOT UNAVAILABLE — the full-suite runner of this chain could not be recorded, so the chain closes as a local chain and needs a local full-suite run." >&2
           fi
           zensu_external_review_wait_reset "$session_val"
+          zensu_review_consume reset "$session_val" >/dev/null 2>&1 || true
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else

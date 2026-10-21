@@ -5,6 +5,7 @@ paths:
   - "hooks/lib/claude-session-control-v1.js"
   - "hooks/lib/reviewer-capability-v1.js"
   - "hooks/lib/review-evidence-hook-v1.js"
+  - "hooks/lib/review-consume-v1.js"
   - "hooks/lib/zensu-session.sh"
   - "hooks/stop-chain-enforcer.sh"
   - "hooks/lib/session-adopt-report-v1.js"
@@ -116,7 +117,9 @@ top-level require cycles.
   its start half shares the SubagentStart matcher with the adapter and races it, and its
   stop half runs on SubagentStop, where no adapter binds, so an adoption that fell due
   while the worker ran lands there or the worker's result is lost with its lease
-  retirement.
+  retirement. The `stop` mode of `review-consume-v1.js` opts in for that same SubagentStop
+  reason: without it a background reviewer's stop goes unrecorded and its ticket can never
+  be consumed.
 - **Never opted in:** `model-bind` (`zensu-doctor.sh` stays write-free and no `zensu-log.sh`
   verb re-mints a record), `resolveFreshHookProject` and `bindFromModelEnvironment`.
 

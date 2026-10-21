@@ -717,6 +717,43 @@ external_review_workflow_wait() {
   return 0
 }
 
+BACKGROUND_REVIEW_STATUS=""
+BACKGROUND_REVIEW_TICKET=""
+BACKGROUND_REVIEW_COUNT=""
+BACKGROUND_REVIEW_MAX=""
+background_review_probe() {
+  local verdict word ticket count max pending claim may_wait=true
+  BACKGROUND_REVIEW_STATUS=""
+  BACKGROUND_REVIEW_TICKET=""
+  BACKGROUND_REVIEW_COUNT=""
+  BACKGROUND_REVIEW_MAX=""
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  [ "$OUTER_PRESENT" = false ] || may_wait=false
+  [ "$DEFERRED_ADOPTED" = false ] || may_wait=false
+  [ -z "$INNER_BOUND_RUN" ] || may_wait=false
+  if [ "$may_wait" = true ]; then
+    pending="$(zensu_pending_review_file 2>/dev/null)" || may_wait=false
+    if [ "$may_wait" = true ]; then
+      claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || may_wait=false
+      if [ "$may_wait" = true ] && { [ -e "$claim" ] || [ -L "$claim" ]; }; then may_wait=false; fi
+    fi
+  fi
+  if [ "$may_wait" = true ]; then
+    verdict="$(zensu_review_consume wait "$SESSION_ID" 2>/dev/null)" || return 1
+  else
+    verdict="$(zensu_review_consume wait "$SESSION_ID" --max 0 2>/dev/null)" || return 1
+  fi
+  read -r word ticket count max <<<"$verdict"
+  case "$word" in wait|limit|stopped) ;; *) return 1 ;; esac
+  ticket="${ticket#ticket=}"
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  BACKGROUND_REVIEW_STATUS="$word"
+  BACKGROUND_REVIEW_TICKET="$ticket"
+  BACKGROUND_REVIEW_COUNT="${count#count=}"
+  BACKGROUND_REVIEW_MAX="${max#max=}"
+  return 0
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1691,6 +1728,15 @@ if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; 
   exit 0
 fi
 
+if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && background_review_probe \
+    && [ "$BACKGROUND_REVIEW_STATUS" = "wait" ]; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    echo "zensu chain-enforcer: releasing this Stop while the background zensu:code-reviewer of review ticket ${BACKGROUND_REVIEW_TICKET} runs; wait ${BACKGROUND_REVIEW_COUNT} of ${BACKGROUND_REVIEW_MAX}. The review chain stays armed: when its task notification arrives, consume it with zensu-log.sh --review-consume --ticket ${BACKGROUND_REVIEW_TICKET}." >&2
+  fi
+  exit 0
+fi
+
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
@@ -1918,6 +1964,14 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
     REASON="STOP intercepted by zensu chain-enforcer. ${SELF_REVIEW_STATE} Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
   else
     REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. /zensu:reset-review-limit cannot repair this state either — it rebinds a RETAINED consumed ticket, which is exactly what is missing here. FIRST read the chain shape with: ${LOG_COMMAND} --chain-status. Act on it ONLY if it reports shape=wedged-stale-rearm with recoverable=true — then /zensu:recover-chain repairs exactly that and the chain can continue. For this state it will normally report shape=self-review-unbindable, whose own next step is the fresh generation below. Re-enter /zensu:tdd for the current task, whose fresh --tdd-begin resets this session's review ticket, round counter, and chain flags in one transition, so the reviewer chain can run again and its terminus can bind."
+  fi
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
+elif [ "$BACKGROUND_REVIEW_STATUS" = "stopped" ] || [ "$BACKGROUND_REVIEW_STATUS" = "limit" ]; then
+  BACKGROUND_CONSUME_COMMAND="${LOG_COMMAND} --review-consume --ticket $(printf '%q' "$BACKGROUND_REVIEW_TICKET")"
+  if [ "$BACKGROUND_REVIEW_STATUS" = "stopped" ]; then
+    REASON="STOP intercepted by zensu chain-enforcer. The zensu:code-reviewer this chain launched in the background for review ticket ${BACKGROUND_REVIEW_TICKET} has stopped, but that ticket is still unclaimed, so the review chain has not advanced. Your VERY NEXT action MUST be: ${BACKGROUND_CONSUME_COMMAND} — it consumes the ticket and prints the routing directive for the report the reviewer's task notification delivered; act on that directive. Do NOT spawn zensu:code-reviewer again and do NOT start the review sequence over."
+  else
+    REASON="STOP intercepted by zensu chain-enforcer. The zensu:code-reviewer this chain launched in the background for review ticket ${BACKGROUND_REVIEW_TICKET} has not stopped yet, so there is no report to consume and the review chain has not advanced. When its task notification arrives, your NEXT action MUST be: ${BACKGROUND_CONSUME_COMMAND}, and you act on the directive it prints. Do NOT start the review sequence over while it runs. Only if its notification reported a failure, or it was stopped without a report, issue a fresh ticket with ${LOG_COMMAND} --review-ticket and spawn one zensu:code-reviewer with the same packet under that new ticket."
   fi
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 elif reviewer_spawn_denied; then

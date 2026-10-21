@@ -68,7 +68,7 @@ const NEXT_COMMAND = Object.freeze({
   'review-in-flight':
     'zensu-log.sh --code-review-done --claimed-review-ticket <the ticket from --current-review-ticket>',
   'ticket-unclaimed':
-    'let the spawned reviewer finish, or issue a fresh ticket with zensu-log.sh --review-ticket and re-spawn zensu:code-reviewer',
+    'let the spawned reviewer finish (one the host launched in the background is consumed with zensu-log.sh --review-consume --ticket <the ticket> once its task notification arrives), or issue a fresh ticket with zensu-log.sh --review-ticket and re-spawn zensu:code-reviewer',
   'ticket-spent':
     'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer — the retained ticket is already consumed and cannot be claimed again',
   'ticket-lost':

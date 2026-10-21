@@ -3132,6 +3132,29 @@ zensu_external_review_wait_reset() {
   return 0
 }
 
+zensu_review_consume() {
+  local mode="${1:-}" session_key="${2:-}" project_root native_project_root exclusions
+  [ "$#" -ge 2 ] || return 2
+  shift 2
+  case "$mode" in launch|lookup|wait|reset) ;; *) return 2 ;; esac
+  command -v zensu_session_key_canonical >/dev/null 2>&1 \
+    || source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  zensu_session_key_canonical "$session_key" || return 2
+  project_root="$(zensu_resolve_project_dir)" || return 2
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 2
+  exclusions="$(zensu_msys_env_exclusions ZENSU_RC_PROJECT_ROOT 2>/dev/null)" \
+    || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  (
+    export MSYS2_ARG_CONV_EXCL='*' MSYS2_ENV_CONV_EXCL="$exclusions" \
+      ZENSU_RC_PROJECT_ROOT="$native_project_root" ZENSU_RC_SESSION_KEY="$session_key"
+    if declare -F zensu_run_bounded >/dev/null 2>&1; then
+      zensu_run_bounded node "${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-consume-v1.js" "$mode" "$@"
+    else
+      node "${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-consume-v1.js" "$mode" "$@"
+    fi
+  )
+}
+
 _tdd_write_pending_review_critical() {
   local pf="$1"
   local files="$2"

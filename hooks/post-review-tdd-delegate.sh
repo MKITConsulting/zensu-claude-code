@@ -28,117 +28,177 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
-{ INPUT="$(cat)"; } 2>/dev/null
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-zensu_bind_hook_session "$INPUT" || exit 0
+CONSUME_MODE=hook
+CONSUME_CLAIMED=false
+CONSUME_REFUSAL=""
+INPUT=""
+
+zensu_background_consume_exit() {
+  local rc=$?
+  [ "$CONSUME_CLAIMED" = true ] && return 0
+  if [ -z "$CONSUME_REFUSAL" ]; then
+    CONSUME_REFUSAL="review ticket ${REVIEW_TICKET:-} could not be consumed: it is not this chain's open review ticket, or the chain no longer matches the recorded launch (a newer or already consumed ticket, a closed or re-armed chain, or a changed Autopilot binding). Nothing was changed. Read the chain shape with --chain-status and follow the command it names."
+    rc=5
+  fi
+  [ "$rc" -ne 0 ] || rc=5
+  printf 'zensu-log.sh --review-consume: %s\n' "$CONSUME_REFUSAL" >&2
+  exit "$rc"
+}
+
+if [ "${1:-}" = "--background-consume" ]; then
+  CONSUME_MODE=background
+  [ "$#" -eq 2 ] || { echo "zensu-log.sh --review-consume: pass exactly --ticket <ticket>" >&2; exit 2; }
+  REVIEW_TICKET="$2"
+  trap zensu_background_consume_exit EXIT
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  if ! zensu_bind_model_session; then
+    CONSUME_REFUSAL="rendered Session Control binding unavailable; run this command exactly as the post-review directive renders it, from Claude Code's own Bash tool"
+    exit 2
+  fi
+else
+  { INPUT="$(cat)"; } 2>/dev/null
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+  zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  zensu_bind_hook_session "$INPUT" || exit 0
+fi
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
 export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 AUTO_FIX_ON=1
 zensu_hook_enabled autoFix || AUTO_FIX_ON=0
 
-SUBAGENT_TYPE="$(node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
-    try {
-      const j = JSON.parse(s);
-      console.log((j.tool_input && j.tool_input.subagent_type) || "");
-    } catch (_) { console.log(""); }
-  });
-' <<<"$INPUT" 2>/dev/null)"
+if [ "$CONSUME_MODE" = hook ]; then
+  SUBAGENT_TYPE="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        console.log((j.tool_input && j.tool_input.subagent_type) || "");
+      } catch (_) { console.log(""); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
 
-if [ "$SUBAGENT_TYPE" != "zensu:code-reviewer" ]; then
-  exit 0
-fi
+  if [ "$SUBAGENT_TYPE" != "zensu:code-reviewer" ]; then
+    exit 0
+  fi
 
-PROMPT_HEADER="$(node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
-    try {
-      const j = JSON.parse(s);
-      const prompt = j.tool_input && j.tool_input.prompt;
-      const lines = typeof prompt === "string" ? prompt.split(/\r?\n/) : [];
-      process.stdout.write((lines[0] || "") + "\n" + (lines[1] || ""));
-    } catch (_) { process.stdout.write("\n"); }
-  });
-' <<<"$INPUT" 2>/dev/null)"
-PROMPT_FIRST_LINE="${PROMPT_HEADER%%$'\n'*}"
-if [ "$PROMPT_FIRST_LINE" = "$PROMPT_HEADER" ]; then
-  PROMPT_SECOND_LINE=""
+  PROMPT_HEADER="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const prompt = j.tool_input && j.tool_input.prompt;
+        const lines = typeof prompt === "string" ? prompt.split(/\r?\n/) : [];
+        process.stdout.write((lines[0] || "") + "\n" + (lines[1] || ""));
+      } catch (_) { process.stdout.write("\n"); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+  PROMPT_FIRST_LINE="${PROMPT_HEADER%%$'\n'*}"
+  if [ "$PROMPT_FIRST_LINE" = "$PROMPT_HEADER" ]; then
+    PROMPT_SECOND_LINE=""
+  else
+    PROMPT_SECOND_LINE="${PROMPT_HEADER#*$'\n'}"
+  fi
+
+  # This marker is emitted only by /zensu:tdd after the read-only review fan-out.
+  # Requiring it on the first line prevents an unrelated standalone reviewer from
+  # consuming stale state that happens to share the same Claude session.
+  [ "$PROMPT_FIRST_LINE" = "PRE-MERGED FINDINGS (fan-out)" ] || exit 0
+  case "$PROMPT_SECOND_LINE" in
+    "REVIEW-TICKET: "*) REVIEW_TICKET="${PROMPT_SECOND_LINE#REVIEW-TICKET: }" ;;
+    *) exit 0 ;;
+  esac
+
+  # The consume-mode reviewer prompt is either truly standalone (no durable
+  # envelope at all) or carries one complete official Autopilot envelope. Parse
+  # and reject partial, duplicate, malformed, conflicting, or team-review-only
+  # headers before reading or claiming any chain/counter state.
+  PROMPT_ENVELOPE_FIELDS="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const input = JSON.parse(s);
+        const prompt = input.tool_input && input.tool_input.prompt;
+        if (typeof prompt !== "string") process.exit(3);
+        const lines = prompt.split(/\r?\n/);
+        const collect = prefix => lines.filter(line => line.startsWith(prefix));
+        const callers = collect("ZENSU-DELEGATED-CALLER:");
+        const bindings = collect("AUTOPILOT-BINDING:");
+        const stages = collect("AUTOPILOT-STAGE:");
+        const reviewOps = collect("AUTOPILOT-REVIEW-OP:");
+        const total = callers.length + bindings.length + stages.length + reviewOps.length;
+        if (total === 0) {
+          process.stdout.write(["standalone", "-", "0", "-", "-"].join("\t"));
+          return;
+        }
+        if (callers.length !== 1 || bindings.length !== 1 || stages.length !== 1
+            || reviewOps.length !== 0 || callers[0] !== "ZENSU-DELEGATED-CALLER: autopilot"
+            || lines[2] !== callers[0] || lines[3] !== bindings[0] || lines[4] !== stages[0]) {
+          process.exit(3);
+        }
+        const binding = /^AUTOPILOT-BINDING: run=([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) attempt=([1-9][0-9]{0,2}) chain=([A-Za-z0-9][A-Za-z0-9_.:-]{2,127})$/.exec(bindings[0]);
+        const stage = /^AUTOPILOT-STAGE: (GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER)$/.exec(stages[0]);
+        if (!binding || !stage || Number(binding[2]) > 999) process.exit(3);
+        process.stdout.write(["bound", binding[1], binding[2], binding[3], stage[1]].join("\t"));
+      } catch (_) { process.exit(3); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)" || exit 0
+  IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
+    PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
+    <<<"$PROMPT_ENVELOPE_FIELDS"
+
+  SESSION_ID="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const id = j.session_id;
+        console.log((typeof id === "string" && id) ? id : "");
+      } catch (_) { console.log(""); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+  SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 else
-  PROMPT_SECOND_LINE="${PROMPT_HEADER#*$'\n'}"
+  SESSION_ID="$(zensu_resolve_session_id "")" || exit 0
 fi
-
-# This marker is emitted only by /zensu:tdd after the read-only review fan-out.
-# Requiring it on the first line prevents an unrelated standalone reviewer from
-# consuming stale state that happens to share the same Claude session.
-[ "$PROMPT_FIRST_LINE" = "PRE-MERGED FINDINGS (fan-out)" ] || exit 0
-case "$PROMPT_SECOND_LINE" in
-  "REVIEW-TICKET: "*) REVIEW_TICKET="${PROMPT_SECOND_LINE#REVIEW-TICKET: }" ;;
-  *) exit 0 ;;
-esac
-
-# The consume-mode reviewer prompt is either truly standalone (no durable
-# envelope at all) or carries one complete official Autopilot envelope. Parse
-# and reject partial, duplicate, malformed, conflicting, or team-review-only
-# headers before reading or claiming any chain/counter state.
-PROMPT_ENVELOPE_FIELDS="$(node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
-    try {
-      const input = JSON.parse(s);
-      const prompt = input.tool_input && input.tool_input.prompt;
-      if (typeof prompt !== "string") process.exit(3);
-      const lines = prompt.split(/\r?\n/);
-      const collect = prefix => lines.filter(line => line.startsWith(prefix));
-      const callers = collect("ZENSU-DELEGATED-CALLER:");
-      const bindings = collect("AUTOPILOT-BINDING:");
-      const stages = collect("AUTOPILOT-STAGE:");
-      const reviewOps = collect("AUTOPILOT-REVIEW-OP:");
-      const total = callers.length + bindings.length + stages.length + reviewOps.length;
-      if (total === 0) {
-        process.stdout.write(["standalone", "-", "0", "-", "-"].join("\t"));
-        return;
-      }
-      if (callers.length !== 1 || bindings.length !== 1 || stages.length !== 1
-          || reviewOps.length !== 0 || callers[0] !== "ZENSU-DELEGATED-CALLER: autopilot"
-          || lines[2] !== callers[0] || lines[3] !== bindings[0] || lines[4] !== stages[0]) {
-        process.exit(3);
-      }
-      const binding = /^AUTOPILOT-BINDING: run=([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) attempt=([1-9][0-9]{0,2}) chain=([A-Za-z0-9][A-Za-z0-9_.:-]{2,127})$/.exec(bindings[0]);
-      const stage = /^AUTOPILOT-STAGE: (GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER)$/.exec(stages[0]);
-      if (!binding || !stage || Number(binding[2]) > 999) process.exit(3);
-      process.stdout.write(["bound", binding[1], binding[2], binding[3], stage[1]].join("\t"));
-    } catch (_) { process.exit(3); }
-  });
-' <<<"$INPUT" 2>/dev/null)" || exit 0
-IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
-  PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
-  <<<"$PROMPT_ENVELOPE_FIELDS"
-
-SESSION_ID="$(node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
-    try {
-      const j = JSON.parse(s);
-      const id = j.session_id;
-      console.log((typeof id === "string" && id) ? id : "");
-    } catch (_) { console.log(""); }
-  });
-' <<<"$INPUT" 2>/dev/null)"
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 
 # Mode-aware fix discipline: the per-session `vanilla` flag was frozen into the
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
 # fix-round directive matches the discipline the session actually runs under.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 TDD_STATE_FILE="$(tdd_state_file "$SESSION_ID")"
+
+if [ "$CONSUME_MODE" = background ]; then
+  if ! _tdd_review_ticket_shape_ok "$REVIEW_TICKET"; then
+    CONSUME_REFUSAL="the ticket is malformed; pass the REVIEW-TICKET value of the background reviewer's prompt"
+    exit 2
+  fi
+  CONSUME_FOUND="$(zensu_review_consume lookup "$SESSION_ID" --ticket "$REVIEW_TICKET" 2>/dev/null)"
+  CONSUME_RC=$?
+  case "$CONSUME_RC" in
+    0)
+      IFS=$'\t' read -r _ CONSUME_AGENT_ID PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
+        PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE <<<"$CONSUME_FOUND"
+      ;;
+    3)
+      CONSUME_REFUSAL="no background zensu:code-reviewer launch is recorded for review ticket ${REVIEW_TICKET} in this session. Only a launch the host reported as async_launched is recorded; a foreground completion is consumed by the post-review hook itself. Nothing was changed."
+      exit 3
+      ;;
+    4)
+      CONSUME_REFUSAL="the background zensu:code-reviewer launched for review ticket ${REVIEW_TICKET} has not stopped yet, so there is no report to consume. Wait for its task notification, then run this command again. Nothing was changed."
+      exit 4
+      ;;
+    *)
+      CONSUME_REFUSAL="the background review records of this session could not be read safely. Nothing was changed."
+      exit 5
+      ;;
+  esac
+fi
 
 # Preflight the prompt envelope against both durable planes before consuming
 # the one-shot ticket. A fully well-shaped but stale/conflicting envelope must
@@ -256,7 +316,31 @@ REVIEW_LAUNCH_STATUS="$(node -e '
   });
 ' <<<"$INPUT" 2>/dev/null)"
 if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
-  printf '%s' "The zensu:code-reviewer call above returned status async_launched: it runs in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, with the same prompt and its same header lines; only a foreground completion advances the chain. Ignore the background run's notification when it arrives, and do NOT end your turn first." | node -e '
+  LAUNCH_AGENT_ID="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const r = JSON.parse(s).tool_response;
+        const id = r && typeof r === "object" && !Array.isArray(r) ? r.agentId : "";
+        if (typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)) process.stdout.write(id);
+      } catch (_) {}
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+  CONSUME_COMMAND="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --review-consume --ticket $(printf '%q' "$REVIEW_TICKET")"
+  if [ -n "$LAUNCH_AGENT_ID" ] && zensu_review_consume launch "$SESSION_ID" \
+      --ticket "$REVIEW_TICKET" --agent "$LAUNCH_AGENT_ID" --kind "$PROMPT_AUTOPILOT_KIND" \
+      --run "$PROMPT_AUTOPILOT_RUN" --attempt "$PROMPT_AUTOPILOT_ATTEMPT" \
+      --chain "$PROMPT_AUTOPILOT_CHAIN" --stage "$PROMPT_AUTOPILOT_STAGE" >/dev/null 2>&1; then
+    ASYNC_WAIT_SENTENCE="Until it arrives you may end your turn: the Stop guard waits while this recorded reviewer runs, and the notification starts your next turn."
+    if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+      ASYNC_WAIT_SENTENCE="An Autopilot-bound chain keeps its Stop guard while the reviewer runs: a Stop blocked before the notification arrives names this same command, so do NOT start the review over."
+    fi
+    ASYNC_MSG="The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed; this launch is recorded against it. Do NOT spawn zensu:code-reviewer again for this ticket and do NOT issue a new ticket. When its task notification arrives, read the report it delivers, then your NEXT action must be: ${CONSUME_COMMAND} — it consumes the ticket only after the host reported that this reviewer stopped, and prints the routing directive a foreground completion would have received here; act on that directive. ${ASYNC_WAIT_SENTENCE}"
+  else
+    ASYNC_MSG="The zensu:code-reviewer call above returned status async_launched: it runs in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed, and this launch could not be recorded, so its completion cannot be consumed either. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, with the same prompt and its same header lines; only a foreground completion or a recorded background launch advances the chain. Ignore the background run's notification when it arrives, and do NOT end your turn first."
+  fi
+  printf '%s' "$ASYNC_MSG" | node -e '
     const msg = require("node:fs").readFileSync(0, "utf8");
     process.stdout.write(JSON.stringify({hookSpecificOutput:{
       hookEventName:"PostToolUse", additionalContext:msg
@@ -272,6 +356,7 @@ fi
 # while a concurrent generation reset makes every later bound CAS stale.
 CLAIM_CONTEXT="$(tdd_consume_review_ticket_context \
   "$SESSION_ID" "$REVIEW_TICKET")" || exit 0
+CONSUME_CLAIMED=true
 CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
   try {
     const value = JSON.parse(process.env.CLAIM_CONTEXT);
@@ -451,6 +536,12 @@ if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
 fi
 
 emit_post_context() {
+  if [ "$CONSUME_MODE" = background ]; then
+    printf '%s\n\n' "zensu-log.sh --review-consume: consumed review ticket ${REVIEW_TICKET} for the background zensu:code-reviewer ${CONSUME_AGENT_ID}, review round ${NEXT}. Its report is the one its task notification delivered; act on this directive exactly as if the hook had printed it at a foreground completion:"
+    cat
+    echo
+    return 0
+  fi
   node -e '
     const msg = require("node:fs").readFileSync(0, "utf8");
     process.stdout.write(JSON.stringify({hookSpecificOutput:{

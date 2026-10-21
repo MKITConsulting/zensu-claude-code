@@ -196,6 +196,58 @@ thread names, but the run record and the journal sit in the session's own projec
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
 
+#### Background reviewers (`--review-consume`)
+
+The consume-mode `zensu:code-reviewer` is the chain's counted round, and a host that runs it
+in the background answers the Agent call with `tool_response.status` `async_launched` before
+any report exists. The Claude desktop app (Code tab) does that for every Agent call, whatever
+`run_in_background` says. Such a chain completes through three supported steps, and none of
+them claims a ticket without a reviewer that ran and stopped:
+
+- **Launch.** `post-review-tdd-delegate.sh` validates the two header lines, the Autopilot
+  envelope and both state planes exactly as for a completion, then records the launch — the
+  ticket, the host's `agentId` and the envelope — in
+  `.zensu/state/review-consume-<scv1-session-key>/` and consumes nothing. Its directive: do
+  not respawn the reviewer, do not issue another ticket, and when the reviewer's task
+  notification arrives run `zensu-log.sh --review-consume --ticket <ticket>`.
+- **Stop.** `review-consume-subagent-stop.sh` records the `SubagentStop` of that agent id.
+  The host fires `SubagentStop` when the subagent finishes, so this record is the
+  host-attested completion; a stop of any other agent, or of a reviewer with no recorded
+  launch, records nothing.
+- **Claim.** `zensu-log.sh --review-consume --ticket <ticket>` requires both records, re-runs
+  the launch-time envelope check against the current state, claims the ticket in the same
+  CAS a foreground completion uses, and prints the same routing directive, so the rest of
+  the chain — fix rounds, `--code-review-done`, `/zensu:self-review`, `--chain-done` — is
+  unchanged. It refuses with exit 3 when no background launch is recorded for the ticket, 4
+  while the reviewer still runs and 5 for a ticket that is stale, already consumed or bound
+  to another chain generation, and it changes nothing when it refuses.
+
+While the open ticket has a recorded launch whose reviewer has not stopped, the Stop guard
+releases the `Stop` without charging the review budget, at most three times in a row per
+ticket, because the task notification starts the next turn. A session that owns a live
+Autopilot run, an Autopilot-bound chain and a chain that adopted or holds a deferred review
+never wait. Past that bound, and as soon as the reviewer stopped while its ticket is still
+unclaimed, the block reason names `--review-consume` instead of restarting the review.
+`--tdd-begin` deletes the session's records, and `--chain-status` names the claim for the
+`ticket-unclaimed` shape. A launch the hook cannot record falls back to the old directive, a
+foreground respawn with `run_in_background: false`.
+
+**Evidence.** Read from local desktop-app transcripts on 2026-10-21: consume-reviewer spawns
+that set `run_in_background: false` came back `async_launched` with an `agentId` and an
+`outputFile`, and their completion arrived as a `<task-notification>` naming that id. The
+review-evidence lease store holds worker results that `SubagentStop` stored for agents the
+host launched in the background, keyed by the same agent id.
+
+**Residuals.** The records sit in the session's own `.zensu/state/`, which the main thread can
+write: a deliberate write there can forge a stop, as for every plugin store, and the claim
+still needs the open ticket of an intact chain. A reviewer that dies without a `SubagentStop`
+stays "running": the guard releases at most three `Stop`s for it, and its block reason then
+says to issue a fresh ticket when the notification reported a failure. Whether `SubagentStop`
+fires for a reviewer stopped with `TaskStop` was not measured; when two reviewers ran for one
+ticket, the first one to stop is the one claimed. An Autopilot-bound chain gets no wait, so a
+`Stop` before the notification still spends its budget, with `--review-consume` named in the
+reason.
+
 #### Custom review personas (repo-local)
 
 Projects extend the review panel without forking the plugin: drop agent definitions at `.claude/agents/zensu-review-*.md` (standard agent frontmatter + body prompt; Claude Code registers them at session start — a file added mid-session is not yet spawnable and gets logged as `PERSONA SKIPPED — <name> (not registered)`). The frontmatter `name:` must equal the filename stem and match `zensu-review-[A-Za-z0-9_-]+` — anything else is skipped as malformed. An optional `activation:` field holds comma-separated glob patterns (items may be quoted) matched against the changed-file paths — `**` crosses directory separators on segment boundaries (`"**/domain/**"` matches `src/domain/x.ts` but not `src/subdomain/x.ts`), `*`/`?` stay within one segment, and a pattern without `/` also matches the basename. Project-agnostic examples: `"**/domain/**"` (DDD rules), `"**/*.tf"` (infrastructure), `"**/*.component.ts"` (frontend components). A persona with no `activation:` field always joins; one whose globs match nothing is skipped AND named in the run log (`PERSONA SKIPPED — <name> (no activation match)`) — never silently omitted; malformed files (bad frontmatter, name/stem mismatch, symlinks) are skipped with a log line and never abort the chain. Extra personas are capped at five per run — glob-matched personas take slots before always-join ones (relevance wins), each group lexicographic; overflow is logged as dropped. **Output contract:** a persona reports exactly like a built-in aspect — `## Aspect: <persona-name>` header with `- [SEVERITY] file:line — finding` bullets — except every finding is prefixed with the persona's uppercased `<NAME>-<n>` ID for provenance. **Trust boundary:** a persona file is a repo-controlled prompt at the same trust level as any `.claude/agents` definition or a checked-in `CLAUDE.md` — the read-only/no-build contract is carried by the spawn prompt and the persona's own `tools:` frontmatter, not by promotion to the built-in reviewer principal. Custom personas stay neutral `host-profile-v1`: the all-tool gate prevents Session Control/workflow-root access and `main-v1` impersonation, but their ordinary host tools remain governed by their own frontmatter. Audit `zensu-review-*.md` files in third-party repos before running `/zensu:tdd` or `/zensu:plan-review` (both spawn personas from the local working checkout; `/zensu:pr-team-review` is base-scoped). Matching is decided deterministically by `hooks/lib/persona-activation.js` (changed files on stdin, personas dir as argv; verdict lines `spawn`/`skip`/`drop`).
