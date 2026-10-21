@@ -763,7 +763,7 @@ else
 fi
 DOCTOR_FLAT="$(tr '\n' ' ' < "$DOCTOR_SKILL" | tr -s ' ')"
 READINESS_MISSING=""
-grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the installed `playwright-cli` manifest names the measured version, and no empty or relative PATH entry comes before or holds `playwright-cli`; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" || READINESS_MISSING="$READINESS_MISSING [skill: registration, measured version and PATH-entry refusals]"
+grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks for Bash and PowerShell, the installed `playwright-cli` manifest names the measured version, and no empty or relative PATH entry comes before or holds `playwright-cli`; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" || READINESS_MISSING="$READINESS_MISSING [skill: registration, measured version and PATH-entry refusals]"
 grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: literal label]"
 grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: do not start until the row clears]"
 if [ -z "$READINESS_MISSING" ]; then

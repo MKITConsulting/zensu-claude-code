@@ -37,7 +37,7 @@ Work these in order. Depth scales to the mission; the skeleton does not.
 
 **0 — Frame the mission.** Decide the mode (below). If the user opened with `/goal ...` or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
 
-**1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu feature show <id>` and linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
+**1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu features get <feature-uuid>`, which takes the UUID rather than the `ZEN-XXX` id, and its linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
 
 **2 — Fight the mission on paper.** Walk the route move by move. Each move carries its expected observation, its most likely failure + cause + counter-move, and a fork with a trigger where the path can diverge. Hold it to the 8-point standard below. Structure per `references/wargame-structure.md`.
 

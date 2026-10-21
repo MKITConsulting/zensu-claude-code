@@ -336,6 +336,26 @@ else
 fi
 rm -rf "$C12_STATE_DIR"
 
+C13_STATE_DIR="$(mktemp -d -t hookmirror-c13-XXXX)"
+seed_active "$C13_STATE_DIR" "hookmirror-oversized"
+C13_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "1048576")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+C13_PAYLOAD_FILE="$C13_STATE_DIR/oversized-payload.json"
+node -e '
+  const [file, total] = process.argv.slice(1);
+  const base = { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "/tmp/x.ts", content: "" }, session_id: "hookmirror-oversized" };
+  base.tool_input.content = "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+  require("fs").writeFileSync(file, JSON.stringify(base));
+' "$C13_PAYLOAD_FILE" "$((C13_LIMIT + 1))"
+OUT_C13="$(STATE_DIR="$C13_STATE_DIR" bash "$HOOK" < "$C13_PAYLOAD_FILE" 2>/dev/null)"
+if printf '%s' "$OUT_C13" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$OUT_C13" | grep -qF "payload is $((C13_LIMIT + 1)) bytes, over the ${C13_LIMIT}-byte limit" \
+  && ! printf '%s' "$OUT_C13" | grep -qF 'binding is unavailable or invalid'; then
+  check "C13 a Write one byte over the binder's payload limit is denied with a reason that names its size, not a broken binding" PASS
+else
+  check "C13 oversized Write deny names its size (out=${OUT_C13:0:240})" FAIL
+fi
+rm -rf "$C13_STATE_DIR"
+
 echo "----"
 echo "test-pre-edit-hook-mirror: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

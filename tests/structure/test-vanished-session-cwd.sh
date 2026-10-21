@@ -57,6 +57,7 @@ const TOOL_INPUT = {
   Grep: { pattern: 'hello', path: project + '/src' },
   Glob: { pattern: '**/*', path: project + '/src' },
   Bash: { command: 'git status' },
+  PowerShell: { command: 'Get-Location' },
   Write: { file_path: project + '/notes.txt', content: 'x' },
   Edit: { file_path: project + '/README.md', old_string: 'hello', new_string: 'hi' },
   MultiEdit: {
