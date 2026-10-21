@@ -1737,8 +1737,11 @@ function acceptHandback(locations, record, agentId, worker, message, commit) {
   record.revision += 1;
   try {
     atomicWriteRecord(locations.records, record);
-  } catch (_) {
-    return `evidence-worker-v1 could not store the ${HANDBACK_TOOL} result; call ${HANDBACK_TOOL} once more with the same JSON object`;
+  } catch (error) {
+    if (error && typeof error.code === 'string') {
+      return `evidence-worker-v1 could not store the ${HANDBACK_TOOL} result; call ${HANDBACK_TOOL} once more with the same JSON object`;
+    }
+    return `evidence-worker-v1 cannot store this ${HANDBACK_TOOL} result in the lease; do not send it again and end the run`;
   }
   return null;
 }

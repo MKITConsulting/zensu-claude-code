@@ -218,6 +218,7 @@ const MUTATING_FILE_TOOLS = new Set([
   'apply_patch',
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
+const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;
 const HOST_PROFILE_TOOLS = new Set([
   'Read',
   'Grep',
@@ -241,14 +242,14 @@ const HOST_PROFILE_TOOLS = new Set([
   'AskUserQuestion',
   'StructuredOutput',
   'ReportFindings',
-  'SubagentHandback',
+  HOST_HANDBACK_TOOL,
 ]);
 const HOST_PROFILE_MCP_READ_TOOLS = new Set([
   'mcp__plugin_context7_context7__resolve-library-id',
   'mcp__plugin_context7_context7__query-docs',
 ]);
 const MCP_COMMAND_SEGMENT_RE = /(^|_)(exec|execute|run|shell|terminal|command|code)(_|$)/i;
-const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', 'SubagentHandback', 'AskUserQuestion']);
+const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', HOST_HANDBACK_TOOL, 'AskUserQuestion']);
 const SEARCH_EXAMPLE_LIMIT = 12;
 
 // `systemMessage` is optional and user-facing. It rides in the ONE object this run
@@ -796,7 +797,6 @@ function neutralViolation(payload, trusted) {
   return null;
 }
 
-const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;
 const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 

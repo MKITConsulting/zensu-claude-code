@@ -95,8 +95,9 @@ transcripts showed the same pattern.
   `toolViolation`, which writes nothing: asked about a handback, it answers the same verdict
   without storing the result, so a caller that only wants a verdict cannot complete a worker.
   Both repeat the exact-name and exact-shape check for their own callers. `HOST_HANDBACK_TOOL`
-  takes its value from the lease module's `HANDBACK_TOOL`, so the name has one owner, and the
-  suite pins that derivation. Every other tool of a worker is denied with
+  takes its value from the lease module's `HANDBACK_TOOL`, and `HOST_PROFILE_TOOLS` and
+  `NON_PATH_TOOLS` spell it through that constant, so the name has one owner in code; the suite
+  pins the derivation. Every other tool of a worker is denied with
   `… only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the JSON result`.
 - **The same validation as the final text.** A bound or retrying worker's message goes
   through `parseWorkerResult` with the label `SubagentHandback message`, then through the
@@ -105,11 +106,14 @@ transcripts showed the same pattern.
   collect read it unchanged. A failure is denied with the validation reason and writes nothing.
   It costs no strike: the two-strike ladder bounds the block loop a `SubagentStop` forces, a
   deny forces no continuation, and `maxTurns: 24` bounds the retries. A write that fails is
-  denied with the fixed reason `evidence-worker-v1 could not store the SubagentHandback result;
-  call SubagentHandback once more with the same JSON object`, never the filesystem error: that
-  message carries the lease id and the plugin-data path, which the worker is never told. A
-  rename that landed before the error leaves the worker completed, so the identical re-send
-  then takes the completed branch.
+  denied with a fixed reason, never the error itself: a filesystem error carries the lease id
+  and the plugin-data path, which the worker is never told. An error with a filesystem `code`
+  may pass, so it answers `evidence-worker-v1 could not store the SubagentHandback result; call
+  SubagentHandback once more with the same JSON object`; a rename that landed before the error
+  leaves the worker completed, and the identical re-send then takes the completed branch. An
+  error without a code is one of the lease's own refusals, such as the record size limit, which
+  the same JSON meets again, so it answers `evidence-worker-v1 cannot store this
+  SubagentHandback result in the lease; do not send it again and end the run`.
 - **Completed means create-once.** A completed worker's handback is allowed only when its
   message parses to the stored result (the same `result_sha256`), and it writes nothing; every
   other message is denied. This is the path a worker takes when its final text completed it at
@@ -255,8 +259,9 @@ CI prints a SKIP line; the check fails loudly only where the host is installed. 
 read the new bundle for the report tool's name and input schema, then update `HANDBACK_TOOL`,
 the shape check `handbackInputValid`, the docs the suite scans, the prose spellings that do not
 interpolate the constant (the two `renderEvidenceWorkerContext` sentences in
-`session-control-core-v1.js`, both agent definitions, both spawn prompts and the persona
-contract sentence), and this file together.
+`session-control-core-v1.js`, the neutral allowlist sentence of `renderHostContext` there, both
+agent definitions, both spawn prompts and the persona contract sentence), and this file
+together.
 
 **Known gaps.**
 

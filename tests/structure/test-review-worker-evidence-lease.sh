@@ -622,13 +622,15 @@ assert_gate "a worker its final text completed may hand that same result back wh
 [ "$HB_FINAL_STATE" = 'completed:1:final-text-role' ] && [ "$(file_digest "$HB_RECORD")" = "$HB_FINAL_DIGEST" ] \
   && check "the final text completed that worker, and its identical handback left the record unchanged" PASS \
   || check "the final text must complete that worker and its identical handback must leave the record unchanged (got: $HB_FINAL_STATE)" FAIL
+HB_DUP_DIGEST="$(file_digest "$HB_RECORD")"
 HB_DUP_REASON="$(gate_reason "$DATA" "$SESSION" hb-dup-agent zensu:plan-review-worker SubagentHandback \
   "$(handback_input "$HB_JSON")")"
 HB_DUP_STATE="$(worker_state "$HB_RECORD" hb-dup-agent)"
-case "$HB_DUP_STATE|$HB_DUP_REASON" in
-  'bound:0:-|'*'worker result role "handback-role" was already claimed'*)
-    check "a handback claiming another worker's role is denied and leaves the worker bound" PASS ;;
-  *) check "a handback claiming another worker's role must be denied (got: $HB_DUP_STATE ${HB_DUP_REASON:-<empty>})" FAIL ;;
+[ "$(file_digest "$HB_RECORD")" = "$HB_DUP_DIGEST" ] && HB_DUP_RECORD=same || HB_DUP_RECORD=changed
+case "$HB_DUP_STATE|$HB_DUP_RECORD|$HB_DUP_REASON" in
+  'bound:0:-|same|'*'worker result role "handback-role" was already claimed'*)
+    check "a handback claiming another worker's role is denied and leaves the record byte-identical" PASS ;;
+  *) check "a handback claiming another worker's role must be denied and leave the record unchanged (got: $HB_DUP_STATE $HB_DUP_RECORD ${HB_DUP_REASON:-<empty>})" FAIL ;;
 esac
 assert_gate "the worker's handback with a role of its own is allowed" allow "$DATA" "$SESSION" hb-dup-agent \
   zensu:plan-review-worker SubagentHandback "$(handback_input "$(valid_plan_result own-role)")"
@@ -674,9 +676,13 @@ HB_PREVIEW="$(MODULE="$PLUGIN/hooks/lib/review-evidence-lease-v1.js" \
   let failure;
   try { failure = lease.admitHandback(payload, binding); } finally { fs.renameSync = rename; }
   const failureUnchanged = read() === before;
+  fs.renameSync = () => { throw new Error("review-evidence-lease-v1: lease record exceeds size limit"); };
+  let fatal;
+  try { fatal = lease.admitHandback(payload, binding); } finally { fs.renameSync = rename; }
+  const fatalUnchanged = read() === before;
   const wrongTool = lease.admitHandback({ ...payload, tool_name: "Read" }, binding);
   const committed = lease.admitHandback(payload, binding);
-  process.stdout.write(JSON.stringify({ preview, previewUnchanged, failure, failureUnchanged, wrongTool, committed }));
+  process.stdout.write(JSON.stringify({ preview, previewUnchanged, failure, failureUnchanged, fatal, fatalUnchanged, wrongTool, committed }));
 ')"
 HB_PREVIEW_VERDICT="$(HB_PREVIEW="$HB_PREVIEW" DATA_ROOT="$DATA" node -e '
   let r; try { r = JSON.parse(process.env.HB_PREVIEW); } catch { process.stdout.write("unparseable"); process.exit(0); }
@@ -684,6 +690,7 @@ HB_PREVIEW_VERDICT="$(HB_PREVIEW="$HB_PREVIEW" DATA_ROOT="$DATA" node -e '
   const problems = [];
   if (r.preview !== null || r.previewUnchanged !== true) problems.push("preview");
   if (r.failure !== failureText || r.failureUnchanged !== true || String(r.failure).includes(process.env.DATA_ROOT)) problems.push("failure");
+  if (r.fatal !== "evidence-worker-v1 cannot store this SubagentHandback result in the lease; do not send it again and end the run" || r.fatalUnchanged !== true) problems.push("fatal");
   if (r.wrongTool !== "evidence-worker-v1 cannot deliver a result through Read; only SubagentHandback delivers it") problems.push("wrong-tool");
   if (r.committed !== null) problems.push("commit");
   process.stdout.write(problems.length ? problems.join(",") : "ok");
@@ -691,7 +698,7 @@ HB_PREVIEW_VERDICT="$(HB_PREVIEW="$HB_PREVIEW" DATA_ROOT="$DATA" node -e '
 HB_PREVIEW_STATE="$(worker_state "$HB_RECORD" hb-preview-agent)"
 case "$HB_PREVIEW_VERDICT|$HB_PREVIEW_STATE" in
   'ok|completed:1:preview-role')
-    check "toolViolation previews a valid handback without writing, a failed write answers a path-free retry reason, and admitHandback stores the result" PASS ;;
+    check "toolViolation previews a valid handback without writing, a failed write answers a path-free reason that asks for a retry only after an I/O error, and admitHandback stores the result" PASS ;;
   *) check "toolViolation must preview without writing and admitHandback must store with a path-free failure reason (got: $HB_PREVIEW_VERDICT, $HB_PREVIEW_STATE)" FAIL ;;
 esac
 HB_FINALIZE="$(helper "$DATA" "$SESSION" finalize --lease-id "$HB_ID" 2>/dev/null)"
@@ -806,8 +813,19 @@ case "$PR_HB_REASON" in
     check "a PR handback with an inline path outside name-status is denied" PASS ;;
   *) check "a PR handback with an inline path outside name-status must be denied (got: ${PR_HB_REASON:-<empty>})" FAIL ;;
 esac
+PR_HB_JSON="$(valid_pr_result bug-hunter src/app.js)"
 assert_gate "a PR handback inside name-status is allowed" allow "$DATA" "$SESSION" pr-handback-agent \
-  zensu:pr-review-worker SubagentHandback "$(handback_input "$(valid_pr_result bug-hunter src/app.js)")"
+  zensu:pr-review-worker SubagentHandback "$(handback_input "$PR_HB_JSON")"
+PR_HB_STATE="$(worker_state "$(record_file "$DATA" "$SESSION" "$PR_HB_ID")" pr-handback-agent)"
+PR_HB_FINALIZE="$(helper "$DATA" "$SESSION" finalize --lease-id "$PR_HB_ID" 2>/dev/null)"
+PR_HB_COLLECT="$(helper "$DATA" "$SESSION" collect --lease-id "$PR_HB_ID" --agent-id pr-handback-agent \
+  --expected-role bug-hunter 2>/dev/null)"
+if [ "$PR_HB_STATE" = 'completed:1:bug-hunter' ] && [ "$PR_HB_FINALIZE" = "sealed=$PR_HB_ID" ] \
+    && [ "$PR_HB_COLLECT" = "$PR_HB_JSON" ]; then
+  check "a PR handback completes the worker, and finalize and collect return it like a final-text result" PASS
+else
+  check "a PR handback must complete the worker, and finalize and collect must return it (got: $PR_HB_STATE, ${PR_HB_FINALIZE:-<empty>})" FAIL
+fi
 helper "$DATA" "$SESSION" close --lease-id "$PR_HB_ID" >/dev/null
 
 # A code fence inside a finding body is content, not a wrapper. The pr-team-review personas
