@@ -114,8 +114,40 @@ shape half through `requireAbsentDirectoryPath` (control characters, absolutenes
 normalization — spelled as PR #272 spells it, so a merge keeps one copy), requires
 the root's PARENT to be a real directory (a pruned installation leaves its cache
 directory behind; a record naming a root under a directory that never existed is
-not this state), and returns only on a clean `lstat` ENOENT — a present root fails
-`still exists`. **The cost, stated:** with the minting tree gone, `runtime_digest`
+not this state), and returns on a clean `lstat` ENOENT or on a retired remnant —
+every other present root fails `still exists`.
+
+**A retired remnant counts as pruned, because Claude Code's orphan cleanup does not
+always remove the directory.** Measured on the maintainer's machine on 2026-10-20: the
+0.21.1 and 0.22.0 cache directories each kept `.orphaned_at` plus leftovers
+(`node_modules`, `.zensu`, `SECURITY.md`, empty skill directories) while
+`.claude-plugin/` and `hooks/` were gone, and a live session minted by 0.21.1 answered
+`record-unreadable`, with its Stop hook blocking the turn nine times in a row.
+`retiredPluginRootState` is the one predicate: `lstat` says a real directory; the
+host manifest path answers ENOENT; `.orphaned_at` reads through
+`readRegularFileSnapshot` (O_NOFOLLOW, regular, single link, at most 13 bytes) and
+matches `^[1-9][0-9]{12}$`. The eval provider's mode and mtime conditions are NOT
+applied: a umask of 002 or a copy without timestamps would wedge real sessions, and
+the marker proves the host's retirement signal, not authenticity. The bound is the
+same as for an absent root: whoever can plant a marker and delete the manifest can
+delete the directory, which this reader already admits, and the private records
+directory stays the barrier. A remnant still carrying its manifest keeps refusing,
+because a manifest-bearing tree whose digest disagrees is an integrity signal. Every
+consumer reaches the remnant through `readPrunedPluginRootContext`, so the binder
+modes, the deny scopes, the Stop release, the doctor's pruned row, the re-anchor
+ladder and adoption need no change of their own.
+
+**A `record-unreadable` refusal names its cause.** `recordReaderRefusals` runs the
+three readers in ladder order, never throws, and returns one `{ reader, refusal }`
+per reader with the core's `session-control-v1: ` prefix stripped
+(`FAIL_PREFIX`). The adoption report renders one row per reader under the refusal
+(`readerRefusalRows`, read behind a `typeof` guard), the doctor's unbound row points
+at the report, and the hand-copied `record-unreadable` remedy in
+`reviewer-capability-v1.js` and `zensu-session.sh` stopped claiming the causes
+cannot be told apart. The refusal object keeps its exact key set, which
+`session-auto-adopt-v1.test.js` pins. **Version: `patch`** — one reader admits
+strictly more, one read-only export is added, and no record field, strict key set,
+hook, matcher, config key or attestation moves. **The cost, stated:** with the minting tree gone, `runtime_digest`
 and `plugin_version` are shape-checked only and taken on the record's word. What
 still binds the record: session hash, schema, principal profiles, `plugin_data`
 equality, the recorded project root existing, the sibling cache directory, and the
