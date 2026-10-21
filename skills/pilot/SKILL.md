@@ -203,8 +203,9 @@ and the relevant slice of the status card as the skill's input. Rules:
 
 ## Degradation ladder (never dead-end)
 
-- `zensu` CLI missing or `zensu auth status` failing → offer `/zensu:setup`,
-  then stop (pilot cannot probe without the backend).
+- `zensu` CLI missing, or `zensu auth status` failing or printing `Not logged in`
+  (it exits 0 then) → offer `/zensu:setup`, then stop (pilot cannot probe without
+  the backend).
 - `gh` missing or unauthenticated → skip the PR probes, say so on the status
   card, and drop all PR-state-keyed rows (review presence, unresolved threads,
   the review-/merged-keyed `testing` transitions, the `CLOSED` fallback). The

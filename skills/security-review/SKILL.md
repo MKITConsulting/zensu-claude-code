@@ -23,7 +23,7 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`); that list pages at 20 with no page flag, so when its `total` exceeds the returned `data` length, resolve against `zensu journeys suggest --product <product-id>` instead.
 
