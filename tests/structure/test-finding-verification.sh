@@ -143,10 +143,13 @@ if [ -n "$JUDGE_LINE" ] && [ -n "$VERIFY_LINE" ] && [ -n "$SPAWN_LINE" ] \
 else
   check "P2b the gate sits AFTER the judge and BEFORE the consume reviewer (4b=$JUDGE_LINE 4c=$VERIFY_LINE 5=$SPAWN_LINE)" FAIL
 fi
-if grep -qF 'zensu_hook_enabled findingVerification' "$TDD_MD"; then
-  check "P2c the gate resolves hooks.findingVerification with the real merge semantics" PASS
+IFS= read -r P2C_PROBE <<'PROBE'
+ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled findingVerification && echo on || echo off'
+PROBE
+if grep -qF -- "$P2C_PROBE" "$TDD_MD"; then
+  check "P2c the gate resolves hooks.findingVerification with the real merge semantics against the bound project root" PASS
 else
-  check "P2c the gate resolves hooks.findingVerification with the real merge semantics" FAIL
+  check "P2c the gate resolves hooks.findingVerification with the real merge semantics against the bound project root" FAIL
 fi
 if grep -qF 'hooks/lib/finding-verify-v1.js' "$TDD_MD"; then
   check "P2d step 4c invokes the model-free grader" PASS
@@ -260,13 +263,21 @@ if grep -qF 'never drop a demoted item silently' "$PLAN_MD"; then
 else
   check "P4h a demoted plan blocker is named in the report, never dropped" FAIL
 fi
-for f in "$PR_MD" "$PLAN_MD"; do
-  if grep -qF 'zensu_hook_enabled findingVerification' "$f"; then
-    check "P4i $(basename "$(dirname "$f")") resolves the same config flag" PASS
+IFS= read -r P4I_PR_PROBE <<'PROBE'
+ZENSU_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$(CLAUDE_PLUGIN_DATA="<absolute-plugin-data>" bash "$ROOT/hooks/lib/zensu-log.sh" --project-root)" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled findingVerification && echo on || echo off'
+PROBE
+IFS= read -r P4I_PLAN_PROBE <<'PROBE'
+ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --project-root)" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled findingVerification && echo on || echo off'
+PROBE
+p4i() {
+  if grep -qF -- "$3" "$2"; then
+    check "P4i $1 resolves the same config flag against the bound project root" PASS
   else
-    check "P4i $(basename "$(dirname "$f")") resolves the same config flag" FAIL
+    check "P4i $1 resolves the same config flag against the bound project root" FAIL
   fi
-done
+}
+p4i pr-team-review "$PR_MD" "$P4I_PR_PROBE"
+p4i plan-review "$PLAN_MD" "$P4I_PLAN_PROBE"
 
 # ── P5 config + docs surface ─────────────────────────────────────────
 if node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(c.hooks && c.hooks.findingVerification===true?0:1)' "$CONFIG_EX" 2>/dev/null; then

@@ -560,6 +560,42 @@ unredact_claim() {
   UNREDACTED_CLAIM="$p"
 }
 
+relative_claim_may_nest() {
+  local dir="$REPO_CANON" rest="$1" seg
+  while :; do
+    case "$rest" in
+      */*) ;;
+      *) return 1 ;;
+    esac
+    seg="${rest%%/*}"
+    rest="${rest#*/}"
+    case "$seg" in
+      ''|.) continue ;;
+    esac
+    dir="$dir/$seg"
+    [ -d "$dir" ] || return 1
+    if [ -L "$dir" ] || [ -e "$dir/.git" ]; then return 0; fi
+  done
+}
+
+place_relative_claim() {
+  local p="$1" verdict
+  PLACED_CLAIM="$p"
+  PLACED_VERDICT=""
+  case "$p" in
+    /*) return 0 ;;
+  esac
+  relative_claim_may_nest "$p" || return 0
+  verdict="$(absolute_claim_verdict "$REPO_CANON/$p")"
+  case "${verdict%%$'\t'*}:${verdict#*$'\t'}" in
+    in-root:*|unrooted:*) return 0 ;;
+    foreign:"$REPO_CANON"/*|undetermined:"$REPO_CANON"/*) ;;
+    foreign:*|undetermined:*) return 0 ;;
+  esac
+  PLACED_CLAIM="$REPO_CANON/$p"
+  PLACED_VERDICT="$verdict"
+}
+
 # Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
 # nothing when it cannot be resolved unambiguously.
 normalize_claim() {
@@ -567,10 +603,11 @@ normalize_claim() {
   p="$(trim_claim "$raw")"
   [ -n "$p" ] || return 1
   unredact_claim "$p" || return 1
-  p="$UNREDACTED_CLAIM"
+  place_relative_claim "$UNREDACTED_CLAIM"
+  p="$PLACED_CLAIM"
   case "$p" in
     /*)
-      verdict="$(absolute_claim_verdict "$p")"
+      verdict="${PLACED_VERDICT:-$(absolute_claim_verdict "$p")}"
       kind="${verdict%%$'\t'*}"
       # A CLOSED case, not a ladder with a silent `else`. The retired shape
       # took `${verdict#*\t}` as a repo-relative PATH for anything it did not
@@ -783,6 +820,13 @@ if [ "$INVENTORY" -eq 1 ]; then
   [ -z "$GIT_FAULT" ] \
     || INV_FAULT="$(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT") ($(render_claim_value "$GIT_FAULT")), so the anchor every absolute claim is placed against is unknown"
   INV_ROOTS="$(mktemp)" || die "mktemp failed"
+  INV_COUNT=0
+  while IFS="$(printf '\t')" read -r step raw; do
+    [ -n "${raw// /}" ] || continue
+    [ "$INV_COUNT" -lt "$INV_CLAIM_BUDGET" ] || break
+    INV_COUNT=$((INV_COUNT + 1))
+  done < "$CLAIMS_FILE"
+  printf 'claimed-files=%s\n' "$INV_COUNT"
   while IFS="$(printf '\t')" read -r step raw; do
     [ -n "${raw// /}" ] || continue
     if [ "$INV_CLAIMS" -ge "$INV_CLAIM_BUDGET" ]; then
@@ -796,11 +840,12 @@ if [ "$INVENTORY" -eq 1 ]; then
     INV_CLAIMS=$((INV_CLAIMS + 1))
     INV_PATH="$(trim_claim "$raw")"
     unredact_claim "$INV_PATH" || continue
-    INV_PATH="$UNREDACTED_CLAIM"
+    place_relative_claim "$UNREDACTED_CLAIM"
+    INV_PATH="$PLACED_CLAIM"
     case "$INV_PATH" in
       /*)
         [ -z "$GIT_FAULT" ] || continue
-        INV_VERDICT="$(absolute_claim_verdict "$INV_PATH")"
+        INV_VERDICT="${PLACED_VERDICT:-$(absolute_claim_verdict "$INV_PATH")}"
         case "${INV_VERDICT%%$'\t'*}" in
           # The append is CHECKED. An ENOSPC, a full tmpfs or a destination that
           # cannot be created silently dropped that root, and the caller then read
@@ -856,7 +901,6 @@ if [ "$INVENTORY" -eq 1 ]; then
         ;;
     esac
   done < "$CLAIMS_FILE"
-  printf 'claimed-files=%s\n' "$INV_CLAIMS"
   # Sort into a variable rather than into a pipeline: a pipeline's status is the
   # LAST command's, so `sort | while` reported the loop's success and swallowed
   # the sort's failure.

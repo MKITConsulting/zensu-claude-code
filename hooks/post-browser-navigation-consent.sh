@@ -9,7 +9,7 @@ skip() {
 INPUT="$(cat 2>/dev/null || true)"
 if ! source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
   || ! declare -F zensu_browser_consent_marked >/dev/null 2>&1; then
-  _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed 's/\\[nrt]//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\" 2>/dev/null)" || _zensu_scan=""
+  _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed 's/\\[nrt]//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\\`" 2>/dev/null)" || _zensu_scan=""
   case "$_zensu_scan $INPUT" in
     *[Pp][Ll][Aa][Yy][Ww][Rr][Ii][Gg][Hh][Tt]*|*[Zz][Ee][Nn][Ss][Uu]-[Vv][Ee][Rr][Ii][Ff][Yy]*) skip "prefilter library unavailable" ;;
   esac

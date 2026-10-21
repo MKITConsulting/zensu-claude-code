@@ -291,6 +291,19 @@ zensu_session_incompatible_runtime() {
   _zensu_session_binder_mode incompatible-runtime "${1:-}"
 }
 
+zensu_hook_payload_oversized() {
+  _zensu_session_binder_mode payload-oversized "${1:-}"
+}
+
+zensu_emit_oversized_payload_deny() {
+  local LC_ALL=C
+  local bytes="${1:-}" cap="${2:-}"
+  case "$bytes" in (''|*[!0-9]*) return 1 ;; esac
+  case "$cap" in (''|*[!0-9]*) return 1 ;; esac
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this call'"'"'s hook payload is %s bytes, over the %s-byte limit Zensu Session Control reads to bind a call to its session, so the call cannot be attributed to a Session Control record. The limit applies to each call, not to the session: repairing or restarting the session does not lift it. Split the work into smaller calls."}}\n' \
+    "$bytes" "$cap"
+}
+
 # The model-side twin of the predicate above, for /zensu:doctor: same question
 # and same printed version pair, but no hook payload exists there, so the session
 # id comes from CLAUDE_CODE_SESSION_ID.
@@ -379,12 +392,16 @@ zensu_session_adoption_tail() {
 # immaterial. A caller that passes no fallback scope gets the generic deny.
 zensu_emit_named_bind_deny() {
   local payload="${1:-}" fallback="${2:-}" audience="${3:-}"
-  local pair refusal
+  local pair refusal oversized
   # The AUDIENCE is an optional third argument: a caller that has already
   # established its principal — the Edit gate exits for every non-main principal
   # before it can reach this function — passes it and saves the node spawn the
   # derivation costs. Anything but `main` or `child` is derived instead.
   case "$audience" in (main|child) ;; (*) audience="" ;; esac
+  if oversized="$(zensu_hook_payload_oversized "$payload")" \
+    && zensu_emit_oversized_payload_deny "${oversized%%$'\t'*}" "${oversized##*$'\t'}"; then
+    return
+  fi
   # Either named state is reached only AFTER the bind's own automatic adoption
   # did not bind the session, so the deny names why. One extra binder spawn, on
   # the deny path only; an unanswerable question renders as `(unknown)`.
@@ -716,7 +733,7 @@ _zensu_adoption_refusal_remedy() {
     (plugin-data-mismatch)
       printf '%s' 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward' ;;
     (record-unreadable)
-      printf '%s' 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change — and adoption cannot tell those apart; /zensu:adopt-session prints the full diagnosis, and a fresh Claude Code session is the way forward' ;;
+      printf '%s' 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change; /zensu:adopt-session names why each record reader refused it, and a fresh Claude Code session is the way forward' ;;
     (executing-runtime-unidentified)
       printf '%s' 'The running installation declares no usable version, so repair the plugin installation first' ;;
     (opted-out)
@@ -1194,6 +1211,7 @@ case "${OSTYPE:-}" in
     export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
       zensu_safe_display_path \
       _zensu_session_binder_mode zensu_emit_named_bind_deny \
+      zensu_hook_payload_oversized zensu_emit_oversized_payload_deny \
       zensu_session_unregistered \
       zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
       zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
