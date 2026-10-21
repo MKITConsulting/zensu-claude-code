@@ -14,9 +14,10 @@
 # (how an agent *gains* the context the gate wants), the explicit per-command
 # `ZENSU_MCP_GATE=off` prefix of a main-thread command, or a write whose target backend
 # (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
-# where the dedup/journey/classification conventions are meaningless. An unprefixed
-# --help/-h or localhost call leaves before the bind; a read or a prefixed call passes
-# only once the session binds, and a PowerShell call it cannot judge is denied.
+# where the dedup/journey/classification conventions are meaningless. A --help/-h or
+# localhost call the parse reads as one, without the inline prefix, leaves before the
+# bind; a read or a prefixed call passes only once the session binds, and a PowerShell
+# call it cannot judge is denied.
 #
 # This is a convention-nudge, not an airtight boundary: once the CLI's OAuth
 # token is cached on disk an agent can curl the API directly. The gate enforces

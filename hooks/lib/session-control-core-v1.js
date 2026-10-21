@@ -2904,7 +2904,8 @@ function repairWorkflowBaseline(options) {
 // gone". This one answers "it serves it fine and the DIRECTORY the record anchors
 // is gone" — the ordinary shape after `git worktree remove`, where readContext
 // throws, readOrphanedProjectRootContext succeeds, reads other than a zensu CLI call
-// work, and Edit, Write, MultiEdit and a Bash write the opt-in gate attributes deny.
+// work, and Edit, Write and MultiEdit deny, as does a Bash write the opted-in gate
+// attributes while no usable CLAUDE_PROJECT_DIR remains.
 //
 // WHY THIS IS NOT THE RE-ANCHORING THAT WAS REFUSED. CLAUDE.md records the
 // refusal of re-anchoring a record to a live directory: a session may delete its

@@ -149,9 +149,11 @@ denies one it cannot read: a call another command starts, a noun or verb built a
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
-(`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
-meaningless; an inline `ZENSU_MCP_GATE=off` prefix still brings any such call to the binding, which denies it when
-it fails. A subagent's mutation is denied even while a window is open, because a child never
+is **localhost** — a throwaway dev/test DB where the conventions are meaningless. It reads that backend from
+`--api-url <url>` given as two words, or from `ZENSU_API_URL` as an inline prefix or in the hook's own
+environment; a `--help`, `-h` or `--api-url` word right after a word the shell expands at run time is read as that
+word's value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
+brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
