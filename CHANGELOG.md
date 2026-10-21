@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so each took the order's work out of its lease. The operator account now names the routes the
   gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
   pull request.
+- **CLI write-gate `--api-url=`**: the `zensu` CLI write-gate now reads the one-word
+  `--api-url=<url>` as a localhost backend, as it reads the two-word `--api-url <url>` and
+  `ZENSU_API_URL`, so a mutation such as
+  `zensu --api-url=http://localhost:8090 security classify f1` is no longer denied as a freelance
+  one. The spelling counts only where the gate reads the call in full: every such word names
+  `localhost`, `127.0.0.1` or `0.0.0.0` with at most a port and a plain path and stands in flag
+  position, and the command holds no `$`, backtick, brace, carriage return, glob character,
+  `xargs` or `watch`, on Windows no backslash, and no `zensu` call the shell model cannot find.
+  A local call that misses one of these keeps the earlier deny; the two-word spelling passes as
+  before.
 
 ## [0.28.0] - 2026-10-21
 
