@@ -38,7 +38,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,generate_claude_md,generate_threat_model,analyze_feature_security"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu products create` / `zensu products vision-create` / `zensu products bootstrap-apply` / `zensu features create` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,set_security_classification"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu products create` / `zensu products vision-create` / `zensu products bootstrap-apply` / `zensu features create` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
 ### Phase 1: Product & Vision Setup
 
@@ -69,7 +69,7 @@ Execute each step below, presenting results to the user after each.
 - Remove horizontal/implementation features that shouldn't be tracked
 - Split XL-effort features using `zensu subfeatures add <feature-id>` or `zensu features split <feature-id>`
 - Add missing features with `zensu features create`
-- Fix incorrect priorities or security classifications with `zensu features update <feature-id>`
+- Fix incorrect priorities with `zensu features update <feature-id> --priority <low|medium|high|critical>` and incorrect security classifications with `zensu security classify <feature-id> --classification <public|internal|confidential|restricted>`
 - After completion: run `zensu products bootstrap-step <vision-id> 1` (the step is a positional argument, not a `--step` flag)
 
 **Step 2: Define User Journeys**
@@ -131,6 +131,7 @@ The product is now ready for implementation. Features can be worked on using the
 | `zensu products bootstrap-apply` | 2 | Create components and features from decomposition |
 | `zensu features list` | 3.1 | Review bootstrapped features |
 | `zensu features update` | 3.1 | Fix priorities, descriptions |
+| `zensu security classify` | 3.1 | Fix security classifications |
 | `zensu subfeatures add` | 3.1 | Split large features |
 | `zensu features split` | 3.1 | Split features into children |
 | `zensu features create` | 3.1 | Add missing features |

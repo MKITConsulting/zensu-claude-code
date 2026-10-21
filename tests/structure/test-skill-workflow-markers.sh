@@ -11,23 +11,36 @@ source "${CLAUDE_PLUGIN_ROOT}/tests/structure/lib-skill-text.sh" 2>/dev/null || 
 # a mutation tool (the primary form post-rehome), and a legacy backticked bare
 # mutation tool name. Echoes the offending tool name; silent + return 0 when the
 # skill is properly workflow-wrapped.
-skill_unwrapped_mutation() {
-  local f="$1" tok line noun verb tool
-  if grep -qF -- '--workflow-begin' "$f" && grep -qF -- '--workflow-end' "$f"; then
-    return 0
-  fi
-  for line in $(grep -oE 'zensu +[a-z][a-z-]+ +[a-z][a-z-]+' "$f" | sed -E 's/ +/=/g'); do
-    noun="${line#zensu=}"; verb="${noun#*=}"; noun="${noun%%=*}"
+skill_cli_mutations() {
+  local tool
+  for tool in $(skill_cli_tools "$1"); do
+    if zensu_is_mutation_tool "$tool" && ! zensu_is_work_order_tool "$tool" && ! zensu_is_human_decision_tool "$tool"; then echo "$tool"; fi
+  done
+}
+
+skill_cli_tools() {
+  local f="$1" line rest noun verb third
+  for line in $(grep -oE 'zensu +[a-z][a-z-]+ +[a-z][a-z-]+( +[a-z][a-z-]+)?' "$f" | sed -E 's/ +/=/g'); do
+    rest="${line#zensu=}"; noun="${rest%%=*}"; rest="${rest#*=}"; verb="${rest%%=*}"; third=""
+    case "$rest" in *=*) third="${rest#*=}" ;; esac
     case "$noun" in                                                # normalize CLI noun aliases (mirror the gate's ALIAS map)
       product) noun=products ;; feature) noun=features ;; subfeature) noun=subfeatures ;;
       roadmaps) noun=roadmap ;; tier) noun=tiers ;; sec) noun=security ;;
-      journey) noun=journeys ;; docs) noun=doc ;; kb) noun=knowledge ;; wiki-pages) noun=wiki ;;
+      journey) noun=journeys ;; mock) noun=mocks ;; docs) noun=doc ;; kb) noun=knowledge ;; wiki-pages) noun=wiki ;;
     esac
-    tool="$(zensu_cli_to_tool "$noun" "$verb")"
-    if [ -n "$tool" ] && zensu_is_mutation_tool "$tool"; then echo "$tool"; return 0; fi
+    zensu_cli_to_tool "$noun" "$verb" "$third"
   done
+}
+
+skill_unwrapped_mutation() {
+  local f="$1" tok tool
+  if grep -qF -- '--workflow-begin' "$f" && grep -qF -- '--workflow-end' "$f"; then
+    return 0
+  fi
+  tool="$(skill_cli_mutations "$f" | head -n 1)"
+  if [ -n "$tool" ]; then echo "$tool"; return 0; fi
   for tok in $(grep -oE '`[^`]+`' "$f" | grep -oE '[a-z][a-z0-9_]+' | sort -u); do
-    if zensu_is_mutation_tool "$tok"; then echo "$tok"; return 0; fi
+    if zensu_is_mutation_tool "$tok" && ! zensu_is_work_order_tool "$tok" && ! zensu_is_human_decision_tool "$tok"; then echo "$tok"; return 0; fi
   done
 }
 
@@ -38,7 +51,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for t in get_feature list_features search_knowledge suggest_workflow analyze_journey_health validate_feature_security ghost_get_candidates pulse_start_session pulse_end_session pulse_session_summary; do
+for t in get_feature list_features search_knowledge suggest_workflow analyze_journey_health validate_feature_security ghost_get_candidates pulse_start_session pulse_end_session pulse_session_summary analyze_feature_security generate_threat_model generate_claude_md list_mocks get_mock get_design_context get_automation_policy list_product_repositories list_work_plan_followups; do
   if zensu_is_read_tool "$t" 2>/dev/null && ! zensu_is_mutation_tool "$t" 2>/dev/null; then
     check "T-read $t -> read, not mutation" PASS
   else
@@ -46,7 +59,7 @@ for t in get_feature list_features search_knowledge suggest_workflow analyze_jou
   fi
 done
 
-for t in set_security_classification create_feature analyze_feature_security complete_security_review link_test generate_threat_model ghost_apply apply_bootstrap update_feature bootstrap_from_vision; do
+for t in set_security_classification create_feature complete_security_review link_test ghost_apply apply_bootstrap update_feature bootstrap_from_vision create_mock update_journey_step delete_journey_step approve_work_plan set_automation_policy ask_work_order_question push_work_plan; do
   if zensu_is_mutation_tool "$t" 2>/dev/null && ! zensu_is_read_tool "$t" 2>/dev/null; then
     check "T-mut $t -> mutation, not read" PASS
   else
@@ -144,6 +157,85 @@ printf '# multi\n\nStep: call `create_feature(name, component)` to add it.\n' > 
 MULTI="$(skill_unwrapped_mutation "$FXM/multi/SKILL.md" 2>/dev/null)"
 [ "$MULTI" = "create_feature" ] && check "I4-multi multi-token backtick span flagged" PASS || check "I4-multi multi-token flagged (got '$MULTI')" FAIL
 rm -rf "$FXM"
+
+FXT="$(mktemp -d -t skillmarkt-XXXXXX)"
+mkdir -p "$FXT/third" "$FXT/mock" "$FXT/order" "$FXT/human"
+printf '# third\n\nStep: run `zensu work policy set --product <product-id> --max-attempts 2`.\n' > "$FXT/third/SKILL.md"
+printf '# mock\n\nStep: run `zensu mock create <feature-id> <file>`.\n' > "$FXT/mock/SKILL.md"
+printf '# order\n\nThe helper sends `zensu work ask <order-id>` and never `zensu work heartbeat <order-id>`.\n' > "$FXT/order/SKILL.md"
+THIRD="$(skill_cli_tools "$FXT/third/SKILL.md" 2>/dev/null | grep -v '^$' | head -n 1)"
+MOCK="$(skill_unwrapped_mutation "$FXT/mock/SKILL.md" 2>/dev/null)"
+ORDER="$(skill_unwrapped_mutation "$FXT/order/SKILL.md" 2>/dev/null)"
+printf '# human\n\nTell the user to run `zensu plan approve <plan-id>` or `zensu work policy set --product <product-id>` themselves.\n' > "$FXT/human/SKILL.md"
+HUMAN="$(skill_unwrapped_mutation "$FXT/human/SKILL.md" 2>/dev/null)"
+[ "$THIRD" = "set_automation_policy" ] && check "I5-third a group verb resolves through its third word" PASS || check "I5-third group verb third word (got '$THIRD')" FAIL
+[ "$MOCK" = "create_mock" ] && check "I5-mock the mock alias resolves to mocks" PASS || check "I5-mock alias (got '$MOCK')" FAIL
+[ -z "$ORDER" ] && check "I5-order work-order protocol verbs need no skill window" PASS || check "I5-order work-order verbs flagged (got '$ORDER')" FAIL
+[ -z "$HUMAN" ] && check "I5-human a decision the person runs needs no skill window" PASS || check "I5-human human-decision verbs flagged (got '$HUMAN')" FAIL
+rm -rf "$FXT"
+
+C_FAIL=0
+for t in $ZENSU_MUTATION_TOOL_NAMES; do
+  zensu_is_read_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      mutation '$t' also classifies as a read, so the gate would pass it"; }
+done
+for t in $ZENSU_HUMAN_DECISION_TOOL_NAMES $ZENSU_WORK_ORDER_TOOL_NAMES; do
+  zensu_is_mutation_tool "$t" || { C_FAIL=$((C_FAIL+1)); echo "      '$t' is not in ZENSU_MUTATION_TOOL_NAMES"; }
+done
+for t in $ZENSU_WORK_ORDER_SESSION_TOOL_NAMES; do
+  zensu_is_work_order_tool "$t" || { C_FAIL=$((C_FAIL+1)); echo "      session tool '$t' is not a work-order tool"; }
+done
+for t in $ZENSU_HUMAN_DECISION_TOOL_NAMES; do
+  zensu_is_work_order_tool "$t" && { C_FAIL=$((C_FAIL+1)); echo "      '$t' is both a human decision and a work-order tool"; }
+done
+[ "$C_FAIL" -eq 0 ] && check "C1 no mutation classifies as a read; human-decision and work-order names are mutations; session names are work-order names; the two families are disjoint" PASS || check "C1 classification invariants ($C_FAIL)" FAIL
+
+M_FAIL=0
+for t in $(grep -oE 'echo "[a-z_]+"' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh" | sed -E 's/echo "([a-z_]+)"/\1/' | sort -u); do
+  zensu_is_zensu_tool "$t" || { M_FAIL=$((M_FAIL+1)); echo "      the CLI map emits '$t', which is neither a read nor a mutation"; }
+done
+[ "$M_FAIL" -eq 0 ] && check "C2 every tool the CLI map emits is classified as a read or a mutation" PASS || check "C2 unclassified CLI map outputs ($M_FAIL)" FAIL
+
+D_FAIL=0; W_FAIL=0
+for d in "${CLAUDE_PLUGIN_ROOT}"/skills/*/; do
+  [ -f "${d}SKILL.md" ] || continue
+  F="$(skill_text_file "${d%/}" 2>/dev/null)" || F=""
+  [ -n "$F" ] || continue
+  declared="$(grep -oE -- '--workflow-begin --tools "[^"]*"' "$F" | sed -E 's/.*"([^"]*)"/\1/' | tr ',\n' '  ')"
+  for t in $declared; do
+    zensu_is_mutation_tool "$t" || { D_FAIL=$((D_FAIL+1)); echo "      skill '$(basename "$d")' declares '$t', which is not a mutation"; }
+    if zensu_is_human_decision_tool "$t" || zensu_is_work_order_tool "$t"; then
+      D_FAIL=$((D_FAIL+1)); echo "      skill '$(basename "$d")' declares '$t', which no skill window may let through"
+    fi
+  done
+  if [ -n "$declared" ]; then
+    for t in $(skill_cli_mutations "$F" | sort -u); do
+      case " $declared " in
+        *" $t "*) ;;
+        *) W_FAIL=$((W_FAIL+1)); echo "      skill '$(basename "$d")' runs '$t' but its --workflow-begin --tools window does not declare it" ;;
+      esac
+    done
+  fi
+  rm -f "$F"
+done
+[ "$D_FAIL" -eq 0 ] && check "C3 every --workflow-begin --tools declaration names mutations only, and never a human decision or a work-order verb" PASS || check "C3 non-mutation, human-decision or work-order declarations ($D_FAIL)" FAIL
+[ "$W_FAIL" -eq 0 ] && check "C4 every CLI mutation a skill with a window runs is declared in that window" PASS || check "C4 undeclared skill mutations ($W_FAIL)" FAIL
+
+WO_VERBS="$(node -e 'process.stdout.write([...require(process.argv[1]).SESSION_WORK_VERBS].join(" "))' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/work-order-v1.js" 2>/dev/null)"
+S_FAIL=0; S_SEEN=""
+[ -n "$WO_VERBS" ] || { S_FAIL=1; echo "      SESSION_WORK_VERBS could not be read from hooks/lib/work-order-v1.js"; }
+for v in $WO_VERBS; do
+  t="$(zensu_cli_to_tool work "$v")"
+  if zensu_is_read_tool "$t"; then continue; fi
+  if zensu_is_work_order_session_tool "$t"; then S_SEEN="$S_SEEN $t"; continue; fi
+  S_FAIL=$((S_FAIL+1)); echo "      the work-order gate lets zensu work $v through, but '$t' is neither a read nor a work-order session tool"
+done
+for t in $ZENSU_WORK_ORDER_SESSION_TOOL_NAMES; do
+  case " $S_SEEN " in
+    *" $t "*) ;;
+    *) S_FAIL=$((S_FAIL+1)); echo "      work-order session tool '$t' is not a verb the work-order gate lets through" ;;
+  esac
+done
+[ "$S_FAIL" -eq 0 ] && check "C5 the write-gate's work-order session tools are exactly the mutations among the verbs the work-order gate lets through" PASS || check "C5 work-order session tools drift from SESSION_WORK_VERBS ($S_FAIL)" FAIL
 
 if command -v node >/dev/null 2>&1; then
   check "AP0 node is available for the argument-placeholder lint" PASS
