@@ -81,9 +81,9 @@ updating features, security classifications, tiers, journeys and their steps, re
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must
 run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
 user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
-telemetry are always allowed in a session that binds; the gate binds before it classifies, so when
-the Session Control binding fails it denies every `zensu <noun> <verb>` call it parses, reads
-included. A command that records a decision the person makes — creating,
+telemetry are allowed in a session that binds, except a PowerShell call the analyzer cannot judge
+(see [Shell Tools](#shell-tools)); the gate binds before it classifies, so when the Session Control
+binding fails it denies every call it parses, reads included. A command that records a decision the person makes — creating,
 approving, requeuing, cancelling or confirming the merge of a work order, pushing, approving,
 finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing its
 follow-ups, answering or overturning a question, setting the automation policy and adding,
@@ -120,7 +120,7 @@ the MCP write-gate it replaced).
 
 ```mermaid
 flowchart TD
-    A["zensu CLI command<br/>(Bash or PowerShell, main thread, bound session)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
+    A["zensu CLI command the gate can judge<br/>(Bash or PowerShell, main thread, bound session)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
@@ -148,9 +148,10 @@ it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh
 denies one it cannot read: a call another command starts, a noun or verb built at run time, an
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
-*real tracked product*), so it also never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
+*real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
-meaningless. A subagent's mutation is denied even while a window is open, because a child never
+meaningless; an inline `ZENSU_MCP_GATE=off` prefix still brings any such call to the binding, which denies it when
+it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
@@ -899,7 +900,7 @@ installation may serve it, and the directory it records as `project_root` is gon
 `readOrphanedProjectRootContext` waives exactly that one existence check, so reads other than a
 `zensu` CLI call, whose gate binds before it classifies, and the read-only diagnostics keep
 working — while `Edit`, `Write` and `MultiEdit` deny, and so does a
-Bash write while the opt-in source-write gate is on and no usable `CLAUDE_PROJECT_DIR` remains, because the workflow document lived under
+Bash write the source-write gate can attribute while that opt-in gate is on and no usable `CLAUDE_PROJECT_DIR` remains, because the workflow document lived under
 that root and no write can be attributed to a project that is not there. It IS a relaxable bind failure, and the table in
 [Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
 

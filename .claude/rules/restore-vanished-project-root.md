@@ -594,10 +594,8 @@ records against itself: `zensu-session.sh`'s `orphaned-project-root` scope (`R7g
 NO command at all and is pinned by `R8l2` to keep it that way, and the four
 `pre-bash-source-write-gate.sh` write denies, which comply today and are held to it by
 NOTHING — `R8n` asserts only that each names `--restore-root`, never that it omits
-`--confirm`. `skills/doctor/SKILL.md` is on the rule and
-is **UNPINNED** — no suite greps it for this — so check it by hand, and note that the
-hand-check was SKIPPED the first round this was written, which is how that file kept a
-retired framing for a round. The deny scopes, the capability gate's deny, the
+`--confirm`. `skills/doctor/SKILL.md` is on the rule and `R6a4` fails when it quotes the
+complete invocation anywhere. The deny scopes, the capability gate's deny, the
 `/zensu:doctor` rows and `skills/doctor/SKILL.md` all name
 `/zensu:adopt-session --restore-root` alone; the operator stderr channel in
 `stop-chain-enforcer.sh` keeps the full spelling on its stderr OPERATOR channel, and

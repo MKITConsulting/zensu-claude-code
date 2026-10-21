@@ -71,7 +71,8 @@ properties are easy to get wrong and cost the whole feature:
   bind, so a project-level `.zensu/config.json` opt-in reaches this branch only while that
   directory exists, and only a global or `ZENSU_CONFIG` opt-in reaches the no-anchor deny. Opted in, `pre-bash-source-write-gate.sh`
   runs the parser's `BSWG_MODE=targets` pass, which resolves write operands without an
-  anchor, and denies only commands that actually write. Denying unconditionally there once
+  anchor, and denies only commands that actually write, or a PowerShell command it cannot
+  prove read-only. Denying unconditionally there once
   put the diagnostic back behind the defect it reports, and the healthy-anchor test fixtures
   hid it; `O29`/`O29a` pin both the deleted-root and unset-anchor shapes with the gate
   opted in.

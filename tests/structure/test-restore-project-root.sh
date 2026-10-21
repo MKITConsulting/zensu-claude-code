@@ -450,6 +450,16 @@ if [ "$(r6_consent_verdict "$R6_EMPTY_PROBE")" = "FAIL-EMPTY" ]; then
   check "R6a2-control an empty slice is refused rather than reported clean" PASS
 else check "R6a2-control an empty slice is refused rather than reported clean" FAIL; fi
 rm -f "$R6_EMPTY_PROBE"
+DOCTOR_SKILL_MD="$PLUGIN_DIR/skills/doctor/SKILL.md"
+if [ -s "$DOCTOR_SKILL_MD" ] && ! grep -qF -- '--restore-root --confirm' "$DOCTOR_SKILL_MD"; then
+  check "R6a4 skills/doctor/SKILL.md quotes no complete restore consent invocation" PASS
+else check "R6a4 skills/doctor/SKILL.md quotes the complete restore consent invocation, or is missing" FAIL; fi
+R6_SKILL_PROBE="$STATE_DIR/r6a4-skill-probe.md"
+printf 'run `/zensu:adopt-session --restore-root --confirm` now\n' > "$R6_SKILL_PROBE"
+if grep -qF -- '--restore-root --confirm' "$R6_SKILL_PROBE"; then
+  check "R6a4-control the needle finds a complete invocation" PASS
+else check "R6a4-control the needle finds a complete invocation" FAIL; fi
+rm -f "$R6_SKILL_PROBE"
 if grep -qF -- 're-create exactly that directory to resume' "$REPORT_JS"; then
   check "R6b  the incomplete remedy is gone from the doctor row" FAIL
 else check "R6b  the incomplete remedy is gone from the doctor row" PASS; fi

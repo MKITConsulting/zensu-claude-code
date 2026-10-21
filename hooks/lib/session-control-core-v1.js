@@ -2903,15 +2903,15 @@ function repairWorkflowBaseline(options) {
 // workflowBaselineVerdict answers "it serves it fine and the workflow document is
 // gone". This one answers "it serves it fine and the DIRECTORY the record anchors
 // is gone" — the ordinary shape after `git worktree remove`, where readContext
-// throws, readOrphanedProjectRootContext succeeds, reads still work and every
-// write denies.
+// throws, readOrphanedProjectRootContext succeeds, reads other than a zensu CLI call
+// work, and Edit, Write, MultiEdit and a Bash write the opt-in gate attributes deny.
 //
 // WHY THIS IS NOT THE RE-ANCHORING THAT WAS REFUSED. CLAUDE.md records the
 // refusal of re-anchoring a record to a live directory: a session may delete its
 // own root, so a caller-named anchor would become a cross-project write escape.
 // Nothing here accepts a caller-named anchor. The path comes only from
-// context.project_root, so the anchor never MOVES — the source-write gate keeps
-// comparing against exactly the root it compared against before, and creating a
+// context.project_root, so the anchor never MOVES — the source-write gate, opted
+// in, keeps comparing against the root it compared against before, and creating a
 // directory at a path the record already names restores the authority the session
 // already had and adds none. Do not "generalize" this into a mode that takes a
 // destination; that is the refused design, not an extension of this one.

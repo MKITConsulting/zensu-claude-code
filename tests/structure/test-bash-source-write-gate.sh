@@ -1401,6 +1401,18 @@ WP_UNBOUND_READ="$(payload "Get-ChildItem -Recurse" "$PROJ" PowerShell | env -u 
 { printf '%s' "$WP_UNBOUND" | grep -qF 'WRITE-TARGET (unevaluated: a PowerShell command this check cannot prove read-only' && [ -z "$WP_UNBOUND_READ" ]; } \
   && check "WP16 unbound without CLAUDE_PROJECT_DIR a PowerShell write denies and a PowerShell read passes" PASS \
   || check "WP16 unbound PowerShell (write='$WP_UNBOUND' read='$WP_UNBOUND_READ')" FAIL
+WP_UNBOUND_GIT="$(payload "git status" "$PROJ" PowerShell | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+WP_UNBOUND_GIT_BASH="$(payload "git status" "$PROJ" | env -u CLAUDE_PROJECT_DIR \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_ON" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+WP_UNBOUND_GIT_REASON="$(printf '%s' "$WP_UNBOUND_GIT" | reason)"
+{ printf '%s' "$WP_UNBOUND_GIT_REASON" | grep -qF 'run a read-only command through the Bash tool' \
+  && printf '%s' "$WP_UNBOUND_GIT_REASON" | grep -qF 'Read-only Bash commands still run' \
+  && [ -z "$WP_UNBOUND_GIT_BASH" ]; } \
+  && check "WP16b unbound, a PowerShell read it cannot prove read-only is sent to the Bash tool, where it passes" PASS \
+  || check "WP16b unbound PowerShell read remedy (ps='$WP_UNBOUND_GIT_REASON' bash='$WP_UNBOUND_GIT_BASH')" FAIL
 WP_COPY="$WORKROOT/powershell-module-missing"
 mkdir -p "$WP_COPY"
 cp -R "$PLUGIN_DIR/hooks" "$WP_COPY/hooks"
@@ -1418,7 +1430,6 @@ WP_MISSING_BASH="$(payload "ls" "$PROJ" | env CLAUDE_PLUGIN_ROOT="$WP_COPY" CLAU
   || check "WP17 analyzer-less copy (powershell='$WP_MISSING' bash='$WP_MISSING_BASH')" FAIL
 rm -rf "$WP_COPY"
 
-rm -f "$CFG_ON" "$CFG_OFF" "$CFG_UNSET" "$CFG_QUOTED"
 
 unit_check_done "W3z every unit file the registry gives this suite was graded"
 echo "----"

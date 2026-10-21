@@ -5340,8 +5340,8 @@ function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
       + ' missing check, not an all-clear. Look at the path before you write to it.';
   }
   line(gitPresent === true ? OK : WARN,
-    'state: this session\'s recorded project root was RE-CREATED by '
-    + '/zensu:adopt-session --restore-root — ' + restores.length
+    'state: this session\'s recorded project root was RE-CREATED by a confirmed '
+    + '/zensu:adopt-session --restore-root repair — ' + restores.length
     + (restores.length === 1 ? ' entry' : ' entries')
     + ', most recently at ' + when + why + '.' + provenanceClause + cost + rendered.note);
 }

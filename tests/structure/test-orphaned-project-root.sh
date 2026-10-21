@@ -763,7 +763,7 @@ O29G2_BAD="$(GATE_SRC="$BASH_GATE" node -e '
   let sites = 0;
   const bad = [];
   lines.forEach((line, i) => {
-    if (/^\s*#/.test(line) || !line.includes("node ./bash-source-write-parse.js")) return;
+    if (/^\s*#/.test(line) || !/\bnode\b.*bash-source-write-parse\.js/.test(line)) return;
     sites += 1;
     let start = i;
     while (start > 0 && /\\\s*$/.test(lines[start - 1])) start -= 1;
@@ -771,12 +771,35 @@ O29G2_BAD="$(GATE_SRC="$BASH_GATE" node -e '
     if (!/<<<"\$INPUT"\s*$/.test(line)) bad.push((i + 1) + ":stdin");
     if (!/(^|\s)PAYLOAD=(\s|$)/.test(command) || /PAYLOAD=[^\s]/.test(command)) bad.push((i + 1) + ":payload");
   });
-  process.stdout.write(sites ? bad.join(" ") : "no-call-site");
+  process.stdout.write(sites === 4 ? bad.join(" ") : "call-sites=" + sites + " " + bad.join(" "));
 ' 2>&1)"
 if [ -z "$O29G2_BAD" ]; then
-  check "O29g2 every parser call in the gate reads the payload on stdin and passes PAYLOAD empty" PASS
+  check "O29g2 all 4 parser calls in the gate read the payload on stdin and pass PAYLOAD empty" PASS
 else
-  check "O29g2 parser call sites that do not read the payload on stdin ($O29G2_BAD)" FAIL
+  check "O29g2 parser call sites not exactly 4, or not reading the payload on stdin ($O29G2_BAD)" FAIL
+fi
+O29H_PAYLOAD_FILE="$STATE_DIR/long-target-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "printf x > src/" + "abcdefgh/".repeat(80000) + "x.rs" }, session_id: "orphan-gone", cwd: process.argv[2] }))' \
+  "$O29H_PAYLOAD_FILE" "$GATE_PROJECT"
+O29H_OUT="$(env O29G_PAD_A="$O29G_PAD" O29G_PAD_B="$O29G_PAD" O29G_PAD_C="$O29G_PAD" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  CLAUDE_PROJECT_DIR="$STATE_DIR/never-created-anchor" ZENSU_CONFIG="$GATE_ON_CFG" \
+  ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
+  bash "$BASH_GATE" < "$O29H_PAYLOAD_FILE" 2>/dev/null)"
+O29H_STATUS=$?
+O29H_REASON_LEN="$(printf '%s' "$O29H_OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const r=String((JSON.parse(s).hookSpecificOutput||{}).permissionDecisionReason||"");process.stdout.write(r.indexOf("cannot be attributed to any project")!==-1?String(r.length):"0")}catch(_){process.stdout.write("0")}})')"
+if [ "$O29H_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29H_OUT" | decision)" = "deny" ] && [ "${O29H_REASON_LEN:-0}" -gt 700000 ]; then
+  check "O29h a no-anchor deny whose reason is over the exec size limit still reaches the host as a deny" PASS
+else
+  check "O29h oversized no-anchor deny (status $O29H_STATUS, reason length ${O29H_REASON_LEN:-0}, output '$(printf '%s' "$O29H_OUT" | cut -c1-160)')" FAIL
+fi
+rm -f "$O29H_PAYLOAD_FILE"
+O29G3_BODY="$(awk '/^emit_deny\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$BASH_GATE")"
+if [ -n "$O29G3_BODY" ] && printf '%s' "$O29G3_BODY" | grep -qF 'readFileSync(0' \
+  && ! printf '%s' "$O29G3_BODY" | grep -qE 'REASON=|process\.env'; then
+  check "O29g3 emit_deny reads its reason on stdin and never through the environment" PASS
+else
+  check "O29g3 emit_deny passes its reason through the environment, or was not found" FAIL
 fi
 OVERLAY_ARMED="$( { arm orphan-overlay >/dev/null 2>&1 && printf '%s\n%s\n' "$ARMED_ROOT" "$ARMED_DATA"; } )" \
   || { echo "O29f fixture failed" >&2; exit 1; }

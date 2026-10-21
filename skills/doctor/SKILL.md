@@ -582,9 +582,9 @@ whether browser verification is enforced, not only when a row is red.
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so Bash (except a `zensu` CLI call) and this
   diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes
-  with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created by
-  `/zensu:adopt-session --restore-root --confirm`, which must run AFTER the adoption: that repair
-  requires the running installation to SERVE the record, which the
+  with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created by the repair
+  `/zensu:adopt-session --restore-root` reports, confirmed by the user AFTER the adoption:
+  it needs this installation to SERVE the record, which the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
@@ -902,7 +902,7 @@ whether browser verification is enforced, not only when a row is red.
   `/zensu:tdd` to re-arm if that work still needs a review.
 - **⚠️ state: this session's recorded project root was RE-CREATED** → the history
   carries the reserved `PROJECT_ROOT_RESTORED` provenance entry, so the directory this
-  session is anchored to was planted by `/zensu:adopt-session --restore-root --confirm`
+  session is anchored to was planted by the `/zensu:adopt-session --restore-root` repair
   rather than being the one that was there before. It renders BESIDE the REBUILT row
   above, not instead of it: that one is about the workflow document, this one about the
   directory, and the restore writes both. Relay it with its cost — the repair restores

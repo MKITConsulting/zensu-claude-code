@@ -914,7 +914,7 @@ function renderRestoreVerdict(verdict, confirmed) {
     w("root is not reachable, which is why Edit, Write and MultiEdit are denied, and so is any\n");
     w("Bash command the source-write gate can attribute as a write while that opt-in gate is\n");
     w("on (hooks.bashWriteGate: true) and no usable CLAUDE_PROJECT_DIR remains. A zensu CLI\n");
-    w("call is denied as well, because its gate needs a binding; other shell commands and\n");
+    w("call is denied as well, because its gate needs a binding; other Bash commands and\n");
     w("reads still work.\n");
     // The whole evidence base here is one ENOENT, which a deleted directory, a MOVED
     // or renamed one and an unmounted volume all produce identically. Both Stop-hook
@@ -1558,9 +1558,9 @@ function main(deps = {}) {
   if (adopted.orphanedProjectRoot) {
     // Never the unqualified "bound again" line for this shape. The lineage break
     // is gone, but the anchor is still a directory that does not exist, which is
-    // the ordinary orphaned-project-root state: diagnostics and Bash other than a zensu
-    // CLI call run, Edit, Write and MultiEdit do not. Saying otherwise would send the
-    // user straight into a deny.
+    // the ordinary orphaned-project-root state: diagnostics and Bash run, except a zensu
+    // CLI call and a write the opted-in source-write gate attributes; Edit, Write and
+    // MultiEdit do not. Saying otherwise would send the user straight into a deny.
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
     process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work,\n");

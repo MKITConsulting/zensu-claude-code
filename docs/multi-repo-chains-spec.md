@@ -275,10 +275,10 @@ record as trusted.
 is the exact failure §8.1 exists to name.
 
 1. **The gate.** A containment rule in `hooks/lib/bash-source-write-parse.js`
-   refusing a Bash write into `CLAUDE_PLUGIN_DATA`, on a path that runs at every
-   setting, such as the `BSWG_MODE=control` pass the hook runs ahead of its
-   `hooks.bashWriteGate` check — never as a fourth rule beside (A)/(B)/(C),
-   which are opt-in and off by default. That parser carries no rule
+   refusing a Bash or PowerShell write into `CLAUDE_PLUGIN_DATA`, on a path that
+   runs at every setting, such as the `BSWG_MODE=control` pass, which judges both
+   shell tools, ahead of the hook's `hooks.bashWriteGate` check — never as a fourth
+   rule beside (A)/(B)/(C), which are opt-in and off by default. That parser carries no rule
    naming that store, or `.zensu`, at all. Adding one widens a DENY gate, which
    costs a `minor` release under CLAUDE.md §"Runtime Lineage". This gate is worth
    building whether or not stage 2 is ever built: the same store holds every

@@ -76,15 +76,15 @@ esac
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 emit_deny() {
-  REASON="$1" node -e '
+  printf '%s' "$1" | node -e '
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: process.env.REASON
+        permissionDecisionReason: require("fs").readFileSync(0, "utf8")
       }
     }));
-  '
+  ' 2>/dev/null || printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the source-write gate could not render its reason, so this command is refused rather than allowed unchecked."}}'
   echo
 }
 
@@ -205,11 +205,11 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # state this branch exists to make usable. `targets` runs the full default
     # parse, applies the same source-extension and temp-root filters, and
     # answers only with operands it actually resolved; it needs no project root
-    # because it skips exactly the two rules that would consult one. The one
+    # because it skips exactly the two rules that would consult one. Its
     # non-operand answer is a synthetic `WRITE-TARGET (unevaluated: …)` when the
-    # parser's target budget is exhausted — this branch treats it as a deny, the
-    # same way it treats a parser that cannot run at all, and it reaches the
-    # user verbatim in the message below.
+    # target budget is exhausted or a PowerShell command is not provably read-only;
+    # this branch denies it, as it denies when the parser cannot run at all, and it
+    # reaches the user verbatim in the message below.
     #
     # Because it is the default parse, the inline ZENSU_BASH_WRITE_GATE=off /
     # ZENSU_MCP_GATE=off escapes still surface as __bypass__ markers here, so
@@ -225,7 +225,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     case "$UNBOUND_TARGETS" in
       ''|__bypass__*) exit 0 ;;
     esac
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run unless the zensu CLI gate finds a zensu call in them, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only Bash commands still run unless the zensu CLI gate finds a zensu call in them, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. ${OPT_IN_NOTE}"
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command
