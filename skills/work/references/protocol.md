@@ -32,7 +32,7 @@ key. Each is written to a temporary file and renamed into place.
 | `answer-keys-` | renewals, `--start`, `--bind-spec` | the key of the last answer queued for each question, or found already shown by a runtime from before this file, which never rewrites it |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
-| `stop-` | the Stop hook | stops in a row without a new ledger event |
+| `stop-` | the Stop hook | stops in a row without progress, and the progress key: the run id and ledger length, plus `#` and the summed revisions of the session's review evidence leases when the hook could read them |
 
 ## Stages
 

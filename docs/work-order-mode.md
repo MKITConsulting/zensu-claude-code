@@ -120,10 +120,27 @@ a direct `zensu work ask` blocked the order.
 ## The Stop hook
 
 `hooks/stop-work-order.sh` keeps a work-order session from ending without a reported outcome. It
-blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without a
-new Autopilot ledger event end the order on its own: it reports `ready_for_merge` for a `DONE` run and
+blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without
+progress end the order on its own: it reports `ready_for_merge` for a `DONE` run and
 `blocked(worker_error)` for any other, then lets the session stop. A lost lease ends the session
 without a report.
+
+Progress is a new Autopilot ledger event or a change in one of the session's review evidence
+leases: a seat bound, a worker result recorded, a lease sealed or closed. A team review spawns its
+seats in the background and the ledger moves only when the review is published, so the lease is
+what shows that the review advances. While an active lease still has a seat in flight, a bound or
+retrying worker, a Stop is blocked without counting. That wait ends when the last seat reports or
+when the lease stops taking results: at its expiry, and at the latest 3600 seconds after it was
+created. After that, three Stops without progress end the order as before. A lease store the hook
+cannot read counts as no progress, so a fault never extends the wait. The hook reads the store as
+strictly as the review workers write it: a lease whose review workspace is gone fails the read,
+and a lease dated more than 60 seconds ahead of the clock holds no seat in flight.
+
+The Autopilot Stop hook runs in the same Stop and counts every Stop against its own budget of
+12 Stops per stage, which only a stage move resets. It reads the same lease and skips that count
+while a seat is in flight, so a review wait exhausts neither budget; once no seat is in flight,
+both count again. A store either hook cannot read counts the Stop in that hook, and so does an
+Autopilot read that does not finish within five seconds where `timeout` or `gtimeout` is installed.
 
 ## The launcher and the manifest
 
@@ -204,3 +221,6 @@ raw output to a file there; nothing else keeps it.
   started some other way keeps the PowerShell tool as its host configures it, and every PowerShell
   command there is refused.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.
+- A session can write its own review evidence lease store with a shell command, so a forged
+  record can fake progress or hold a review wait open in both Stop hooks, as a deliberate write
+  can defeat every plugin store.
