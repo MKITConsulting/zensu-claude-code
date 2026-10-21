@@ -178,6 +178,14 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   predates that read), so at a load in the high hundreds it can still reach the deadline. The
   largest remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on
   bash 3.2) and the config reads (5).
+- A durable Autopilot Stop that reaches the stage budget spawns one more `node` child,
+  `hooks/lib/review-evidence-hook-v1.js wait`, whose contract `.claude/rules/work-order-mode.md`
+  owns. It runs through `zensu_run_bounded`, answers from one `lstat` when the session has no
+  records directory in the review-evidence store, and otherwise binds the payload again,
+  recomputing the runtime digest, before it reads the lease. `L30` drives a standalone chain and
+  never reaches that path, so its cost is unmeasured. On base macOS the child has no watchdog of
+  its own, only this hook's deadline; where one exists, a child that misses its 5 s under heavy
+  load prints nothing, and that Stop counts against the stage budget as before.
 - The memo and the shortcut were measured on macOS (bash 3.2.57) and on Linux (bash 5.2.15, in a
   container). Git Bash is unverified. The symlink checks `L13`, `L17d`, `L43`, `L48`, `L50`, `L51`
   and `L52` make their links through Node, never with `ln -s`, which Git Bash satisfies with a
