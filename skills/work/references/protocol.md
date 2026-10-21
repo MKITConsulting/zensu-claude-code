@@ -173,12 +173,15 @@ Outside work-order mode all three print nothing and exit 0.
 - `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
   `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
   `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
-  `followup`, the `zensu plan` approval verbs, and a command that prints, reads, unsets or overrides
+  `followup`, every `zensu plan` verb that records a person's decision (`push`, `approve`,
+  `finalize`, `abandon`, `confirm-merge` and `followup accept|dismiss`), and a command that prints, reads, unsets or overrides
   `ZENSU_SESSION_TOKEN` or sets, changes or removes `ZENSU_API_URL` in the spellings it knows: an
   assignment prefix, `export`, `declare` and their kin, `unset`, `env -u`, `env -i`, any long `env`
   option, `exec -c`, `printf -v`, `read`, `let` and a loop variable. It also denies `--api-url` on
-  `zensu`. Zensu refuses `zensu work list`, `questions`, `policy get` and `repositories list` for a
-  session token, so their denial points at the order file. It reads commands inside `bash -c`,
+  `zensu`. Zensu refuses `zensu work list`, `questions`, `policy get` and `repositories list` (alias
+  `repos list`) for a session token, so their denial points at the order file. It finds the noun and
+  the verb of a `zensu` call as the CLI does: a flag without `=` takes the next word, an empty word
+  is skipped and `--` ends the search. It reads commands inside `bash -c`,
   `eval`, `env -S`, command substitutions and wrappers such as `env` or `sudo`. It reads every
   command three ways, with plain single quotes and with the ANSI-C quoting (`$'work'`) of bash and
   of zsh, and denies when any reading finds a forbidden command. It denies an option between `-c`
@@ -212,9 +215,14 @@ The CLI prints a backend error as `error: <message> (status <n>, code <code>)`, 
 more context on the same line or on further lines, and under `--json` adds a last stderr line
 `{"error":{"status":…,"code":…,"message":…}}`. Every helper call passes `--json`. The runtime reads
 the JSON line first and the first `(status …)` group of the error text second; without a code it
-decides by status and, for a `409`, by one more `zensu work get`. A failure without a status — a
-network, flag or validation error — is retried inside the retry budget like a missing answer, and
-every message about it quotes the CLI's own line.
+decides by status and, for a `409`, by one more `zensu work get`. A failure without a status counts
+as no answer, and is retried inside the retry budget, only when it shows that no answer came: the
+CLI timed out, was killed or printed no `error:` line, or its line is a transport error
+(`Post "<url>": …`), a body it could not read (`reading response body`, `invalid … response`) or a
+network failure such as `connection refused`. Any other error the CLI printed itself — a flag,
+argument, validation or setup error — is final: the helper sends it once, never retries it, and
+names the zensu CLI as the refuser with the CLI's own line. Every message about either quotes that
+line.
 
 | Answer | Handling |
 |---|---|
@@ -226,9 +234,10 @@ every message about it quotes the CLI's own line.
 | `409` without a code | probe the order: an unconfirmed claim retries, a missing plan approval reads as `plan_approval_required`, anything else as `invalid_transition` |
 | any other code or `4xx` | final; the helper exits 8 and names the code |
 | at `--start`, a CLI error without a status that says `ZENSU_SESSION_TOKEN needs the host` or `ZENSU_SESSION_TOKEN must hold` | setup error: the session has no host for the token, or the token is not a session token; exit 3 with the CLI's line and what the worker must change |
+| any other CLI error without a status: a flag, argument, validation or setup error the CLI printed itself | final and never retried: exit 3 at `--start`, exit 8 elsewhere, each naming the zensu CLI and quoting its line |
 
-A heartbeat that fails with a final answer is treated as a lost lease, because a lease Zensu does not
-renew cannot be relied on.
+A heartbeat that fails with a final answer, or that the CLI refuses, is treated as a lost lease
+(code `cli_refused` for the CLI), because a lease Zensu does not renew cannot be relied on.
 
 A final answer to a stage stops the outbox at that stage. `--bind-spec` and `--plan-approval` exit 8
 and name the stage, and the post-tool hook tells the model to run `--finish --reason`. `--finish` on
