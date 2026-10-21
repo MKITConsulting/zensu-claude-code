@@ -1554,7 +1554,7 @@ test('a review wait whose seats never report ends the order within three stops a
     assert.equal(decided.decision, 'block');
     assert.match(decided.reason, /2 review seats of this session are still in flight/);
     assert.ok(decided.reason.includes(until), decided.reason);
-    assert.match(decided.reason, /does not count against the stop budget/);
+    assert.match(decided.reason, /does not count against this work order's stop budget, but the Autopilot run still counts every stop/);
   }
   assert.equal(JSON.parse(fs.readFileSync(context.files.stop, 'utf8')).count, 0);
   const late = () => wo.stopDecision(context, { env: box.env, review: () => lease.read(open.deadlineMs) });
@@ -1571,7 +1571,7 @@ test('a review wait whose seats never report ends the order within three stops a
   assert.equal(box.fake().order.blocked_kind, 'worker_error');
 });
 
-test('a lease read that fails never counts as progress and keeps the recorded progress key', () => {
+test('a lease read that fails never counts as progress, never resets the count and keeps the recorded progress key', () => {
   const box = sandbox();
   const context = startedContext(box);
   wo.markerRun(context, RUN);
@@ -1581,9 +1581,9 @@ test('a lease read that fails never counts as progress and keeps the recorded pr
   lease.report('bug-hunter');
   const progress = lease.read().progress;
   const seen = () => JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
-  assert.equal(wo.stopDecision(context, { env: box.env, review: () => lease.read() }).decision, 'block');
-  assert.deepEqual([seen().count, seen().seen], [1, `${RUN}:9#${progress}`]);
   assert.equal(wo.stopDecision(context, { env: box.env, review: () => null }).decision, 'block');
+  assert.deepEqual([seen().count, seen().seen], [1, `${RUN}:9`]);
+  assert.equal(wo.stopDecision(context, { env: box.env, review: () => lease.read() }).decision, 'block');
   assert.deepEqual([seen().count, seen().seen], [2, `${RUN}:9#${progress}`]);
   const thrown = wo.stopDecision(context, { env: box.env, review: () => { throw new Error('lease store unreadable'); } });
   assert.equal(thrown.decision, 'block');
@@ -1627,7 +1627,7 @@ test('a terminal run and a session without a run never read the lease store, and
   assert.equal(fs.existsSync(path.join(box.root, 'review-evidence')), false);
 });
 
-test('the lease reader sums every revision, counts only bound or retrying seats before the clamped deadline and refuses a foreign entry', () => {
+test('the lease reader sums every revision, counts only bound or retrying seats before the clamped deadline, ignores a lease dated ahead of the clock and refuses a foreign entry', () => {
   const box = sandbox();
   startedContext(box);
   const lease = reviewLease(box, 3);
@@ -1650,10 +1650,153 @@ test('the lease reader sums every revision, counts only bound or retrying seats 
   const stretched = lease.read(created + LEASE.MAX_TTL_SECONDS * 1000 - 1);
   assert.deepEqual([stretched.inFlight, stretched.deadlineMs], [1, created + LEASE.MAX_TTL_SECONDS * 1000]);
   assert.equal(lease.read(created + LEASE.MAX_TTL_SECONDS * 1000).inFlight, 0);
-  fs.writeFileSync(path.join(records, `.${lease.leaseId}.123.0123456789abcdef.tmp`), '{');
+  const datedAhead = (offset) => {
+    const shift = Date.now() + offset - created;
+    const workers = Object.fromEntries(Object.entries(record.workers).map(([agentId, worker]) => [agentId, {
+      ...worker,
+      bound_at_ms: worker.bound_at_ms + shift,
+      ...(worker.finished_at_ms === undefined ? {} : { finished_at_ms: worker.finished_at_ms + shift }),
+    }]));
+    const dated = { ...record, workers, created_at_ms: created + shift, expires_at_ms: created + shift + 600000 };
+    fs.writeFileSync(file, `${JSON.stringify(LEASE.sealRecord(dated))}\n`, { mode: 0o600 });
+  };
+  datedAhead(10 * 60 * 1000);
+  assert.deepEqual(lease.read(), { progress: 5, inFlight: 0, deadlineMs: null });
+  datedAhead(30 * 1000);
+  assert.equal(lease.read().inFlight, 1);
+  fs.writeFileSync(path.join(records, LEASE.temporaryRecordName(lease.leaseId)), '{');
   assert.equal(lease.read().progress, 5);
   fs.writeFileSync(path.join(records, 'notes.txt'), 'x');
   assert.throws(() => lease.read(), /unexpected entry/);
+});
+
+test('the lease reader refuses a store directory that is a symlink, not a directory or open to other users', () => {
+  const box = sandbox();
+  startedContext(box);
+  const lease = reviewLease(box, 1);
+  const v1 = path.join(lease.pluginData, 'review-evidence', 'v1');
+  const records = path.join(v1, 'records', box.sessionKey);
+  assert.equal(lease.read().progress, 1);
+  fs.chmodSync(v1, 0o750);
+  assert.throws(() => lease.read(), /permissions are unsafe/);
+  fs.chmodSync(v1, 0o700);
+  const moved = path.join(box.root, 'records-elsewhere');
+  fs.renameSync(records, moved);
+  fs.symlinkSync(moved, records);
+  assert.throws(() => lease.read(), /private lease path is unsafe/);
+  fs.unlinkSync(records);
+  fs.writeFileSync(records, '{}');
+  assert.throws(() => lease.read(), /private lease path is unsafe/);
+  fs.unlinkSync(records);
+  assert.deepEqual(lease.read(), { progress: 0, inFlight: 0, deadlineMs: null });
+});
+
+test('the lease reader sums every lease of the session and keeps the later deadline, and a new lease counts as progress', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const first = reviewLease(box, 1);
+  first.bind('bug-hunter');
+  first.report('bug-hunter');
+  const records = path.join(first.pluginData, 'review-evidence', 'v1', 'records', box.sessionKey);
+  const recordOf = (leaseId) => JSON.parse(fs.readFileSync(path.join(records, `${leaseId}.json`), 'utf8'));
+  const past = Date.now() - 2 * LEASE.MAX_TTL_SECONDS * 1000;
+  fs.writeFileSync(path.join(records, `${first.leaseId}.json`), `${JSON.stringify(LEASE.sealRecord({ ...recordOf(first.leaseId), created_at_ms: past, expires_at_ms: past + 600000 }))}\n`, { mode: 0o600 });
+  const stop = () => wo.stopDecision(context, { env: box.env, review: () => first.read() });
+  const stopState = () => {
+    const state = JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+    return [state.count, state.seen];
+  };
+  assert.equal(stop().decision, 'block');
+  assert.equal(stop().decision, 'block');
+  assert.deepEqual(stopState(), [2, `${RUN}:9#3`]);
+  const workspace = path.join(box.root, 'review-workspace');
+  const second = LEASE.createLease(first.binding, {
+    kind: 'pr-review',
+    filesManifest: path.join(workspace, 'FILES.txt'),
+    safeSubtreesManifest: path.join(workspace, 'ROOTS.txt'),
+    nameStatusFile: path.join(workspace, 'NAME-STATUS.txt'),
+    changedProductionFilesFile: path.join(workspace, 'CHANGED.txt'),
+    maxWorkers: 2,
+    ttlSeconds: 600,
+  });
+  assert.equal(recordOf(first.leaseId).status, 'closed');
+  assert.equal(stop().decision, 'block');
+  assert.deepEqual(stopState(), [1, `${RUN}:9#5`]);
+  const planWorkspace = path.join(box.root, 'plan-workspace');
+  fs.mkdirSync(planWorkspace, { mode: 0o700 });
+  fs.chmodSync(planWorkspace, 0o700);
+  fs.writeFileSync(path.join(planWorkspace, 'FILES.txt'), `${path.join(box.project, 'src', 'app.js')}\n`);
+  fs.writeFileSync(path.join(planWorkspace, 'ROOTS.txt'), `${path.join(box.project, 'src')}\n`);
+  const plan = LEASE.createLease(first.binding, {
+    kind: 'plan-review',
+    filesManifest: path.join(planWorkspace, 'FILES.txt'),
+    safeSubtreesManifest: path.join(planWorkspace, 'ROOTS.txt'),
+    maxWorkers: 1,
+    ttlSeconds: 1200,
+  });
+  LEASE.bindWorker({ agent_type: 'zensu:pr-review-worker', agent_id: 'agent-second-1' }, first.binding);
+  LEASE.bindWorker({ agent_type: 'zensu:pr-review-worker', agent_id: 'agent-second-2' }, first.binding);
+  LEASE.bindWorker({ agent_type: 'zensu:plan-review-worker', agent_id: 'agent-plan-1' }, first.binding);
+  const later = recordOf(plan).expires_at_ms;
+  assert.ok(later > recordOf(second).expires_at_ms);
+  assert.deepEqual(first.read(), { progress: 9, inFlight: 3, deadlineMs: later });
+  const waiting = stop();
+  assert.equal(waiting.decision, 'block');
+  assert.match(waiting.reason, /3 review seats of this session are still in flight/);
+  assert.ok(waiting.reason.includes(new Date(later).toISOString()), waiting.reason);
+  assert.deepEqual(stopState(), [0, `${RUN}:9#9`]);
+});
+
+test('a lease whose review workspace is gone fails the read, so its seat holds no wait and every stop counts', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const lease = reviewLease(box, 1);
+  lease.bind('bug-hunter');
+  assert.equal(lease.read().inFlight, 1);
+  const workspace = path.join(box.root, 'review-workspace');
+  fs.renameSync(workspace, `${workspace}-moved`);
+  assert.throws(() => lease.read(), /workspace/);
+  const stop = () => wo.stopDecision(context, { env: box.env, review: () => lease.read() });
+  for (let index = 0; index < 3; index += 1) {
+    const decided = stop();
+    assert.equal(decided.decision, 'block');
+    assert.match(decided.reason, /3 stops in a row without progress/);
+  }
+  const state = JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+  assert.deepEqual([state.count, state.seen], [3, `${RUN}:9`]);
+  const closed = stop();
+  assert.equal(closed.decision, 'allow');
+  assert.equal(closed.cancelRun, RUN);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('the stop verb binds the hook payload under the executing plugin root, reads the lease once more after a failure and answers nothing when the binding or both reads fail', (t) => {
+  assert.equal(wo.reviewLeaseProgress({}, { env: {} }), null);
+  const hookSession = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'claude-hook-session-v1.js'));
+  const binding = { sessionKey: 'scv1_stub' };
+  const binds = [];
+  t.mock.method(hookSession, 'resolveHookSession', (payload, env) => {
+    binds.push({ payload, root: env.CLAUDE_PLUGIN_ROOT, marker: env.MARKER });
+    return binding;
+  });
+  const answers = [];
+  t.mock.method(LEASE, 'leaseProgress', (bound, now) => {
+    assert.equal(bound, binding);
+    const next = answers.shift();
+    if (next instanceof Error) throw next;
+    return { ...next, now };
+  });
+  answers.push(new Error('busy'), { progress: 4, inFlight: 1, deadlineMs: 9 });
+  assert.deepEqual(wo.reviewLeaseProgress({ session_id: 's' }, { env: { MARKER: 'm' }, now: () => 7 }), { progress: 4, inFlight: 1, deadlineMs: 9, now: 7 });
+  assert.deepEqual(binds, [{ payload: { session_id: 's' }, root: path.resolve(__dirname, '..', '..'), marker: 'm' }]);
+  answers.push(new Error('busy'), new Error('busy'), { progress: 1, inFlight: 0, deadlineMs: null });
+  assert.equal(wo.reviewLeaseProgress('not a payload', { env: {}, now: () => 7 }), null);
+  assert.equal(answers.length, 1);
+  assert.deepEqual(binds[1].payload, {});
 });
 
 test('binding answers only for this session\'s order and the push refuses before any write when the lease is stale', () => {

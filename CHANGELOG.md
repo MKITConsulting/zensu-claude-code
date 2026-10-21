@@ -92,7 +92,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
   while a review seat is still in flight does not count toward the three-stop budget until the
   lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
-  three times without progress after that still ends the order as blocked.
+  three times without progress after that still ends the order as blocked. The Autopilot run still
+  counts each of these Stops against its budget of 12 per stage, so a review wait that takes more
+  Stops than that still blocks the run.
 
 ## [0.27.0] - 2026-10-17
 

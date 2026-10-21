@@ -128,7 +128,14 @@ what shows that the review advances. While an active lease still has a seat in f
 retrying worker, a Stop is blocked without counting. That wait ends when the last seat reports or
 when the lease stops taking results: at its expiry, and at the latest 3600 seconds after it was
 created. After that, three Stops without progress end the order as before. A lease store the hook
-cannot read counts as no progress, so a fault never extends the wait.
+cannot read counts as no progress, so a fault never extends the wait. The hook reads the store as
+strictly as the review workers write it: a lease whose review workspace is gone fails the read,
+and a lease dated more than 60 seconds ahead of the clock holds no seat in flight.
+
+This budget belongs to the work-order hook. The Autopilot Stop hook runs in the same Stop and
+still counts every Stop against its own budget of 12 Stops per stage, which only a stage move
+resets. A review wait that takes more Stops than that ends the run `BLOCKED` there, and this hook
+then reports the order blocked.
 
 ## The launcher and the manifest
 
@@ -203,3 +210,6 @@ raw output to a file there; nothing else keeps it.
   started some other way keeps the PowerShell tool as its host configures it, and every PowerShell
   command there is refused.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.
+- A session can write its own review evidence lease store with a shell command, so a forged
+  record can fake progress or hold a review wait open, as a deliberate write can defeat every
+  plugin store. The Autopilot stage budget still ends such a run.

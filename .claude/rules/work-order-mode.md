@@ -6,6 +6,7 @@ paths:
   - "hooks/pre-work-order-gate.sh"
   - "hooks/post-work-order.sh"
   - "hooks/stop-work-order.sh"
+  - "hooks/lib/review-evidence-lease-v1.js"
   - "harness/**"
   - "skills/work/**"
   - "skills/autopilot/rules/work-order.md"
@@ -160,11 +161,19 @@ ceiling on a review, and how often the main thread stops while it waits depends 
 not on how long the seats take. After the
 deadline, three Stops without progress end the order as before. A read that fails returns no
 progress: the Stop reuses the recorded key of the same ledger part and counts, so a fault never
-resets the count or extends the wait. The reader takes no lease lock, creates no directory, skips
-the temp entries `atomicWriteRecord` leaves (`TEMP_RECORD_RE` mirrors that name) and refuses any
-other entry, as `listRecords` does. The stop verb binds through `resolveHookSession` with the
-executing plugin root as `CLAUDE_PLUGIN_ROOT`, as `zensu_bind_hook_session` does, and reads a
-second time after a failure. Only a nonterminal run reads the store. Pins: the five Stop cases in
+resets the count or extends the wait. A bare ledger key, which a failed read leaves when no
+suffixed key of that ledger part was recorded, counts as the same key once a read succeeds, so a
+failure followed by a success does not reset the count either. The reader takes no lease lock and
+creates no directory. It checks every store directory with `assertPrivateDirectory`, the check
+`ensurePrivateDirectory` runs after its chmod, and validates every record as strictly as the
+writers' `listRecords` does, so a lease whose review workspace is gone fails the read and the Stop
+counts instead of waiting on a seat that can no longer report. It skips the temp entries
+`atomicWriteRecord` leaves (`temporaryRecordName` builds the name, and `TEMP_RECORD_RE` is
+composed from the same `LEASE_ID_PATTERN`) and refuses any other entry. A lease whose
+`created_at_ms` lies more than `MAX_CLOCK_SKEW_MS` (60 s) ahead of the reader's clock holds no
+seat in flight. The stop verb binds through `resolveHookSession` with the executing plugin root as
+`CLAUDE_PLUGIN_ROOT`, as `zensu_bind_hook_session` does, and reads a second time after a failure.
+Only a nonterminal run reads the store. Pins: the Stop and lease-reader cases in
 `tests/structure/work-order-v1.test.js` and `I18` and `I19` in
 `tests/structure/test-work-order-implement.sh`, which drive the real hooks.
 
@@ -173,8 +182,9 @@ gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release p
 version; never bump it by hand.
 
 **Version of the review-progress Stop budget: `patch`.** The stop state keeps its `{count, seen}`
-shape; only the value of `seen` gains a suffix, and a runtime that meets the other spelling resets
-its count once. The lease module gains two read-only exports and no record field or key set. No
+shape; only the value of `seen` gains a suffix, and a runtime that finds the bare spelling of the
+same ledger key keeps its count. The lease module gains three exports that write nothing
+(`leaseProgress`, `MAX_TTL_SECONDS`, `temporaryRecordName`) and no record field or key set. No
 hook, matcher, config key or attestation moves, and the Stop hook returns the same block decision
 it returned before.
 
@@ -196,5 +206,8 @@ it returned before.
   the order blocked.
 - Every Stop of a session with a nonterminal run now binds once more in Node, which measures the
   runtime digest again. The added latency is unmeasured.
-- A session can write the lease store with a shell command, so a forged record can stretch a wait
-  to its recorded creation time plus 3600 s, as a deliberate write can defeat every plugin store.
+- A session can write the lease store with a shell command, so a forged record can fake progress
+  or hold a wait open, dated at most 60 s ahead of the clock each time it is written, as a
+  deliberate write can defeat every plugin store. The Autopilot stage cap still ends such a run.
+- The durable fix for the 12-Stop cap above, letting the Autopilot interceptor skip its
+  stage-budget increment while the session's lease reports a seat in flight, is not implemented.
