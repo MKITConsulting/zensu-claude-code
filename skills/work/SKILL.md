@@ -22,9 +22,11 @@ skill needs a work order id.
 
 ## Rules that hold for the whole session
 
-- **No person in the loop.** Never call `AskUserQuestion`, `EnterPlanMode` or `ExitPlanMode`, and
-  never open a task chip. A question goes to Zensu (see "Questions"); a follow-up idea goes to Zensu
-  as a follow-up.
+- **No person in the loop.** Never call `AskUserQuestion`, `EnterPlanMode` or `ExitPlanMode`;
+  never open a task chip, start or propose another session, hand the task off to one or ask one to
+  take work up; and never move this session to the cloud. A question goes to Zensu (see
+  "Questions"); a follow-up idea goes to Zensu as a follow-up, and the order's own work stays in
+  this session.
 - **The token is not yours to read.** Never print, echo, unset or override `ZENSU_SESSION_TOKEN`,
   never run `env`, `printenv` or `set`, and never run `zensu auth`. Never set, change or remove
   `ZENSU_API_URL`, and never pass `--api-url`. The helpers read the token and its host from the
@@ -158,7 +160,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$WO" --finish
 
 Exit 0 and exit 6 both end the session. The Stop hook blocks a session that tries to end without a
 reported outcome, and after three stops without progress it reports the order as blocked on its
-own.
+own. A change in one of the session's review evidence leases counts as progress, and a stop while a
+review seat is still in flight does not count until the lease stops taking that seat's result. The
+Autopilot run skips its own stage count for the same stops.
 
 ## Reference Files
 

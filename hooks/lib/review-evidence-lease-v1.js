@@ -11,10 +11,13 @@ const os = require('node:os');
 const path = require('node:path');
 const hookSession = require('./claude-hook-session-v1.js');
 const hostPaths = require('./claude-path-v1.js');
+const core = require('./session-control-core-v1.js');
 
 const SCHEMA = 'zensu.review-evidence-lease';
 const SCHEMA_VERSION = 1;
-const LEASE_ID_RE = /^rel1_[a-f0-9]{32}$/;
+const LEASE_ID_PATTERN = 'rel1_[a-f0-9]{32}';
+const LEASE_ID_RE = new RegExp(`^${LEASE_ID_PATTERN}$`);
+const TEMP_RECORD_RE = new RegExp(`^\\.${LEASE_ID_PATTERN}\\.[0-9]+\\.[a-f0-9]{16}\\.tmp$`);
 const ROLE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HASH_RE = /^sha256:[a-f0-9]{64}$/;
 const ALLOWED_KINDS = new Set(['plan-review', 'pr-review']);
@@ -25,6 +28,9 @@ const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 128 * 1024;
 const MAX_EVIDENCE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_EVIDENCE_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_TTL_SECONDS = 3600;
+const MAX_CLOCK_SKEW_MS = 60 * 1000;
+const LEASE_READ_ATTEMPTS = 2;
 
 // The store prefix, named once. This module OWNS the layout; the superseded-lease
 // sweep in review-evidence-sweep-v1.js has to traverse exactly the chain storage()
@@ -390,17 +396,22 @@ function ensurePrivateDirectory(base, segments) {
     }
     const stat = fs.lstatSync(current);
     if (stat.isSymbolicLink() || !stat.isDirectory()) fail('private lease path is unsafe');
-    if (process.platform !== 'win32') {
-      fs.chmodSync(current, 0o700);
-      const checked = fs.lstatSync(current);
-      if ((checked.mode & 0o077) !== 0) fail('private lease path permissions are unsafe');
-      if (typeof process.getuid === 'function' && checked.uid !== process.getuid()) {
-        fail('private lease path ownership is unsafe');
-      }
-    }
-    if (fs.realpathSync.native(current) !== current) fail('private lease path is aliased');
+    if (process.platform !== 'win32') fs.chmodSync(current, 0o700);
+    assertPrivateDirectory(current);
   }
   return current;
+}
+
+function assertPrivateDirectory(current) {
+  const stat = fs.lstatSync(current);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) fail('private lease path is unsafe');
+  if (process.platform !== 'win32') {
+    if ((stat.mode & 0o077) !== 0) fail('private lease path permissions are unsafe');
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+      fail('private lease path ownership is unsafe');
+    }
+  }
+  if (fs.realpathSync.native(current) !== current) fail('private lease path is aliased');
 }
 
 function storage(binding) {
@@ -1004,6 +1015,10 @@ function validateRecord(record, binding, options = {}) {
   return record;
 }
 
+function temporaryRecordName(leaseId) {
+  return `.${leaseId}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+}
+
 function atomicWriteRecord(recordsDirectory, record) {
   const sealed = sealRecord(record);
   const target = path.join(recordsDirectory, `${sealed.lease_id}.json`);
@@ -1016,8 +1031,7 @@ function atomicWriteRecord(recordsDirectory, record) {
   if (existing && (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1)) {
     fail('existing lease record path is unsafe');
   }
-  const temporary = path.join(recordsDirectory,
-    `.${sealed.lease_id}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
+  const temporary = path.join(recordsDirectory, temporaryRecordName(sealed.lease_id));
   let descriptor;
   try {
     descriptor = fs.openSync(temporary, 'wx', 0o600);
@@ -1064,6 +1078,77 @@ function activeRecord(records, kind, now = Date.now()) {
     && record.status === 'active' && record.expires_at_ms > now);
   if (active.length > 1) fail(`multiple active ${kind} leases exist`);
   return active[0] || null;
+}
+
+function leaseProgress(binding, now = Date.now()) {
+  const pluginData = canonicalExisting(binding.pluginData, 'CLAUDE_PLUGIN_DATA', 'directory').canonical;
+  const summary = { progress: 0, inFlight: 0, deadlineMs: null };
+  let records = pluginData;
+  for (const segment of [...REVIEW_EVIDENCE_SEGMENTS, 'records', binding.sessionKey]) {
+    records = path.join(records, segment);
+    try {
+      assertPrivateDirectory(records);
+    } catch (error) {
+      if (error.code === 'ENOENT') return summary;
+      throw error;
+    }
+  }
+  for (const name of fs.readdirSync(records).sort()) {
+    if (TEMP_RECORD_RE.test(name)) continue;
+    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
+    if (!LEASE_ID_RE.test(leaseId)) fail('private lease record directory contains an unexpected entry');
+    const record = readRecord(path.join(records, name), binding);
+    if (record.lease_id !== leaseId) fail('lease filename and record id do not match');
+    summary.progress += record.revision;
+    const deadline = Math.min(record.expires_at_ms, record.created_at_ms + MAX_TTL_SECONDS * 1000);
+    if (record.status !== 'active' || deadline <= now || record.created_at_ms > now + MAX_CLOCK_SKEW_MS) continue;
+    const seats = Object.values(record.workers).filter((worker) => worker.status === 'bound' || worker.status === 'retry').length;
+    if (seats === 0) continue;
+    summary.inFlight += seats;
+    summary.deadlineMs = Math.max(summary.deadlineMs === null ? deadline : summary.deadlineMs, deadline);
+  }
+  return summary;
+}
+
+function hookLeaseProgress(payload, { env = process.env, now = Date.now, read = leaseProgress } = {}) {
+  let binding;
+  try {
+    binding = hookSession.resolveHookSession(
+      payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {},
+      { ...env, CLAUDE_PLUGIN_ROOT: path.resolve(__dirname, '..', '..') },
+    );
+  } catch (_) {
+    return null;
+  }
+  for (let attempt = 0; attempt < LEASE_READ_ATTEMPTS; attempt += 1) {
+    try {
+      return read(binding, now());
+    } catch (_) {
+      continue;
+    }
+  }
+  return null;
+}
+
+function hookLeaseWait(payload, options = {}) {
+  const env = options.env || process.env;
+  const sessionId = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.session_id : null;
+  if (typeof sessionId === 'string' && typeof env.CLAUDE_PLUGIN_DATA === 'string' && path.isAbsolute(env.CLAUDE_PLUGIN_DATA)) {
+    let records = null;
+    try {
+      records = path.join(env.CLAUDE_PLUGIN_DATA, ...REVIEW_EVIDENCE_SEGMENTS, 'records', core.sessionKey(sessionId));
+    } catch (_) {
+      records = null;
+    }
+    if (records !== null) {
+      try {
+        fs.lstatSync(records);
+      } catch (error) {
+        if (error && error.code === 'ENOENT') return { progress: 0, inFlight: 0, deadlineMs: null };
+      }
+    }
+  }
+  return hookLeaseProgress(payload, options);
 }
 
 function manifestPaths(file, label) {
@@ -1181,8 +1266,8 @@ function createLease(binding, options) {
   if (!Number.isInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 32) {
     fail('--max-workers must be an integer from 1 through 32');
   }
-  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 3600) {
-    fail('--ttl-seconds must be an integer from 60 through 3600');
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > MAX_TTL_SECONDS) {
+    fail(`--ttl-seconds must be an integer from 60 through ${MAX_TTL_SECONDS}`);
   }
 
   const exactInputs = [
@@ -1925,10 +2010,14 @@ module.exports = {
   finalizeLease,
   HANDBACK_TOOL,
   handbackInputValid,
+  hookLeaseProgress,
+  hookLeaseWait,
   kindForAgentType,
+  leaseProgress,
   parseWorkerResult,
   sealRecord,
   storeWorkerResult,
+  temporaryRecordName,
   toolViolation,
   // The store's own vocabulary, exported so the superseded-lease sweep consumes
   // it instead of hand-copying it. Five elements used to live as copies in
@@ -1936,6 +2025,7 @@ module.exports = {
   // compared source spellings rather than behaviour.
   LEASE_ID_RE,
   MAX_RECORD_BYTES,
+  MAX_TTL_SECONDS,
   REVIEW_EVIDENCE_SEGMENTS,
   ensurePrivateDirectory,
   leaseRecordIsOwned,

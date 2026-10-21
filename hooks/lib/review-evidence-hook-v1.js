@@ -69,11 +69,25 @@ function stop() {
   }
 }
 
+function waitLine(progress) {
+  if (!progress || !Number.isSafeInteger(progress.inFlight) || progress.inFlight < 1
+      || !Number.isSafeInteger(progress.deadlineMs)) {
+    return '';
+  }
+  const until = new Date(progress.deadlineMs);
+  return Number.isFinite(until.getTime()) ? `${progress.inFlight}\t${until.toISOString()}\n` : '';
+}
+
+function wait() {
+  process.stdout.write(waitLine(leases.hookLeaseWait(readPayload('Stop'))));
+}
+
 function main() {
   const mode = process.argv[2];
-  if (process.argv.length !== 3 || !['start', 'stop'].includes(mode)) fail('expected start or stop');
+  if (process.argv.length !== 3 || !['start', 'stop', 'wait'].includes(mode)) fail('expected start, stop or wait');
   if (mode === 'start') start();
-  else stop();
+  else if (mode === 'stop') stop();
+  else wait();
 }
 
 // The entry point runs only when this file IS the hook, so requiring it — the unit
@@ -85,4 +99,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { LEAD_IN, bindAndDisclose };
+module.exports = { LEAD_IN, bindAndDisclose, waitLine };

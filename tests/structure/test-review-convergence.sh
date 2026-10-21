@@ -170,7 +170,7 @@ n="$(grep -cF -- '${CONVERGENCE_CLAUSE}' "$DELEGATE")"
 [ "$n" -eq 3 ] && check "R15 every severity arm interpolates the clause (${n}x)" PASS \
                || check "R15 every severity arm interpolates the clause (${n}x, want 3)" FAIL
 RULE_LINES="$(grep -F 'IMPORTANT_RULE="' "$DELEGATE")"
-for needle in 'step 4c Finding Verification Gate' 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
+for needle in 'step 4c Finding Verification Gate' '${ACTIVATION_INPUT}' '${ROUND_SCOPE}' 'review-round-scope-v1.js' \
               'status=empty or status=degraded' 'always keeps the full cumulative diff' 'aspect-activation-v1.js --panel ${PANEL} --round re' \
               're-run the FULL test suite over the current tree in the FOREGROUND' '${CLAUDE_PLUGIN_ROOT}'; do
   case "$CLAUSE_LINE$RULE_LINES" in

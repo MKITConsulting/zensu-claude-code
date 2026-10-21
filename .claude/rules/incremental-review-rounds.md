@@ -32,9 +32,9 @@ delta; that deletes the compensating control rather than a redundancy.
 
 **The lean panel (`hooks.reviewPanel`, default `lean`) re-reviews without the judge, by
 decision.** The first review spawns `correctness`, `design` and `security` plus the judge; a fix
-round's re-review spawns `correctness` alone on the round delta and no judge (`--panel <panel>
---round <round>` of `aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of
-both delegate arms). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
+round's re-review spawns `correctness` alone, on the round delta while
+`hooks.incrementalReviewRounds` is on, and no judge (`--panel <panel> --round <round>` of
+`aspect-activation-v1.js`, step 4b of `/zensu:tdd`, and the judge clause of every delegate arm). That drops the compensating control above knowingly: with `autoFixMaxRounds: 2`
 by default a chain runs up to two lean re-reviews, the last of them hands the chain to
 `/zensu:self-review`, which re-reads the whole change, and the consume-mode code-reviewer still
 reads the merge. With `hooks.selfReview: false` that whole-change read is gone (see the known
@@ -72,13 +72,52 @@ failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns the 
 shrank silently is indistinguishable from one that was never spawned, which is the failure this
 repository treats as worse than the cost it removes.
 
+**Who resolves each key, and why there.** Both keys shipped documented and in `config.example.json`
+while nothing read them, so a `false` in any config changed nothing. Each is now resolved where its
+decision is made, through `zensu_hook_enabled` against the Session Control record's project root:
+
+- **`hooks.aspectActivation` belongs to `/zensu:tdd` step 3.** Every fan-out runs there, and the
+  first review has no hook directive in front of it. A main-thread probe runs
+  `zensu_hook_enabled aspectActivation` with `CLAUDE_PROJECT_DIR="{project_root}"`, in the anchored
+  form `I11` pins and `I11c`/`I11d` run, and answers `on` or `off`; `{project_root}` is the path
+  `zensu-log.sh --project-root` prints, so a project `.zensu/config.json` counts. On `off` the helper still runs, over an EMPTY change
+  set: it then skips nothing for what the change set holds, while the lean panel's re-review shape,
+  `correctness` alone (`re-review-lean-panel`), stays where it lives, in `aspect-activation-v1.js`.
+  Skipping the helper instead was rejected: every lean re-review would have spawned all three
+  perspectives, and the panel's shape would have needed a second copy in prose. Step 3 logs
+  `ASPECT ACTIVATION OFF — hooks.aspectActivation`, so a documentation-only change set that kept
+  `security` is explained in the run log.
+- **`hooks.incrementalReviewRounds` belongs to `hooks/post-review-tdd-delegate.sh`.** Only its
+  fix-round directive launches a round that narrows, and the hook already exports
+  `CLAUDE_PROJECT_DIR` from `zensu_resolve_project_dir` and sources `zensu-config.sh`. It resolves
+  the key once above the severity split into `ROUND_SCOPE`: the round-delta clause while the key is
+  on, a clause that keeps the whole diff for the aspects and the judge alike while it is off. The
+  step 10 fix-round paragraph narrows only when the directive says `hooks.incrementalReviewRounds is
+  on` and never resolves the key itself, so the model has no condition left to evaluate. The
+  review-convergence clause names the round-scope helper itself, through `SCOPE_HELPER_Q` beside
+  `LEDGER_HELPER_Q`, because convergence still runs that helper while the key is off and
+  `ROUND_SCOPE` names the file only while it is on (`I17g`, `I17h`, `I32c`).
+- **The delegate also resolves `hooks.aspectActivation`**, into `ACTIVATION_INPUT`, because its
+  re-review parenthetical used to prescribe the helper over the round's `changed_files`
+  unconditionally, which contradicted a probe answering `off`. It now names the round's
+  `changed_files` while the key is on and an empty change set while it is off, so the directive and
+  step 3 name the same input.
+
 **Coupled sites that move together:** the two libs and their exports; `skills/tdd/references/review-chain.md`
-step 3 (activation) and the step 10 fix-round paragraph (delta scoping); BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
-contract (`P3b` in `test-finding-verification.sh` counts `step 4c Finding Verification Gate`
-exactly twice, so a one-sided edit there fails in a suite named for something else); the two
-config keys in `config.example.json`; and the operator accounts in `docs/configuration.md`,
-`docs/review-chain.md`, `docs/architecture.md` and `docs/tdd-manager-workflow.md`.
-`tests/structure/test-incremental-review-rounds.sh` pins all of it and drives both unit files;
+step 3 (the activation probe and its empty-input `off` arm) and the step 10 fix-round paragraph
+(which follows the directive's round-scope clause); the `ACTIVATION_INPUT` and `ROUND_SCOPE`
+assignments of `hooks/post-review-tdd-delegate.sh` and ALL THREE severity arms that interpolate
+them, which are verbatim-identical by contract (`P3b` in `test-finding-verification.sh` counts
+`step 4c Finding Verification Gate` in exactly three lines, so a one-sided edit there fails in a
+suite named for something else, and `R16` in `test-review-convergence.sh` keeps both
+interpolations out of the convergence clause); the two config keys in `config.example.json`; both
+keys again in `evals/route-short-line-reaction/eval-config.json`, which must switch off every key
+a hook reads (`RS5` in `test-route-short-line-eval.sh`), so the delegate's two reads put them there;
+and the operator accounts in `docs/configuration.md`, `docs/review-chain.md`, `docs/architecture.md`
+and `docs/tdd-manager-workflow.md`. `tests/structure/test-incremental-review-rounds.sh` pins all of
+it, runs the step 3 probe against a project config (`I11c`, `I11d`), renders the delegate with
+`aspectActivation` off and with `incrementalReviewRounds` off in every severity arm (`I30` to
+`I32e`) and drives both unit files;
 the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` plus both unit files'
 entries in `tests/profiles/unit-files.v1.json` move with it, because `run-all.sh` refuses to
 execute at all when either file and the directory disagree.
@@ -87,7 +126,7 @@ execute at all when either file and the directory disagree.
 `/zensu:reset-review-limit` appends after a same-chain rearm, starts a new generation:
 `roundScope` counts only claims after the last marker, so restarted round numbers no longer merge
 old and new `R1-` claims. The `R<n>-` claim prefix itself is prescribed by the fix-round text
-of BOTH severity arms in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:tdd` fix-round
+of EVERY severity arm in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:tdd` fix-round
 paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on
 that one. A round whose claims still lack the prefix answers `empty` — the safe direction.
 
@@ -111,7 +150,9 @@ that list against the exports of `aspect-activation-v1.js`.
 workflow-state schema field (both libs are read-only and persist nothing), no strict key set, no
 hook added, removed or renamed and no matcher changed, no attestation change, and no
 `permissionDecision` in either direction. The two new config keys are read through the
-PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `patch`.
+PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `patch`. Resolving
+them later, through the step 3 probe and the delegate's two assignments, is a `patch` on the same
+walk: no key was added, both reads stay permissive, and only directive text moved.
 
 **Known gaps, accepted and named:**
 
@@ -131,17 +172,24 @@ PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `
   costed at `defaultSeconds` until a real ubuntu `--ci` figure exists.
 - **No `/zensu:doctor` row.** A project whose activation helper stopped loading is visible only
   in the run log's `ASPECT ACTIVATION UNAVAILABLE` line, not in a diagnostic.
+- **Two reads of `aspectActivation` per fix round.** The delegate resolves it when it renders the
+  directive and step 3 resolves it again at the fan-out. Both read the Session Control record's
+  project root, so only a config edited between the two reads can make that round's directive and
+  probe disagree.
 - **`hooks.selfReview: false` leaves the lean panel without a whole-change read after the first
-  review.** A lean re-review reads only its round's delta and runs no judge, and the stage that
-  would re-read the whole change is switched off, so a fix round's drift into a file it did not
-  touch reaches no reviewer. A project that switches the self-review off and still wants that read
-  sets `hooks.reviewPanel: full`, which keeps the judge, and the full cumulative change set it
-  reads, on every review.
+  review while `hooks.incrementalReviewRounds` is on.** A lean re-review then reads only its
+  round's delta and runs no judge, and the stage that would re-read the whole change is switched
+  off, so a fix round's drift into a file it did not touch reaches no reviewer. A project that
+  switches the self-review off and still wants that read sets `hooks.incrementalReviewRounds:
+  false`, which gives the `correctness` re-review the whole diff but still no judge, or
+  `hooks.reviewPanel: full`, which keeps the judge, and the full cumulative change set it reads,
+  on every review.
 
 **Port-relevant.** The core half is both libs, which are host-neutral, zero-dependency and carry
 no environment reads of their own — every anchor arrives as an option or an argument. The host
-half is FOUR obligations: the two config keys and their reader, the two step directives in the
-skill, the fix-round directive in the delegate hook, and the run-log claim FORMAT the delta is
+half is FOUR obligations: the two config keys and the places that resolve them (the step 3 probe
+and the delegate's two assignments), the two step directives in the skill, the fix-round directive
+in the delegate hook, and the run-log claim FORMAT the delta is
 derived from — a port whose rounds log their edits differently gets a helper that always answers
 `empty` and therefore never narrows, which is the safe direction but buys nothing. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
