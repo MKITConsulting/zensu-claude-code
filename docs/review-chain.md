@@ -10,7 +10,7 @@ skeletons they anchor on.
 | **zensu-plm** | Read-only planning analyst | Explains and decomposes Zensu lifecycle work. It receives neutral context but exposes only `Read`, `Grep`, and `Glob`; the matching skill performs mutations in the interactive main thread. |
 | **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from the parallel `review-aspect` panel — three perspectives by default, five with `hooks.reviewPanel: full` (no re-read, no build/test). |
 | **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns one per perspective of the panel in a single parallel batch — `correctness`, `design` and `security` by default (`hooks.reviewPanel: lean`, whose fix-round re-reviews spawn `correctness` alone), or `conventions`, `bugs`, `architecture`, `tests` and `security` with `hooks.reviewPanel: full` — then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
-| **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. It also traces every guarantee a query or call inherits from session or connection state (row-level security, a tenant setting, the connecting role) through each connection mode the code still supports, and reports a defect such a mode reaches with its condition, even when committed configuration disables the mode, which may lower the severity by one level but never below IMPORTANT. On the first review it runs twice, independently and side by side (`hooks.reviewJudgeSecondRun`, default on): the second run reads what the changed files depend on before the files themselves and only adds `JUDGE-B<n>` findings, which the main thread merges as a union. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
+| **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only, and on any review the Stop hook resumes). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. It also traces every guarantee a query or call inherits from session or connection state (row-level security, a tenant setting, the connecting role) through each connection mode the code still supports, and reports a defect such a mode reaches with its condition, even when committed configuration disables the mode, which may lower the severity by one level but never below IMPORTANT. On the first review it runs twice, independently and side by side (`hooks.reviewJudgeSecondRun`, default on): the second run reads what the changed files depend on before the files themselves and only adds `JUDGE-B<n>` findings, which the main thread merges as a union. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
 | **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object as its final message; only the main thread validates and materializes that result. |
 | **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
 
@@ -120,7 +120,25 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
   can be computed, the change-time check decides alone and the line says `tree=unverified`. A
   run that has not completed answers `status=unavailable reason=run-not-completed`, and a run
-  whose arguments left a changed path out `reason=files-not-reviewed`. The first line names
+  whose arguments left a changed path out `reason=files-not-reviewed`. The `--root` of both
+  calls must be the root of the session's work tree: the top level `git rev-parse
+  --show-toplevel` prints for the project root, or the project root itself when it lies outside
+  git. Any other root answers `status=unavailable reason=root layout=<layout>` (with `--stage`
+  or `--tree`, `stage=unavailable` or `tree=unavailable` in its place, and no copy is written)
+  followed by what the layout is and the next
+  step: `nested-work-tree` for a separate work tree nested inside the session's own, such as a
+  worktree of another repository, `nested-in-folder` for a repository inside a project folder
+  that is not a git work tree, `outside` for a sibling, `enclosing` for a directory above the
+  work tree, `subdirectory` for one below its top level, `unresolved-root` or
+  `unresolved-project-root` for a path that is missing, is not a directory or ends in a symbolic
+  link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
+  `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
+  aspect panel reviews this change, and a workflow review of the other work tree imports only in
+  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
+  git's fault in `detail=`: for the review root it asks for the same re-run, because only that
+  root imports whatever the fault hid, and for the project root it asks for the fault to be
+  fixed first. The first line names
   the lenses the run reviewed (`lenses=`), which the judge receives. The import then compares
   the result's agent counts with the run journal the workflow runtime wrote (`journal.jsonl`
   in the launch's transcript directory, where only the outcome of each label's latest start

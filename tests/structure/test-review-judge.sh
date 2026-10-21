@@ -288,7 +288,7 @@ if grep -qF '| `reviewJudgeSecondRun` |' "$CONFIG_DOC" \
 else
   check "P5d the configuration and review-chain docs describe the second judge run" FAIL
 fi
-if grep -qF 'the flag probes in `/zensu:tdd`, `/zensu:plan-review` and `/zensu:pr-team-review` set it to the bound project root of the session' "$CONFIG_DOC" \
+if grep -qF 'the flag probes in `/zensu:tdd`, `/zensu:plan-review`, `/zensu:pr-team-review` and `/zensu:self-review` set it to the bound project root of the session' "$CONFIG_DOC" \
   && ! grep -qF 'a known gap it shares with `reviewJudge` and `findingVerification`' "$CONFIG_DOC"; then
   check "P5f the configuration doc anchors the skill flag probes on the bound project root and names no project-config gap" PASS
 else

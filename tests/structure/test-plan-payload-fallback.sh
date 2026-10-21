@@ -67,6 +67,10 @@ check() {
   else echo "  FAIL  $1"; FAIL=$((FAIL + 1)); fi
 }
 
+PLAN_LIB="$PLUGIN_DIR/hooks/lib/plan-payload-v1.js"
+. "$(dirname "$0")/lib-unit-registry.sh"
+ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" unit_check "F11b the plan-payload module unit file passes" "$PLUGIN_DIR/tests/structure/plan-payload-v1.test.js"
+
 [ -f "$HOOK" ] && bash -n "$HOOK" 2>/dev/null \
   && check "F0 plan hook exists and parses" PASS \
   || { check "F0 plan hook exists and parses" FAIL; exit 1; }
@@ -876,32 +880,6 @@ else
   check "F11 exception and no-verdict codes are not distinctly wired" FAIL
 fi
 
-# --- F11b the module's own decision table and reader, pinned by BEHAVIOR in a
-# node --test sibling rather than by grepping its source text. The shell layer
-# cannot reach a NUL-byte path, a bare-string carrier, or a hard link; the unit
-# suite can. Driven from here the way test-chain-recover.sh drives its own.
-PLAN_LIB="$PLUGIN_DIR/hooks/lib/plan-payload-v1.js"
-PLAN_UNIT="$PLUGIN_DIR/tests/structure/plan-payload-v1.test.js"
-# Shared, locale-independent `node --test` summary parse (see the file header for
-# why the count matters and why it is not hand-copied here).
-. "$(dirname "$0")/lib-unit-summary.sh"
-
-PLAN_UNIT_OUT="$TMP/plan-unit.out"
-PLAN_UNIT_FLOOR="$(unit_overview_declared "${PLAN_UNIT##*/}")"
-if [ -f "$PLAN_LIB" ] && [ -f "$PLAN_UNIT" ] \
-  && ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" node --test "$PLAN_UNIT" > "$PLAN_UNIT_OUT" 2>&1 \
-  && unit_cases_registered_floor "$PLAN_UNIT_OUT" "$PLAN_UNIT_FLOOR"; then
-  check "F11b the plan-payload module unit suite passes ($(unit_cases_report "$PLAN_UNIT_OUT"))" PASS
-else
-  check "F11b the plan-payload module unit suite failed, is missing, or registered fewer than ${PLAN_UNIT_FLOOR:-<no overview row>} cases ($(unit_cases_report "$PLAN_UNIT_OUT"))" FAIL
-  [ -f "$PLAN_UNIT_OUT" ] && grep -B2 -A 20 '^not ok' "$PLAN_UNIT_OUT" | head -40
-fi
-if F11B_OVERVIEW="$(unit_overview_check "$PLAN_UNIT")"; then
-  check "F11b-overview the SUITE-OVERVIEW Blocks cell matches what ${PLAN_UNIT##*/} registers ($PLAN_UNIT_FLOOR)" PASS
-else
-  check "F11b-overview $F11B_OVERVIEW" FAIL
-fi
-
 # --- F11b-tool the tool-name guard, pinned behaviorally. A payload from another
 # tool carrying an otherwise perfect plan must refuse AND leave the run record
 # untouched — without the guard it would approve and mutate it.
@@ -1264,6 +1242,8 @@ if [ "$NO_MODULE_READY" = true ] \
 else
   check "F47a restored-module fixture could not be prepared" FAIL
 fi
+
+unit_check_done "F11z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-plan-payload-fallback: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"

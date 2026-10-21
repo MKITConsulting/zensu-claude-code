@@ -6,7 +6,7 @@ LEDGER_LIB="$ROOT/hooks/lib/review-ledger-v1.js"
 SCOPE_LIB="$ROOT/hooks/lib/review-round-scope-v1.js"
 LEDGER_UNIT="$ROOT/tests/structure/review-ledger-v1.test.js"
 LOG_WRITER="$ROOT/hooks/lib/zensu-log.sh"
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 
 RUBRIC_DOC="$ROOT/docs/review-severity.md"
 ASPECT_MD="$ROOT/agents/review-aspect.md"
@@ -25,7 +25,6 @@ WORKFLOW_DOC="$ROOT/docs/tdd-manager-workflow.md"
 EVAL="$ROOT/evals/config-gate/test-review-convergence-directive.sh"
 EVAL_RUNNER="$ROOT/evals/config-gate/run-eval.sh"
 MANIFEST="$ROOT/tests/profiles/promptfoo-local-only.v1.json"
-OVERVIEW_MD="$ROOT/tests/SUITE-OVERVIEW.md"
 
 PASS=0; FAIL=0
 check() {
@@ -47,7 +46,7 @@ finish() {
 
 for f in "$LEDGER_LIB" "$SCOPE_LIB" "$LEDGER_UNIT" "$LOG_WRITER" "$RUBRIC_DOC" "$ASPECT_MD" "$JUDGE_MD" \
          "$REVIEWER_MD" "$TDD_MD" "$SELF_REVIEW_MD" "$RESET_MD" "$DELEGATE" "$CONFIG_EX" "$CONFIG_DOC" \
-         "$CHAIN_DOC" "$ARCH_DOC" "$WORKFLOW_DOC" "$EVAL" "$EVAL_RUNNER" "$MANIFEST" "$OVERVIEW_MD"; do
+         "$CHAIN_DOC" "$ARCH_DOC" "$WORKFLOW_DOC" "$EVAL" "$EVAL_RUNNER" "$MANIFEST"; do
   if [ ! -f "$f" ]; then
     check "R0 required file exists: $f" FAIL
     finish
@@ -58,19 +57,7 @@ if ! command -v node >/dev/null 2>&1; then
   finish
 fi
 
-LEDGER_OUT="$(cd "$ROOT" && node --test "$LEDGER_UNIT" 2>&1)"
-LEDGER_RC=$?
-[ "$LEDGER_RC" -eq 0 ] && check "R1 review-ledger unit suite passes ($(unit_cases_report_text "$LEDGER_OUT"))" PASS \
-                       || check "R1 review-ledger unit suite passes" FAIL
-LEDGER_FLOOR="$(unit_overview_declared "${LEDGER_UNIT##*/}")"
-unit_cases_registered_floor_text "$LEDGER_OUT" "$LEDGER_FLOOR" \
-  && check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least $LEDGER_FLOOR)" PASS \
-  || check "R1a review-ledger unit suite registers its cases ($UNIT_CASES_TESTS, at least ${LEDGER_FLOOR:-<no overview row>})" FAIL
-if R1B_OVERVIEW="$(unit_overview_check "$LEDGER_UNIT")"; then
-  check "R1b the SUITE-OVERVIEW Blocks cell equals the registered count (cell=$LEDGER_FLOOR)" PASS
-else
-  check "R1b $R1B_OVERVIEW" FAIL
-fi
+unit_check "R1 the review-ledger unit file passes" "$LEDGER_UNIT"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/zensu-rcv-XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -228,7 +215,8 @@ check "R25b self-review reads the chain's own run log" "$(grep_ok "$SELF_REVIEW_
 check "R25c self-review reads the ledger leniently inside the project root" "$(grep_ok "$SELF_REVIEW_MD" 'review-ledger-v1.js" --report --log <run-log> --root')"
 check "R25d self-review never shell-expands a ledger line" "$(grep_ok "$SELF_REVIEW_MD" 'fed by a heredoc whose delimiter is quoted, never through `--message`')"
 check "R25e self-review appends its fixed lines through the stdin verb" "$(grep_ok "$SELF_REVIEW_MD" 'append --log <run-log> --message-stdin')"
-check "R25f self-review reads the ledger only while reviewConvergence is on" "$(grep_ok "$SELF_REVIEW_MD" 'zensu_hook_enabled reviewConvergence && echo on || echo off')"
+R25F_PROBE='`ZENSU_ROOT="${CLAUDE_PLUGIN_ROOT}" CLAUDE_PROJECT_DIR="$PROJECT_ROOT" bash -c '\''source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off'\''`'
+check "R25f self-review reads the ledger only while reviewConvergence is on, resolved against the bound project root" "$(grep_ok "$SELF_REVIEW_MD" "$R25F_PROBE")"
 check "R25g self-review takes parked entries as candidates" "$(grep_ok "$SELF_REVIEW_MD" '`routed-unfixed` or `parked`, and every `deferred` entry rated IMPORTANT or CRITICAL')"
 check "R25h self-review fixes a supported parked entry whatever the must-fix bar says" "$(grep_ok "$SELF_REVIEW_MD" 'whatever the must-fix bar above says')"
 check "R25i self-review reports the candidates it fixed without a re-review" "$(grep_ok "$SELF_REVIEW_MD" 'how many of them this stage fixed without a re-review')"
@@ -314,4 +302,5 @@ check "LC3i config.example.json ships the lean panel" "$(node -e 'process.stdout
 check "LC2j a not-reproduced CRITICAL leaves the loop through the Deferred annotation" "$(grep_ok "$TDD_MD" 'retitle the finding `[Deferred — do not fix]` with `CRITICAL (not reproduced)` in its text')"
 
 rm -f "$TDD_MD"
+unit_check_done "R1z every unit file the registry gives this suite was graded"
 finish

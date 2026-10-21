@@ -28,23 +28,23 @@ This is the **greenfield** entry point — a new product captured from a plan/vi
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A product plan or vision document (MVP spec, PRD, or idea paper)
 
-Every command accepts `--json` for machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
+Every `zensu` command this skill runs except `zensu auth` accepts `--json` for machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
 
 ## Workflow
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,generate_claude_md,generate_threat_model,analyze_feature_security"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu products create` / `zensu products vision-create` / `zensu products bootstrap-apply` / `zensu features create` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,set_security_classification"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu products create` / `zensu products vision-create` / `zensu products bootstrap-apply` / `zensu features create` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content
 2. Run `zensu products create` with name, slug, and product type
-3. Run `zensu products vision-create --product <product-id> --content <plan-document> --source claude-code`
+3. Run `zensu products vision-create --product <product-id> --title <vision-title> --content <plan-document> --source claude-code`
 4. Save the returned product_id and vision_id for subsequent steps
 
 ### Phase 2: Feature Extraction & Bootstrap
@@ -65,11 +65,11 @@ Execute these phases in order. Present results to the user after each phase and 
 Execute each step below, presenting results to the user after each.
 
 **Step 1: Review & Refine Features**
-- Review the bootstrapped features with the user (`zensu features list --product <product-id>`). The response is a `{data, total, page, perPage}` envelope paginated at 20 and the CLI exposes no page flag — when `total` exceeds the returned `data` length, read the full catalog from `zensu journeys suggest --product <product-id>` (its payload carries every feature) instead of reviewing only the first page.
+- Review the bootstrapped features with the user (`zensu features list --product <product-id>`).
 - Remove horizontal/implementation features that shouldn't be tracked
-- Split XL-effort features using `zensu subfeatures add <feature-id>` or `zensu features split <feature-id>`
-- Add missing features with `zensu features create`
-- Fix incorrect priorities or security classifications with `zensu features update <feature-id>`
+- Split XL-effort features using `zensu subfeatures add <feature-id> --title <title>` or `zensu features split <feature-id> --children '<json>'` (a JSON array of `{"title", "slug"}` objects)
+- Add missing features with `zensu features create --product <product-id> --component <component-uuid> --title <title>`; the `components` array of `zensu journeys suggest --product <product-id>` holds the component UUIDs, and the command takes no priority, so set it afterwards with `zensu features update`
+- Fix incorrect priorities with `zensu features update <feature-id> --priority <low|medium|high|critical>` and incorrect security classifications with `zensu security classify <feature-id> --classification <public|internal|confidential|restricted>`
 - After completion: run `zensu products bootstrap-step <vision-id> 1` (the step is a positional argument, not a `--step` flag)
 
 **Step 2: Define User Journeys**
@@ -77,7 +77,8 @@ Execute each step below, presenting results to the user after each.
 - Propose 3-5 critical user journeys to the user
 - Create approved journeys with `zensu journeys create --product <product-id>`: `--title` (required), `--slug`, `--type` (critical|happy_path|edge_case|error_path|onboarding), `--priority` (critical|high|medium|low), `--persona` (free text). Pick `--type` from that enum only — the server rejects any other value.
 - For each journey, add steps with `zensu journeys step <journey-id> --product <product-id>`:
-  - Set step order (1-based sequential) via `--step-order`
+  - Name the step via `--title` (required)
+  - Set step order (1-based sequential) via `--step-order` (required)
   - Link to features via `--feature` (the feature **UUID**, not its slug)
   - Set `--interaction-type` (action|navigation|input|validation|output|wait)
   - Mark critical steps with `--critical`
@@ -95,8 +96,8 @@ Execute each step below, presenting results to the user after each.
 - Ask the user: "Does this product use pricing tiers (e.g. Free/Pro/Enterprise)?"
 - If yes:
   1. Ask which tiers they need
-  2. Run `zensu tiers create --product <product-id>` for each tier (ascending tier order: 1, 2, 3...)
-  3. Run `zensu tiers set-feature <feature-id>` for each feature:
+  2. Run `zensu tiers create --product <product-id> --slug <slug> --name <name> --tier-order <n>` for each tier (`--tier-order` ascending, 1 = the lowest tier: 1, 2, 3...)
+  3. Run `zensu tiers set-feature <feature-id> --tiers '<json>'` for each feature. The JSON array replaces the feature's tier assignments; each entry is `{"tierId": "<tier-uuid>", "gatingType": "hard|soft|preview"}` with an optional `tierLimits` object, and `zensu tiers list --product <product-id>` returns the tier UUIDs:
      - Critical features: available in all tiers (hard gating)
      - High priority: Pro and above
      - Medium/low: highest tier only
@@ -131,6 +132,7 @@ The product is now ready for implementation. Features can be worked on using the
 | `zensu products bootstrap-apply` | 2 | Create components and features from decomposition |
 | `zensu features list` | 3.1 | Review bootstrapped features |
 | `zensu features update` | 3.1 | Fix priorities, descriptions |
+| `zensu security classify` | 3.1 | Fix security classifications |
 | `zensu subfeatures add` | 3.1 | Split large features |
 | `zensu features split` | 3.1 | Split features into children |
 | `zensu features create` | 3.1 | Add missing features |
@@ -142,6 +144,7 @@ The product is now ready for implementation. Features can be worked on using the
 | `zensu security suggest-tests` | 3.3 | Get security test suggestions |
 | `zensu security threat-model` | 3.3 | Generate STRIDE threat model |
 | `zensu tiers create` | 3.4 | Create pricing tiers |
+| `zensu tiers list` | 3.4 | Look up the tier UUIDs for `tiers set-feature` |
 | `zensu tiers set-feature` | 3.4 | Assign features to tiers |
 | `zensu tiers matrix` | 3.4 | Show tier matrix |
 | `zensu doc claude-md` | 3.5 | Generate CLAUDE.md template |

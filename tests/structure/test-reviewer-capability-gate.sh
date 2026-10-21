@@ -655,6 +655,18 @@ case "$MONITOR_OFF_REASON" in
   *)
     check "a withdrawn grant must leave Bash out of the allowlist deny (got: ${MONITOR_OFF_REASON:-<empty>})" FAIL ;;
 esac
+assert_case "PS1 a named neutral agent's PowerShell command stays outside the shell grant" deny general-purpose PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS2 a reviewer's PowerShell command is denied" deny zensu:review-aspect PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS3 the PLM's PowerShell command is denied" deny zensu-plm PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS4 an evidence worker's PowerShell command is denied" deny zensu:pr-review-worker PowerShell '{"command":"Get-ChildItem"}'
+assert_case "PS5 the main thread's PowerShell command passes the capability gate" allow - PowerShell '{"command":"Get-ChildItem"}'
+POWERSHELL_REASON="$(deny_reason general-purpose PowerShell '{"command":"Get-ChildItem"}')"
+case "$POWERSHELL_REASON" in
+  "reviewer-capability-v1 deny: host-profile-v1 cannot invoke PowerShell; a neutral subagent may use only "*)
+    check "PS6 a named neutral agent's PowerShell command gets the allowlist deny, because the grant covers Bash alone" PASS ;;
+  *)
+    check "PS6 a PowerShell command must get the allowlist deny (got: ${POWERSHELL_REASON:-<empty>})" FAIL ;;
+esac
 GUARD_TAIL='The guard prevents accidents and is not a sandbox; report the need to the main thread instead.'
 GUARD_REASON="$(deny_reason general-purpose Bash '{"command":"git clean -fdx"}')"
 case "$GUARD_REASON" in
@@ -1021,24 +1033,9 @@ EOF
 fi
 
 GUARD_UNIT="$PLUGIN/tests/structure/subagent-shell-guard-v1.test.js"
-source "$PLUGIN/tests/structure/lib-unit-summary.sh"
-GUARD_FLOOR="$(unit_overview_declared "${GUARD_UNIT##*/}")"
-if node --test --test-reporter=tap "$GUARD_UNIT" >"$TMP/guard-unit.out" 2>&1 \
-   && [ -n "$GUARD_FLOOR" ] && unit_cases_registered_floor "$TMP/guard-unit.out" "$GUARD_FLOOR"; then
-  check "the shell guard unit suite passes with at least $GUARD_FLOOR registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" PASS
-else
-  if grep -q '^not ok ' "$TMP/guard-unit.out"; then
-    awk '/^# Subtest: /{show=0; next} /^not ok /{show=1} show || /^# /' "$TMP/guard-unit.out" | head -n 200 | sed 's/^/    /'
-  else
-    sed 's/^/    /' "$TMP/guard-unit.out" | tail -40
-  fi
-  check "the shell guard unit suite passes with at least ${GUARD_FLOOR:-<no overview row>} registered cases ($(unit_cases_report "$TMP/guard-unit.out"))" FAIL
-fi
-if GUARD_OVERVIEW="$(unit_overview_check "$GUARD_UNIT")"; then
-  check "the SUITE-OVERVIEW Blocks cell matches what ${GUARD_UNIT##*/} registers ($GUARD_FLOOR)" PASS
-else
-  check "$GUARD_OVERVIEW" FAIL
-fi
+. "$PLUGIN/tests/structure/lib-unit-registry.sh"
+unit_check "the shell guard unit file passes" "$GUARD_UNIT"
+unit_check_done "every unit file the registry gives this suite was graded"
 
 SANDBOX_MISSING=""
 for text in docs/configuration.md docs/session-control.md docs/gates.md docs/review-chain.md \

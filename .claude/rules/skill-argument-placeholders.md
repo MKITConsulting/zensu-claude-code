@@ -72,20 +72,20 @@ it before `--external-review` reads `reviewJudge`. `/zensu:tdd` passes `{project
 `/zensu:adopt-session --reanchor` is not the bound root, and pr-team-review's is the reviewed
 repository, which can be a clone outside the session whose committed config would then switch the
 Finding Verification Gate off for a review published under the user's name. `/zensu:self-review`
-passes `$TOP`, the top level of the bound root's work tree.
+passes the `PROJECT_ROOT` its Phase 1 reads from `zensu-log.sh --project-root`.
 
 **Coupled sites.** The probes, and the checks that pin each: `skills/self-review/SKILL.md` Phase 3
-(`R25f` in `tests/structure/test-review-convergence.sh`, the flag tail only);
-`skills/tdd/references/review-chain.md` step 3 (`LC3k`, same suite), step 4b (`P3h` in
-`tests/structure/test-review-judge.sh`, and `P3h2` runs it against a project overlay), the second
-run in step 4b (`P3j`, "the same way"), step 4c (`P2c` in `tests/structure/test-finding-verification.sh`)
-and its stage 3 (`LC2k`, "the same way"); `skills/plan-review/SKILL.md` step 3b and
-`skills/pr-team-review/references/debate.md` step 4b (`P4i`). Every pin but `R25f` holds the whole
-command, so a probe that drops the `CLAUDE_PROJECT_DIR` assignment fails it. The operator accounts
+(`R25f` in `tests/structure/test-review-convergence.sh`); `skills/tdd/references/review-chain.md`
+step 3 (`LC3k`, same suite), step 4b (`P3h` in `tests/structure/test-review-judge.sh`, and `P3h2`
+runs it against a project overlay), step 4c (`P2c` in `tests/structure/test-finding-verification.sh`);
+`skills/plan-review/SKILL.md` step 3b and `skills/pr-team-review/references/debate.md` step 4b
+(`P4i`). Each of those pins holds the whole command, so a probe that drops the `CLAUDE_PROJECT_DIR`
+assignment fails it. The second run in step 4b and stage 3 of step 4c resolve their flags "the
+same way" as the probe before them, and `P3j` and `LC2k` pin that wording. The operator accounts
 are item 2 of the resolution order in `docs/configuration.md` (`P5f`) and the `{project_root}`
-paragraph of `docs/tdd-manager-workflow.md` (unpinned). `ZENSU_ROOT` is read by
-nothing else in the plugin; pick another name if that ever changes, because the probe hands it to
-every child the sourced library starts.
+paragraph of `docs/tdd-manager-workflow.md` (unpinned). `ZENSU_ROOT` is read by nothing else in
+the plugin; pick another name if that ever changes, because the probe hands it to every child the
+sourced library starts.
 
 **Version: `patch`.** Skill text and a structure check: no schema field, key set, hook, matcher,
 config key or attestation moves.
@@ -107,7 +107,4 @@ config key or attestation moves.
   verb's refusal on stderr. The verb refuses when the binding is unavailable, which both skills
   already needed for their review-evidence lease, and for a root holding a double quote, a dollar
   sign, a backtick or a backslash.
-- **Self-review reads `$TOP`.** A session recorded in a subdirectory that carries its own
-  `.zensu/config.json` has its self-review probe read the work-tree top's file while the hooks
-  read the subdirectory's (`.claude/rules/review-convergence.md`).
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not checked.

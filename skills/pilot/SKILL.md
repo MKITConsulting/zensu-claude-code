@@ -70,10 +70,10 @@ runs until the feature reaches `released` or the user picks Exit. Checkpoints
 sit ONLY at skill boundaries: once a delegated skill starts, pilot never
 interrupts it — in particular the `/zensu:tdd` review chain runs to its own
 terminus (owned by `/zensu:self-review`; pilot never touches the chain-state
-markers itself). The Stop-hook backstop hard-enforces that terminus for every
-`/zensu:tdd` chain in the session (`--tdd-begin` re-arms it per chain), so
-pilot's repeated delegations each get the full guarantee — and pilot never
-interrupts a chain either way.
+markers itself). The Stop-hook backstop enforces that terminus, up to each
+chain's Stop cap, for every `/zensu:tdd` chain in the session (`--tdd-begin`
+re-arms it per chain), so each of pilot's repeated delegations gets the same
+enforcement — and pilot never interrupts a chain either way.
 
 ## Workflow
 
@@ -85,11 +85,8 @@ interrupts a chain either way.
    (status 400)`. Otherwise pick the feature interactively. Both paths go through
    the product: `zensu features list` requires `--product` (`--product is
    required` without it), so run `zensu products list --json` first, then
-   `zensu features list --product <product-id> --json` (add `--status` to narrow).
-   Its `{data, total, page, perPage}` envelope pages at 20 and the CLI has no page
-   flag — when `total` exceeds the returned `data` length, fall back to
-   `zensu journeys suggest --product <product-id>`, whose `features` array carries
-   the whole catalog with `id`, `slug`, and `number`. Show the non-released
+   `zensu features list --product <product-id> --json` (add `--status` to narrow),
+   which reads every page. Show the non-released
    features (id, title, status) and ask via `AskUserQuestion` which one to conduct
    (≤4 options; when more exist, offer the most recently active plus "Other").
 2. Preflight `zensu auth status` and `command -v gh` once; remember the results
@@ -101,7 +98,7 @@ Gather the real state; run zero mutations:
 
 - `zensu features get <feature-uuid>` — status, component, priority, active
   revision, linked tests/source/docs counts, and the `product_id` the journey
-  probe below needs. The command has no `--json` flag; it always prints JSON.
+  probe below needs.
 - `zensu security validate <id>` — release-gate preview (score, violations).
 - Journeys: resolve the product id from the `features get` JSON, run
   `zensu journeys list --product <product-id> --json`, keep the journeys whose
@@ -203,8 +200,9 @@ and the relevant slice of the status card as the skill's input. Rules:
 
 ## Degradation ladder (never dead-end)
 
-- `zensu` CLI missing or `zensu auth status` failing → offer `/zensu:setup`,
-  then stop (pilot cannot probe without the backend).
+- `zensu` CLI missing, or `zensu auth status` failing or printing `Not logged in`
+  (it exits 0 then) → offer `/zensu:setup`, then stop (pilot cannot probe without
+  the backend).
 - `gh` missing or unauthenticated → skip the PR probes, say so on the status
   card, and drop all PR-state-keyed rows (review presence, unresolved threads,
   the review-/merged-keyed `testing` transitions, the `CLOSED` fallback). The
@@ -258,9 +256,8 @@ and the relevant slice of the status card as the skill's input. Rules:
 | Command | Phase | Purpose |
 |---|---|---|
 | `zensu products list --json` | 0 | Resolve the product before listing features |
-| `zensu features list --product <pid> --json` | 0 | Candidate pick when no feature id given (`--product` required; pages at 20) |
-| `zensu journeys suggest --product <pid>` | 0 | Full feature catalog when the list envelope's `total` exceeds one page |
-| `zensu features get <feature-uuid>` | 1 | Status, revision, linked artifacts, product id (no `--json` flag) |
+| `zensu features list --product <pid> --json` | 0 | Candidate pick when no feature id given (`--product` required) |
+| `zensu features get <feature-uuid>` | 1 | Status, revision, linked artifacts, product id |
 | `zensu security validate <id>` | 1, 4 | Release-gate preview + released preflight |
 | `zensu journeys list --product <pid> --json` | 1 | Discover journeys referencing the feature |
 | `zensu journeys health --product <pid> <jid>` | 1 | Journey coverage on the card |

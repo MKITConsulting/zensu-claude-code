@@ -37,6 +37,10 @@ for f in "$HELPER" "$REPORT" "$SKILL_MD" "$PLUGIN_JSON" "$README"; do
 done
 check "P0 all target files exist" PASS
 
+. "$(dirname "$0")/lib-unit-registry.sh"
+unit_check "P0zv the zensu-cli version unit file passes" "$PLUGIN_DIR/tests/structure/zensu-cli-version-v1.test.js"
+unit_check_done "P0zw every unit file the registry gives this suite was graded"
+
 # P2 — structure/doc pins (no node needed)
 if head -1 "$HELPER" | grep -qF '#!/bin/bash'; then
   check "P2a helper carries a bash shebang" PASS
@@ -356,6 +360,75 @@ case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when
 case "$GREEN" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1ea playwright-cli at the measured version renders green" PASS ;; *) check "P1ea playwright-cli at the measured version (got: $GREEN)" FAIL ;; esac
 case "$GREEN" in *'Playwright MCP'*|*'verify-feature gate:'*) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" FAIL ;; *) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" PASS ;; esac
 
+shell_root() {
+  local root="$SBOX/shell-$1"
+  mkdir -p "$root/.claude-plugin" "$root/hooks"
+  printf '{"name":"zensu","version":"1.2.3"}\n' > "$root/.claude-plugin/plugin.json"
+  printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$root/.claude-plugin/marketplace.json"
+  printf '%s\n' "$2" > "$root/hooks/hooks.json"
+  printf '#!/bin/bash\n' > "$root/hooks/gate.sh"
+  printf '%s' "$root"
+}
+shell_row() {
+  ZDOC_POWERSHELL_TOOL="$2" ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$1" ZENSU_CONFIG="$PLUGIN_DIR/.no-such-doctor-config" CLAUDE_PROJECT_DIR="$PLUGIN_DIR/.no-such-doctor-project" \
+    HOME="$PLUGIN_DIR/.no-such-doctor-home" node "${3:-$REPORT}" 2>/dev/null | grep -F 'shell tools:' || true
+}
+SHELL_GAP="$(shell_root gap '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh\""}]}]}}')"
+SHELL_COVERED="$(shell_root covered '{"hooks":{"PreToolUse":[{"matcher":"Bash|PowerShell","hooks":[{"type":"command","command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh\""}]}]}}')"
+SHELL_ARRAY="$(shell_root array '{"hooks":[]}')"
+case "$(shell_row "$SHELL_GAP" default)" in
+  *'⚠️  shell tools: 1 hook(s) fire for the Bash tool but not for the PowerShell tool (gate.sh), and this is Windows, where the PowerShell tool is on by default for claude.ai and Console accounts'*'CLAUDE_CODE_USE_POWERSHELL_TOOL=0'*) check "P2p1 a Bash-only hook on a Windows host warns and names the hook and the remedy" PASS ;;
+  *) check "P2p1 a Bash-only hook on a Windows host warns and names the hook and the remedy" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" on)" in
+  *'⚠️  shell tools: 1 hook(s)'*'the PowerShell tool is enabled here'*) check "P2p2 a Bash-only hook warns when CLAUDE_CODE_USE_POWERSHELL_TOOL enables the tool" PASS ;;
+  *) check "P2p2 a Bash-only hook warns when CLAUDE_CODE_USE_POWERSHELL_TOOL enables the tool" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" off)" in
+  *'✅  shell tools: 1 hook(s)'*'the PowerShell tool is off here'*) check "P2p3 a Bash-only hook is reported without a warning when the tool is off" PASS ;;
+  *) check "P2p3 a Bash-only hook is reported without a warning when the tool is off" FAIL ;;
+esac
+case "$(shell_row "$SHELL_GAP" absent)" in
+  *'✅  shell tools: 1 hook(s)'*'opt-in through CLAUDE_CODE_USE_POWERSHELL_TOOL=1'*) check "P2p4 a Bash-only hook is reported without a warning where the tool is opt-in" PASS ;;
+  *) check "P2p4 a Bash-only hook is reported without a warning where the tool is opt-in" FAIL ;;
+esac
+case "$(shell_row "$SHELL_COVERED" default)" in
+  *'✅  shell tools: all 1 hooks that fire for the Bash tool also fire for the PowerShell tool'*) check "P2p5 a hook on Bash|PowerShell renders the coverage green" PASS ;;
+  *) check "P2p5 a hook on Bash|PowerShell renders the coverage green" FAIL ;;
+esac
+case "$(shell_row "$SHELL_ARRAY" default)" in
+  *'⚠️  shell tools: not checked — hooks.json has a shape this check cannot read'*) check "P2p6 an unreadable hooks.json shape is a missing check, never an all-clear" PASS ;;
+  *) check "P2p6 an unreadable hooks.json shape is a missing check, never an all-clear" FAIL ;;
+esac
+SHELL_LONE="$SBOX/shell-lone/hooks/lib"
+mkdir -p "$SHELL_LONE"
+cp "$REPORT" "$SHELL_LONE/zensu-doctor-report.js"
+case "$(shell_row "$SHELL_GAP" default "$SHELL_LONE/zensu-doctor-report.js")" in
+  *'⚠️  shell tools: not checked — hooks/lib/shell-tool-coverage-v1.js could not be loaded'*) check "P2p7 a missing coverage module is a missing check, never an all-clear" PASS ;;
+  *) check "P2p7 a missing coverage module is a missing check, never an all-clear" FAIL ;;
+esac
+SHELL_NOANALYZER="$SBOX/shell-noanalyzer/hooks/lib"
+mkdir -p "$SHELL_NOANALYZER"
+cp "$REPORT" "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" "$SHELL_NOANALYZER/"
+case "$(shell_row "$SHELL_COVERED" default "$SHELL_NOANALYZER/zensu-doctor-report.js")" in
+  *'⚠️  shell tools: all 1 hooks that fire for the Bash tool also fire for the PowerShell tool, but hooks/lib/powershell-command-v1.js could not be loaded'*'reinstall the plugin'*) check "P2p9 covered hooks without the PowerShell analyzer warn instead of reading green" PASS ;;
+  *) check "P2p9 covered hooks without the PowerShell analyzer warn instead of reading green" FAIL ;;
+esac
+SHELL_REAL_GAPS="$(node -e '
+  const m = require(process.argv[1]);
+  process.stdout.write(String(m.gapNames(m.shellCoverage(JSON.parse(require("fs").readFileSync(process.argv[2], "utf8")))).length));
+' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+SHELL_REAL_ROW="$(shell_row "$PLUGIN_DIR" default)"
+case "$SHELL_REAL_GAPS" in
+  0) case "$SHELL_REAL_ROW" in *'✅  shell tools: all '*' hooks that fire for the Bash tool also fire for the PowerShell tool'*) SHELL_REAL_OK=true ;; *) SHELL_REAL_OK=false ;; esac ;;
+  [1-9]*) case "$SHELL_REAL_ROW" in *"⚠️  shell tools: $SHELL_REAL_GAPS hook(s) fire for the Bash tool but not for the PowerShell tool"*) SHELL_REAL_OK=true ;; *) SHELL_REAL_OK=false ;; esac ;;
+  *) SHELL_REAL_OK=false ;;
+esac
+[ "$SHELL_REAL_OK" = true ] \
+  && check "P2p8 the shipped hooks.json renders the row the coverage module derives ($SHELL_REAL_GAPS gap(s))" PASS \
+  || check "P2p8 the shipped hooks.json renders the row the coverage module derives (gaps: ${SHELL_REAL_GAPS:-<none>}; row: $SHELL_REAL_ROW)" FAIL
+
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
   ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
@@ -380,8 +453,8 @@ case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not
 case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac
 for VF_UNAV_REASON in \
   'consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin' \
-  'consent hook not registered on the Bash matcher' \
-  'consent recorder not registered on the Bash matcher' \
+  'consent hook not registered on a matcher that covers Bash and PowerShell' \
+  'consent recorder not registered on a matcher that covers Bash and PowerShell' \
   'the consent decision module could not be loaded'
 do
   case "$(verify_row unavailable "$VF_UNAV_REASON")" in
@@ -471,12 +544,12 @@ vf_copy_doctor() { # $1 policy value (may be empty)
 }
 VF_NOREC_OUT="$(vf_copy_doctor)"
 case "$VF_NOREC_OUT" in
-  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
   *) check "P1vl an unregistered consent recorder is named rather than absorbed" FAIL ;;
 esac
 VF_VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}'
 case "$(vf_copy_doctor "$VF_VALID_POLICY")" in
-  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl1 a valid policy does not hide an unregistered consent recorder" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl1 a valid policy does not hide an unregistered consent recorder" PASS ;;
   *) check "P1vl1 a valid policy does not hide an unregistered consent recorder" FAIL ;;
 esac
 node -e '
@@ -499,7 +572,7 @@ node -e '
   && check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" PASS \
   || check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" FAIL
 case "$(vf_copy_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
+  *'❌  verify-feature: cannot start (consent hook not registered on a matcher that covers Bash and PowerShell; consent recorder not registered on a matcher that covers Bash and PowerShell)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
   *) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" FAIL ;;
 esac
 rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
@@ -608,22 +681,22 @@ if node -e '
   const gate = "/hooks/pre-browser-navigation-consent.sh";
   let widened = 0;
   for (const group of registry.hooks.PreToolUse || []) {
-    if (group.matcher === "Bash" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
-      group.matcher = "Bash|Read";
+    if (group.matcher === "Bash|PowerShell" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+      group.matcher = "Bash|PowerShell|Read";
       widened += 1;
     }
   }
   if (widened !== 1) process.exit(1);
   fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
 ' "$VF_REG_ROOT/hooks/hooks.json"; then
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" PASS
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" PASS
 else
-  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" FAIL
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|PowerShell|Read" FAIL
 fi
 case "$(vf_reg_doctor)" in
-  *'not registered on the Bash matcher'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
-  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" PASS ;;
-  *) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+  *'not registered on a matcher that covers Bash and PowerShell'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
+  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" PASS ;;
+  *) check "P1vl7 a consent gate on a matcher that includes Bash and PowerShell counts as registered" FAIL ;;
 esac
 cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
 if node -e '
@@ -692,7 +765,7 @@ else
   check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" FAIL
 fi
 case "$(vf_reg_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder registration in hooks/hooks.json could not be determined)'*)
+  *'❌  verify-feature: cannot start (consent hook not registered on a matcher that covers Bash and PowerShell; consent recorder registration in hooks/hooks.json could not be determined)'*)
     check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" PASS ;;
   *) check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" FAIL ;;
 esac
@@ -2172,6 +2245,7 @@ OUT="$(run_report_binding bound)"
 case "$OUT" in *'binding: this session has a valid Session Control record'*) check "P1ac bound session renders a ✅ binding row" PASS ;; *) check "P1ac bound session binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unbound)"
 case "$OUT" in *'every stateful Zensu tool fails closed'*) check "P1ad unbound session renders a ❌ binding row" PASS ;; *) check "P1ad unbound session binding row (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'/zensu:adopt-session, which writes nothing without --confirm, names the cause (for an unreadable record, why each record reader refused it); start a fresh Claude Code session'*) check "P1ad6 the unbound row names /zensu:adopt-session as the read-only report of the cause" PASS ;; *) check "P1ad6 unbound row names no read-only cause report (got: $OUT)" FAIL ;; esac
 # A record whose recorded project root is gone is NOT the no-record state and
 # must not be reported as one. Both sub-branches matter: with a path it renders
 # the parenthesised directory the user has to re-create, and with the path
@@ -4065,9 +4139,11 @@ case "$(run_report "$RC_GONE" "$SBOX/good-cfg.json" "$STATE_PROJECT")" in
 RC_OFFCFG="$SBOX/cfg-bsf-off.json"
 printf '{"hooks":{"bestSolutionFirst":false}}\n' > "$RC_OFFCFG"
 RC_OFF_OUT="$(run_report "$SBOX/plug" "$RC_OFFCFG" "$STATE_PROJECT")"
-case "$RC_OFF_OUT" in *'best-solution-first block is intact'*'hooks.bestSolutionFirst is false'*)
-  check "P5e a switched-off carrier is distinguished from a broken one" PASS ;;
-  *) check "P5e switched-off carrier row (got: $RC_OFF_OUT)" FAIL ;; esac
+RC_OFF_MAIN="$(printf '%s\n' "$RC_OFF_OUT" | grep -F 'rule carriers: best-solution-first block is intact')"
+RC_OFF_REM="$(printf '%s\n' "$RC_OFF_OUT" | grep -F 'rule carriers: best-solution-first-reminder block is intact')"
+case "$RC_OFF_MAIN|$RC_OFF_REM" in *'hooks.bestSolutionFirst is false — the main thread does not receive it at session start, every subagent still does'*'|'*'hooks.bestSolutionFirst is false — the main thread does not receive it on any prompt'*)
+  check "P5e a switched-off carrier is distinguished from a broken one, on the block row, which says subagents still receive the block, and on the reminder row" PASS ;;
+  *) check "P5e switched-off carrier rows (got: $RC_OFF_OUT)" FAIL ;; esac
 case "$RC_OFF_OUT" in *'evidence-discipline block is intact'*)
   check "P5f the unswitchable carrier carries no flag clause" PASS ;;
   *) check "P5f unswitchable carrier row changed under a foreign flag" FAIL ;; esac
@@ -4085,6 +4161,27 @@ case "$RC_NOMOD_OUT" in *'rule-block-v1.js could not be loaded'*'was NOT checked
 case "$RC_NOMOD_OUT" in *'block is intact'*)
   check "P5h a missing module wrongly still claimed a carrier was intact" FAIL ;;
   *) check "P5h a missing module claims nothing about carrier health" PASS ;; esac
+
+RC_REM="$SBOX/plug-reminder"
+cp -R "$SBOX/plug" "$RC_REM"
+RC_GREEN_OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$RC_GREEN_OUT" in *'rule carriers: best-solution-first-reminder block is intact'*)
+  check "P5i the per-prompt reminder block is checked as its own carrier and reports intact" PASS ;;
+  *) check "P5i reminder carrier row missing from the green fixture (got: $RC_GREEN_OUT)" FAIL ;; esac
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const L = fs.readFileSync(p, "utf8").split("\n");
+  const i = L.indexOf("<!-- zensu:best-solution-first-reminder -->");
+  if (i < 0) process.exit(1);
+  L.splice(i + 2, 0, "a re-wrapped paragraph");
+  fs.writeFileSync(p, L.join("\n"));
+' "$RC_REM/docs/best-solution-first.md" 2>/dev/null \
+  && RC_REM_OUT="$(run_report "$RC_REM" "$SBOX/good-cfg.json" "$STATE_PROJECT")" \
+  || RC_REM_OUT="fixture-failed"
+case "$RC_REM_OUT" in *'rule carriers: best-solution-first block is intact'*'best-solution-first-reminder is NOT injecting'*'not carry the block as exactly one line'*)
+  check "P5j a re-wrapped reminder is reported on its own row while the session-start block stays intact" PASS ;;
+  *) check "P5j re-wrapped reminder not reported on its own row (got: $RC_REM_OUT)" FAIL ;; esac
 
 # --- P1n: durable Autopilot run rows ---------------------------------------
 # Until this row existed the report carried NO Autopilot row of any kind, so a
@@ -10382,6 +10479,104 @@ case "$OUT_WK37" in
     check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code" PASS ;;
   *) check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code (got: $(printf '%s' "$OUT_WK37" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
+ZC_BIN="$SBOX/zc-bin"
+ZC_LOG="$SBOX/zc.log"
+mkdir -p "$ZC_BIN"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'case "$1" in' '  --version) printf "%s\n" "$ZC_VERSION_LINE" ;;' '  auth) printf "%s\n" "$ZC_AUTH_LINE"; exit "${ZC_AUTH_RC:-0}" ;;' 'esac' > "$ZC_BIN/zensu"
+chmod +x "$ZC_BIN/zensu"
+ZC_FACTS="$(DOCTOR_ZC_MODULE="$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js" node -e 'const m = require(process.env.DOCTOR_ZC_MODULE); process.stdout.write([m.MIN_VERSION, m.INSTALL.homebrew, m.INSTALL.homebrewUpgrade, m.INSTALL.script, m.INSTALL.powershell].join("\n"))')"
+ZC_FLOOR="$(printf '%s\n' "$ZC_FACTS" | sed -n 1p)"
+ZC_BREW="$(printf '%s\n' "$ZC_FACTS" | sed -n 2p)"
+ZC_BREW_UP="$(printf '%s\n' "$ZC_FACTS" | sed -n 3p)"
+ZC_SCRIPT="$(printf '%s\n' "$ZC_FACTS" | sed -n 4p)"
+ZC_PS="$(printf '%s\n' "$ZC_FACTS" | sed -n 5p)"
+zc_wrap() {
+  env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE -u ZENSU_NO_UPDATE_CHECK \
+    PATH="$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$1" ZC_AUTH_LINE="$2" ZC_AUTH_RC="${3:-0}" \
+    ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    bash "$HELPER" 2>/dev/null
+}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P8z1-P8z8 the wrapper reads a shell-script zensu for its auth state and version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    rm -f "$ZC_LOG"
+    ZC_OUT="$(zc_wrap 'zensu 0.9.0 (commit abc1234, built 2026-10-13T15:09:40Z)' 'Not logged in. Run `zensu auth login`.')"
+    case "$ZC_OUT" in *'⚠️  zensu CLI: installed but not authenticated — run `zensu auth login`'*) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" PASS ;; *) check "P8z1 an auth status that exits 0 and prints Not logged in reads as not authenticated" FAIL ;; esac
+    case "$ZC_OUT" in *"⚠️  zensu CLI version: 0.9.0 is older than $ZC_FLOOR, the oldest release this plugin supports"*"\`$ZC_BREW_UP\`"*"\`$ZC_SCRIPT\`"*"\`$ZC_PS\`"*) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" PASS ;; *) check "P8z2 a CLI below the floor warns with the floor and the upgrade commands" FAIL ;; esac
+    ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
+    case "$ZC_CALLS" in '1|--version 1|auth status ') check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off" PASS ;; *) check "P8z3 the wrapper runs --version before auth status, once each, both with the update check off (got: $ZC_CALLS)" FAIL ;; esac
+    ZC_OK="$(zc_wrap "zensu $ZC_FLOOR (commit abc1234, built now)" 'Logged in to https://api.zensu.dev as dev@example.com')"
+    case "$ZC_OK" in *'✅  zensu CLI: installed and authenticated'*) check "P8z4 a logged-in auth status reads as authenticated" PASS ;; *) check "P8z4 a logged-in auth status reads as authenticated" FAIL ;; esac
+    case "$ZC_OK" in *"✅  zensu CLI version: $ZC_FLOOR — at or above $ZC_FLOOR"*) check "P8z5 a CLI at the floor renders OK" PASS ;; *) check "P8z5 a CLI at the floor renders OK" FAIL ;; esac
+    case "$(zc_wrap "zensu $ZC_FLOOR (commit abc1234, built now)" 'boom' 1)" in *'⚠️  zensu CLI: installed but not authenticated'*) check "P8z6 an auth status that exits non-zero reads as not authenticated" PASS ;; *) check "P8z6 an auth status that exits non-zero reads as not authenticated" FAIL ;; esac
+    case "$(zc_wrap 'zensu dev (commit none, built unknown)' 'Logged in to https://api.zensu.dev as dev@example.com')" in *"⚠️  zensu CLI version: a development build, which names no release — the $ZC_FLOOR floor was not checked"*) check "P8z7 a development build warns that the floor was not checked" PASS ;; *) check "P8z7 a development build warns that the floor was not checked" FAIL ;; esac
+    rm -f "$ZC_LOG"
+    ZC_INJECTED="$(env PATH="$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" bash "$HELPER" 2>/dev/null)"
+    if [ ! -s "$ZC_LOG" ] && ! printf '%s' "$ZC_INJECTED" | grep -qF 'zensu CLI version'; then
+      check "P8z8 an injected ZDOC_ZENSU runs no zensu and renders no version row" PASS
+    else
+      check "P8z8 an injected ZDOC_ZENSU runs no zensu and renders no version row (got: $(cat "$ZC_LOG" 2>/dev/null))" FAIL
+    fi
+    case "$(zc_wrap 'zensu version unknown' 'Logged in to https://api.zensu.dev as dev@example.com')" in *"⚠️  zensu CLI version: \`zensu --version\` printed no version this report could read — the $ZC_FLOOR floor was not checked"*) check "P8z11 a version output without a version line renders the unread row" PASS ;; *) check "P8z11 a version output without a version line renders the unread row" FAIL ;; esac
+    ZC_CWD="$SBOX/zc-cwd"
+    mkdir -p "$ZC_CWD/zc-rel"
+    cp "$ZC_BIN/zensu" "$ZC_CWD/zc-rel/zensu"
+    rm -f "$ZC_LOG"
+    ZC_REL_OUT="$(cd "$ZC_CWD" && env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE -u ZENSU_NO_UPDATE_CHECK \
+      PATH="zc-rel:$ZC_BIN:$PATH" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="zensu $ZC_FLOOR (commit abc1234, built now)" ZC_AUTH_LINE='Logged in to https://api.zensu.dev as dev@example.com' ZC_AUTH_RC=0 \
+      ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" bash "$HELPER" 2>/dev/null)"
+    if [ ! -s "$ZC_LOG" ] && printf '%s' "$ZC_REL_OUT" | grep -qF '⚠️  zensu CLI: PATH reaches zensu through an empty or relative entry' \
+      && printf '%s' "$ZC_REL_OUT" | grep -qF 'neither its login nor its version was checked' && ! printf '%s' "$ZC_REL_OUT" | grep -qF 'zensu CLI version'; then
+      check "P8z12 a zensu that PATH reaches through a relative entry is never run, and the row says neither login nor version was checked" PASS
+    else
+      check "P8z12 a zensu that PATH reaches through a relative entry is never run, and the row says neither login nor version was checked (got calls: $(cat "$ZC_LOG" 2>/dev/null))" FAIL
+    fi
+    ZC_NODE_ONLY="$SBOX/zc-node-only"
+    mkdir -p "$ZC_NODE_ONLY"
+    ln -sf "$(command -v node)" "$ZC_NODE_ONLY/node"
+    ZC_FN_OUT="$(zensu() { printf '%s\n' 'Logged in to https://api.zensu.dev as dev@example.com'; }; export -f zensu
+      env -u ZDOC_ZENSU -u ZDOC_ZENSU_VERSION -u ZDOC_ZENSU_VERSION_STATE \
+      PATH="$ZC_NODE_ONLY:/usr/bin:/bin" ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=absent ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" "$BASH" "$HELPER" 2>/dev/null)"
+    case "$ZC_FN_OUT" in *"⚠️  zensu CLI version: the shell found zensu but the version probe found none on PATH"*) check "P8z13 a shell function named zensu with no binary on PATH renders the absent row" PASS ;; *) check "P8z13 a shell function named zensu with no binary on PATH renders the absent row" FAIL ;; esac
+    ;;
+esac
+case "$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")" in *"⚠️  zensu CLI: not found on PATH — feature tracking commands will be unavailable; install zensu-cli $ZC_FLOOR or later with \`$ZC_BREW\`, \`$ZC_SCRIPT\` or, on Windows, \`$ZC_PS\`"*) check "P8z9 the not-found row names the floor and the three install commands from the module" PASS ;; *) check "P8z9 the not-found row names the floor and the three install commands from the module" FAIL ;; esac
+if ! grep -qF 'NOTHING here writes' "$HELPER" && grep -qF 'hosts.json' "$HELPER" && grep -qF 'ZENSU_NO_UPDATE_CHECK=1 zensu auth status' "$HELPER"; then
+  check "P8z10 the helper no longer claims that nothing writes, names hosts.json, and runs auth status with the update check off" PASS
+else
+  check "P8z10 the helper no longer claims that nothing writes, names hosts.json, and runs auth status with the update check off" FAIL
+fi
+ZC_COPY="$SBOX/zc-plug-copy"
+mkdir -p "$ZC_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$ZC_COPY/hooks/lib"
+rm -f "$ZC_COPY/hooks/lib/zensu-cli-version-v1.js"
+zc_copied_report() {
+  env ZDOC_ZENSU="$1" ZDOC_ZENSU_VERSION_STATE="$2" ZDOC_ZENSU_VERSION="$3" ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$ZC_COPY/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+if zc_copied_report absent '' '' | grep -qF "the install commands could not be read, because the plugin's module hooks/lib/zensu-cli-version-v1.js did not load — reinstall the plugin" \
+  && zc_copied_report authed ok "$ZC_FLOOR" | grep -qF "⚠️  zensu CLI version: not judged — the plugin's version module hooks/lib/zensu-cli-version-v1.js could not be loaded; reinstall the plugin"; then
+  check "P8z14 without the version module the not-found row and the version row say the module did not load" PASS
+else
+  check "P8z14 without the version module the not-found row and the version row say the module did not load" FAIL
+fi
+ZC_REF="$PLUGIN_DIR/skills/doctor/references/zensu-cli.md"
+ZC_ROW_MISSING=""
+for ZC_ROW in 'zensu CLI: installed and authenticated' 'zensu CLI: installed but not authenticated' 'zensu CLI: PATH reaches zensu through an empty or relative entry' 'zensu CLI: not found on PATH' \
+  'zensu CLI version: a development build' 'zensu CLI version: the shell found zensu but the version probe found none on PATH' \
+  'zensu CLI version: `zensu --version` printed no version this report could read' 'zensu CLI version: PATH reaches zensu through an empty or relative entry' 'zensu CLI version: not judged' \
+  'is older than' 'at or above'; do
+  grep -qF -- "$ZC_ROW" "$REPORT" && grep -qF -- "$ZC_ROW" "$ZC_REF" || ZC_ROW_MISSING="$ZC_ROW_MISSING [$ZC_ROW]"
+done
+if [ -z "$ZC_ROW_MISSING" ] && grep -qF 'read `references/zensu-cli.md`' "$SKILL_MD"; then
+  check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names" PASS
+else
+  check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names (missing:$ZC_ROW_MISSING)" FAIL
+fi
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"
