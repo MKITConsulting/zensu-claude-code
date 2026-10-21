@@ -112,7 +112,7 @@ shell is refused.
 
 | Hook | PowerShell disposition |
 |---|---|
-| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, or an analyzer that fails to load while the text names `zensu` denies. No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B45f). |
+| `pre-bash-zensu-gate.sh` | Judged: reads and `--help` pass, a freelance or subagent mutation is denied as in Bash. `unjudged`, a noun or verb holding `OPAQUE_ARGUMENT`, a group subcommand holding it (`GROUPS`), or an analyzer that fails to load while the text names `zensu` denies. No inline escape. A payload over the binder limit is not refused ahead of the analyzer: it reaches the bind, and the bind-deny ladder names its size (B48f). |
 | `pre-bash-source-write-gate.sh`, control mode | `controlVerdict`, always on. |
 | same, rules (A)/(B)/(C) | `readOnlyVerdict` while `hooks.bashWriteGate` is on; the deny ends with `OPT_IN_NOTE`. |
 | `pre-write-secret-scan.sh` | The whole command text is scanned, with no channel filter and no inline escape. |

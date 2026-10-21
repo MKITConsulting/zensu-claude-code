@@ -214,7 +214,7 @@ grows past 64 directories is denied (`directories`).
   `shortFlagsInclude`, `withoutComments` blanks every comment in one join, and the gate trims
   quotes with `unquoted`. Two stars around a literal in one
   regex, or a rescan from every opening character, is the shape to avoid. The unit test "the
-  parser stays linear on adversarial input" and B44 in `tests/structure/test-bash-zensu-gate.sh`
+  parser stays linear on adversarial input" and B51 in `tests/structure/test-bash-zensu-gate.sh`
   run each shape under a 15 s budget.
 - Guidance stays conservative. Skill text keeps every gate, every test whose result counts as
   evidence, every commit and every `zensu` call with the main thread, because the grant can be

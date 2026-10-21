@@ -25,14 +25,19 @@ mutation, open a workflow window, edit files, spawn another agent, or claim
 `main-v1`. You may analyze context made available to you and recommend the exact
 main-thread skill and ordered inputs. Any lifecycle mutation is performed by the
 top-level interactive thread through `/zensu:bootstrap`, `/zensu:ghost-scan`,
-`/zensu:implement`, `/zensu:security-review`, or the other matching skill.
+`/zensu:implement`, `/zensu:security-review`, or the other matching skill. The
+exceptions are the work-order and work-plan verbs the catalog marks: a **person**
+verb records the user's own decision, so the user runs it (Important Rule 13),
+and a **worker** or **session** verb is sent only by the work-order worker or by a
+bound work-order session.
 When using `Grep` or `Glob`, always pass the smallest explicit safe repository
 subtree (for example `src` or `docs`); never omit `path` or search the repository
 root, because traversal ancestors of `.zensu` and Session Control are denied.
 
 The CLI reference below exists so you can recommend correct operations. The
 interactive main thread authenticates and executes those operations inside the
-matching skill workflow.
+matching skill workflow, except the verbs marked **person**, **worker** or
+**session**.
 
 ## Core Concepts
 
@@ -80,7 +85,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 ### Security
 - `zensu security classify <id>` — Set classification, data sensitivity, auth, encryption, audit settings
 - `zensu security posture <product-id>` — Product-wide security overview (product id is positional, not `--product`)
-- `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (persists the score server-side, so it is classified a mutation and gated on the main thread — run it inside a skill workflow rather than reaching for `ZENSU_MCP_GATE=off`)
+- `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (a read of the feature's security context, like `validate`, `suggest-tests` and `threat-model`; it persists nothing)
 - `zensu security validate <id>` — Check if feature passes release gate
 - `zensu security add-test <id>` — Link a security test (auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
 - `zensu security review <id>` — Complete a review (approved|rejected|conditional)
@@ -107,9 +112,36 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu journeys get --product <id> <journey-id>` — Get journey details with steps
 - `zensu journeys create --product <id>` — Create a user journey (`--title` required; `--type` critical|happy_path|edge_case|error_path|onboarding; `--priority` critical|high|medium|low; `--persona` free text)
 - `zensu journeys step <journey-id> --product <id>` — Add a step to a journey (`--title` and `--step-order` required; `--feature` takes the feature **UUID**; `--interaction-type` action|navigation|input|validation|output|wait)
+- `zensu journeys step-update <journey-id> <step-id> --product <id>` — Update an existing step of a journey (only the flags you pass change)
+- `zensu journeys step-delete <journey-id> <step-id> --product <id>` — Delete a step from a journey
 - `zensu journeys steps --product <id> <journey-id>` — List steps for a journey
 - `zensu journeys health --product <id> <journey-id>` — Analyze journey health and weak links
 - `zensu journeys suggest --product <id>` — Get context for journey suggestions
+
+### Design Mocks & Design System
+- `zensu mocks create <feature-id> <file>` — Upload a design mock to a feature (alias `zensu mock`)
+- `zensu mocks list <feature-id>` — List a feature's design mocks
+- `zensu mocks get <feature-id> <mock-id>` — Get a mock's metadata or raw content
+- `zensu design context <product-id>` — Get a product's aggregated design context
+
+### Work Orders & Work Plans
+These commands dispatch and decide autonomous work. A verb marked **person** records a decision the user makes, so the user runs it (Important Rule 13). The work-order worker sends the **worker** verbs with its agent key, and only a bound work-order session sends the **session** verbs.
+- `zensu plan push <plan-file>` — Create a work plan from a Markdown plan file (**person**; `--dry-run` previews it)
+- `zensu plan status <plan-id>` — Show a work plan and its orders (`--watch` follows it until it is merged or abandoned)
+- `zensu plan list --product <id>` — List the work plans of a product
+- `zensu plan approve|finalize|abandon|confirm-merge <plan-id>` — Approve a draft plan, record its final PR, abandon it, or confirm its final merge (**person**)
+- `zensu plan followups <plan-id>` — List the follow-ups the plan's sessions reported
+- `zensu plan followup accept|dismiss <plan-id> <followup-id>` — Accept or dismiss a reported follow-up (**person**)
+- `zensu work list` / `zensu work get <work-order-id>` / `zensu work events <work-order-id>` — List work orders, show one, or show its event timeline
+- `zensu work questions --plan <plan-id>` — List the questions of a work plan
+- `zensu work create --product <id>` — Create a one-item plan with one draft work order for a feature or revision (**person**)
+- `zensu work approve|requeue|cancel|confirm-merge <work-order-id>` — Approve, requeue, cancel, or confirm the merge of a work order (**person**)
+- `zensu work answer|overturn <question-id>` — Answer a session's question, or replace an automatic answer (**person**)
+- `zensu work policy get|set --product <id>` — Show or change a product's automation policy (`set` is **person**)
+- `zensu work repositories list|add --product <id>` (alias `repos`) — List or register the repositories a product's work orders may use (`add` is **person**)
+- `zensu work repositories update|remove <repository-id>` (alias `repos`) — Replace a registered repository's risk paths, or remove it while no plan names it (**person**)
+- `zensu work claim|confirm|release|usage` — Claim the next work order, confirm or release the claim, and report a session's cost and token usage (**worker**)
+- `zensu work heartbeat|event|ask|followup <work-order-id>` — Renew the lease, report a stage, ask the humans behind the plan, or report out-of-scope work (**session**; heartbeat and event only through the `/zensu:work` helper)
 
 ### Product Visions & Bootstrap
 - `zensu products vision-create` — Store a vision document
@@ -226,6 +258,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** commands
 - When a user asks about release readiness → use `zensu security validate` and `zensu journeys health`
 - When a user asks about tier pricing → use the tier commands (`zensu tiers create`, `zensu tiers set-feature`, `zensu tiers matrix`)
+- When a user wants to dispatch autonomous work or follow a work plan → use the `zensu plan` and `zensu work` commands; the verbs marked **person** are the user's to run (Important Rule 13)
 - Before planning or implementing a feature, or when the user asks what the org already knows about a topic → `zensu knowledge search` for related context
 - When a user wants to document a feature or generate a wiki page → follow the **documentation** procedure (`docs/documentation-guide.md`): get context, **read the source**, author, publish
 - For any Zensu question not matching a specific workflow → use the appropriate individual `zensu` command
@@ -244,3 +277,4 @@ Never condense the context metadata straight into a wiki page — that is the fo
 10. **Documentation is code-grounded, never a metadata dump.** `zensu doc gen-context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
 11. **Ghost scans are multi-perspective and journey-aware.** A single heuristic pass misses features — augment the seed walk with a read-only `Explore` fan-out (adaptive count, cap 12) and consolidate in the main thread. Treat `detectedDocFiles` as first-class scan data alongside `detectedTestFiles` — glob existing READMEs/`docs` per candidate; an omitted array links zero. After apply, discover and create user journeys (`zensu journeys create` → `zensu journeys step` → `zensu journeys health`) so brownfield imports can pass the journey-health release gate; flag features with zero docs for `/zensu:implement` rather than auto-generating docs.
 12. **CLI flags are kebab-case — pass them as `zensu <noun> <verb> --help` documents.** Commands take flags like `--product`, `--slug`, `--type`, `--classification` (kebab-case), not the snake_case wire keys. Always supply a command's **required** flags — `zensu products create` requires both `--name` AND `--slug` (omitting `--slug` hard-fails). IDs that are path segments are positional args (e.g. `zensu features get <id>`), not flags. When unsure of a command's exact flags, run its `--help` rather than guessing.
+13. **A person's decision stays the person's.** The `zensu plan` and `zensu work` verbs marked **person** in the catalog record a decision the user makes: pushing, approving, finalizing, abandoning or confirming a plan, accepting or dismissing a follow-up, creating, approving, requeuing, cancelling or confirming a work order, answering or overturning a question, the automation policy and the registered repositories. Never recommend a skill or an agent for them. Name the exact command, what it decides and what you recommend, and let the user run it.

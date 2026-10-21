@@ -27,6 +27,19 @@ the session's marker in `.zensu/state/work-order/` binds its Session Control key
 0. A hook that answered `allow` there would skip the user's permission prompts, so none of them
 ever allows. `test-work-order-gates.sh` G1-G3 hold the silence.
 
+**The CLI write-gate leaves `ask` and `followup` to this gate.** `pre-bash-zensu-gate.sh` calls
+`zensu_work_order_hook bound`, which runs the side-effect-free `bound` verb of `work-order-v1.js`
+behind the same D32 test, and when it answers `bound` the write-gate does not deny
+`zensu work ask` or `zensu work followup`. Every other `zensu` mutation follows the write-gate's
+ordinary rules in a work-order session: a person's decision and a work-order protocol verb are
+denied even inside a skill window, but a window passes the other mutations it declares and the
+inline `ZENSU_MCP_GATE=off` one-off passes any of them, because this gate refuses neither. The
+deny of a person's decision in a bound session points to a work-order question, since no person
+is there. `SESSION_WORK_VERBS` is exported because `test-skill-workflow-markers.sh` C5
+holds the write-gate's `ZENSU_WORK_ORDER_SESSION_TOOL_NAMES` to it: a verb added to
+`SESSION_WORK_VERBS` must map to a read or to one of those session tools
+(`.claude/rules/cli-command-classification.md`).
+
 **The Autopilot ledger is the outbox.** No second store records what Zensu still has to hear;
 `--drain` derives the stages from the run record and the outbox file keeps the highest rank Zensu
 accepted. A stage is sent forward only, and `ready_for_merge` only by `--finish`. The one exception

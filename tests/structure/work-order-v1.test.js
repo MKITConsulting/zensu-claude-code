@@ -257,6 +257,33 @@ test('loadContext is inert without the token or the marker and refuses a marker 
   assert.equal(bound.marker.orderId, ORDER);
 });
 
+test('the bound verb answers bound only for a marker that binds this session and writes nothing', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  const bound = () => spawnSync(process.execPath, [MODULE, 'bound'], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  let answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: wo.sessionKeyOf('another-session-99'), orderId: ORDER, attempt: 1 });
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  fs.writeFileSync(files.marker, '{');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const before = fs.readFileSync(files.marker, 'utf8');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.OK, answer.stderr);
+  assert.equal(answer.stdout, '\nbound\n');
+  assert.equal(fs.readFileSync(files.marker, 'utf8'), before);
+  assert.deepEqual(box.calls(), []);
+});
+
 test('state files refuse symlinks, hard links, oversized bodies and foreign schemas', () => {
   const box = sandbox();
   const files = wo.sessionFiles(box.project, box.sessionKey);

@@ -43,7 +43,7 @@ command -v node >/dev/null 2>&1 || exit 0
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 # Parse the Bash command into zensu invocations. Emits one line per invocation,
-# tab-separated "<noun>\t<verb>". Emits nothing — so the
+# tab-separated "<noun>\t<verb>\t<third word>". Emits nothing — so the
 # gate is a no-op — when the command runs no `zensu` CLI binary. Anchoring on the
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
@@ -65,8 +65,9 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     process.stdout.write("__oversized__\t" + size + "\t" + cap);
     process.exit(0);
   }
-  const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
-  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
+  const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
+  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
+  const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
   const OPQ = String.fromCharCode(0);
@@ -87,6 +88,21 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       if (c === ":" || c === "/") { h = u.slice(0, ci); break; }
     }
     return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
+  }
+  function takesNextWord(t) {
+    return t.indexOf("=") === -1 && (t.length === 2 || t.charAt(1) === "-");
+  }
+  function isDynamic(t) {
+    return t.indexOf("\u0001") !== -1 || t.indexOf("\x24") !== -1;
+  }
+  function dynamicReadings(c) {
+    if (!c.rest.some(isDynamic)) return [];
+    const skipped = c.rest.filter((t) => !isDynamic(t)), consumed = [];
+    for (let i = 0; i < c.rest.length; i++) {
+      if (isDynamic(c.rest[i])) { i++; continue; }
+      consumed.push(c.rest[i]);
+    }
+    return [{ envp: c.envp, rest: skipped }, { envp: c.envp, rest: consumed }];
   }
   function tokenInvocations() {
     const found = [];
@@ -125,6 +141,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       .map((c) => ({ envp: c.environment, rest: c.words }))
       .concat(invocations);
   } catch (_) {}
+  invocations = invocations.concat(...invocations.map(dynamicReadings));
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -140,22 +157,26 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     let noun = "", k = 0;
     for (; k < rest.length; k++) {
       const t = rest[k];
-      if (t === "--api-url") { k++; continue; }                                    // skip global flag value
-      if (t.charAt(0) === "-") continue;                                           // skip flags
+      if (t === "--") break;
+      if (t === "") continue;
+      if (t.charAt(0) === "-") { if (takesNextWord(t)) k++; continue; }
       if (NOUNS.has(t)) { noun = ALIAS[t] || t; }
       break;                                                                       // first non-flag token decides
     }
     if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
     if (!noun) continue;
-    let verb = "";
-    for (let m = k + 1; m < rest.length; m++) {
+    const words = [];
+    for (let m = k + 1; m < rest.length && words.length < 2; m++) {
       const t = rest[m];
-      if (t === "--api-url") { m++; continue; }
-      if (t.charAt(0) === "-") continue;
-      verb = t.split(/[\t\r\n]/)[0]; break;
+      if (t === "--") break;
+      if (t === "") continue;
+      if (t.charAt(0) === "-") { if (takesNextWord(t)) m++; continue; }
+      words.push(t.split(/[\t\r\n]/)[0]);
     }
+    const verb = words[0] || "", third = words[1] || "";
     if (ps && verb.indexOf(OPQ) !== -1) { out.add(UNJ + "the verb of a zensu call is built at run time"); continue; }
-    out.add(noun + "\t" + verb);
+    if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
+    out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
   }
   process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
@@ -269,19 +290,37 @@ EOF
   return 1
 }
 
+work_order_session_bound() {
+  local hook_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-work-order-hook.sh"
+  [ -n "${ZENSU_SESSION_TOKEN:-}" ] || return 1
+  [ -f "$hook_lib" ] && [ ! -L "$hook_lib" ] || return 1
+  source "$hook_lib" 2>/dev/null || return 1
+  [ "$(zensu_work_order_hook bound "$INPUT")" = bound ]
+}
+
+work_order_session_owns() {
+  zensu_is_work_order_session_tool "$1" && work_order_session_bound
+}
+
 DENY_TOOL=""
-while IFS="$(printf '\t')" read -r noun verb; do
+while IFS="$(printf '\t')" read -r noun verb third; do
   [ -z "$noun" ] && continue
-  TOOL="$(zensu_cli_to_tool "$noun" "$verb")"
+  TOOL="$(zensu_cli_to_tool "$noun" "$verb" "$third")"
   [ -z "$TOOL" ] && continue                          # unknown/neutral (auth, version) → allow
   zensu_is_read_tool "$TOOL" && continue              # read → allow
   zensu_is_mutation_tool "$TOOL" || continue          # not a known mutation → allow (safety)
-  if [ "$IS_SUBAGENT" = true ]; then
-    DENY_TOOL="$TOOL"
-    break                                               # a child never borrows main's workflow window
+  if [ "$IS_SUBAGENT" != true ]; then
+    work_order_session_owns "$TOOL" && continue
+    if ! zensu_is_human_decision_tool "$TOOL" && ! zensu_is_work_order_tool "$TOOL"; then
+      tool_allowed_by_workflow "$TOOL" && continue    # workflow-driven → allow
+    fi
   fi
-  tool_allowed_by_workflow "$TOOL" && continue        # workflow-driven → allow
-  DENY_TOOL="$TOOL"; break                            # freelance mutation → deny
+  if zensu_is_human_decision_tool "$TOOL"; then
+    DENY_TOOL="$TOOL"; break
+  fi
+  if [ -z "$DENY_TOOL" ] || { zensu_is_work_order_tool "$TOOL" && ! zensu_is_work_order_tool "$DENY_TOOL"; }; then
+    DENY_TOOL="$TOOL"
+  fi
 done <<EOF
 $INVOCATIONS
 EOF
@@ -298,6 +337,22 @@ elif [ "$TOOL_NAME" = PowerShell ]; then
   REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape; writes targeting a localhost backend (--api-url, or ZENSU_API_URL in the session environment) and --help are never gated."
 else
   REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
+fi
+
+if zensu_is_human_decision_tool "$DENY_TOOL"; then
+  REASON="Zensu command (maps to '${DENY_TOOL}') was blocked. It records a decision that the person makes, so the person runs it, not an agent and not a skill. Do not run it, with or without a prefix."
+  if [ "$IS_SUBAGENT" = true ]; then
+    REASON="$REASON Report the command and what it decides to the main thread, which puts the decision to the user."
+  elif work_order_session_bound; then
+    REASON="$REASON This session runs a Zensu work order without a person, so put the decision to the people behind the plan as a work-order question (zensu-work-order.sh --ask)."
+  else
+    REASON="$REASON Tell the user the exact command, what it decides and what you recommend, and let them run it."
+  fi
+elif zensu_is_work_order_tool "$DENY_TOOL"; then
+  REASON="Zensu command (maps to '${DENY_TOOL}') was blocked. It belongs to the Zensu work-order protocol: the worker sends claim, confirm, release and usage, and only a bound work-order session sends heartbeat, event, ask and followup, the first two through the /zensu:work helper alone. Do not run it here, with or without a prefix."
+  if [ "$IS_SUBAGENT" = true ]; then
+    REASON="$REASON A subagent never sends it: report what you need to the main thread instead."
+  fi
 fi
 
 REASON="$REASON" node -e '
