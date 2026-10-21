@@ -641,75 +641,26 @@ themselves deleted when the seam was taken. Getting that set wrong is its own ha
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
-sample, taken on the head that carries Part C2.** `windows-shard-2` logged
-`PASSED versioned-plugin-upgrade (152553ms)` against the 900000 ms ceiling — roughly
-17% — on the green run of commit `22dd388`. It is the first Windows wall clock taken
-after the seam work added two `node --test` drivers and the vanished-project-root
-work added Part C2: further armed sessions, a Stop invocation, capability-gate
-drives and tampered record copies, each spawning `node` or `bash`. It SUPERSEDES the
-previous sample of 107613 ms, which was taken at the head carrying Part C plus the
-AC-C11/AC-C11b/AC-C12 family; the two are 42% apart on content that grew, which is
-the growth this figure now prices in and the caveat below refuses to treat as a
-bound. Re-measure on the next green Windows run after a change that adds process
-runs, and replace the number and this provenance sentence together. Deliberately
-no row count here: this file's own rule two paragraphs up is that a hand-maintained
-number is what a driven loop cannot catch, and the count written into an earlier
-version of this paragraph had already drifted from the suite's own reported total
-before it was read a second time.
+**The Windows wall clock of `test-versioned-plugin-upgrade.sh` is measured, and the suite
+runs FIRST on `windows-shard-7`.** The 29 all-green CI runs from 38309344682 to 38432294025
+(2026-10-12 and 2026-10-13) measured it at 247-480 s against its 900000 ms cap, at most 53.3%
+of it. Those runs include Part C2 and Part D. The suite used to run LAST on
+`windows-shard-2`. There `tests/run-profile.js` granted it `Math.min(suite.timeoutMs,
+remaining)`, where `remaining` is the shard budget minus everything already spent, and that
+shard used up to 1601 s of its 1800000 ms. So a slow run of this suite could surface as a
+profile abort instead of its own `TIMED_OUT`. Nothing runs before it on shard 7, so its own
+cap binds first. The shard figures and the reason for the move are in
+`.claude/rules/windows-budget-best-solution-first.md`.
 
-**THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
-Windows run replaces it.** The PR #272 review round added checks to this suite —
-deliberately not counted here, for the reason the paragraph above gives: the count in
-that paragraph's own earlier wording had already drifted, and so had this one, which
-read `five` while the round stood at six. What prices the round is the WORK, not a
-numeral —
-including one that COPIES the whole lib directory and executes the adoption entry point
-twice, and `AC-C20b`, which drives the capability gate a third time but deliberately
-adds NO install, reusing `AC-C09`'s already-tampered sibling root instead — and rewrote
-a case in `tests/structure/session-adopt-report-v1.test.js`, which
-this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
-(`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
-The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
-`windows-shard-2` and grew too. The ceiling was deliberately NOT raised: raising it
-without a measurement trades a visible `TIMED_OUT` for a silently truncated tail, which
-is the failure this file records for two sibling suites. Say "unmeasured", not "17% of
-cap" — the percentage is arithmetic over a stale numerator. Same reason as ever, the
-caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
-key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
-manifest load.
-
-Part D of the same suite — the pruned-installation rows, three further synthetic
-installs — landed after that note without a Windows sample either, so the same
-instruction applies twice over.
-
-**And the SUITE cap is the wrong ceiling to reason about alone — the SHARD envelope binds
-first.** `windows-shard-2` carries `profileTimeoutMs: 1800000` across eight entries, and
-`versioned-plugin-upgrade` is the LAST object in that array. `tests/run-profile.js`
-computes `effectiveTimeoutMs: Math.min(suite.timeoutMs, remaining)` where `remaining` is
-the shard budget minus everything already spent, so this suite receives the REMAINDER, not
-its own 900000. That is not hypothetical: this file records shard-3's eight suites summing
-to 1800072 ms, with its last entry granted 139971 ms of a 420000 ms cap and reporting
-`TIMED_OUT` — "It was not slow; it was not paid for." Shard-2's job duration is UNMEASURED
-here too, so a genuine overrun in this suite may surface as a profile abort rather than the
-suite `TIMED_OUT` its ceiling exists to make visible. Record both figures when the next
-green Windows run supplies them.
-
-Read this sample as ONE sample, not as a bound. The sibling
-`stop-enforcer-self-review-routing` note in this file records a 29% spread across
-two green runs of byte-identical content on the same runner class, so a single
-figure says nothing about the worst case — it says only that the suite is not
-currently close to its ceiling. Budget against the measured figure and re-measure
-after a change that adds process runs; the previous wording tried to substitute a
-hand-counted itemization of node and bash invocations for a wall clock, and that
-itemization went stale on its next row edit, which is exactly why it is gone.
-The caveat lives here and NOT in the manifest:
+Read one run as one sample. The `stop-enforcer-self-review-routing` note in
+`.claude/rules/host-refused-reviewer-spawn.md` records a 29% spread across green runs of
+identical content on the same runner class. Re-measure after a change that adds process runs,
+and do not raise the cap without a measurement: a raise without one trades a visible
+`TIMED_OUT` for a silently truncated tail. Do not write a row count here either; the suite
+reports its own total. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
-`{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
-EVERY Windows shard before a single suite runs — a `note` field there is a
-CI-wide outage, not documentation. Note also that shard-2's `profileTimeoutMs` is
-1800000, so a run genuinely approaching 900 s surfaces as a profile abort rather
-than the suite `TIMED_OUT` this ceiling exists to make visible.
+`{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts EVERY Windows
+shard before a single suite runs.
 
 Operator-facing accounts that must move with it: `docs/session-control.md`
 "Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and

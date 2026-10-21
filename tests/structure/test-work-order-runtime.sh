@@ -20,10 +20,13 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     check "native Windows work-order run skipped (macOS/Linux/WSL required)" PASS
-    finish; exit 0
+    unit_check_done "R2a every unit file the registry gives this suite was graded"
+    finish; exit
     ;;
 esac
 
@@ -39,23 +42,8 @@ check "R0 module, wrapper, unit suite, fake and session baseline exist" PASS
   && check "R1 wrapper is executable and parses" PASS || check "R1 wrapper is executable and parses" FAIL
 node --check "$MODULE" 2>/dev/null && check "R1 module parses" PASS || check "R1 module parses" FAIL
 
-UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"
-UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# pass ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' | tail -1)"
-UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if [ -n "$UNIT_FLOOR" ] && [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" = "0" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
-  check "R2 unit suite green with at least $UNIT_FLOOR cases and none skipped (pass=$UNIT_PASS)" PASS
-else
-  check "R2 unit suite green with at least ${UNIT_FLOOR:-<no overview row>} cases and none skipped (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?})" FAIL
-  printf '%s\n' "$UNIT_OUT" | grep -E '^not ok|# SKIP' | head -5
-fi
-if R2_OVERVIEW="$(unit_overview_check "$UNIT")"; then
-  check "R2-overview the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "R2-overview $R2_OVERVIEW" FAIL
-fi
+unit_check "R2 the work-order runtime unit file passes with its registered count and no skipped case" "$UNIT"
+unit_check_done "R2a every unit file the registry gives this suite was graded"
 
 source "$FAKE_LIB"
 
@@ -98,6 +86,7 @@ else
 fi
 
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 export ZENSU_WORK_ORDER_RETRY_MS=1
 export ZENSU_WORK_ORDER_RETRY_BUDGET_MS=50
 OUT="$(bash "$WRAPPER" --start --order "$ORDER" 2>"$SBOX/start.err")"; RC=$?

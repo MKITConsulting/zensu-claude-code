@@ -1,0 +1,15 @@
+description: "Control for the router result: nothing is injected and the installed runtime's prompt hooks are silenced. The model gets the router scenario's planning request and must ask no route or triage question and print no route status line or hook scaffolding. A control that asks the three triage questions shows that the host, not the router line, produces the triage, and the router result then credits nothing to the line."
+vars:
+  route_source: none
+  user_message: "Plan this cart app as a product in Zensu: set up the roadmap with its features and tiers."
+  expected_hook: ""
+  expected_shape: none
+  expected_field: n/a
+  router_fires: "yes"
+assert:
+  - type: javascript
+    value: file://assertions/no-route-question.js
+  - type: javascript
+    value: file://assertions/no-route-status.js
+  - type: javascript
+    value: file://assertions/no-placeholder-copy.js

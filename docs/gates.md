@@ -30,13 +30,49 @@ its own justification, and the authoritative five-class enumeration, in the head
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literals `--restore-root` and `--confirm`, each
 at most once. Neither literal takes a VALUE, which is what keeps a destination out
-of every invocation this gate admits. Every hook on the `Bash`
+of every invocation this gate admits. Every hook on the `Bash|PowerShell`
 matcher plus the all-tool capability gate must allow, because a deny from any one
-of them wins. The adoption itself no longer needs the command: every hook adopts a
+of them wins. The recognizer reads the Bash spelling only, so run both commands through the
+Bash tool; a PowerShell call in a bind failure gets the named deny. The adoption itself no longer needs the command: every hook adopts a
 compatible-schema record automatically on its first failed bind
 (`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
 command is the report and the manual retry for a refusal. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
+
+## Shell Tools
+
+Claude Code has two shell tools, `Bash` and `PowerShell`. The PowerShell tool is on by default on
+Windows for claude.ai and Console accounts, and opt-in elsewhere through
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
+the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
+judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
+analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
+when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
+differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
+for both readings.
+
+| Gate | A PowerShell command |
+|---|---|
+| CLI write-gate | Judged like a Bash command. A `zensu` call that another command starts, that builds its noun or verb at run time, or that the analyzer cannot read is denied, and so is one whose argument holds a double quote, which Windows PowerShell 5.1 can split, or a cmd.exe operator or `%name%` reference, which cmd.exe reads as code when `zensu` is a batch file. An empty argument counts as built at run time, because Windows PowerShell 5.1 drops it. There is no inline escape. |
+| Session Control check | Denied when it names a protected input such as `ZENSU_SESSION_KEY` in any spelling, writes the Environment provider under a name built at run time, turns text built at run time into code, or cannot be read. |
+| Source-write rules (A), (B), (C) | While `hooks.bashWriteGate` is on, only a provably read-only command passes. Outside Windows, a name that PowerShell 7 leaves to a native program, such as `sort` or `ls`, counts as that program. |
+| Secret scan | The whole command text is scanned. |
+| Browser consent gate | A `zensu-verify` `playwright-cli` call is refused, in every spelling the analyzer decodes: backtick escapes, Unicode escapes and joined string literals. |
+| Artifact redaction | Runs as after a Bash command. |
+| Work-order gate | Refused in a work-order session; the launcher turns the PowerShell tool off. |
+
+Every refusal of a command a gate cannot judge tells the main thread to use the Bash tool, or Edit
+and Write, and a subagent to report to the main thread; a judged `zensu` mutation is refused as
+in Bash, with the skill to run instead. The session banner names the commands to run through the
+Bash tool while the PowerShell tool may be active. While that tool may be active, the
+`shell tools:` row of `/zensu:doctor` warns when a hook fires for `Bash` but not for
+`PowerShell`; once every such hook covers `PowerShell`, it warns when the analyzer does not load.
+Names built at run time from variables, character codes or subexpressions, script files,
+interpreter code, a command registered to run later, such as a scheduled task, and a `zensu` call
+that cmd.exe finds in an argument of another batch file stay unread, as names built at run time do
+in Bash.
+To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`; see
+[Platform Support](operations.md#platform-support).
 
 ## CLI Write-Gate
 
@@ -77,7 +113,7 @@ through the shared bind-deny ladder.
 
 ```mermaid
 flowchart TD
-    A["zensu CLI command<br/>(Bash, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
+    A["zensu CLI command<br/>(Bash or PowerShell, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
@@ -97,7 +133,12 @@ it never declared — and `--workflow-end` closes it again. The `--tools` list s
 the gate maps each CLI command back to its canonical tool name to check membership. `ZENSU_MCP_GATE=off`
 disables the gate for a deliberate one-off — honored both as a session env and as an **inline prefix**
 (`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
-ignores it on a subagent's command. The gate is scoped to its threat model (a low-context agent writing to the
+ignores it on a subagent's command, and a PowerShell command has none. A PowerShell command is
+read by the shared analyzer, which finds a literal `zensu` call in every spelling PowerShell runs
+it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`) and
+denies one it cannot read: a call another command starts, a noun or verb built at run time, an
+argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
+cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
@@ -236,7 +277,8 @@ A third PreToolUse gate (`pre-write-secret-scan.sh`) inspects **what** is about 
 complementing the source-write gate's **which files**: Write `content`, Edit `new_string`,
 MultiEdit `edits[].new_string`, NotebookEdit `new_source`, and — whenever the shared parser
 (`detectChannels`) reports a write channel (redirect, `tee`, `sed -i`, `dd of=`, heredoc) —
-the Bash command text. Payloads are matched against the curated rule set in
+the Bash command text. A PowerShell command is scanned as a whole, because the gate does not
+trace where PowerShell writes. Payloads are matched against the curated rule set in
 `hooks/lib/secret-patterns.js` (AWS, GitHub `gh[pousr]_`/`github_pat_`, Slack, Stripe
 `sk_live_`/`rk_live_`, private-key PEM headers incl. PKCS#8, plus a Shannon-entropy assignment
 heuristic — deliberately no naive key/password catch-all); decision logic lives in
@@ -416,7 +458,11 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. The gate is
+(`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
+PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
+those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
+decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
+starts `node` for a PowerShell call that names `wright` and `verify` or holds a Unicode escape. The gate is
 textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
 text names the CLI and that session, or names the CLI while the hook environment's
@@ -625,7 +671,7 @@ an absent or symlinked module, or a module failure denies with a stderr note, an
 skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
 JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
 a backslash-newline or backslash-CR-LF line continuation and one `LC_ALL=C tr -d` pass removes
-quotes and backslashes, with the raw payload as the fallback when either pass fails: stripping them in pure bash
+quotes, backslashes and backticks, with the raw payload as the fallback when either pass fails: stripping them in pure bash
 was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
 `tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
 prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The
@@ -788,8 +834,8 @@ minting a new one.
 - **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`
   for the diagnosis and `/zensu:adopt-session --confirm` to rebuild — instead of the generic
   `immutable context revalidation failed`, which is accurate and names no way out. Both
-  commands stay reachable on macOS and Linux, because the Bash recognizer admits them in every
-  bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
+  commands stay reachable on macOS and Linux through the Bash tool, because the Bash recognizer
+  admits them in every bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
   child gets the cause and is told to report it to the main thread rather than retry.
 - **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
   unreadable keeps the generic wording: something is at that path, and offering a rebuild

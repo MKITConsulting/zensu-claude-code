@@ -22,7 +22,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A feature ID to implement. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — a `KEY-N` id or a slug fails with `invalid feature id (status 400)`. Resolve it first (see Step 1).
 
@@ -75,7 +75,7 @@ The /zensu:tdd workflow will:
 - Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
-At the end of the workflow (Phase 6) it marks implementation complete, fans out one `zensu:review-aspect` agent per perspective of the configured panel in parallel (three by default, five with `hooks.reviewPanel: full`), optionally runs `zensu:review-judge` (default on; on the lean panel for the first review only), and passes the merge to one consume-mode `zensu:code-reviewer`. The `Stop` hook (`stop-chain-enforcer.sh`) enforces the review chain for up to `autoFixMaxRounds + 3` blocked Stops, and `post-review-tdd-delegate.sh` routes findings back for in-thread fixing until PASS or max rounds before terminal self-review.
+At the end of the workflow (Phase 6) it marks implementation complete, fans out one `zensu:review-aspect` agent per perspective of the configured panel in parallel (three by default, five with `hooks.reviewPanel: full`), optionally runs `zensu:review-judge` (default on; on the lean panel for the first review only, and on any review the `Stop` hook resumes), and passes the merge to one consume-mode `zensu:code-reviewer`. The `Stop` hook (`stop-chain-enforcer.sh`) enforces the review chain for up to `autoFixMaxRounds + 3` blocked Stops, and `post-review-tdd-delegate.sh` routes findings back for in-thread fixing until PASS or max rounds before terminal self-review.
 
 **For trivial changes** (single-line fix, config change, migration-only): Skip the /zensu:tdd skill and implement directly, then continue with Step 4.
 

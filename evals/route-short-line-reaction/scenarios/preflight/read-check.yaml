@@ -1,0 +1,10 @@
+description: "Preflight: proves that an allowed call runs. The user asks for one Bash read of the fixture, which the probe allows, so a result that is not an error and carries the fixture's source shows that the sandbox, the installed runtime's PreToolUse hooks and Claude Code's own temporary files let an allowed call through."
+vars:
+  route_source: none
+  user_message: "Run `cat src/cart.js` with the Bash tool, then tell me in one sentence what cartTotal returns."
+  expected_shape: none
+  expected_field: n/a
+  read_marker: "const SHIPPING_FEE = 5;"
+assert:
+  - type: javascript
+    value: file://assertions/allowed-read.js

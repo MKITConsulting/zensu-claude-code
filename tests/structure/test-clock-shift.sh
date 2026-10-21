@@ -9,7 +9,7 @@ RUNNER="$PLUGIN_DIR/tests/run-clock-shift.js"
 ALLOWLIST="$PLUGIN_DIR/tests/profiles/clock-shift-allowlist.v1.json"
 WORKFLOW="$PLUGIN_DIR/.github/workflows/scheduled.yml"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
-source "$PLUGIN_DIR/tests/structure/lib-unit-summary.sh"
+source "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -48,26 +48,7 @@ else
   check "C0a the suite is classified as a CI structure test that needs the npm devDependencies" FAIL
 fi
 
-WORK="$(mktemp -d 2>/dev/null)" || { check "C0 scratch dir" FAIL; finish; exit 1; }
-trap 'rm -rf "$WORK"' EXIT
+unit_check "C1 the clock-shift unit file passes" "$UNIT"
 
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "C1 the unit suite passes (node --test clock-shift-v1.test.js)" PASS
-else
-  check "C1 the unit suite passes (node --test clock-shift-v1.test.js)" FAIL
-  sed -n '1,120p' "$WORK/unit.out"
-fi
-
-UNIT_FLOOR="$(unit_overview_declared "${UNIT##*/}")"
-if unit_cases_meet_floor "$WORK/unit.out" "$UNIT_FLOOR"; then
-  check "C1a the unit suite registered at least $UNIT_FLOOR passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" PASS
-else
-  check "C1a the unit suite registered at least ${UNIT_FLOOR:-<no overview row>} passing cases (tests=$UNIT_CASES_TESTS pass=$UNIT_CASES_PASS)" FAIL
-fi
-if C1B="$(unit_overview_check "$UNIT")"; then
-  check "C1b the SUITE-OVERVIEW Blocks cell matches what ${UNIT##*/} registers ($UNIT_FLOOR)" PASS
-else
-  check "C1b $C1B" FAIL
-fi
-
+unit_check_done "C1z every unit file the registry gives this suite was graded"
 finish

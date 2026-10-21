@@ -70,7 +70,7 @@ RP5 in `evals/config-gate/test-review-convergence-directive.sh`.
 **FAIL-OPEN IS THE CONTRACT.** The classification runs only for a re-review launched from the
 post-review directive AND only when `review-round-scope-v1.js` and `review-ledger-v1.js` both
 answer `status=ok`. Any other answer routes that review exactly as before and logs
-`CONVERGENCE UNAVAILABLE — <reason>`. The Stop-hook resume directive is deliberately unchanged,
+`CONVERGENCE UNAVAILABLE — <reason>`. The Stop-hook resume directive has no convergence clause,
 so a resumed review also routes as before. The routing read answers `degraded` on a malformed
 `FINDING LEDGER` line (an anchor carrying a backtick, `$(` or `${` included), more than
 `MAX_ENTRIES` entries, an unreadable or out-of-root log, an earlier-round registration of a new
@@ -94,7 +94,10 @@ boundary, and at every boundary, marked or not, it carries each open entry forwa
 `G<g>:R<k>-F<n>` id naming the generation it came from, so a reset never hides an open finding.
 Only a `fixed` line may carry that qualifier; it closes the carried entry and routing ignores it.
 Both `## Open` renderers add ledger rows only while `hooks.reviewConvergence` is on: with the key
-off the hook's `LEDGER_OPEN_ROWS` fragment is empty and self-review skips the ledger.
+off the hook's `LEDGER_OPEN_ROWS` fragment is empty and self-review skips the ledger. The hook
+and self-review read the key against the same Session Control record root: the hook exports it
+as `CLAUDE_PROJECT_DIR`, and the self-review probe passes the `PROJECT_ROOT` that
+`zensu-log.sh --project-root` prints.
 
 **Deferred is not dropped.** The main thread ledgers every finding it defers right after
 classifying, so a review that closes the loop still hands its deferred findings on. Every
@@ -170,10 +173,6 @@ together with `parked` and the `G<g>:` qualifier, so no released reader predates
 - **Self-review needs the chain's run-log path.** It reads the ledger of the log the chain wrote
   in this session and never resolves one by recency; when the session no longer knows the path,
   it skips the ledger and the deferred findings survive only in the buffered report blocks.
-- **Self-review reads the key against `$TOP`, the hook against the Session Control record
-  root.** Both resolve the same project `.zensu/config.json` for a session started at the
-  repository root; a session started in a subdirectory that carries its own config can still
-  see them disagree.
 - **The reset marker depends on a known log path.** `/zensu:reset-review-limit` never searches
   for a log; without the path it skips the marker. An id reuse or a round regression then turns
   the routing read `degraded` and makes the report read open a new generation, but a reset stays

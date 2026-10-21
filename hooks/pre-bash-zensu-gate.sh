@@ -48,19 +48,20 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
-  let cmd = "", sub = false, size = 0;
+INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
+  let cmd = "", sub = false, ps = false, size = 0;
   try {
     const raw = require("fs").readFileSync(0);
     size = raw.length;
     const j = JSON.parse(raw.toString("utf8") || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
     sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
+    ps = j.tool_name === "PowerShell";
   } catch (_) { process.exit(0); }
-  if (!cmd || !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd)) process.exit(0);
+  if (!cmd || (!ps && !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd))) process.exit(0);
   let cap = 0;
   try { cap = require(process.env.ZBIND).MAX_PAYLOAD_BYTES; } catch (_) {}
-  if (Number.isSafeInteger(cap) && cap > 0 && size > cap) {
+  if (!ps && Number.isSafeInteger(cap) && cap > 0 && size > cap) {
     process.stdout.write("__oversized__\t" + size + "\t" + cap);
     process.exit(0);
   }
@@ -68,6 +69,8 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE
   const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
+  const OPQ = String.fromCharCode(0);
+  const UNJ = "__unjudged__\t";
   function unquoted(value) {
     let start = 0, end = value.length;
     while (start < end && (value.charCodeAt(start) === 34 || value.charCodeAt(start) === 39)) start += 1;
@@ -108,15 +111,22 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE
     }
     return found;
   }
-  let invocations = tokenInvocations();
-  try {
+  function psInvocations() {
+    let found = null;
+    try { found = require(process.env.ZPS || "").zensuInvocations(cmd); } catch (_) {}
+    if (!found) found = { unjudged: /zensu/i.test(cmd.replace(/\x60/g, "")) ? "the PowerShell analyzer could not be loaded" : "", invocations: [] };
+    if (found.unjudged) out.add(UNJ + String(found.unjudged).split(/[\t\r\n]/)[0]);
+    return found.invocations;
+  }
+  let invocations = ps ? psInvocations() : tokenInvocations();
+  if (!ps) try {
     invocations = require(process.env.ZGUARD).commandInvocations(cmd, { platform: process.platform })
       .filter((c) => c.name === "zensu")
       .map((c) => ({ envp: c.environment, rest: c.words }))
       .concat(invocations);
   } catch (_) {}
   for (const invocation of invocations) {
-    const envp = invocation.envp, rest = invocation.rest;
+    const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
       out.add("__bypass__\tZENSU_MCP_GATE");
       continue;
@@ -135,6 +145,7 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE
       if (NOUNS.has(t)) { noun = ALIAS[t] || t; }
       break;                                                                       // first non-flag token decides
     }
+    if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
     if (!noun) continue;
     let verb = "";
     for (let m = k + 1; m < rest.length; m++) {
@@ -143,6 +154,7 @@ INVOCATIONS="$(printf '%s' "$INPUT" | ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE
       if (t.charAt(0) === "-") continue;
       verb = t.split(/[\t\r\n]/)[0]; break;
     }
+    if (ps && verb.indexOf(OPQ) !== -1) { out.add(UNJ + "the verb of a zensu call is built at run time"); continue; }
     out.add(noun + "\t" + verb);
   }
   process.stdout.write([...out].join("\n"));
@@ -229,10 +241,12 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
 SID_CURRENT="$(zensu_resolve_session_id "$(field session_id)" 2>/dev/null || true)"
 AGENT_ID="$(field agent_id)"
 AGENT_TYPE="$(field agent_type)"
+TOOL_NAME="$(field tool_name)"
 IS_SUBAGENT=false
 if [ -n "$AGENT_ID" ] || [ -n "$AGENT_TYPE" ]; then
   IS_SUBAGENT=true
 fi
+UNJUDGED="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unjudged__"{print $2; exit}')"
 
 # Returns 0 (allowed) only when the current hook payload session (or, when the
 # payload omitted it, the exact exported Session Control key) owns a workflow
@@ -272,10 +286,16 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && { record_bypass_markers; exit 0; }
+[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && { record_bypass_markers; exit 0; }
 
-if [ "$IS_SUBAGENT" = true ]; then
+if [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
+elif [ -n "$UNJUDGED" ]; then
+  REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+elif [ "$IS_SUBAGENT" = true ]; then
   REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. Zensu CLI mutations are reserved for the interactive main thread: a subagent never borrows the main thread's skill window, and the per-command gate escape is a deliberate one-off for the main thread, never a route for a subagent. Do not retry this command, with or without a prefix. Report the operation you need to the main thread, which runs it through the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+elif [ "$TOOL_NAME" = PowerShell ]; then
+  REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. A PowerShell command has no inline gate escape; writes targeting a localhost backend (--api-url, or ZENSU_API_URL in the session environment) and --help are never gated."
 else
   REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
 fi

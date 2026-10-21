@@ -24,9 +24,13 @@ The rule lives in the hook, the skill, the operator doc row and EVERY
 of them — the count is deliberately not written out here, because the eval roster is DERIVED
 from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch:
 `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
-authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
+authoritative copy, sent in full once per context generation and anchor variant and followed by
+a short body that keeps the field, both markers and, in the armed variant only, the trust clause,
+because the none swap removes that span as it does in the full text, see
+`.claude/rules/prompt-ledger.md`), `skills/zen-mode/SKILL.md` rule 6,
 `docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
-`evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
+`evals/zen-mode-reaction/scenarios/*.yaml`, which embed a whole directive verbatim: the full contract,
+or in a `short-` scenario the short body.
 Z19b pins the directive carriers against each other, Z19c pins the extraction regex
 across the two zen suites, Z19d pins the operator row.
 
@@ -280,15 +284,12 @@ is the drift the rule exists to prevent.
   not declare, and its mechanism is the fourth distinct one - the anchor keeps rendering and
   the allowlist-membership case in `zen-anchor-v1.test.js` is what reddens. Four exports,
   four different mechanisms, and only one of them silences the anchor.
-- `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
-  REGISTRATION count, so adding or removing a case in either zen unit file makes that
-  table stale, which `Z78` in `tests/structure/test-zen-mode.sh` and `R13` in
-  `tests/structure/test-restore-project-root.sh` both report. Its section 1 row for
-  `tests/structure/*.test.js` deliberately reads "(count deliberately omitted)", so adding a
-  unit FILE owes nothing there. An earlier wording here claimed that row carried a total and
-  that the file named itself its single owner; neither statement is in that file, and a
-  maintainer working from it would have gone looking for a figure that does not exist. The
-  per-file row is the whole obligation.
+- `tests/profiles/unit-files.v1.json` carries an entry per driven `node --test` file with its
+  exact REGISTRATION count, so adding or removing a case in either zen unit file fails its
+  driver (`Z29` or `Z31`) until `registered` moves with it, and the `run-all.sh` preflight
+  census refuses the tree from the source alone. `tests/SUITE-OVERVIEW.md` §4 is generated
+  from that file, so the obligation is the entry plus
+  `node tests/structure/lib-unit-registry.js render --write`.
 - `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
   clause — its ranking obligation and the anti-inflation counterweight — so editing that
   clause reddens a suite named for the best-solution-first hook. Note the boundary: a
@@ -302,22 +303,22 @@ is the drift the rule exists to prevent.
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
-  this suite. TWO KINDS of floor guard the unit file and they count different
+  this suite. TWO KINDS of count guard the unit file and they count different
   things — do not conflate them, and note that the two kinds do not move together.
-  `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS in the whole
-  file; the per-table `floor:` values live in the unit file and count CASES inside one
-  scenario. So binding a further scenario raises the registration count and no case count,
-  while adding a grader to a scenario already bound does the reverse — which is why
-  "raise the matching number" needs the word MATCHING. Both kinds fire on REMOVAL only, so
-  raising either in the same commit that adds to it is a CONVENTION the file states in its
-  own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
+  `registered` in the file's entry in `tests/profiles/unit-files.v1.json` counts `test()`
+  REGISTRATIONS in the whole file and is exact; the per-table `floor:` values live in the
+  unit file and count CASES inside one scenario. So binding a further scenario raises the
+  registration count and no case count, while adding a grader to a scenario already bound does
+  the reverse — which is why "raise the matching number" needs the word MATCHING. The
+  per-table floors fire on REMOVAL only, so raising one in the same commit that adds to it is
+  a CONVENTION the file states in its own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
   when the mark-derivation graders went: the cases that drove them described a decision the
   reply no longer makes. That is a deliberate lowering with its reason recorded at the
   constant, and lowering it again needs the same note. The per-table count is deliberately
   not written out here — it grew by one when the third scenario was bound, and a numeral in
   this file is exactly what nothing recomputes.
 - Z31 drives `tests/structure/zen-anchor-v1.test.js`, the anchor module's own unit
-  contract, with the same registration floor. Z32 drives the hook end to end against a real
+  contract, graded against its own registry entry. Z32 drives the hook end to end against a real
   Session Control record: `none` with no chain, the implementing position with one armed,
   and — the load-bearing arm — an unreadable workflow document costing the ANCHOR and never
   the MODE.
@@ -512,7 +513,11 @@ headroom, because a ceiling that has drifted away from its text has stopped bein
 embeds the none variant, because that is what a session with no chain receives, and every other
 scenario embeds the static literal with a token other than `none`. `Z19b` and P8 capture the
 none variant by firing the hook rather than re-spelling the replacement, so a change to the
-emission moves the comparison with it.
+emission moves the comparison with it. A `short-` scenario embeds the short body in the same two
+variants, and both checks require the file name and the embedded body to agree: they read the armed
+short body from the hook source and capture its none variant by firing the hook a second time in the
+same session. `zen-anchor-assertions.test.js` requires each `short-` scenario to carry the graders and
+the anchor of its full-contract twin unchanged.
 
 **Known gap, accepted:** the per-turn totals in `docs/architecture.md` are hand-derived. The
 measurement that holds them is `tests/structure/test-user-prompt-budget.sh`
@@ -762,9 +767,10 @@ nothing returns a `permissionDecision` — so the `patch` verdict is unchanged; 
 enumeration was short. Two things read like a breaking change here and are not, which is why
 the walk is written down rather than left to be re-derived: the runtime digest DOES move,
 because `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale — but
-`readContextInternal` measures the RECORDED root — and the directive is re-emitted from the
-executing tree on every prompt, so nothing persisted crosses the upgrade. The only
-per-session artefact zen-mode owns is the `{"active":true|false}` marker, whose shape is
-untouched. Choosing `minor` would be actively harmful rather than merely wasteful: while the
+`readContextInternal` measures the RECORDED root — and every prompt's directive, full or short, is
+emitted from the executing tree, so nothing persisted crosses the upgrade. Besides the
+`{"active":true|false}` marker, whose shape is untouched, zen-mode owns only its `zen-none` and
+`zen-armed` prompt-ledger entries, which are tagged with the executing plugin root, so an upgrade
+sends the full text again. Choosing `minor` would be actively harmful rather than merely wasteful: while the
 plugin is at major `0` the minor is the breaking axis, so it would refuse every in-flight
 session until the user ran `/zensu:adopt-session --confirm`.

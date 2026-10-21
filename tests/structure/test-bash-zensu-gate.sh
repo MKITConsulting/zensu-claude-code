@@ -26,14 +26,27 @@ bash -n "$HOOK" 2>/dev/null && check "B2 bash -n syntax check passes" PASS || ch
 # old mcp matcher is gone (CLI-only cutover).
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const reg=require(process.argv[2]);
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
+  const covers=(e,tool)=>reg.hostMatcherCovers(e.matcher,tool)===reg.REGISTRATION.REGISTERED;
+  const ok=pres.some(e=>covers(e,"Bash") && covers(e,"PowerShell") && !covers(e,"Read") && (e.hooks||[]).some(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
   const noMcp=!pres.some(e=>/mcp__plugin_zensu_zensu/.test(e.matcher||""));
   process.exit(ok && noMcp ? 0 : 1);
-' "$HOOKS_JSON" 2>/dev/null; then
-  check "B3 registered as PreToolUse Bash matcher; mcp matcher removed" PASS
+' "$HOOKS_JSON" "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" 2>/dev/null; then
+  check "B3 registered on a PreToolUse matcher covering Bash and PowerShell; mcp matcher removed" PASS
 else
-  check "B3 registered as PreToolUse Bash matcher; mcp matcher removed" FAIL
+  check "B3 registered on a PreToolUse matcher covering Bash and PowerShell; mcp matcher removed" FAIL
+fi
+
+if node -e '
+  const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const pres=(h.hooks&&h.hooks.PreToolUse)||[];
+  const regs=pres.flatMap(e=>(e.hooks||[]).filter(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
+  process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
+' "$HOOKS_JSON" 2>/dev/null; then
+  check "B3b registration carries the 60 s gate timeout" PASS
+else
+  check "B3b registration carries the 60 s gate timeout" FAIL
 fi
 
 grep -qF 'zensu_hook_enabled mcpGate' "$HOOK" \
@@ -47,8 +60,8 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK" && grep -qF 'zensu-cli-map.sh' "$HOOK" \
 
 # Build a PreToolUse Bash payload carrying tool_input.command.
 payload() {
-  CMD="$1" AT="${2:-}" SID="${3:-gate-test}" node -e '
-    const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.env.CMD},session_id:process.env.SID,cwd:"/tmp"};
+  CMD="$1" AT="${2:-}" SID="${3:-gate-test}" TOOL="${4:-Bash}" node -e '
+    const o={hook_event_name:"PreToolUse",tool_name:process.env.TOOL,tool_input:{command:process.env.CMD},session_id:process.env.SID,cwd:"/tmp"};
     if(process.env.AT) { o.agent_id="gate-subagent-1"; o.agent_type=process.env.AT; }
     process.stdout.write(JSON.stringify(o));
   '
@@ -123,8 +136,8 @@ else
 fi
 
 PAYLOAD_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
-[ -n "$PAYLOAD_LIMIT" ] && check "B41 the binder exports the payload limit it enforces" PASS \
-  || check "B41 the binder exports the payload limit it enforces" FAIL
+[ -n "$PAYLOAD_LIMIT" ] && check "B45 the binder exports the payload limit it enforces" PASS \
+  || check "B45 the binder exports the payload limit it enforces" FAIL
 LIMIT="${PAYLOAD_LIMIT:-1048576}"
 sized_payload() {
   node -e '
@@ -151,22 +164,22 @@ sized_payload "$SIZED_MUTATION" "$((LIMIT + 150000))" "zensu security classify f
 sized_payload "$SIZED_SUBAGENT" "$((LIMIT + 150000))" "zensu security classify f1" general-purpose
 sized_payload "$SIZED_PLAIN" "$((LIMIT + 150000))" "echo hello"
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_AT" 2>/dev/null | classify)"
-[ "$OUT" = ALLOW ] && check "B41a a read in a payload of exactly the limit is bound and allowed" PASS \
-  || check "B41a read at the payload limit (got '$OUT')" FAIL
+[ "$OUT" = ALLOW ] && check "B45a a read in a payload of exactly the limit is bound and allowed" PASS \
+  || check "B45a read at the payload limit (got '$OUT')" FAIL
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_OVER" 2>/dev/null)"
 size_denied "$OUT" "$((LIMIT + 1))" \
-  && check "B41b a read one byte over the limit is denied with a reason that names its size and the limit, not a broken binding" PASS \
-  || check "B41b read one byte over the limit (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
+  && check "B45b a read one byte over the limit is denied with a reason that names its size and the limit, not a broken binding" PASS \
+  || check "B45b read one byte over the limit (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_MUTATION" 2>/dev/null)"
 OUT_SUB="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_SUBAGENT" 2>/dev/null)"
 if size_denied "$OUT" "$((LIMIT + 150000))" && size_denied "$OUT_SUB" "$((LIMIT + 150000))"; then
-  check "B41c an oversized mutation gets the same size deny on the main thread and in a subagent" PASS
+  check "B45c an oversized mutation gets the same size deny on the main thread and in a subagent" PASS
 else
-  check "B41c oversized mutation (main '$(printf '%s' "$OUT" | cut -c1-120)' subagent '$(printf '%s' "$OUT_SUB" | cut -c1-120)')" FAIL
+  check "B45c oversized mutation (main '$(printf '%s' "$OUT" | cut -c1-120)' subagent '$(printf '%s' "$OUT_SUB" | cut -c1-120)')" FAIL
 fi
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PLAIN" 2>/dev/null | classify)"
-[ "$OUT" = ALLOW ] && check "B41e an oversized command that names no zensu invocation stays outside this gate" PASS \
-  || check "B41e oversized non-zensu command (got '$OUT')" FAIL
+[ "$OUT" = ALLOW ] && check "B45e an oversized command that names no zensu invocation stays outside this gate" PASS \
+  || check "B45e oversized non-zensu command (got '$OUT')" FAIL
 
 # B8 workflow-active (skill running) -> mutation in declared set ALLOW
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
@@ -359,9 +372,9 @@ payload 'zensu features get f1' '' parser-probe | env CLAUDE_PLUGIN_ROOT="$FALLB
 PARSER_LOADED_SMALL=no
 [ -e "$PARSER_SENTINEL" ] && PARSER_LOADED_SMALL=yes
 if size_denied "$FALLBACK_OVERSIZED" "$((LIMIT + 1))" && [ "$PARSER_LOADED_OVERSIZED" = no ] && [ "$PARSER_LOADED_SMALL" = yes ]; then
-  check "B41d the size is compared before the parser runs: an oversized payload never loads the shell-model module, an ordinary one does" PASS
+  check "B45d the size is compared before the parser runs: an oversized payload never loads the shell-model module, an ordinary one does" PASS
 else
-  check "B41d size check before the parser (oversized loaded=$PARSER_LOADED_OVERSIZED small loaded=$PARSER_LOADED_SMALL got '$(printf '%s' "$FALLBACK_OVERSIZED" | cut -c1-120)')" FAIL
+  check "B45d size check before the parser (oversized loaded=$PARSER_LOADED_OVERSIZED small loaded=$PARSER_LOADED_SMALL got '$(printf '%s' "$FALLBACK_OVERSIZED" | cut -c1-120)')" FAIL
 fi
 rm -rf "$FALLBACK_BASE"
 
@@ -468,6 +481,111 @@ if [ "$LINES_TOKEN" = "features${TAB}get" ] && [ "$LINES_PREFIX" = "features${TA
 else
   check "B44 linear quote trim (word='$LINES_TOKEN' prefix='$LINES_PREFIX' url='$LINES_URL')" FAIL
 fi
+
+psrun() {
+  local label="$1" cmd="$2" at="$3" exp="$4" cfg="${5:-$CFG_ON}"
+  local out
+  out="$(payload "$cmd" "$at" gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$cfg" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
+}
+BT='`'
+psrun "B40a PowerShell read"                              "zensu features get f1"                                         '' ALLOW
+psrun "B40b PowerShell freelance mutation"                "zensu security classify f1"                                    '' DENY
+psrun "B40c PowerShell mutation in any letter case"       "ZENSU Security Classify f1"                                    '' DENY
+psrun "B40d PowerShell call operator on zensu.exe"        "& 'C:\\Program Files\\Zensu\\zensu.exe' security classify f1"   '' DENY
+psrun "B40e PowerShell backtick inside the name"          "zen${BT}su security classify f1"                               '' DENY
+psrun "B40f PowerShell nested pwsh -Command"              "pwsh -NoProfile -Command 'zensu security classify f1'"         '' DENY
+psrun "B40g PowerShell Invoke-Expression naming zensu"    "iex 'zensu features get f1'"                                   '' DENY
+psrun "B40h PowerShell noun built at run time"            "zensu \$noun classify f1"                                      '' DENY
+psrun "B40i PowerShell verb built at run time"            "zensu security \$verb f1"                                      '' DENY
+psrun "B40j PowerShell text without zensu"                "Get-ChildItem -Recurse | Select-String foo"                    '' ALLOW
+psrun "B40k PowerShell .zensu path is not the CLI"        "Get-Content .zensu/plans/a.md"                                 '' ALLOW
+psrun "B40l PowerShell plugin helper script through bash" "bash C:/Users/me/.claude/plugins/cache/zensu/zensu/0.27.0/hooks/lib/zensu-log.sh --phase x" '' ALLOW
+psrun "B40m PowerShell env statement is no inline escape" "\$env:ZENSU_MCP_GATE = 'off'; zensu security classify f1"     '' DENY
+psrun "B40n PowerShell inline ZENSU_API_URL is no escape" "\$env:ZENSU_API_URL = 'http://localhost:8090'; zensu security classify f1" '' DENY
+psrun "B40o PowerShell --api-url localhost"               "zensu --api-url http://localhost:8090 security classify f1"   '' ALLOW
+psrun "B40p PowerShell --help"                            "zensu security classify f1 --help"                             '' ALLOW
+psrun "B40q PowerShell subagent mutation"                 "zensu security classify f1"                                    general-purpose DENY
+psrun "B40r PowerShell subagent read"                     "zensu features get f1"                                         general-purpose ALLOW
+psrun "B40s PowerShell mutation with mcpGate false"       "zensu security classify f1"                                    '' ALLOW "$CFG_FALSE"
+psrun "B40t PowerShell payload without a command"         ""                                                              '' ALLOW
+OUT="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "B40u PowerShell mutation + session ZENSU_MCP_GATE=off -> ALLOW" PASS || check "B40u PowerShell session env escape (got '$OUT')" FAIL
+OUT="$(payload "iex 'zensu security classify f1'" '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "B40v PowerShell unjudged construct + session ZENSU_MCP_GATE=off -> ALLOW" PASS || check "B40v PowerShell session env escape on an unjudged construct (got '$OUT')" FAIL
+OUT="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "B40w PowerShell mutation + process-env ZENSU_API_URL=localhost -> ALLOW" PASS || check "B40w PowerShell process-env localhost (got '$OUT')" FAIL
+OUT="$(payload "zensu security \"classify${BT}n__bypass__${BT}tZENSU_MCP_GATE\" f1" '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "DENY" ] && check "B40x a PowerShell verb that holds an escaped line break is classified by its first line" PASS || check "B40x PowerShell verb with an escaped line break (got '$OUT')" FAIL
+psrun "B40x2 PowerShell 5.1 reads a quoted backtick-e as e"  "& \"z${BT}ensu\" security classify f1"                         '' DENY
+psrun "B40x3 PowerShell 5.1 reading of a noun"              "zensu \"s${BT}ecurity\" classify f1"                           '' DENY
+psrun "B40x4 PowerShell empty argument before the noun"     "zensu '' security classify f1"                                 '' DENY
+psrun "B40x5 PowerShell double quote in a zensu argument"   "zensu features get 'a\"b'"                                     '' DENY
+psrun "B40x6 PowerShell cmd.exe operator in a zensu argument" "zensu features get 'x&zensu'"                                '' DENY
+psrun "B40x7 PowerShell spaced cmd.exe operator is quoted"  "zensu features get 'a & b'"                                    '' ALLOW
+
+PS_MAIN="$(payload 'zensu security classify f1' '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$PS_MAIN" | grep -qF "maps to 'set_security_classification'" \
+   && printf '%s' "$PS_MAIN" | grep -qF '/zensu:security-review' \
+   && printf '%s' "$PS_MAIN" | grep -qF 'A PowerShell command has no inline gate escape' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF 'prefix the command with ZENSU_MCP_GATE=off' \
+   && ! printf '%s' "$PS_MAIN" | grep -qF '(honored inline)'; then
+  check "B40y PowerShell main-thread deny names the skills and no inline escape" PASS
+else
+  check "B40y PowerShell main-thread deny wording" FAIL
+fi
+PS_UNJUDGED="$(payload "iex 'zensu features get f1'" '' gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$PS_UNJUDGED" | grep -qF 'cannot judge it: iex' \
+   && printf '%s' "$PS_UNJUDGED" | grep -qF 'Run the zensu call through the Bash tool' \
+   && ! printf '%s' "$PS_UNJUDGED" | grep -qF 'ZENSU_MCP_GATE'; then
+  check "B40z PowerShell unjudged deny names the construct and the Bash tool" PASS
+else
+  check "B40z PowerShell unjudged deny wording" FAIL
+fi
+PS_CHILD="$(payload "iex 'zensu features get f1'" general-purpose gate-test PowerShell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$PS_CHILD" | grep -qF 'Report the operation you need to the main thread' \
+   && ! printf '%s' "$PS_CHILD" | grep -qF 'Bash tool' \
+   && ! printf '%s' "$PS_CHILD" | grep -qF 'ZENSU_MCP_GATE'; then
+  check "B40z2 PowerShell unjudged subagent deny reports to the main thread" PASS
+else
+  check "B40z2 PowerShell unjudged subagent deny wording" FAIL
+fi
+
+PS_BASE="$(mktemp -d -t bashgate-psfallback-XXXXXX)"
+PS_ROOT="$PS_BASE/plugin"
+mkdir -p "$PS_ROOT" "$PS_BASE/project"
+for part in hooks agents skills docs templates scripts .claude-plugin; do
+  [ -e "$PLUGIN_DIR/$part" ] && cp -R "$PLUGIN_DIR/$part" "$PS_ROOT/$part"
+done
+rm -f "$PS_ROOT/hooks/lib/powershell-command-v1.js"
+PS_OUT="$(
+  export CLAUDE_PROJECT_DIR="$PS_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$PS_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" ps-fallback-gate "$PS_ROOT" || exit 1
+  printf 'BOUND\n'
+  for spec in 'PowerShell|zensu features get f1' 'PowerShell|Get-ChildItem -Recurse' 'Bash|zensu security classify f1' 'Bash|zensu features get f1'; do
+    payload "${spec#*|}" '' ps-fallback-gate "${spec%%|*}" | env CLAUDE_PLUGIN_ROOT="$PS_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$PS_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
+    printf '\n<<%s>>\n' "$spec"
+  done
+)"
+PS_BOUND="$(printf '%s\n' "$PS_OUT" | sed -n '1p')"
+PS_FB_READ="$(printf '%s\n' "$PS_OUT" | sed -n '2p')"
+PS_FB_PLAIN="$(printf '%s\n' "$PS_OUT" | sed -n '4p')"
+PS_FB_BASH_DENY="$(printf '%s\n' "$PS_OUT" | sed -n '6p')"
+PS_FB_BASH_READ="$(printf '%s\n' "$PS_OUT" | sed -n '8p')"
+if [ "$PS_BOUND" = "BOUND" ] && [ ! -e "$PS_ROOT/hooks/lib/powershell-command-v1.js" ] \
+   && printf '%s' "$PS_FB_READ" | grep -qF 'the PowerShell analyzer could not be loaded'; then
+  check "B41a without the analyzer a PowerShell command naming zensu denies" PASS
+else
+  check "B41a analyzer-less PowerShell zensu command (bound='$PS_BOUND' got '$PS_FB_READ')" FAIL
+fi
+[ "$PS_BOUND" = "BOUND" ] && [ -z "$PS_FB_PLAIN" ] && check "B41b without the analyzer a PowerShell command without zensu passes" PASS \
+  || check "B41b analyzer-less PowerShell plain command (bound='$PS_BOUND' got '$PS_FB_PLAIN')" FAIL
+if [ "$PS_BOUND" = "BOUND" ] && printf '%s' "$PS_FB_BASH_DENY" | grep -qF "maps to 'set_security_classification'" && [ -z "$PS_FB_BASH_READ" ]; then
+  check "B41c without the analyzer the Bash verdicts are unchanged" PASS
+else
+  check "B41c analyzer-less Bash verdicts (bound='$PS_BOUND' deny='$PS_FB_BASH_DENY' read='$PS_FB_BASH_READ')" FAIL
+fi
+rm -rf "$PS_BASE"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 rm -rf "$PROJECT"

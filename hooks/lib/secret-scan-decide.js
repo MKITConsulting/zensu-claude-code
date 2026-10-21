@@ -89,6 +89,10 @@ function main() {
     });
     if (escaped) return "__bypass__:ZENSU_SECRET_SCAN";
     candidates.push(cmd);
+  } else if (tool === "PowerShell") {
+    const cmd = typeof ti.command === "string" ? ti.command : "";
+    if (!cmd) return "";
+    candidates.push(cmd);
   } else {
     return "";
   }

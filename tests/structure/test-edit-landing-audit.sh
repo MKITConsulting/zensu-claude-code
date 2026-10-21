@@ -388,7 +388,7 @@ else
   check "X5 SKIPPED — this filesystem produced no real symlink for the anchor alias" PASS
 fi
 
-echo "== Aliasing: a relative foreign claim is ungradeable before the Stage 2 label =="
+echo "== Aliasing: a relative sibling claim is ungradeable before the Stage 2 label =="
 # The documented Stage 1 gap (spec §5). `src.txt` from a sibling repository is
 # textually identical to an anchor claim, and the anchor holds a dirty file of that
 # name, so it grades as LANDED. Pinned as CURRENT behaviour so the gap cannot be
@@ -398,6 +398,11 @@ OUT10="$(run_audit --log "$MR/alias.log" --project "$MR/anchor" --receipt -)"
 RC10=$?
 { [ "$RC10" -eq 0 ] && printf '%s' "$OUT10" | grep -qF 'EDIT LANDED — S4: src.txt'; }
 check "X6 a RELATIVE claim colliding with a dirty anchor file still grades as landed (Stage 1 gap, named not fixed)" "$(verdict $?)"
+printf '%s\n' "[10:00:05] S5 IMPL completed — files: ../sibling/src/app.ts" > "$MR/alias-up.log"
+OUT10A="$(run_audit --log "$MR/alias-up.log" --project "$MR/anchor" --receipt -)"
+{ printf '%s' "$OUT10A" | grep -qF 'EDIT NOT LANDED — S5: claimed ../sibling/src/app.ts' \
+  && ! printf '%s' "$OUT10A" | grep -qF 'UNVERIFIED (foreign root) — S5:'; }
+check "X6a a RELATIVE claim that climbs into a sibling with .. keeps the anchor's grading (Stage 1 gap, named not fixed)" "$(verdict $?)"
 
 echo "== The ancestor walk and the claim count are bounded =="
 # `--inventory` walks every absolute claim through canon_claim / claim_root_of /
@@ -831,18 +836,18 @@ STRAY="$(find "$PLUGIN_DIR" -maxdepth 1 -name 'edit-landing-*.json' 2>/dev/null 
 check "L92 the suite leaves no edit-landing receipt in the repo root" "$(verdict $?)"
 
 echo "== The redactor decides which half of stage 1 is reachable =="
-# Every other fixture in this file writes its run log with a raw `printf`, which
-# matches no redaction rule — so the suite is green against an input shape the
-# PRODUCTION writer rarely produces. `zensu-log.sh append` passes every message
-# through `zensu-artifact-redact-v1.js`, and `.log` is a redaction bucket, so a
-# claim naming a sibling repository under `$HOME` is rewritten to `~/...` BEFORE
-# it reaches the log. The `/*` arm in `normalize_claim` is the only entry to
-# `absolute_claim_verdict`, so such a claim never matches it, no foreign-root line
-# is emitted, and the doctor topology row cannot fire for that topology.
+# A run log written raw, with `printf` or a heredoc, matches no redaction rule,
+# so it cannot show what the PRODUCTION writer does to a claim; this section
+# writes through it. `zensu-log.sh append` passes every message through
+# `zensu-artifact-redact-v1.js`, and `.log` is a redaction bucket, so a claim
+# naming a sibling repository under `$HOME` is rewritten to `~/...` BEFORE it
+# reaches the log. `~` is never rebuilt, so the claim stays relative, no caller
+# of `absolute_claim_verdict` places it, no foreign-root line is emitted, and the
+# doctor topology row cannot fire for that topology.
 #
-# This pins the BOUND, not a fix: roots outside both `$HOME` and the project root
-# survive redaction and stage 1 works correctly on them. CLAUDE.md records it as
-# the fourth known gap.
+# This pins the BOUND, not a fix: a root survives redaction only outside `$HOME`,
+# the project root and the residual `/Users/<seg>`, `/home/<seg>` and `/root`
+# prefixes the redactor rewrites to `<home>`; stage 1 works on those roots.
 RD_HOME="$WORK/fakehome"
 RD_PROJ="$RD_HOME/IdeaProjects/anchor"
 RD_SIB="$RD_HOME/IdeaProjects/sibling"
@@ -877,6 +882,283 @@ grep -qF "~/" "$RD_LOG"
 check "X16a-pre the sibling claim reached the run log in its redacted form" "$(verdict $?)"
 ! printf '%s' "$RD_INV" | grep -qF "${RD_SIB_ABS}"
 check "X16a a sibling under \$HOME is rewritten to ~ before the parser sees it (stage 1 gap, named not fixed)" "$(verdict $?)"
+
+echo "== A <project>-redacted claim is placed like its absolute spelling =="
+nested_redact_case() {
+  local kind="$1" a
+  shift
+  a="$WORK/nested-redact/$kind/anchor"
+  NRD_A="$a"
+  NRD_LOG="$a/.zensu/logs/nested-redact.log"
+  new_repo "$a" && mkdir -p "$a/src" "$a/.zensu/logs" || return 1
+  printf '%s\n' "$@" > "$a/.gitignore"
+  printf 'v1\n' > "$a/src/a.ts"
+  { G "$a" add -A && G "$a" commit -qm base; } >/dev/null 2>&1 || return 1
+  printf 'v2\n' > "$a/src/a.ts"
+  new_repo "$a/nested/other" && mkdir -p "$a/nested/other/src" || return 1
+  printf 'v1\n' > "$a/nested/other/src/x.ts"
+  { G "$a/nested/other" add -A && G "$a/nested/other" commit -qm base; } >/dev/null 2>&1 || return 1
+  printf 'v2\n' > "$a/nested/other/src/x.ts"
+  NRD_ABS="$(cd "$a" && pwd -P)"
+  NRD_NEST_ABS="$(cd "$a/nested/other" && pwd -P)"
+  ( cd "$a" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$NRD_ABS" \
+      bash "$RD_WRITER" append --truncate --log "$NRD_LOG" \
+      --message "S50 IMPL completed — files: ${NRD_NEST_ABS}/src/x.ts, ${NRD_ABS}/src/a.ts" >/dev/null 2>&1 )
+}
+for NRD_KIND in ignored tracked; do
+  if [ "$NRD_KIND" = ignored ]; then
+    nested_redact_case "$NRD_KIND" nested/ .zensu/
+  else
+    nested_redact_case "$NRD_KIND" .zensu/
+  fi
+  NRD_RC=$?
+  { [ "$NRD_RC" -eq 0 ] && grep -qF 'S50 IMPL completed — files: <project>/nested/other/src/x.ts, <project>/src/a.ts' "$NRD_LOG"; }
+  check "X16b-pre ($NRD_KIND) the production writer logged both claims in their <project> spelling" "$(verdict $?)"
+  OUT_NRD="$(run_audit --log "$NRD_LOG" --project "$NRD_A" --receipt -)"
+  RC_NRD=$?
+  { [ "$RC_NRD" -eq 1 ] && printf '%s' "$OUT_NRD" | grep -qF 'UNVERIFIED (foreign root) — S50:'; }
+  check "X16b ($NRD_KIND) a <project>-redacted claim into a work tree nested under the anchor is foreign and fails the audit" "$(verdict $?)"
+  printf '%s' "$OUT_NRD" | grep -qF "it belongs to ${NRD_NEST_ABS}"
+  check "X16c ($NRD_KIND) the verdict names the nested work tree as the root" "$(verdict $?)"
+  { ! printf '%s' "$OUT_NRD" | grep -qE '^EDIT (LANDED|NOT LANDED).*nested/other'; }
+  check "X16d ($NRD_KIND) the nested claim reaches neither EDIT LANDED (untracked-by-design) nor EDIT NOT LANDED" "$(verdict $?)"
+  printf '%s' "$OUT_NRD" | grep -qF 'EDIT LANDED — S50: src/a.ts'
+  check "X16e ($NRD_KIND) the <project>-redacted in-anchor claim beside it still grades EDIT LANDED" "$(verdict $?)"
+  INV_NRD="$(run_audit --inventory --log "$NRD_LOG" --project "$NRD_A")"
+  RC_INV_NRD=$?
+  { [ "$RC_INV_NRD" -eq 0 ] \
+    && printf '%s\n' "$INV_NRD" | grep -qxF "foreign-root$(printf '\t')${NRD_NEST_ABS}" \
+    && [ "$(printf '%s\n' "$INV_NRD" | grep -c '^foreign-root')" -eq 1 ]; }
+  check "X16f ($NRD_KIND) --inventory reports the nested work tree, and only it, as a foreign root" "$(verdict $?)"
+done
+SUB_R="$WORK/nested-redact/subdir"
+new_repo "$SUB_R" && mkdir -p "$SUB_R/pkg/src" "$SUB_R/pkg/.zensu/logs" "$SUB_R/src"
+printf '.zensu/\n' > "$SUB_R/.gitignore"
+printf 'v1\n' > "$SUB_R/pkg/src/y.ts"
+printf 'v1\n' > "$SUB_R/src/y.ts"
+{ G "$SUB_R" add -A && G "$SUB_R" commit -qm base; } >/dev/null 2>&1
+printf 'v2\n' > "$SUB_R/pkg/src/y.ts"
+printf 'v2\n' > "$SUB_R/src/y.ts"
+SUB_PKG_ABS="$(cd "$SUB_R/pkg" && pwd -P)"
+SUB_LOG="$SUB_R/pkg/.zensu/logs/subdir.log"
+( cd "$SUB_R/pkg" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$SUB_PKG_ABS" \
+    bash "$RD_WRITER" append --truncate --log "$SUB_LOG" \
+    --message "S52 IMPL completed — files: ${SUB_PKG_ABS}/src/y.ts" >/dev/null 2>&1 )
+grep -qF 'S52 IMPL completed — files: <project>/src/y.ts' "$SUB_LOG"
+check "X16g-pre the production writer logged the subdirectory claim as <project>/src/y.ts" "$(verdict $?)"
+OUT_SUB="$(run_audit --log "$SUB_LOG" --project "$SUB_R/pkg" --receipt -)"
+RC_SUB=$?
+{ [ "$RC_SUB" -eq 0 ] && printf '%s' "$OUT_SUB" | grep -qF 'EDIT LANDED — S52: pkg/src/y.ts'; }
+check "X16g a <project> claim is rebuilt under the audited project root, not the repository top that holds a same-named dirty file" "$(verdict $?)"
+
+echo "== A relative claim into a nested work tree is placed like its absolute spelling =="
+for NRL_KIND in ignored tracked; do
+  if [ "$NRL_KIND" = ignored ]; then
+    nested_redact_case "relative-$NRL_KIND" nested/ .zensu/
+  else
+    nested_redact_case "relative-$NRL_KIND" .zensu/
+  fi
+  NRL_RC=$?
+  NRL_LOG="$NRD_A/.zensu/logs/nested-relative.log"
+  ( cd "$NRD_A" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$NRD_ABS" \
+      bash "$RD_WRITER" append --truncate --log "$NRL_LOG" \
+      --message "S53 IMPL completed — files: nested/other/src/x.ts, src/a.ts" >/dev/null 2>&1 )
+  { [ "$NRL_RC" -eq 0 ] && grep -qF 'S53 IMPL completed — files: nested/other/src/x.ts, src/a.ts' "$NRL_LOG"; }
+  check "X16h-pre ($NRL_KIND) the production writer logged both relative claims unchanged" "$(verdict $?)"
+  OUT_NRL="$(run_audit --log "$NRL_LOG" --project "$NRD_A" --receipt -)"
+  RC_NRL=$?
+  { [ "$RC_NRL" -eq 1 ] && printf '%s' "$OUT_NRL" | grep -qF 'UNVERIFIED (foreign root) — S53: claimed "nested/other/src/x.ts"'; }
+  check "X16h ($NRL_KIND) a relative claim into a work tree nested under the anchor is foreign and fails the audit" "$(verdict $?)"
+  printf '%s' "$OUT_NRL" | grep -qF "it belongs to ${NRD_NEST_ABS}"
+  check "X16i ($NRL_KIND) the verdict names the nested work tree as the root" "$(verdict $?)"
+  { ! printf '%s' "$OUT_NRL" | grep -qE '^EDIT (LANDED|NOT LANDED).*nested/other'; }
+  check "X16j ($NRL_KIND) the relative nested claim reaches neither EDIT LANDED (untracked-by-design) nor EDIT NOT LANDED" "$(verdict $?)"
+  printf '%s' "$OUT_NRL" | grep -qF 'EDIT LANDED — S53: src/a.ts'
+  check "X16k ($NRL_KIND) the relative in-anchor claim beside it still grades EDIT LANDED" "$(verdict $?)"
+  INV_NRL="$(run_audit --inventory --log "$NRL_LOG" --project "$NRD_A")"
+  RC_INV_NRL=$?
+  { [ "$RC_INV_NRL" -eq 0 ] \
+    && printf '%s\n' "$INV_NRL" | grep -qxF "foreign-root$(printf '\t')${NRD_NEST_ABS}" \
+    && [ "$(printf '%s\n' "$INV_NRL" | grep -c '^foreign-root')" -eq 1 ]; }
+  check "X16l ($NRL_KIND) --inventory reports the nested work tree, and only it, as a foreign root" "$(verdict $?)"
+done
+ln -s nested/other/src "$NRD_A/alias" 2>/dev/null || true
+if [ -L "$NRD_A/alias" ]; then
+  NRL_ALIAS_LOG="$NRD_A/.zensu/logs/nested-alias.log"
+  ( cd "$NRD_A" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$NRD_ABS" \
+      bash "$RD_WRITER" append --truncate --log "$NRL_ALIAS_LOG" \
+      --message "S54 IMPL completed — files: alias/x.ts" >/dev/null 2>&1 )
+  OUT_ALIAS="$(run_audit --log "$NRL_ALIAS_LOG" --project "$NRD_A" --receipt -)"
+  RC_ALIAS=$?
+  { [ "$RC_ALIAS" -eq 1 ] && printf '%s' "$OUT_ALIAS" | grep -qF 'UNVERIFIED (foreign root) — S54: claimed "alias/x.ts"' \
+    && printf '%s' "$OUT_ALIAS" | grep -qF "it belongs to ${NRD_NEST_ABS}"; }
+  check "X34 a relative claim through an in-anchor symlink into the nested work tree is placed where it resolves" "$(verdict $?)"
+else
+  check "X34 SKIPPED — this filesystem produced no real symlink for the in-anchor alias" PASS
+fi
+SBJ="$WORK/relative-subdir"
+new_repo "$SBJ" && mkdir -p "$SBJ/pkg/.zensu/logs"
+printf '.zensu/\n' > "$SBJ/.gitignore"
+printf 'v1\n' > "$SBJ/pkg/README.md"
+{ G "$SBJ" add -A && G "$SBJ" commit -qm base; } >/dev/null 2>&1
+new_repo "$SBJ/pkg/vendor/lib" && mkdir -p "$SBJ/pkg/vendor/lib/src"
+printf 'v1\n' > "$SBJ/pkg/vendor/lib/src/x.ts"
+{ G "$SBJ/pkg/vendor/lib" add -A && G "$SBJ/pkg/vendor/lib" commit -qm base; } >/dev/null 2>&1
+printf 'v2\n' > "$SBJ/pkg/vendor/lib/src/x.ts"
+SBJ_PKG_ABS="$(cd "$SBJ/pkg" && pwd -P)"
+SBJ_LOG="$SBJ/pkg/.zensu/logs/relative-subdir.log"
+( cd "$SBJ/pkg" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$SBJ_PKG_ABS" \
+    bash "$RD_WRITER" append --truncate --log "$SBJ_LOG" \
+    --message "S55 IMPL completed — files: pkg/vendor/lib/src/x.ts, vendor/lib/src/x.ts" >/dev/null 2>&1 )
+OUT_SBJ="$(run_audit --log "$SBJ_LOG" --project "$SBJ/pkg" --receipt -)"
+{ printf '%s' "$OUT_SBJ" | grep -qF 'UNVERIFIED (foreign root) — S55: claimed "pkg/vendor/lib/src/x.ts"' \
+  && printf '%s' "$OUT_SBJ" | grep -qF "it belongs to ${SBJ_PKG_ABS}/vendor/lib"; }
+check "X35 a relative claim is joined to the repository top, so its top-relative spelling into a work tree under a subdirectory project root is foreign" "$(verdict $?)"
+printf '%s' "$OUT_SBJ" | grep -qF 'EDIT NOT LANDED — S55: claimed vendor/lib/src/x.ts'
+check "X35a the project-relative spelling of that file names another path under the repository top and keeps the anchor's grading" "$(verdict $?)"
+SMU="$WORK/relative-submodule"
+new_repo "$SMU/up" && mkdir -p "$SMU/up/src"
+printf 'v1\n' > "$SMU/up/src/x.ts"
+{ G "$SMU/up" add -A && G "$SMU/up" commit -qm base; } >/dev/null 2>&1
+new_repo "$SMU/anchor" && mkdir -p "$SMU/anchor/.zensu/logs"
+printf '.zensu/\n' > "$SMU/anchor/.gitignore"
+printf 'v1\n' > "$SMU/anchor/a.ts"
+{ G "$SMU/anchor" add -A && G "$SMU/anchor" commit -qm base; } >/dev/null 2>&1
+SMU_UP_ABS="$(cd "$SMU/up" && pwd -P)"
+{ G "$SMU/anchor" -c protocol.file.allow=always submodule add -q "$SMU_UP_ABS" sub \
+  && G "$SMU/anchor" commit -qm sub; } >/dev/null 2>&1
+if [ -f "$SMU/anchor/sub/.git" ] && [ -f "$SMU/anchor/sub/src/x.ts" ]; then
+  printf 'v2\n' > "$SMU/anchor/sub/src/x.ts"
+  SMU_A_ABS="$(cd "$SMU/anchor" && pwd -P)"
+  SMU_LOG="$SMU/anchor/.zensu/logs/submodule.log"
+  ( cd "$SMU/anchor" && HOME="$RD_HOME_ABS" CLAUDE_PROJECT_DIR="$SMU_A_ABS" \
+      bash "$RD_WRITER" append --truncate --log "$SMU_LOG" \
+      --message "S56 IMPL completed — files: sub/src/x.ts, sub" >/dev/null 2>&1 )
+  OUT_SMU="$(run_audit --log "$SMU_LOG" --project "$SMU/anchor" --receipt -)"
+  { printf '%s' "$OUT_SMU" | grep -qF 'UNVERIFIED (foreign root) — S56: claimed "sub/src/x.ts"' \
+    && printf '%s' "$OUT_SMU" | grep -qF "it belongs to ${SMU_A_ABS}/sub"; }
+  check "X36 a relative claim inside a checked-out submodule is foreign and names the submodule root" "$(verdict $?)"
+  printf '%s' "$OUT_SMU" | grep -qF 'EDIT LANDED — S56: sub'
+  check "X36a a claim naming the submodule path itself is the anchor's own gitlink and grades against the anchor's change set" "$(verdict $?)"
+  INV_SMU="$(run_audit --inventory --log "$SMU_LOG" --project "$SMU/anchor")"
+  RC_INV_SMU=$?
+  { [ "$RC_INV_SMU" -eq 0 ] \
+    && printf '%s\n' "$INV_SMU" | grep -qxF "foreign-root$(printf '\t')${SMU_A_ABS}/sub" \
+    && [ "$(printf '%s\n' "$INV_SMU" | grep -c '^foreign-root')" -eq 1 ]; }
+  check "X36b --inventory reports the submodule, and only it, as a foreign root" "$(verdict $?)"
+else
+  check "X36 SKIPPED — git could not create a local submodule checkout here" PASS
+fi
+DN_DIR="$WORK/dirname-count"
+mkdir -p "$DN_DIR"
+printf '#!/bin/sh\nprintf x >> "%s/calls"\nexec "%s" "$@"\n' "$DN_DIR" "$(command -v dirname)" > "$DN_DIR/dirname"
+chmod +x "$DN_DIR/dirname"
+DN_MANY_LIST="src/a.ts"
+i=1
+while [ "$i" -lt 20 ]; do DN_MANY_LIST="$DN_MANY_LIST, src/f$i.ts"; i=$((i+1)); done
+printf '%s\n' "[10:00:30] S57 IMPL completed — files: src/a.ts" > "$DN_DIR/one.log"
+printf '%s\n' "[10:00:31] S57 IMPL completed — files: $DN_MANY_LIST" > "$DN_DIR/many.log"
+printf '%s\n' "[10:00:32] S58 IMPL completed — files: nested/other/src/x.ts" > "$DN_DIR/nested.log"
+dirname_calls() {
+  : > "$DN_DIR/calls"
+  PATH="$DN_DIR:$PATH" bash "$LIB" --inventory --log "$1" --project "$NRD_A" >/dev/null 2>&1
+  wc -c < "$DN_DIR/calls" | tr -d ' '
+}
+DN_ONE="$(dirname_calls "$DN_DIR/one.log")"
+DN_MANY="$(dirname_calls "$DN_DIR/many.log")"
+DN_NEST="$(dirname_calls "$DN_DIR/nested.log")"
+if [ "${DN_ONE:-0}" -gt 0 ] 2>/dev/null; then
+  [ "$DN_NEST" -gt "$DN_ONE" ]
+  check "X37-control the PATH stub sees the ancestor walk a nested relative claim takes ($DN_NEST > $DN_ONE dirname calls)" "$(verdict $?)"
+  [ "$DN_MANY" -eq "$DN_ONE" ]
+  check "X37 twenty in-anchor relative claims spawn no more dirname than one ($DN_MANY = $DN_ONE): the nesting pre-check forks nothing" "$(verdict $?)"
+else
+  check "X37 SKIPPED — this host did not route dirname through the PATH stub" PASS
+fi
+RDEEP_TAIL=""
+i=0
+while [ "$i" -lt 70 ]; do RDEEP_TAIL="${RDEEP_TAIL}z$i/"; i=$((i+1)); done
+mkdir -p "$NRD_A/nested/other/$RDEEP_TAIL"
+printf '%s\n' "[10:00:33] S59 IMPL completed — files: nested/other/${RDEEP_TAIL}x.ts" > "$DN_DIR/deep.log"
+OUT_RDEEP="$(run_audit --log "$DN_DIR/deep.log" --project "$NRD_A" --receipt -)"
+RC_RDEEP=$?
+{ [ "$RC_RDEEP" -eq 1 ] && printf '%s' "$OUT_RDEEP" | grep -qF 'UNVERIFIED (undetermined root) — S59:'; }
+check "X38 a relative claim whose walk to a nested work tree outruns the ancestor budget is undetermined, never graded against the anchor" "$(verdict $?)"
+INV_RDEEP="$(run_audit --inventory --log "$DN_DIR/deep.log" --project "$NRD_A")"
+RC_INV_RDEEP=$?
+{ [ "$RC_INV_RDEEP" -eq 2 ] && printf '%s' "$INV_RDEEP" | grep -qF -- '--inventory did not complete'; }
+check "X38a --inventory over that claim refuses to complete rather than shorten its foreign-root list" "$(verdict $?)"
+DN_DOT_LIST="./src/a.ts"
+i=1
+while [ "$i" -lt 20 ]; do DN_DOT_LIST="$DN_DOT_LIST, ./src/f$i.ts"; i=$((i+1)); done
+printf '%s\n' "[10:00:34] S60 IMPL completed — files: $DN_DOT_LIST" > "$DN_DIR/dot.log"
+if [ "${DN_ONE:-0}" -gt 0 ] 2>/dev/null; then
+  DN_DOT="$(dirname_calls "$DN_DIR/dot.log")"
+  [ "$DN_DOT" -eq "$DN_ONE" ]
+  check "X37b twenty ./-spelled in-anchor relative claims spawn no more dirname than one ($DN_DOT = $DN_ONE): a . segment is skipped, never walked" "$(verdict $?)"
+else
+  check "X37b SKIPPED — this host did not route dirname through the PATH stub" PASS
+fi
+MAL_DOT="./src/f1.ts"
+i=2
+while [ "$i" -le 40 ]; do MAL_DOT="$MAL_DOT ./src/f$i.ts"; i=$((i+1)); done
+MAL_SLASH="src//f1.ts"
+i=2
+while [ "$i" -le 70 ]; do MAL_SLASH="$MAL_SLASH src//f$i.ts"; i=$((i+1)); done
+printf '%s\n' "[10:00:35] S61 IMPL completed — files: $MAL_DOT" > "$DN_DIR/malformed-dot.log"
+printf '%s\n' "[10:00:36] S62 IMPL completed — files: $MAL_SLASH" > "$DN_DIR/malformed-slash.log"
+OUT_MDOT="$(run_audit --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" --receipt -)"
+run_audit --inventory --log "$DN_DIR/malformed-dot.log" --project "$NRD_A" >/dev/null 2>&1
+RC_INV_MDOT=$?
+{ printf '%s' "$OUT_MDOT" | grep -qF 'EDIT NOT LANDED — S61:' \
+  && ! printf '%s' "$OUT_MDOT" | grep -qF 'UNVERIFIED (undetermined root) — S61:' \
+  && [ "$RC_INV_MDOT" -eq 0 ]; }
+check "X39 a malformed list of ./-spelled paths stops at its first missing component: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+OUT_MSL="$(run_audit --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" --receipt -)"
+run_audit --inventory --log "$DN_DIR/malformed-slash.log" --project "$NRD_A" >/dev/null 2>&1
+RC_INV_MSL=$?
+{ printf '%s' "$OUT_MSL" | grep -qF 'EDIT NOT LANDED — S62:' \
+  && ! printf '%s' "$OUT_MSL" | grep -qF 'UNVERIFIED (undetermined root) — S62:' \
+  && [ "$RC_INV_MSL" -eq 0 ]; }
+check "X39a the same list spelled with empty segments stops there too: EDIT NOT LANDED, and --inventory completes" "$(verdict $?)"
+KILL_DIR="$WORK/inventory-kill"
+KILL_A="$KILL_DIR/anchor"
+mkdir -p "$KILL_DIR/stub"
+new_repo "$KILL_A" && mkdir -p "$KILL_A/src"
+printf '.zensu/\n' > "$KILL_A/.gitignore"
+printf 'v1\n' > "$KILL_A/src/a.ts"
+{ G "$KILL_A" add -A && G "$KILL_A" commit -qm base; } >/dev/null 2>&1
+new_repo "$KILL_A/slowtree/repo" && mkdir -p "$KILL_A/slowtree/repo/src"
+cat > "$KILL_DIR/stub/dirname" <<STUB
+#!/bin/sh
+case "\$1" in
+  (*slowtree*)
+    if [ ! -e "$KILL_DIR/walking" ]; then
+      echo \$\$ > "$KILL_DIR/walking"
+      exec sleep 10
+    fi
+    ;;
+esac
+exec "$(command -v dirname)" "\$@"
+STUB
+chmod +x "$KILL_DIR/stub/dirname"
+printf '%s\n' "[10:00:37] S63 IMPL completed — files: slowtree/repo/src/f1.ts, slowtree/repo/src/f2.ts, slowtree/repo/src/f3.ts" > "$KILL_DIR/kill.log"
+PATH="$KILL_DIR/stub:$PATH" bash "$LIB" --inventory --log "$KILL_DIR/kill.log" --project "$KILL_A" > "$KILL_DIR/out" 2>/dev/null </dev/null &
+KILL_PID=$!
+i=0
+while [ "$i" -lt 300 ] && [ ! -s "$KILL_DIR/walking" ]; do sleep 0.1; i=$((i+1)); done
+if [ -s "$KILL_DIR/walking" ]; then
+  kill -TERM "$KILL_PID" 2>/dev/null
+  kill "$(cat "$KILL_DIR/walking")" 2>/dev/null
+  wait "$KILL_PID"
+  KILL_RC=$?
+  { [ "$KILL_RC" -eq 143 ] && grep -qx 'claimed-files=3' "$KILL_DIR/out"; }
+  check "X40 an --inventory child stopped by TERM while it walks a claim has already printed claimed-files=, the lower bound --tdd-complete arms on (rc=$KILL_RC)" "$(verdict $?)"
+else
+  kill "$KILL_PID" 2>/dev/null
+  wait "$KILL_PID" 2>/dev/null
+  check "X40 SKIPPED — this host did not route dirname through the PATH stub" PASS
+fi
 
 echo "== Harness hygiene =="
 # `check` counts anything that is not the literal `PASS` as a FAILURE, and the

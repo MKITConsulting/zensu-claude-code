@@ -54,6 +54,16 @@ else
   check "C1b guarded zensu-log command deduplicated (definitions=$LOG_COMMAND_DEFINITION_COUNT uses=$LOG_COMMAND_USE_COUNT)" FAIL
 fi
 
+if node -e '
+  const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const regs=((h.hooks&&h.hooks.PreToolUse)||[]).flatMap(e=>(e.hooks||[]).filter(z=>/pre-edit-tdd-reminder\.sh/.test(z.command||"")));
+  process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
+' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null; then
+  check "C1c registration carries the 60 s gate timeout" PASS
+else
+  check "C1c registration carries the 60 s gate timeout" FAIL
+fi
+
 PAYLOAD_DENY='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/x.ts"},"session_id":"hookmirror-test"}'
 
 C2_STATE_DIR="$(mktemp -d -t hookmirror-c2-XXXX)"
@@ -92,6 +102,25 @@ if [ "$RC_C3" = "0" ] && [ "$C3_LINES" = "4" ] && [ -z "$C3_DIFF" ]; then
 else
   check "C3 denial + ZENSU_HOOK_LOG -> exact 4-line mirror (rc=$RC_C3, lines=$C3_LINES, diff=${C3_DIFF:0:300}, content=${C3_CONTENT:0:300})" FAIL
 fi
+C3B_REASON="$(printf '%s' "$OUT_C3" | node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s.trim().split(/\n/).filter(Boolean).pop());
+      process.stdout.write(j.hookSpecificOutput.permissionDecisionReason || "");
+    } catch (_) { process.stdout.write(""); }
+  });
+' 2>/dev/null)"
+case "$C3B_REASON" in
+  *"read from the environment Claude Code was started in"*"no Edit, Write or Bash prefix can set it"*"Ask the user to choose"*"--tdd-reset"*"restart Claude Code with ZENSU_TDD_GATE=off"*)
+    case "$C3B_REASON" in
+      *"Legitimate non-TDD edit: set ZENSU_TDD_GATE=off"*)
+        check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" FAIL ;;
+      *) check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" PASS ;;
+    esac ;;
+  *) check "C3b deny reason routes a non-TDD edit to the user (got: ${C3B_REASON:0:400})" FAIL ;;
+esac
 rm -rf "$C3_STATE_DIR" "$C3_LOG" "$C3_EXPECTED"
 
 C4_STATE_DIR="$(mktemp -d -t hookmirror-c4-XXXX)"

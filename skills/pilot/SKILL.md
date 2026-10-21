@@ -70,10 +70,10 @@ runs until the feature reaches `released` or the user picks Exit. Checkpoints
 sit ONLY at skill boundaries: once a delegated skill starts, pilot never
 interrupts it — in particular the `/zensu:tdd` review chain runs to its own
 terminus (owned by `/zensu:self-review`; pilot never touches the chain-state
-markers itself). The Stop-hook backstop hard-enforces that terminus for every
-`/zensu:tdd` chain in the session (`--tdd-begin` re-arms it per chain), so
-pilot's repeated delegations each get the full guarantee — and pilot never
-interrupts a chain either way.
+markers itself). The Stop-hook backstop enforces that terminus, up to each
+chain's Stop cap, for every `/zensu:tdd` chain in the session (`--tdd-begin`
+re-arms it per chain), so each of pilot's repeated delegations gets the same
+enforcement — and pilot never interrupts a chain either way.
 
 ## Workflow
 
@@ -203,8 +203,9 @@ and the relevant slice of the status card as the skill's input. Rules:
 
 ## Degradation ladder (never dead-end)
 
-- `zensu` CLI missing or `zensu auth status` failing → offer `/zensu:setup`,
-  then stop (pilot cannot probe without the backend).
+- `zensu` CLI missing, or `zensu auth status` failing or printing `Not logged in`
+  (it exits 0 then) → offer `/zensu:setup`, then stop (pilot cannot probe without
+  the backend).
 - `gh` missing or unauthenticated → skip the PR probes, say so on the status
   card, and drop all PR-state-keyed rows (review presence, unresolved threads,
   the review-/merged-keyed `testing` transitions, the `CLOSED` fallback). The
