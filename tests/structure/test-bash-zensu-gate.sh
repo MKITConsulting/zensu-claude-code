@@ -141,12 +141,13 @@ PAYLOAD_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES
 LIMIT="${PAYLOAD_LIMIT:-1048576}"
 sized_payload() {
   node -e '
-    const [file, total, prefix, agent] = process.argv.slice(1);
-    const base = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: prefix + " && : " }, session_id: "gate-test", cwd: "/tmp" };
+    const [file, total, prefix, agent, tool] = process.argv.slice(1);
+    const shell = tool || "Bash";
+    const base = { hook_event_name: "PreToolUse", tool_name: shell, tool_input: { command: prefix + (shell === "Bash" ? " && : " : "; # ") }, session_id: "gate-test", cwd: "/tmp" };
     if (agent) { base.agent_id = "gate-subagent-1"; base.agent_type = agent; }
     base.tool_input.command += "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
     require("fs").writeFileSync(file, JSON.stringify(base));
-  ' "$1" "$2" "$3" "${4:-}"
+  ' "$1" "$2" "$3" "${4:-}" "${5:-}"
 }
 size_denied() {
   printf '%s' "$1" | grep -qF '"permissionDecision":"deny"' \
@@ -180,6 +181,17 @@ fi
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PLAIN" 2>/dev/null | classify)"
 [ "$OUT" = ALLOW ] && check "B45e an oversized command that names no zensu invocation stays outside this gate" PASS \
   || check "B45e oversized non-zensu command (got '$OUT')" FAIL
+SIZED_PS_MUTATION="$PROJECT/sized-ps-mutation.json"
+SIZED_PS_PLAIN="$PROJECT/sized-ps-plain.json"
+sized_payload "$SIZED_PS_MUTATION" "$((LIMIT + 150000))" "zensu security classify f1" "" PowerShell
+sized_payload "$SIZED_PS_PLAIN" "$((LIMIT + 150000))" "Get-ChildItem" "" PowerShell
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PS_MUTATION" 2>/dev/null)"
+size_denied "$OUT" "$((LIMIT + 150000))" \
+  && check "B45f an oversized PowerShell command that names zensu gets the same size deny through the bind" PASS \
+  || check "B45f oversized PowerShell zensu command (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PS_PLAIN" 2>/dev/null | classify)"
+[ "$OUT" = ALLOW ] && check "B45g an oversized PowerShell command that names no zensu stays outside this gate" PASS \
+  || check "B45g oversized PowerShell command without zensu (got '$OUT')" FAIL
 
 # B8 workflow-active (skill running) -> mutation in declared set ALLOW
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
