@@ -37,10 +37,20 @@ started for every session that loaded the plugin, and each start materialized a 
 of several hundred megabytes whether or not a browser was ever opened — that cost is the whole
 reason for this design, so do not reintroduce a plugin-scoped MCP server to "restore" a control.
 
-The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair on the `Bash`
+The controls the MCP-era capability broker held moved into two places: a PreToolUse/PostToolUse pair on the `Bash|PowerShell`
 matcher (`hooks/pre-browser-navigation-consent.sh`, `hooks/post-browser-navigation-consent.sh`, both
 thin wrappers around `hooks/lib/verify-consent-v1.js` modes `pre`/`post`), and the per-run config
 file the browser is opened with, written by `scripts/verify-browser-config.js`.
+
+**A PowerShell call is refused, not judged.** The lexer reads Bash, so a PowerShell call that
+carries both markers denies with `POWERSHELL_NOT_JUDGED`, which names the Bash tool and the Grep
+tool, and the recorder skips a PowerShell call (`powershell-call`). The markers are read over
+`spellings()` of `hooks/lib/powershell-command-v1.js`, which decodes backtick and Unicode escapes
+and joins string literals in both the Windows PowerShell 5.1 and the PowerShell 7 reading, and a
+call that reaches node while that module cannot load is refused. For a PowerShell payload the
+prefilter also forwards a text that names `wright` and `verify` or holds `u{`, because those
+spellings never name `playwright-cli` literally, and the pre hook's fallback counts any of
+`wright`, `verify` or `u{` as marked. V70 to V70g and H17g5-H17g6 pin both halves.
 
 **SCOPE is `zensu-verify-*` sessions only, and that is a decision, not an omission.** Gating every
 `playwright-cli` call would deny a user's own browser skills — which legitimately use `eval`,
@@ -56,7 +66,10 @@ and the skill's instruction to use only the printed session is prose, not a boun
    normalizes the payload with ONE `LC_ALL=C sed` pass that first pairs every JSON-escaped
    backslash — so an escaped backslash before `n` is never read as a line break — and then joins
    a JSON-encoded backslash-newline or backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d`
-   pass that removes every quote, backslash and pairing sentinel, then matches case-insensitively.
+   pass that removes every quote, backslash, backtick and pairing sentinel, then matches
+   case-insensitively. The backtick matters for Bash too: an empty command substitution splits a
+   marker without changing what runs, so ``` playwright-cl``i ``` runs `playwright-cli`; `H16q` and
+   `H16r` hold that through the real pre hook and the module-absent copy.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
    CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
@@ -66,7 +79,7 @@ and the skill's instruction to use only the printed session is prose, not a boun
    only. **When the library cannot be sourced**, or sourcing it defines no
    `zensu_browser_consent_marked`, each wrapper falls back to its own test: one `LC_ALL=C sed`
    pass drops the JSON escapes `\n`, `\r` and `\t` WITHOUT first pairing escaped backslashes, one
-   `LC_ALL=C tr -d` pass removes quotes and backslashes, and EITHER marker alone — `playwright` or
+   `LC_ALL=C tr -d` pass removes quotes, backslashes and backticks, and EITHER marker alone — `playwright` or
    `zensu-verify`, in any letter case, in that text or in the raw payload — counts as marked. That
    text is the whole hook payload, not only the command, so a working directory that names either
    marker marks every Bash call of that project. The pre hook then
@@ -347,7 +360,7 @@ version other than `PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the re
 read, renders WARN and names what was not measured against it; a difference is disclosed, never a
 failure. The verify-feature row runs its availability checks FIRST — hook pair, prefilter library,
 module and helper present, the module no symlink (both hooks refuse one) and loadable, the helper
-loadable, both hooks registered on a matcher that covers `Bash` — and reports `unavailable`
+loadable, both hooks registered on a matcher that covers `Bash` and `PowerShell` — and reports `unavailable`
 before it classifies a policy, so a valid policy over an
 unregistered recorder is not reported as ready. Each hook is named with its own state — "consent
 hook" is the PreToolUse gate, "consent recorder" the PostToolUse half — joined by `; ` when both
@@ -390,7 +403,12 @@ announces a prompt rather than a capability the plugin hands itself.
   derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
-- `CONSENT_MATCHER` (`'Bash'`) ↔ both registrations in `hooks/hooks.json` ↔
+- The `PATH` walk of `hooks/lib/playwright-cli-version-v1.js` — `findBinary` and its `cwd-relative`
+  verdict — has a hand copy in `hooks/lib/zensu-cli-version-v1.js`
+  (`.claude/rules/zensu-cli-floor.md`). The unit case `the PATH walk decides as the playwright-cli
+  probe walk does over the same fixtures` in `tests/structure/zensu-cli-version-v1.test.js`
+  compares the two on POSIX, so a change to this walk changes that copy in the same commit.
+- `CONSENT_MATCHER` (`'Bash|PowerShell'`) and `CONSENT_TOOLS` ↔ both registrations in `hooks/hooks.json` ↔
   `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
   doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
   start (…)` bullet in `skills/doctor/SKILL.md`, which must name every cause those reasons carry

@@ -148,11 +148,11 @@ if grep -qF 'post-artifact-redact.sh' "$HOOKS_JSON" 2>/dev/null \
     const post = (j.hooks && j.hooks.PostToolUse) || [];
     const on = m => post.some(e => e.matcher === m
       && (e.hooks || []).some(h => String(h.command || "").includes("post-artifact-redact.sh")));
-    process.exit((on("Edit|Write|MultiEdit") && on("Bash")) ? 0 : 1);
+    process.exit((on("Edit|Write|MultiEdit") && on("Bash|PowerShell")) ? 0 : 1);
   ' "$HOOKS_JSON" 2>/dev/null; then
-  check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash" PASS
+  check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" PASS
 else
-  check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash" FAIL
+  check "R0c hooks.json registers the redactor on Edit|Write|MultiEdit and Bash|PowerShell" FAIL
 fi
 
 # ── R1-R3: the narrative log, written through the `append` verb ──────
@@ -199,6 +199,14 @@ sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
 assert_clean "hand-rolled \`printf >>\` log" "$RAW_LOG" R7 R7b R7c
 assert_survived "the hand-rolled log line" "$RAW_LOG" 'RAW ' R7d
+
+RAW_PS_LOG="$PROJ/.zensu/logs/2026-01-01-0002_tdd-raw-ps.log"
+printf 'RAWPS %s\n' "$LEAK_TEXT" > "$RAW_PS_LOG"
+printf '{"hook_event_name":"PostToolUse","tool_name":"PowerShell","tool_input":{"command":%s},"tool_response":{"stdout":""},"session_id":%s}' \
+  "$(json_str 'Add-Content -Path $log -Value x')" "$(json_str "$SESSION")" \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
+assert_clean "hand-rolled PowerShell log write" "$RAW_PS_LOG" R7p R7pb R7pc
+assert_survived "the hand-rolled PowerShell log line" "$RAW_PS_LOG" 'RAWPS ' R7pd
 
 # ── R9: idempotence, and the no-op writes nothing at all ─────────────
 if [ -f "$REDACT" ] && [ -f "$LOGF" ]; then

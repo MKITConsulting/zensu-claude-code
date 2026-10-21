@@ -592,6 +592,47 @@ test('F2 the record-unreadable remedy names the pruned-AND-orphaned conjunction 
     'the bare exclusion is what made the remedy false in the combined state');
 });
 
+test('F3 the record-unreadable remedy names the retired remnant and points at the reader rows', () => {
+  const core = require(path.join(LIB, 'session-control-core-v1.js'));
+  const { REMEDY } = report();
+  const text = REMEDY[core.ADOPTION_REFUSALS.RECORD_UNREADABLE];
+  assert.match(text, /left a remnant it retired \(an \.orphaned_at marker and no manifest\)/);
+  assert.match(text, /The rows below name why each of the three record readers refused this record\./);
+  assert.equal(/cannot tell the remaining causes apart/.test(text), false);
+  assert.equal(/cannot name the cause/.test(text), false);
+});
+
+test('F4 the reader rows name each refusal and degrade to one sentence when the core cannot answer', () => {
+  const { readerRefusalRows, safe } = report();
+  const request = { recordsDir: '/records', sessionId: 'session', host: 'claude' };
+  const seen = [];
+  const rows = readerRefusalRows(request, {
+    recordReaderRefusals: (asked) => {
+      seen.push(asked);
+      return [
+        { reader: 'strict', refusal: 'host-specific plugin manifest is missing: /cache/0.21.1/.claude-plugin/plugin.json' },
+        { reader: 'orphaned-project-root', refusal: 'context project root still exists' },
+        { reader: 'pruned-plugin-root', refusal: 'context plugin root still exists and carries no valid orphan marker' },
+      ];
+    },
+  });
+  assert.deepEqual(seen, [request]);
+  assert.ok(rows.startsWith('\nWhy each record reader refused this record:\n'), rows);
+  assert.ok(rows.includes('  strict read         : '
+    + safe('host-specific plugin manifest is missing: /cache/0.21.1/.claude-plugin/plugin.json') + '\n'), rows);
+  assert.ok(rows.includes('  project root gone   : context project root still exists\n'), rows);
+  assert.ok(rows.includes('  installation pruned : context plugin root still exists and carries no valid orphan marker\n'), rows);
+
+  assert.match(readerRefusalRows(request, {}), /cannot ask the record readers/);
+  assert.match(readerRefusalRows(request, { recordReaderRefusals: () => { throw new Error('boom'); } }),
+    /could not be asked/);
+  assert.match(readerRefusalRows(request, { recordReaderRefusals: () => [] }), /could not be asked/);
+  const changed = readerRefusalRows(request, { recordReaderRefusals: () => [{ reader: 'strict', refusal: null }] });
+  assert.ok(changed.includes('  strict read         : accepted the record; it changed after the check above, so re-run this command\n'), changed);
+  const unknown = readerRefusalRows(request, { recordReaderRefusals: () => [{ reader: 'x  : forged', refusal: 'y' }] });
+  assert.ok(unknown.includes('  ' + safe('x  : forged') + ' : y\n'), unknown);
+});
+
 // ── WB / the workflow-baseline half of an already-served run ────────────────
 // The record needs nothing and the workflow document it ANCHORS can still be
 // gone; while it is, the capability gate denies every tool in the session. This
@@ -939,6 +980,42 @@ test('MAIN the read-only preview: an adoptable preview is the one answer that re
   assert.ok(out.startsWith('Zensu session adoption — ADOPTABLE'), out.slice(0, 80));
   assert.ok(out.includes('Run the same command with --confirm to adopt'));
   assert.equal(code, 0);
+});
+
+test('MAIN a pruned minting installation is marked as pruned from the plugin cache, never as gone from disk', () => {
+  const { out, code } = runMain(seam({
+    core: { adoptableRecord: () => ({ ...SEAM_ADOPTABLE, prunedPluginRoot: true }) },
+    autoAdopt: { previewAdoption: () => ({ outcome: 'adoptable', reason: 'adoptable', supersededFile: null, leases: null, error: null }) },
+  }), false);
+  assert.ok(out.includes('record minted by : 0.20.0 (installation pruned from the plugin cache)\n'), out);
+  assert.equal(out.includes('no longer on disk'), false);
+  assert.equal(code, 0);
+});
+
+test('MAIN a record-unreadable refusal renders the remedy and one row per record reader, and exits 1', () => {
+  const asked = [];
+  const { out, code } = runMain(seam({
+    core: {
+      adoptableRecord: () => ({
+        ok: false, reason: 'record-unreadable', recorded: null, executing: null,
+        orphanedProjectRoot: false, prunedPluginRoot: false,
+      }),
+      recordReaderRefusals: (request) => {
+        asked.push(request);
+        return [
+          { reader: 'strict', refusal: 'context runtime digest mismatch' },
+          { reader: 'orphaned-project-root', refusal: 'context runtime digest mismatch' },
+          { reader: 'pruned-plugin-root', refusal: 'context plugin root still exists and still carries its manifest' },
+        ];
+      },
+    },
+  }), false);
+  assert.ok(out.startsWith('Zensu session adoption — NOT adoptable (record-unreadable)'), out.slice(0, 80));
+  assert.ok(out.includes(report().REMEDY['record-unreadable']));
+  assert.ok(out.includes('  strict read         : context runtime digest mismatch\n'), out);
+  assert.ok(out.includes('  installation pruned : context plugin root still exists and still carries its manifest\n'), out);
+  assert.deepEqual(asked, [{ ...SEAM_REQUEST }]);
+  assert.equal(code, 1);
 });
 
 test('MAIN the provenance branches read the core vocabulary, not the literals', () => {

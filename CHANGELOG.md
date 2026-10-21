@@ -50,6 +50,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Zensu refuses for a session token, and points at the order file instead. It now also denies the
   usual spellings that set, change or remove `ZENSU_API_URL`, `--api-url` on `zensu`, and `env -i`
   or `exec -c`, which drop the session token.
+- **PowerShell tool**: Zensu's shell hooks now also fire for Claude Code's PowerShell tool, which
+  is on by default on Windows for claude.ai and Console accounts. Each one judges a PowerShell
+  command or refuses it. The CLI write-gate judges a literal `zensu` call and denies one it cannot
+  read, such as a call another command starts or a noun or verb built at run time. The Session
+  Control check denies a command that names a protected input, writes the Environment provider
+  under a name built at run time or turns text built at run time into code. While
+  `hooks.bashWriteGate` is on, the source-write rules pass only a read-only PowerShell command.
+  The secret scan reads the whole command, the browser consent gate refuses a `zensu-verify`
+  browser call, and a work-order session refuses the tool. A PowerShell command has no inline gate
+  escape. Every refusal of a command a gate cannot judge names the Bash tool, which works as
+  before, so `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` is no longer required and stays an option.
+  Because Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is missing, the
+  analyzer reads a string escape the two versions decode differently both ways. The
+  `shell tools:` row of `/zensu:doctor` reports the coverage.
+- **CLI write-gate**: the gate now covers the zensu-cli 0.10.0 surface. A `zensu work`, `zensu plan`,
+  `zensu mocks create` or `zensu journeys step-update|step-delete` command that changes Zensu is
+  denied on the main thread unless a skill window declares it, like every other mutation; reads
+  such as `zensu work list` or `zensu plan status` still pass. A command that records your decision
+  (creating, approving, requeuing, cancelling or confirming the merge of a work order, pushing,
+  approving, finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing
+  its follow-ups, answering or overturning a question, the automation policy and the registered
+  repositories) is denied with a reason that leaves it to you to run, even inside a skill window
+  that declares it, and so is a work-order protocol verb. `zensu security analyze`,
+  `zensu security threat-model` and `zensu doc claude-md` are reads now and pass without a window.
+  A value flag before the verb, as in `zensu features --product p1 create`, or a shell expansion
+  such as `zensu features $FLAGS create` no longer hides the verb. In a work-order session the gate
+  leaves `zensu work ask` and `zensu work followup` to the work-order gate. `ZENSU_MCP_GATE=off`
+  still lets a deliberate one-off through.
+- **work-order gate**: a work-order session can no longer push a work plan or accept or dismiss a
+  plan follow-up, which are a person's decisions like approving a plan. The gate now finds the noun
+  and the verb of a `zensu` call the way the CLI does, so a value flag or an empty word in front of
+  them, as in `zensu --reason x plan abandon <id>`, no longer hides a denied command, and it reads
+  `zensu work repos` like `zensu work repositories`. A `zensu` call that the CLI itself refuses, with
+  a flag, argument, validation or setup error, is no longer retried as if Zensu had not answered:
+  the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
+  that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
+  `zensu auth login`, which cannot help there.
 - **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
   while its team review runs. A change in one of the session's review evidence leases (a seat
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop

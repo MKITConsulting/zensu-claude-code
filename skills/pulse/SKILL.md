@@ -16,7 +16,7 @@ Your Developer Journal: privacy-first session tracking that helps you understand
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - Git repository (for HEAD SHA and branch context)
 

@@ -89,8 +89,10 @@
 #         still declare the recorded version;
 #       * else, when that root was PRUNED from the cache,
 #         readPrunedPluginRootContext, which re-measures NEITHER the digest nor the
-#         declared version — nothing can read a tree that is gone — and instead
-#         PROVES the root absent with its parent still present.
+#         declared version — nothing can read a tree that is gone or retired — and
+#         instead PROVES the root absent, or a remnant the host retired (a real
+#         directory, no host manifest, a 13-digit .orphaned_at), with its parent
+#         still present.
 #     On BOTH rungs: the session-hash match, the full schema and principal-profile
 #     validation, source_revision === runtime_digest, the sibling-root bound, the
 #     plugin_data equality check, and ADOPTION_SAFE_VERSION_RE on both versions
