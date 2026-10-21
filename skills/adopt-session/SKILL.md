@@ -273,12 +273,13 @@ removed worktree leaves, so the tree probably MOVED). Each writes nothing.
 
 **The OTHER recorded root is closed.** A minting installation pruned from the
 plugin cache is admitted at condition 1 through `readPrunedPluginRootContext`,
-which waives that root's existence alone and proves the absence; the strict read
-must fail first, so it never reaches a record any installation could still serve.
-Nothing can re-measure a tree that is gone, so the runtime digest and the declared
-version are taken on the record's word there — the stated cost, and the reason such
-a record is adopted once rather than served. The COMBINED state — project root gone
-AND installation pruned — still refuses `record-unreadable`.
+which waives that root's existence alone and proves the absence, or a remnant the
+host retired (`.orphaned_at`, no manifest); the strict read must fail first, so it
+never reaches a record any installation could still serve. Nothing can re-measure
+such a tree, so the runtime digest and the declared version are taken on the
+record's word — the stated cost, and the reason such a record is adopted once
+rather than served. The COMBINED state — project root gone AND installation
+pruned — still refuses `record-unreadable`.
 
 ### `--reanchor` — moving the anchor to a sibling worktree of the same repository
 
@@ -432,7 +433,7 @@ remedy inline, so render that verbatim too.
 | `session-id-unusable` | Entry-point refusal, raised before anything is read: the session identity the command was given is empty, malformed, or a DERIVED Session Control identifier rather than the raw host session id. Nothing is read and nothing is changed, and the record store is not implicated — a fresh Claude Code session is the way forward. |
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
-| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation merely pruned from the cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. |
+| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. A recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the cache, a retired remnant included. Both together still land here, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. The report names why each record reader refused it. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
