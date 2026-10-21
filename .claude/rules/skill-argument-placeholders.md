@@ -82,6 +82,6 @@ config key or attestation moves.
   without `CLAUDE_PROJECT_DIR`, which the Bash tool does not carry, so a project-level
   `hooks.reviewJudge` or `hooks.findingVerification` is ignored there. The tdd probes in
   `skills/tdd/references/review-chain.md` set it from `{project_root}` and the self-review probe
-  from `$TOP`, because the post-review hook's consume gate reads the project config and a probe
-  that ignored it ran a review the gate then judged by another configuration.
+  to the bound project root, because the post-review hook's consume gate reads the project config
+  and a probe that ignored it ran a review the gate then judged by another configuration.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not checked.

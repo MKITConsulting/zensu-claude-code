@@ -26,6 +26,9 @@ _ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_RO
 _ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
 [ -f "$_ZENSU_TDD_CONTROL_CORE" ] && [ ! -L "$_ZENSU_TDD_CONTROL_CORE" ] \
   || { return 2 2>/dev/null || exit 2; }
+_ZENSU_TDD_PATH_SAFETY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/state-path-safety-v1.js"
+[ -f "$_ZENSU_TDD_PATH_SAFETY" ] && [ ! -L "$_ZENSU_TDD_PATH_SAFETY" ] \
+  || { return 2 2>/dev/null || exit 2; }
 _ZENSU_TDD_CHAIN_RECOVERY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/chain-recovery-v1.js"
 
 _tdd_chain_recovery_module_ok() {
@@ -211,10 +214,11 @@ _tdd_native_project_path() {
 # macOS' /var -> /private/var alias). Every component *below* that anchor is
 # checked with lstat. For an explicit state path outside both anchors, the
 # nearest existing, non-symlink ancestor becomes the entry point.
-_tdd_paths_safe() {
+_tdd_paths_safe_argv() {
   [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
   local path_args=("$@") native_path_args=() index=0 target native_target mode
   local native_project_root="" native_temp_root="" native_home_root=""
+  _ZENSU_TDD_PATHS_ARGV=()
   while [ "$index" -lt "${#path_args[@]}" ]; do
     target="${path_args[$index]}"
     mode="${path_args[$((index + 1))]}"
@@ -240,71 +244,17 @@ _tdd_paths_safe() {
   if [ -n "${HOME:-}" ]; then
     native_home_root="$(_tdd_native_path "$HOME")" || return 1
   fi
-  MSYS2_ARG_CONV_EXCL='*' node -e '
-      const fs = require("fs");
-      const path = require("path");
-      const within = (base, candidate) => {
-        const rel = path.relative(base, candidate);
-        return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
-      };
-      const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(1);
-      const trusted = [projectRoot, tempRoot, homeRoot]
-        .filter(Boolean).map(value => path.resolve(value));
-      const validModes = new Set(["regular", "regular-or-absent", "directory", "directory-or-absent"]);
-      for (let pair = 0; pair < args.length; pair += 2) {
-        const target = path.resolve(args[pair]);
-        const mode = args[pair + 1];
-        if (!validModes.has(mode)) process.exit(3);
-        const candidates = trusted.filter(value => within(value, target)).sort((a, b) => b.length - a.length);
-        let anchor = candidates[0] || "";
-        if (!anchor) {
-          let cursor = path.dirname(target);
-          for (;;) {
-            try {
-              const st = fs.lstatSync(cursor);
-              if (st.isDirectory() && !st.isSymbolicLink()) {
-                anchor = cursor;
-                break;
-              }
-            } catch (error) {
-              if (error.code !== "ENOENT") process.exit(3);
-            }
-            const parent = path.dirname(cursor);
-            if (parent === cursor) process.exit(3);
-            cursor = parent;
-          }
-        }
-        let physicalAnchor;
-        try { physicalAnchor = fs.realpathSync(anchor); }
-        catch (_) { process.exit(3); }
-        const rel = path.relative(anchor, target);
-        if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) process.exit(3);
-        const parts = rel ? rel.split(path.sep).filter(Boolean) : [];
-        let current = physicalAnchor;
-        let missing = false;
-        for (let i = 0; i < parts.length; i += 1) {
-          current = path.join(current, parts[i]);
-          const leaf = i === parts.length - 1;
-          if (missing) continue;
-          let st;
-          try { st = fs.lstatSync(current); }
-          catch (error) {
-            if (error.code !== "ENOENT") process.exit(3);
-            missing = true;
-            continue;
-          }
-          if (st.isSymbolicLink()) process.exit(3);
-          if (!leaf && !st.isDirectory()) process.exit(3);
-          if (leaf) {
-            if ((mode === "regular" || mode === "regular-or-absent")
-                && (!st.isFile() || st.nlink !== 1)) process.exit(3);
-            if ((mode === "directory" || mode === "directory-or-absent") && !st.isDirectory()) process.exit(3);
-          }
-        }
-        if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
-      }
-    ' "$native_project_root" "$native_temp_root" "$native_home_root" \
-      "${native_path_args[@]}" >/dev/null 2>&1
+  _ZENSU_TDD_PATHS_ARGV=("$native_project_root" "$native_temp_root" "$native_home_root" \
+    "${native_path_args[@]}")
+}
+
+_tdd_paths_safe_check() {
+  MSYS2_ARG_CONV_EXCL='*' node "$_ZENSU_TDD_PATH_SAFETY" "${_ZENSU_TDD_PATHS_ARGV[@]}" >/dev/null 2>&1
+}
+
+_tdd_paths_safe() {
+  _tdd_paths_safe_argv "$@" || return 1
+  _tdd_paths_safe_check
 }
 
 _tdd_path_safe() {
@@ -313,14 +263,19 @@ _tdd_path_safe() {
   _tdd_paths_safe "$target" "$mode"
 }
 
-_tdd_state_storage_safe() {
+_tdd_state_storage_argv() {
   local state_file="${1:-}" state_dir
   [ -n "$state_file" ] || return 1
   state_dir="$(dirname "$state_file")"
-  _tdd_paths_safe \
+  _tdd_paths_safe_argv \
     "$state_dir" directory \
     "$state_file" regular-or-absent \
     "${state_file}.lock" regular-or-absent
+}
+
+_tdd_state_storage_safe() {
+  _tdd_state_storage_argv "${1:-}" || return 1
+  _tdd_paths_safe_check
 }
 
 _tdd_prepare_directory() {
@@ -578,19 +533,24 @@ tdd_write_autopilot_adopted() {
 }
 
 _tdd_core_lock_keeper() {
-  node -e '
+  MSYS2_ARG_CONV_EXCL='*' node -e '
     const fs = require("node:fs");
-    const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
+    const [corePath, lockDirectory, resourcePath, safetyPath, ...storage] = process.argv.slice(1);
     let core = null;
     let lease = null;
     try {
       core = require(corePath);
+      const safety = require(safetyPath);
+      if (!safety.pathsSafeArgv(storage)) {
+        fs.writeSync(1, "UNSAFE\n");
+        process.exit(0);
+      }
       lease = core.acquireExternalProcessLock({
         lockDirectory,
         resourcePath,
         ownerPid: process.pid,
       });
-      fs.writeSync(1, "READY\n");
+      fs.writeSync(1, safety.pathsSafeArgv(storage) ? "READY\n" : "UNSAFE-HELD\n");
       const command = fs.readFileSync(0, "utf8");
       if (command !== "RELEASE\n") throw new Error("lock keeper release protocol failed");
       core.releaseExternalProcessLock({
@@ -617,7 +577,7 @@ _tdd_core_lock_keeper() {
       try { fs.writeSync(1, `ERROR ${detail}\n`); } catch (_) { /* parent exited */ }
       process.exit(3);
     }
-  ' -- "$1" "$2" "$3"
+  ' -- "$@"
 }
 
 _tdd_locked_run() {
@@ -627,7 +587,8 @@ _tdd_locked_run() {
   # Every caller uses the Core lease namespace. Selecting different mutexes via
   # PATH or environment would split mutual exclusion for the same resource.
   # Recheck storage after acquisition so a path swap cannot reach the mutation.
-  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_state_storage_argv "$state_file" || return 1
+  local storage_argv=("${_ZENSU_TDD_PATHS_ARGV[@]}")
 
   # Bash 4+ gives us anonymous bidirectional coprocess pipes. Keep one Node
   # process alive for the entire critical section so its PID is both the lease
@@ -645,7 +606,7 @@ _tdd_locked_run() {
     _ZENSU_TDD_COPROC_SEQ=$(( ${_ZENSU_TDD_COPROC_SEQ:-0} + 1 ))
     coproc_name="ZENSU_TDD_LOCK_${_ZENSU_TDD_COPROC_SEQ}"
 
-    if ! eval "coproc $coproc_name { _tdd_core_lock_keeper \"\$core_path\" \"\$native_lock_directory\" \"\$native_state_file\"; }"; then
+    if ! eval "coproc $coproc_name { _tdd_core_lock_keeper \"\$core_path\" \"\$native_lock_directory\" \"\$native_state_file\" \"\$_ZENSU_TDD_PATH_SAFETY\" \"\${storage_argv[@]}\"; }"; then
       echo "[zensu-tdd-phase] lock keeper launch failed for $state_file" >&2
       return 1
     fi
@@ -661,17 +622,18 @@ _tdd_locked_run() {
 
     keeper_status=""
     IFS= read -r keeper_status <&"$keeper_read_fd" || true
-    if [ "$keeper_status" != "READY" ]; then
+    if [ "$keeper_status" != "READY" ] && [ "$keeper_status" != "UNSAFE-HELD" ]; then
       eval "exec ${keeper_write_fd}>&-" 2>/dev/null || true
       eval "exec ${keeper_read_fd}<&-" 2>/dev/null || true
       if wait "$keeper_pid" 2>/dev/null; then keeper_rc=0; else keeper_rc=$?; fi
       eval "unset $coproc_name ${coproc_name}_PID" 2>/dev/null || true
+      [ "$keeper_status" != "UNSAFE" ] || return 1
       [ -z "$keeper_status" ] || echo "[zensu-tdd-phase] lock detail: ${keeper_status#ERROR }" >&2
       echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
       return 1
     fi
 
-    if _tdd_state_storage_safe "$state_file" && "$@"; then
+    if [ "$keeper_status" = "READY" ] && _tdd_state_storage_argv "$state_file" && "$@"; then
       callback_rc=0
     else
       callback_rc=$?
@@ -694,7 +656,7 @@ _tdd_locked_run() {
   fi
 
   local lock_directory token_file native_lock_directory native_state_file native_token_file
-  local token acquire_rc release_rc
+  local token acquire_rc release_rc token_argv
   lock_directory="$(dirname "$state_file")"
   token_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-token.XXXXXX" 2>/dev/null)" || {
     echo "[zensu-tdd-phase] lock token allocation failed for $state_file" >&2
@@ -704,10 +666,11 @@ _tdd_locked_run() {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
   }
-  _tdd_path_safe "$token_file" regular || {
+  _tdd_paths_safe_argv "$token_file" regular || {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
   }
+  token_argv=("${_ZENSU_TDD_PATHS_ARGV[@]}")
   native_lock_directory="$(_tdd_native_path "$lock_directory")" || {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
@@ -720,9 +683,9 @@ _tdd_locked_run() {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
   }
-  if node -e '
+  if MSYS2_ARG_CONV_EXCL='*' node -e '
       const fs = require("node:fs");
-      const [corePath, lockDirectory, resourcePath, tokenFile] = process.argv.slice(1);
+      const [corePath, lockDirectory, resourcePath, tokenFile, safetyPath, storageCount, ...checks] = process.argv.slice(1);
       let core = null;
       const sameIdentity = (left, right) => {
         if (left.ino !== 0 && right.ino !== 0) return left.dev === right.dev && left.ino === right.ino;
@@ -738,6 +701,11 @@ _tdd_locked_run() {
       let lease = null;
       try {
         core = require(corePath);
+        const safety = require(safetyPath);
+        const split = Number(storageCount);
+        const storageSafe = () => safety.pathsSafeArgv(checks.slice(0, split));
+        const tokenSafe = () => safety.pathsSafeArgv(checks.slice(split));
+        if (!Number.isSafeInteger(split) || !storageSafe() || !tokenSafe()) process.exit(64);
         const before = fs.lstatSync(tokenFile);
         if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) throw new Error("unsafe token file");
         descriptor = fs.openSync(
@@ -769,6 +737,24 @@ _tdd_locked_run() {
         ) throw new Error("token file changed after publication");
         fs.closeSync(descriptor);
         descriptor = undefined;
+        if (!tokenSafe()) throw new Error("token file changed after publication");
+        if (!storageSafe()) {
+          const held = lease;
+          lease = null;
+          try {
+            core.releaseExternalProcessLockByToken({
+              lockDirectory,
+              resourcePath,
+              token: held.token,
+            });
+          } catch (releaseError) {
+            const detail = String(releaseError && releaseError.message ? releaseError.message : "unknown release error")
+              .replace(/[\r\n]+/g, " ").slice(0, 512);
+            process.stderr.write(`[zensu-tdd-phase] lock release detail: ${detail}\n`);
+            process.exit(66);
+          }
+          process.exit(65);
+        }
       } catch (error) {
         const detail = String(error && error.message ? error.message : "unknown acquisition error")
           .replace(/[\r\n]+/g, " ").slice(0, 512);
@@ -788,15 +774,30 @@ _tdd_locked_run() {
         process.exit(3);
       }
     ' -- "$_ZENSU_TDD_CONTROL_CORE" \
-      "$native_lock_directory" "$native_state_file" "$native_token_file" >/dev/null; then
+      "$native_lock_directory" "$native_state_file" "$native_token_file" \
+      "$_ZENSU_TDD_PATH_SAFETY" "${#storage_argv[@]}" "${storage_argv[@]}" "${token_argv[@]}" >/dev/null; then
     acquire_rc=0
   else
     acquire_rc=$?
   fi
-  if _tdd_path_safe "$token_file" regular; then
+  case "$acquire_rc" in
+    64|65)
+      rm -f -- "$token_file" 2>/dev/null || true
+      return 1
+      ;;
+    66)
+      rm -f -- "$token_file" 2>/dev/null || true
+      echo "[zensu-tdd-phase] lock release failed for $state_file" >&2
+      return 1
+      ;;
+  esac
+  token=""
+  if [ "$acquire_rc" -eq 0 ]; then
+    if _tdd_paths_safe_argv "$token_file" regular; then
+      token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
+    fi
+  elif _tdd_path_safe "$token_file" regular; then
     token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
-  else
-    token=""
   fi
   rm -f -- "$token_file" 2>/dev/null || true
   if [ "$acquire_rc" -ne 0 ] || ! [[ "$token" =~ ^[a-f0-9]{48}$ ]]; then
@@ -815,7 +816,7 @@ _tdd_locked_run() {
     echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
     return 1
   fi
-  if _tdd_state_storage_safe "$state_file"; then
+  if _tdd_state_storage_argv "$state_file"; then
     "$@"
   else
     false
@@ -2646,6 +2647,11 @@ _tdd_read_validated_state() {
           && Array.isArray(state.workflowTools)
           && state.workflowTools.includes(arg);
         emit("valid", hit ? "true" : "false");
+      } else if (mode === "workflow-tools") {
+        const tools = state.workflowActive === true && Array.isArray(state.workflowTools)
+          ? state.workflowTools
+          : [];
+        emit("valid", tools.join("\n"));
       } else if (mode === "bypasses") {
         const allow = String(arg).split(" ").filter(Boolean);
         const values = Array.isArray(state.bypasses)
@@ -2734,6 +2740,15 @@ zensu_workflow_allows() {
   [ "$status" = "valid" ] || { echo "false"; return 0; }
   value="${result#*$'\n'}"
   [ "$value" = "true" ] && echo "true" || echo "false"
+}
+
+zensu_workflow_tools() {
+  local sf="${1:-}" result status
+  result="$(_tdd_read_validated_state "$sf" workflow-tools)"
+  status="${result%%$'\n'*}"
+  [ "$status" = "valid" ] || return 1
+  [ "$result" = "$status" ] && return 0
+  printf '%s\n' "${result#*$'\n'}"
 }
 
 tdd_phase() {
@@ -3864,9 +3879,9 @@ case "${OSTYPE:-}" in
     # Export the module paths only after they were derived from, and
     # identity-checked against, the executing library above. Exported helpers
     # must never fall back to an inherited ZENSU_* module path.
-    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY
+    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY _ZENSU_TDD_PATH_SAFETY
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe_argv _tdd_paths_safe_check _tdd_paths_safe _tdd_path_safe _tdd_state_storage_argv _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows zensu_workflow_tools tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

@@ -128,7 +128,9 @@ WebSocket connection is not fenced by it, which is an open gap — blocks servic
 keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
-The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
+The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
+it refuses a PowerShell call that names the CLI and a `zensu-verify` session: run every browser
+call through the Bash tool. It is a textual gate: it judges a
 `playwright-cli` call on a `zensu-verify` session before it runs only when the command text
 names the CLI and that session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
@@ -334,7 +336,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <lo
 
 Each form judges its target as the gate judges that kind of origin, and starts no browser. Before it judges the target
 it runs the readiness check of the run-config helper: both consent hooks must be registered on a
-matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
+matcher that covers `Bash` and `PowerShell`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
 of the caller must name the measured version, and no empty or relative `PATH` entry may come
 before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
 terminal. Section 5 lists those refusals and their fixes. It prints `policy` when the policy
@@ -562,7 +564,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
-| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers `Bash` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
+| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers both `Bash` and `PowerShell` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
 | PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
 | PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |

@@ -23,13 +23,13 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 ## What it checks
 
-- **CLI & tooling** — the zensu CLI and its auth, node, the code-forge CLI (gh or glab) and
+- **CLI & tooling** — the zensu CLI (auth, version), node, the code-forge CLI (gh or glab) and
   its auth resolved from the repo's provider, whether playwright-cli is installed and its
-  version, and the browser consent gate's registration on the Bash matcher.
-- **Plugin integrity** — hooks.json wired to files on disk, and plugin.json ↔
-  marketplace.json version sync.
-- **Config** — valid JSON, the quoted-boolean trap where "true"/"false" as a string is
-  silently ignored by strict === checks, and whether the permission rules in
+  version, and the browser consent gate's registration on both shell tools.
+- **Plugin integrity** — hooks.json wired to files on disk, Bash-to-PowerShell hook
+  coverage, and plugin.json ↔ marketplace.json version sync.
+- **Config** — valid JSON, quoted booleans that strict === checks ignore, and whether the
+  permission rules in
   ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal before any chain
   has wedged.
 - **Session state** — the state dir is writable; canonical CAS workflow documents are valid;
@@ -70,7 +70,7 @@ CAS workflow documents are never deleted.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
+(`command -v`, `--version`, `zensu auth status`). The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
 package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
 within four directories of the resolved binary — without running it. A manifest that names
@@ -372,7 +372,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
-- **⚠️ zensu not authenticated** → `zensu auth login`.
+- **zensu CLI** rows → read `references/zensu-cli.md`.
 - **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
   manifest beside the binary is the one the browser consent gate was measured against, and
   `/zensu:verify-feature` drives the browser through it. The manifest vouches for the package,
@@ -432,7 +432,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   origins, if any, but no navigation command may open one. Other origins are asked, or denied
   under bypass permissions or dontAsk. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
-  registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
+  registered on both shell tools, and a runtime recipe (`.zensu/runtime.yaml` or
   `.zensu/autopilot.yaml`) is present. The permission prompt asks the user once per session for
   each new loopback origin of a `zensu-verify` session, and at every browser start for a remote
   HTTPS origin, which under bypass permissions or dontAsk needs the policy.
@@ -458,8 +458,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
   `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
   hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
-  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
-  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  does not register the GATE or the RECORDER on a matcher that covers Bash and PowerShell, a
+  registration there could not be determined, or the pair's registration probe did not complete.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
@@ -488,10 +488,10 @@ whether browser verification is enforced, not only when a row is red.
 
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
-  invalid` denial. Nothing in this session can be repaired in place; start a
-  fresh Claude Code session. The binding row is omitted entirely when the helper
-  was invoked without `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_DATA` — that
-  is a missing check, not a healthy session.
+  invalid` denial. `/zensu:adopt-session` names the cause; then start a fresh
+  Claude Code session. The binding row is omitted entirely when the helper was
+  invoked without `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_DATA` — that is a
+  missing check, not a healthy session.
 - **❌ binding: the project root recorded for this session no longer exists** →
   a different diagnosis with a different remedy: the record is intact, and the
   directory it names is gone (a deleted or recycled worktree), taking the
@@ -627,24 +627,20 @@ whether browser verification is enforced, not only when a row is red.
   installation that minted it has been removed from the plugin cache** → the
   fourth named bind failure, with its own row naming both versions (`record
   minted by X, executing Y`). The host keeps only a few plugin versions in its
-  cache, so a session that outlives them lands here whatever its lineage: nothing
-  can re-verify the record any more and no installation serves it. Never report
-  it as a missing record. The remedy is the same in-place adoption as the lineage
-  row — attempted automatically on the first hook contact, so a row still rendered
-  means that
-  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
-  the same refusal in full
-  and names a superseded record file when one blocks the adoption;
-  when it answers ADOPTABLE instead,
-  the automatic path was either opted out
-  — ask the user before `--confirm` then, since the operator switched the automatic
-  path off on purpose —
-  or did not complete (a lock timeout, or a fault inside the adoption itself),
-  and
-  `/zensu:adopt-session --confirm` retries by hand.
-  The adoption report marks the minting version
-  `(installation no longer on disk)`.
-  Both commands and this diagnostic stay reachable, and `Stop` is released rather
+  cache, so a session that outlives them lands here whatever its lineage, a
+  retired remnant (`.orphaned_at`, no manifest) included: nothing can re-verify
+  the record and no installation serves it. Never report it as a missing record.
+  The remedy is the lineage row's in-place adoption — attempted automatically on
+  the first hook contact, so a row still rendered
+  means that adoption was refused, opted out or did not complete;
+  `/zensu:adopt-session` prints the same refusal in full and names a superseded
+  record file when one blocks the adoption; when it answers ADOPTABLE instead,
+  the automatic path was either opted out — ask the user before `--confirm`
+  then, as the operator switched it off — or did not complete (a
+  lock timeout, or a fault inside the adoption itself), and
+  `/zensu:adopt-session --confirm` retries by hand. The report marks the
+  minting version `(installation pruned from the plugin cache)`. Both
+  commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
@@ -847,9 +843,9 @@ whether browser verification is enforced, not only when a row is red.
   run log is REDACTED on the way in: a claim under `$HOME` is
   rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
   no longer an absolute path when the audit reads it, no foreign root is derived
-  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
-  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
-  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  and no row can fire. A sibling in another home or `/root` becomes `<home>`; only siblings
+  outside every home — `/opt`, `/srv`, `/builds` — reach the row. Say
+  WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
 - **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
   session's delivery route is already decided, so the plan-approval hook and the

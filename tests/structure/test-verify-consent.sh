@@ -59,8 +59,8 @@ done
   || check "V2b node --check passes for the four modules, both helpers and the five unit files" FAIL
 
 MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT_MATCHER))' "$MODULE" 2>/dev/null)"
-[ "$MATCHER" = "Bash" ] && check "V3 the module's CONSENT_MATCHER is Bash" PASS \
-  || check "V3 the module's CONSENT_MATCHER is Bash (got: ${MATCHER:-<none>})" FAIL
+[ "$MATCHER" = "Bash|PowerShell" ] && check "V3 the module's CONSENT_MATCHER is Bash|PowerShell" PASS \
+  || check "V3 the module's CONSENT_MATCHER is Bash|PowerShell (got: ${MATCHER:-<none>})" FAIL
 if node -e '
   const [file, matcher] = process.argv.slice(1);
   const doc = JSON.parse(require("fs").readFileSync(file, "utf8"));
@@ -321,7 +321,9 @@ for _vc_case in "H16 quote-split CLI name|playwright-cl''i -s=$SESSION eval 1" \
   "H16m two line continuations inside the session name|playwright-cli -s zensu-verify\\${NL}\\${NL}-vc eval 1" \
   "H16n double-quote split of the CLI name|playwright-cl\"\"i -s=$SESSION eval 1" \
   "H16o backslash split of the CLI name|playwright-cl\\i -s=$SESSION eval 1" \
-  "H16p double-quote split of the session name|playwright-cli -s=zensu-ver\"\"ify-vc eval 1"; do
+  "H16p double-quote split of the session name|playwright-cli -s=zensu-ver\"\"ify-vc eval 1" \
+  "H16q backtick split of the CLI name|playwright-cl\`\`i -s=$SESSION eval 1" \
+  "H16r backtick split of the session name|playwright-cli -s=zensu-ver\`\`ify-vc eval 1"; do
   _vc_label="${_vc_case%%|*}"
   _vc_command="${_vc_case#*|}"
   _vc_verdict="$(pre_verdict "$_vc_command" "$SID" "$PROJ")"
@@ -372,7 +374,7 @@ while [ "$_vc_i" -lt "${#DIFF_COMMANDS[@]}" ]; do
   fi
   _vc_i=$((_vc_i + 1))
 done
-[ "${#DIFF_COMMANDS[@]}" -ge 24 ] && [ -z "$DIFF_MISSES" ] \
+[ "${#DIFF_COMMANDS[@]}" -ge 26 ] && [ -z "$DIFF_MISSES" ] \
   && check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included" PASS \
   || check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included (misses:${DIFF_MISSES})" FAIL
 
@@ -436,6 +438,17 @@ case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_JOINED" 2
   *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" PASS ;;
   *) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" FAIL ;;
 esac
+nolib_powershell() {
+  bash_payload PreToolUse "$1" "$SID" "$PROJ" '{"tool_name":"PowerShell"}' \
+    | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
+}
+case "$(nolib_powershell "& ('pla' + 'ywright-cli') -s=('zensu-' + 'ver' + 'ify-nolib') snapshot")" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g5 without the prefilter library a PowerShell call that joins both markers from string literals is still denied" PASS ;;
+  *) check "H17g5 without the prefilter library a PowerShell call that joins both markers from string literals is still denied" FAIL ;;
+esac
+[ -z "$(nolib_powershell 'Get-ChildItem -Recurse')" ] \
+  && check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" PASS \
+  || check "H17g6 without the prefilter library an unrelated PowerShell call passes the pre hook silently" FAIL
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -1323,8 +1336,8 @@ if printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'When `hooks/lib/zensu-browser-cons
 else
   check "V60 both consent hook rows in docs/configuration.md state the prefilter-library fallback" FAIL
 fi
-if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Before it judges the target it runs the readiness check of the run-config helper: both consent hooks must be registered on a matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH` of the caller must name the measured version, and no empty or relative `PATH` entry may come before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that terminal.' \
-  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'both consent hooks must be registered on a matcher that covers `Bash`, and the `@playwright/cli` manifest' \
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Before it judges the target it runs the readiness check of the run-config helper: both consent hooks must be registered on a matcher that covers `Bash` and `PowerShell`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH` of the caller must name the measured version, and no empty or relative `PATH` entry may come before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that terminal.' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'both consent hooks must be registered on a matcher that covers `Bash` and `PowerShell`, and the `@playwright/cli` manifest' \
   && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF '| `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |'; then
   check "V61 the preflight section of docs/verify-feature.md names the readiness check that runs before the target is judged" PASS
 else
@@ -1487,6 +1500,33 @@ if [ -z "$SHELL_STATE_MISSING" ]; then
 else
   check "V66 the docs say a function is denied only when the command defines it, and the version is checked only when the helper runs (missing:$SHELL_STATE_MISSING)" FAIL
 fi
+
+PS_EXTRA='{"tool_name":"PowerShell"}'
+PS_MEMORY_BEFORE="$(memory_count)"
+[ "$(pre_verdict "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70 the real pre hook denies a PowerShell call that names playwright-cli and a zensu-verify session" PASS \
+  || check "V70 the real pre hook denies a PowerShell call that names playwright-cli and a zensu-verify session" FAIL
+case "$(pre_reason "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" in
+  *'a zensu-verify browser call runs through the Bash tool only'*'use the Grep tool or a message file'*) check "V70b the PowerShell deny names the Bash tool and the Grep tool" PASS ;;
+  *) check "V70b the PowerShell deny names the Bash tool and the Grep tool" FAIL ;;
+esac
+[ "$(pre_verdict "Get-ChildItem -Recurse" "$SID" "$PROJ" "$PS_EXTRA")" = "NONE" ] \
+  && check "V70c a PowerShell call without the markers reaches no decision" PASS \
+  || check "V70c a PowerShell call without the markers reaches no decision" FAIL
+post_run "playwright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA" >/dev/null
+[ "$(memory_count)" = "$PS_MEMORY_BEFORE" ] \
+  && check "V70d the recorder writes no consent record for a PowerShell call" PASS \
+  || check "V70d the recorder writes no consent record for a PowerShell call (before=$PS_MEMORY_BEFORE after=$(memory_count))" FAIL
+PS_BT='`'
+[ "$(pre_verdict "play${PS_BT}wright-cli -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70e the real pre hook denies a PowerShell call that splits playwright-cli with a backtick" PASS \
+  || check "V70e the real pre hook denies a PowerShell call that splits playwright-cli with a backtick" FAIL
+[ "$(pre_verdict "& ('play' + 'wright-cli') -s=('zensu-' + 'verify-vc') goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70f the real pre hook denies a PowerShell call that joins both markers from string literals" PASS \
+  || check "V70f the real pre hook denies a PowerShell call that joins both markers from string literals" FAIL
+[ "$(pre_verdict "& \"pla${PS_BT}u{79}wright-cli\" -s=$SESSION goto http://127.0.0.1:4200/" "$SID" "$PROJ" "$PS_EXTRA")" = "DENY" ] \
+  && check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" PASS \
+  || check "V70g the real pre hook denies a PowerShell call that spells playwright-cli with a Unicode escape" FAIL
 
 unit_check_done "V7z every unit file the registry gives this suite was graded"
 

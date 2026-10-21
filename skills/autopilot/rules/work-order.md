@@ -16,7 +16,8 @@ Stay in the checkout the session started in: the worker prepared it. Do not crea
   it: `git fetch origin <branch>`, then `git checkout -B <branch> origin/<branch>`. `--start`
   already released the local Autopilot run an earlier attempt left in this checkout.
 - No `branch`: create `workBranch` from the order's integration branch, else its base branch:
-  `git fetch origin <base>`, then `git checkout -b <workBranch> origin/<base>`.
+  `git fetch origin <base>`, then `git checkout -b <workBranch> origin/<base>`. Use `workBranch`
+  verbatim: it carries the branch prefix Zensu requires, and any other branch name is refused.
 
 Resolve `$VCS` and detect the forge as Autopilot's Step 0 and 0.A.1 say. `cliReady=false` or an
 unknown provider cannot be fixed here: finish with `--reason`.
@@ -78,8 +79,11 @@ These steps differ:
 
 - **Every push** runs `"$WO" --push`, never `git push`. That holds inside `/zensu:pr-fix-findings`
   and in the validate loop too: where those steps push, run `--push` instead. Exit 8 from `--push`
-  means the remote branch does not hold the head Zensu recorded; never force past it, finish with
-  `--reason`.
+  names its cause on stderr; never force past it. A working branch without the order's prefix means
+  you left the order's branch: check out the `workBranch` of the `--start` summary and run `--push`
+  again, unless the order's pull request was merged or closed, which ends the order with `--reason`.
+  Every other exit 8, such as a remote that moved past the head Zensu recorded or a head Zensu
+  refused to record, ends the order with `--reason`.
 - **Opening the pull request** (Phase 1 step 3): commit, run `"$WO" --push`, persist
   `PR_OPEN_REQUESTED`, then run
   `"$WO" --open-pr --title "<title>" --body-file "<absolute path>"` instead of the driver's

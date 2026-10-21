@@ -231,7 +231,7 @@ It prints `policy` and exits `0` only when the parent policy lists that origin i
 consent-mode run passes instead.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
-`pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
+`pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on both shell tools —
 judges a `playwright-cli` call on a `zensu-verify-*` session before it runs. It is a textual gate: it
 judges the calls whose command text names the CLI and that session, which is one more reason every
 call spells both literally. It denies every
@@ -398,7 +398,7 @@ instead, where the consent prompt covers it like any other origin, never navigat
 report the rows that need another one PARTIAL, because it needs the launch-time policy. The helper prints `session=zensu-verify-<id>`, `config=<absolute path>`,
 `mode=consent|policy`, one `origin=` line per navigable origin and one `network-only-origin=`
 line per network-only origin, or exits `1` with a named reason and writes nothing. It refuses unless
-`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
+`hooks/hooks.json` demonstrably registers both consent hooks for Bash and PowerShell, the
 installed `playwright-cli` manifest names the measured version, and no empty or relative PATH
 entry comes before or holds `playwright-cli`; then report PARTIAL with its
 reason, and never open a browser without the run config it writes. Copy the printed session

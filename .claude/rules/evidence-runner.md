@@ -141,6 +141,18 @@ and reading it as "not a repository" would open the gate on a real repository.
 suite drives through the unqualified verbs. The edit-landing audit draws the same split a third
 time, through `_el_git` and `git_fault` in `hooks/lib/zensu-edit-landing.sh`
 (`.claude/rules/multi-repo-stage1.md`). A change to the split here moves both copies too.
+`workTreeTop` reads the same `NO_WORK_TREE_RE` for the external-review root rule and also
+places a root outside git when no `git` binary exists (`.claude/rules/external-review-import.md`).
+The same options argument of `computeTree` takes `excluded`, a list of root-relative paths it
+drops beside `.zensu`, matched literally; only the external review passes one, the `.zensu` of a
+session whose project root lies below the top level it fingerprints, and every runner caller
+keeps its fingerprint.
+`gitEnvironment` also drops the pathspec-mode variables in `GIT_PATHSPEC_ENV`
+(`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`, `GIT_ICASE_PATHSPECS`):
+an inherited `GIT_LITERAL_PATHSPECS` reads that list's `:(exclude,literal)` magic as a file name
+and puts the excluded paths back into the tree. It is a list of its own because
+`GIT_SCRUBBED_ENV` is the one `_tc_git` in `zensu-log.sh` mirrors, and a shell caller passes no
+magic pathspec.
 
 **The gate sits at `--chain-done` only**: the ticket-bound standalone terminus and a
 bound chain with outcome `pass`. `--tdd-complete` is deliberately not gated, because

@@ -86,6 +86,7 @@ else
 fi
 
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 export ZENSU_WORK_ORDER_RETRY_MS=1
 export ZENSU_WORK_ORDER_RETRY_BUDGET_MS=50
 OUT="$(bash "$WRAPPER" --start --order "$ORDER" 2>"$SBOX/start.err")"; RC=$?

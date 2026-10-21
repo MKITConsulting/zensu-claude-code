@@ -5,7 +5,7 @@
 requirement on a logged claim), `hooks/lib/zensu-edit-landing.sh` (a claim resolving
 outside the audited root fails the audit and names the foreign root, plus the
 read-only `--inventory` mode its two consumers share) and
-`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE both `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not. See the fourth known gap in `CLAUDE.md` §"Multi-Repo Stage 1". The carrier question of §6.1.1 was ANSWERED on
+`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE every home directory and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not, and one under another user's home or `/root` becomes `<home>` and names no root either. See the redactor gap in `CLAUDE.md` §"Multi-Repo Stage 1". The carrier question of §6.1.1 was ANSWERED on
 2026-09-20 — the Session Control record, sealed by an interactive confirmation at
 arming, behind a containment gate on the Bash channel into the plugin-data store —
 but the answer is a decision, not a mechanism: stage 2 must not be implemented
@@ -36,7 +36,7 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:147-154`), and
 `pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
@@ -47,7 +47,7 @@ default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1621`) and counts through the shared helper (`:1643`),
+(`hooks/lib/zensu-log.sh:1634`) and counts through the shared helper (`:1672`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -59,13 +59,15 @@ when it is unset, is an open question (§11).
 **The edit-landing audit already takes a `--project` argument** — it defaults to
 `CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:101`) and
 enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:469-494`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:386`), while
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:192`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1610`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1618`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
-named as a foreign root rather than reported as unresolvable, while a RELATIVE
-foreign claim stays indistinguishable from an anchor claim — the gap §5 names.
+named as a foreign root rather than reported as unresolvable, and so is a RELATIVE
+claim that, joined at the repository top, lands in a work tree nested under the
+anchor, while a RELATIVE claim naming a SIBLING repository's file stays
+indistinguishable from an anchor claim — the gap §5 names.
 
 **The receipt gate was scoped by the anchor's change count — SUPERSEDED by stage 1,
 item 2.** As read for this document, `zensu-log.sh` counted `git diff --name-only
@@ -81,9 +83,9 @@ alone, which it now takes through the same scrubbed wrapper — see the paragrap
 
 **The write gate confines Bash writes while it is opted in, the edit gate does not confine
 paths.** Rules (A)/(B)/(C) run only when `hooks.bashWriteGate` is `true`. Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:829`) and rule (C) at the same predicate
-for git targets (`:875`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:724`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
+(`hooks/lib/bash-source-write-parse.js:885`) and rule (C) at the same predicate
+for git targets (`:931`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:780`). `hooks/pre-edit-tdd-reminder.sh:132-160` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today, and Bash writes do too unless the gate is
@@ -188,9 +190,11 @@ below are behavior now; the pins are named at the end of §10.
 4. A `/zensu:doctor` row names the topology: claims logged against a root that is
    not the anchor.
 
-**Item 3 is partial by construction, and saying so is part of stage 1.** Only an
-*absolute* foreign claim can be recognised without the stage-2 label. A relative
-claim from a code root (`src/foo.ts`) is textually indistinguishable from an anchor
+**Item 3 is partial by construction, and saying so is part of stage 1.** Without
+the stage-2 label a foreign claim is recognised only where the filesystem places it:
+an *absolute* claim, or a relative claim that, joined at the repository top, lands
+in a work tree nested under the anchor. A relative claim from a sibling code root
+(`src/foo.ts`) is textually indistinguishable from an anchor
 claim that never landed — and where the anchor happens to hold a dirty file at the
 same repo-relative path, which `src/index.ts` or `package.json` routinely will
 across sibling repositories, the foreign claim resolves against the anchor's file
@@ -419,10 +423,10 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:386` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:192` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/references/review-chain.md` step 10.2 |
-| Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:829`, `:875` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1659`, `:118-119` |
+| Write gate | Rules (B) and (C) accept a path inside ANY union member — a widening that only matters while the opt-in gate is on. | `hooks/lib/bash-source-write-parse.js:885`, `:931` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1672`, `:118-119` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:633`, `:609` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -616,9 +620,9 @@ order, or until an integrity mechanism over `codeRoots[]` is specified instead.
 **The Session Control record does not authenticate its own contents either.**
 This matters because §6.1.1 offers that record as a carrier, which reads as
 though it settles requirement 1. `validateContext`
-(`hooks/lib/session-control-core-v1.js:680`) enforces the schema pair, a fixed
+(`hooks/lib/session-control-core-v1.js:683`) enforces the schema pair, a fixed
 list of required fields, and that `source_revision` equals `runtime_digest` — but
-that digest is computed by `manifestRuntimeEntries` (`:482`) over the executing
+that digest is computed by `manifestRuntimeEntries` (`:484`) over the executing
 plugin tree's `hooks`, `agents`, `skills`, `docs` and `templates` plus the
 manifest. Nothing in it covers the record's own fields. A `code_roots` entry
 rewritten in place would leave the digest untouched and validate. There is also
@@ -631,10 +635,10 @@ executing runtime, never of the list. Candidate 1 satisfies requirement 1 only i
 combination with the containment gate of §6.1.2, and its security rests entirely
 on the records directory being unwritable by the session. Two obligations travel
 with it: `adoptContext` re-mints through `buildContext`
-(`hooks/lib/session-control-core-v1.js:607`), so a new field
+(`hooks/lib/session-control-core-v1.js:609`), so a new field
 must be threaded there or it is silently dropped at every adoption; and a
 `SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
-one release boundary as `record-unreadable` (`:1986`).
+one release boundary as `record-unreadable` (`:2069`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger
@@ -681,8 +685,9 @@ are what the doctor row's read-only contract rests on). `tests/structure/test-do
 carries the topology row and its negatives (the `P1tp` family). Both are named as FAMILIES
 rather than as ranges: an endpoint is a hand-maintained numeral wearing a range's clothes,
 and both of these were appended past inside the change that wrote them. Two bounds ship with them and are not
-closed by stage 1: a relative foreign claim still grades against the anchor, and the
-claim-armed scope needs either `--plan` or a receipt to locate the run log — the
+closed by stage 1: a relative claim naming a sibling repository's file still grades
+against the anchor (one into a work tree nested under the anchor is placed and
+reported), and the claim-armed scope needs either `--plan` or a receipt to locate the run log — the
 flag-free recovery spelling keeps the pre-stage-1 zero-change exemption.
 
 ### Stage 2
@@ -797,7 +802,7 @@ citations to re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:1588`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:1596`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

@@ -59,8 +59,10 @@ claude plugin marketplace update zensu
 claude plugin update zensu@zensu
 ```
 
-Optional, for feature tracking: install the CLI with
-`curl -fsSL https://zensu.dev/install.sh | sh` and run `zensu auth login`.
+Optional, for feature tracking: install zensu-cli 0.10.0 or later with
+`brew install --cask mkitconsulting/tap/zensu` (upgrade with `brew upgrade --cask zensu`),
+`curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
+`irm https://zensu.dev/install.ps1 | iex`, then run `zensu auth login`.
 
 Run `/zensu:setup` for a guided first-run configuration, or `/zensu:doctor` if
 something is not firing.
@@ -238,15 +240,21 @@ starts Claude Code: without it, Zensu refuses every tool call. Zensu's hooks are
 bash scripts, which macOS and Linux run as they are. On Windows, run Claude Code
 inside WSL, or install Git for Windows so that Claude Code runs the hooks through
 Git Bash, whichever terminal you start `claude` from. Native Windows without Git
-Bash is not supported. With Git Bash, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`
-in the environment that starts Claude Code or in the `env` block of
-`~/.claude/settings.json`: Zensu's shell-command gates watch only the Bash tool,
-so a command Claude runs through the PowerShell tool skips them.
+Bash is not supported. With Git Bash, Claude Code may run shell commands through
+its PowerShell tool; Zensu's shell-command gates judge those too and refuse a
+PowerShell command they cannot judge, naming the Bash tool. To keep Claude on
+the Bash tool, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` in the environment that
+starts Claude Code or in the `env` block of `~/.claude/settings.json`.
 [Platform Support](docs/operations.md#platform-support) has the details and the
 known gaps on native Windows. `/zensu:verify-feature` and the autopilot browser
 driver additionally need `playwright-cli` on `PATH`
 (`npm install -g @playwright/cli@0.1.21`, the version the browser consent gate
 was measured against; `brew install playwright-cli` is unpinned).
+
+Feature tracking needs zensu-cli 0.10.0 or later: older releases print only the
+first 100 ghost-scan candidates and read only the first page of wiki lists.
+`zensu --version` shows the installed release, and the session banner and
+`/zensu:doctor` warn about an older one without blocking anything.
 
 ## Documentation
 

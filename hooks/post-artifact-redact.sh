@@ -150,7 +150,7 @@ printf '%s' "$INPUT" | \
     // the registered matcher — the one a `NotebookEdit` added to `hooks.json`
     // would silently miss.
     const writeTool = tool === "Edit" || tool === "Write" || tool === "MultiEdit";
-    if (tool !== "Bash" && !writeTool) return;
+    if (tool !== "Bash" && tool !== "PowerShell" && !writeTool) return;
 
     // Always sweep; prepend the named file when the payload carries one. The
     // sweep must not be conditional on a usable `file_path` — that was the one

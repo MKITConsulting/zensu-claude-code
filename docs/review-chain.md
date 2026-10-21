@@ -120,7 +120,25 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
   can be computed, the change-time check decides alone and the line says `tree=unverified`. A
   run that has not completed answers `status=unavailable reason=run-not-completed`, and a run
-  whose arguments left a changed path out `reason=files-not-reviewed`. The first line names
+  whose arguments left a changed path out `reason=files-not-reviewed`. The `--root` of both
+  calls must be the root of the session's work tree: the top level `git rev-parse
+  --show-toplevel` prints for the project root, or the project root itself when it lies outside
+  git. Any other root answers `status=unavailable reason=root layout=<layout>` (with `--stage`
+  or `--tree`, `stage=unavailable` or `tree=unavailable` in its place, and no copy is written)
+  followed by what the layout is and the next
+  step: `nested-work-tree` for a separate work tree nested inside the session's own, such as a
+  worktree of another repository, `nested-in-folder` for a repository inside a project folder
+  that is not a git work tree, `outside` for a sibling, `enclosing` for a directory above the
+  work tree, `subdirectory` for one below its top level, `unresolved-root` or
+  `unresolved-project-root` for a path that is missing, is not a directory or ends in a symbolic
+  link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
+  `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
+  aspect panel reviews this change, and a workflow review of the other work tree imports only in
+  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
+  git's fault in `detail=`: for the review root it asks for the same re-run, because only that
+  root imports whatever the fault hid, and for the project root it asks for the fault to be
+  fixed first. The first line names
   the lenses the run reviewed (`lenses=`), which the judge receives. The import then compares
   the result's agent counts with the run journal the workflow runtime wrote (`journal.jsonl`
   in the launch's transcript directory, where only the outcome of each label's latest start

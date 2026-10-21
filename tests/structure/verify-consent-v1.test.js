@@ -117,8 +117,10 @@ function words(lexed) {
   return lexed.segments.map((segment) => segment.map((word) => word.value));
 }
 
-test('the gate rides the Bash matcher and names two hook files that exist', () => {
-  assert.equal(consent.CONSENT_MATCHER, 'Bash');
+test('the gate rides the Bash and PowerShell matcher and names two hook files that exist', () => {
+  assert.equal(consent.CONSENT_MATCHER, 'Bash|PowerShell');
+  assert.deepEqual([...consent.CONSENT_TOOLS], ['Bash', 'PowerShell']);
+  assert.equal(Object.isFrozen(consent.CONSENT_TOOLS), true);
   assert.equal(consent.CONSENT_HOOK_FILE, 'pre-browser-navigation-consent.sh');
   assert.equal(consent.CONSENT_RECORDER_FILE, 'post-browser-navigation-consent.sh');
   for (const file of [consent.CONSENT_HOOK_FILE, consent.CONSENT_RECORDER_FILE]) {
@@ -1255,6 +1257,18 @@ test('a command beyond the size bound is refused only when it names a zensu-veri
   assert.deepEqual(decide(`playwright-cli snapshot # ${padding}`), { verdict: 'none' });
 });
 
+test('the largest command the gate parses stays linear on a long shell flag', () => {
+  const prefix = `${cli('snapshot')}; bash -`;
+  const length = 262144 - Buffer.byteLength(prefix) - 3;
+  assert.equal(denied(`${prefix}${'c'.repeat(length)}1 xx`), REASONS.COMMAND_TOO_LARGE);
+  const command = `${JSON.stringify(prefix)} + 'c'.repeat(${length}) + '1 x'`;
+  const expression = `require(${JSON.stringify(MODULE)}).evaluate({ command: ${command}, payload: {}, env: {}, records: [], policy: null }).reason`;
+  const run = spawnSync(process.execPath, ['-e', `process.stdout.write(${expression});`], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(run.status, 0, run.signal || (run.error && run.error.code) || run.stderr);
+  assert.equal(run.stdout, REASONS.NOT_PLAIN);
+  assert.equal(denied(`bash -cx '${cli('eval 1')}'`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
+});
+
 test('a gated command the lexer cannot close is refused as unjudged', () => {
   assert.equal(denied(cli("goto 'http://127.0.0.1:4200/")), REASONS.UNJUDGED_BODY);
 });
@@ -1553,6 +1567,29 @@ test('runPre writes nothing for a non-Bash or unrelated call and denies an unrea
   const nameless = sink();
   assert.equal(consent.runPre({ tool_input: {} }, {}, nameless, err), true);
   assert.equal(JSON.parse(nameless.text()).hookSpecificOutput.permissionDecision, 'deny');
+  const powershell = (command) => ({ tool_name: 'PowerShell', tool_input: { command } });
+  const plain = sink();
+  assert.equal(consent.runPre(powershell('Get-ChildItem'), {}, plain, err), false);
+  assert.equal(consent.runPre(powershell('playwright-cli -s=mine snapshot'), {}, plain, err), false);
+  assert.equal(consent.runPre(powershell(`Write-Output ${SESSION}`), {}, plain, err), false);
+  assert.equal(plain.text(), '');
+  const marked = sink();
+  assert.equal(consent.runPre(powershell(`playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`), {}, marked, err), true);
+  assert.deepEqual(JSON.parse(marked.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }));
+  const ambient = sink();
+  assert.equal(consent.runPre(powershell('PLAYWRIGHT-CLI snapshot'), { PLAYWRIGHT_CLI_SESSION: SESSION }, ambient, err), true);
+  assert.equal(JSON.parse(ambient.text()).hookSpecificOutput.permissionDecisionReason, `${DENIED}${REASONS.POWERSHELL_NOT_JUDGED}`);
+  const BT = String.fromCharCode(96);
+  for (const spelling of [
+    `play${BT}wright-cli -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `& ('play' + 'wright-cli') -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `& "pla${BT}u{79}wright-cli" -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `playwright-cli -s=("zensu-" + "${SESSION.slice('zensu-'.length)}") goto http://127.0.0.1:4200/`,
+  ]) {
+    const decoded = sink();
+    assert.equal(consent.runPre(powershell(spelling), {}, decoded, err), true, spelling);
+    assert.deepEqual(JSON.parse(decoded.text()), consent.preEnvelope({ verdict: 'deny', reason: REASONS.POWERSHELL_NOT_JUDGED }), spelling);
+  }
   assert.equal(err.text(), '');
 });
 
@@ -1680,6 +1717,8 @@ test('runPost records nothing for a denied, interrupted, non-Bash, target-free o
   assert.deepEqual(consent.runPost(post(cli('goto http://127.0.0.1:4200/'), { tool_response: { interrupted: true } }), env, err),
     { ok: true, skipped: 'interrupted' });
   assert.deepEqual(consent.runPost({ tool_name: 'Read', tool_input: {} }, env, err), { ok: true, skipped: 'not-a-bash-call' });
+  assert.deepEqual(consent.runPost({ tool_name: 'PowerShell', tool_input: { command: cli('goto http://127.0.0.1:4200/') } }, env, err),
+    { ok: true, skipped: 'powershell-call' });
   assert.deepEqual(consent.runPost(post('ls -la'), env, err), { ok: true, skipped: 'nothing-to-record' });
   assert.deepEqual(consent.runPost(post(cli('snapshot')), env, err), { ok: true, skipped: 'nothing-to-record' });
   assert.equal(err.text(), '');
@@ -1733,7 +1772,7 @@ const registrationManifest = (hookMatcher, recorderMatcher) => ({
   },
 });
 
-test('the registration probes find both hooks on the Bash matcher of this plugin', () => {
+test('the registration probes find both hooks on the Bash and PowerShell matcher of this plugin', () => {
   assert.deepEqual(consent.REGISTRATION, { REGISTERED: 'registered', UNREGISTERED: 'unregistered', UNKNOWN: 'unknown' });
   assert.equal(Object.isFrozen(consent.REGISTRATION), true);
   assert.equal(consent.consentHookRegistered(REPO_ROOT), consent.REGISTRATION.REGISTERED);
@@ -1742,16 +1781,19 @@ test('the registration probes find both hooks on the Bash matcher of this plugin
 
 test('the registration probes follow the host matcher rule and refuse another matcher, a swapped event, a missing hook file and a missing root', (t) => {
   const { REGISTERED, UNREGISTERED } = consent.REGISTRATION;
-  const control = registrationRoot(t, registrationManifest('Bash', 'Bash'));
+  const control = registrationRoot(t, registrationManifest('Bash|PowerShell', 'PowerShell|Bash'));
   assert.equal(consent.consentHookRegistered(control), REGISTERED);
   assert.equal(consent.consentRecorderRegistered(control), REGISTERED);
-  const widened = registrationRoot(t, registrationManifest('Bash|Read', ''));
+  const bashOnly = registrationRoot(t, registrationManifest('Bash', 'Bash'));
+  assert.equal(consent.consentHookRegistered(bashOnly), UNREGISTERED, 'a matcher without PowerShell leaves PowerShell calls unjudged');
+  assert.equal(consent.consentRecorderRegistered(bashOnly), UNREGISTERED, 'a matcher without PowerShell leaves PowerShell calls unrecorded');
+  const widened = registrationRoot(t, registrationManifest('Bash|PowerShell|Read', ''));
   assert.equal(consent.consentHookRegistered(widened), REGISTERED);
   assert.equal(consent.consentRecorderRegistered(widened), REGISTERED);
   const everyTool = registrationRoot(t, registrationManifest('*', undefined));
   assert.equal(consent.consentHookRegistered(everyTool), REGISTERED, 'a * matcher covers every tool');
   assert.equal(consent.consentRecorderRegistered(everyTool), REGISTERED, 'an absent matcher covers every tool');
-  const pattern = registrationRoot(t, registrationManifest('Ba.h', '.*'));
+  const pattern = registrationRoot(t, registrationManifest('Ba.h|PowerShell', '.*'));
   assert.equal(consent.consentHookRegistered(pattern), REGISTERED);
   assert.equal(consent.consentRecorderRegistered(pattern), REGISTERED);
   const otherMatcher = registrationRoot(t, registrationManifest('Read', 'Edit|Write'));
@@ -1761,7 +1803,7 @@ test('the registration probes follow the host matcher rule and refuse another ma
   assert.equal(consent.consentHookRegistered(substring), UNREGISTERED, 'a plain name matches the whole tool name only');
   assert.equal(consent.consentRecorderRegistered(substring), UNREGISTERED, 'a plain name list matches whole tool names only');
   if (process.platform !== 'win32') {
-    const linked = registrationRoot(t, registrationManifest('Bash', 'Bash'), []);
+    const linked = registrationRoot(t, registrationManifest('Bash|PowerShell', 'Bash|PowerShell'), []);
     fs.writeFileSync(path.join(linked, 'hooks', 'gate-target.sh'), '#!/bin/bash\n');
     fs.symlinkSync('gate-target.sh', path.join(linked, 'hooks', consent.CONSENT_HOOK_FILE));
     fs.symlinkSync('absent-target.sh', path.join(linked, 'hooks', consent.CONSENT_RECORDER_FILE));
@@ -1815,12 +1857,12 @@ test('the registration probes answer unknown when hooks.json cannot be read, par
     hooks: {
       PreToolUse: [
         { matcher: '(', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] },
-        { matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] },
+        { matcher: 'Bash|PowerShell', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] },
       ],
-      PostToolUse: [{ matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_RECORDER_FILE)] }],
+      PostToolUse: [{ matcher: 'Bash|PowerShell', hooks: [registrationEntry(consent.CONSENT_RECORDER_FILE)] }],
     },
   });
-  assert.equal(consent.consentHookRegistered(settled), REGISTERED, 'a registration on Bash settles an uncompilable sibling');
+  assert.equal(consent.consentHookRegistered(settled), REGISTERED, 'a registration on Bash and PowerShell settles an uncompilable sibling');
 });
 
 test('one registration reader serves the consent probes and the grant row, each through its own reading', () => {
