@@ -146,6 +146,43 @@ process, never inside a bound session, and it loads the digested runtime from `h
 only production caller, so removing or renaming the module breaks the launcher, not only a test. `test-harness-launcher.sh` H12 drives the
 module's unit file.
 
+**The gate denies every Claude Desktop session tool that is not known to be inert**: every
+`mcp__ccd_session__` tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+`read_widget_context` (`SESSION_TOOL_PREFIX` and `INERT_SESSION_TOOLS` in
+`hooks/lib/work-order-v1.js`), and `mcp__ccd_session_mgmt__send_message`
+(`SESSION_MESSAGE_TOOLS`), all with the `chip` reason, which names `zensu work followup <order>`.
+Nobody in a work order clicks a card or answers an offer, and a session started from one runs
+outside the order's lease. `hand_off_to_session` moves the current task into a new session, which
+runs outside the lease as well; `move_to_cloud` pushes the branch past `--push`, which pushes with a
+lease against the head Zensu recorded, continues the session in the cloud and archives it here; and
+`send_message` asks another running session to take work up. Claude Desktop 2.42304.0 replaced the
+task chip with a `start_session` proposal (read from its bundle on 2026-10-18), so a deny of
+`spawn_task` alone left the work skill's "never open a task chip" rule unguarded there. The server
+is therefore judged by its prefix: a tool a later Claude Desktop adds stays denied until
+`INERT_SESSION_TOOLS` names it. The same bundle, read again on 2026-10-19, registers eight tools on
+the `ccd_session` server: `spawn_task` only when `start_session` is not offered; `start_session`,
+`hand_off_to_session` and `list_start_targets` when it is; `move_to_cloud` behind a check of its
+own; and `dismiss_task`, `mark_chapter` and `read_widget_context` always. The four inert ones stay
+allowed, because none of them starts or moves work: `dismiss_task` only withdraws a task chip or a
+proposal nobody started, `mark_chapter` only marks a chapter in the transcript,
+`list_start_targets` only lists the folders, SSH hosts, cloud environments and presets a session
+could start in, and `read_widget_context` only reads a widget's state. On the `ccd_session_mgmt`
+server only `send_message` is judged. Claude Desktop supplies all of these tools itself, so a
+work-order session the launcher starts with `claude -p` has none of them; the deny guards a work
+order bound inside a Claude Desktop session. The code `chip` predates the other denies and stays,
+because the module's non-hook gate output carries it.
+
+Each tool the gate starts to deny is a call it used to allow, so the change alters the capability
+set of every session a newer installation would serve, which `.claude/rules/runtime-lineage.md`
+makes breaking although no matcher (the gate matches `.*`), hook or schema moves: the
+`start_session` deny and this one ship in a `minor` release. A name added to `INERT_SESSION_TOOLS`
+denies strictly less and is a `patch`. `test-work-order-gates.sh` G4 drives the four start and move
+tools through the hook, and the gate case in `work-order-v1.test.js` pins them, a tool the server
+does not have today, `send_message`, the four inert tools and a `ccd_session_mgmt` tool outside the
+gate. `skills/work/SKILL.md`, `skills/work/references/protocol.md`, the tool-hooks section of
+`docs/work-order-mode.md` and the gate row of `docs/configuration.md` describe the denied tools too,
+and no test reads those sentences, so they move with the gate by hand.
+
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.
@@ -156,6 +193,13 @@ version; never bump it by hand.
   each command three ways, with plain single quotes and with the ANSI-C quoting of bash and of zsh,
   so its deny set never shrinks below the plain reading; a reading the shell does not use can only
   add a deny.
+- The gate judges forge writes only in Bash command text, and tools by name only on the two
+  Claude Desktop session servers. `SendMessage` stays allowed because it also continues this
+  session's own subagents, and a deny would have to read its `to` argument; it can still ask
+  another running session to take work up. `RemoteTrigger` can create and run a remote routine,
+  the other `ccd_session_mgmt` tools are not judged, and neither is an MCP tool that pushes, opens
+  or merges a pull request; the slot's MCP configuration, its permission mode and the host's rules
+  are the boundary there (read from the tool descriptions on 2026-10-19).
 - `--review-import` trusts a marker by its digest and reads only the first part of a review.
 - A nonterminal run of another order in a reused checkout still holds a new run off.
 - Native Windows is unverified. The launcher's process-group handling is POSIX only, and the five

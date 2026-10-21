@@ -426,7 +426,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 | `structure/fixture-mutation-watch.test.js` | 19 | – | `test-eval-harness-units.sh` | Fixture mutation-event classification for the Promptfoo wrapper, routed through one decision for both watch backends. |
 | `structure/full-suite-ci-v1.test.js` | 28 | – | `test-full-suite-ci.sh` | Full-suite CI deferral: the workflow scan, the remote proof, the verification cache, the policy ladder and the deferred-ci verdict. |
 | `structure/git-repo-escape.test.js` | 45 | – | `test-bash-source-write-gate.sh` | The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice. |
-| `structure/linked-sessions-v1.test.js` | 17 | – | `test-session-trail-verdict.sh` | The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets and the unread reports. |
+| `structure/linked-sessions-v1.test.js` | 23 | – | `test-session-trail-verdict.sh` | The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets, the unread reports and the task-chip proposals. |
 | `structure/owned-process.test.js` | 4 | win32 4 | `test-eval-harness-units.sh` | The owned-process lifecycle, including a signal-killed child reported as 128 plus its signal number. |
 | `structure/plan-payload-v1.test.js` | 20 | – | `test-plan-payload-fallback.sh` | The plan-source precedence table, the hardened plan-file reader refusals and the O_NOFOLLOW fallback. |
 | `structure/playwright-cli-version-v1.test.js` | 14 | win32 12 | `test-verify-consent.sh` | The installed playwright-cli version identity, read from its package manifest without running the binary. |

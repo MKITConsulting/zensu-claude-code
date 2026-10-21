@@ -1652,6 +1652,11 @@ test('the Bash analysis stays linear on a long shell flag', () => {
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__start_session')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__hand_off_to_session')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__move_to_cloud')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__future_tool')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session_mgmt__send_message')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
   assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
@@ -1661,8 +1666,17 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
     assert.equal(decided.code, 'ask', tool);
     assert.match(decided.reason, new RegExp(`zensu work ask ${ORDER}`));
   }
-  const chip = wo.gateDecision(context, payload('mcp__ccd_session__spawn_task'), { env: box.env });
-  assert.match(chip.reason, new RegExp(`zensu work followup ${ORDER}`));
+  for (const tool of ['mcp__ccd_session__spawn_task', 'mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session', 'mcp__ccd_session__move_to_cloud', 'mcp__ccd_session__future_tool', 'mcp__ccd_session_mgmt__send_message']) {
+    const decided = wo.gateDecision(context, payload(tool), { env: box.env });
+    assert.equal(decided.code, 'chip', tool);
+    assert.match(decided.reason, new RegExp(`zensu work followup ${ORDER}`), tool);
+    assert.match(decided.reason, /a proposed session reaches nobody/, tool);
+    assert.match(decided.reason, /handed off from here, this session moved to the cloud/, tool);
+    assert.match(decided.reason, /moves the order's work out of its lease/, tool);
+  }
+  for (const tool of ['mcp__ccd_session__dismiss_task', 'mcp__ccd_session__mark_chapter', 'mcp__ccd_session__list_start_targets', 'mcp__ccd_session__read_widget_context', 'mcp__ccd_session_mgmt__list_sessions']) {
+    assert.equal(wo.gateDecision(context, payload(tool), { env: box.env }), null, tool);
+  }
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
