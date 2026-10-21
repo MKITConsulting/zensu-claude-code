@@ -758,6 +758,26 @@ if [ "$O29G_STATUS" -eq 0 ] && [ "$(printf '%s' "$O29G_OUT" | decision)" = "allo
 else
   check "O29g oversized read-only payload refused (status $O29G_STATUS, output '$(printf '%s' "$O29G_OUT" | cut -c1-160)')" FAIL
 fi
+O29G2_BAD="$(GATE_SRC="$BASH_GATE" node -e '
+  const lines = require("fs").readFileSync(process.env.GATE_SRC, "utf8").split("\n");
+  let sites = 0;
+  const bad = [];
+  lines.forEach((line, i) => {
+    if (/^\s*#/.test(line) || !line.includes("node ./bash-source-write-parse.js")) return;
+    sites += 1;
+    let start = i;
+    while (start > 0 && /\\\s*$/.test(lines[start - 1])) start -= 1;
+    const command = lines.slice(start, i + 1).join(" ");
+    if (!/<<<"\$INPUT"\s*$/.test(line)) bad.push((i + 1) + ":stdin");
+    if (!/(^|\s)PAYLOAD=(\s|$)/.test(command) || /PAYLOAD=[^\s]/.test(command)) bad.push((i + 1) + ":payload");
+  });
+  process.stdout.write(sites ? bad.join(" ") : "no-call-site");
+' 2>&1)"
+if [ -z "$O29G2_BAD" ]; then
+  check "O29g2 every parser call in the gate reads the payload on stdin and passes PAYLOAD empty" PASS
+else
+  check "O29g2 parser call sites that do not read the payload on stdin ($O29G2_BAD)" FAIL
+fi
 OVERLAY_ARMED="$( { arm orphan-overlay >/dev/null 2>&1 && printf '%s\n%s\n' "$ARMED_ROOT" "$ARMED_DATA"; } )" \
   || { echo "O29f fixture failed" >&2; exit 1; }
 OVERLAY_ROOT="$(printf '%s\n' "$OVERLAY_ARMED" | sed -n 1p)"

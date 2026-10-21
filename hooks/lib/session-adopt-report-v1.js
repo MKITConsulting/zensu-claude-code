@@ -1558,8 +1558,9 @@ function main(deps = {}) {
   if (adopted.orphanedProjectRoot) {
     // Never the unqualified "bound again" line for this shape. The lineage break
     // is gone, but the anchor is still a directory that does not exist, which is
-    // the ordinary orphaned-project-root state: Bash and diagnostics run, Edit and
-    // Write do not. Saying otherwise would send the user straight into a deny.
+    // the ordinary orphaned-project-root state: diagnostics and Bash other than a zensu
+    // CLI call run, Edit, Write and MultiEdit do not. Saying otherwise would send the
+    // user straight into a deny.
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
     process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work,\n");

@@ -515,10 +515,9 @@ whether browser verification is enforced, not only when a row is red.
   described above probes the recorded root and reports what is there now, so relay
   the row's own sentence rather than this forecast once the repair has run.
   Otherwise start a fresh session. If the directory was MOVED rather than deleted,
-  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed but
-  not edited — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`, `Write` and `MultiEdit` stay denied because nothing can anchor a write to a
-  project, as does any Bash write the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left. Do NOT report this row as a missing record.
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session can be diagnosed — this read-only report runs, `Stop` is released rather than wedged,
+  and a `zensu` CLI call, `Edit`, `Write` and `MultiEdit` stay denied because no project
+  anchors the session, as does any Bash write the opted-in source-write gate attributes with no usable `CLAUDE_PROJECT_DIR` left. Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
   the recorded one — strict `X.Y.Z`, equal major, equal minor while major is `0`,
@@ -584,8 +583,8 @@ whether browser verification is enforced, not only when a row is red.
   the repair: adoption clears the LINEAGE break, so Bash (except a `zensu` CLI call) and this
   diagnostic work again, while `Edit`, `Write` and `MultiEdit` stay denied, as does any Bash write the opted-in source-write gate attributes
   with no usable `CLAUDE_PROJECT_DIR` left, until that directory is re-created by
-  `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
-  requires the running installation to SERVE the record, which is what the
+  `/zensu:adopt-session --restore-root --confirm`, which must run AFTER the adoption: that repair
+  requires the running installation to SERVE the record, which the
   adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
