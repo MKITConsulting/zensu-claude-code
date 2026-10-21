@@ -479,6 +479,35 @@ else
   check "evidence runner converts and loads (with its sibling requires) from the special plugin root" FAIL
 fi
 
+review_consume() {
+  CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SESSION" bash -c '
+    source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" || exit 90
+    zensu_bind_model_session || exit 91
+    source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh" || exit 92
+    mode="$1"
+    shift
+    zensu_review_consume "$mode" "$ZENSU_SESSION_KEY" "$@"
+  ' review-consume "$@" 2>>"$RAW_TMP/review-consume.err"
+}
+review_consume launch --ticket rt_special --agent aspecial1 --kind standalone \
+  --run - --attempt 0 --chain - --stage - >/dev/null
+RC_LAUNCH=$?
+RC_RUNNING="$(review_consume lookup --ticket rt_special)"
+RC_RUNNING_RC=$?
+REVIEW_STOP_OUT="$(AGENT_ID=aspecial1 AGENT_TYPE=zensu:code-reviewer worker_payload SubagentStop "" \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    bash "$PLUGIN/hooks/review-consume-subagent-stop.sh" 2>>"$RAW_TMP/review-consume.err")"
+REVIEW_STOP_RC=$?
+RC_STOPPED="$(review_consume lookup --ticket rt_special)"
+RC_STOPPED_RC=$?
+if [ "$RC_LAUNCH" -eq 0 ] && [ "$RC_RUNNING_RC" -eq 4 ] && [ "$RC_RUNNING" = running ] \
+    && [ "$REVIEW_STOP_RC" -eq 0 ] && [ -z "$REVIEW_STOP_OUT" ] && [ "$RC_STOPPED_RC" -eq 0 ] \
+    && [ "$RC_STOPPED" = "$(printf 'stopped\taspecial1\tstandalone\t-\t0\t-\t-')" ]; then
+  check "background review records launch, stop and look up through the special plugin root" PASS
+else
+  check "background review records launch, stop and look up through the special plugin root" FAIL
+fi
+
 
 if [ "$FAIL" -ne 0 ]; then
   for diagnostic in "$RAW_TMP"/*.err; do

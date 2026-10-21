@@ -86,7 +86,7 @@ const JQ_VALUE_OPTIONS = new Map([['--arg', 2], ['--argjson', 2], ['--slurpfile'
 const YQ_SUBCOMMANDS = new Set(['e', 'eval', 'ea', 'eval-all']);
 const POWERSHELL = new Set(['pwsh', 'powershell']);
 
-const HELPER_RE = /(?:^|[/(,=:'"`])(?:zensu-log\.sh|zensu-session[a-z0-9._-]*\.sh|zensu-doctor\.sh|zensu-review-evidence\.sh|(?:claude-hook-session-v1|claude-session-control-v1|session-control-core-v1|review-evidence-lease-v1|session-auto-adopt-v1)(?:\.js)?|zensu_bind_[a-z0-9_]+|model-bind)(?=$|[)\s;,:'"`])/i;
+const HELPER_RE = /(?:^|[/(,=:'"`])(?:zensu-log\.sh|zensu-session[a-z0-9._-]*\.sh|zensu-doctor\.sh|zensu-review-evidence\.sh|(?:claude-hook-session-v1|claude-session-control-v1|session-control-core-v1|review-evidence-lease-v1|review-consume-v1|session-auto-adopt-v1)(?:\.js)?|zensu_bind_[a-z0-9_]+|model-bind)(?=$|[)\s;,:'"`])/i;
 const READ_ONLY_COMMANDS = new Set([
   'cat', 'tac', 'head', 'tail', 'less', 'more', 'bat', 'batcat', 'nl', 'od', 'xxd', 'hexdump',
   'strings', 'wc', 'cut', 'sort', 'uniq', 'tr', 'fold', 'column', 'paste', 'comm', 'fmt',

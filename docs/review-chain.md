@@ -208,23 +208,30 @@ them claims a ticket without a reviewer that ran and stopped:
   envelope and both state planes exactly as for a completion, then records the launch — the
   ticket, the host's `agentId` and the envelope — in
   `.zensu/state/review-consume-<scv1-session-key>/` and consumes nothing. Its directive: do
-  not respawn the reviewer, do not issue another ticket, and when the reviewer's task
-  notification arrives run `zensu-log.sh --review-consume --ticket <ticket>`.
+  not respawn the reviewer, do not issue another ticket, and when the reviewer's report
+  arrives, as its hand-back message or in its task notification, run
+  `zensu-log.sh --review-consume --ticket <ticket>`. Only when the notification reports that
+  the reviewer failed or stopped without a report does it name a fresh `--review-ticket` and
+  one respawn instead; a fresh ticket repeats the review, it never skips one.
 - **Stop.** `review-consume-subagent-stop.sh` records the `SubagentStop` of that agent id.
   The host fires `SubagentStop` when the subagent finishes, so this record is the
   host-attested completion; a stop of any other agent, or of a reviewer with no recorded
-  launch, records nothing.
+  launch, records nothing. It does not read `last_assistant_message`, because a reviewer on
+  the desktop app hands its report back through the `SubagentHandback` tool and its last
+  assistant message carries no text.
 - **Claim.** `zensu-log.sh --review-consume --ticket <ticket>` requires both records, re-runs
   the launch-time envelope check against the current state, claims the ticket in the same
   CAS a foreground completion uses, and prints the same routing directive, so the rest of
   the chain — fix rounds, `--code-review-done`, `/zensu:self-review`, `--chain-done` — is
   unchanged. It refuses with exit 3 when no background launch is recorded for the ticket, 4
   while the reviewer still runs and 5 for a ticket that is stale, already consumed or bound
-  to another chain generation, and it changes nothing when it refuses.
+  to another chain generation, and it changes nothing when it refuses. Exit 6 is the one exit
+  after a state change: the ticket was consumed but its directive could not be printed, so
+  the verb names `--chain-status` instead of reporting success.
 
 While the open ticket has a recorded launch whose reviewer has not stopped, the Stop guard
-releases the `Stop` without charging the review budget, at most three times in a row per
-ticket, because the task notification starts the next turn. A session that owns a live
+releases the `Stop` without charging the review budget, at most three times per ticket (the
+count restarts only for a new ticket), because the reviewer's report starts the next turn. A session that owns a live
 Autopilot run, an Autopilot-bound chain and a chain that adopted or holds a deferred review
 never wait. Past that bound, and as soon as the reviewer stopped while its ticket is still
 unclaimed, the block reason names `--review-consume` instead of restarting the review.
@@ -236,13 +243,19 @@ foreground respawn with `run_in_background: false`.
 that set `run_in_background: false` came back `async_launched` with an `agentId` and an
 `outputFile`, and their completion arrived as a `<task-notification>` naming that id. The
 review-evidence lease store holds worker results that `SubagentStop` stored for agents the
-host launched in the background, keyed by the same agent id.
+host launched in the background, keyed by the same agent id. Nine consume-reviewer
+transcripts of the same day end on a `SubagentHandback` tool call whose `message` carries the
+report, followed by the tool result "Report delivered to your caller."; none ends on
+assistant text.
 
 **Residuals.** The records sit in the session's own `.zensu/state/`, which the main thread can
 write: a deliberate write there can forge a stop, as for every plugin store, and the claim
 still needs the open ticket of an intact chain. A reviewer that dies without a `SubagentStop`
 stays "running": the guard releases at most three `Stop`s for it, and its block reason then
-says to issue a fresh ticket when the notification reported a failure. Whether `SubagentStop`
+says to issue a fresh ticket when the notification reported a failure. A stop that reaches
+the recorder before the launch record exists is dropped; the exit-4 refusal then names a
+fresh ticket once the notification says the reviewer finished. The wait has no TTL and does
+not read the Stop payload's `background_tasks`, which was not measured to list agents. Whether `SubagentStop`
 fires for a reviewer stopped with `TaskStop` was not measured; when two reviewers ran for one
 ticket, the first one to stop is the one claimed. An Autopilot-bound chain gets no wait, so a
 `Stop` before the notification still spends its budget, with `--review-consume` named in the

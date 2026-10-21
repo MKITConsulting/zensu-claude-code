@@ -3145,12 +3145,13 @@ zensu_review_consume() {
   exclusions="$(zensu_msys_env_exclusions ZENSU_RC_PROJECT_ROOT 2>/dev/null)" \
     || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   (
+    cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 2
     export MSYS2_ARG_CONV_EXCL='*' MSYS2_ENV_CONV_EXCL="$exclusions" \
       ZENSU_RC_PROJECT_ROOT="$native_project_root" ZENSU_RC_SESSION_KEY="$session_key"
     if declare -F zensu_run_bounded >/dev/null 2>&1; then
-      zensu_run_bounded node "${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-consume-v1.js" "$mode" "$@"
+      zensu_run_bounded node ./review-consume-v1.js "$mode" "$@"
     else
-      node "${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-consume-v1.js" "$mode" "$@"
+      node ./review-consume-v1.js "$mode" "$@"
     fi
   )
 }

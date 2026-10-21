@@ -30,12 +30,17 @@ CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 CONSUME_MODE=hook
 CONSUME_CLAIMED=false
+CONSUME_EMITTED=false
 CONSUME_REFUSAL=""
 INPUT=""
 
 zensu_background_consume_exit() {
   local rc=$?
-  [ "$CONSUME_CLAIMED" = true ] && return 0
+  if [ "$CONSUME_CLAIMED" = true ]; then
+    [ "$CONSUME_EMITTED" = true ] && return 0
+    printf 'zensu-log.sh --review-consume: %s\n' "review ticket ${REVIEW_TICKET:-} was consumed, but no routing directive could be printed for it. Do NOT treat this as a finished review and do NOT run --code-review-done or --chain-done on it. Read the chain shape with --chain-status and follow the command it names." >&2
+    exit 6
+  fi
   if [ -z "$CONSUME_REFUSAL" ]; then
     CONSUME_REFUSAL="review ticket ${REVIEW_TICKET:-} could not be consumed: it is not this chain's open review ticket, or the chain no longer matches the recorded launch (a newer or already consumed ticket, a closed or re-armed chain, or a changed Autopilot binding). Nothing was changed. Read the chain shape with --chain-status and follow the command it names."
     rc=5
@@ -190,7 +195,7 @@ if [ "$CONSUME_MODE" = background ]; then
       exit 3
       ;;
     4)
-      CONSUME_REFUSAL="the background zensu:code-reviewer launched for review ticket ${REVIEW_TICKET} has not stopped yet, so there is no report to consume. Wait for its task notification, then run this command again. Nothing was changed."
+      CONSUME_REFUSAL="the background zensu:code-reviewer launched for review ticket ${REVIEW_TICKET} has not stopped yet, so there is no report to consume. Wait for its hand-back message or its task notification, then run this command again. If its task notification already reported that it finished, its stop was not recorded: issue a fresh ticket with zensu-log.sh --review-ticket and spawn one zensu:code-reviewer with the same prompt under that new ticket. Nothing was changed."
       exit 4
       ;;
     *)
@@ -327,7 +332,8 @@ if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
       } catch (_) {}
     });
   ' <<<"$INPUT" 2>/dev/null)"
-  CONSUME_COMMAND="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --review-consume --ticket $(printf '%q' "$REVIEW_TICKET")"
+  CONSUME_LOG="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+  CONSUME_COMMAND="${CONSUME_LOG} --review-consume --ticket $(printf '%q' "$REVIEW_TICKET")"
   if [ -n "$LAUNCH_AGENT_ID" ] && zensu_review_consume launch "$SESSION_ID" \
       --ticket "$REVIEW_TICKET" --agent "$LAUNCH_AGENT_ID" --kind "$PROMPT_AUTOPILOT_KIND" \
       --run "$PROMPT_AUTOPILOT_RUN" --attempt "$PROMPT_AUTOPILOT_ATTEMPT" \
@@ -336,7 +342,7 @@ if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
     if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       ASYNC_WAIT_SENTENCE="An Autopilot-bound chain keeps its Stop guard while the reviewer runs: a Stop blocked before the notification arrives names this same command, so do NOT start the review over."
     fi
-    ASYNC_MSG="The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed; this launch is recorded against it. Do NOT spawn zensu:code-reviewer again for this ticket and do NOT issue a new ticket. When its task notification arrives, read the report it delivers, then your NEXT action must be: ${CONSUME_COMMAND} — it consumes the ticket only after the host reported that this reviewer stopped, and prints the routing directive a foreground completion would have received here; act on that directive. ${ASYNC_WAIT_SENTENCE}"
+    ASYNC_MSG="The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed; this launch is recorded against it. Do NOT spawn zensu:code-reviewer again for this ticket and do NOT issue a new ticket. When its report reaches you through its hand-back message or its task notification, read it, then your NEXT action must be: ${CONSUME_COMMAND} — it consumes the ticket only after the host reported that this reviewer stopped, and prints the routing directive a foreground completion would have received here; act on that directive. Only if its task notification reports that it failed or was stopped without a report, do NOT run that command: issue a fresh ticket with ${CONSUME_LOG} --review-ticket and spawn one zensu:code-reviewer with the same prompt under that new ticket. ${ASYNC_WAIT_SENTENCE}"
   else
     ASYNC_MSG="The zensu:code-reviewer call above returned status async_launched: it runs in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed, and this launch could not be recorded, so its completion cannot be consumed either. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, with the same prompt and its same header lines; only a foreground completion or a recorded background launch advances the chain. Ignore the background run's notification when it arrives, and do NOT end your turn first."
   fi
@@ -537,10 +543,9 @@ fi
 
 emit_post_context() {
   if [ "$CONSUME_MODE" = background ]; then
-    printf '%s\n\n' "zensu-log.sh --review-consume: consumed review ticket ${REVIEW_TICKET} for the background zensu:code-reviewer ${CONSUME_AGENT_ID}, review round ${NEXT}. Its report is the one its task notification delivered; act on this directive exactly as if the hook had printed it at a foreground completion:"
-    cat
-    echo
-    return 0
+    printf '%s\n\n' "zensu-log.sh --review-consume: consumed review ticket ${REVIEW_TICKET} for the background zensu:code-reviewer ${CONSUME_AGENT_ID}, review round ${NEXT}. Its report is the one its hand-back message or its task notification delivered; act on this directive exactly as if the hook had printed it at a foreground completion:" \
+      && cat && echo
+    return
   fi
   node -e '
     const msg = require("node:fs").readFileSync(0, "utf8");
@@ -555,7 +560,7 @@ if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
   DISABLED_TAIL=""
   [ "$SELF_REVIEW_ON" = "0" ] && DISABLED_TAIL="${BYPASS_DIRECTIVE_TRAILING}"
-  printf '%s' "${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  printf '%s' "${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context && CONSUME_EMITTED=true
   exit 0
 fi
 
@@ -589,7 +594,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     [ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && MAX_ROUNDS_VERDICTS=" No FULL SUITE or ACCEPTANCE line reaches you for this max-rounds close, so in the summary below write 🟡 not checked (max-rounds) as the Full suite verdict and 🟡 not-checked (max-rounds) as the Acceptance verdict."
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Before you reply, ${CLOSE_SUITE_STEP}. Fix rounds re-run only their own scoped suites and no terminus gate follows here, so ${CLOSE_SUITE_REASON}. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${MAX_ROUNDS_VERDICTS}${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
-  printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context && CONSUME_EMITTED=true
   exit 0
 fi
 
@@ -644,4 +649,4 @@ EXPANDED_MSG="${MSG//\$\{NEXT\}/$NEXT}"
 EXPANDED_MSG="${EXPANDED_MSG//\$\{MAX_ROUNDS\}/$MAX_ROUNDS}"
 EXPANDED_MSG="${EXPANDED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}"
 
-printf '%s' "$EXPANDED_MSG" | emit_post_context
+printf '%s' "$EXPANDED_MSG" | emit_post_context && CONSUME_EMITTED=true

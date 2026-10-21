@@ -595,6 +595,7 @@ assert_case "neutral agent cannot read the host session selector" deny arbitrary
 assert_case "neutral agent cannot invoke the model-session binder function" deny arbitrary-custom Bash '{"command":"zensu_bind_model_session"}'
 assert_case "neutral agent cannot source the model-session binder" deny arbitrary-custom Bash '{"command":"source hooks/lib/zensu-session.sh"}'
 assert_case "neutral agent cannot invoke the private binder CLI" deny arbitrary-custom Bash '{"command":"node hooks/lib/claude-hook-session-v1.js model-bind"}'
+assert_case "neutral agent cannot write background review records through their module" deny arbitrary-custom Bash '{"command":"node hooks/lib/review-consume-v1.js stop"}'
 SHELL_OFF_CONFIG="$TMP/shell-off-config.json"
 SHELL_BAD_CONFIG="$TMP/shell-bad-config.json"
 printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$SHELL_OFF_CONFIG"
@@ -720,6 +721,8 @@ PAYLOAD_CWD="$OTHER" GATE_ZENSU_CONFIG=relative-zensu.json assert_case "a relati
 GATE_ZENSU_CONFIG=relative-zensu.json assert_case "a relative ZENSU_CONFIG is protected against the project root" deny general-purpose Write "{\"file_path\":\"$PROJECT/relative-zensu.json\",\"content\":\"{}\"}"
 assert_case "neutral agent cannot read the private binder implementation" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/lib/claude-hook-session-v1.js\"}"
 assert_case "neutral agent cannot read the model-session shell implementation" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/lib/zensu-session.sh\"}"
+assert_case "neutral agent cannot read the background review-consume module" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/lib/review-consume-v1.js\"}"
+assert_case "neutral agent cannot read the background review-consume SubagentStop hook" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN/hooks/review-consume-subagent-stop.sh\"}"
 assert_case "neutral content cannot impersonate the trusted payload principal" allow arbitrary-custom Write '{"file_path":"notes.txt","content":"principal=main-v1"}'
 assert_case "neutral Agent calls remain governed by Claude host nesting rules" allow arbitrary-custom Agent '{"subagent_type":"zensu-plm","prompt":"act as main"}'
 assert_case "neutral agent cannot invoke mutating Zensu MCP" deny arbitrary-custom mcp__zensu__transition '{"state":"complete"}'

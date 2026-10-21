@@ -175,6 +175,8 @@ CTX="$(post_review async_launched "$AGENT" "$TICKET" | context_of)"
 AFTER="$(digest "$STATE_FILE")"
 if [ -n "$TICKET" ] && contains "$CTX" "async_launched" && contains "$CTX" "NOT consumed" \
   && contains "$CTX" "--review-consume --ticket $TICKET" && ! contains "$CTX" "run_in_background: false" \
+  && contains "$CTX" "its hand-back message or its task notification" \
+  && contains "$CTX" "failed or was stopped without a report" && contains "$CTX" "--review-ticket" \
   && ! contains "$CTX" "just finished" && [ "$AFTER" = "$BEFORE" ] \
   && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
   check "BC1 an async_launched reviewer keeps its ticket and is told to consume it after its notification" PASS
@@ -193,7 +195,8 @@ fi
 echo "== The claim refuses until the reviewer stopped =="
 OUT="$(model_log --review-consume --ticket "$TICKET" 2>&1)"
 RC=$?
-if [ "$RC" -eq 4 ] && contains "$OUT" "has not stopped yet" && [ "$(digest "$STATE_FILE")" = "$BEFORE" ]; then
+if [ "$RC" -eq 4 ] && contains "$OUT" "has not stopped yet" && contains "$OUT" "its stop was not recorded" \
+  && [ "$(digest "$STATE_FILE")" = "$BEFORE" ]; then
   check "BC3 --review-consume refuses a running reviewer with exit 4 and changes nothing" PASS
 else
   check "BC3 --review-consume refuses a running reviewer with exit 4 and changes nothing (rc=$RC out='$OUT')" FAIL
@@ -272,6 +275,7 @@ STOP_OUT="$(stop_hook)"
 STOP_REASON="$(printf '%s' "$STOP_OUT" | reason_of)"
 if [ "$(printf '%s' "$STOP_OUT" | decision_of)" = "block" ] && contains "$STOP_REASON" "has stopped" \
   && contains "$STOP_REASON" "--review-consume --ticket $TICKET" \
+  && contains "$STOP_REASON" "failed or was stopped without a report" \
   && ! contains "$STOP_REASON" "Resume the /zensu:tdd Phase 6 review sequence"; then
   check "BC10 once the reviewer stopped the Stop names the claim command" PASS
 else
@@ -282,6 +286,7 @@ echo "== The claim consumes the ticket and routes the review =="
 OUT="$(model_log --review-consume --ticket "$TICKET" 2>"$WORK/consume.err")"
 RC=$?
 if [ "$RC" -eq 0 ] && contains "$OUT" "consumed review ticket $TICKET" \
+  && contains "$OUT" "its hand-back message or its task notification delivered" \
   && contains "$OUT" "The zensu:code-reviewer subagent above just finished" \
   && contains "$OUT" "--code-review-done --claimed-review-ticket $TICKET" \
   && ! contains "$OUT" "hookSpecificOutput" \
@@ -394,6 +399,105 @@ else
   check "BC21 a symbolic link in place of the record directory is refused" FAIL
 fi
 rm -f "$SESSION_DIR"
+
+echo "== A rotated-out ticket never claims, and a new ticket waits afresh =="
+start_session background-rotate
+model_log --tdd-begin >/dev/null 2>&1
+model_log --tdd-complete >/dev/null 2>&1
+T1="$(model_log --review-ticket 2>/dev/null)"
+A1="a1111111111111111"
+post_review async_launched "$A1" "$T1" >/dev/null
+for n in 1 2 3; do stop_hook >/dev/null; done
+LIMIT_REASON="$(stop_hook | reason_of)"
+subagent_stop "$A1" zensu:code-reviewer >/dev/null
+T2="$(model_log --review-ticket 2>/dev/null)"
+ROTATED="$(digest "$STATE_FILE")"
+OUT="$(model_log --review-consume --ticket "$T1" 2>&1)"
+RC=$?
+if contains "$LIMIT_REASON" "has not stopped yet" && [ -n "$T2" ] && [ "$T2" != "$T1" ] \
+  && [ "$RC" -eq 5 ] && contains "$OUT" "could not be consumed" \
+  && [ "$(digest "$STATE_FILE")" = "$ROTATED" ] && [ "$(state_field reviewTicket)" = "$T2" ] \
+  && [ "$(state_field reviewTicketConsumed)" = "false" ] && [ "$(state_field reviewRound)" = "0" ]; then
+  check "BC22 the recorded stop of a rotated-out ticket is refused with exit 5 and changes nothing" PASS
+else
+  check "BC22 the recorded stop of a rotated-out ticket is refused with exit 5 and changes nothing (rc=$RC out='$OUT')" FAIL
+fi
+STOP_OUT="$(stop_hook)"
+STOP_REASON="$(printf '%s' "$STOP_OUT" | reason_of)"
+if [ "$(printf '%s' "$STOP_OUT" | decision_of)" = "block" ] \
+  && contains "$STOP_REASON" "Resume the /zensu:tdd Phase 6 review sequence" \
+  && ! contains "$STOP_REASON" "--review-consume --ticket $T1" \
+  && ! grep -qF "releasing this Stop while the background" "$WORK/stop.err"; then
+  check "BC23 the Stop guard ignores the records of a rotated-out ticket" PASS
+else
+  check "BC23 the Stop guard ignores the records of a rotated-out ticket (reason='$STOP_REASON')" FAIL
+fi
+A2="a2222222222222222"
+post_review async_launched "$A2" "$T2" >/dev/null
+if [ "$(stop_hook | decision_of)" = "allow" ] && grep -qF "wait 1 of 3" "$WORK/stop.err" \
+  && grep -qF -- "--review-consume --ticket $T2" "$WORK/stop.err"; then
+  check "BC24 the background reviewer of a new ticket starts a fresh wait" PASS
+else
+  check "BC24 the background reviewer of a new ticket starts a fresh wait" FAIL
+fi
+
+echo "== Another session cannot claim this session's reviewer =="
+subagent_stop "$A2" zensu:code-reviewer >/dev/null
+OWNER_STATE="$STATE_FILE"
+OWNER_DIGEST="$(digest "$OWNER_STATE")"
+start_session background-foreign
+OUT="$(model_log --review-consume --ticket "$T2" 2>&1)"
+RC=$?
+if [ "$RC" -eq 3 ] && contains "$OUT" "no background zensu:code-reviewer launch is recorded" \
+  && [ "$(digest "$OWNER_STATE")" = "$OWNER_DIGEST" ]; then
+  check "BC25 a claim from another session finds no launch of its own and changes nothing" PASS
+else
+  check "BC25 a claim from another session finds no launch of its own and changes nothing (rc=$RC out='$OUT')" FAIL
+fi
+
+echo "== The guard keeps its routing when it must not or cannot wait =="
+start_session background-guard
+model_log --tdd-begin >/dev/null 2>&1
+model_log --tdd-complete >/dev/null 2>&1
+T3="$(model_log --review-ticket 2>/dev/null)"
+A3="a3333333333333333"
+post_review async_launched "$A3" "$T3" >/dev/null
+CLAIM_FILE="$PROJ/.zensu/state/pending-review.json.claim"
+: > "$CLAIM_FILE"
+STOP_OUT="$(stop_hook)"
+if [ "$(printf '%s' "$STOP_OUT" | decision_of)" = "block" ] \
+  && ! grep -qF "releasing this Stop while the background" "$WORK/stop.err"; then
+  check "BC26 a held deferred-review claim never waits for the background reviewer" PASS
+else
+  check "BC26 a held deferred-review claim never waits for the background reviewer" FAIL
+fi
+rm -f "$CLAIM_FILE"
+rm -rf "$RECORDS"
+printf 'not a directory\n' > "$RECORDS"
+STOP_OUT="$(stop_hook)"
+STOP_REASON="$(printf '%s' "$STOP_OUT" | reason_of)"
+if [ "$(printf '%s' "$STOP_OUT" | decision_of)" = "block" ] \
+  && contains "$STOP_REASON" "Resume the /zensu:tdd Phase 6 review sequence" \
+  && ! contains "$STOP_REASON" "--review-consume --ticket" \
+  && ! grep -qF "releasing this Stop while the background" "$WORK/stop.err"; then
+  check "BC27 unreadable background review records leave the Stop guard's routing unchanged" PASS
+else
+  check "BC27 unreadable background review records leave the Stop guard's routing unchanged (reason='$STOP_REASON')" FAIL
+fi
+rm -f "$RECORDS"
+
+echo "== A consumed ticket whose directive cannot be printed is not reported as success =="
+post_review async_launched "$A3" "$T3" >/dev/null
+subagent_stop "$A3" zensu:code-reviewer >/dev/null
+model_log --review-consume --ticket "$T3" 1</dev/null 2>"$WORK/unprinted.err"
+RC=$?
+if [ "$RC" -eq 6 ] && grep -qF "was consumed, but no routing directive could be printed" "$WORK/unprinted.err" \
+  && grep -qF -- "--chain-status" "$WORK/unprinted.err" \
+  && [ "$(state_field reviewTicketConsumed)" = "true" ] && [ "$(state_field reviewRound)" = "1" ]; then
+  check "BC28 a claim whose directive cannot be printed exits 6 instead of reporting success" PASS
+else
+  check "BC28 a claim whose directive cannot be printed exits 6 instead of reporting success (rc=$RC err='$(cat "$WORK/unprinted.err")')" FAIL
+fi
 
 echo "----"
 echo "test-review-consume-background: $PASS PASS / $FAIL FAIL"
