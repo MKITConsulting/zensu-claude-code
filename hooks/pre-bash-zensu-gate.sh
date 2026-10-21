@@ -48,22 +48,36 @@ command -v node >/dev/null 2>&1 || exit 0
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" node -e '
-  let cmd = "", sub = false, ps = false;
+INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then ZPS=./powershell-command-v1.js; else ZPS=; fi; printf '%s' "$INPUT" | ZPS="$ZPS" ZAPI="${ZENSU_API_URL:-}" ZGUARD="${CLAUDE_PLUGIN_ROOT}/hooks/lib/subagent-shell-guard-v1.js" ZBIND="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js" node -e '
+  let cmd = "", sub = false, ps = false, size = 0;
   try {
-    const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
+    const raw = require("fs").readFileSync(0);
+    size = raw.length;
+    const j = JSON.parse(raw.toString("utf8") || "{}");
     if (j.tool_input && typeof j.tool_input.command === "string") cmd = j.tool_input.command;
     sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
     ps = j.tool_name === "PowerShell";
   } catch (_) { process.exit(0); }
   if (!cmd || (!ps && !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd))) process.exit(0);
+  let cap = 0;
+  try { cap = require(process.env.ZBIND).MAX_PAYLOAD_BYTES; } catch (_) {}
+  if (!ps && Number.isSafeInteger(cap) && cap > 0 && size > cap) {
+    process.stdout.write("__oversized__\t" + size + "\t" + cap);
+    process.exit(0);
+  }
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
   const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
   const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
-  const out = [];
+  const out = new Set();
   const OPQ = String.fromCharCode(0);
   const UNJ = "__unjudged__\t";
+  function unquoted(value) {
+    let start = 0, end = value.length;
+    while (start < end && (value.charCodeAt(start) === 34 || value.charCodeAt(start) === 39)) start += 1;
+    while (end > start && (value.charCodeAt(end - 1) === 34 || value.charCodeAt(end - 1) === 39)) end -= 1;
+    return value.slice(start, end);
+  }
   function isLocalUrl(u) {
     u = String(u || "").toLowerCase();
     const s = u.indexOf("://");
@@ -100,11 +114,11 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       for (;;) {
         while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {       // capture env prefixes (VAR=val)
           const a = toks[i], eq = a.indexOf("=");
-          envp[a.slice(0, eq)] = a.slice(eq + 1).replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
+          envp[a.slice(0, eq)] = unquoted(a.slice(eq + 1));
           i++;
         }
         if (i >= toks.length) break;
-        const t = toks[i].replace(/^\\/, "").replace(/^[\x22\x27]+|[\x22\x27]+$/g, ""); // strip a leading backslash and any wrapping quote chars; quote bytes are hex-escaped so no literal quote appears in this bash single-quoted node script
+        const t = unquoted(toks[i].replace(/^\\/, ""));                           // strip a leading backslash and any wrapping quote chars
         if (WRAP.has(t)) { i++; continue; }                                        // skip transparent wrappers (command/env/sudo/…)
         base = t.split("/").pop(); break;                                           // resolved command basename
       }
@@ -117,7 +131,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     let found = null;
     try { found = require(process.env.ZPS || "").zensuInvocations(cmd); } catch (_) {}
     if (!found) found = { unjudged: /zensu/i.test(cmd.replace(/\x60/g, "")) ? "the PowerShell analyzer could not be loaded" : "", invocations: [] };
-    if (found.unjudged) out.push(UNJ + String(found.unjudged).split(/[\t\r\n]/)[0]);
+    if (found.unjudged) out.add(UNJ + String(found.unjudged).split(/[\t\r\n]/)[0]);
     return found.invocations;
   }
   let invocations = ps ? psInvocations() : tokenInvocations();
@@ -131,13 +145,13 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
-      if (out.indexOf("__bypass__\tZENSU_MCP_GATE") < 0) out.push("__bypass__\tZENSU_MCP_GATE");
+      out.add("__bypass__\tZENSU_MCP_GATE");
       continue;
     }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
     let apiUrl = envp.ZENSU_API_URL || "";
     const ai = rest.indexOf("--api-url");
-    if (ai !== -1 && typeof rest[ai + 1] === "string") apiUrl = rest[ai + 1].replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
+    if (ai !== -1 && typeof rest[ai + 1] === "string") apiUrl = unquoted(rest[ai + 1]);
     if (!apiUrl) apiUrl = process.env.ZAPI || "";
     if (isLocalUrl(apiUrl)) continue;                                              // localhost/dev backend → conventions moot, not the tracked product
     let noun = "", k = 0;
@@ -149,7 +163,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       if (NOUNS.has(t)) { noun = ALIAS[t] || t; }
       break;                                                                       // first non-flag token decides
     }
-    if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.push(UNJ + "the noun of a zensu call is built at run time"); continue; }
+    if (ps && typeof rest[k] === "string" && rest[k].indexOf(OPQ) !== -1) { out.add(UNJ + "the noun of a zensu call is built at run time"); continue; }
     if (!noun) continue;
     const words = [];
     for (let m = k + 1; m < rest.length && words.length < 2; m++) {
@@ -160,11 +174,11 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
       words.push(t.split(/[\t\r\n]/)[0]);
     }
     const verb = words[0] || "", third = words[1] || "";
-    if (ps && verb.indexOf(OPQ) !== -1) { out.push(UNJ + "the verb of a zensu call is built at run time"); continue; }
-    if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.push(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
-    out.push(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
+    if (ps && verb.indexOf(OPQ) !== -1) { out.add(UNJ + "the verb of a zensu call is built at run time"); continue; }
+    if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
+    out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
   }
-  process.stdout.write(out.join("\n"));
+  process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
 
 field() {
@@ -190,6 +204,15 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled mcpGate || exit 0
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+case "$INVOCATIONS" in
+  (__oversized__*)
+    IFS="$(printf '\t')" read -r OVERSIZED_MARK OVERSIZED_BYTES OVERSIZED_CAP <<EOF
+$INVOCATIONS
+EOF
+    zensu_emit_oversized_payload_deny "$OVERSIZED_BYTES" "$OVERSIZED_CAP" || zensu_emit_hook_session_deny
+    exit 0
+    ;;
+esac
 if ! zensu_bind_hook_session "$INPUT"; then
   # The two recognized commands are reachable in EVERY bind failure, not only the
   # two relaxable ones — including a record that exists and disagrees, which is
@@ -250,10 +273,20 @@ UNJUDGED="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__unjudged__"{print 
 # payload omitted it, the exact exported Session Control key) owns a workflow
 # declaring $1. Ambient CLAUDE_SESSION_ID is legacy introspection data and must
 # never donate another session's authorization.
+WORKFLOW_TOOLS=""
+WORKFLOW_TOOLS_READ=false
 tool_allowed_by_workflow() {
-  local tool="$1"
+  local tool="$1" allowed
   [ -n "$SID_CURRENT" ] || return 1
-  [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_CURRENT")" "$tool")" = "true" ] && return 0
+  if [ "$WORKFLOW_TOOLS_READ" != true ]; then
+    WORKFLOW_TOOLS="$(zensu_workflow_tools "$(tdd_state_file "$SID_CURRENT")")" || WORKFLOW_TOOLS=""
+    WORKFLOW_TOOLS_READ=true
+  fi
+  while IFS= read -r allowed; do
+    [ -n "$allowed" ] && [ "$allowed" = "$tool" ] && return 0
+  done <<EOF
+$WORKFLOW_TOOLS
+EOF
   return 1
 }
 
