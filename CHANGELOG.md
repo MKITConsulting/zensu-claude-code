@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
   `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
   now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
+  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+  `read_widget_context`, which neither start nor move work, so
+  `mcp__ccd_session__hand_off_to_session`,
+  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
+  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
+  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
+  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
+  session in the cloud and archives it here, and a message asks another session to take work up,
+  so each took the order's work out of its lease. The operator account now names the routes the
+  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
+  pull request.
 - **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
   linked session's folder belongs to the old session by its git repository, measured with
   `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
@@ -49,18 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
   out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
   `takeover`.
-- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
-  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
-  `read_widget_context`, which neither start nor move work, so
-  `mcp__ccd_session__hand_off_to_session`,
-  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
-  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
-  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
-  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
-  session in the cloud and archives it here, and a message asks another session to take work up,
-  so each took the order's work out of its lease. The operator account now names the routes the
-  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
-  pull request.
 
 ## [0.28.0] - 2026-10-21
 
