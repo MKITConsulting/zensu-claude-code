@@ -126,6 +126,39 @@ if [ "$HEAD_READY" = true ] \
   check "S1b head-update prerequisite precedes the static outer action" PASS
 else check "S1b head-update prerequisite is explicit and ordered" FAIL; fi
 
+HEAD_RUN_FILE="$P1H/.zensu/state/autopilot-run-stop_run_head.json"
+head_budget() { node -e 'process.stdout.write(String(require(process.argv[1]).stopBudget.count))' "$HEAD_RUN_FILE" 2>/dev/null; }
+HEAD_BUDGET_BEFORE="$(head_budget)"
+HEAD_SEATS_READY=true
+activate_session "$P1H" stop_session_head || HEAD_SEATS_READY=false
+HEAD_NATIVE="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$P1H")" || HEAD_SEATS_READY=false
+HEAD_TMP_NATIVE="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$TMP")" || HEAD_SEATS_READY=false
+HEAD_REVIEW_DIR="$HEAD_TMP_NATIVE/head-review"
+mkdir -p "$P1H/src" "$HEAD_REVIEW_DIR" && chmod 700 "$HEAD_REVIEW_DIR"
+printf 'const value = 1;\n' > "$P1H/src/app.js"
+printf '%s\n' "$HEAD_NATIVE/src/app.js" > "$HEAD_REVIEW_DIR/FILES.txt"
+printf '%s\n' "$HEAD_NATIVE/src" > "$HEAD_REVIEW_DIR/ROOTS.txt"
+printf 'M\tsrc/app.js\n' > "$HEAD_REVIEW_DIR/NAME-STATUS.txt"
+printf 'src/app.js\n' > "$HEAD_REVIEW_DIR/CHANGED.txt"
+bash "$PLUGIN_DIR/hooks/lib/zensu-review-evidence.sh" create --kind pr-review --files-manifest "$HEAD_REVIEW_DIR/FILES.txt" \
+  --safe-subtrees-manifest "$HEAD_REVIEW_DIR/ROOTS.txt" --name-status-file "$HEAD_REVIEW_DIR/NAME-STATUS.txt" \
+  --changed-production-files-file "$HEAD_REVIEW_DIR/CHANGED.txt" --max-workers 2 --ttl-seconds 600 >/dev/null 2>&1 \
+  || HEAD_SEATS_READY=false
+for role in bug-hunter security; do
+  printf '{"hook_event_name":"SubagentStart","session_id":"stop_session_head","cwd":"%s","agent_id":"agent-%s","agent_type":"zensu:pr-review-worker"}' \
+    "$HEAD_NATIVE" "$role" | bash "$PLUGIN_DIR/hooks/review-evidence-subagent-start.sh" >/dev/null 2>&1 || HEAD_SEATS_READY=false
+done
+OUT1S="$(invoke "$P1H" stop_session_head)"
+HEAD_BUDGET_AFTER="$(head_budget)"
+if [ "$HEAD_READY" = true ] && [ "$HEAD_SEATS_READY" = true ] \
+  && [ "$(printf '%s' "$OUT1S" | decision)" = block ] \
+  && printf '%s' "$OUT1S" | grep -qF 'prerequisiteActionCode=UPDATE_PR_HEAD; nextActionCode=FIX_REVIEW_FINDINGS; stopBlock=uncounted.' \
+  && printf '%s' "$OUT1S" | grep -qF 'FIRST execute prerequisite action UPDATE_PR_HEAD' \
+  && printf '%s' "$OUT1S" | grep -qE 'continue the static stage action FIX_REVIEW_FINDINGS\. 2 review seats of this session are still in flight and their evidence lease takes results until [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z, so this Stop does not count against the stage budget of 12; their results arrive as task notifications\. Inner TDD completion never releases the outer run' \
+  && [ -n "$HEAD_BUDGET_BEFORE" ] && [ "$HEAD_BUDGET_AFTER" = "$HEAD_BUDGET_BEFORE" ]; then
+  check "S1c a review wait keeps the head-update prerequisite, names both seats in flight and the lease deadline, and claims no stage budget" PASS
+else check "S1c review wait under the head-update prerequisite (seats=$HEAD_SEATS_READY budget=$HEAD_BUDGET_BEFORE->$HEAD_BUDGET_AFTER out=$(printf '%s' "$OUT1S" | head -c 600))" FAIL; fi
+
 CFG_INNER_OFF="$TMP/inner-off.json"; printf '%s\n' '{"hooks":{"chainEnforcer":false}}' > "$CFG_INNER_OFF"
 OUT2="$(invoke "$P1" stop_session_01 "$CFG_INNER_OFF")"
 [ "$(printf '%s' "$OUT2" | decision)" = block ] \

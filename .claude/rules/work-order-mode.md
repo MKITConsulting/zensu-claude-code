@@ -6,6 +6,8 @@ paths:
   - "hooks/pre-work-order-gate.sh"
   - "hooks/post-work-order.sh"
   - "hooks/stop-work-order.sh"
+  - "hooks/lib/review-evidence-lease-v1.js"
+  - "hooks/lib/review-evidence-hook-v1.js"
   - "harness/**"
   - "skills/work/**"
   - "skills/autopilot/rules/work-order.md"
@@ -183,9 +185,65 @@ gate. `skills/work/SKILL.md`, `skills/work/references/protocol.md`, the tool-hoo
 `docs/work-order-mode.md` and the gate row of `docs/configuration.md` describe the denied tools too,
 and no test reads those sentences, so they move with the gate by hand.
 
+**The Stop budget counts review progress, and waits on review seats by time.** `stopDecision`
+ends the order after three Stops in a row with one progress key. The ledger part of that key,
+`<runId>:<events.length>`, stands still for a whole team review: the seats run in the background,
+the main thread ends turns, and the ledger moves only at `TEAM_REVIEW_PUBLISHED`. The 2026-10-20
+smoke saw two Stops during one review, with three seats finished between them. So the key gains
+`#<progress>`, the summed revisions of the session's evidence leases (`leaseProgress` in
+`hooks/lib/review-evidence-lease-v1.js`), which every create, bind, result, seal and close raises;
+and a Stop while an active lease has a bound or retrying seat before
+`min(expires_at_ms, created_at_ms + MAX_TTL_SECONDS * 1000)` blocks without counting. The wait is
+bounded by that deadline rather than by a Stop count, because the lease TTL is the plugin's own
+ceiling on a review, and how often the main thread stops while it waits depends on how it waits,
+not on how long the seats take. After the
+deadline, three Stops without progress end the order as before. A read that fails returns no
+progress: the Stop reuses the recorded key of the same ledger part and counts, so a fault never
+resets the count or extends the wait. A bare ledger key, which a failed read leaves when no
+suffixed key of that ledger part was recorded, counts as the same key once a read succeeds, so a
+failure followed by a success does not reset the count either. The reader takes no lease lock and
+creates no directory. It checks every store directory with `assertPrivateDirectory`, the check
+`ensurePrivateDirectory` runs after its chmod, and validates every record as strictly as the
+writers' `listRecords` does, so a lease whose review workspace is gone fails the read and the Stop
+counts instead of waiting on a seat that can no longer report. It skips the temp entries
+`atomicWriteRecord` leaves (`temporaryRecordName` builds the name, and `TEMP_RECORD_RE` is
+composed from the same `LEASE_ID_PATTERN`) and refuses any other entry. A lease whose
+`created_at_ms` lies more than `MAX_CLOCK_SKEW_MS` (60 s) ahead of the reader's clock holds no
+seat in flight. One function binds a hook payload and reads the store: `hookLeaseProgress` in the
+lease module binds through `resolveHookSession` with the executing plugin root as
+`CLAUDE_PLUGIN_ROOT`, as `zensu_bind_hook_session` does, and reads a second time after a failure.
+It binds without the automatic adoption: it writes nothing, and both callers run it after their
+Stop hook's own `zensu_bind_hook_session`, which adopts (`.claude/rules/automatic-adoption.md`).
+The work-order stop verb calls it, and so does the Autopilot interceptor: `outer_finish` in
+`hooks/stop-chain-enforcer.sh` runs `outer_review_wait`, the `wait` mode of
+`hooks/lib/review-evidence-hook-v1.js`, before `autopilot_increment_stop_budget_capped`, and while
+that mode prints a seat count it blocks through `outer_stage_block` with `stopBlock=uncounted` and
+claims no stage budget. The `wait` mode enters through `hookLeaseWait`, which answers "no seat"
+from one `lstat`, without binding, when the session has no records directory in the store, and in
+every other case binds and reads as `hookLeaseProgress` does: the interceptor runs on every Stop it
+would count, and a session that never created a lease has nothing to read. The child runs through
+`zensu_run_bounded`; an expired, failed or empty answer counts the Stop as before. Both hooks
+therefore wait on one predicate; each reads it once per Stop, so a store that changes between the
+two reads can count one Stop in one hook only. Only a nonterminal run reads the store. Pins: the
+Stop, lease-reader, wait-mode and wait-entry cases in
+`tests/structure/work-order-v1.test.js`; `I18` to `I22` in
+`tests/structure/test-work-order-implement.sh`, which drive the real hooks, with `I20` to `I22`
+running both Stop hooks of the group through a wait, an unreadable store and the seat's result;
+and `S1c` in `tests/structure/test-autopilot-stop-enforcer.sh`, which waits on a real lease with
+two seats bound by the real SubagentStart hook while the stage also owes a head update.
+
 **Version: `minor`.** The work-order hooks can return a `permissionDecision`, and the run schema
 gained `workOrder`, `ORDER_SPEC_BOUND` and `TEAM_REVIEW_IMPORTED`. The release pipeline sets the
 version; never bump it by hand.
+
+**Version of the review-progress Stop budget: `patch`.** The stop state keeps its `{count, seen}`
+shape; only the value of `seen` gains a suffix, and a runtime that finds the bare spelling of the
+same ledger key keeps its count. The lease module gains only exports that write nothing
+(`leaseProgress`, `hookLeaseProgress`, `hookLeaseWait`, `MAX_TTL_SECONDS`, `temporaryRecordName`)
+and no record field or key set. No hook, matcher, config key or attestation moves, and both Stop
+hooks return the same block decision they returned before. The Autopilot run's `stopBudget` keeps
+its shape; the interceptor only skips an increment, and the evidence hook gains a mode, not a
+registration.
 
 **Known gaps, accepted and named:**
 
@@ -206,3 +264,17 @@ version; never bump it by hand.
   work-order suites skip there, because Node cannot start their shell-script fake `zensu` without a
   shell. `tests/profiles/windows-native-structure.v1.json` lists all five as excluded.
 - `usage` lines and the cost cap belong to slice S4, other order kinds to slice S9.
+- Every Stop of a session with a nonterminal run now binds once more in Node in the work-order
+  hook, and every Stop the Autopilot interceptor would count spawns the evidence hook's wait mode,
+  which binds once more when the session has a records directory in the store; each bind measures
+  the runtime digest again. The added latency is unmeasured.
+- The wait child is bounded only where `zensu_run_bounded` finds `timeout` or `gtimeout`. Base
+  macOS has neither, so there it runs inside the Stop hook's own deadline
+  (`.claude/rules/stop-latency.md`) and nothing shorter. Where a watchdog exists, a child that
+  misses its 5 s under heavy load prints nothing, and that Stop counts against the stage budget
+  although a seat was in flight.
+- A session can write the lease store with a shell command, so a forged record can fake progress
+  or hold a wait open in both Stop hooks, dated at most 60 s ahead of the clock each time it is
+  written, as a deliberate write can defeat every plugin store.
+- The inner chain's own Stop budget (`tdd_increment_stop_budget`) does not read the lease; a team
+  review runs after the inner chain closed, so no review wait reaches it.
