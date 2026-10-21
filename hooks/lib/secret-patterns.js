@@ -40,6 +40,8 @@ const WINDOW_OVERLAP = 256;
 const PLACEHOLDER =
   /EXAMPLE|PLACEHOLDER|CHANGE_?ME|YOUR_|XXXX|\.\.\.|<[^>]*>|\{\{|\$\{/i;
 
+const TEAM_REVIEW_OPERATION_KEY = /^team-review:v1:[0-9a-f]{64}$/;
+
 const ALLOW_MARKER = "zensu-secret-allow";
 
 function shannonEntropy(s) {
@@ -57,6 +59,7 @@ function entropyCandidate(value) {
   if (value.length < 16) return false;
   if (!/[0-9]/.test(value) || !/[A-Za-z]/.test(value)) return false;
   if (PLACEHOLDER.test(value)) return false;
+  if (TEAM_REVIEW_OPERATION_KEY.test(value)) return false;
   return shannonEntropy(value) >= ENTROPY_THRESHOLD;
 }
 
