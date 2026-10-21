@@ -4,10 +4,10 @@
 # feeds the result to the classification SoT in zensu-mcp-tools.sh
 # (zensu_is_read_tool / zensu_is_mutation_tool) so the CLI gate reproduces the
 # exact semantics the MCP gate had — reads pass, mutations gate to the active
-# workflow. One entry per CLI verb across the 17 noun groups; the mutation
-# entries stay a subset of ZENSU_MUTATION_TOOL_NAMES (the build-time guard pins
-# this). Unknown noun/verb (auth, version, help, completion, typos) → empty,
-# which the gate treats as ungated.
+# workflow. One entry per CLI verb across the 20 command groups of zensu-cli
+# v0.10.0; the mutation entries stay a subset of ZENSU_MUTATION_TOOL_NAMES (the
+# build-time guard pins this). Unknown noun/verb (auth, version, help,
+# completion, typos) → empty, which the gate treats as ungated.
 
 zensu_cli_to_tool() {
   case "${1:-} ${2:-}" in
@@ -66,9 +66,15 @@ zensu_cli_to_tool() {
     "journeys get")             echo "get_journey" ;;
     "journeys create")          echo "create_user_journey" ;;
     "journeys step")            echo "create_journey_step" ;;
+    "journeys step-update")     echo "update_journey_step" ;;
+    "journeys step-delete")     echo "delete_journey_step" ;;
     "journeys steps")           echo "list_journey_steps" ;;
     "journeys health")          echo "analyze_journey_health" ;;
     "journeys suggest")         echo "suggest_journeys" ;;
+    "mocks create")             echo "create_mock" ;;
+    "mocks list")               echo "list_mocks" ;;
+    "mocks get")                echo "get_mock" ;;
+    "design context")           echo "get_design_context" ;;
     # link
     "link test")                echo "link_test" ;;
     "link docs")                echo "link_docs" ;;
@@ -99,8 +105,54 @@ zensu_cli_to_tool() {
     "pulse start")              echo "pulse_start_session" ;;
     "pulse end")                echo "pulse_end_session" ;;
     "pulse summary")            echo "pulse_session_summary" ;;
+    "work create")              echo "create_work_order" ;;
+    "work list")                echo "list_work_orders" ;;
+    "work get")                 echo "get_work_order" ;;
+    "work events")              echo "list_work_order_events" ;;
+    "work approve")             echo "approve_work_order" ;;
+    "work requeue")             echo "requeue_work_order" ;;
+    "work cancel")              echo "cancel_work_order" ;;
+    "work confirm-merge")       echo "confirm_work_order_merge" ;;
+    "work claim")               echo "claim_work_order" ;;
+    "work confirm")             echo "confirm_work_order_claim" ;;
+    "work release")             echo "release_work_order" ;;
+    "work usage")               echo "report_work_order_usage" ;;
+    "work heartbeat")           echo "send_work_order_heartbeat" ;;
+    "work event")               echo "send_work_order_event" ;;
+    "work ask")                 echo "ask_work_order_question" ;;
+    "work followup")            echo "report_work_order_followup" ;;
+    "work answer")              echo "answer_work_question" ;;
+    "work overturn")            echo "overturn_work_answer" ;;
+    "work questions")           echo "list_work_questions" ;;
+    "work policy")
+      case "${3:-}" in
+        get)                    echo "get_automation_policy" ;;
+        set)                    echo "set_automation_policy" ;;
+        *)                      echo "" ;;
+      esac ;;
+    "work repositories"|"work repos")
+      case "${3:-}" in
+        list)                   echo "list_product_repositories" ;;
+        add)                    echo "add_product_repository" ;;
+        update)                 echo "update_product_repository" ;;
+        remove)                 echo "remove_product_repository" ;;
+        *)                      echo "" ;;
+      esac ;;
+    "plan push")                echo "push_work_plan" ;;
+    "plan status")              echo "get_work_plan" ;;
+    "plan list")                echo "list_work_plans" ;;
+    "plan approve")             echo "approve_work_plan" ;;
+    "plan finalize")            echo "finalize_work_plan" ;;
+    "plan abandon")             echo "abandon_work_plan" ;;
+    "plan confirm-merge")       echo "confirm_work_plan_merge" ;;
+    "plan followups")           echo "list_work_plan_followups" ;;
+    "plan followup")
+      case "${3:-}" in
+        accept)                 echo "accept_work_plan_followup" ;;
+        dismiss)                echo "dismiss_work_plan_followup" ;;
+        *)                      echo "" ;;
+      esac ;;
     # meta (CLI stubs — server-side compute, gated by classification only)
-    "meta scaffold-agent")      echo "scaffold_agent" ;;
     "meta workflow-guide")      echo "get_workflow_guide" ;;
     "meta suggest-workflow")    echo "suggest_workflow" ;;
     # org

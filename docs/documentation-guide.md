@@ -98,7 +98,7 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
 |------|------|
 | `get_doc_generation_context` | Fetch the context (the map). Read the named source before writing. |
 | `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). |
-| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs --content <markdown>` also authors/updates the linked wiki page in the same call; `--file` / `--external-url` register a repo or external doc. |
+| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs <feature-id> --doc-type <type> --content <markdown>` also authors/updates the linked wiki page in the same call; `--file` / `--external-url` register a repo or external doc. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
 **frontend-only** — it is not exposed as an MCP tool. Agents do not call it;

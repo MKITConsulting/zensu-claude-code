@@ -403,6 +403,11 @@ announces a prompt rather than a capability the plugin hands itself.
   derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
+- The `PATH` walk of `hooks/lib/playwright-cli-version-v1.js` — `findBinary` and its `cwd-relative`
+  verdict — has a hand copy in `hooks/lib/zensu-cli-version-v1.js`
+  (`.claude/rules/zensu-cli-floor.md`). The unit case `the PATH walk decides as the playwright-cli
+  probe walk does over the same fixtures` in `tests/structure/zensu-cli-version-v1.test.js`
+  compares the two on POSIX, so a change to this walk changes that copy in the same commit.
 - `CONSENT_MATCHER` (`'Bash|PowerShell'`) and `CONSENT_TOOLS` ↔ both registrations in `hooks/hooks.json` ↔
   `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
   doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
