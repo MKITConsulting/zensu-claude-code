@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-21
+
+### Added
+
+- **hooks**: Gate the zensu-cli 0.10.0 work, plan, mocks and journey-step mutations (#470)
+- Warn when zensu-cli is older than 0.10.0 and fix the doctor's auth probe (#475)
+- **hooks**: Judge PowerShell tool commands in every shell hook (#459)
+- **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
+- **session-trail**: Continue a taken-over session's linked sessions (#464)
+
+### Fixed
+
+- **skills**: Define the fallback for hosts with the task tools switched off (#473)
+- **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
+- **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
+- **hooks**: Harden the CLI gate against oversized and long commands (#452)
+- **work-order**: Close the work-order gate gaps of the zensu-cli 0.10.0 audit (#477)
+- **skills**: Make every documented zensu command work with zensu-cli 0.10.0 (#476)
+- **edit-landing**: Place a relative claim into a nested work tree like its absolute spelling (#471)
+- **self-review**: Resolve reviewConvergence against the bound project root (#469)
+- **work-order**: Hand an overturned automatic answer to the model again (#468)
+- **work-order**: Name the work branch with the order's prefix and close the service contract gaps (#458)
+- **external-review**: Bind the review root to the session work tree and name each refused layout (#467)
+
 ### Upgrade notes
 
 - **session-trail linked sessions**: a takeover now continues the old session's open linked
