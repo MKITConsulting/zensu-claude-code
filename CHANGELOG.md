@@ -64,6 +64,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Because Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is missing, the
   analyzer reads a string escape the two versions decode differently both ways. The
   `shell tools:` row of `/zensu:doctor` reports the coverage.
+- **CLI write-gate**: the gate now covers the zensu-cli 0.10.0 surface. A `zensu work`, `zensu plan`,
+  `zensu mocks create` or `zensu journeys step-update|step-delete` command that changes Zensu is
+  denied on the main thread unless a skill window declares it, like every other mutation; reads
+  such as `zensu work list` or `zensu plan status` still pass. A command that records your decision
+  (creating, approving, requeuing, cancelling or confirming the merge of a work order, pushing,
+  approving, finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing
+  its follow-ups, answering or overturning a question, the automation policy and the registered
+  repositories) is denied with a reason that leaves it to you to run, even inside a skill window
+  that declares it, and so is a work-order protocol verb. `zensu security analyze`,
+  `zensu security threat-model` and `zensu doc claude-md` are reads now and pass without a window.
+  A value flag before the verb, as in `zensu features --product p1 create`, or a shell expansion
+  such as `zensu features $FLAGS create` no longer hides the verb. In a work-order session the gate
+  leaves `zensu work ask` and `zensu work followup` to the work-order gate. `ZENSU_MCP_GATE=off`
+  still lets a deliberate one-off through.
 
 ## [0.27.0] - 2026-10-17
 

@@ -195,6 +195,12 @@ The gate reads command text; a command assembled at run time, such as a script f
 an interpreter one-liner such as `python3 -c`, or a spelling it does not know, is not judged. The
 slot sandbox of the worker, not this gate, is the boundary.
 
+The Zensu CLI write-gate of every session, `pre-bash-zensu-gate.sh`, leaves `zensu work ask` and
+`zensu work followup` to `pre-work-order-gate.sh` in a bound work-order session. Every other
+`zensu` mutation follows its ordinary rules there: a person's decision and a work-order protocol
+verb are denied even inside a skill window, and the deny of a person's decision points to a
+work-order question. This skill opens no workflow window.
+
 The worker starts the session through `harness/launcher.js` (`docs/work-order-mode.md`). The
 launcher renews the lease when no renewal succeeded for a third of the lease time, terminates the
 session once the lease is lost, and releases the session's nonterminal Autopilot run after the

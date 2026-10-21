@@ -2692,6 +2692,11 @@ function dispatchCli(argv, env) {
     return EXIT.TRANSIENT;
   }
   const context = loadContext({ env, projectRoot, sessionKey });
+  if (verb === 'bound') {
+    if (!context || context.fault) return EXIT.NOT_BOUND;
+    process.stdout.write('\nbound\n');
+    return EXIT.OK;
+  }
   const emit = (result) => {
     if (env.WO_EMIT === 'value') {
       if (result.value !== undefined && result.value !== null) process.stdout.write(`${JSON.stringify(result.value)}\n`);
@@ -2822,6 +2827,7 @@ module.exports = {
   LOST_CODES,
   RETRY_CODES,
   SCHEMA_VERSION,
+  SESSION_WORK_VERBS,
   STAGE_RANK,
   STATE_SEGMENTS,
   SUPPORTED_KINDS,
