@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+
+## [0.28.0] - 2026-10-21
+
+### Added
+
+- **hooks**: Gate the zensu-cli 0.10.0 work, plan, mocks and journey-step mutations (#470)
+- Warn when zensu-cli is older than 0.10.0 and fix the doctor's auth probe (#475)
+- **hooks**: Judge PowerShell tool commands in every shell hook (#459)
+- **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
+- **session-trail**: Continue a taken-over session's linked sessions (#464)
+
+### Fixed
+
+- **skills**: Define the fallback for hosts with the task tools switched off (#473)
+- **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
+- **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
+- **hooks**: Harden the CLI gate against oversized and long commands (#452)
+- **work-order**: Close the work-order gate gaps of the zensu-cli 0.10.0 audit (#477)
+- **skills**: Make every documented zensu command work with zensu-cli 0.10.0 (#476)
+- **edit-landing**: Place a relative claim into a nested work tree like its absolute spelling (#471)
+- **self-review**: Resolve reviewConvergence against the bound project root (#469)
+- **work-order**: Hand an overturned automatic answer to the model again (#468)
+- **work-order**: Name the work branch with the order's prefix and close the service contract gaps (#458)
+- **external-review**: Bind the review root to the session work tree and name each refused layout (#467)
+
+### Upgrade notes
+
 - **session-trail linked sessions**: a takeover now continues the old session's open linked
   sessions, the sessions it started in Claude Desktop. Both briefs list them under *Linked
   sessions*, read from the records in the old session's Claude Desktop folder, each with its kind,
@@ -87,22 +130,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
   that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
   `zensu auth login`, which cannot help there.
-- **session-trail task chips**: a takeover now carries the old session's open task chips over as
-  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
-  session is released, each chip the brief marks **propose** gets one `start_session` call with
-  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
-  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
-  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
-  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
-  the old session's checkout is marked **list** and named to the user, because a proposal cannot
-  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
-  listed for the user. A takeover run from another repository than the old session's marks every
-  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
-  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
-  longer carried, and a carried one leaves the cards after a week unless it is started.
-  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
-  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
-  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
 
 ## [0.27.0] - 2026-10-17
 

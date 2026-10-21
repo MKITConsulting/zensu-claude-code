@@ -205,6 +205,44 @@ OUT="$(engine_rules 'api_key = "XXXX9aB3kZpQ7Lm2XXXX"')"
 OUT="$(engine_rules 'plain text, nothing secret here')"
 [ "$OUT" = '{"matches":[]}' ] && check "U13 engine: clean input -> empty matches" PASS || check "U13 engine: clean input -> empty matches" FAIL
 
+OPKEY_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+OPKEY_RUN="run_5d1e8a3f9c2b7e40"
+OPKEY_HEAD="3f1c9a7e5b2d4f6081a3c5e7f9b1d3a5c7e9f1b3"
+AP_KEY="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c 'source "$1" && autopilot_team_review_operation_key "$2" "$3"' _ "$OPKEY_LIB" "$OPKEY_RUN" "$OPKEY_HEAD" 2>/dev/null)"
+WO_KEY="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c 'source "$1" && autopilot_work_order_review_operation_key "$2" "$3"' _ "$OPKEY_LIB" 6f9b1c2d-3e4a-4b5c-8d6e-7f8091a2b3c4 "$OPKEY_HEAD" 2>/dev/null)"
+OPKEY_HEX="${AP_KEY#team-review:v1:}"
+
+OUT="$(engine_rules "{operationKey:\"$AP_KEY\",marker:\$m,headSha:\"$OPKEY_HEAD\",provider:\"github\"}")"
+if [ -n "$OPKEY_HEX" ] && [ "$OPKEY_HEX" != "$AP_KEY" ] && [ "$OUT" = '{"matches":[]}' ]; then
+  check "U14 engine: the Autopilot producer's team-review operation key is not a secret" PASS
+else
+  check "U14 engine: Autopilot team-review operation key (key '$AP_KEY', got $OUT)" FAIL
+fi
+
+OUT="$(engine_rules "OPERATION_KEY=\"$WO_KEY\"")"
+if [ -n "$WO_KEY" ] && [ "${WO_KEY#team-review:v1:}" != "$WO_KEY" ] && [ "$OUT" = '{"matches":[]}' ]; then
+  check "U15 engine: the work-order producer's team-review operation key is not a secret" PASS
+else
+  check "U15 engine: work-order team-review operation key (key '$WO_KEY', got $OUT)" FAIL
+fi
+
+OPKEY_UNFLAGGED=""
+for OPKEY_VARIANT in "${AP_KEY%?}" "${AP_KEY}0" "team-review:v1:$(printf '%s' "$OPKEY_HEX" | tr 'a-f' 'A-F')" \
+  "team-review:v2:$OPKEY_HEX" "zensu-review:v1:$OPKEY_HEX" "x$AP_KEY" "$OPKEY_HEX"; do
+  case "$(engine_rules "{operationKey:\"$OPKEY_VARIANT\"}")" in
+    *'"high-entropy-assignment"'*) ;;
+    *) OPKEY_UNFLAGGED="$OPKEY_UNFLAGGED $OPKEY_VARIANT" ;;
+  esac
+done
+if [ -n "$OPKEY_HEX" ] && [ -z "$OPKEY_UNFLAGGED" ]; then
+  check "U16 engine: every near miss of the operation-key shape is still flagged (leading prefix, 63 or 65 hex, uppercase, v2, other namespace, bare hex)" PASS
+else
+  check "U16 engine: near misses of the operation-key shape (not flagged:$OPKEY_UNFLAGGED)" FAIL
+fi
+
+OUT="$(engine_rules "{operationKey:\"$AP_KEY\",api_token:\"f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj\"}")"
+case "$OUT" in *'"high-entropy-assignment"'*) check "U17 engine: a real secret after an exempt operation key on the same line is still flagged" PASS;; *) check "U17 engine: secret beside an operation key (got $OUT)" FAIL;; esac
+
 # D — detectChannels unit cases (direct parser invocation, BSWG_MODE=detect)
 detect() { PAYLOAD="{\"tool_input\":{\"command\":$1}}" BSWG_MODE=detect node "$PARSER" 2>/dev/null; }
 
@@ -231,6 +269,9 @@ case "$OUT" in *redirect*) check "D7 detect: glued redirect" PASS;; *) check "D7
 
 OUT="$(detect '"git status && ls"')"
 [ -z "$OUT" ] && check "D8 detect: read-only command -> no channel" PASS || check "D8 detect: read-only command -> no channel" FAIL
+
+OUT="$(detect '"M=\"<!-- marker -->\""')"
+case "$OUT" in *redirect*) check "D9 detect: a quoted --> still reads as a redirect (the deny path keeps its over-detection)" PASS;; *) check "D9 detect: quoted --> (got: $OUT)" FAIL;; esac
 
 # F — hook functional cases. Hermetic: ZENSU_CONFIG temp override, ambient
 # ZENSU_SECRET_SCAN/BSWG_MODE neutralized (empty is not "off"); extra env
@@ -347,6 +388,64 @@ OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","c
 
 OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/readme.md","content":"plain documentation text, nothing secret"}}')"
 [ -z "$OUT" ] && check "F12 clean content -> allow" PASS || check "F12 clean content -> allow" FAIL
+
+bash_payload() { node -e 'process.stdout.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: process.argv[1] } }))' "$1"; }
+bash_channels() { PAYLOAD="$(bash_payload "$1")" BSWG_MODE=detect node "$PARSER" 2>/dev/null; }
+OPKEY_MARKER="$(node -e '
+  const crypto = require("crypto");
+  const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
+  process.stdout.write("<!-- zensu-review:v1:" + digest(process.argv[1]) + ":" + digest("payload") + ":" + process.argv[2] + ":1:part=1/1 -->");
+' "$AP_KEY" "$OPKEY_HEAD")"
+opkey_command() {
+  local s="${1%$'\n'}"
+  s="${s//@RUN@/$OPKEY_RUN}"
+  s="${s//@HEAD@/$OPKEY_HEAD}"
+  s="${s//@MARKER@/$OPKEY_MARKER}"
+  printf '%s' "${s//@KEY@/$AP_KEY}"
+}
+IFS= read -r -d '' OPKEY_INLINE <<'CMD'
+bash "$ROOT/hooks/lib/zensu-log.sh" --autopilot-event --run @RUN@ --event TEAM_REVIEW_PUBLISHED --event-id "team-review-published:@HEAD@" --payload "$(jq -nc --arg m '@MARKER@' '{operationKey:"@KEY@",marker:$m,headSha:"@HEAD@",provider:"github"}')"
+CMD
+IFS= read -r -d '' OPKEY_ASSIGNED <<'CMD'
+M='@MARKER@'; bash "$ROOT/hooks/lib/zensu-log.sh" --autopilot-event --run @RUN@ --event TEAM_REVIEW_PUBLISHED --event-id "team-review-published:@HEAD@" --payload "$(jq -nc --arg m "$M" '{operationKey:"@KEY@",marker:$m,headSha:"@HEAD@",provider:"github"}')"
+CMD
+IFS= read -r -d '' OPKEY_REDIRECT <<'CMD'
+jq -nc '{operationKey:"@KEY@",headSha:"@HEAD@",provider:"github"}' > team-review-published.json
+CMD
+
+OPKEY_CMD="$(opkey_command "$OPKEY_INLINE")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12b the smoke run's TEAM_REVIEW_PUBLISHED event (inline quoted --> marker plus operation key) is scanned and allowed" PASS
+else
+  check "F12b TEAM_REVIEW_PUBLISHED event with an inline marker (got '$OUT')" FAIL
+fi
+
+OPKEY_CMD2="$(opkey_command "$OPKEY_ASSIGNED")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD2")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD2")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12c the same event with the marker assigned to M= first is scanned and allowed" PASS
+else
+  check "F12c TEAM_REVIEW_PUBLISHED event with M= marker (got '$OUT')" FAIL
+fi
+
+OPKEY_CMD3="$(opkey_command "$OPKEY_REDIRECT")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD3")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD3")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12d the operation key written through a real redirect is allowed" PASS
+else
+  check "F12d operation key through a real redirect (got '$OUT')" FAIL
+fi
+
+OUT="$(run_hook "$(node -e 'process.stdout.write(JSON.stringify({ tool_name: "Write", tool_input: { file_path: "/x/src/review.js", content: "const event = { operationKey: \"" + process.argv[1] + "\" };" } }))' "$AP_KEY")")"
+if [ -n "$AP_KEY" ] && [ -z "$OUT" ]; then
+  check "F12e a Write of a source file carrying the operation key is allowed" PASS
+else
+  check "F12e Write with the operation key (got '$OUT')" FAIL
+fi
+
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD; GH_TOKEN=\"f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj\" gh auth status")")"
+case "$OUT" in *"$DENY"*high-entropy-assignment*) check "F12f a real secret in the same command as the operation key still denies" PASS;; *) check "F12f secret beside the operation key (got '$OUT')" FAIL;; esac
 
 mkdir -p "$TMPD/shim"
 cat > "$TMPD/shim/node" <<'SHIM'

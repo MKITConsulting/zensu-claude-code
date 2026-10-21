@@ -214,9 +214,9 @@
       "summary": "The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 125, "skips": {"win32": 2},
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 126, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection."
+      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan and every refused indirection."
     },
     {
       "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
@@ -259,10 +259,10 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 88,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 89,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate with its cobra word reading, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,

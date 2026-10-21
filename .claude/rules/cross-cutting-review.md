@@ -86,8 +86,9 @@ runs after every import, so its digest and the import gate stay as they are.
 **Coupled sites, and what pins each.** `tests/structure/test-review-judge.sh`: the judge's
 `judge_run` paragraph, no-findings heading and gap exception (`P2n`); its `Check only` bullet
 (`P2o`); step 6 of both agents (`P2p`); the Grep/Glob rule of both agents (`P2q`); the reviewJudge
-probe (`P3h`); step 4b's early pointer and second-run paragraph (`P3j`); the `Work sequentially`
-bullet of `skills/tdd/SKILL.md`, whose body the skill text budget bounds (`P3k`); the step-10 lead
+probe, which passes `{project_root}` as `CLAUDE_PROJECT_DIR` (`P3h`, `P3h2`); step 4b's early
+pointer and second-run paragraph (`P3j`); the `Work sequentially` bullet of `skills/tdd/SKILL.md`,
+whose body the skill text budget bounds (`P3k`); the step-10 lead
 and step 3 (`P3l`); `config.example.json` (`P4c`); the `reviewJudge`, `reviewJudgeSecondRun` and
 `externalReviewImport` rows of `docs/configuration.md` and the judge row and import-path gap bullet
 of `docs/review-chain.md` (`P5d`, `P5e`); the paragraph above the rubric in
@@ -109,9 +110,6 @@ or re-matched, no attestation change, and the key is read permissively.
 - Two runs of one definition stay correlated; the reading-order switch decorrelates them only as
   far as the model follows it.
 - "The same defect at the same `file:line`" is the main thread's judgment, like the panel merge.
-- The step-4b probe reads `~/.zensu/config.json` and `ZENSU_CONFIG` but not a project
-  `.zensu/config.json`, because the Bash tool carries no `CLAUDE_PROJECT_DIR`; `reviewJudge` and
-  `findingVerification` share the gap (`.claude/rules/skill-argument-placeholders.md`).
 - A lean fix-round re-review runs `correctness` alone, so a fix round that drops an account
   predicate meets step 6 but no inherited-guarantee check.
 - `JUDGE SECOND RUN UNAVAILABLE` and `JUDGE SECOND RUN RULE BREACH` are run-log lines, not
