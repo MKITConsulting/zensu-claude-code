@@ -803,7 +803,7 @@ function scanSegments(lexed, context, depth, found, inherited) {
       const cliAt = isCliWord(head) ? position.index : launcherCliIndex(words, position.index);
       const scope = { assignments, wrappers };
       if (SHELLS.includes(headName)) {
-        const flagAt = words.findIndex((word, offset) => offset > position.index && /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
+        const flagAt = words.findIndex((word, offset) => offset > position.index && /^-[A-Za-z]+$/.test(word.value) && word.value.includes('c'));
         if (flagAt !== -1 && words[flagAt + 1]) {
           const body = words[flagAt + 1];
           consumed.add(flagAt + 1);

@@ -1651,7 +1651,9 @@ function releasePlan(projectRoot, orderId, belowAttempt) {
 const TOKEN_VARIABLE = 'ZENSU_SESSION_TOKEN';
 const HOST_VARIABLE = 'ZENSU_API_URL';
 const ASK_TOOLS = new Set(['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
-const CHIP_TOOLS = new Set(['mcp__ccd_session__spawn_task']);
+const SESSION_TOOL_PREFIX = 'mcp__ccd_session__';
+const INERT_SESSION_TOOLS = new Set(['mcp__ccd_session__dismiss_task', 'mcp__ccd_session__mark_chapter', 'mcp__ccd_session__list_start_targets', 'mcp__ccd_session__read_widget_context']);
+const SESSION_MESSAGE_TOOLS = new Set(['mcp__ccd_session_mgmt__send_message']);
 const SHELL_KEYWORDS = new Set(['{', '}', '!', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', 'for', 'select', 'case', 'esac', 'function', 'coproc']);
 const SHELL_WRAPPERS = new Set(['command', 'builtin', 'exec', 'env', 'sudo', 'doas', 'nohup', 'nice', 'time', 'timeout', 'gtimeout', 'stdbuf', 'xargs']);
 const SHELL_INTERPRETERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
@@ -2085,7 +2087,7 @@ function analyzeBash(command, depth = 0) {
     }
     if (SHELL_INTERPRETERS.has(name) || name === 'eval') {
       const optionEnd = name === 'eval' ? 0 : interpreterOptionEnd(args);
-      const at = args.slice(0, optionEnd).findIndex((arg) => /^[-+][A-Za-z]*c[A-Za-z]*$/.test(arg));
+      const at = args.slice(0, optionEnd).findIndex((arg) => /^[-+][A-Za-z]+$/.test(arg) && arg.includes('c'));
       if (at >= 0 && (/[oOR]/.test(args[at].slice(1)) || /^[-+]/.test(String(args[at + 1] || '')))) {
         result.deny = bashFinding('shell-option', `${name} ${args.slice(at, at + 2).join(' ')}`);
         return result;
@@ -2204,7 +2206,7 @@ function gateReason(orderId, finding) {
     case 'ask':
       return `${lead} Nobody can answer a prompt or approve a plan here. Put the question to Zensu with the ask step of /zensu:work (zensu-work-order.sh --ask), which sends zensu work ask ${orderId} with a category, the question and, unless the question blocks, the option you continue with. Zensu binds the plan through zensu-work-order.sh --bind-spec, never plan mode.`;
     case 'chip':
-      return `${lead} A task chip reaches nobody. File the follow-up with Zensu through zensu-work-order.sh --followup, which sends zensu work followup ${orderId} with a title, a rationale and a severity.`;
+      return `${lead} A task chip or a proposed session reaches nobody, and a session started or handed off from here, this session moved to the cloud or a message asking another session to take work up moves the order's work out of its lease. Of the Claude Desktop session tools only dismiss_task, mark_chapter, list_start_targets and read_widget_context stay available. Keep the order's work in this session, and file anything else with Zensu as a follow-up through zensu-work-order.sh --followup, which sends zensu work followup ${orderId} with a title, a rationale and a severity.`;
     case 'push':
       return `${lead} A raw git push is not allowed. Run zensu-work-order.sh --push: it renews the lease, pushes with a lease against the head Zensu recorded for the order and reports the new head.`;
     case 'open-pr':
@@ -2245,7 +2247,9 @@ function gateDecision(context, payload, { env = process.env, now = Date.now } = 
   const orderId = context.marker.orderId;
   const tool = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   if (ASK_TOOLS.has(tool)) return { code: 'ask', reason: gateReason(orderId, bashFinding('ask', null)) };
-  if (CHIP_TOOLS.has(tool)) return { code: 'chip', reason: gateReason(orderId, bashFinding('chip', null)) };
+  if ((tool.startsWith(SESSION_TOOL_PREFIX) && !INERT_SESSION_TOOLS.has(tool)) || SESSION_MESSAGE_TOOLS.has(tool)) {
+    return { code: 'chip', reason: gateReason(orderId, bashFinding('chip', null)) };
+  }
   if (tool === 'PowerShell') return { code: 'powershell', reason: gateReason(orderId, bashFinding('powershell', null)) };
   let analysis = { deny: null, forge: false };
   if (tool === 'Bash') {

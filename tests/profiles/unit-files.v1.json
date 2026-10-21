@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": [
     {
-      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 217, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
+      "path": "tests/session-control/session-control-core-v1.test.js", "registered": 226, "skips": {"darwin": 2, "linux": 5, "root": 5, "win32": 22},
       "runs": [{ "driver": "tests/session-control/run.sh" }],
       "summary": "Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification."
     },
@@ -67,13 +67,13 @@
       "summary": "The pure half of source-write rule (C): gitTargets() repository resolution and the git mutation and option lattice."
     },
     {
-      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 17,
+      "path": "tests/structure/linked-sessions-v1.test.js", "registered": 23,
       "guards": [
         "a detached linked session and everything below it is never listed",
         "a confirmed lineage edge from the session or an earlier id of it keeps it from starting again"
       ],
       "runs": [{ "driver": "tests/structure/test-session-trail-verdict.sh" }],
-      "summary": "The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets and the unread reports."
+      "summary": "The session-trail linked-session reader: the family walk, the kinds, the start decisions and calls, the saved presets, the unread reports and the task-chip proposals."
     },
     {
       "path": "tests/structure/owned-process.test.js", "registered": 4, "skips": {"win32": 4},
@@ -169,7 +169,7 @@
       "summary": "The marker-block reader both rule carriers share: marker position, the size ceilings and the short-read and swapped-file refusals."
     },
     {
-      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 59,
+      "path": "tests/structure/session-adopt-report-v1.test.js", "registered": 63,
       "runs": [{ "driver": "tests/structure/test-versioned-plugin-upgrade.sh" }],
       "summary": "The adoption report payload: the safe() folding, the pair-forgery guard and the rendered rows."
     },
@@ -214,9 +214,9 @@
       "summary": "The playwright-cli run-config helper: the isolated origin-restricted config and the address pins of a remote run."
     },
     {
-      "path": "tests/structure/verify-consent-v1.test.js", "registered": 125, "skips": {"win32": 2},
+      "path": "tests/structure/verify-consent-v1.test.js", "registered": 126, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-verify-consent.sh" }],
-      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer and every refused indirection."
+      "summary": "The verify-feature browser consent gate: the command allowlist, the shell lexer with its linear shell-flag scan and every refused indirection."
     },
     {
       "path": "tests/structure/verify-feature-transcript-check.test.js", "registered": 26,
@@ -259,10 +259,10 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 88,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 89,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate with its cobra word reading, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate with its cobra word reading and its linear shell-flag scan, the refusals of the zensu CLI that are never retried, the side-effect-free bound verb and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,

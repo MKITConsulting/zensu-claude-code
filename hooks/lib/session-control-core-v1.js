@@ -40,8 +40,10 @@ const WORKFLOW_RESERVED_FIELDS = new Set([
   'actor',
 ]);
 
+const FAIL_PREFIX = 'session-control-v1: ';
+
 function fail(message) {
-  throw new Error(`session-control-v1: ${message}`);
+  throw new Error(`${FAIL_PREFIX}${message}`);
 }
 
 function requireText(value, label) {
@@ -670,7 +672,8 @@ function buildContext(options, buildOptions) {
 // Both default to off, so every caller that does not opt in keeps the strict
 // behaviour. Each has exactly one opt-in caller —
 // readOrphanedProjectRootContext and readPrunedPluginRootContext — which
-// separately PROVES the path is absent and re-applies the shape half through
+// separately PROVES the path is absent (the pruned reader also admits a remnant
+// the host retired) and re-applies the shape half through
 // requireAbsentDirectoryPath. Waiving the check does not mean the field is
 // unvalidated: the requireText loop below still rejects a missing or blank value.
 //
@@ -1837,7 +1840,8 @@ function readContextInternal(options) {
   // digest and the declared version stay shape-checked by validateContext and
   // are otherwise taken on the record's word. That is the stated cost of the
   // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
-  // proves the root is absent before it hands the record to anyone.
+  // proves the root is absent or a retired remnant before it hands the record
+  // to anyone.
   if (!options.allowMissingPluginRoot) {
     const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
     if (currentDigest !== context.runtime_digest) {
@@ -1936,12 +1940,61 @@ function readOrphanedProjectRootContext(options) {
   fail('context project root still exists');
 }
 
+const ORPHAN_MARKER_NAME = '.orphaned_at';
+const ORPHAN_MARKER_BYTES = 13;
+const ORPHAN_MARKER_RE = /^[1-9][0-9]{12}$/;
+const RETIRED_PLUGIN_ROOT_STATES = Object.freeze({
+  ABSENT: 'absent',
+  RETIRED: 'retired',
+  NOT_A_DIRECTORY: 'not-a-directory',
+  MANIFEST_PRESENT: 'manifest-present',
+  NO_ORPHAN_MARKER: 'no-orphan-marker',
+  UNREADABLE: 'unreadable',
+});
+const RETIRED_PLUGIN_ROOT_REFUSALS = Object.freeze({
+  [RETIRED_PLUGIN_ROOT_STATES.NOT_A_DIRECTORY]: 'context plugin root still exists',
+  [RETIRED_PLUGIN_ROOT_STATES.MANIFEST_PRESENT]: 'context plugin root still exists and still carries its manifest',
+  [RETIRED_PLUGIN_ROOT_STATES.NO_ORPHAN_MARKER]: 'context plugin root still exists and carries no valid orphan marker',
+  [RETIRED_PLUGIN_ROOT_STATES.UNREADABLE]: 'context plugin root is unreadable',
+});
+
+function retiredPluginRootState(pluginRoot, host) {
+  let rootStat;
+  try {
+    rootStat = fs.lstatSync(pluginRoot);
+  } catch (error) {
+    return error && error.code === 'ENOENT'
+      ? RETIRED_PLUGIN_ROOT_STATES.ABSENT
+      : RETIRED_PLUGIN_ROOT_STATES.UNREADABLE;
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    return RETIRED_PLUGIN_ROOT_STATES.NOT_A_DIRECTORY;
+  }
+  try {
+    fs.lstatSync(manifestPath(pluginRoot, host));
+    return RETIRED_PLUGIN_ROOT_STATES.MANIFEST_PRESENT;
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') return RETIRED_PLUGIN_ROOT_STATES.UNREADABLE;
+  }
+  let marker;
+  try {
+    marker = readRegularFileSnapshot(path.join(pluginRoot, ORPHAN_MARKER_NAME), ORPHAN_MARKER_BYTES, true);
+  } catch {
+    return RETIRED_PLUGIN_ROOT_STATES.NO_ORPHAN_MARKER;
+  }
+  if (marker === null || !ORPHAN_MARKER_RE.test(marker.data.toString('utf8'))) {
+    return RETIRED_PLUGIN_ROOT_STATES.NO_ORPHAN_MARKER;
+  }
+  return RETIRED_PLUGIN_ROOT_STATES.RETIRED;
+}
+
 // The relaxed reader for the OTHER recorded root. An installation the host has
 // pruned from its plugin cache leaves a record that is intact in every respect
 // except that its plugin_root no longer exists — and with it every way to
 // re-measure the runtime digest or re-read the declared version. Existence is
 // the one waived check, and it is proven rather than assumed: the path must be
-// absent (lstat, never realpath, for the reason the orphan reader states), and
+// absent (lstat, never realpath, for the reason the orphan reader states) or a
+// remnant the host retired (retiredPluginRootState), and
 // its PARENT must still be a real directory, because a pruned installation
 // leaves its cache directory behind while a record naming a root under a
 // directory that never existed is not this state. Lineage is deliberately NOT
@@ -1957,13 +2010,43 @@ function readPrunedPluginRootContext(options) {
   });
   requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
   canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
-  try {
-    fs.lstatSync(context.plugin_root);
-  } catch (error) {
-    if (error.code === 'ENOENT') return context;
-    fail('context plugin root is unreadable');
+  const state = retiredPluginRootState(context.plugin_root, context.host);
+  if (state === RETIRED_PLUGIN_ROOT_STATES.ABSENT || state === RETIRED_PLUGIN_ROOT_STATES.RETIRED) {
+    return context;
   }
-  fail('context plugin root still exists');
+  fail(RETIRED_PLUGIN_ROOT_REFUSALS[state]);
+}
+
+const RECORD_READERS = Object.freeze({
+  STRICT: 'strict',
+  ORPHANED_PROJECT_ROOT: 'orphaned-project-root',
+  PRUNED_PLUGIN_ROOT: 'pruned-plugin-root',
+});
+
+function readerRefusalText(error) {
+  const message = error && typeof error.message === 'string' ? error.message : String(error);
+  return message.startsWith(FAIL_PREFIX) ? message.slice(FAIL_PREFIX.length) : message;
+}
+
+function recordReaderRefusals(options) {
+  const source = options && typeof options === 'object' ? options : {};
+  const readerOptions = {
+    recordsDir: source.recordsDir,
+    sessionId: source.sessionId,
+    expectedHost: source.host,
+  };
+  return [
+    [RECORD_READERS.STRICT, readContext],
+    [RECORD_READERS.ORPHANED_PROJECT_ROOT, readOrphanedProjectRootContext],
+    [RECORD_READERS.PRUNED_PLUGIN_ROOT, readPrunedPluginRootContext],
+  ].map(([reader, read]) => {
+    try {
+      read(readerOptions);
+      return { reader, refusal: null };
+    } catch (error) {
+      return { reader, refusal: readerRefusalText(error) };
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2110,7 +2193,8 @@ function adoptableRecord(options) {
     //
     // A recorded installation the host PRUNED from its cache. Say what that
     // branch gives up, because "the root's existence alone" is false:
-    // readPrunedPluginRootContext proves the absence and waives THREE checks —
+    // readPrunedPluginRootContext proves the absence, or that only a remnant the
+    // host retired is left, and waives THREE checks —
     // the root's existence, the digest re-measure and the manifest-version match
     // — the last two because they read the tree that is gone. So the forgery
     // sentence above does NOT carry over: there the digest and the declared
@@ -2121,7 +2205,7 @@ function adoptableRecord(options) {
     // validation, source_revision === runtime_digest, plugin_data equality, the
     // sibling-root bound, ADOPTION_SAFE_VERSION_RE on both versions before either
     // reaches a filename, the never-backwards comparison, and the PROVEN absence
-    // of the waived root. The barrier was never the digest — it is the private
+    // or retirement of the waived root. The barrier was never the digest — it is the private
     // records directory. That is the stated cost, and the reason such a record is
     // adopted once rather than served. Every OTHER disagreement — plugin version,
     // session hash, schema, principal profiles — throws in all three readers and
@@ -6036,6 +6120,10 @@ module.exports = {
   readContext,
   readOrphanedProjectRootContext,
   readPrunedPluginRootContext,
+  RETIRED_PLUGIN_ROOT_STATES,
+  retiredPluginRootState,
+  RECORD_READERS,
+  recordReaderRefusals,
   // Exported for the unit layer alone — no production caller requires it; all
   // of its call sites are in this file. Without a direct handle its three rules
   // (the UNSAFE_PATH_CHARACTERS class, path.isAbsolute, and the

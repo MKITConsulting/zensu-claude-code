@@ -567,7 +567,7 @@ function renderBaselineNotes(baseline, sessionId) {
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation that was merely pruned from the plugin cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned — each relaxed reader pins the other's waiver off, so nothing is left to anchor the record to — and so is having no record for this session at all. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation pruned from the plugin cache, whether the host removed its directory or left a remnant it retired (an .orphaned_at marker and no manifest). A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned — each relaxed reader pins the other's waiver off, so nothing is left to anchor the record to — and so is having no record for this session at all. The rows below name why each of the three record readers refused this record. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -587,7 +587,7 @@ const REMEDY = {
 // that names the minting version, so the user learns why the strict read failed
 // without a detour through /zensu:doctor, and repeated as one sentence because
 // a parenthetical alone does not say what adoption will do about it.
-const PRUNED_NOTE = " (installation no longer on disk)";
+const PRUNED_NOTE = " (installation pruned from the plugin cache)";
 const PRUNED_EXPLANATION = "The installation that minted the record has been pruned from the plugin cache, so the\nrecord could not be re-measured; adoption re-mints it under the running installation.\n";
 const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 
@@ -1242,6 +1242,39 @@ function provenanceToken(c, name, fallback) {
   return vocabulary && typeof vocabulary[name] === "string" ? vocabulary[name] : fallback;
 }
 
+const READER_LABELS = Object.freeze({
+  "strict": "strict read        ",
+  "orphaned-project-root": "project root gone  ",
+  "pruned-plugin-root": "installation pruned",
+});
+
+function readerRefusalRows(request, c) {
+  if (!c || typeof c.recordReaderRefusals !== "function") {
+    return "\nThis installation cannot ask the record readers why they refused the record.\n";
+  }
+  let verdicts;
+  try {
+    verdicts = c.recordReaderRefusals(request);
+  } catch {
+    verdicts = null;
+  }
+  if (!Array.isArray(verdicts) || verdicts.length === 0) {
+    return "\nThe record readers could not be asked why they refused the record.\n";
+  }
+  const rows = ["\nWhy each record reader refused this record:\n"];
+  for (const verdict of verdicts) {
+    const reader = verdict && typeof verdict.reader === "string" ? verdict.reader : "";
+    const label = Object.prototype.hasOwnProperty.call(READER_LABELS, reader)
+      ? READER_LABELS[reader]
+      : safe(reader || "unnamed reader");
+    const cause = verdict && typeof verdict.refusal === "string"
+      ? safe(verdict.refusal)
+      : "accepted the record; it changed after the check above, so re-run this command";
+    rows.push("  " + label + " : " + cause + "\n");
+  }
+  return rows.join("");
+}
+
 // ONE rendering for a refusal, whichever check answered it: the probe at the top of
 // a run, or the preview below it when the state changed in between. The diagnosis of
 // the workflow document is appended ONLY for already-served, and only on the
@@ -1252,6 +1285,9 @@ function provenanceToken(c, name, fallback) {
 function writeRefusal(reason, request, c) {
   process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(reason) + ")\n\n");
   process.stdout.write((REMEDY[reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+  if (reason === c.ADOPTION_REFUSALS.RECORD_UNREADABLE) {
+    process.stdout.write(readerRefusalRows(request, c));
+  }
   if (reason === c.ADOPTION_REFUSALS.ALREADY_SERVED) {
     process.stdout.write(renderBaselineDiagnosis(baselineVerdict(request), request.sessionId));
   }
@@ -1767,6 +1803,7 @@ module.exports = {
   NON_ASCII,
   REMEDY,
   SAFE_DISPLAY,
+  readerRefusalRows,
   leasesScope,
   leaseFault,
   baselineFault,

@@ -322,9 +322,15 @@ heuristic — deliberately no naive key/password catch-all); decision logic live
 `spec(s)/`, `testdata/`, `evals/` or `fixtures/` segment and `*.example.*` files (the path exemption does not apply to
 the Bash channel — its targets are not resolved; use the marker or escape hatch there), lines
 carrying the `zensu-secret-allow` marker, obvious placeholders (`EXAMPLE`, `YOUR_...`,
-`{{...}}`, `${...}`), and Bash commands with an inline `ZENSU_SECRET_SCAN=off` prefix. Parser
-errors **fail open** with a stderr note. Bypass with `ZENSU_SECRET_SCAN=off` (env, or inline
-for Bash); disable via `hooks.secretScan:false`.
+`{{...}}`, `${...}`), the plugin's own Autopilot team-review operation key (exactly
+`team-review:v1:` plus 64 lowercase hex digits, the value `autopilot_team_review_operation_key`
+and `autopilot_work_order_review_operation_key` produce, so persisting `TEAM_REVIEW_PUBLISHED`
+does not trip the entropy rule), and Bash commands with an inline `ZENSU_SECRET_SCAN=off`
+prefix. The entropy rule still judges every other value, a near miss of that shape included.
+`detectChannels` keeps reading a quoted `>` as a redirect: the Session Control check of the
+source-write gate denies on the same answer, and a quote-aware reading would let
+`bash -c '... > file'` escape the scan. Parser errors **fail open** with a stderr note. Bypass
+with `ZENSU_SECRET_SCAN=off` (env, or inline for Bash); disable via `hooks.secretScan:false`.
 `tests/structure/test-secret-scan-gate.sh` pins the behavior.
 
 ## Reviewer-Spawn Grant
