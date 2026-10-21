@@ -106,10 +106,12 @@ The gate classifies each distinct invocation once, however many of the two readi
 reads the session's declared workflow tools at most once per call. Both readings take time linear in
 the length of the command. A Bash call that names `zensu` and whose hook payload exceeds the session
 binder's limit (`MAX_PAYLOAD_BYTES` in `hooks/lib/claude-hook-session-v1.js`, 1 MiB) is denied before
-either reading runs, with a reason that names the payload's size and the limit. The all-tool capability
-gate already denies every payload over that limit, so the decision does not change; the reason no
-longer blames the session binding. The Edit gate and the secret scan name the size the same way,
-through the shared bind-deny ladder.
+either reading runs, with a reason that names the payload's size and the limit. A PowerShell call
+goes through the PowerShell analyzer instead; when the analyzer reports a `zensu` call or a construct
+it cannot judge, the failed bind names the size through the shared bind-deny ladder. The all-tool
+capability gate already denies every payload over that limit, so the decision does not change; the
+reason no longer blames the session binding. The Edit gate and the secret scan name the size the same
+way, through the same ladder.
 
 ```mermaid
 flowchart TD

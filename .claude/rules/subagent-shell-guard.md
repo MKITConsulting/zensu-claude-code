@@ -206,8 +206,8 @@ grows past 64 directories is denied (`directories`).
   distinct line once (a `Set`), because the walker and the token scan find the same invocation, and
   the shell resolves the workflow's tools once per run (`zensu_workflow_tools`), so the cost of a
   call no longer grows with repeated invocations. Before either reading runs it compares the
-  payload with the binder's exported `MAX_PAYLOAD_BYTES` and turns an oversized `zensu` command
-  into the size deny of `zensu_emit_oversized_payload_deny`.
+  payload with the binder's exported `MAX_PAYLOAD_BYTES` and turns an oversized Bash command that
+  names `zensu` into the size deny of `zensu_emit_oversized_payload_deny`.
 - The parse stays linear in the command length. `braceSpan` is one stack pass that keeps the
   leftmost brace group holding a comma, `endWord` keeps a per-command flag for leading
   assignments, the shell `-c` flag in the walker and in `commandItemViolation` goes through
