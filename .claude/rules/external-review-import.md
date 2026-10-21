@@ -190,13 +190,13 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   capability gate confines every reviewer, the template's agents included, to the session's
   project root, so a template run over a sibling repository cannot read it. Importing such a
   review would make the import the one place where a second root counts as the chain's own.
-  Stage 1 catches this layout only in part, so the import cannot lean on it: a claim spelled
-  absolutely into a work tree nested under the anchor grades `UNVERIFIED (foreign root)`, the
-  run-log writer's `<project>/…` spelling included, because `unredact_claim` places it again,
-  but a claim written relative to the anchor still grades against the anchor's change set
-  (`.claude/rules/multi-repo-stage1.md`). Measured 2026-10-14, such a relative claim graded
-  `EDIT LANDED (untracked-by-design)` where the anchor ignores the nested directory and
-  `EDIT NOT LANDED` where it does not. Accepting a second root needs all of these at
+  Stage 1 catches this layout only in part, so the import cannot lean on it: a claim into a
+  work tree nested under the anchor grades `UNVERIFIED (foreign root)` whether it is spelled
+  absolutely, as the run-log writer's `<project>/…` or relative to the repository top, because
+  `unredact_claim` and `place_relative_claim` place it again, but a relative claim naming a
+  sibling repository's file still grades against the anchor's change set, and a sibling under
+  `$HOME`, another user's home or `/root` reaches the run log as `~/…` or `<home>/…` and is
+  never placed (`.claude/rules/multi-repo-stage1.md`). Accepting a second root needs all of these at
   once: the root taken from the sealed `codeRoots[]` of `docs/multi-repo-chains-spec.md`
   §6.1.1, never from a model-typed `--root` (the `--code-root` flag that section rejects); a
   tree binding over the anchor and that root, the `project`/`work` tree `computeFingerprint`

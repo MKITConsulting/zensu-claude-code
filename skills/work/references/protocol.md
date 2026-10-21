@@ -28,7 +28,8 @@ key. Each is written to a temporary file and renamed into place.
 | `order-` | `--start`, `--bind-spec` | the last `zensu work get` answer |
 | `lease-` | every successful renewal or event | lease seconds, last success time, recorded head, order status |
 | `outbox-` | `--autopilot-begin`, `--drain`, a block, `ready_for_merge` or question send, and a refused lease whose replay got no answer | the bound Autopilot run id, the highest stage rank Zensu accepted, up to four block, `ready_for_merge` or question sends Zensu has not answered yet, and the code of a refused lease while their replay waits |
-| `answers-` | renewals, `--start`, `--bind-spec` | answers to this order's non-blocking questions and the plan-wide decisions of `decision_log` not yet shown to the model |
+| `answers-` | renewals, `--start`, `--bind-spec`, the post-tool hook | answers to this order's non-blocking questions and the plan-wide decisions of `decision_log` not yet shown to the model, and the ids already shown |
+| `answer-keys-` | renewals, `--start`, `--bind-spec` | the key of the last answer queued for each question, or found already shown by a runtime from before this file, which never rewrites it |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
 | `stop-` | the Stop hook | stops in a row without a new ledger event |
@@ -146,7 +147,11 @@ follow-up quotes Zensu's message, and for a text that is too long names the fiel
 `--start` and `--bind-spec` queue the answered entries of the order's `decision_log` — questions a
 person decided for the whole plan — beside the answers, and the post-tool hook hands them to the
 model as decisions that bind this order. A plan-wide decision made after `--bind-spec` reaches the
-next session, not this one: the heartbeat carries only this order's answers.
+next session, not this one: the heartbeat carries only this order's answers. The hook hands each
+answer over once per id and `answered_at` (the SHA-256 of its text when `answered_at` is missing),
+so when a heartbeat carries a person's replacement of an automatic answer, the replacement reaches
+the model, in place of a still-pending automatic answer, and tells it that the automatic answer no
+longer holds.
 
 `--plan-approval` needs the order at `planning` with `plan_approval = required`. It commits the plan
 file when it is new or changed, pushes through the push verb, and sends an artifact event of kind

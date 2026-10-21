@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -1513,6 +1514,7 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
   assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__start_session')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
+  assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
   const context = startedContext(box);
   for (const tool of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) {
@@ -1529,6 +1531,9 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
+  const powershell = wo.gateDecision(context, payload('PowerShell', 'Get-ChildItem'), { env: box.env });
+  assert.equal(powershell.code, 'powershell');
+  assert.match(powershell.reason, /judges Bash commands only\. Run the command through the Bash tool\.$/);
   wo.markLost(context, { code: 'stale_attempt', via: 'test', at: Date.now() });
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
@@ -1737,6 +1742,11 @@ test('the post-tool update hands answers over once and ends the session on a blo
   assert.match(first.additionalContext, /active ones only/);
   const second = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
   assert.equal(second.additionalContext, null);
+  const escalated = { stdout: JSON.stringify({ question: { id: 'q-3', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
+  const powershellAsk = wo.postToolUpdate(context, { tool_name: 'PowerShell', tool_input: { command: `zensu work ask ${ORDER} --category scope --question "x" --blocking --json` }, tool_response: escalated }, { env: box.env });
+  assert.equal(powershellAsk.cancelRun, null);
+  assert.equal(powershellAsk.additionalContext, null);
+  assert.equal(fs.existsSync(context.files.ended), false);
   wo.markerRun(context, RUN);
   writeRun(box, 'TDD_RUNNING', DONE_LEDGER.slice(0, 3));
   const response = { stdout: JSON.stringify({ question: { id: 'q-2', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
@@ -1744,6 +1754,110 @@ test('the post-tool update hands answers over once and ends the session on a blo
   assert.equal(ended.cancelRun, RUN);
   assert.match(ended.additionalContext, /Stop now/);
   assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
+});
+
+test('an automatic answer a person overturns reaches the model again as a replacement, and an unchanged answer stays deduplicated', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const t1 = '2026-10-14T10:00:00.000Z';
+  const t2 = '2026-10-14T11:00:00.000Z';
+  const automatic = { id: 'q1', category: 'technical_choice', question: 'Which store?', status: 'auto_answered', answer: 'A', answered_at: t1 };
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 1);
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 0);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['A']);
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 0);
+  const overturn = { ...automatic, status: 'answered', answer: 'B', answered_at: t2, overturned_at: t2 };
+  const added = wo.recordAnswers(context, [overturn]);
+  assert.deepEqual(added.map((entry) => [entry.id, entry.answer, entry.overturnedAt]), [['q1', 'B', t2]]);
+  assert.equal(wo.recordAnswers(context, [overturn]).length, 0);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /Answer: "B"/);
+  assert.match(update.additionalContext, /replaced the automatic answer Zensu gave to a question this order asked earlier, so that automatic answer no longer holds/);
+  assert.doesNotMatch(update.additionalContext, /Answer: "A"/);
+  assert.doesNotMatch(update.additionalContext, /keep the default you continued with/);
+  assert.equal(wo.recordAnswers(context, [overturn]).length, 0);
+  assert.equal(wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env }).additionalContext, null);
+});
+
+test('a changed answer replaces its pending entry, an answer without answered_at is keyed by its text, and a replaced plan-wide decision keeps the plan-wide wording', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.recordAnswers(context, [{ id: 'q1', question: 'Which store?', status: 'auto_answered', answer: 'A', answered_at: 't1' }]);
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', question: 'Which store?', status: 'answered', answer: 'B', answered_at: 't2', overturned_at: 't2' }]).length, 1);
+  assert.deepEqual(wo.readState(context.files.answers).pending.map((entry) => [entry.id, entry.answer]), [['q1', 'B']]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['B']);
+  const textKey = (text) => `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 1);
+  assert.equal(wo.readState(context.files.answers).pending[0].version, textKey('C'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 0);
+  wo.takePendingAnswers(context);
+  assert.equal(wo.readState(context.files.answerKeys).keys.q2, textKey('C'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 0);
+  assert.deepEqual(wo.recordAnswers(context, [{ id: 'q2', answer: 'D' }]).map((entry) => entry.answer), ['D']);
+  wo.takePendingAnswers(context);
+  wo.recordAnswers(context, [{ id: 'p1', category: 'product_decision', question: 'Which currency?', status: 'answered', answer: 'Euro.', answered_at: 't3', overturned_at: 't3', planWide: true }]);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Answer: "Euro\." A person replaced the automatic answer Zensu gave to this question, so that automatic answer no longer holds\./);
+  assert.doesNotMatch(update.additionalContext, /this order asked earlier/);
+});
+
+test('an answers file an older runtime wrote keeps its meaning, an id it delivered takes the next key without being handed over again, and the delivered list stays bounded', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const older = Array.from({ length: 498 }, (_, index) => `old-${index}`);
+  wo.writeState(box.project, files.answers, { delivered: [...older, 'q3', 'q1'], pending: [{ id: 'q2', category: null, question: 'Which queue?', answer: 'The existing one.', status: 'answered', planWide: false }] });
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'A', answered_at: 't1' }]).length, 0);
+  assert.equal(wo.readState(files.answerKeys).keys.q1, 't1');
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'A', answered_at: 't1' }]).length, 0);
+  assert.equal(wo.recordAnswers(context, [{ id: 'q3', answer: 'C', answered_at: 't5', overturned_at: 't5' }]).length, 0);
+  wo.recordAnswers(context, [{ id: 'q2', answer: 'The existing one.', answered_at: 't2' }]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), ['q2']);
+  const stored = wo.readState(files.answers);
+  assert.equal(stored.delivered.length, 500);
+  assert.deepEqual(stored.delivered.slice(0, 2), ['old-1', 'old-2']);
+  assert.deepEqual(stored.delivered.slice(-2), ['q1', 'q2']);
+  assert.deepEqual(Object.keys(stored).sort(), ['delivered', 'pending', 'schemaVersion']);
+  assert.deepEqual(wo.readState(files.answerKeys).keys, { q1: 't1', q2: 't2', q3: 't5' });
+  assert.ok(stored.delivered.every((id) => typeof id === 'string'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'B', answered_at: 't3', overturned_at: 't3' }]).length, 1);
+  const pending = wo.readState(files.answers).pending;
+  assert.deepEqual(pending.map((entry) => [entry.id, entry.category, entry.question, entry.answer, entry.status, entry.planWide]), [['q1', null, null, 'B', null, false]]);
+});
+
+test('a key this runtime recorded survives an older runtime rewriting the answers file, so a later overturn still reaches the model once', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const overturn = { id: 'q1', answer: 'B', status: 'answered', answered_at: 't2', overturned_at: 't2' };
+  const queued = { id: 'q2', answer: 'The existing one.', status: 'answered', answered_at: 't3' };
+  wo.recordAnswers(context, [{ id: 'q1', answer: 'A', status: 'auto_answered', answered_at: 't1' }]);
+  wo.takePendingAnswers(context);
+  wo.writeState(box.project, files.answers, { delivered: ['q1'], pending: [{ id: 'q2', category: null, question: 'Which queue?', answer: 'The existing one.', status: 'answered', planWide: false }] });
+  assert.deepEqual(wo.recordAnswers(context, [overturn, queued]).map((entry) => [entry.id, entry.answer]), [['q1', 'B'], ['q2', 'The existing one.']]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), ['q1', 'q2']);
+  wo.writeState(box.project, files.answers, { delivered: ['q1', 'q2', 'q1', 'q2'], pending: [] });
+  assert.equal(wo.recordAnswers(context, [overturn, queued]).length, 0);
+  assert.deepEqual(wo.takePendingAnswers(context), []);
+});
+
+test('an overturn the pending bound pushes out is queued again by the next heartbeat', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const overturn = { id: 'q1', answer: 'B', status: 'answered', answered_at: 't2', overturned_at: 't2' };
+  const flood = Array.from({ length: 50 }, (_, index) => ({ id: `n${index}`, answer: `N${index}`, status: 'answered', answered_at: 'tn' }));
+  wo.recordAnswers(context, [{ id: 'q1', answer: 'A', status: 'auto_answered', answered_at: 't1' }]);
+  wo.takePendingAnswers(context);
+  wo.recordAnswers(context, [overturn, ...flood]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), flood.map((entry) => entry.id));
+  assert.deepEqual(wo.recordAnswers(context, [overturn, ...flood]).map((entry) => entry.answer), ['B']);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['B']);
+  assert.equal(wo.recordAnswers(context, [overturn, ...flood]).length, 0);
 });
 
 test('the plan summary carries no markup, command line or control character', () => {

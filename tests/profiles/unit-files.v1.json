@@ -96,6 +96,11 @@
       "summary": "Plugin-data containment: the separator classes, the resolution bounds, the truncated-walk refusal and the realpath fast path."
     },
     {
+      "path": "tests/structure/powershell-command-v1.test.js", "registered": 17, "skips": {"darwin": 1, "linux": 1, "root": 1},
+      "runs": [{ "driver": "tests/structure/test-powershell-tool-coverage.sh" }],
+      "summary": "The PowerShell command analyzer the shell gates share: its Windows PowerShell 5.1 and PowerShell 7 readings, the zensu call finder, the Session Control check, the read-only verdict, faults, the alias tables and a conformance case against the real PowerShell parser."
+    },
+    {
       "path": "tests/structure/process-supervisor.test.js", "registered": 7, "skips": {"linux": 1, "root": 1},
       "notRunOn": {"win32": "test-harness-launcher.sh skips native Windows before grading, because the launcher stops its session through POSIX process groups"},
       "runs": [{ "driver": "tests/structure/test-harness-launcher.sh" }],
@@ -254,10 +259,10 @@
       "summary": "Windows Safety shard partitioning, with no suite duplicated or lost."
     },
     {
-      "path": "tests/structure/work-order-v1.test.js", "registered": 76,
+      "path": "tests/structure/work-order-v1.test.js", "registered": 81,
       "notRunOn": {"win32": "test-work-order-runtime.sh skips native Windows before grading, because Node cannot start the file's shell-script fake zensu there"},
       "runs": [{ "driver": "tests/structure/test-work-order-runtime.sh" }],
-      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, the gate and the takeover release plan."
+      "summary": "The work-order runtime: the CLI error grammar, the ledger-to-stage mapping, lease renewal and expiry, the inert context outside the mode, the branch prefix, the DONE delivery order with refused stages and replayed terminal sends, bind-spec and the plan approval, questions and follow-ups against the fake's service rules, overturned automatic answers and their keys beside older runtimes, the gate and the takeover release plan."
     },
     {
       "path": "tests/structure/workflow-dispatch-inputs.test.js", "registered": 24,
@@ -288,6 +293,11 @@
       "path": "tests/structure/zen-anchor-v1.test.js", "registered": 25,
       "runs": [{ "driver": "tests/structure/test-zen-mode.sh" }],
       "summary": "The zen-mode chain anchor: the shape-to-line mapping, the failed mark and the closed chain."
+    },
+    {
+      "path": "tests/structure/zensu-cli-version-v1.test.js", "registered": 14, "skips": {"win32": 8},
+      "runs": [{ "driver": "tests/structure/test-doctor.sh" }],
+      "summary": "The zensu-cli version floor: the version line, the floor comparison, and a probe that never runs a binary PATH reaches through a relative entry and walks PATH as the playwright-cli probe does."
     },
     {
       "path": "tests/structure/zensu-doctor-invocation.test.js", "registered": 27,

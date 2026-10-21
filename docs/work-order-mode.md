@@ -152,7 +152,8 @@ raw output to a file there; nothing else keeps it.
 ## Known gaps
 
 - The installed `zensu` CLI must provide `zensu work`, which zensu-cli 0.8.0 is the first release
-  to carry; with an older CLI, `/zensu:work` refuses in one line.
+  to carry; with an older CLI, `/zensu:work` refuses in one line that names zensu-cli 0.10.0,
+  the oldest release the plugin supports.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not
   judged; the worker's slot sandbox, not the gate, is the boundary.
@@ -166,4 +167,8 @@ raw output to a file there; nothing else keeps it.
   only in part is imported as if it were complete.
 - Work-order mode is unverified on native Windows: the launcher's process-group handling is POSIX
   only, and the work-order suites skip on that host.
+- The gate judges only Bash commands, so it refuses Claude Code's PowerShell tool in a bound
+  session, and the launcher starts the session with `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`. A session
+  started some other way keeps the PowerShell tool as its host configures it, and every PowerShell
+  command there is refused.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.

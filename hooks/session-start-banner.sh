@@ -59,6 +59,23 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh" ] \
   echo "zensu: Reviewer spawns — this plugin is configured to admit its own read-only reviewer subagents (Read/Grep/Glob only) itself, so the host permission layer is not asked for them. This line checks the flag and the two files; /zensu:doctor is the authoritative check and additionally verifies the hook's registration and that its decision module loads. Turn off: hooks.reviewerSpawnAutoAllow=false in ~/.zensu/config.json."
 fi
 
+_zensu_powershell_host() {
+  [ -n "${CLAUDE_CODE_USE_POWERSHELL_TOOL:-}" ] && return 0
+  case "$(uname -s 2>/dev/null)" in
+    (MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  return 1
+}
+if _zensu_powershell_host && command -v node >/dev/null 2>&1; then
+  _ZENSU_POWERSHELL_LINE="$(
+    cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 0
+    node ./shell-tool-coverage-v1.js banner ../hooks.json 2>/dev/null
+  )"
+  case "$_ZENSU_POWERSHELL_LINE" in
+    ('zensu: ⚠'*) printf '%s\n' "$_ZENSU_POWERSHELL_LINE"; _ZENSU_POWERSHELL_LINE="" ;;
+  esac
+fi
+
 # Whether the delivery-route question can actually be asked. Four conditions, all
 # required: the flag, node, the hook file, and no configured default route —
 # plan-approved-delegate.sh exits 0 silently without node or without its own
@@ -176,6 +193,7 @@ if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/verify-consent-v1.js" ]; then
   echo "zensu: Browser verification — no navigation policy is set, so /zensu:verify-feature runs in consent mode: it drives playwright-cli, and its zensu-verify browser session asks you through the permission prompt once per session for each loopback origin and at every browser start for a remote HTTPS origin; under bypass permissions or dontAsk the prompt cannot be shown, so a remote target there needs the policy. /zensu:doctor checks playwright-cli, the hook registration and the runtime recipe."
 fi
+[ -n "${_ZENSU_POWERSHELL_LINE:-}" ] && printf '%s\n' "$_ZENSU_POWERSHELL_LINE"
 
 
 VERSION="?"
@@ -207,10 +225,23 @@ else
   fi
 fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
+_ZENSU_CLI_PROBE=""
+if command -v node >/dev/null 2>&1; then
+  _ZENSU_CLI_PROBE="$(cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null && node -e 'process.exitCode = require("./zensu-cli-version-v1.js").cliMain(["--lookup"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" || _ZENSU_CLI_PROBE=""
+fi
+_ZENSU_CLI_STATE="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^state=//p')"
+_ZENSU_CLI_VERSION="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^version=//p')"
+_ZENSU_CLI_FLOOR="$(printf '%s\n' "$_ZENSU_CLI_PROBE" | sed -n 's/^floor=//p')"
 if command -v zensu >/dev/null 2>&1; then
-  echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."
+  case "$_ZENSU_CLI_STATE" in
+    (old) echo "zensu: ⚠ zensu CLI $_ZENSU_CLI_VERSION ($(command -v zensu)) is older than $_ZENSU_CLI_FLOOR, the oldest release Zensu skills support: older releases print only the first 100 ghost-scan candidates and read only the first page of wiki lists. Upgrade: brew upgrade --cask zensu, or run the installer again: curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex." ;;
+    (ok) echo "zensu: CLI ready ($(command -v zensu), $_ZENSU_CLI_VERSION) — Zensu skills drive it. On an auth error run: zensu auth login." ;;
+    (*) echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login." ;;
+  esac
 else
-  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need it. Install: curl -fsSL https://zensu.dev/install.sh | sh  then: zensu auth login."
+  _ZENSU_CLI_NEED="it"
+  [ -n "$_ZENSU_CLI_FLOOR" ] && _ZENSU_CLI_NEED="zensu-cli $_ZENSU_CLI_FLOOR or later"
+  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need $_ZENSU_CLI_NEED. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex — then: zensu auth login."
 fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 }

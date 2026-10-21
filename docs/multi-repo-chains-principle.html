@@ -137,8 +137,9 @@
   <strong>And which half of that is universally live is narrower than “stage 1 is implemented”:</strong>
   the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the
   project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still
-  beginning with <code>/</code>. A foreign root outside both <code>$HOME</code> and the project root is
-  detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not.
+  beginning with <code>/</code>. A foreign root outside every home directory and the project root is
+  detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not, and
+  one under another user's home or <code>/root</code> becomes <code>&lt;home&gt;</code> and names no root either.
   They remain requirements, not achieved properties. A carrier was chosen on 2026-09-20 — the
   Session Control record, sealed by a confirmation at arming — but the gate that makes its store
   unwritable from inside a session is not built, so rule 2 is stated and not yet satisfied — see
