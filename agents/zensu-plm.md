@@ -46,7 +46,7 @@ matching skill workflow, except the verbs marked **person**, **worker** or
 - **Tiers**: Pricing levels (Free/Pro/Team/Enterprise) with feature gating
 - **Features**: The central entity — tracked with status, security profile, linked tests, docs, coverage, and tier availability
 
-**Feature IDs** follow the `KEY-N` format — product feature key + per-product number (e.g. `ZEN-42`, `AUTH-7`). Reference them in commit messages as `[ZEN-42]`; legacy `[ZEN-<slug>]` refs stay resolvable. `KEY-N` is the human-facing id only: every CLI `<feature-id>` argument takes the feature **UUID** and rejects a `KEY-N` id or slug with `invalid feature id (status 400)`. Resolve `KEY-N` → UUID via `zensu products list --json` (match `feature_key`) → `zensu features list --product <id> --json` (match `number` or `slug`), falling back to `zensu journeys suggest --product <id>` when the list envelope's `total` exceeds one 20-item page.
+**Feature IDs** follow the `KEY-N` format — product feature key + per-product number (e.g. `ZEN-42`, `AUTH-7`). Reference them in commit messages as `[ZEN-42]`; legacy `[ZEN-<slug>]` refs stay resolvable. `KEY-N` is the human-facing id only: every CLI `<feature-id>` argument takes the feature **UUID** and rejects a `KEY-N` id or slug with `invalid feature id (status 400)`. Resolve `KEY-N` → UUID via `zensu products list --json` (match `feature_key`) → `zensu features list --product <id> --json` (match `number` or `slug`).
 
 **Feature Status Lifecycle**: `planned` → `in-progress` → `testing` → `released`
 
@@ -64,22 +64,22 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 ## Available CLI Commands
 
 ### Feature CRUD
-- `zensu features list` — List features (`--product` **required**, optional `--status` and `--json`). The response is a `{data, total, page, perPage}` envelope paginated at 20 with **no page flag on the CLI** — when `total` exceeds the returned `data` length, read the full catalog from `zensu journeys suggest --product <id>`, whose payload carries every feature.
-- `zensu features get <id>` — Get full feature details. The id must be the feature **UUID**; a slug or KEY-N id is rejected with `invalid feature id (status 400)`. The command has no `--json` flag — it always prints JSON.
-- `zensu features create` — Create a new feature
+- `zensu features list` — List features (`--product` **required**, optional `--status` and `--json`). The CLI reads every page and prints one `{data, total, page, perPage}` envelope with the whole catalog.
+- `zensu features get <id>` — Get full feature details. The id must be the feature **UUID**; a slug or KEY-N id is rejected with `invalid feature id (status 400)`.
+- `zensu features create` — Create a new feature (`--product`, `--component` and `--title` required; `--component` takes a component UUID from the `components` array of `zensu journeys suggest --product <id>`; optional `--slug`, derived from the title when omitted, and `--status`)
 - `zensu features update <id>` — Update feature properties (NOT status — use `zensu features status`)
 - `zensu features status <id> <status>` — Transition status (planned|in-progress|testing|released)
 - `zensu products list` — List all products
-- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and the product metadata flags
+- `zensu products create` — Create a new product. **Required: `--name` + `--slug`** (`slug` = URL-safe id, e.g. `my-saas-app`; the CLI sends a create without it, and the server rejects that with `slug is required`). Optional: `--type` (`public_product`|`internal_product`|`hybrid`) and `--description`
 
 ### Subfeatures
-- `zensu subfeatures add <feature-id>` — Add a child feature
+- `zensu subfeatures add <feature-id>` — Add a child feature (`--title` required)
 - `zensu subfeatures list <feature-id>` — List children of a feature
 - `zensu subfeatures promote <feature-id> <sub-id>` — Promote a subfeature to a standalone feature
 
 ### Linking Artifacts
-- `zensu link test <feature-id>` — Link a test file (unit|integration|e2e|security|performance|accessibility)
-- `zensu link docs <feature-id>` — Link documentation to a feature
+- `zensu link test <feature-id>` — Link a test file (`--file` and `--test-type` required: unit|integration|e2e|security|performance|accessibility)
+- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also writes the linked wiki page)
 - `zensu link source <feature-id>` — Map source files (repeatable `--file`; covers bulk mapping)
 
 ### Security
@@ -87,24 +87,24 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu security posture <product-id>` — Product-wide security overview (product id is positional, not `--product`)
 - `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (a read of the feature's security context, like `validate`, `suggest-tests` and `threat-model`; it persists nothing)
 - `zensu security validate <id>` — Check if feature passes release gate
-- `zensu security add-test <id>` — Link a security test (auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
-- `zensu security review <id>` — Complete a review (approved|rejected|conditional)
+- `zensu security add-test <id>` — Link a security test (`--file` and `--type` required: auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
+- `zensu security review <id>` — Complete a review (`--reviewer` and `--status` required: approved|rejected|conditional; optional `--type` manual|automated|external)
 - `zensu security suggest-tests <id>` — Get context for test recommendations
 - `zensu security threat-model <id>` — Get context for STRIDE threat model generation
 
 ### Revisions
-- `zensu features revision <id>` — Create a versioned revision of a feature
+- `zensu features revision <id>` — Create a versioned revision of a feature (`--scope-summary` required)
 - `zensu features history <id>` — Get revision history
 
 ### Lifecycle
-- `zensu features split <id>` — Split a feature into multiple children
-- `zensu features merge <id>` — Merge multiple features into one
+- `zensu features split <id>` — Split a feature into multiple children (`--children` required: a JSON array of `{title, slug}` objects)
+- `zensu features merge <id>` — Merge multiple features into one (`--source`, a JSON array of feature UUIDs, `--title` and `--slug` required)
 - `zensu features deprecate <id>` — Mark a feature as deprecated
 
 ### Tiers
-- `zensu tiers create --product <id>` — Create a pricing tier
+- `zensu tiers create --product <id>` — Create a pricing tier (`--slug`, `--name` and `--tier-order` required; tier order 1 is the lowest tier)
 - `zensu tiers list --product <id>` — List all tiers for a product
-- `zensu tiers set-feature <feature-id>` — Assign features to tiers (hard|soft|preview gating)
+- `zensu tiers set-feature <feature-id>` — Replace a feature's tier assignments (`--tiers` required: a JSON array of `{tierId, gatingType}` entries, `gatingType` hard|soft|preview, optional `tierLimits`)
 - `zensu tiers matrix --product <id>` — Get the complete Feature × Tier matrix
 
 ### User Journeys
@@ -144,7 +144,7 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu work heartbeat|event|ask|followup <work-order-id>` — Renew the lease, report a stage, ask the humans behind the plan, or report out-of-scope work (**session**; heartbeat and event only through the `/zensu:work` helper)
 
 ### Product Visions & Bootstrap
-- `zensu products vision-create` — Store a vision document
+- `zensu products vision-create` — Store a vision document (`--title` and `--content` required; optional `--product` and `--source` studio|import|claude-code)
 - `zensu products vision-get <vision-id>` — Retrieve vision content for analysis
 - `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (`--result`)
 - `zensu products bootstrap-step <vision-id> <step>` — Track post-bootstrap progress (the step number is positional, not `--step`)
@@ -152,33 +152,33 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 ### Product Studio
 - `zensu doc claude-md-context --product <id>` — Get CLAUDE.md context for a product
 - `zensu products import <product-id> --repo-url <url>` — Import a repository for analysis (optional `--repo-type` github|gitlab|bitbucket|local; product id is positional)
-- `zensu doc claude-md --product <id>` — Generate a CLAUDE.md template (`--variant` full|minimal|ci-only)
+- `zensu doc claude-md --product <id>` — Generate a CLAUDE.md template (`--variant` full|minimal|ci-only, required)
 
 ### Source Files & Docs
-- `zensu doc gen-context <feature-id>` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
+- `zensu doc gen-context <feature-id> --doc-type <type>` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
 
 ### Wiki
-- `zensu wiki create` — Create a wiki page
+- `zensu wiki create` — Create a wiki page (`--product`, `--title` and `--content` required)
 - `zensu wiki update <id>` — Update a wiki page
-- `zensu wiki list` — List wiki pages
+- `zensu wiki list --product <id>` — List wiki pages
 
 ### Knowledge (Second-Brain)
-- `zensu knowledge search` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
+- `zensu knowledge search --query <text>` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
 - `zensu knowledge get <id>` — Fetch a full knowledge item by id (complete content, excerpt, trust level, provenance)
 - `zensu knowledge sources` — List indexed knowledge sources with type and sync status
 
 ### Pulse (Developer Journal)
-- `zensu pulse start` — Start a dev session (with git HEAD SHA and branch)
-- `zensu pulse end <id>` — End a session (with changed file paths)
+- `zensu pulse start` — Start a dev session (the git HEAD SHA via `--head-sha`, required, and the branch via `--branch`)
+- `zensu pulse end <id>` — End a session (each changed file path via a repeated `--changed-file`)
 - `zensu pulse summary <id>` — Review session activity
 
 ### Ghost Scan
-- `zensu ghost scan --product <id>` — Create a scan with feature candidates
-- `zensu ghost candidates <scan-id>` — Load candidates for review
-- `zensu ghost approve <scan-id> <candidate-id>` — Approve a single scan candidate
-- `zensu ghost reject <scan-id> <candidate-id>` — Reject a single scan candidate
-- `zensu ghost batch <scan-id>` — Batch approve/reject candidates
-- `zensu ghost apply <scan-id>` — Apply approved candidates as features
+- `zensu ghost scan --product <id> --candidates '<json>'` — Create a scan with feature candidates (it prints the scan id; no command lists scans)
+- `zensu ghost candidates <scan-id> --product <id>` — Load candidates for review
+- `zensu ghost approve <scan-id> <candidate-id> --product <id>` — Approve a single scan candidate
+- `zensu ghost reject <scan-id> <candidate-id> --product <id>` — Reject a single scan candidate (optional `--reason`)
+- `zensu ghost batch <scan-id> --product <id>` — Batch approve/reject candidates (`--approve-ids` and `--reject-ids` take JSON arrays of candidate UUIDs, at least one of them; `--reject-reason` applies to every rejection)
+- `zensu ghost apply <scan-id> --product <id>` — Apply approved candidates as features (`--enrich-existing` when the product already has features)
 
 ### Agent & Workflow
 - `zensu meta scaffold-agent` / `zensu meta workflow-guide` / `zensu meta suggest-workflow` — agent-integration helpers. These compute server-side and currently have no CLI endpoint (they error with guidance); use the skill workflows instead.
@@ -211,7 +211,7 @@ Use the `/zensu:security-review` skill workflow:
 
 ### When the user wants to scan a repo for features
 Use the `/zensu:ghost-scan` skill workflow:
-1. Load existing features AND journeys (`zensu journeys list`) to avoid duplicates
+1. Load existing features AND journeys (`zensu journeys list --product <id>`) to avoid duplicates
 2. Walk the file tree (seed pass); for each candidate populate `detectedSourceFiles`, `detectedTestFiles`, AND `detectedDocFiles` — tests and docs are co-located with source, so glob both patterns inside each candidate's source dirs. Never submit an empty `detectedTestFiles` or `detectedDocFiles` when the repo has tests or docs.
 3. **Multi-perspective fan-out:** spawn read-only `Explore` lenses in one parallel batch (adaptive count, cap 12) to refine boundaries, catch missed features, and draft journeys; consolidate in the main thread. This raises recall beyond the single seed pass.
 4. Create ghost scan with the refined candidates
@@ -222,7 +222,7 @@ Use the `/zensu:ghost-scan` skill workflow:
 ### When the project has both built code and a forward plan (hybrid)
 A brownfield repo whose plan/vision doc *also* describes not-yet-built features:
 1. Run the **ghost scan** workflow above — imports the built features.
-2. Diff the plan/vision doc against the applied features. For each plan item with no matching feature, run `zensu features create --status planned` — it is genuinely unbuilt, so `planned` is correct and it gets its v1 only at implement-time.
+2. Diff the plan/vision doc against the applied features. For each plan item with no matching feature, run `zensu features create --product <id> --component <component-uuid> --title <title> --status planned` — it is genuinely unbuilt, so `planned` is correct and it gets its v1 only at implement-time.
 3. Present the new planned features for the user to prioritize.
 No separate skill — the hybrid is ghost-scan followed by direct `zensu features create` calls for the remainder.
 
@@ -250,7 +250,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
   |---|---|---|---|
   | no  | yes | —   | **bootstrap** (greenfield) |
   | yes | no  | —   | **ghost-scan** (brownfield) |
-  | yes | yes | yes | **hybrid** — ghost-scan, then `zensu features create --status planned` for plan items the scan did not match |
+  | yes | yes | yes | **hybrid** — ghost-scan, then `zensu features create --product <id> --component <component-uuid> --title <title> --status planned` for plan items the scan did not match |
   | no  | no  | —   | ask for a vision/description, then **bootstrap** |
 - When a user mentions a specific feature ID (KEY-N, e.g. ZEN-42) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
@@ -272,7 +272,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 5. **Reference features in commits.** Use `[KEY-N]` format (e.g. `[ZEN-42]`) in commit messages.
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `--enrich-existing`.
-8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — the scan apply links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and run `zensu ghost apply --enrich-existing`; tests attach to the existing features by slug, no duplicates.
+8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — the scan apply links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and run `zensu ghost apply <scan-id> --product <id> --enrich-existing`; tests attach to the existing features by slug, no duplicates.
 9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `zensu knowledge search` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge commands are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
 10. **Documentation is code-grounded, never a metadata dump.** `zensu doc gen-context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
 11. **Ghost scans are multi-perspective and journey-aware.** A single heuristic pass misses features — augment the seed walk with a read-only `Explore` fan-out (adaptive count, cap 12) and consolidate in the main thread. Treat `detectedDocFiles` as first-class scan data alongside `detectedTestFiles` — glob existing READMEs/`docs` per candidate; an omitted array links zero. After apply, discover and create user journeys (`zensu journeys create` → `zensu journeys step` → `zensu journeys health`) so brownfield imports can pass the journey-health release gate; flag features with zero docs for `/zensu:implement` rather than auto-generating docs.
