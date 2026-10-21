@@ -1164,6 +1164,7 @@ fi
 outer_finish() {
   local fields run_id owner stage action head_update_required count cap
   local budget_json budget_fields budget_blocked reconcile_rc budget_rc
+  local review_wait wait_seats wait_until
   local stale_retry="${1:-false}"
 
   # Re-read and, when necessary, reconcile the current Outer+Inner generation
@@ -1198,6 +1199,17 @@ outer_finish() {
   esac
 
   cap=12
+  if review_wait="$(outer_review_wait)"; then
+    IFS=$'\t' read -r wait_seats wait_until <<<"$review_wait"
+    if [ "$wait_seats" = 1 ]; then
+      wait_seats="1 review seat of this session is"
+    else
+      wait_seats="${wait_seats} review seats of this session are"
+    fi
+    outer_stage_block "$run_id" "$stage" "$action" "$head_update_required" uncounted \
+      "${wait_seats} still in flight and their evidence lease takes results until ${wait_until}, so this Stop does not count against the stage budget of ${cap}; their results arrive as task notifications. "
+    return 0
+  fi
   if budget_json="$(autopilot_increment_stop_budget_capped "$run_id" "$stage" \
       "$PROJECT_ROOT" "$SESSION_ID" "$cap" STOP_BUDGET_EXHAUSTED 2>/dev/null)"; then
     :
@@ -1237,12 +1249,37 @@ outer_finish() {
     return 0
   fi
 
-  if [ "$head_update_required" = "true" ]; then
-    emit_block "STOP intercepted by durable Zensu Autopilot run ${run_id}. stage=${stage}; prerequisiteActionCode=UPDATE_PR_HEAD; nextActionCode=${action}; stopBlock=${count}/${cap}. FIRST execute prerequisite action UPDATE_PR_HEAD: re-run the configured gates, push the fixes, read the resulting PR head, and persist the exact PR_HEAD_UPDATED event. Only after that succeeds continue the static stage action ${action}. Inner TDD completion never releases the outer run; only DONE, BLOCKED, or CANCELLED may stop."
-  else
-    emit_block "STOP intercepted by durable Zensu Autopilot run ${run_id}. stage=${stage}; nextActionCode=${action}; stopBlock=${count}/${cap}. Continue exactly that closed next action. Inner TDD completion never releases the outer run; only DONE, BLOCKED, or CANCELLED may stop."
-  fi
+  outer_stage_block "$run_id" "$stage" "$action" "$head_update_required" "${count}/${cap}" ""
   return 0
+}
+
+outer_stage_block() {
+  local run_id="$1" stage="$2" action="$3" head_update_required="$4" budget="$5" note="$6"
+  if [ "$head_update_required" = "true" ]; then
+    emit_block "STOP intercepted by durable Zensu Autopilot run ${run_id}. stage=${stage}; prerequisiteActionCode=UPDATE_PR_HEAD; nextActionCode=${action}; stopBlock=${budget}. FIRST execute prerequisite action UPDATE_PR_HEAD: re-run the configured gates, push the fixes, read the resulting PR head, and persist the exact PR_HEAD_UPDATED event. Only after that succeeds continue the static stage action ${action}. ${note}Inner TDD completion never releases the outer run; only DONE, BLOCKED, or CANCELLED may stop."
+  else
+    emit_block "STOP intercepted by durable Zensu Autopilot run ${run_id}. stage=${stage}; nextActionCode=${action}; stopBlock=${budget}. Continue exactly that closed next action. ${note}Inner TDD completion never releases the outer run; only DONE, BLOCKED, or CANCELLED may stop."
+  fi
+}
+
+outer_review_wait() {
+  local probe="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-evidence-hook-v1.js"
+  local native_plugin_data msys_env_exclusions line seats until
+  [ -f "$probe" ] && [ ! -L "$probe" ] || return 1
+  native_plugin_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_DATA)" || return 1
+  line="$(
+    cd -P -- "$(dirname "$probe")" || exit 1
+    printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_DATA="$native_plugin_data" zensu_run_bounded node ./review-evidence-hook-v1.js wait 2>/dev/null
+  )" || return 1
+  IFS=$'\t' read -r seats until <<<"$line"
+  case "$seats" in ''|0|*[!0-9]*) return 1 ;; esac
+  case "$until" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z) ;;
+    *) return 1 ;;
+  esac
+  printf '%s\t%s\n' "$seats" "$until"
 }
 
 # Corrupt outer state must be handled before project-wide deferred review

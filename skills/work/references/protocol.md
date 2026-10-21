@@ -32,7 +32,7 @@ key. Each is written to a temporary file and renamed into place.
 | `answer-keys-` | renewals, `--start`, `--bind-spec` | the key of the last answer queued for each question, or found already shown by a runtime from before this file, which never rewrites it |
 | `lost-` | the first lease loss | the code that proved it; created once, never replaced |
 | `ended-` | the first outcome Zensu accepted, or the lease loss that ended the session | outcome, kind, whether Zensu accepted it; created once |
-| `stop-` | the Stop hook | stops in a row without a new ledger event |
+| `stop-` | the Stop hook | stops in a row without progress, and the progress key: the run id and ledger length, plus `#` and the summed revisions of the session's review evidence leases when the hook could read them |
 
 ## Stages
 
@@ -170,8 +170,11 @@ session continues with `--bind-spec`.
 
 Outside work-order mode all three print nothing and exit 0.
 
-- `pre-work-order-gate.sh` (every tool) denies the prompt tools, the task-chip tool, a raw
-  `git push`, `gh pr create`, `glab mr create`, every merge, `zensu auth`, `zensu work event` and
+- `pre-work-order-gate.sh` (every tool) denies the prompt tools, every Claude Desktop session tool
+  except `dismiss_task`, `mark_chapter`, `list_start_targets` and `read_widget_context` (so
+  `spawn_task`, `start_session`, `hand_off_to_session`, `move_to_cloud` and any session tool a
+  later Claude Desktop adds), `mcp__ccd_session_mgmt__send_message`, a raw `git push`,
+  `gh pr create`, `glab mr create`, `gh pr merge`, `glab mr merge`, `zensu auth`, `zensu work event` and
   `zensu work heartbeat`, every other `zensu work` verb except `get`, `events`, `ask` and
   `followup`, every `zensu plan` verb that records a person's decision (`push`, `approve`,
   `finalize`, `abandon`, `confirm-merge` and `followup accept|dismiss`), and a command that prints, reads, unsets or overrides
