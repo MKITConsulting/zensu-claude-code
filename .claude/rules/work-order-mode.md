@@ -154,8 +154,10 @@ replaced the task chip with a `start_session` proposal (read from its bundle on 
 deny of `spawn_task` alone left the work skill's "never open a task chip" rule unguarded there.
 Claude Desktop supplies both tools itself, so a work-order session the launcher starts with
 `claude -p` has neither; the deny guards a work order bound inside a Claude Desktop session.
-Adding a name to `CHIP_TOOLS` changes no matcher (the gate matches `.*`), adds no hook and moves
-no schema, so it ships as a `patch`. `test-work-order-gates.sh` G4 and the gate case in
+A tool the gate starts to deny is a call it used to allow, so the `start_session` deny alters the
+capability set of every session a newer installation would serve, which
+`.claude/rules/runtime-lineage.md` makes breaking although no matcher (the gate matches `.*`), hook
+or schema moves: it ships in a `minor` release. `test-work-order-gates.sh` G4 and the gate case in
 `work-order-v1.test.js` pin both names. `skills/work/references/protocol.md`, the tool-hooks
 section of `docs/work-order-mode.md` and the gate row of `docs/configuration.md` name both tools
 too, and no test reads those sentences, so they move with `CHIP_TOOLS` by hand.
