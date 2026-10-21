@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
   that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
   `zensu auth login`, which cannot help there.
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
 
 ## [0.27.0] - 2026-10-17
 
