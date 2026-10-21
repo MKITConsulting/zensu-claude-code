@@ -61,13 +61,28 @@ as it is.
 1. `command -v node` — if missing, do **not** write. Still gather choices in Phases
    2–4, then print the merged JSON (Phase 5 snippet) and tell the user which file to
    paste it into. Stop after that.
-2. `command -v zensu` — if missing, note it and skip Phase 1; continue with config
+2. `command -v zensu` — if missing, note it and name the install commands:
+   `brew install --cask mkitconsulting/tap/zensu`,
+   `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows
+   `irm https://zensu.dev/install.ps1 | iex`. Skip Phase 1 and continue with config
    only.
+3. When both `zensu` and `node` are present, check the version floor with
+   `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-version-v1.js" --lookup`. It runs
+   `zensu --version` once with the update check off and prints `state=`, `version=`
+   and `floor=` lines. On `state=old`, tell the user that Zensu skills need
+   zensu-cli 0.10.0 or later and name the upgrade: `brew upgrade --cask zensu`, or
+   running the installer again. On `dev`, `unread` or `absent` (the shell found
+   `zensu`, but no binary on `PATH`), say that the floor was not checked and why.
+   Warn only: continue either way. On `cwd-relative`, `PATH` reaches `zensu` through an
+   empty or relative entry that the shell reads against the working directory, so
+   `zensu` was not run: tell the user to remove that entry from `PATH`, or move it
+   behind the directory that holds `zensu`, and skip Phase 1, because
+   `zensu auth status` would run the binary that entry reaches.
 
 ## Phase 1 — Auth (only when the CLI is present)
 
-Run `zensu auth status`. If it exits non-zero or reports that no host is logged in,
-ask via `AskUserQuestion` whether to log in now:
+Run `zensu auth status`. If it exits non-zero or prints `Not logged in` (it exits 0
+then), ask via `AskUserQuestion` whether to log in now:
 
 - **Yes** → run `zensu auth login` (interactive browser OAuth; it auto-approves when
   a Zensu web session is already active). The login flow never exposes any credential
@@ -152,5 +167,6 @@ Report:
 
 | Command | Phase | Purpose |
 |---|---|---|
+| `node …/zensu-cli-version-v1.js --lookup` | 0 | Check the zensu-cli version floor (runs `zensu --version`) |
 | `zensu auth status` | 1 | Check whether a Zensu host is logged in |
 | `zensu auth login` | 1 | Interactive login (only when the user opts in) |

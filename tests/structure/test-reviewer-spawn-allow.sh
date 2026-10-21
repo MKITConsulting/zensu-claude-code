@@ -56,27 +56,9 @@ else
   check "A3 registered in hooks.json PreToolUse on matcher Agent|Task" FAIL
 fi
 
-# ── A4 the unit driver runs here, with a case-count floor ────────────
-# tests/run-all.sh discovers only test-*.sh, so a *.test.js with no driver is
-# never executed by the tree runner. Exit 0 also accepts a file registering zero
-# cases, which is why the floor is asserted rather than the exit status alone.
-UNIT_OUT="$(node --test "$UNIT" 2>&1)"
-UNIT_RC=$?
-UNIT_COUNT="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# *pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-[ -z "$UNIT_COUNT" ] && UNIT_COUNT="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^.*pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
-# The floor is DERIVED from the file, not a literal: a hardcoded number drifts below the
-# real count and then silently tolerates deleted cases.
-# `test.skip(`/`test.todo(` count too: without them a disabled case lowers BOTH sides
-# together and the equality still holds over a case that no longer runs.
-UNIT_EXPECTED="$(grep -cE "^test(\.(skip|todo))?\(" "$UNIT" 2>/dev/null || echo 0)"
-UNIT_TOTAL="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# *tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-[ -z "$UNIT_TOTAL" ] && UNIT_TOTAL="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^.*tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-if [ "$UNIT_RC" -eq 0 ] && [ -n "$UNIT_COUNT" ] && [ "$UNIT_EXPECTED" -gt 0 ] \
-  && [ "$UNIT_COUNT" -eq "$UNIT_EXPECTED" ] && [ "${UNIT_TOTAL:-0}" -eq "$UNIT_COUNT" ]; then
-  check "A4 reviewer-spawn-allow-v1.test.js green with all $UNIT_EXPECTED registered cases" PASS
-else
-  check "A4 reviewer-spawn-allow-v1.test.js green with all registered cases (rc=$UNIT_RC ran=${UNIT_COUNT:-none} registered=$UNIT_EXPECTED)" FAIL
-fi
+# ── A4 the unit driver runs here ─────────────────────────────────────
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "A4 the reviewer-spawn-allow unit file passes" "$UNIT"
 
 # ── Behavioral helpers ───────────────────────────────────────────────
 SESSION_ID="revallow-session-$$"
@@ -802,6 +784,8 @@ if grep -qE '(^|[^_])zensu_hook_enabled reviewerSpawnAutoAllow' "$BANNER"; then
 else
   check "A41b the permissive reader is not used on this key in the banner" PASS
 fi
+
+unit_check_done "A4z every unit file the registry gives this suite was graded"
 
 echo "----"
 if [ "$SKIP" -gt 0 ]; then

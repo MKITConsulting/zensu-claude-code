@@ -7,7 +7,7 @@
 set -u
 
 # Pins the SessionStart "Zensu active" banner + agent primer (0.4.0):
-# user banner via stdout, agent primer via additionalContext, both gated by
+# user banner via systemMessage, agent primer via additionalContext, both gated by
 # hooks.sessionBanner and firing only on fresh starts (startup/clear).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -89,6 +89,19 @@ export ZENSU_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"
 
 OUT_START="$(printf '%s' '{"source":"startup"}' | bash "$BANNER" 2>/dev/null)"
 [ -n "$OUT_START" ] && check "B10 banner emits on source=startup" PASS || check "B10 banner emits on source=startup" FAIL
+if printf '%s' "$OUT_START" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ try { const j=JSON.parse(s);
+    const h=j.hookSpecificOutput||{};
+    const ok = typeof j.systemMessage==="string"
+      && j.systemMessage.split("\n").some(l=>/^zensu: Zensu PLM v\S+ active/.test(l))
+      && h.hookEventName==="SessionStart" && h.additionalContext===j.systemMessage;
+    process.exit(ok?0:1); } catch(_){ process.exit(1); } });
+'; then
+  check "B10b banner reaches the user as systemMessage and the model as the same additionalContext" PASS
+else
+  check "B10b banner reaches the user as systemMessage and the model as the same additionalContext" FAIL
+fi
 
 OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
@@ -119,6 +132,116 @@ case "$OUT_QUIET_CONTROL" in
   *) check "B11c-control the same invocation without the flag does emit the consent line" FAIL ;;
 esac
 rm -f "$QUIET_CONFIG"
+
+PS_BASE="$(mktemp -d -t zensu-banner-powershell-XXXXXX)"
+PS_FIXTURE() {
+  local name="$1" matcher="$2" root
+  root="$PS_BASE/$name"
+  mkdir -p "$root/hooks/lib" "$root/.claude-plugin"
+  cp "$BANNER" "$root/hooks/session-start-banner.sh"
+  cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$root/hooks/lib/zensu-config.sh"
+  cp "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$root/hooks/lib/shell-tool-coverage-v1.js"
+  cp "$PLUGIN_DIR/hooks/lib/hook-registration-v1.js" "$root/hooks/lib/hook-registration-v1.js"
+  printf '{"name":"zensu","version":"9.9.9"}\n' > "$root/.claude-plugin/plugin.json"
+  printf '{"hooks":{"PreToolUse":[{"matcher":"%s","hooks":[{"type":"command","command":"bash \\"${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh\\""}]}]}}\n' "$matcher" > "$root/hooks/hooks.json"
+  (cd "$root" && pwd -P)
+}
+PS_RUN() {
+  local root="$1" source="$2" value="$3" config="${4:-$ZENSU_CONFIG}"
+  if [ "$value" = unset ]; then
+    printf '{"source":"%s"}' "$source" | env -u CLAUDE_CODE_USE_POWERSHELL_TOOL CLAUDE_PLUGIN_ROOT="$root" ZENSU_CONFIG="$config" \
+      bash "$root/hooks/session-start-banner.sh" 2>/dev/null
+  else
+    printf '{"source":"%s"}' "$source" | CLAUDE_CODE_USE_POWERSHELL_TOOL="$value" CLAUDE_PLUGIN_ROOT="$root" ZENSU_CONFIG="$config" \
+      bash "$root/hooks/session-start-banner.sh" 2>/dev/null
+  fi
+}
+PS_GAP_ROOT="$(PS_FIXTURE bash-only Bash)"
+PS_COVERED_ROOT="$(PS_FIXTURE covered 'Bash|PowerShell')"
+PS_QUIET_CONFIG="$PS_BASE/quiet.json"
+printf '%s\n' '{"hooks":{"sessionBanner":false}}' > "$PS_QUIET_CONFIG"
+PS_ON="$(PS_RUN "$PS_GAP_ROOT" startup 1)"
+case "$PS_ON" in
+  *'zensu: ⚠ PowerShell tool — '*'PowerShell tool is enabled here'*'1 of Zensu'*'CLAUDE_CODE_USE_POWERSHELL_TOOL=0'*'/zensu:doctor'*) check "B16 the PowerShell tool warning names the enabled tool, the gap count, the remedy and /zensu:doctor" PASS ;;
+  *) check "B16 the PowerShell tool warning names the enabled tool, the gap count, the remedy and /zensu:doctor (got: $PS_ON)" FAIL ;;
+esac
+case "$(PS_RUN "$PS_GAP_ROOT" startup 1 "$PS_QUIET_CONFIG")" in
+  *'zensu: ⚠ PowerShell tool'*) check "B16a the PowerShell tool warning sits above the sessionBanner gate" PASS ;;
+  *) check "B16a the PowerShell tool warning sits above the sessionBanner gate" FAIL ;;
+esac
+case "$(PS_RUN "$PS_GAP_ROOT" resume 1)" in
+  *'PowerShell tool'*) check "B16b the PowerShell tool warning stays silent on source=resume" FAIL ;;
+  *) check "B16b the PowerShell tool warning stays silent on source=resume" PASS ;;
+esac
+case "$(PS_RUN "$PS_GAP_ROOT" startup 0)" in
+  *'PowerShell tool'*) check "B16c CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the warning" FAIL ;;
+  *) check "B16c CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the warning" PASS ;;
+esac
+case "$(PS_RUN "$PS_COVERED_ROOT" startup 1)" in
+  *'zensu: ⚠ PowerShell tool'*) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" FAIL ;;
+  *'zensu: PowerShell tool — '*'judge PowerShell commands too'*'Use the Bash tool'*'hooks.bashWriteGate'*) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" PASS ;;
+  *) check "B16d a hook registered on Bash|PowerShell raises no warning and names what to run through the Bash tool" FAIL ;;
+esac
+case "$(PS_RUN "$PS_COVERED_ROOT" startup 1 "$PS_QUIET_CONFIG")" in
+  *'PowerShell tool'*) check "B16h the Bash-tool guidance sits below the sessionBanner gate" FAIL ;;
+  *) check "B16h the Bash-tool guidance sits below the sessionBanner gate" PASS ;;
+esac
+case "$(PS_RUN "$PS_COVERED_ROOT" startup 0)" in
+  *'PowerShell tool'*) check "B16h2 CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the Bash-tool guidance" FAIL ;;
+  *) check "B16h2 CLAUDE_CODE_USE_POWERSHELL_TOOL=0 silences the Bash-tool guidance" PASS ;;
+esac
+PS_DEFAULT="$(PS_RUN "$PS_GAP_ROOT" startup unset)"
+if [ "$(node -p 'process.platform')" = "win32" ]; then
+  case "$PS_DEFAULT" in
+    *'zensu: ⚠ PowerShell tool — '*'on by default for claude.ai and Console accounts'*) check "B16e on Windows an unset CLAUDE_CODE_USE_POWERSHELL_TOOL warns that the tool is on by default" PASS ;;
+    *) check "B16e on Windows an unset CLAUDE_CODE_USE_POWERSHELL_TOOL warns that the tool is on by default (got: $PS_DEFAULT)" FAIL ;;
+  esac
+else
+  case "$PS_DEFAULT" in
+    *'PowerShell tool'*) check "B16e off Windows an unset CLAUDE_CODE_USE_POWERSHELL_TOOL raises no warning" FAIL ;;
+    *) check "B16e off Windows an unset CLAUDE_CODE_USE_POWERSHELL_TOOL raises no warning" PASS ;;
+  esac
+fi
+PS_EXPECTED="$(node -e '
+  const m = require(process.argv[1]);
+  const manifest = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+  const environment = { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" };
+  process.stdout.write(m.bannerLine(manifest, environment, process.platform) || m.steerLine(manifest, environment, process.platform));
+' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" "$HOOKS_JSON" 2>/dev/null)"
+PS_REAL="$(printf '%s' '{"source":"startup"}' | CLAUDE_CODE_USE_POWERSHELL_TOOL=1 bash "$BANNER" 2>/dev/null | node -e '
+  let s = ""; process.stdin.on("data", (c) => { s += c; });
+  process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(s).systemMessage); } catch (_) { process.exit(1); } });
+' 2>/dev/null | grep -E '^zensu: (⚠ )?PowerShell tool' || true)"
+{ [ -n "$PS_EXPECTED" ] && [ "$PS_REAL" = "$PS_EXPECTED" ]; } \
+  && check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json" PASS \
+  || check "B16f the shipped banner prints exactly the line the coverage module derives from hooks/hooks.json (banner: $PS_REAL; module: $PS_EXPECTED)" FAIL
+if node -e '
+  const m = require(process.argv[1]);
+  const gap = { hooks: { PostToolUse: [{ matcher: "Bash", hooks: [{ command: "bash x/hooks/post.sh" }] }] } };
+  const both = { hooks: { PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [{ command: "bash x/hooks/post.sh" }] }] } };
+  const all = { hooks: { PreToolUse: [{ matcher: ".*", hooks: [{ command: "bash x/hooks/pre.sh" }] }] } };
+  const ok = m.bannerLine(gap, {}, "win32").includes("on by default")
+    && m.bannerLine(gap, {}, "darwin") === ""
+    && m.bannerLine(gap, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" }, "win32") === ""
+    && m.bannerLine(gap, { CLAUDE_CODE_USE_POWERSHELL_TOOL: " TRUE " }, "linux").includes("is enabled here")
+    && m.bannerLine(both, {}, "win32") === ""
+    && m.bannerLine(all, {}, "win32") === ""
+    && m.bannerLine(null, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux").includes("could not read hooks/hooks.json")
+    && m.steerLine(both, {}, "win32").includes("Use the Bash tool")
+    && m.steerLine(both, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux") === m.steerLine(both, {}, "win32")
+    && m.steerLine(both, {}, "darwin") === ""
+    && m.steerLine(both, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" }, "win32") === ""
+    && m.steerLine(gap, {}, "win32") === ""
+    && m.steerLine(null, { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" }, "linux") === ""
+    && m.shellCoverage({ hooks: [] }) === null
+    && m.shellCoverage({}).gaps.length === 0;
+  process.exit(ok ? 0 : 1);
+' "$PLUGIN_DIR/hooks/lib/shell-tool-coverage-v1.js" 2>/dev/null; then
+  check "B16g the coverage module warns only for a host that may run PowerShell and a hook that fires for Bash alone" PASS
+else
+  check "B16g the coverage module warns only for a host that may run PowerShell and a hook that fires for Bash alone" FAIL
+fi
+rm -rf "$PS_BASE"
 
 PRIMER_START="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$PRIMER" 2>/dev/null)"
 if printf '%s' "$PRIMER_START" | node -e '
@@ -157,6 +280,25 @@ if [ -z "$PRIMER_AGENT_TYPE" ] && [ -z "$PRIMER_AGENT_ID" ] && [ -z "$PRIMER_PAR
   check "B12c top-level --agent and partial principals receive no main primer" PASS
 else
   check "B12c top-level --agent and partial principals receive no main primer" FAIL
+fi
+
+primer_context() {
+  printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | env -u ZENSU_SESSION_TOKEN "$@" bash "$PRIMER" 2>/dev/null | node -e '
+    try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).hookSpecificOutput.additionalContext); }
+    catch (_) { process.exit(1); }
+  ' 2>/dev/null
+}
+PRIMER_AUTH_PLAIN="$(primer_context)"
+PRIMER_AUTH_TOKEN="$(primer_context ZENSU_SESSION_TOKEN=zst_primer_case)"
+if printf '%s' "$PRIMER_AUTH_PLAIN" | grep -qF 'Use /zensu:zensu-help to answer questions about Zensu. Zensu CLI auth recovery:' \
+  && printf '%s' "$PRIMER_AUTH_PLAIN" | grep -qF 'run zensu auth login yourself' \
+  && printf '%s' "$PRIMER_AUTH_TOKEN" | grep -qF 'Use /zensu:zensu-help to answer questions about Zensu. This is a one-time per-session orientation' \
+  && printf '%s' "$PRIMER_AUTH_TOKEN" | grep -qF -- "--tdd-begin" \
+  && ! printf '%s' "$PRIMER_AUTH_TOKEN" | grep -qF 'auth login' \
+  && ! printf '%s%s' "$PRIMER_AUTH_PLAIN" "$PRIMER_AUTH_TOKEN" | grep -qF '__ZENSU_CLI_AUTH__'; then
+  check "B12d the primer keeps the zensu auth login recovery out of a session that holds ZENSU_SESSION_TOKEN and gives it to every other session" PASS
+else
+  check "B12d the primer keeps the zensu auth login recovery out of a session that holds ZENSU_SESSION_TOKEN and gives it to every other session" FAIL
 fi
 
 PRIMER_COMPACT="$(printf '%s' '{"hook_event_name":"SessionStart","source":"compact"}' | bash "$PRIMER" 2>/dev/null)"
@@ -263,6 +405,65 @@ else
   check "B15 emitted command executes with inert quoted root and plugin data (parse=$SPECIAL_PARSE_RC command=$SPECIAL_COMMAND_RC exec=$SPECIAL_EXEC_RC marker=$SPECIAL_MARKER_OK)" FAIL
 fi
 rm -rf "$SPECIAL_BASE"
+
+ZC_BASE="$(mktemp -d -t zensu-banner-cli-XXXXXX)"
+ZC_FAKE="$ZC_BASE/fake"
+ZC_NODE_ONLY="$ZC_BASE/node-only"
+ZC_LOG="$ZC_BASE/calls.log"
+mkdir -p "$ZC_FAKE" "$ZC_NODE_ONLY"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "${ZENSU_NO_UPDATE_CHECK:-unset}" "$*" >> "$ZC_LOG"' 'printf "%s\n" "$ZC_VERSION_LINE"' > "$ZC_FAKE/zensu"
+chmod +x "$ZC_FAKE/zensu"
+ln -s "$(command -v node)" "$ZC_NODE_ONLY/node"
+ZC_FLOOR="$(node -e 'process.stdout.write(require(process.argv[1]).MIN_VERSION)' "$PLUGIN_DIR/hooks/lib/zensu-cli-version-v1.js")"
+zc_banner() {
+  printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZENSU_NO_UPDATE_CHECK -u ZENSU_SESSION_TOKEN PATH="$1" ZC_LOG="$ZC_LOG" ZC_VERSION_LINE="$2" "${@:3}" bash "$BANNER" 2>/dev/null
+}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "B16a-B16e the CLI line reads a shell-script zensu for its version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    ZC_OLD="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" 'zensu 0.9.0 (commit abc1234, built now)')"
+    case "$ZC_OLD" in
+      *"zensu CLI 0.9.0 ($ZC_FAKE/zensu) is older than $ZC_FLOOR"*'brew upgrade --cask zensu'*'curl -fsSL https://zensu.dev/install.sh | sh'*'irm https://zensu.dev/install.ps1 | iex'*)
+        check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" PASS ;;
+      *) check "B16a a CLI below the floor turns the CLI line into a warning with the floor and the upgrade commands" FAIL ;;
+    esac
+    ZC_CALLS="$(tr '\n' ' ' < "$ZC_LOG" 2>/dev/null)"
+    case "$ZC_CALLS" in
+      '1|--version ') check "B16b the banner runs zensu --version once, with the update check off" PASS ;;
+      *) check "B16b the banner runs zensu --version once, with the update check off (got: $ZC_CALLS)" FAIL ;;
+    esac
+    case "$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)")" in
+      *"CLI ready ($ZC_FAKE/zensu, $ZC_FLOOR)"*) check "B16c a CLI at the floor names its version on the ready line" PASS ;;
+      *) check "B16c a CLI at the floor names its version on the ready line" FAIL ;;
+    esac
+    rm -f "$ZC_LOG"
+    ZC_RELATIVE="$(cd "$ZC_BASE" && zc_banner "fake:$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" 'zensu 0.9.0 (commit abc1234, built now)')"
+    if [ ! -s "$ZC_LOG" ] && printf '%s' "$ZC_RELATIVE" | grep -qF 'CLI ready (' && ! printf '%s' "$ZC_RELATIVE" | grep -qF 'is older than'; then
+      check "B16d a zensu that PATH reaches through a relative entry is never run at session start" PASS
+    else
+      check "B16d a zensu that PATH reaches through a relative entry is never run at session start" FAIL
+    fi
+    case "$(zc_banner "$ZC_NODE_ONLY:/usr/bin:/bin" '')" in
+      *"'zensu' CLI not found on PATH — Zensu skills need zensu-cli $ZC_FLOOR or later. Install: brew install --cask mkitconsulting/tap/zensu, curl -fsSL https://zensu.dev/install.sh | sh, or on Windows irm https://zensu.dev/install.ps1 | iex"*)
+        check "B16e a missing CLI names the floor and the three install commands" PASS ;;
+      *) check "B16e a missing CLI names the floor and the three install commands" FAIL ;;
+    esac
+    ZC_READY_PLAIN="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)")"
+    ZC_READY_TOKEN="$(zc_banner "$ZC_FAKE:$ZC_NODE_ONLY:/usr/bin:/bin" "zensu $ZC_FLOOR (commit abc1234, built now)" ZENSU_SESSION_TOKEN=zst_banner_case)"
+    ZC_MISSING_PLAIN="$(zc_banner "$ZC_NODE_ONLY:/usr/bin:/bin" '')"
+    ZC_MISSING_TOKEN="$(zc_banner "$ZC_NODE_ONLY:/usr/bin:/bin" '' ZENSU_SESSION_TOKEN=zst_banner_case)"
+    if printf '%s' "$ZC_READY_PLAIN" | grep -qF "CLI ready ($ZC_FAKE/zensu, $ZC_FLOOR) — Zensu skills drive it. On an auth error run: zensu auth login." \
+      && printf '%s' "$ZC_MISSING_PLAIN" | grep -qF 'irm https://zensu.dev/install.ps1 | iex — then: zensu auth login.' \
+      && printf '%s' "$ZC_READY_TOKEN" | grep -qF "CLI ready ($ZC_FAKE/zensu, $ZC_FLOOR) — Zensu skills drive it." \
+      && printf '%s' "$ZC_MISSING_TOKEN" | grep -qF 'irm https://zensu.dev/install.ps1 | iex.' \
+      && ! printf '%s%s' "$ZC_READY_TOKEN" "$ZC_MISSING_TOKEN" | grep -qF 'auth login'; then
+      check "B16f the CLI lines advise zensu auth login, except in a session that holds ZENSU_SESSION_TOKEN" PASS
+    else
+      check "B16f the CLI lines advise zensu auth login, except in a session that holds ZENSU_SESSION_TOKEN" FAIL
+    fi
+    ;;
+esac
+rm -rf "$ZC_BASE"
 rm -rf "$PRIMER_DATA_BASE"
 
 echo "----"

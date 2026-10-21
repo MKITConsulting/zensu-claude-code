@@ -185,6 +185,7 @@ OUT14=""
 N14=0
 for PROMPT14 in \
   "$(printf '<task-notification>\n<task-id>b14</task-id>\n<status>completed</status>\n</task-notification>')" \
+  "$(printf 'Another Claude session sent a message:\n<agent-message from="a14">\n[Subagent hand-back] Add a retry helper to the client.\n</agent-message>')" \
   "$(printf '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\n<bash-input>git status</bash-input>')" \
   "/zensu:tdd-mode"; do
   N14=$((N14 + 1))
@@ -194,7 +195,7 @@ for PROMPT14 in \
 done
 OUT14B="$(payload "/zensu:tdd add a retry helper" "s14-args" "$P14" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P14/plugin-data" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
 if [ -z "$OUT14" ] && [ "$OUT14B" = "FIRED" ]; then
-  check "C14 task notifications, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
+  check "C14 task notifications, subagent hand-backs, shell inputs and argument-less slash commands get no reminder; a slash command with arguments does" PASS
 else
   check "C14 origin gate (harness output='${OUT14:0:60}' slash-with-args='$OUT14B')" FAIL
 fi
@@ -225,6 +226,33 @@ else
   check "C15 CI-event note (len=${LEN15:-none}: ${CTX15:0:80})" FAIL
 fi
 rm -rf "$P15"
+
+P16="$(mktemp -d -t tddrem-XXXXXX)"
+payload "x" "s16" "$P16" >/dev/null
+LARGE16="$P16/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "s16", prompt: "fix the auth token expiry bug\n" + "a line of pasted build output\n".repeat(23400) }))' "$LARGE16"
+PAD16=
+if [ "$(uname -s)" = Darwin ]; then
+  PAD16="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT16="$(env PAD16_A="$PAD16" PAD16_B="$PAD16" PAD16_C="$PAD16" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P16/plugin-data" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" < "$LARGE16" 2>/dev/null | fired)"
+[ "$OUT16" = "FIRED" ] \
+  && check "C16 a code prompt in a payload over the exec size limit still fires the TDD directive" PASS \
+  || check "C16 oversized code prompt (got '$OUT16')" FAIL
+rm -rf "$P16"
+
+C17_LEAK="$(HOOK="$HOOK" node -e '
+  const src = require("fs").readFileSync(process.env.HOOK, "utf8").replace(/\\\n\s*/g, " ");
+  const leaks = src.split("\n").filter((line) =>
+    /(^|[\s;\x28|&])[A-Za-z_][A-Za-z0-9_]*="\$\{?INPUT\}?"[^\n]*\bnode\b/.test(line)
+    || /\bnode\b[^|\n]*"\$\{?INPUT\}?"/.test(line));
+  process.stdout.write(leaks.join("\n"));
+')"
+if [ -z "$C17_LEAK" ]; then
+  check "C17 no node child takes the hook payload from its environment or argv" PASS
+else
+  check "C17 a node child takes the hook payload from its environment or argv, so an oversized payload fails the exec silently (${C17_LEAK:0:120})" FAIL
+fi
 
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"

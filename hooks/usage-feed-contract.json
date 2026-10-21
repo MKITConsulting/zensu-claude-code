@@ -1,0 +1,1 @@
+{"schemaVersion":1,"usage":{"directory":"zensu/session-hub/v1/usage","schemaVersion":1,"record":["schemaVersion","sessionId","observedAt","rateLimits"],"rateLimit":["kind","percentUsed","resetsAt"]}}

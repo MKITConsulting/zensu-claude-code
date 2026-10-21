@@ -141,7 +141,13 @@ the raw body, with no process, because that value is a closed vocabulary that ne
 escaping. Each hook that substitutes sources the directive library itself. The substitution is
 one pass, so a value is never scanned for another placeholder. When node cannot substitute, the
 delivery-route wrapper still emits valid JSON with the skill sentence in place of the command, so
-the directive is never routed to silence; the primer emits nothing, as before.
+the directive is never routed to silence; the primer emits nothing, as before. The reminder's other
+three shapes are `printf` literals through the same wrapper, never a third heredoc: the CI note, the
+decided line it sends on every prompt while the field reads `tdd` or `direct`, and the short line it
+sends on a later `ask` prompt of a context generation that already received the full text
+(`.claude/rules/prompt-ledger.md`). The CI note and the decided line never carry the record command;
+the short line does, through the same placeholder, so a Yes can be recorded even when the full text
+is no longer in context.
 
 ## Disclosure, five surfaces
 
@@ -178,7 +184,9 @@ and two `/zensu:doctor` rows.
   the doctor row.
 
 Nothing is ledgered: a recorded route is a MODE choice like the tdd-mode marker, a config key is
-standing configuration, and no `ZENSU_*=off` spelling exists for it.
+standing configuration, and no `ZENSU_*=off` spelling exists for it. The prompt ledger of
+`.claude/rules/prompt-ledger.md` records which full TEXTS a context generation received, never a
+route: a route change moves only the field, and every shape of the reminder carries the field.
 
 ## Coupled sites
 

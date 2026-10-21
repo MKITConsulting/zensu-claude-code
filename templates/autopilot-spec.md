@@ -28,4 +28,4 @@ or a concrete observation through the validation driver).
 | boot | {boot command} |
 | gates | {gate commands} |
 | auth | {login script or n/a} |
-| validate | {driver: browser/api/cli/async/iac/custom} |
+| validate | {driver: browser/api/cli/library/async/iac/mobile/desktop/custom} |

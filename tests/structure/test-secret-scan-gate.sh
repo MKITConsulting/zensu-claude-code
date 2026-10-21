@@ -72,10 +72,27 @@ WIRING="$(node -e '
     g.matcher === m &&
     (g.hooks || []).some((x) => typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1)
   );
-  process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash")].join(","));
+  process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash|PowerShell")].join(","));
 ' "$HOOKS_JSON" 2>/dev/null)"
+TIMEOUTS="$(node -e '
+  const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const found = [];
+  for (const g of (h.hooks && h.hooks.PreToolUse) || []) {
+    for (const x of g.hooks || []) {
+      if (typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1) {
+        found.push(g.matcher + "=" + (typeof x.timeout === "number" ? x.timeout : "none"));
+      }
+    }
+  }
+  process.stdout.write(found.sort().join(" "));
+' "$HOOKS_JSON" 2>/dev/null)"
+if [ "$TIMEOUTS" = "Bash|PowerShell=60 Edit|Write|MultiEdit=60 NotebookEdit=60" ]; then
+  check "P1b every registration carries the 60 s gate timeout ($TIMEOUTS)" PASS
+else
+  check "P1b every registration carries the 60 s gate timeout (got: $TIMEOUTS)" FAIL
+fi
 if [ "$WIRING" = "true,true,true" ]; then
-  check "P1 hook wired under Edit|Write|MultiEdit + NotebookEdit + Bash matchers" PASS
+  check "P1 hook wired under Edit|Write|MultiEdit + NotebookEdit + Bash|PowerShell matchers" PASS
 else
   check "P1 hook wired under all three matchers (got: $WIRING)" FAIL
 fi
@@ -301,6 +318,24 @@ if is_deny "$OUT"; then check "F7c escape token inside heredoc BODY does not dis
 OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456"}}')"
 [ -z "$OUT" ] && check "F8 Bash without write channel -> allow" PASS || check "F8 Bash without write channel -> allow" FAIL
 
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
+case "$OUT" in *"$DENY"*github-token*"A PowerShell command is scanned as a whole"*) check "F8p PowerShell write with GitHub token -> deny (rule and whole-text scope named)" PASS;; *) check "F8p PowerShell write with GitHub token (got '$OUT')" FAIL;; esac
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Write-Output ghp_''123456789012345678901234567890123456"}}')"
+if is_deny "$OUT"; then check "F8p2 PowerShell without a recognized write channel is still scanned" PASS; else check "F8p2 PowerShell channel-less scan (got '$OUT')" FAIL; fi
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"$env:ZENSU_SECRET_SCAN = \"off\"; Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
+if is_deny "$OUT"; then check "F8p3 a PowerShell env statement is no inline escape" PASS; else check "F8p3 PowerShell inline escape (got '$OUT')" FAIL; fi
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}' ZENSU_SECRET_SCAN=off)"
+[ -z "$OUT" ] && check "F8p4 PowerShell + ZENSU_SECRET_SCAN=off env -> allow" PASS || check "F8p4 PowerShell env escape (got '$OUT')" FAIL
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Get-ChildItem -Recurse | Select-String TODO"}}')"
+[ -z "$OUT" ] && check "F8p5 PowerShell without a secret -> allow" PASS || check "F8p5 PowerShell clean command (got '$OUT')" FAIL
+
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"cat > creds.env <<EOF\nghp_''123456789012345678901234567890123456\nEOF"}}')"
+case "$OUT" in *"A PowerShell command is scanned as a whole"*) check "F8p6 the Bash deny carries no PowerShell sentence" FAIL;; *"$DENY"*) check "F8p6 the Bash deny carries no PowerShell sentence" PASS;; *) check "F8p6 Bash deny (got '$OUT')" FAIL;; esac
+
 OUT="$(run_hook '{"tool_name":"MultiEdit","tool_input":{"file_path":"/x/src/n.go","edits":[{"new_string":"ok"},{"new_string":"t := \"xox''b-1234567890-abcdefghij\""}]}}')"
 case "$OUT" in *"$DENY"*slack-token*) check "F9 MultiEdit with Slack token -> deny (rule named)" PASS;; *) check "F9 MultiEdit with Slack token -> deny (rule named)" FAIL;; esac
 
@@ -400,6 +435,26 @@ if node -e '
     *) check "F19 foreign-installation record (got '$OUT')" FAIL ;; esac
 else
   check "F19 foreign-installation fixture could not be minted" FAIL
+fi
+
+F20_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "1048576")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+F20_PAYLOAD="$TMPD/oversized-bash.json"
+node -e '
+  const [file, total, cwd] = process.argv.slice(1);
+  const base = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo " }, session_id: "secret-scan-test", cwd };
+  base.tool_input.command += "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+  require("fs").writeFileSync(file, JSON.stringify(base));
+' "$F20_PAYLOAD" "$((F20_LIMIT + 1))" "$TMPD"
+OUT="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= \
+  STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" bash "$HOOK" < "$F20_PAYLOAD" 2>/dev/null)"
+if is_deny "$OUT" \
+  && printf '%s' "$OUT" | grep -qF "payload is $((F20_LIMIT + 1)) bytes, over the ${F20_LIMIT}-byte limit" \
+  && ! printf '%s' "$OUT" | grep -qF 'binding is unavailable or invalid'; then
+  check "F20 a Bash call one byte over the binder's payload limit is denied with a reason that names its size, not a broken binding" PASS
+else
+  check "F20 oversized Bash deny names its size (got '${OUT:0:240}')" FAIL
 fi
 
 echo "----"

@@ -64,7 +64,7 @@ const ADOPTION_REFUSAL_REMEDIES = Object.freeze({
   'workflow-schema-mismatch': 'The persisted workflow shape really did change between the two versions, so a fresh Claude Code session is the only way forward',
   'not-a-sibling-installation': 'The running installation is not a sibling of the recorded one (for example a --plugin-dir checkout beside an installed plugin), so a fresh Claude Code session on this installation is the way forward',
   'plugin-data-mismatch': 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward',
-  'record-unreadable': 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change — and adoption cannot tell those apart; /zensu:adopt-session prints the full diagnosis, and a fresh Claude Code session is the way forward',
+  'record-unreadable': 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change; /zensu:adopt-session names why each record reader refused it, and a fresh Claude Code session is the way forward',
   'executing-runtime-unidentified': 'The running installation declares no usable version, so repair the plugin installation first',
   'opted-out': 'hooks.sessionAutoAdopt is false in your Zensu config, so the automatic path is switched off on purpose; report this refusal and ask the user whether to run /zensu:adopt-session --confirm, which ignores the opt-out — never run it on your own initiative',
   'adopted-concurrently': 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call',
@@ -644,8 +644,9 @@ function protectedAccessViolation(payload, trusted) {
   return null;
 }
 
-function hostProfileAllowance() {
-  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
+function hostProfileAllowance(shellGranted) {
+  const shell = shellGranted ? ', Bash behind an accident guard' : '';
+  return `a neutral subagent may use only ${[...HOST_PROFILE_TOOLS].join(', ')}${shell}, the MCP tools ${[...HOST_PROFILE_MCP_READ_TOOLS].join(', ')}, and read-only Zensu MCP tools`;
 }
 
 function foldedPath(value) {
@@ -693,6 +694,7 @@ function configLayerViolation(payload, trusted, candidates) {
 function hostProfileToolViolation(payload, trusted, protectedRoots) {
   const tool = payload.tool_name;
   const commandViolation = () => `${COMMAND_TOOL_DENY}. ${searchRemedy(trusted, protectedRoots)}`;
+  const unlistedViolation = () => `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance(shellGuard.grantRefusal(payload) === null)}`;
   if (shellGuard.isShellCall(payload)) {
     const shell = shellGuard.shellViolation(payload, trusted);
     if (!shell) return null;
@@ -710,10 +712,10 @@ function hostProfileToolViolation(payload, trusted, protectedRoots) {
         : 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
     }
     if (MCP_COMMAND_SEGMENT_RE.test(segment)) return commandViolation();
-    return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+    return unlistedViolation();
   }
   if (HOST_PROFILE_TOOLS.has(tool)) return null;
-  return `host-profile-v1 cannot invoke ${tool}; ${hostProfileAllowance()}`;
+  return unlistedViolation();
 }
 
 function neutralViolation(payload, trusted) {

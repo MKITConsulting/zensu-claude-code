@@ -16,7 +16,7 @@ Your Developer Journal: privacy-first session tracking that helps you understand
 
 ## Prerequisites
 
-- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Zensu CLI 0.10.0 or later on `PATH`: `brew install --cask mkitconsulting/tap/zensu`, `curl -fsSL https://zensu.dev/install.sh | sh`, or on Windows `irm https://zensu.dev/install.ps1 | iex`; upgrade with `brew upgrade --cask zensu` or by running the installer again
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
 - Git repository (for HEAD SHA and branch context)
 
@@ -46,7 +46,7 @@ Work as normal. Pulse captures the session at its boundaries (start in Phase 1, 
 **Privacy controls:**
 - Only structured data is recorded (session metadata, feature IDs, file paths)
 - Code content is never recorded
-- Error messages are only logged if the user has enabled `freetext_logging`
+- Error messages and other free text are never recorded
 - Users can disable tracking entirely via privacy settings
 
 ## Phase 3: Session End & Review
@@ -67,7 +67,7 @@ When wrapping up your coding session:
 Pulse is designed as "Your Developer Journal" — personal and private by default:
 
 - **Tracking**: Can be disabled entirely (no data recorded)
-- **Freetext**: Error messages stripped unless explicitly opted in
+- **Free text**: Never recorded, error messages included
 - **Team visibility**: Off by default — your sessions are only visible to you
 - **Retention**: Data auto-expires after 90 days (configurable)
 

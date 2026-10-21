@@ -1,8 +1,11 @@
 # Verifying a feature live, standalone
 
-`/zensu:verify-feature` proves an already-built feature in a real browser and reports what
-it observed. Under `/zensu:autopilot` its preconditions are prepared for you. Run on its own,
-it has two ways to authorize the browser:
+`/zensu:verify-feature` proves an already-built feature in the real running application and
+reports what it observed: a web UI in a real browser, an API, a CLI, a library, a worker,
+infrastructure code, an iOS or Android app in a simulator or emulator, or a desktop app.
+[What it can verify](#what-it-can-verify) lists each driver and what it needs. Under
+`/zensu:autopilot` its preconditions are prepared for you. Run on its own, it has two ways to
+authorize the browser:
 
 - **Consent mode** (the default when nothing is configured): Claude Code's own permission
   prompt asks you, in the CLI and in the desktop app alike, with no environment variable and no
@@ -69,6 +72,47 @@ mode the later pass boots on the same loopback origin, so the prompt is not aske
 Autopilot-bound chain skips this stage: its VALIDATE stage verifies every criterion unless the
 run was started with `--no-validate`, and the chain's terminus line says which.
 
+## What it can verify
+
+Every scenario of a run gets a **driver**. The skill picks it from the diff, from the recipe's
+`validate.driver`, or from `--driver=<id>`. A feature that spans surfaces mixes drivers: a
+SwiftUI screen and the endpoint it calls are verified as `mobile` rows and `api` rows in one run.
+The catalog, the evidence each driver needs for a PASS and the driver rule files live under
+`skills/verify-feature/rules/`, starting at `drivers.md`.
+
+| Driver | Verifies | Needs on this machine | Isolation |
+|---|---|---|---|
+| `browser` | web apps and PWAs | `playwright-cli` (below) and Chrome | an isolated browser restricted to the run's origins, behind the consent gate |
+| `api` | REST, GraphQL, gRPC, WebSocket and SSE endpoints | `curl`, or `grpcurl` or a WebSocket client | the service runs from the worktree on a run-specific loopback port |
+| `cli` | commands, scripts, batch jobs, terminal UIs | the project's toolchain; `tmux` or `expect` for a terminal UI | a run directory, redirected configuration and data directories, a run-owned `tmux` socket |
+| `library` | packages and SDKs | the project's toolchain | a throwaway consumer in the run directory |
+| `async` | queue consumers, workers, schedulers, pipelines | the project's toolchain and broker | a uniquely named, run-owned broker |
+| `iac` | Terraform, Helm, Kubernetes, CDK and CloudFormation | the infrastructure CLIs; `kind` or localstack for an apply | a copy in the run directory; an apply only to a run-named `kind` cluster or localstack |
+| `mobile` | iOS, iPadOS, watchOS, tvOS, visionOS; Android | Xcode (`xcrun`, `xcodebuild`) or the Android SDK (`adb`, `emulator`); optionally Maestro or a simulator accessibility CLI | a simulator created for the run and deleted afterwards; an Android virtual device created in the run directory and an emulator the run starts |
+| `desktop` | macOS, Electron, Tauri, Windows and Linux apps | a computer-use tool of the host, or macOS System Events with the Accessibility permission | the build runs under a supervisor; no launch when the app's data location exists without an isolation switch |
+| `custom` | anything else | the project's `exercise` and `assert` scripts | what the scripts guarantee |
+
+- Remote mode supports the `browser` driver only. Every other driver verifies a build of your
+  current worktree.
+- Simulators and emulators only, never a physical device, and never one of your own
+  simulators: a run creates `zensu-verify-<run>` and deletes exactly that device at the end.
+- Every device, supervised process, cluster, container and `tmux` socket that a driver starts
+  goes through `skills/verify-feature/scripts/verify-run-resources.js`, which records it in the
+  run directory and removes only what it recorded. The services of a runtime recipe keep the
+  recipe's own `down`. When teardown keeps something, the report names it and the run directory
+  stays, so the teardown can be retried.
+- The skill never installs a tool or lets a build download dependencies without asking you
+  first. A missing tool makes the affected scenarios PARTIAL, and the report names it.
+- A native or command-line build needs no runtime recipe: the skill reads the scheme, bundle
+  identifier and build command from the project. `/zensu:verify-feature --setup` writes the
+  driver's block into `.zensu/runtime.yaml` when you want those facts fixed.
+- This plugin has measured one iOS simulator run end to end. It has not measured Android
+  emulators, Windows and Linux desktop automation, the macOS desktop launch, Maestro, AXe, idb
+  or `tmux`; treat those paths as unverified until a run of yours has shown them.
+
+The rest of this page is about the `browser` driver: how the browser is fenced, consent mode,
+the navigation policy, local mode with its runtime recipe, and remote mode.
+
 ## How the browser is fenced
 
 Every run writes a **run config** into its own run directory with
@@ -79,7 +123,9 @@ WebSocket connection is not fenced by it, which is an open gap — blocks servic
 keeps screenshots and snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
-The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
+The **browser consent gate** — two hooks on the `Bash|PowerShell` matcher — reads Bash only, so
+it refuses a PowerShell call that names the CLI and a `zensu-verify` session: run every browser
+call through the Bash tool. It is a textual gate: it judges a
 `playwright-cli` call on a `zensu-verify` session before it runs only when the command text
 names the CLI and that session, or names the CLI while the hook environment's
 `PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
@@ -285,7 +331,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <lo
 
 Each form judges its target as the gate judges that kind of origin, and starts no browser. Before it judges the target
 it runs the readiness check of the run-config helper: both consent hooks must be registered on a
-matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
+matcher that covers `Bash` and `PowerShell`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
 of the caller must name the measured version, and no empty or relative `PATH` entry may come
 before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
 terminal. Section 5 lists those refusals and their fixes. It prints `policy` when the policy
@@ -513,7 +559,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
-| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers `Bash` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
+| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers both `Bash` and `PowerShell` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
 | PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
 | PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
@@ -521,3 +567,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
 | PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in a session that cannot show the prompt, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |
+| PARTIAL; a scenario names a missing tool such as `xcrun`, `adb`, `maestro` or `tmux` | the driver's toolchain is not on `PATH`, and no lower rung of its ladder can observe the criterion | install the tool yourself and re-run, or accept the lower rung the report names; the skill asks before it downloads anything |
+| PARTIAL; reason `remote mode supports the browser driver only` | `--mode=remote` was combined with a driver other than `browser` | verify the worktree's build in local mode |
+| the report's Resources line names a `kept` resource | the run-resource helper could not prove that a device, process, emulator serial, cluster, container or `tmux` socket was the run's own, or the tool that removes it failed | the skill keeps the run directory and names it under Limitations; check that the resource carries the run's `zensu-verify-<run>` prefix, then retry with `verify-run-resources.js teardown --run-dir <dir>` or remove it yourself |
+| a desktop scenario is PARTIAL because its data location already exists | the app shares its data location or its credential-store items with a copy installed on this machine, and the recipe names no isolation switch | add `validate.desktop.dataIsolation` to the recipe: a launch argument or environment variable that points the app's data and credential storage at `${ZENSU_VERIFY_RUN_DIR:?}` |

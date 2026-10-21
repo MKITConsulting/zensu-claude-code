@@ -18,9 +18,7 @@ SKILL="$ROOT/skills/recover-chain/SKILL.md"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 README="$ROOT/README.md"
 PASS=0; FAIL=0
-# Shared, locale-independent `node --test` summary parse (see the file header for
-# why the count matters and why it is not hand-copied here).
-. "$(dirname "$0")/lib-unit-summary.sh"
+. "$(dirname "$0")/lib-unit-registry.sh"
 check() {
   local label="$1" result="$2"
   if [ "$result" = PASS ]; then echo "  PASS  $label"; PASS=$((PASS+1));
@@ -43,20 +41,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-P1_UNIT="$ROOT/tests/structure/chain-recovery-v1.test.js"
-P1_FLOOR="$(unit_overview_declared "${P1_UNIT##*/}")"
-if node --test "$P1_UNIT" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_registered_floor "$WORK/unit.out" "$P1_FLOOR"; then
-  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
-else
-  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= ${P1_FLOOR:-<no overview row>} registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
-  grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
-fi
-if P1_OVERVIEW="$(unit_overview_check "$P1_UNIT")"; then
-  check "P1-overview the SUITE-OVERVIEW Blocks cell matches what ${P1_UNIT##*/} registers ($P1_FLOOR)" PASS
-else
-  check "P1-overview $P1_OVERVIEW" FAIL
-fi
+unit_check "P1 the classifier unit file passes" "$ROOT/tests/structure/chain-recovery-v1.test.js"
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
 export ZENSU_TEST_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
@@ -960,6 +945,8 @@ done
 [ "$ENFORCER_SHAPE_N" -gt 0 ] && [ -z "$ENFORCER_SHAPES_UNKNOWN" ] \
   && check "T51 every chain shape the Stop enforcer names is one the module can still emit, so its refusal never routes to a renamed shape" PASS \
   || check "T51 every chain shape the Stop enforcer names is a real module shape (named=$ENFORCER_SHAPE_N unknown:$ENFORCER_SHAPES_UNKNOWN)" FAIL
+
+unit_check_done "P1z every unit file the registry gives this suite was graded"
 
 echo "----"
 echo "test-chain-recover: $PASS PASS / $FAIL FAIL"

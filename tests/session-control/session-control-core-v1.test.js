@@ -6296,7 +6296,15 @@ function prunedReaderFixture() {
   return f;
 }
 
-test('the pruned-root reader admits only a record whose recorded plugin root is gone', () => {
+const RETIRED_MARKER = '1791803431544';
+
+function retireToRemnant(f, marker = RETIRED_MARKER) {
+  fs.rmSync(path.join(f.pluginRoot, '.claude-plugin'), { recursive: true, force: true });
+  fs.rmSync(path.join(f.pluginRoot, 'hooks'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(f.pluginRoot, '.orphaned_at'), marker);
+}
+
+test('the pruned-root reader refuses an intact recorded plugin root and admits it once gone', () => {
   const f = prunedReaderFixture();
   assert.equal(core.readContext(f.readerOptions).plugin_root, f.currentContext.plugin_root);
   assert.throws(
@@ -6592,6 +6600,215 @@ test('a relaxed reader refuses to waive its sibling root as well', () => {
     }),
     /context plugin root does not exist/,
   );
+});
+
+test('the pruned-root reader admits a remnant the host retired: no manifest and a valid orphan marker', () => {
+  const f = prunedReaderFixture();
+  retireToRemnant(f);
+  assert.ok(fs.existsSync(path.join(f.pluginRoot, 'skills', 'sample', 'SKILL.md')));
+  assert.throws(() => core.readContext(f.readerOptions), /host-specific plugin manifest is missing/);
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(f.readerOptions),
+    /host-specific plugin manifest is missing/,
+  );
+  assert.equal(
+    core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+    core.RETIRED_PLUGIN_ROOT_STATES.RETIRED,
+  );
+  const relaxed = core.readPrunedPluginRootContext(f.readerOptions);
+  assert.equal(relaxed.plugin_root, f.currentContext.plugin_root);
+  assert.equal(relaxed.runtime_digest, f.currentContext.runtime_digest);
+  assert.equal(relaxed.plugin_version, '9.8.7');
+});
+
+test('a record whose minting installation is a retired remnant adopts like a pruned one', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  retireToRemnant(f);
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.prunedPluginRoot, true);
+  assert.equal(verdict.orphanedProjectRoot, false);
+  assert.equal(verdict.recorded, '9.8.7');
+  assert.equal(verdict.executing, '10.0.0');
+  const adopted = core.adoptContext(adoptionOptions(f, successor));
+  assert.equal(adopted.prunedPluginRoot, true);
+  assert.equal(adopted.context.plugin_root, successor);
+  assert.equal(core.readContext(f.readerOptions).plugin_root, successor);
+  assert.ok(fs.existsSync(path.join(f.pluginRoot, '.orphaned_at')));
+
+  const compatible = prunedReaderFixture();
+  const patchSuccessor = successorInstallation(compatible, '9.8.8');
+  assert.equal(core.adoptableRecord(adoptionOptions(compatible, patchSuccessor)).reason, 'already-served');
+  retireToRemnant(compatible);
+  const compatibleVerdict = core.adoptableRecord(adoptionOptions(compatible, patchSuccessor));
+  assert.equal(compatibleVerdict.ok, true, JSON.stringify(compatibleVerdict));
+  assert.equal(compatibleVerdict.prunedPluginRoot, true);
+});
+
+test('the pruned-root reader refuses a remnant that still carries its manifest', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  fs.rmSync(path.join(f.pluginRoot, 'hooks'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(f.pluginRoot, '.orphaned_at'), RETIRED_MARKER);
+  assert.throws(() => core.readContext(f.readerOptions));
+  assert.equal(
+    core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+    core.RETIRED_PLUGIN_ROOT_STATES.MANIFEST_PRESENT,
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists and still carries its manifest$/,
+  );
+  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'record-unreadable');
+});
+
+test('the pruned-root reader refuses a remnant without a valid orphan marker', () => {
+  const f = prunedReaderFixture();
+  retireToRemnant(f);
+  const marker = path.join(f.pluginRoot, '.orphaned_at');
+  const refuses = (label) => {
+    assert.equal(
+      core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+      core.RETIRED_PLUGIN_ROOT_STATES.NO_ORPHAN_MARKER,
+      label,
+    );
+    assert.throws(
+      () => core.readPrunedPluginRootContext(f.readerOptions),
+      /^Error: session-control-v1: context plugin root still exists and carries no valid orphan marker$/,
+      label,
+    );
+  };
+  fs.rmSync(marker);
+  refuses('absent');
+  for (const content of ['', '179180343154', '17918034315440', '0791803431544', `${RETIRED_MARKER}\n`, '17918034315a4']) {
+    fs.writeFileSync(marker, content);
+    refuses(JSON.stringify(content));
+  }
+  fs.rmSync(marker);
+  fs.mkdirSync(marker);
+  refuses('directory');
+  fs.rmSync(marker, { recursive: true, force: true });
+  const elsewhere = path.join(f.root, 'marker-elsewhere');
+  fs.writeFileSync(elsewhere, RETIRED_MARKER);
+  fs.linkSync(elsewhere, marker);
+  refuses('hard link');
+  fs.rmSync(marker);
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(elsewhere, marker);
+    refuses('symlink');
+    fs.rmSync(marker);
+  }
+  fs.writeFileSync(marker, RETIRED_MARKER);
+  assert.equal(core.readPrunedPluginRootContext(f.readerOptions).plugin_root, f.currentContext.plugin_root);
+});
+
+test('a link standing where the recorded plugin root was is never a retired remnant', () => {
+  const f = prunedReaderFixture();
+  retireToRemnant(f);
+  const remnant = path.join(f.root, 'remnant-elsewhere');
+  fs.renameSync(f.pluginRoot, remnant);
+  fs.symlinkSync(remnant, f.pluginRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(
+    core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+    core.RETIRED_PLUGIN_ROOT_STATES.NOT_A_DIRECTORY,
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /^Error: session-control-v1: context plugin root still exists$/,
+  );
+});
+
+test('a remnant whose manifest path cannot be read is not admitted', () => {
+  const f = prunedReaderFixture();
+  retireToRemnant(f);
+  fs.writeFileSync(path.join(f.pluginRoot, '.claude-plugin'), 'not a directory\n');
+  if (process.platform === 'win32') {
+    assert.notEqual(
+      core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+      core.RETIRED_PLUGIN_ROOT_STATES.MANIFEST_PRESENT,
+    );
+    return;
+  }
+  assert.equal(
+    core.retiredPluginRootState(f.currentContext.plugin_root, 'claude'),
+    core.RETIRED_PLUGIN_ROOT_STATES.UNREADABLE,
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /^Error: session-control-v1: context plugin root is unreadable$/,
+  );
+});
+
+test('a retired remnant relaxes neither the sibling root nor the strict read', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '10.0.0');
+  retireToRemnant(f);
+  fs.rmSync(f.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(() => core.readContext(f.readerOptions));
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context project root does not exist/,
+  );
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(f.readerOptions),
+    /host-specific plugin manifest is missing/,
+  );
+  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'record-unreadable');
+});
+
+test('recordReaderRefusals names why each record reader refused the record', () => {
+  const options = (f) => ({ recordsDir: f.recordsDir, sessionId: RAW_SESSION, host: 'claude' });
+  const byReader = (verdicts) => Object.fromEntries(verdicts.map((entry) => [entry.reader, entry.refusal]));
+
+  const unmarked = prunedReaderFixture();
+  const successor = successorInstallation(unmarked, '10.0.0');
+  retireToRemnant(unmarked);
+  fs.rmSync(path.join(unmarked.pluginRoot, '.orphaned_at'));
+  const unmarkedVerdicts = core.recordReaderRefusals(options(unmarked));
+  assert.deepEqual(unmarkedVerdicts.map((entry) => entry.reader), [
+    core.RECORD_READERS.STRICT,
+    core.RECORD_READERS.ORPHANED_PROJECT_ROOT,
+    core.RECORD_READERS.PRUNED_PLUGIN_ROOT,
+  ]);
+  const unmarkedCauses = byReader(unmarkedVerdicts);
+  assert.match(unmarkedCauses.strict, /^host-specific plugin manifest is missing: /);
+  assert.match(unmarkedCauses['orphaned-project-root'], /^host-specific plugin manifest is missing: /);
+  assert.equal(
+    unmarkedCauses['pruned-plugin-root'],
+    'context plugin root still exists and carries no valid orphan marker',
+  );
+  assert.equal(core.adoptableRecord(adoptionOptions(unmarked, successor)).reason, 'record-unreadable');
+
+  const healthy = prunedReaderFixture();
+  const healthyCauses = byReader(core.recordReaderRefusals(options(healthy)));
+  assert.equal(healthyCauses.strict, null);
+  assert.equal(healthyCauses['orphaned-project-root'], 'context project root still exists');
+  assert.equal(
+    healthyCauses['pruned-plugin-root'],
+    'context plugin root still exists and still carries its manifest',
+  );
+
+  const retired = prunedReaderFixture();
+  retireToRemnant(retired);
+  assert.equal(byReader(core.recordReaderRefusals(options(retired)))['pruned-plugin-root'], null);
+});
+
+test('recordReaderRefusals never throws and names a session that has no record', () => {
+  const f = prunedReaderFixture();
+  const missing = core.recordReaderRefusals({ recordsDir: f.recordsDir, sessionId: 'no such session', host: 'claude' });
+  assert.equal(missing.length, 3);
+  for (const entry of missing) {
+    assert.match(entry.refusal, /^missing file: /, entry.reader);
+  }
+  for (const input of [undefined, null, 'not an object', {}]) {
+    const verdicts = core.recordReaderRefusals(input);
+    assert.equal(verdicts.length, 3);
+    for (const entry of verdicts) {
+      assert.equal(typeof entry.refusal, 'string', entry.reader);
+      assert.equal(entry.refusal.startsWith('session-control-v1: '), false, entry.refusal);
+    }
+  }
 });
 
 // The safe-version shape is exported so every producer that renders a recorded

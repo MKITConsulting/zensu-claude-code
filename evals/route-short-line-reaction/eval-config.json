@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "autoFix": false,
+    "autopilotEnforcer": false,
+    "bestSolutionFirst": false,
+    "chainEnforcer": false,
+    "criticalReproduction": false,
+    "externalReviewImport": false,
+    "findingVerification": false,
+    "intentRouter": false,
+    "mcpGate": false,
+    "pulseSession": false,
+    "reviewConvergence": false,
+    "reviewJudge": false,
+    "reviewSpawnScopeSentence": false,
+    "secretScan": false,
+    "selfReview": false,
+    "sessionBanner": false,
+    "sessionHubReceipt": false,
+    "tddReminder": false,
+    "worktreeKeep": false,
+    "zenMode": false
+  },
+  "context": {
+    "compactionNudge": false
+  }
+}

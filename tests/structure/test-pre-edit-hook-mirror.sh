@@ -54,6 +54,16 @@ else
   check "C1b guarded zensu-log command deduplicated (definitions=$LOG_COMMAND_DEFINITION_COUNT uses=$LOG_COMMAND_USE_COUNT)" FAIL
 fi
 
+if node -e '
+  const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const regs=((h.hooks&&h.hooks.PreToolUse)||[]).flatMap(e=>(e.hooks||[]).filter(z=>/pre-edit-tdd-reminder\.sh/.test(z.command||"")));
+  process.exit(regs.length===1 && regs[0].timeout===60 ? 0 : 1);
+' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null; then
+  check "C1c registration carries the 60 s gate timeout" PASS
+else
+  check "C1c registration carries the 60 s gate timeout" FAIL
+fi
+
 PAYLOAD_DENY='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/x.ts"},"session_id":"hookmirror-test"}'
 
 C2_STATE_DIR="$(mktemp -d -t hookmirror-c2-XXXX)"
@@ -92,6 +102,25 @@ if [ "$RC_C3" = "0" ] && [ "$C3_LINES" = "4" ] && [ -z "$C3_DIFF" ]; then
 else
   check "C3 denial + ZENSU_HOOK_LOG -> exact 4-line mirror (rc=$RC_C3, lines=$C3_LINES, diff=${C3_DIFF:0:300}, content=${C3_CONTENT:0:300})" FAIL
 fi
+C3B_REASON="$(printf '%s' "$OUT_C3" | node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s.trim().split(/\n/).filter(Boolean).pop());
+      process.stdout.write(j.hookSpecificOutput.permissionDecisionReason || "");
+    } catch (_) { process.stdout.write(""); }
+  });
+' 2>/dev/null)"
+case "$C3B_REASON" in
+  *"read from the environment Claude Code was started in"*"no Edit, Write or Bash prefix can set it"*"Ask the user to choose"*"--tdd-reset"*"restart Claude Code with ZENSU_TDD_GATE=off"*)
+    case "$C3B_REASON" in
+      *"Legitimate non-TDD edit: set ZENSU_TDD_GATE=off"*)
+        check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" FAIL ;;
+      *) check "C3b deny reason routes a non-TDD edit to the user instead of an env var the model cannot set" PASS ;;
+    esac ;;
+  *) check "C3b deny reason routes a non-TDD edit to the user (got: ${C3B_REASON:0:400})" FAIL ;;
+esac
 rm -rf "$C3_STATE_DIR" "$C3_LOG" "$C3_EXPECTED"
 
 C4_STATE_DIR="$(mktemp -d -t hookmirror-c4-XXXX)"
@@ -288,6 +317,44 @@ else
   check "C11 emitted command prefix executes (extract=$C11_EXTRACT_RC exec=$C11_EXEC_RC phase=$C11_PHASE)" FAIL
 fi
 rm -rf "$C11_STATE_DIR"
+
+C12_STATE_DIR="$(mktemp -d -t hookmirror-c12-XXXX)"
+seed_active "$C12_STATE_DIR" "hookmirror-large"
+C12_PAYLOAD_FILE="$C12_STATE_DIR/large-payload.json"
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "/tmp/x.ts", content: "a".repeat(700000) }, session_id: "hookmirror-large" }))' "$C12_PAYLOAD_FILE"
+C12_PAD=
+if [ "$(uname -s)" = Darwin ]; then
+  C12_PAD="$(node -e 'process.stdout.write("p".repeat(125000))')"
+fi
+OUT_C12="$(env C12_PAD_A="$C12_PAD" C12_PAD_B="$C12_PAD" C12_PAD_C="$C12_PAD" \
+  STATE_DIR="$C12_STATE_DIR" bash "$HOOK" < "$C12_PAYLOAD_FILE" 2>/dev/null)"
+if printf '%s' "$OUT_C12" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$OUT_C12" | grep -qF 'TDD-Phase-Gate: Write on '; then
+  check "C12 a Write whose payload is over the exec size limit is still phase-gated" PASS
+else
+  check "C12 oversized Write payload (out=${OUT_C12:0:240})" FAIL
+fi
+rm -rf "$C12_STATE_DIR"
+
+C13_STATE_DIR="$(mktemp -d -t hookmirror-c13-XXXX)"
+seed_active "$C13_STATE_DIR" "hookmirror-oversized"
+C13_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "1048576")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+C13_PAYLOAD_FILE="$C13_STATE_DIR/oversized-payload.json"
+node -e '
+  const [file, total] = process.argv.slice(1);
+  const base = { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "/tmp/x.ts", content: "" }, session_id: "hookmirror-oversized" };
+  base.tool_input.content = "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+  require("fs").writeFileSync(file, JSON.stringify(base));
+' "$C13_PAYLOAD_FILE" "$((C13_LIMIT + 1))"
+OUT_C13="$(STATE_DIR="$C13_STATE_DIR" bash "$HOOK" < "$C13_PAYLOAD_FILE" 2>/dev/null)"
+if printf '%s' "$OUT_C13" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$OUT_C13" | grep -qF "payload is $((C13_LIMIT + 1)) bytes, over the ${C13_LIMIT}-byte limit" \
+  && ! printf '%s' "$OUT_C13" | grep -qF 'binding is unavailable or invalid'; then
+  check "C13 a Write one byte over the binder's payload limit is denied with a reason that names its size, not a broken binding" PASS
+else
+  check "C13 oversized Write deny names its size (out=${OUT_C13:0:240})" FAIL
+fi
+rm -rf "$C13_STATE_DIR"
 
 echo "----"
 echo "test-pre-edit-hook-mirror: $PASS PASS / $FAIL FAIL"

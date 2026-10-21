@@ -59,6 +59,18 @@ function verdict(fixture, command, options = {}) {
   return guard.accidentReason(bash(command), fixture.trusted, fixture.env, options) ? 'deny' : 'allow';
 }
 
+function driveRoot(value) {
+  try {
+    return path.parse(fs.realpathSync.native(value)).root.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function rootRemovalReason(projectRoot) {
+  return driveRoot('/') === driveRoot(projectRoot) ? guard.REASONS.projectRoot : null;
+}
+
 const ALLOWED = [
   'git status --short',
   'npm test',
@@ -133,6 +145,20 @@ const ALLOWED = [
   `bash <<'EOF'\ncd build && rm -rf "$PWD"/*\nEOF`,
   `env -C build bash -c 'rm -rf "$PWD"/*'`,
   `rm -rf ${String.fromCodePoint(2)}`,
+  `grep -rn "require('./hooks/lib/claude-hook-session-v1.js')" tests`,
+  "git commit -m 'docs: quote `zensu-log.sh` in the guide'",
+  'tmux ls',
+  'tmux has-session -t dev',
+  'tmux capture-pane -p -t dev',
+  'tmux kill-session -t run',
+  'screen -ls',
+  'screen -S dev -X quit',
+  'screen -Dm make test',
+  "tmux display -p '#S'",
+  'tmux ls \\; \\; ls',
+  "tmux bind-key x display hi '\\;' new-window",
+  'screen -r dev -X quit',
+  'screen -S dev -padmin -X quit',
 ];
 
 const DENIED = [
@@ -163,6 +189,16 @@ const DENIED = [
   ['sudo bash hooks/lib/zensu-doctor.sh', guard.REASONS.helper],
   ['bash hooks/lib/zensu-session-adopt.sh --confirm', guard.REASONS.helper],
   ['find . -name zensu-log.sh -exec bash {} +', guard.REASONS.helper],
+  [`node -e "require('./hooks/lib/claude-hook-session-v1.js')"`, guard.REASONS.helper],
+  [`python3 -c "import subprocess; subprocess.run(['bash','hooks/lib/zensu-log.sh','--chain-done'])"`, guard.REASONS.helper],
+  [`python3 -c "import subprocess; subprocess.run(['zensu-log.sh', '--chain-done'])"`, guard.REASONS.helper],
+  [`node -e 'require("child_process").execSync("bash hooks/lib/zensu-doctor.sh")'`, guard.REASONS.helper],
+  [`ruby -e 'system("zensu-log.sh", "--chain-done")'`, guard.REASONS.helper],
+  ["node -e 'require(`./hooks/lib/session-control-core-v1.js`)'", guard.REASONS.helper],
+  ["perl -e 'print `zensu-log.sh --chain-done`'", guard.REASONS.helper],
+  [`node -e "require('./hooks/lib/session-control-core-v1')"`, guard.REASONS.helper],
+  ['node hooks/lib/session-control-core-v1 render-main', guard.REASONS.helper],
+  ["gh pr comment 12 --body 'Fixed the retry in `zensu-log.sh`.'", guard.REASONS.helper],
   ['ls .zensu/state', guard.REASONS.workflowDirectory],
   ['cat ./.zensu/state/x.json', guard.REASONS.workflowDirectory],
   ['rm -rf .z*', guard.REASONS.workflowDirectory],
@@ -205,6 +241,44 @@ const DENIED = [
   ['npm run dev &', guard.REASONS.background],
   ['nohup npm run dev > /tmp/dev.log 2>&1 &', guard.REASONS.background],
   ['setsid npm start', guard.REASONS.background],
+  ["tmux new-session -d -s dev 'npm run dev'", guard.REASONS.background],
+  ['tmux new -d npm run dev', guard.REASONS.background],
+  ['tmux -L work new-s -d make watch', guard.REASONS.background],
+  ["tmux new-window -t dev 'npm test'", guard.REASONS.background],
+  ["tmux send-keys -t dev 'npm run dev' Enter", guard.REASONS.background],
+  ["tmux run-shell -b 'npm run dev'", guard.REASONS.background],
+  ["tmux has-session -t dev \\; split-window 'npm test'", guard.REASONS.background],
+  ['nohup tmux new -d make watch', guard.REASONS.background],
+  ['screen -dmS dev npm run dev', guard.REASONS.background],
+  ['screen -S dev -d -m npm start', guard.REASONS.background],
+  ["screen -S dev -X stuff 'npm run dev'", guard.REASONS.background],
+  ['bash -c "screen -dm npm run dev"', guard.REASONS.background],
+  ["tmux neww 'npm run dev'", guard.REASONS.background],
+  ["tmux splitw -h 'npm test'", guard.REASONS.background],
+  ["tmux respawnp -k 'npm run dev'", guard.REASONS.background],
+  ["tmux respawnw -k 'npm run dev'", guard.REASONS.background],
+  ["tmux pipep 'cat >> pane.log'", guard.REASONS.background],
+  ["tmux respawn-pane -k 'npm run dev'", guard.REASONS.background],
+  ["tmux respawn-window -k 'npm run dev'", guard.REASONS.background],
+  ["tmux if-shell true 'neww npm run dev'", guard.REASONS.background],
+  ["tmux pipe-pane 'cat >> pane.log'", guard.REASONS.background],
+  ["tmux set-buffer 'npm run dev' \\; paste-buffer -t dev", guard.REASONS.background],
+  ['tmux pasteb -t dev', guard.REASONS.background],
+  ["tmux display-popup -E 'npm run dev'", guard.REASONS.background],
+  ["tmux popup -E 'npm run dev'", guard.REASONS.background],
+  ['tmux -- new -d make watch', guard.REASONS.background],
+  ['tmux -Lwork new -d make', guard.REASONS.background],
+  ["tmux kill-session -t old \\; 'neww;'", guard.REASONS.background],
+  ['screen -S dev -X screen npm run dev', guard.REASONS.background],
+  ['screen -S dev -X exec npm run dev', guard.REASONS.background],
+  ["screen -S dev -X eval 'stuff make'", guard.REASONS.background],
+  ['screen -S dev -X at 0 stuff make', guard.REASONS.background],
+  ['screen -S dev -X paste .', guard.REASONS.background],
+  ['screen -S dev -X process a', guard.REASONS.background],
+  ['screen -S dev -Q stuff make', guard.REASONS.background],
+  ['screen -Sdm dev npm run dev', guard.REASONS.background],
+  ["screen -x dev -X stuff 'npm run dev'", guard.REASONS.background],
+  ["screen -r dev -X stuff 'npm run dev'", guard.REASONS.background],
   ['bash -c "git reset --hard"', 'the command runs a git operation that removes or reverts work (git reset --hard)'],
   ['bash -c "cd $REPO && git reset --hard origin/main"', 'the command runs a git operation that removes or reverts work (git reset --hard)'],
   ['sh -c "git clean -fdx $X"', 'the command runs a git operation that removes or reverts work (git clean)'],
@@ -243,7 +317,6 @@ const DENIED = [
   ['rm -rf $(pwd)', guard.REASONS.projectRoot],
   ['rm -rf "$PWD"', guard.REASONS.projectRoot],
   ['rm -rf ~', guard.REASONS.projectRoot],
-  ['rm -rf /', guard.REASONS.projectRoot],
   ['mv . ../elsewhere', guard.REASONS.projectRoot],
   ['rmdir ../project', guard.REASONS.projectRoot],
   ['rm -rf "$(git rev-parse --show-toplevel)"', guard.REASONS.projectRoot],
@@ -336,6 +409,7 @@ test('absolute spellings of the project root and its parents are denied', () => 
     assert.equal(guard.accidentReason(bash(command), fixture.trusted, fixture.env), guard.REASONS.projectRoot, command);
   }
   assert.equal(verdict(fixture, `rm -rf ${projectRoot}/src/*`), 'allow');
+  assert.equal(guard.accidentReason(bash('rm -rf /'), fixture.trusted, fixture.env), rootRemovalReason(projectRoot));
   assert.equal(verdict(fixture, `ls ${fixture.trusted.pluginData}`), 'deny');
   const git = (operation) => `the command runs a git operation that removes or reverts work (${operation})`;
   assert.equal(guard.accidentReason(bash(`git restore ${projectRoot}`), fixture.trusted, fixture.env), git('git restore over the whole tree'));
@@ -355,6 +429,7 @@ test('the project overlay under HOME leaves globs that cannot reach protected st
   for (const [command, reason] of DENIED) {
     assert.equal(guard.accidentReason(bash(command), fixture.trusted, env), reason, command);
   }
+  assert.equal(guard.accidentReason(bash('rm -rf /'), fixture.trusted, env), rootRemovalReason(fixture.trusted.projectRoot));
   assert.equal(guard.accidentReason(bash('cat .zens*/config.json'), fixture.trusted, env), guard.REASONS.protectedPath);
   assert.equal(guard.accidentReason(bash('rm -rf ~/.claude/plug*'), fixture.trusted, env), guard.REASONS.protectedParent);
   assert.equal(guard.accidentReason(bash('ls ~/.claude/plugins/*/zensu-zensu'), fixture.trusted, env), guard.REASONS.protectedPath);
@@ -485,6 +560,30 @@ test('the command walker finds every simple command the shell would run', () => 
   );
 });
 
+test('the parser stays linear on adversarial input', () => {
+  const modulePath = path.join(ROOT, 'hooks', 'lib', 'subagent-shell-guard-v1.js');
+  const setup = [
+    `const guard = require(${JSON.stringify(modulePath)});`,
+    "const home = require('node:path').join(require('node:os').tmpdir(), 'shell-guard-linear-home');",
+    "const trusted = { pluginData: home + '/data', pluginRoot: home + '/root', contextFile: home + '/data/scv1_x.json', projectRoot: require('node:os').tmpdir(), toolCwd: require('node:os').tmpdir() };",
+  ].join('\n');
+  const shapes = [
+    ['unclosed braces', "guard.parseScript('echo ' + '{'.repeat(200000), { platform: 'linux' })"],
+    ['leading assignments', "guard.parseScript('a=1 '.repeat(100000), { platform: 'linux' })"],
+    ['a long shell flag in the walker', "guard.commandInvocations('zensu features get f1; bash -' + 'c'.repeat(400000) + '1 x', { platform: 'linux' })"],
+    ['a long shell flag in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'bash -' + 'c'.repeat(400000) + '1 x' }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
+    ['many comments in the guard', "guard.accidentReason({ tool_name: 'Bash', tool_input: { command: 'ls\\n' + '#x\\n'.repeat(600000) }, agent_id: 'a', agent_type: 'general-purpose' }, trusted, { HOME: home }, { platform: 'linux' })"],
+  ];
+  for (const [label, expression] of shapes) {
+    const run = spawnSync(process.execPath, ['-e', `${setup}\n${expression};`], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(run.status, 0, `${label}: ${run.signal || (run.error && run.error.code) || run.stderr}`);
+  }
+  const words = (word) => guard.parseScript(`echo ${word}`, { platform: 'linux' }).items[0].words.map((entry) => entry.value);
+  assert.deepEqual(words('{x{a,b}'), ['echo', '{xa', '{xb']);
+  assert.deepEqual(words('{a{b,c}}'), ['echo', '{ab}', '{ac}']);
+  assert.deepEqual(words('{x,{a,b}y}'), ['echo', 'x', 'ay', 'by']);
+});
+
 test('a symlinked config layer protects its target', { skip: process.platform === 'win32' }, () => {
   const fixture = layout();
   const target = path.join(fixture.base, 'dotfiles', 'zensu.json');
@@ -582,11 +681,12 @@ test('the strict flag reader agrees with zensu_hook_enabled_strict', () => {
     ['no hooks object', { global: '{"x":1}' }, {}],
     ['explicit file says false', { explicit: '{"hooks":{"subagentShell":false}}' }, {}],
     ['explicit file is absent', { explicitAbsent: true }, {}],
-    ['no candidate at all', {}, { noHome: true }],
+    ['no candidate at all', {}, { noHome: true, posixOnly: true }],
     ['directory at the config path', { directory: true }, {}],
     ['explicit path with a line break', { explicitBroken: true }, {}],
   ];
   for (const [label, files, flags] of scenarios) {
+    if (flags.posixOnly && process.platform === 'win32') continue;
     for (const file of [globalFile, projectFile]) fs.rmSync(file, { recursive: true, force: true });
     if (files.global) fs.writeFileSync(globalFile, files.global);
     if (files.project) fs.writeFileSync(projectFile, files.project);
@@ -628,8 +728,8 @@ test('the config authorities name every layer, a superset of the strict candidat
 });
 
 test('the strict candidates mirror the shell reader', () => {
-  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }), ['/x/c.json']);
-  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
+  assert.deepEqual(guard.strictCandidates({ ZENSU_CONFIG: '/x/c.json', HOME: '/h' }, 'linux'), ['/x/c.json']);
+  assert.deepEqual(guard.strictCandidates({ HOME: '/h', CLAUDE_PROJECT_DIR: '/p' }, 'linux'), ['/h/.zensu/config.json', '/p/.zensu/config.json']);
   assert.deepEqual(guard.strictCandidates({ HOME: '' }), []);
   assert.deepEqual(guard.strictCandidates({ HOME: '/c/Users/dev' }, 'win32'), ['C:/Users/dev/.zensu/config.json']);
 });
@@ -655,6 +755,17 @@ test('Windows spellings reach the same rules', () => {
   assert.equal(reason('type .ZENSU\\state\\x.json'), guard.REASONS.workflowDirectory);
   assert.equal(reason('git.exe clean -fd'), 'the command runs a git operation that removes or reverts work (git clean)');
   assert.equal(reason('ls src'), null);
+  const rootOn = (drive) => ({
+    realpathSync: {
+      native(value) {
+        if (value === '/') return `${drive}:\\`;
+        throw new Error('no filesystem in this test');
+      },
+    },
+  });
+  const rootRemoval = (drive) => guard.accidentReason(bash('rm -rf /'), trusted, env, { platform: 'win32', fs: rootOn(drive) });
+  assert.equal(rootRemoval('C'), guard.REASONS.projectRoot);
+  assert.equal(rootRemoval('D'), null);
   const spaced = {
     pluginData: 'C:\\Users\\John Doe\\.claude\\plugins\\data\\zensu-zensu',
     pluginRoot: 'C:\\Users\\John Doe\\.claude\\plugins\\cache\\zensu\\zensu\\9.9.9',

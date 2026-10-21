@@ -37,13 +37,13 @@ Work these in order. Depth scales to the mission; the skeleton does not.
 
 **0 — Frame the mission.** Decide the mode (below). If the user opened with `/goal ...` or the mission is a proof/audit/coverage/invariant task, write the goal contract first (`references/goal-contract.md`) — it becomes the doc's header and the referee for "done." Settle the output path (see *Where output goes*).
 
-**1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu feature show <id>` and linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
+**1 — Recon, read-only.** Read what the mission depends on before planning a single move: the repo and its core flow, the reference site, the schema, the process description, the transcripts — whatever the brief names. For a `ZEN-XXX` feature, read its current state (`zensu features get <feature-uuid>`, which takes the UUID rather than the `ZEN-XXX` id, and its linked docs/journeys) as recon input. Recon settles assumptions; what it cannot settle becomes RECON NEEDED. Never mutate anything in this phase.
 
 **2 — Fight the mission on paper.** Walk the route move by move. Each move carries its expected observation, its most likely failure + cause + counter-move, and a fork with a trigger where the path can diverge. Hold it to the 8-point standard below. Structure per `references/wargame-structure.md`.
 
 **3 — Write the doc.** Emit the wargame to the output path in the canonical structure. Write for the executor: concrete, blind-runnable, no open questions left as prose.
 
-**4 — Red-team, then converge.** Attack your own plan. Record the attack that failed (proof of strength) and the attack that landed plus its patch. For `/goal` missions, run the **cohort-until-parity loop** (`references/goal-contract.md`) — and for **code / feature / audit** missions, that cohort IS the Zensu review chain (`zensu:review-aspect` ×5 + `zensu:code-reviewer`), not ad-hoc verifiers.
+**4 — Red-team, then converge.** Attack your own plan. Record the attack that failed (proof of strength) and the attack that landed plus its patch. For `/goal` missions, run the **cohort-until-parity loop** (`references/goal-contract.md`) — and for **code / feature / audit** missions, that cohort IS the Zensu review chain (the `zensu:review-aspect` panel + `zensu:code-reviewer`), not ad-hoc verifiers.
 
 **5 — Grade.** Grade the doc against all 8 SUCCESS points; fix any that fail before declaring done. Record the self-grade in the doc. (Persisting the grade onto the Zensu feature and the release gate is Phase 2 — not yet wired.)
 

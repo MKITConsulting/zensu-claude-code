@@ -27,6 +27,16 @@ const SCRIPT_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir
 fs.writeFileSync(SCRIPT_FILE, SCRIPT);
 const RESULT_LABELS = ['find:correctness', 'find:security', 'refute:correctness#1', 'refute:correctness#2'];
 const RUN_FILES = ['src/a.js', 'src/b.js', 'src/deleted.js'];
+const TOP_RERUN = 're-run with --root set to the top level that git -C <project root> rev-parse --show-toplevel prints';
+const FOLDER_RERUN = "re-run with --root set to this session's project root";
+const NESTED_ADVICE = "the review root is a separate git work tree nested inside this session's work tree, and a chain reviews one work tree; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it";
+const FOLDER_ADVICE = "the review root is a git work tree inside this session's project folder, which is not a git work tree itself, and a chain reviews one root; this review runs the aspect panel, and a workflow review of that work tree imports only in a session started in it";
+const OUTSIDE_ADVICE = "the review root lies outside this session's work tree, where no reviewer of this session can read; this review runs the aspect panel, and a workflow review of that directory imports only in a session started in it";
+const ENCLOSING_ADVICE = "the review root encloses this session's work tree, so its tree and change times would not be this session's";
+const SUBDIRECTORY_ADVICE = "the review root lies below the root of this session's work tree, so its tree would cover only part of it";
+const UNRESOLVED_ADVICE = 'the review root is not an absolute, symlink-free path to an existing directory';
+const UNDETERMINED_ADVICE = "the work tree of the review root could not be determined, and a root other than this session's own is refused whatever its layout";
+const PROJECT_UNDETERMINED_ADVICE = "the work tree of this session's project root could not be determined; fix the cause the detail names and re-run";
 
 let runCounter = 0;
 
@@ -67,6 +77,23 @@ function project() {
   fs.writeFileSync(path.join(root, 'src', 'a.js'), 'module.exports = 1;\n');
   fs.writeFileSync(path.join(root, '.zensu', 'state', 'x.json'), '{}\n');
   return root;
+}
+
+function gitIn(cwd, ...args) {
+  const result = spawnSync('git', ['-c', 'user.email=t@example.invalid', '-c', 'user.name=tester', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+  if (result.status !== 0) assert.fail(`git ${args.join(' ')} failed: ${result.stderr}`);
+  return result.stdout;
+}
+
+function commitAll(directory) {
+  gitIn(directory, 'init', '-q');
+  gitIn(directory, 'add', '-A');
+  gitIn(directory, 'commit', '-qm', 'baseline');
+  return directory;
+}
+
+function rootLine(layout, advice) {
+  return `EXTERNAL REVIEW — status=unavailable reason=root layout=${layout} — ${advice}`;
 }
 
 function setMtime(file, ms) {
@@ -429,8 +456,6 @@ test('check answers none without a launch, off when disabled, and unavailable on
   const reasons = [
     [{ sessionKey: 'raw-session' }, 'session'],
     [{ pluginData: '' }, 'plugin-data'],
-    [{ root: path.join(root, 'src') }, 'root'],
-    [{ root: '/definitely/not/here' }, 'root'],
     [{ changedText: '' }, 'empty-change-set'],
     [{ changedText: '.zensu/state/x.json\n' }, 'empty-change-set'],
     [{ changedText: '../outside.js\n' }, 'unsafe-path'],
@@ -754,10 +779,12 @@ test('stopWait waits a bounded number of times per session and expires an old co
   const data = tempDir('data');
   const running = { background_tasks: [{ id: '1', type: 'workflow', status: 'running', name: 'review-changes' }, { id: '2', type: 'workflow', status: 'running', name: 'bad name' }] };
   const options = { pluginData: data, sessionKey: SESSION, now: BASE };
+  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
   for (let count = 1; count <= 3; count += 1) {
     const result = xr.stopWait(running, options);
     assert.equal(result.wait, true);
     assert.equal(result.line, `wait count=${count} max=3 workflows=2 names=review-changes`);
+    setMtime(waitFile, options.now);
   }
   const limited = xr.stopWait(running, options);
   assert.equal(limited.wait, false);
@@ -766,7 +793,6 @@ test('stopWait waits a bounded number of times per session and expires an old co
   const later = xr.stopWait(running, { ...options, now: options.now + 25 * 60 * 60 * 1000 });
   assert.equal(later.wait, true);
   assert.equal(later.count, 1);
-  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
   assert.equal(fs.existsSync(waitFile), true);
   fs.unlinkSync(waitFile);
   assert.equal(xr.stopWait(running, options).count, 1);
@@ -825,16 +851,16 @@ test('main never writes stdout in record mode and always answers in check, tree 
   assert.match(written.join(''), /^EXTERNAL REVIEW — tree=unavailable reason=\S+\n$/);
   written.length = 0;
   assert.equal(xr.main(['tree'], { ...env, ZENSU_XR_ROOT: '/definitely/not/here' }, { write }), 0);
-  assert.equal(written.join(''), 'EXTERNAL REVIEW — tree=unavailable reason=root\n');
+  assert.equal(written.join(''), `EXTERNAL REVIEW — tree=unavailable reason=root layout=unresolved-root — ${UNRESOLVED_ADVICE}; ${FOLDER_RERUN}\n`);
   written.length = 0;
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
-  assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' },
-    { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write }), 0);
+  const waitEnv = { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_MAX_WAITS: '1000' };
+  const runningInput = { stdin: JSON.stringify({ background_tasks: [{ type: 'workflow', status: 'running' }] }), write };
+  const waitFile = path.join(data, 'external-review', 'v1', 'waits', `${SESSION}.json`);
+  for (let count = 1; count <= 3; count += 1) {
+    assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);
+    setMtime(waitFile, Date.now());
+  }
+  assert.equal(xr.main(['stop-wait'], waitEnv, runningInput), 0);
   assert.match(written.at(-1), /^nowait reason=limit .* max=3\n$/);
   written.length = 0;
   assert.equal(xr.main(['stop-wait'], { ZENSU_XR_PLUGIN_DATA: data, ZENSU_XR_SESSION_KEY: SESSION }, { stdin: 'not json', write }), 0);
@@ -868,6 +894,340 @@ test('the tree mode and the import agree on a real git work tree and a later edi
   const stale = xr.check(options);
   assert.equal(stale.status, 'stale');
   assert.match(stale.lines[0], /^EXTERNAL REVIEW — status=stale reason=tree /);
+});
+
+test('the import and the tree mode accept only the root of the session work tree and name every other layout', () => {
+  const home = tempDir('layout');
+  const session = path.join(home, 'session');
+  fs.mkdirSync(path.join(session, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(session, '.gitignore'), 'nested/\n.zensu/\n');
+  fs.writeFileSync(path.join(session, 'src', 'a.js'), 'module.exports = 1;\n');
+  commitAll(session);
+  const other = path.join(home, 'other');
+  fs.mkdirSync(other);
+  fs.writeFileSync(path.join(other, 'b.js'), 'module.exports = 2;\n');
+  commitAll(other);
+  const nested = path.join(session, 'nested', 'other-review');
+  gitIn(other, 'worktree', 'add', '-q', '-b', 'review', nested);
+  fs.mkdirSync(path.join(nested, 'lib'));
+  fs.mkdirSync(path.join(session, '..cache'));
+  const dotted = path.join(home, '..dotted', 'session');
+  fs.mkdirSync(dotted, { recursive: true });
+  const sibling = path.join(home, 'sibling');
+  fs.mkdirSync(sibling);
+  gitIn(sibling, 'init', '-q');
+  const data = tempDir('data');
+  setMtime(path.join(session, 'src', 'a.js'), BASE);
+  launchedRun(data, BASE + 120000);
+  const lines = (root, projectRoot = session) => xr.check(checkOptions(data, root, { projectRoot })).lines;
+  assert.equal(xr.check(checkOptions(data, session)).status, 'ok');
+  assert.equal(xr.check(checkOptions(data, session, { projectRoot: path.join(session, 'src') })).status, 'ok');
+  assert.deepEqual(lines(nested), [rootLine('nested-work-tree', NESTED_ADVICE)]);
+  assert.deepEqual(lines(path.join(nested, 'lib')), [rootLine('nested-work-tree', NESTED_ADVICE)]);
+  assert.deepEqual(lines(home), [rootLine('enclosing', `${ENCLOSING_ADVICE}; ${TOP_RERUN}`)]);
+  assert.deepEqual(lines(path.join(session, 'src')), [rootLine('subdirectory', `${SUBDIRECTORY_ADVICE}; ${TOP_RERUN}`)]);
+  assert.deepEqual(lines(path.join(session, 'src'), path.join(session, 'src')), [rootLine('subdirectory', `${SUBDIRECTORY_ADVICE}; ${TOP_RERUN}`)]);
+  assert.deepEqual(lines(path.join(session, '..cache')), [rootLine('subdirectory', `${SUBDIRECTORY_ADVICE}; ${TOP_RERUN}`)]);
+  assert.deepEqual(lines(home, dotted), [rootLine('enclosing', `${ENCLOSING_ADVICE}; ${FOLDER_RERUN}`)]);
+  assert.deepEqual(lines(sibling), [rootLine('outside', OUTSIDE_ADVICE)]);
+  assert.deepEqual(lines('/definitely/not/here'), [rootLine('unresolved-root', `${UNRESOLVED_ADVICE}; ${TOP_RERUN}`)]);
+  const written = [];
+  const write = (text) => written.push(text);
+  const env = { ZENSU_XR_ENABLED: '1', ZENSU_XR_PROJECT_ROOT: session };
+  for (const root of [nested, home, session]) assert.equal(xr.main(['tree'], { ...env, ZENSU_XR_ROOT: root }, { write }), 0);
+  assert.equal(written[0], `EXTERNAL REVIEW — tree=unavailable reason=root layout=nested-work-tree — ${NESTED_ADVICE}\n`);
+  assert.equal(written[1], `EXTERNAL REVIEW — tree=unavailable reason=root layout=enclosing — ${ENCLOSING_ADVICE}; ${TOP_RERUN}\n`);
+  assert.match(written[2], /^EXTERNAL REVIEW — tree=[0-9a-f]{40,64}\n$/);
+  const staged = [];
+  assert.equal(xr.main(['stage'], { ...env, ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_ROOT: nested }, { write: (text) => staged.push(text) }), 0);
+  assert.deepEqual(staged, [`EXTERNAL REVIEW — stage=unavailable reason=root layout=nested-work-tree — ${NESTED_ADVICE}\n`]);
+  assert.equal(fs.existsSync(path.join(session, '.zensu', 'state', xr.stagedTemplateName(SESSION))), false);
+});
+
+test('a session in a folder outside git accepts only that folder and names a repository inside it', () => {
+  const folder = project();
+  const repository = path.join(folder, 'service');
+  fs.mkdirSync(repository);
+  fs.writeFileSync(path.join(repository, 'index.js'), 'module.exports = 3;\n');
+  commitAll(repository);
+  const evidence = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
+  assert.deepEqual(evidence.workTreeTop(folder), { top: null, reason: null });
+  assert.deepEqual(evidence.workTreeTop(path.join(repository)), { top: repository, reason: null });
+  const data = tempDir('data');
+  const lines = (root) => xr.check(checkOptions(data, root, { projectRoot: folder })).lines;
+  assert.equal(xr.check(checkOptions(data, folder)).status, 'none');
+  assert.deepEqual(lines(repository), [rootLine('nested-in-folder', FOLDER_ADVICE)]);
+  assert.deepEqual(lines(path.join(folder, 'src')), [rootLine('subdirectory', `${SUBDIRECTORY_ADVICE}; ${FOLDER_RERUN}`)]);
+  assert.deepEqual(lines(path.dirname(folder)), [rootLine('enclosing', `${ENCLOSING_ADVICE}; ${FOLDER_RERUN}`)]);
+  const written = [];
+  assert.equal(xr.main(['tree'], { ZENSU_XR_ENABLED: '1', ZENSU_XR_PROJECT_ROOT: folder, ZENSU_XR_ROOT: repository }, { write: (text) => written.push(text) }), 0);
+  assert.deepEqual(written, [`EXTERNAL REVIEW — tree=unavailable reason=root layout=nested-in-folder — ${FOLDER_ADVICE}\n`]);
+});
+
+test('a fault while placing either root answers undetermined, and an unusable project root sends the model to the doctor', () => {
+  const folder = project();
+  const data = tempDir('data');
+  const fault = () => ({ top: null, reason: 'git rev-parse failed: fatal: detected dubious ownership in repository' });
+  assert.deepEqual(xr.check(checkOptions(data, folder, { topOf: fault })).lines, [
+    `EXTERNAL REVIEW — status=unavailable reason=root layout=undetermined detail=git-rev-parse-failed-fatal-detected-dubious-ownership-in-repository — ${PROJECT_UNDETERMINED_ADVICE}`,
+  ]);
+  const reviewFault = (directory) => (directory === folder ? { top: null, reason: null } : { top: null, reason: 'git timed out' });
+  assert.deepEqual(xr.check(checkOptions(data, path.join(folder, 'src'), { projectRoot: folder, topOf: reviewFault })).lines, [
+    `EXTERNAL REVIEW — status=unavailable reason=root layout=undetermined detail=git-timed-out — ${UNDETERMINED_ADVICE}; ${FOLDER_RERUN}`,
+  ]);
+  for (const projectRoot of ['', 'relative/project', '/definitely/not/here']) {
+    assert.deepEqual(xr.check(checkOptions(data, folder, { projectRoot })).lines, [
+      "EXTERNAL REVIEW — status=unavailable reason=root layout=unresolved-project-root — this session's project root is not an absolute, symlink-free path to an existing directory; run /zensu:doctor",
+    ]);
+  }
+});
+
+test('a host without a git binary places the project root outside git', { skip: process.platform === 'win32' }, () => {
+  const folder = commitAll(project());
+  const projectRoot = path.join(folder, 'src');
+  const evidence = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
+  const saved = process.env.PATH;
+  let placed;
+  let verdict;
+  try {
+    process.env.PATH = folder;
+    placed = evidence.workTreeTop(projectRoot);
+    verdict = xr.resolveRoot({ projectRoot, root: projectRoot });
+  } finally {
+    process.env.PATH = saved;
+  }
+  assert.deepEqual(placed, { top: null, reason: null });
+  assert.deepEqual(verdict, { root: projectRoot });
+  assert.deepEqual(xr.resolveRoot({ projectRoot, root: projectRoot }), { layout: 'subdirectory', rerun: TOP_RERUN.replace('re-run with --root set to ', '') });
+});
+
+test('a real git refusal to place either root answers undetermined with the refusal git printed', { skip: process.platform === 'win32' }, () => {
+  const home = tempDir('refusal');
+  const session = path.join(home, 'session');
+  fs.mkdirSync(path.join(session, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(session, '.gitignore'), 'nested/\n.zensu/\n');
+  fs.writeFileSync(path.join(session, 'src', 'a.js'), 'module.exports = 1;\n');
+  commitAll(session);
+  const nested = path.join(session, 'nested', 'clone');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(nested, 'b.js'), 'module.exports = 2;\n');
+  commitAll(nested);
+  const gitHome = path.join(home, 'git-home');
+  fs.mkdirSync(gitHome);
+  fs.writeFileSync(path.join(gitHome, '.gitconfig'), `[safe]\n\tdirectory = ${session}\n`);
+  const isolated = {
+    HOME: gitHome,
+    XDG_CONFIG_HOME: path.join(gitHome, '.config'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_TEST_ASSUME_DIFFERENT_OWNER: '1',
+  };
+  const evidence = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'evidence-run-v1.js'));
+  const data = tempDir('data');
+  const written = [];
+  const saved = {};
+  let own;
+  let refused;
+  let review;
+  let project;
+  try {
+    for (const [name, value] of Object.entries(isolated)) {
+      saved[name] = process.env[name];
+      process.env[name] = value;
+    }
+    own = evidence.workTreeTop(session);
+    refused = evidence.workTreeTop(nested);
+    review = xr.check(checkOptions(data, nested, { projectRoot: session })).lines;
+    project = xr.check(checkOptions(data, nested, { projectRoot: nested })).lines;
+    xr.main(['tree'], { ZENSU_XR_ENABLED: '1', ZENSU_XR_PROJECT_ROOT: session, ZENSU_XR_ROOT: nested }, { write: (text) => written.push(text) });
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  assert.deepEqual(own, { top: session, reason: null });
+  assert.equal(refused.top, null);
+  assert.match(refused.reason, /^git rev-parse failed: fatal: detected dubious ownership in repository/);
+  const refusal = /^status=unavailable reason=root layout=undetermined detail=git-rev-parse-failed-fatal-detected-dubious-ownership-in-repository[A-Za-z0-9._-]*$/;
+  for (const [lines, advice] of [[review, `${UNDETERMINED_ADVICE}; ${TOP_RERUN}`], [project, PROJECT_UNDETERMINED_ADVICE]]) {
+    assert.equal(lines.length, 1);
+    const parts = lines[0].split(' — ');
+    assert.equal(parts.length, 3, lines[0]);
+    assert.equal(parts[0], 'EXTERNAL REVIEW');
+    assert.match(parts[1], refusal);
+    assert.equal(parts[2], advice);
+  }
+  assert.equal(written.length, 1);
+  assert.match(written[0], /^EXTERNAL REVIEW — tree=unavailable reason=root layout=undetermined detail=git-rev-parse-failed-fatal-detected-dubious-ownership-in-repository[A-Za-z0-9._-]* — /);
+  assert.ok(written[0].endsWith(` — ${UNDETERMINED_ADVICE}; ${TOP_RERUN}\n`), written[0]);
+});
+
+function stageOptions(root, overrides = {}) {
+  return {
+    enabled: true,
+    sessionKey: SESSION,
+    projectRoot: root,
+    root,
+    treeOf: () => ({ tree: TREE, reason: null }),
+    templateFile: TEMPLATE,
+    ...overrides,
+  };
+}
+
+test('stage copies the template into the project state directory under the session key, verifies it and replaces an edited copy', () => {
+  const root = project();
+  const expected = path.join(root, '.zensu', 'state', `zensu-review-v1-${SESSION}.js`);
+  const staged = xr.stageTemplate(stageOptions(root));
+  assert.equal(staged.status, 'ok');
+  assert.equal(staged.script, expected);
+  assert.equal(xr.stagedTemplateName(SESSION), path.basename(expected));
+  assert.equal(staged.line, `EXTERNAL REVIEW — stage=ok tree=${TREE} script=${expected}`);
+  assert.ok(fs.readFileSync(expected).equals(fs.readFileSync(TEMPLATE)));
+  if (process.platform !== 'win32') assert.equal(fs.statSync(expected).mode & 0o777, 0o600);
+  const launched = xr.buildRecord(payload({ cwd: root, tool_input: { scriptPath: expected } }), SESSION, { now: 1 });
+  assert.equal(launched.script_sha256, xr.templateDigest(TEMPLATE));
+  fs.appendFileSync(expected, '\nlog("edited")\n');
+  assert.notEqual(xr.templateDigest(expected), xr.templateDigest(TEMPLATE));
+  assert.equal(xr.stageTemplate(stageOptions(root)).status, 'ok');
+  assert.equal(xr.templateDigest(expected), xr.templateDigest(TEMPLATE));
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')).sort(), [path.basename(expected), 'x.json'].sort());
+  gitIn(root, 'init', '-q');
+  const nested = xr.stageTemplate(stageOptions(root, { projectRoot: path.join(root, 'src') }));
+  assert.equal(nested.script, path.join(root, 'src', '.zensu', 'state', xr.stagedTemplateName(SESSION)));
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(root, 'src', '.zensu', 'state')).mode & 0o777, 0o700);
+});
+
+test('stage sweeps the copies other sessions left idle past the idle window and keeps everything else', () => {
+  const root = project();
+  const state = path.join(root, '.zensu', 'state');
+  const idle = path.join(state, xr.stagedTemplateName(OTHER_SESSION));
+  const recent = path.join(state, xr.stagedTemplateName(`scv1_${'d'.repeat(64)}`));
+  const unrelated = path.join(state, 'zensu-review-v1-notes.js');
+  for (const file of [idle, recent, unrelated]) fs.writeFileSync(file, SCRIPT);
+  const now = Date.now();
+  setMtime(idle, now - xr.LIMITS.idleSessionMs - 60000);
+  setMtime(recent, now - xr.LIMITS.idleSessionMs + 60000);
+  setMtime(unrelated, now - xr.LIMITS.idleSessionMs - 60000);
+  const staged = xr.stageTemplate(stageOptions(root, { now }));
+  assert.equal(staged.status, 'ok');
+  assert.equal(fs.existsSync(idle), false);
+  assert.equal(fs.existsSync(recent), true);
+  assert.equal(fs.existsSync(unrelated), true);
+  assert.equal(fs.existsSync(path.join(state, 'x.json')), true);
+});
+
+test('stage answers unavailable with a named reason and writes nothing before every input holds', () => {
+  const root = project();
+  const unavailable = (overrides) => xr.stageTemplate(stageOptions(root, overrides)).line;
+  assert.equal(unavailable({ enabled: false }), 'EXTERNAL REVIEW — stage=unavailable reason=disabled');
+  assert.equal(unavailable({ judge: false }), 'EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled');
+  assert.equal(unavailable({ root: path.join(root, 'src') }), `EXTERNAL REVIEW — stage=unavailable reason=root layout=subdirectory — ${SUBDIRECTORY_ADVICE}; ${FOLDER_RERUN}`);
+  assert.equal(unavailable({ projectRoot: '/definitely/not/here' }), "EXTERNAL REVIEW — stage=unavailable reason=root layout=unresolved-project-root — this session's project root is not an absolute, symlink-free path to an existing directory; run /zensu:doctor");
+  assert.equal(unavailable({ sessionKey: 'scv1_../../escape' }), 'EXTERNAL REVIEW — stage=unavailable reason=session');
+  assert.equal(unavailable({ treeOf: () => ({ tree: null, reason: 'not a work tree' }) }), 'EXTERNAL REVIEW — stage=unavailable reason=not-a-work-tree');
+  assert.equal(unavailable({ templateFile: path.join(root, 'absent.js') }), 'EXTERNAL REVIEW — stage=unavailable reason=template-unreadable');
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')), ['x.json']);
+  const blocked = path.join(root, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  fs.mkdirSync(blocked);
+  assert.equal(unavailable({}), 'EXTERNAL REVIEW — stage=unavailable reason=write-failed');
+  assert.deepEqual(fs.readdirSync(path.join(root, '.zensu', 'state')).sort(), [path.basename(blocked), 'x.json'].sort());
+  const plain = path.join(tempDir('plain-state'), 'project');
+  fs.mkdirSync(path.join(plain, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(plain, '.zensu', 'state'), 'not a directory\n');
+  assert.equal(xr.stageTemplate(stageOptions(plain)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+});
+
+test('stage refuses a project state directory reached through a symbolic link', { skip: process.platform === 'win32' }, () => {
+  const linkedState = project();
+  const elsewhere = tempDir('elsewhere-state');
+  fs.rmSync(path.join(linkedState, '.zensu', 'state'), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(linkedState, '.zensu', 'state'));
+  assert.equal(xr.stageTemplate(stageOptions(linkedState)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+  const linkedZensu = project();
+  const moved = path.join(tempDir('elsewhere-zensu'), 'moved');
+  fs.renameSync(path.join(linkedZensu, '.zensu'), moved);
+  fs.symlinkSync(moved, path.join(linkedZensu, '.zensu'));
+  assert.equal(xr.stageTemplate(stageOptions(linkedZensu)).line, 'EXTERNAL REVIEW — stage=unavailable reason=state-directory');
+  assert.deepEqual(fs.readdirSync(path.join(moved, 'state')), ['x.json']);
+});
+
+test('the stage mode prints the tree id the tree mode prints, and its copy moves neither that tree nor the import', () => {
+  const root = project();
+  const init = spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8' });
+  if (init.status !== 0) {
+    assert.fail(`git init failed: ${init.stderr}`);
+  }
+  const env = { ZENSU_XR_ENABLED: '1', ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_PROJECT_ROOT: root, ZENSU_XR_ROOT: root };
+  const written = [];
+  const write = (text) => written.push(text);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  assert.equal(xr.main(['stage'], env, { write }), 0);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  const tree = /^EXTERNAL REVIEW — tree=([0-9a-f]{40,64})\n$/.exec(written[0]);
+  assert.ok(tree, written[0]);
+  const script = path.join(root, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  assert.equal(written[1], `EXTERNAL REVIEW — stage=ok tree=${tree[1]} script=${script}\n`);
+  assert.equal(written[2], written[0]);
+  written.length = 0;
+  assert.equal(xr.main(['stage'], { ...env, ZENSU_XR_JUDGE: '0' }, { write }), 0);
+  assert.equal(xr.main(['stage'], { ...env, ZENSU_XR_SESSION_KEY: '' }, { write }), 0);
+  assert.deepEqual(written, [
+    'EXTERNAL REVIEW — stage=unavailable reason=review-judge-disabled\n',
+    'EXTERNAL REVIEW — stage=unavailable reason=session\n',
+  ]);
+  const data = tempDir('data');
+  setMtime(path.join(root, 'src', 'a.js'), BASE);
+  const run = launchedRun(data, BASE + 120000, { script: fs.readFileSync(script, 'utf8'), result: reviewResult({ tree: tree[1] }) },
+    { tool_input: { scriptPath: script } });
+  const options = checkOptions(data, root, { resultFile: run.outputFile, templateFile: TEMPLATE });
+  delete options.treeOf;
+  const imported = xr.check(options);
+  assert.equal(imported.status, 'ok');
+  assert.match(imported.lines[0], / tree=match /);
+});
+
+test('a session started in a subdirectory keeps its own state out of the tree it stages, prints and imports', () => {
+  const top = tempDir('subdirectory-session');
+  const projectRoot = path.join(top, 'pkg');
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(top, '.gitignore'), '.zensu/*\n');
+  fs.writeFileSync(path.join(projectRoot, 'src', 'a.js'), 'module.exports = 1;\n');
+  commitAll(top);
+  const env = { ZENSU_XR_ENABLED: '1', ZENSU_XR_SESSION_KEY: SESSION, ZENSU_XR_PROJECT_ROOT: projectRoot, ZENSU_XR_ROOT: top };
+  const written = [];
+  const write = (text) => written.push(text);
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  assert.equal(xr.main(['stage'], env, { write }), 0);
+  fs.writeFileSync(path.join(projectRoot, '.zensu', 'state', 'tdd-phase-x.json'), '{"phase":"IMPL"}\n');
+  assert.equal(xr.main(['tree'], env, { write }), 0);
+  const tree = /^EXTERNAL REVIEW — tree=([0-9a-f]{40,64})\n$/.exec(written[0]);
+  assert.ok(tree, written[0]);
+  const script = path.join(projectRoot, '.zensu', 'state', xr.stagedTemplateName(SESSION));
+  assert.equal(written[1], `EXTERNAL REVIEW — stage=ok tree=${tree[1]} script=${script}\n`);
+  assert.equal(written[2], written[0]);
+  const data = tempDir('data');
+  setMtime(path.join(projectRoot, 'src', 'a.js'), BASE);
+  const run = launchedRun(data, BASE + 120000, {
+    args: { tree: tree[1], lenses: ['correctness', 'security'], changedFiles: ['pkg/src/a.js'] },
+    script: fs.readFileSync(script, 'utf8'),
+    result: reviewResult({ tree: tree[1] }),
+  }, { tool_input: { scriptPath: script } });
+  const options = checkOptions(data, top, { projectRoot, resultFile: run.outputFile, templateFile: TEMPLATE, changedText: 'pkg/src/a.js\n' });
+  delete options.treeOf;
+  const imported = xr.check(options);
+  assert.equal(imported.status, 'ok', imported.lines.join('\n'));
+  assert.match(imported.lines[0], / tree=match /);
+  const literal = process.env.GIT_LITERAL_PATHSPECS;
+  const literalWritten = [];
+  try {
+    process.env.GIT_LITERAL_PATHSPECS = '1';
+    assert.equal(xr.main(['tree'], env, { write: (text) => literalWritten.push(text) }), 0);
+  } finally {
+    if (literal === undefined) delete process.env.GIT_LITERAL_PATHSPECS;
+    else process.env.GIT_LITERAL_PATHSPECS = literal;
+  }
+  assert.deepEqual(literalWritten, [written[0]]);
 });
 
 test('check skips a record dated beyond the clock skew', () => {
@@ -937,9 +1297,10 @@ test('a script path is read only as a bounded regular file that is not a link', 
 test('stale wait counters are swept and fresh ones are kept', () => {
   const data = tempDir('data');
   const running = { background_tasks: [{ id: '1', type: 'workflow', status: 'running' }] };
-  xr.stopWait(running, { pluginData: data, sessionKey: SESSION });
-  xr.stopWait(running, { pluginData: data, sessionKey: OTHER_SESSION });
   const waits = path.join(data, 'external-review', 'v1', 'waits');
+  xr.stopWait(running, { pluginData: data, sessionKey: SESSION });
+  setMtime(path.join(waits, `${SESSION}.json`), Date.now());
+  xr.stopWait(running, { pluginData: data, sessionKey: OTHER_SESSION });
   setMtime(path.join(waits, `${OTHER_SESSION}.json`), Date.now() - 2 * 24 * 60 * 60 * 1000);
   assert.equal(xr.sweepStaleWaits(path.join(data, 'external-review', 'v1')), 1);
   assert.equal(fs.existsSync(path.join(waits, `${SESSION}.json`)), true);
@@ -951,22 +1312,29 @@ function pause(ms) {
   while (Date.now() < until) { }
 }
 
+function kernelNow() {
+  const probe = path.join(tempDir('clock'), 'probe');
+  fs.writeFileSync(probe, '');
+  return Math.floor(fs.statSync(probe).mtimeMs);
+}
+
 test('freshness sees a restored modification time and a deleted changed file', () => {
   const data = tempDir('data');
   const root = project();
   fs.writeFileSync(path.join(root, 'src', 'b.js'), 'module.exports = 2;\n');
   pause(30);
-  const run = launchedRun(data, Date.now());
+  const launchedAt = kernelNow();
+  const run = launchedRun(data, launchedAt);
   assert.equal(xr.check(checkOptions(data, root, { changedText: 'src/a.js\nsrc/b.js\n', resultFile: run.outputFile })).status, 'ok');
   pause(30);
-  setMtime(path.join(root, 'src', 'a.js'), Date.now() - 24 * 60 * 60 * 1000);
+  setMtime(path.join(root, 'src', 'a.js'), launchedAt - 24 * 60 * 60 * 1000);
   assert.equal(xr.check(checkOptions(data, root, { resultFile: run.outputFile })).status, 'stale');
 
   const second = tempDir('data');
   const other = project();
   fs.writeFileSync(path.join(other, 'src', 'b.js'), 'module.exports = 2;\n');
   pause(30);
-  xr.recordLaunch(payload(), { CLAUDE_PLUGIN_DATA: second }, { now: Date.now() });
+  xr.recordLaunch(payload(), { CLAUDE_PLUGIN_DATA: second }, { now: kernelNow() });
   pause(30);
   fs.unlinkSync(path.join(other, 'src', 'b.js'));
   const deleted = xr.check(checkOptions(second, other, { changedText: 'src/a.js\nsrc/b.js\n' }));

@@ -30,26 +30,76 @@ its own justification, and the authoritative five-class enumeration, in the head
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literals `--restore-root` and `--confirm`, each
 at most once. Neither literal takes a VALUE, which is what keeps a destination out
-of every invocation this gate admits. Every hook on the `Bash`
+of every invocation this gate admits. Every hook on the `Bash|PowerShell`
 matcher plus the all-tool capability gate must allow, because a deny from any one
-of them wins. The adoption itself no longer needs the command: every hook adopts a
+of them wins. The recognizer reads the Bash spelling only, so run both commands through the
+Bash tool; a PowerShell call in a bind failure gets the named deny. The adoption itself no longer needs the command: every hook adopts a
 compatible-schema record automatically on its first failed bind
 (`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
 command is the report and the manual retry for a refusal. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
 
+## Shell Tools
+
+Claude Code has two shell tools, `Bash` and `PowerShell`. The PowerShell tool is on by default on
+Windows for claude.ai and Console accounts, and opt-in elsewhere through
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Every Zensu hook that reads a shell command is registered on
+the `Bash|PowerShell` matcher, and each one judges a PowerShell command or refuses what it cannot
+judge; none lets a PowerShell command it cannot read pass in silence. The judging gates share one
+analyzer, `hooks/lib/powershell-command-v1.js`. Claude Code falls back to Windows PowerShell 5.1
+when PowerShell 7 is not installed, and the two decode the string escapes `` `e `` and `` `u{…} ``
+differently, so the analyzer reads such a string both ways and a verdict holds only when it holds
+for both readings.
+
+| Gate | A PowerShell command |
+|---|---|
+| CLI write-gate | Judged like a Bash command. A `zensu` call that another command starts, that builds its noun or verb at run time, or that the analyzer cannot read is denied, and so is one whose argument holds a double quote, which Windows PowerShell 5.1 can split, or a cmd.exe operator or `%name%` reference, which cmd.exe reads as code when `zensu` is a batch file. An empty argument counts as built at run time, because Windows PowerShell 5.1 drops it. There is no inline escape. |
+| Session Control check | Denied when it names a protected input such as `ZENSU_SESSION_KEY` in any spelling, writes the Environment provider under a name built at run time, turns text built at run time into code, or cannot be read. |
+| Source-write rules (A), (B), (C) | While `hooks.bashWriteGate` is on, only a provably read-only command passes. Outside Windows, a name that PowerShell 7 leaves to a native program, such as `sort` or `ls`, counts as that program. |
+| Secret scan | The whole command text is scanned. |
+| Browser consent gate | A `zensu-verify` `playwright-cli` call is refused, in every spelling the analyzer decodes: backtick escapes, Unicode escapes and joined string literals. |
+| Artifact redaction | Runs as after a Bash command. |
+| Work-order gate | Refused in a work-order session; the launcher turns the PowerShell tool off. |
+
+Every refusal of a command a gate cannot judge tells the main thread to use the Bash tool, or Edit
+and Write, and a subagent to report to the main thread; a judged `zensu` mutation is refused as
+in Bash, with the skill to run instead. The session banner names the commands to run through the
+Bash tool while the PowerShell tool may be active. While that tool may be active, the
+`shell tools:` row of `/zensu:doctor` warns when a hook fires for `Bash` but not for
+`PowerShell`; once every such hook covers `PowerShell`, it warns when the analyzer does not load.
+Names built at run time from variables, character codes or subexpressions, script files,
+interpreter code, a command registered to run later, such as a scheduled task, and a `zensu` call
+that cmd.exe finds in an argument of another batch file stay unread, as names built at run time do
+in Bash.
+To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`; see
+[Platform Support](operations.md#platform-support).
+
 ## CLI Write-Gate
 
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
-updating features, security classifications, tiers, journeys, revisions, …) run directly
-on the main thread is **denied by default** — it must run inside a skill that declared its
-work, so "freelance" writes cannot bypass the dedup, user-journey, baseline-revision and
-security-review conventions the skills enforce. Reads and telemetry are always allowed.
+updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
+work orders, work plans, …) run directly on the main thread is **denied by default** — it must
+run inside a skill that declared its work, so "freelance" writes cannot bypass the dedup,
+user-journey, baseline-revision and security-review conventions the skills enforce. Reads and
+telemetry are always allowed. A command that records a decision the person makes — creating,
+approving, requeuing, cancelling or confirming the merge of a work order, pushing, approving,
+finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing its
+follow-ups, answering or overturning a question, setting the automation policy and adding,
+updating or removing a repository — is denied with a reason that leaves the command to the
+person instead of naming a skill, even inside a skill window that declares it, and so is a verb of
+the work-order protocol. When one command holds several denied invocations, the reason follows a
+person's decision first, then a work-order verb.
 
 The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
 out of the Bash command, resolves each to its canonical tool
 name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
-source of truth. It reads the command twice and gates every invocation either reading finds. The
+source of truth. It finds the subcommand the way cobra, the CLI's command library, does: a flag
+without `=` takes the next word, an empty word is skipped and `--` ends the search, so
+`zensu features --product p1 create` counts as a create. Where the verb is itself a command group
+(`work policy`, `work repositories` or `repos`, `plan followup`), the third word picks the
+command. A word the shell expands at run time, such as `$FLAGS` or `$(…)`, is read twice more,
+once as if it were empty and once as if it were a value flag that takes the next word, so
+`zensu features $FLAGS create` counts as a create too. It reads the command twice and gates every invocation either reading finds. The
 shell model of the subagent accident guard (`hooks/lib/subagent-shell-guard-v1.js`) finds an
 invocation behind a wrapper such as `timeout`, `nice -n`, `env -i` or `xargs`, in a loop or `if`
 body, in a `bash -c` body or a heredoc a shell reads, in `eval`, and in a command substitution,
@@ -66,15 +116,28 @@ is cached on disk an agent could `curl` the backend directly; the gate enforces 
 conventions, not a security control (the same role, and the same `ZENSU_MCP_GATE=off` escape, as
 the MCP write-gate it replaced).
 
+The gate classifies each distinct invocation once, however many of the two readings find it, and
+reads the session's declared workflow tools at most once per call. Both readings take time linear in
+the length of the command. A Bash call that names `zensu` and whose hook payload exceeds the session
+binder's limit (`MAX_PAYLOAD_BYTES` in `hooks/lib/claude-hook-session-v1.js`, 1 MiB) is denied before
+either reading runs, with a reason that names the payload's size and the limit. A PowerShell call
+goes through the PowerShell analyzer instead; when the analyzer reports a `zensu` call or a construct
+it cannot judge, the failed bind names the size through the shared bind-deny ladder. The all-tool
+capability gate already denies every payload over that limit, so the decision does not change; the
+reason no longer blames the session binding. The Edit gate and the secret scan name the size the same
+way, through the same ladder.
+
 ```mermaid
 flowchart TD
-    A["zensu CLI command<br/>(Bash, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
+    A["zensu CLI command<br/>(Bash or PowerShell, main thread)"] --> B{"Read / telemetry / --help?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, --help …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off (env or inline)<br/>or hooks.mcpGate=false<br/>or localhost backend?"}
     C -->|"yes (escape hatch)"| ALLOW
     C -->|"no"| E{"Inside an active main-thread skill workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
     E -->|"yes"| ALLOW
-    E -->|"no"| DENY(["DENY<br/>run the matching skill<br/>in the interactive main thread"])
+    E -->|"no"| W{"zensu work ask / followup<br/>in a bound work-order session?"}
+    W -->|"yes (the work-order gate decides)"| ALLOW
+    W -->|"no"| DENY(["DENY<br/>run the matching skill<br/>in the interactive main thread,<br/>or leave a decision to the person"])
 
     style A fill:#4a9eff,color:#fff
     style ALLOW fill:#51cf66,color:#fff
@@ -88,15 +151,27 @@ it never declared — and `--workflow-end` closes it again. The `--tools` list s
 the gate maps each CLI command back to its canonical tool name to check membership. `ZENSU_MCP_GATE=off`
 disables the gate for a deliberate one-off — honored both as a session env and as an **inline prefix**
 (`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
-ignores it on a subagent's command. The gate is scoped to its threat model (a low-context agent writing to the
+ignores it on a subagent's command, and a PowerShell command has none. A PowerShell command is
+read by the shared analyzer, which finds a literal `zensu` call in every spelling PowerShell runs
+it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`) and
+denies one it cannot read: a call another command starts, a noun or verb built at run time, an
+argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
+cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so it also never fires on reads or `--help`/`-h`, or on a write whose target backend
 (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** — a throwaway dev/test DB where the conventions are
 meaningless. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
-report the operation to the main thread, which runs it through the matching skill. A structure
+report the operation to the main thread, which runs it through the matching skill. In a bound
+work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
+gate, which allows them there ([Work-order mode](work-order-mode.md)). Every other mutation
+follows the ordinary rules in that session, where `/zensu:work` opens no window, and the deny of a
+person's decision points to a work-order question instead of a user. A work-order protocol command
+denied anywhere else gets a reason that names the worker and the `/zensu:work` helper, and a
+subagent's deny adds that it reports the need to the main thread. A structure
 test (`tests/structure/test-skill-workflow-markers.sh`)
 fails the build if any skill runs a mutation command without the `--workflow-begin` /
-`--workflow-end` markers, so a new skill cannot silently regress the contract.
+`--workflow-end` markers, or runs one its window does not declare, so a new skill cannot silently
+regress the contract.
 
 ## Source-Write Gate
 
@@ -227,7 +302,8 @@ A third PreToolUse gate (`pre-write-secret-scan.sh`) inspects **what** is about 
 complementing the source-write gate's **which files**: Write `content`, Edit `new_string`,
 MultiEdit `edits[].new_string`, NotebookEdit `new_source`, and — whenever the shared parser
 (`detectChannels`) reports a write channel (redirect, `tee`, `sed -i`, `dd of=`, heredoc) —
-the Bash command text. Payloads are matched against the curated rule set in
+the Bash command text. A PowerShell command is scanned as a whole, because the gate does not
+trace where PowerShell writes. Payloads are matched against the curated rule set in
 `hooks/lib/secret-patterns.js` (AWS, GitHub `gh[pousr]_`/`github_pat_`, Slack, Stripe
 `sk_live_`/`rk_live_`, private-key PEM headers incl. PKCS#8, plus a Shannon-entropy assignment
 heuristic — deliberately no naive key/password catch-all); decision logic lives in
@@ -407,7 +483,11 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. The gate is
+(`post-browser-navigation-consent.sh`), both registered on the `Bash|PowerShell` matcher. A
+PowerShell call that names `playwright-cli` and a `zensu-verify-*` session is refused, so run
+those calls through the Bash tool. It is refused in every spelling the shared PowerShell analyzer
+decodes, a backtick or Unicode escape and joined string literals included, so the prefilter
+starts `node` for a PowerShell call that names `wright` and `verify` or holds a Unicode escape. The gate is
 textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
 text names the CLI and that session, or names the CLI while the hook environment's
@@ -616,7 +696,7 @@ an absent or symlinked module, or a module failure denies with a stderr note, an
 skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
 JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
 a backslash-newline or backslash-CR-LF line continuation and one `LC_ALL=C tr -d` pass removes
-quotes and backslashes, with the raw payload as the fallback when either pass fails: stripping them in pure bash
+quotes, backslashes and backticks, with the raw payload as the fallback when either pass fails: stripping them in pure bash
 was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
 `tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
 prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The
@@ -746,6 +826,19 @@ through Bash.
 - **A deployed app's API or identity origin has no network-only role without a policy.** It is
   passed as one more `--origin`, asked in the same prompt and never navigated to by the skill,
   but the gate would admit a navigation to it.
+- **Only the `browser` driver is gated.** The other drivers of `/zensu:verify-feature` (`api`,
+  `cli`, `library`, `async`, `iac`, `mobile`, `desktop`, `custom`) run the worktree's own build on
+  run-owned local resources, bounded by the skill's rules, the host's own permission prompts and
+  the per-app or per-device grants of the host's computer-use and simulator tools. No hook judges
+  them, and how the host resolves those prompts in auto mode or a headless run is unverified.
+  Teardown is the mechanical part: `skills/verify-feature/scripts/verify-run-resources.js`
+  records every device, supervised process, emulator serial, cluster, container and `tmux`
+  socket a driver starts, and acts only on recorded entries. A simulator must still carry the
+  run's name, a process is stopped through the supervisor's lease or after a command-line check,
+  and an emulator is only stopped through its supervised process, never killed by its serial.
+  A container, a `tmux` socket and a `kind` cluster are removed by the run-prefixed name that was
+  checked when it was recorded, with no second check. A resource started outside the helper is
+  outside its reach.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.
@@ -766,8 +859,8 @@ minting a new one.
 - **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`
   for the diagnosis and `/zensu:adopt-session --confirm` to rebuild — instead of the generic
   `immutable context revalidation failed`, which is accurate and names no way out. Both
-  commands stay reachable on macOS and Linux, because the Bash recognizer admits them in every
-  bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
+  commands stay reachable on macOS and Linux through the Bash tool, because the Bash recognizer
+  admits them in every bind failure, but for the main thread only — so a reviewer, an evidence worker or a neutral
   child gets the cause and is told to report it to the main thread rather than retry.
 - **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
   unreadable keeps the generic wording: something is at that path, and offering a rebuild
@@ -1096,14 +1189,19 @@ live. `/zensu:tdd` Phase 6 step 6d runs `/zensu:verify-feature --chain` before t
 
 - **How a verdict is recorded.** `zensu-log.sh --acceptance-record --ac <id> --verdict
   <pass|fail|partial> --driver <driver> --log <run log> [--evidence-run <id>]`, with the
-  evidence text on stdin. The driver names come from `skills/autopilot/rules/drivers.md`.
-  - **Observed:** `api`, `cli`, `async`, `iac`, `custom`, `library` and `artifact` are decided
+  evidence text on stdin. The driver names are the nine ids of
+  `skills/verify-feature/rules/drivers.md`. `desktop-native` and `artifact`, the spellings of
+  earlier releases, stay accepted, so a running session whose skill text still names them can
+  record; `desktop-native` counts as attested and `artifact` as observed.
+  - **Observed:** `api`, `cli`, `async`, `iac`, `custom` and `library` are decided
     by an exit code. So the check must run through
     `zensu-log.sh --evidence-run --scope acceptance`, and the record must cite that run. A pass
     needs exit 0, a fail needs a non-zero exit, and a run that changed the tree while it ran is
     refused.
-  - **Attested:** `browser`, `mobile` and `desktop-native` are driven by the model and recorded
-    with the evidence text alone.
+  - **Attested:** `browser`, `mobile` and `desktop` are driven by the model and recorded
+    with the evidence text alone. A `desktop` record is stored as `desktop-native`: after an
+    update, the earlier installation can still read the same session's records, and it accepts
+    only that spelling.
 
   The verb refuses an unknown or deprecated id, empty or secret-matching evidence, and a run
   log whose stem differs from the one this session's edit-landing receipt records. It appends
