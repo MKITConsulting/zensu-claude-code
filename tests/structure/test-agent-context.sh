@@ -66,6 +66,25 @@ else
   check "A6 legacy ambient-force principal helpers are absent from production hooks" PASS
 fi
 
+A7_MAIN="$(zensu_hook_principal '{"hook_event_name":"Stop","transcript_path":"/t/a b.jsonl"}' Stop transcript_path)"
+A7_SPOOF="$(zensu_hook_principal '{"hook_event_name":"Stop","agent_id":"a1","agent_type":"custom-agent","transcript_path":"main-v1"}' Stop transcript_path)"
+A7_BOOL="$(zensu_hook_principal '{"hook_event_name":"Stop","transcript_path":true}' Stop transcript_path)"
+A7_NUM="$(zensu_hook_principal '{"hook_event_name":"Stop","transcript_path":7}' Stop transcript_path)"
+A7_NONE="$(zensu_hook_principal '{"hook_event_name":"Stop"}' Stop transcript_path)"
+A7_BAD="$(zensu_hook_principal 'not-json' Stop transcript_path)"
+A7_WRONG="$(zensu_hook_principal '{"hook_event_name":"SubagentStop","transcript_path":"/t"}' Stop transcript_path)"
+A7_PLAIN="$(zensu_hook_principal '{"hook_event_name":"Stop","transcript_path":"/t"}' Stop)"
+if [ "$A7_MAIN" = "main-v1"$'\n'"/t/a b.jsonl" ] \
+  && [ "${A7_SPOOF%%$'\n'*}" != "main-v1" ] && [ "${A7_SPOOF#*$'\n'}" = "main-v1" ] \
+  && [ "$A7_BOOL" = "main-v1"$'\n'"true" ] \
+  && [ "$A7_NUM" = "main-v1" ] && [ "$A7_NONE" = "main-v1" ] \
+  && [ -z "$A7_BAD" ] && [ -z "$A7_WRONG" ] \
+  && [ "$A7_PLAIN" = "main-v1" ]; then
+  check "A7 a requested payload field rides after the principal line and can never forge it" PASS
+else
+  check "A7 principal plus payload field (main='$A7_MAIN' spoof='$A7_SPOOF' bool='$A7_BOOL' num='$A7_NUM' none='$A7_NONE' bad='$A7_BAD' wrong='$A7_WRONG' plain='$A7_PLAIN')" FAIL
+fi
+
 echo "----"
 echo "test-agent-context: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -203,7 +203,7 @@ else
 fi
 
 if grep -qF "path_indexes=(0 1 2 3 6 10)" "$STATE_LIB" \
-  && grep -qF "path_indexes=(0 1 2 4)" "$STATE_LIB" \
+  && grep -qF "path_indexes=(0 1 2)" "$STATE_LIB" \
   && grep -qF "path_indexes=(0 1 4 6)" "$STATE_LIB" \
   && grep -qF "path_indexes=(0 1)" "$STATE_LIB" \
   && grep -qF "MSYS2_ARG_CONV_EXCL='*' node -" "$STATE_LIB" \

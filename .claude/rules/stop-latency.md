@@ -168,16 +168,89 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
   that the resolver refuses. A cache file: poisonable. Memoizing `_tdd_paths_safe`: it is the
   per-operation symlink check and must see every swap.
 
+**Lease checks inside the lock process (`hooks/lib/state-path-safety-v1.js`).** `_tdd_locked_run`
+used to spawn a storage walk before the lease, the acquisition, a token walk, a storage re-walk and
+the release: six `node` children per lease on bash 3.2 and three on bash 4+. The walk now lives in
+`state-path-safety-v1.js` and runs inside the process that takes the lease, before the acquisition
+and again after it. A lease costs two children on bash 3.2 (acquire with checks, release by token)
+and one on bash 4+ (the keeper); `P9` in `tests/structure/test-tdd-no-flock-external-lease.sh`
+pins both counts.
+
+- **Order of observations.** The post-acquisition walk is the last full walk before the callback.
+  Between it and the callback only builtins run: the leaf re-check `_tdd_paths_leaf_safe` (`[ -L ]`,
+  `-e`, `-f`, `-d`, no command substitution) and, on bash 3.2, the token read with `read` plus one
+  `rm` of the token file. That `rm` stays before the callback on purpose: after the release it
+  would leave the token file behind whenever the deadline kills the worker mid-callback, and the
+  walk-to-use window is dominated anyway by the callback's own `node` start. `_tdd_paths_safe` is
+  still never memoized.
+- **Fail-closed load.** Every caller loads the module with `require` and accepts only
+  `pathsSafeArgv(...) === true`, so a missing, truncated or inert module refuses.
+  `_tdd_paths_safe_check` carries the module path in the environment (`PATH_SAFETY`, mechanism 2
+  of `test-msys-special-plugin-module-boundaries.sh`) and the rendered anchors and operands in
+  argv under `MSYS2_ARG_CONV_EXCL='*'`. The module has no CLI and reads neither `process.env` nor
+  `process.argv`. The lease processes take the module path in argv beside the control core's,
+  which travelled that way before.
+- **Exit codes and lines.** The bash 3.2 acquirer exits 64 when a check fails before the
+  acquisition (silent return 1), 65 when the storage is unsafe after it and the lease was released
+  in-process (silent return 1), and 66 when that release failed (`lock release failed`, return 1).
+  The keeper writes `UNSAFE` (nothing held, silent return 1) or `UNSAFE-HELD` (callback skipped,
+  normal `RELEASE`, silent return 1). The keeper still releases in-process, so the win32 holder
+  marker behaves as before.
+- **Pins.** `P7` plants a hard-linked `.lock` (link count 2, which only the module refuses) after
+  `tests/structure/fixtures/lease-acquire-entry-preload.js` proves the contender is inside
+  `acquireExternalProcessLock`; `P8` plants it before any acquisition and requires that the
+  acquisition never started. Removing either walk turns the matching check red on bash 3.2 and on
+  bash 5.2. `tests/structure/state-path-safety-v1.test.js` covers the refusals no shell leaf test
+  sees, and the canary loads the module from a plugin root with whitespace and an apostrophe.
+
+**Further cuts on the armed path.** Each removes a process whose observation is repeated, or moves
+it into an adjacent process with no filesystem change in between.
+
+- The reviewer-note lease is skipped when the probe verdict is neither `blocked` nor `clear`,
+  because the callback then does nothing. `reviewer_denial_note_acts` is the one predicate for the
+  guard and the callback, and the probe stays outside the lease. A status the callback learns to
+  act on must join that predicate.
+- `_tdd_atomic_replace_regular` walks its source and target as the first statement of its replace
+  process; exit 64 maps to return 1, every other status passes through.
+- The `read-active` worker derives the owner pointer from the digest rule the writers use through
+  `_autopilot_active_path`, so the Stop path no longer spawns a hashing child.
+- `zensu_hook_principal` takes an optional payload field and then prints the principal, a newline
+  and that field. The Stop hook decides on the text before the first newline and reads
+  `transcript_path` from the rest, which replaces `read_field`.
+- `tdd_chain_snapshot <file> <session> stop-fields` prints the eight Stop fields from the snapshot
+  process. The field order lives in two places, that projection and the two `read` lists in the
+  hook. `inner_flags_ok` refuses a line whose four flags are not exactly `true` or `false`, the
+  check the removed `JSON.parse` used to give; a projection fault exits 64, which the adoption site
+  maps to its own refusal.
+
+Measured with the latency suite's counting shim (`L30`), the armed Stop went from 51 `node`
+children before the lease folding to 35 after it and 29 with these cuts on macOS bash 3.2, and
+from 31 to 26 on Linux bash 5.2 (`node:20-bookworm`). `L30` allows 32 on bash 3.2 and 30 on
+bash 4+, so reverting these cuts fails it on both.
+
+**Not taken, and why.** Two hunt candidates duplicated cuts above. Handing the idle probe's chain
+fields to the hook was judged unsound as specified, because it removed the only check that acts on
+a read failure at that site. Merging two Autopilot config reads and computing the terminal-stage
+bit in the outer parse save nothing on a measured path. Running the project-root check inside the
+pre-lock storage process and moving the dispatcher's under-lock storage check into the
+`read-active` worker would each save one child on the armed path, but both change the status
+mapping that separates "no run" (which relaxes the guard) from a fault (5) and need their own
+review. Folding the routing re-check after the budget increment (the exact-match comparison and,
+when it fails, the mismatch classifier) into the fresh snapshot process would save one more child.
+Three judges found it sound, because both processes read only their pipe and the hook's own
+expected values, but it turns a parse failure there from a release into a block, a decision change
+that needs its own pin. The deferred-review adoption path keeps its own candidates for a later change, and folds
+inside the stop-budget and handoff critical sections were not fully judged.
+
 **Known gaps.**
 - A deadline release writes no bypass-ledger entry (the write needs the lease under the load
   that caused the deadline) and renders no ledger line. It is INDUCIBLE — by loading the machine,
   or by lowering `ZENSU_STOP_DEADLINE_SECONDS` in the Claude Code environment — the same class as
   the other inducible releases this hook records.
-- The armed path still spawns 51 `node` children on macOS with bash 3.2 (`L30`, measured after
-  the resume directive gained its `zensu_review_panel` read; the 38 on Linux with bash 5.2
-  predates that read), so at a load in the high hundreds it can still reach the deadline. The
-  largest remaining groups are `_tdd_paths_safe` (22), the lock acquire and release pairs (8 on
-  bash 3.2) and the config reads (5).
+- The armed path still spawns 29 `node` children on macOS with bash 3.2 and 26 on Linux with
+  bash 5.2 (`L30`). At 1.3–1.7 s per child under load 100–150 that is about 38–50 s on bash 3.2,
+  so the 45 s deadline can still release an armed Stop on a heavily loaded Mac. These counts were
+  not broken down by group. The deferred-review adoption path was not re-measured.
 - A durable Autopilot Stop that reaches the stage budget spawns one more `node` child,
   `hooks/lib/review-evidence-hook-v1.js wait`, whose contract `.claude/rules/work-order-mode.md`
   owns. It runs through `zensu_run_bounded`, answers from one `lstat` when the session has no
@@ -226,4 +299,6 @@ bash 5.2 the same armed Stop spawns **38**, because the lock pairs cost fewer ch
 matcher change, no `permissionDecision`; the knob is an environment variable, not a config key.
 The per-run memo and the canonical-key shortcut persist nothing and add no hook, matcher, knob
 or config key. Routing the denial-note name through `zensu_session_key_canonical` changes no
-persisted shape: a canonical key yields the same file name as before.
+persisted shape: a canonical key yields the same file name as before. The lease checks, exit codes 64–66 and the
+keeper lines are internal to `_tdd_locked_run`, and the third arguments of `tdd_chain_snapshot`
+and `zensu_hook_principal` are optional, so every two-argument caller sees what it saw before.

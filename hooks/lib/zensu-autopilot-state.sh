@@ -410,7 +410,7 @@ _autopilot_node() {
   # (semantic) -> `zensu-host-path.sh` (namespace, so `path.resolve` is correct on
   # win32) -> `realpathSync.native` in `workspaceRootIndex` (canonical form).
   case "$mode" in
-    read-active) path_indexes=(0 1 2 4) ;;
+    read-active) path_indexes=(0 1 2) ;;
     read-workspace) path_indexes=(0 1) ;;
     read-run) path_indexes=(0 2) ;;
     begin) path_indexes=(0 1 2 3 6 10) ;;
@@ -1406,8 +1406,9 @@ semanticHistoryValid = state => {
 };
 
 if (mode === "read-active") {
-  const [activeFile, stateDir, expectedProjectRoot, expectedOwnerSessionId, legacyActiveFile = ""] = args;
+  const [legacyActiveFile, stateDir, expectedProjectRoot, expectedOwnerSessionId] = args;
   if (!sessionIdentifier(expectedOwnerSessionId)) fail(3, "invalid owner session identity");
+  const activeFile = path.join(stateDir, `${OWNER_POINTER_PREFIX}${rawDigest(expectedOwnerSessionId)}.json`);
   const inventory = readRunInventory(stateDir, expectedProjectRoot, expectedOwnerSessionId);
   // Only this owner's runs are visible here. A nonterminal run owned by another
   // session is neither an orphan nor a hidden run from this caller's position —
@@ -2433,10 +2434,10 @@ autopilot_read_run() {
 }
 
 _autopilot_read_active_critical() {
-  local root="$1" owner="$2" state_dir="$1/.zensu/state" active_file legacy_file
-  active_file="$(_autopilot_active_path "$state_dir" "$owner")" || return 3
+  local root="$1" owner="$2" state_dir="$1/.zensu/state" legacy_file
+  _autopilot_session_id_ok "$owner" || return 3
   legacy_file="$(_autopilot_legacy_active_path "$state_dir")" || return 3
-  _autopilot_node read-active "$active_file" "$state_dir" "$root" "$owner" "$legacy_file"
+  _autopilot_node read-active "$legacy_file" "$state_dir" "$root" "$owner"
 }
 
 # The optional third argument selects WHICH holder is reported when several hold

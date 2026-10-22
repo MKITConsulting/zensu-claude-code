@@ -94,8 +94,3 @@ function pathsSafeArgv(argv) {
 }
 
 module.exports = { pathsSafe, pathsSafeArgv };
-
-if (require.main === module) {
-  const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(2);
-  process.exit(pathsSafe([projectRoot, tempRoot, homeRoot], args) ? 0 : 3);
-}

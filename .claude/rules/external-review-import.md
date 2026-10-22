@@ -196,17 +196,18 @@ a workflow, and no code reads an Ultracode or effort signal. The operator accoun
   `unredact_claim` and `place_relative_claim` place it again, but a relative claim naming a
   sibling repository's file still grades against the anchor's change set, and a sibling under
   `$HOME`, another user's home or `/root` reaches the run log as `~/…` or `<home>/…` and is
-  never placed (`.claude/rules/multi-repo-stage1.md`). Accepting a second root needs all of these at
-  once: the root taken from the sealed `codeRoots[]` of `docs/multi-repo-chains-spec.md`
-  §6.1.1, never from a model-typed `--root` (the `--code-root` flag that section rejects); a
-  tree binding over the anchor and that root, the `project`/`work` tree `computeFingerprint`
-  already writes for a suite run in a nested work tree, with the template's `tree` argument
-  computed the same way; a root label on every changed path and every `changedFiles` entry,
-  because a root-relative path names a file in either root; the edit-landing audit grading each
-  claim against its declared root; and the reviewer lease widened to the
-  declared root (§7.2). Stages 2 and 3 are blocked on §6.1.1, so the import waits with them.
-  Until then the refusal names the layout and the next step: the aspect panel reviews this
-  change, and the other work tree's workflow review imports in a session started there.
+  never placed (`.claude/rules/multi-repo-stage1.md`). Stage 2 of
+  `docs/multi-repo-chains-spec.md`, redesigned on 2026-10-21 and not built yet, keeps this
+  refusal: a chain whose workflow document declares code roots will answer
+  `status=unavailable reason=multi-root` at the import and at `--stage` and `--tree` alike, so
+  the aspect panel reviews it (its §6.3). A multi-root import stays out of scope there (its
+  §11). It would need a tree binding over the anchor and every declared root, the
+  `project`/`work` tree `computeFingerprint` already writes for a suite run in a nested work
+  tree, with the template's `tree` argument computed the same way, and the `@<label>/`
+  spelling on every changed path and every `changedFiles` entry, because a root-relative path
+  names a file in either root. Until stage 2 ships, the refusal names the layout and the next
+  step: the aspect panel reviews this change, and the other work tree's workflow review imports
+  in a session started there.
 
 **Coupled sites.** The wait-file layout is spelled four times: `waitLocations`, `clearWait`
 and `sweepStaleWaits` in the module and `zensu_external_review_wait_file` in `zensu-tdd-phase.sh`, which
@@ -300,8 +301,10 @@ is shifted.
   repositories answers `layout=nested-in-folder` for each of them. Their first review costs the
   aspect panel even when a template workflow already reviewed that work tree. Measured
   2026-10-13 on 0.26.0, where both answered a bare `reason=root` and the tree id was computed
-  by hand. The durable answer is stage 2; until it ships, the session belongs in the work tree
-  it changes.
+  by hand. Stage 2 lets such a chain declare the other work trees as code roots, and its first
+  review then still runs the panel by design, because a multi-root import is out of scope
+  (`reason=multi-root`, `docs/multi-repo-chains-spec.md` §6.3 and §11). Until stage 2 ships,
+  the session belongs in the work tree it changes.
 - The layout comes from git's own answer: a nested worktree whose administrative directory was
   removed reads as no work tree, so a root inside it is `subdirectory`, whose next step, the
   session's top level, is still the root the import accepts.
