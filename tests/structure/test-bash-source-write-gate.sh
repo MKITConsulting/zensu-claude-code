@@ -532,6 +532,41 @@ run "W250 uppercase tee on tracked .rs" "echo x | TEE src/app.rs" DENY
 run "W251 a path to tee on tracked .rs" "echo x | /usr/bin/tee src/app.rs" DENY
 run "W252 uppercase dd of= tracked .rs" "DD of=src/app.rs" DENY
 run "W253 an uppercase CD is no builtin and keeps the cwd" "CD $SIB && git add ." ALLOW
+run "W254 an uppercase ENV runs cd outside the shell, so a write after it stays in the project" "ENV cd $FAKETMP; printf x > src/app.rs" DENY
+run "W255 a lowercase env runs cd outside the shell as well" "env cd $FAKETMP; printf x > src/app.rs" DENY
+run "W256 a cd spelled with a path is no builtin and keeps the cwd" "/usr/bin/cd $FAKETMP; printf x > src/app.rs" DENY
+run "W257 command keeps cd in the shell, so the cwd moves" "command cd $FAKETMP && printf x > src/app.rs" ALLOW
+run "W258 an uppercase ENV before cd leaves git add in the sibling cwd" "ENV cd $PROJ; git add -A" DENY "$SIB"
+run "W259 an uppercase ENV before cd leaves git add in the project" "ENV cd $SIB; git add ." ALLOW
+run "W260 grep naming TEE before a tracked file is no tee write" "grep -n TEE src/app.rs" ALLOW
+run "W261 grep naming a tee directory before a tracked file is no tee write" "grep -n x tools/tee src/app.rs" ALLOW
+run "W262 an uppercase tee in a subshell into CLAUDE_ENV_FILE" 'echo x | (TEE "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
+run "W263 sed -i in a command substitution on CLAUDE_ENV_FILE" 'x=$(SED -i s/a/b/ "$CLAUDE_ENV_FILE")' DENY "$PROJ" "$CFG_OFF"
+run "W264 a quoted tee into CLAUDE_ENV_FILE" 'echo x | "tee" "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W265 a quote inside the program word is read as written, the known quote-removal gap" "g'i't -C $SIB add ." ALLOW
+
+WIN32_PRELOAD="$WORKROOT/win32-platform.js"
+printf '%s\n' 'Object.defineProperty(process, "platform", { value: "win32" });' > "$WIN32_PRELOAD"
+WIN32_PAYLOAD="$(payload "'C:\\Git\\cmd\\git.exe' -C $SIB add .")"
+WIN32_OUT="$(PAYLOAD="$WIN32_PAYLOAD" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" \
+  node -r "$WIN32_PRELOAD" "$PARSER" 2>/dev/null)"
+HOST_OUT="$(PAYLOAD="$WIN32_PAYLOAD" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" \
+  node "$PARSER" 2>/dev/null)"
+HOST_WIN32="$(node -e 'process.stdout.write(process.platform === "win32" ? "yes" : "no")')"
+WIN32_READ=other
+case "$WIN32_OUT" in
+  ('Blocked `git add` against a repository OUTSIDE'*) WIN32_READ=deny ;;
+esac
+HOST_READ=other
+case "$HOST_OUT" in
+  ('') HOST_READ=allow ;;
+  ('Blocked `git add` against a repository OUTSIDE'*) HOST_READ=deny ;;
+esac
+HOST_WANT=allow
+[ "$HOST_WIN32" = yes ] && HOST_WANT=deny
+{ [ "$WIN32_READ" = deny ] && [ "$HOST_READ" = "$HOST_WANT" ]; } \
+  && check "W266 the rule loop reads a backslash path to git.exe as git on win32 only" PASS \
+  || check "W266 win32 program path reading (win32=$WIN32_READ host=$HOST_READ host-is-win32=$HOST_WIN32)" FAIL
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.

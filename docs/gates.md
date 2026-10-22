@@ -231,12 +231,24 @@ command to the user, because the host's auto-mode classifier refuses a command t
 resolve a program name in any letter case by default, Windows also with `.exe`, so the gate reads
 `GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, `DD of=` and a wrapper such as `ENV` or `Sudo`
 like their lowercase spelling, on every platform, and on Windows also behind a path written with
-backslashes. A path to `tee` counts like `tee`, and BSD sed's `-I` counts as in-place like `-i`.
-Shell builtins keep their case: the shell runs any other spelling of `cd`, `export`, `unset`,
-`read` or `printf` as an external program, which cannot change the shell's directory or variables.
+backslashes. A path to `tee` in command position counts like `tee`, while elsewhere in a command
+only the word `tee` itself does, so `grep -n TEE src/app.rs` stays a read; BSD sed's `-I` counts as
+in-place like `-i`. Shell builtins keep their case: the shell runs any other spelling of `cd`,
+`export`, `unset`, `read` or `printf` as an external program, which cannot change the shell's
+directory or variables. For the same reason the gate moves its tracked directory only for a `cd`
+the shell itself runs: the bare word, alone or behind `command`, `builtin` or `time`. `env cd`,
+`ENV cd`, `sudo cd` and `/usr/bin/cd` run a separate program and leave the directory where it was.
 The Session Control check reads wrappers and the `tee`, `sed -i` and `dd of=` channels the same
-way, so `ENV CLAUDE_CODE_SESSION_ID=…` or `TEE "$CLAUDE_ENV_FILE"` is refused whatever
-`hooks.bashWriteGate` says.
+way, also right after a quote, `(` or a backtick, so `ENV CLAUDE_CODE_SESSION_ID=…`,
+`TEE "$CLAUDE_ENV_FILE"` or `(tee "$CLAUDE_ENV_FILE")` is refused whatever `hooks.bashWriteGate`
+says, and the secret scan reads a Bash command spelled that way as a write.
+
+One spelling class is still read as written: a backslash or a quote inside a program word, such as
+`\git`, `g'i't`, `\env` or `\export`. The shell removes those characters before it looks the
+program up, the gate does not, so on macOS and Linux these spellings pass the Session Control check
+and every rule. On Windows the backslash cut reads `\git` and `\env` as `git` and `env`.
+`tests/structure/test-bash-source-write-gate.sh` pins the gap (W265), so closing it is a deliberate
+change.
 
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a

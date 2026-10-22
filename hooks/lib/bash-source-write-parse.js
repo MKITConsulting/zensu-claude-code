@@ -50,7 +50,7 @@
 // drops only that candidate, so a literal `-C ../sibling` beside it still denies.
 // `path.resolve` would otherwise splice the literal `$REPO` under the cwd and call
 // it in-project.
-// Rule (C) also anchors on `cmd0`, and the wrapper skip advances over WRAP names
+// Rule (C) also anchors on `program`, and the wrapper skip advances over WRAP names
 // and VAR=val only, so a wrapper's OWN flag or a shell keyword hides the verb:
 // `sudo -u me git …`, `nice -n 10 git …`, `for f in a b; do git …; done`. That is
 // pre-existing (`sed -i` and `dd` share the anchor) and is not the drifted-cwd
@@ -98,6 +98,7 @@ const SRC = new Set(
 // Transparent command wrappers — skipped so `env sed -i …` / `sudo dd of=…`
 // still resolve to the real verb (mirrors pre-bash-zensu-gate.sh).
 const WRAP = new Set("command builtin exec env sudo nohup nice time".split(" "));
+const SHELL_WRAP = new Set(["command", "builtin", "time"]);
 
 // Git subcommands that rewrite a repository's index or working tree. Rule (C)
 // denies these ONLY when the target repository escapes the session root, so the
@@ -515,11 +516,11 @@ function detectChannels(cmd) {
     .replace(/>\|/g, ">")
     .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
   const REDIR = /(\d*)>>?(?!\s*&\s*[\d-])(?!\s*['"]?\/dev\/(?:null|stdout|stderr|tty)\b)/;
-  const VERB = "(^|\\s|;|\\||&|/|\\\\)";
+  const VERB = "(^|\\s|;|\\||&|/|\\\\|\\(|`|'|\")";
   if (REDIR.test(collapsed)) found.add("redirect");
-  if (new RegExp(VERB + "tee(\\.exe)?(\\s|$)", "iu").test(cmd)) found.add("tee");
-  if (new RegExp(VERB + "sed(\\.exe)?\\s+(-[A-Za-z]*\\s+)*-i", "iu").test(cmd)) found.add("sed -i");
-  if (new RegExp(VERB + "dd(\\.exe)?\\s+[^\\n]*of=", "iu").test(cmd)) found.add("dd of=");
+  if (new RegExp(VERB + "tee(\\.exe)?['\"]?(\\s|$)", "iu").test(cmd)) found.add("tee");
+  if (new RegExp(VERB + "sed(\\.exe)?['\"]?\\s+(-[A-Za-z]*\\s+)*-i", "iu").test(cmd)) found.add("sed -i");
+  if (new RegExp(VERB + "dd(\\.exe)?['\"]?\\s+[^\\n]*of=", "iu").test(cmd)) found.add("dd of=");
   if (/(?<!<)<<(?!<)[-~]?\s*['"]?[A-Za-z_]/.test(cmd)) found.add("heredoc");
   return Array.from(found).join("\n");
 }
@@ -1049,13 +1050,15 @@ function main() {
     if (!rest.length) continue;
 
     // Skip transparent wrappers (env/sudo/command/exec/…) and env's VAR=val args
-    // so a wrapped builtin still resolves to its real verb for the cmd0 gates.
+    // so a wrapped program still resolves to its real verb for the program gates.
     // `env VAR=val git …` carries its assignments here rather than in envp. They
     // are collected separately so rule (C) can read GIT_DIR/GIT_WORK_TREE off both
     // spellings without widening which prefixes count as an escape hatch.
     let ci = 0;
+    let inShell = true;
     const wrapEnv = {};
     while (ci < rest.length && WRAP.has(programName(unquote(rest[ci])))) {
+      if (!SHELL_WRAP.has(unquote(rest[ci]))) inShell = false;
       ci++;
       while (ci < rest.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[ci])) {
         const eq = rest[ci].indexOf("=");
@@ -1063,8 +1066,9 @@ function main() {
         ci++;
       }
     }
-    const cmd0 = ci < rest.length ? unquote(rest[ci]).split("/").pop() : "";
-    const program = ci < rest.length ? programName(unquote(rest[ci])) : "";
+    const word = ci < rest.length ? unquote(rest[ci]) : "";
+    const cmd0 = inShell && word.indexOf("/") === -1 ? word : "";
+    const program = programName(word);
 
     // `cd` updates the scoped cwd BEFORE the escape-hatch check — an escaped
     // segment may still change the directory for the commands that follow it.
@@ -1126,7 +1130,7 @@ function main() {
         else if (rest[k + 1] !== undefined) { targets.push([rest[k + 1], "redirect"]); k++; }
       }
     }
-    const teeIdx = rest.findIndex((t) => programName(unquote(t)) === "tee");
+    const teeIdx = program === "tee" ? ci : rest.findIndex((t) => unquote(t) === "tee");
     if (teeIdx !== -1) {
       for (let k = teeIdx + 1; k < rest.length; k++) {
         const t = rest[k];

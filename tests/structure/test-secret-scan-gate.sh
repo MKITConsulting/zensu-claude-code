@@ -359,6 +359,9 @@ if is_deny "$OUT"; then check "F7c escape token inside heredoc BODY does not dis
 OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456"}}')"
 [ -z "$OUT" ] && check "F8 Bash without write channel -> allow" PASS || check "F8 Bash without write channel -> allow" FAIL
 
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456 | TEE creds.env"}}')"
+case "$OUT" in *"$DENY"*github-token*) check "F8b an uppercase TEE is a write channel, so the scan runs -> deny (rule named)" PASS;; *) check "F8b uppercase TEE write channel (got '$OUT')" FAIL;; esac
+
 OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
 case "$OUT" in *"$DENY"*github-token*"A PowerShell command is scanned as a whole"*) check "F8p PowerShell write with GitHub token -> deny (rule and whole-text scope named)" PASS;; *) check "F8p PowerShell write with GitHub token (got '$OUT')" FAIL;; esac
 

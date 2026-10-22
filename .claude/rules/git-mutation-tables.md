@@ -322,28 +322,44 @@ isWindows)` keeps the part after the last `/` (on win32 also after the last `\`)
 suffix in any case and folds with `toUpperCase().toLowerCase()`, on every platform: macOS and
 Windows resolve `GIT`, `git.exe` or `ENV` as the lowercase program, and the parser cannot know the
 file system of each `PATH` directory. `WRAP` matches on it in `detectControlMutation` and in the
-rule loop, a folded `program` decides `git`, `sed` and `dd`, and the tee channel is any token whose
-program name is `tee`, a path to it included. `cmd0` keeps the written basename for the builtins
-(`cd`, `export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `printf`, `read`), because the
-shell runs any other spelling as an external program, which cannot change the shell's directory or
-variables: folding them would add only false denies, and folding `cd` would move the tracked cwd
-where the shell's stays. `detectChannels` matches `tee`, `sed -i` and `dd of=` with the `iu` flags,
-an optional `.exe` and a backslash before the name, so the always-on `CLAUDE_ENV_FILE` deny reads
-them too. BSD sed's `-I` edits in place like `-i` and counts in both readers. The shell's quote
-removal is NOT applied: a fully quoted word loses its quotes through `unquote`, but a backslash or a
-quote inside the word (`\git`, `g'i't`, `\env`, `\export`) is read as written, as on the base, so
-those spellings pass the always-on check and every rule; only `detectChannels` sees a backslash
-before `tee`, `sed` or `dd`. Other gates read
-program names with code of their own; nothing compares them with this one. Pins: the program-name
-cases of `tests/structure/git-repo-escape.test.js` and W235-W253 in
-`tests/structure/test-bash-source-write-gate.sh`. **Version: `minor`** — the always-on Session
-Control check refuses calls it let through, which changes the capability set of every session a
-newer installation would serve (`.claude/rules/runtime-lineage.md`).
+rule loop, and a folded `program` decides `git`, `sed` and `dd`. The tee channel folds only in
+command position (`program === "tee"`); elsewhere in the segment it stays the literal word `tee`,
+because a folded scan of every token made `grep -n TEE src/app.rs` or a `drivers/tee` operand a
+tee write. In `detectControlMutation`, `cmd0` keeps the written basename for the builtins
+(`export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `printf`, `read`), because the shell
+runs any other spelling as an external program, which cannot change the shell's variables; an
+over-deny there is the safe direction. The rule loop is stricter, because its `cmd0` moves the
+tracked cwd (`cd`) and carries `GIT_DIR`/`GIT_WORK_TREE` (`export`, `declare -x`, `typeset -x`),
+and a wrong move is an allow: `cmd0` is the word as written only when it holds no `/` and every
+wrapper skipped before it is exactly `command`, `builtin` or `time` (`SHELL_WRAP`), the three that
+keep a builtin in the current shell, and empty otherwise. Folding the wrapper skip without that
+rule let `ENV cd /tmp; sed -i … src/app.rs` pass rule (A), and lowercase `env cd`, `sudo cd` and
+`/usr/bin/cd` already moved the tracked cwd on the base. `detectChannels` matches `tee`, `sed -i`
+and `dd of=` with the `iu` flags, an optional `.exe` and an optional closing quote, after a
+backslash, a quote, `(` or a backtick as well as the earlier boundaries, so the always-on
+`CLAUDE_ENV_FILE` deny and the secret scan's Bash trigger (`hooks/lib/secret-scan-decide.js` scans
+a Bash command only when the detector reports a channel) both read those spellings. BSD sed's `-I`
+edits in place like `-i` and counts in both readers. The shell's quote removal is NOT applied to a
+program word: `unquote` strips only leading and trailing quotes, so a backslash or a quote inside
+the word (`\git`, `g'i't`, `\env`, `\export`) is read as written, as on the base. On POSIX those
+spellings pass the always-on check and every rule; on win32 the backslash cut reads `\git` and
+`\env` as `git` and `env`, while `g'i't` and `\export` pass there too. W265 pins `g'i't`, and
+`docs/gates.md` names the gap. The env-file PATH comparison in `commandRefersToControlPath`
+lowercases only a drive-letter target, so on a case-insensitive POSIX volume a case-variant
+literal spelling of the env file is not refused (W74 pins that ALLOW). Other gates read program
+names with code of their own (`commandName` in `subagent-shell-guard-v1.js`, which folds only on
+darwin and win32 and reads quote-removed words, `commandBase` in `powershell-command-v1.js`,
+`commandName` in `work-order-v1.js`); nothing compares them with this one. Pins: the program-name
+cases of `tests/structure/git-repo-escape.test.js`, W235-W266 in
+`tests/structure/test-bash-source-write-gate.sh` and F8b in
+`tests/structure/test-secret-scan-gate.sh`. **Version: `minor`** — the always-on Session Control
+check refuses calls it let through, which changes the capability set of every session a newer
+installation would serve (`.claude/rules/runtime-lineage.md`).
 
 **Cross-file couplings — stated as a CRITERION, never a count**, because the count was "Three" while the list already held four: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
-`cmd0` anchoring depends on — is hand-duplicated as a JS literal in
+`program` anchoring depends on — is hand-duplicated as a JS literal in
 `hooks/pre-bash-zensu-gate.sh`, where it drives that gate's token scan. The CLI gate also
 unwraps through `WRAPPERS` in `hooks/lib/subagent-shell-guard-v1.js`, a larger set, and gates
 what either reading finds, so `timeout`, `xargs` or `stdbuf` in front of a command is

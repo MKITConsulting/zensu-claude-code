@@ -14,11 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default: in any letter case, with an optional `.exe` suffix and behind a path, on Windows also
   behind a path written with backslashes. The Session Control check, which runs whatever
   `hooks.bashWriteGate` says, let `ENV CLAUDE_CODE_SESSION_ID=… …`, `Sudo ZENSU_PROJECT_ROOT=… …`
-  and a write to `CLAUDE_ENV_FILE` through `TEE`, `SED -i` or `DD of=` through; they are now
-  refused like their lowercase spelling. With the gate opted in, rules (A), (B) and (C) also read
-  `GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, a path to `tee`, `DD of=`, BSD sed's `-I`
-  and a wrapper in any case. Shell builtins such as `cd`, `export`, `unset`, `read` and `printf`
-  keep their case, because the shell runs any other spelling as an external program.
+  and a write to `CLAUDE_ENV_FILE` through `TEE`, `SED -i` or `DD of=` through, and missed `tee`,
+  `sed -i` and `dd of=` written in quotes, in a subshell or in a command substitution; they are now
+  refused like their plain lowercase spelling. The secret scan reads such a Bash command as a write
+  too, so it now scans it. With the gate opted in, rules (A), (B) and (C) also read `GIT`,
+  `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE` or a path to `tee` in command position, `DD of=`,
+  BSD sed's `-I` and a wrapper in any case. Shell builtins such as `cd`, `export`, `unset`, `read`
+  and `printf` keep their case, because the shell runs any other spelling as an external program,
+  and the gate now moves its tracked directory only for a `cd` the shell itself runs: `env cd`,
+  `sudo cd` and `/usr/bin/cd` no longer move it, so a write after them is judged where it really
+  lands. A backslash or a quote inside a program word (`\git`, `g'i't`) is still read as written,
+  as `docs/gates.md` §"Source-Write Gate" records.
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
   `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
   root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
