@@ -182,18 +182,19 @@
   <p class="lede">How a Zensu chain could span several repositories without giving up the one
   trusted project root — and how a review sitting on top of it can see contract breaks between
   those roots.</p>
-  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are BLOCKED.</strong> Stage 1
+  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are REDESIGNED, NOT BUILT.</strong> Stage 1
   ships the detect-and-refuse half: the terminus judges the edit-landing receipt's verdict, a logged
   claim arms that requirement even when the anchor's tree is clean, a claim resolving outside the
   audited root fails the audit and names the foreign root, and <code>/zensu:doctor</code> carries a
   topology row. <strong>Which half of stage 1 is universally live is narrower than “stage 1 is implemented”:</strong> the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still beginning with <code>/</code>. A foreign root outside every home directory and the project root is detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not, and one under another user's home or <code>/root</code> becomes <code>&lt;home&gt;</code> and names no root either. Nothing else here is
-  implemented. The carrier question of the specification's §6.1.1 was answered on
-  2026-09-20 — the Session Control record, sealed by an interactive confirmation at arming, behind a
-  containment gate on the Bash channel into the plugin-data store — but that is a decision, not a
-  mechanism. Stage 2 must not be built until §6.1.1's three preconditions are built in order. The
-  workflow document is ruled out as the carrier: it is writable from inside the session and carries
-  no integrity check, so it cannot hold a capability. Read the
-  staging below as blocked work, not as a plan ready to execute.</p>
+  implemented. On 2026-10-21 stages 2 and 3 were redesigned. The sealed carrier the
+  specification's §6.1.1 chose on 2026-09-20 is superseded, because its premise moved: the Bash
+  source-write gate it guarded became opt-in and off by default on 2026-10-03. The list of code roots,
+  <code>codeRoots</code>, now lives in the workflow document as a validated declaration that bounds
+  accidents, not intent — the bar the receipt and the run log beside it already meet. The cross-repo
+  check becomes one more perspective of the review fan-out instead of a new stage. Read the staging
+  below as designed work that ships in five pull requests behind a dark-launch switch, not as
+  behavior.</p>
 </header>
 
 <main>
@@ -290,7 +291,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:192 · zensu-log.sh:1618</p>
+      <p class="src">zensu-edit-landing.sh:192 · zensu-log.sh:1620</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -313,7 +314,7 @@
       <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
       <code>--chain-done</code> zero-change terminus now counts the same way. A chain that
       claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:1634 · zensu-log.sh:1596-1673 · zensu-log.sh:118-119</p>
+      <p class="src">zensu-log.sh:1636 · zensu-log.sh:1598-1675 · zensu-log.sh:118-119</p>
     </div>
   </div>
 </section>
@@ -321,7 +322,8 @@
 <section>
   <h2><span class="num">3</span> Proposal: one anchor, several code roots</h2>
   <p class="sub">The anchor is unchanged and keeps everything that carries identity and state. A
-  declared list of further roots is added, read by a small set of consumers.</p>
+  declared list of further roots is added, and the consumers that enumerate, count or confine
+  read the union.</p>
 
   <figure>
     <div class="scroll" tabindex="0" role="group" aria-labelledby="d2-cap">
@@ -344,7 +346,7 @@
             <text class="t-ink"  x="305" y="56">Review packet</text>
             <text class="t-ink3" x="305" y="72" font-size="11">per root</text>
             <text class="t-ink"  x="475" y="56">Write gate</text>
-            <text class="t-ink3" x="475" y="72" font-size="11">within(ANY)</text>
+            <text class="t-ink3" x="475" y="72" font-size="11">opt-in · within(ANY)</text>
             <text class="t-ink"  x="645" y="56">Terminus</text>
             <text class="t-ink3" x="645" y="72" font-size="11">the union</text>
           </g>
@@ -360,7 +362,7 @@
           <rect class="box-anchor" x="180" y="140" width="420" height="62" rx="9"/>
           <g text-anchor="middle">
             <text class="t-ink bold-svg" x="390" y="166" font-size="14.5">Union: anchor + codeRoots[]</text>
-            <text class="t-ink2" x="390" y="188" font-size="11.5">must freeze at arming · carrier chosen, not built</text>
+            <text class="t-ink2" x="390" y="188" font-size="11.5">validated at arming · bounds accidents, not intent</text>
           </g>
 
           <g class="flow">
@@ -380,11 +382,11 @@
 
             <text class="t-ink bold-svg" x="390" y="270" font-size="13">Code root</text>
             <text class="t-ink3" x="390" y="288" font-size="11">backend/ — worktree</text>
-            <text class="t-ink2 code-svg" x="390" y="309" font-size="11">backend:src/…</text>
+            <text class="t-ink2 code-svg" x="390" y="309" font-size="11">@backend/src/…</text>
 
             <text class="t-ink bold-svg" x="630" y="270" font-size="13">Code root</text>
             <text class="t-ink3" x="630" y="288" font-size="11">frontend/ — worktree</text>
-            <text class="t-ink2 code-svg" x="630" y="309" font-size="11">frontend:src/…</text>
+            <text class="t-ink2 code-svg" x="630" y="309" font-size="11">@frontend/src/…</text>
 
             <text class="t-ink3" x="390" y="362" font-size="11.5">The anchor alone still carries the session's identity. The satellites carry only code.</text>
           </g>
@@ -395,9 +397,9 @@
     <details id="d2-desc" class="longdesc">
       <summary>Text description of the diagram</summary>
       <ol>
-        <li>The same four consumers — Edit landing with labelled claims, Review packet per root, Write gate matching within any declared root, Terminus counting the union — now read one set.</li>
-        <li>That set is the union of the anchor and codeRoots[], which must freeze at arming and be immutable afterwards — a requirement the chosen carrier satisfies only once §6.1.1's preconditions are built.</li>
-        <li>It resolves to three trees: the anchor (orchestrator repository, holding state, logs, record and doctor), and two code roots, backend/ and frontend/, whose claims carry a root label such as backend:src/… The anchor alone still carries the session's identity; the satellites carry only code.</li>
+        <li>The same four consumers — Edit landing with labelled claims, Review packet per root, the opt-in Write gate matching within any declared root, Terminus counting the union — now read one set.</li>
+        <li>That set is the union of the anchor and codeRoots[], validated at arming, held to its string rules on every read and declared in the workflow document, a declaration that bounds accidents, not intent.</li>
+        <li>It resolves to three trees: the anchor (orchestrator repository, holding state, logs, record and doctor), and two code roots, backend/ and frontend/, whose claims carry a root label such as @backend/src/… The anchor alone still carries the session's identity; the satellites carry only code.</li>
       </ol>
     </details>
   </figure>
@@ -405,11 +407,12 @@
 
 <section>
   <h2><span class="num">4</span> The consumers that read the union</h2>
-  <p class="sub">These are the consumers whose ENUMERATION or CONFINEMENT changes: the first four
-  carry multi-repo, the fifth carries the cross-root review of section 5.
-  <code>session-trail</code> also reads the same list and is covered in section 6; it is left out
-  here because it gains no new boundary, only more roots to report on. Everything else — record,
-  state directory, logs, phase gate, doctor — stays untouched at the anchor.</p>
+  <p class="sub">These are the consumers whose ENUMERATION or CONFINEMENT changes most visibly:
+  the first four carry multi-repo, the fifth lets the reviewers of section 5 read the declared
+  roots. The specification's §6.3 lists the rest — the full suite and its CI deferral, acceptance
+  verification, finding verification, the protected <code>.zensu</code> directories, the doctor
+  row and <code>session-trail</code>, which section 6 covers. The Session Control record, the
+  workflow document and the run log stay with the anchor.</p>
 
   <div class="tablewrap" tabindex="0" role="group" aria-labelledby="roster-cap">
     <table>
@@ -420,37 +423,48 @@
       <tbody>
         <tr>
           <th scope="row"><strong>Edit landing</strong><span class="tag flat inline">stage 2</span></th>
-          <td>Enumerate the union. Claims carry a root label instead of being merely repo-relative,
-          otherwise <code>src/foo.ts</code> is ambiguous. Exactly <strong>one</strong> merged
-          receipt, written beside the anchor's workflow document.</td>
+          <td>Enumerate each root's change set. A code-root claim carries its root label,
+          <code>@backend/src/foo.ts</code>, instead of being merely repo-relative, otherwise
+          <code>src/foo.ts</code> is ambiguous; a claim that reaches a declared root under any other
+          spelling grades <code>UNVERIFIED (respell)</code>. The receipt keeps its schema and its
+          shape, with <code>clean</code> judged over the union.</td>
           <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/references/execution.md:9</td>
         </tr>
         <tr>
           <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
-          <td>Enumerate <code>changed_files</code> per root and emit them label-prefixed. Without it
-          no reviewer sees the code.</td>
+          <td>A new optional <code>code_roots</code> field names each declared root, and
+          <code>changed_files</code> carries the <code>@label/</code> paths. Without them no reviewer
+          sees the code; a packet without the field has no code roots and stays valid.</td>
           <td class="where mono">tdd/references/review-chain.md · step 10.2</td>
         </tr>
         <tr>
           <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
-          <td><code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B)
-          and rule (C).</td>
+          <td>While the opt-in gate is on (<code>hooks.bashWriteGate</code>),
+          <code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B) and
+          rule (C), and the temp carve-out stops exempting a temp entry that contains a code root. At
+          its default the gate judges nothing.</td>
           <td class="where mono">bash-source-write-parse.js:885<br>bash-source-write-parse.js:931</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
-          <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
-          counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
-          narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
-          the <code>--chain-done</code> zero-change terminus unchanged.</td>
-          <td class="where mono">zensu-log.sh:1672<br>zensu-log.sh:118-119</td>
+          <td>All four callers of the change count — <code>--tdd-complete</code>, both
+          <code>--chain-done</code> spellings and <code>--code-review-done</code> — and the Stop
+          probe count the union: any <code>unavailable</code> root makes it
+          <code>unavailable</code>, any non-zero root makes it non-zero, and a code root never
+          answers <code>unknown</code>. Otherwise a clean anchor still closes an empty chain. Stage
+          1, item 2 already arms <code>--tdd-complete</code> on a logged claim.</td>
+          <td class="where mono">zensu-log.sh:1674<br>zensu-log.sh:118-119</td>
         </tr>
         <tr>
-          <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
+          <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 2</span></th>
           <td>Today it confines every reviewer path to the project root — “file access must remain
           inside the immutable project root” — and forbids absolute Grep patterns and
-          <code>..</code>. Without an exception no reviewer can read the satellites even when the
-          packet names them.</td>
+          <code>..</code>. Stage 2 admits reads inside the declared roots and adds every root's
+          <code>.zensu</code> to the protected list, for reviewers, the PLM profile and neutral
+          subagents alike, and it refuses a direct read of a <code>.zensu</code> below the anchor
+          whatever the list says. The pattern rule is unchanged, and a root is searched like the anchor: through a
+          subdirectory other than <code>.zensu</code>, because the traversal check refuses a search
+          root that contains a protected directory.</td>
           <td class="where mono">reviewer-capability-v1.js:633<br>reviewer-capability-v1.js:595-597</td>
         </tr>
       </tbody>
@@ -459,14 +473,15 @@
 </section>
 
 <section>
-  <h2><span class="num">5</span> Cross-root review as its own stage</h2>
-  <p class="sub">Each root finishes its own review exactly as today. Only then does a new, single
-  stage run that looks solely at relations between roots — and then the chain closes.</p>
+  <h2><span class="num">5</span> Cross-root review as one more perspective</h2>
+  <p class="sub">The redesign adds no stage. The review fan-out reads the union, one more
+  perspective, <code>crossrepo</code>, looks solely at relations between roots, and the chain then
+  closes exactly as today.</p>
 
   <figure>
     <div class="scroll" tabindex="0" role="group" aria-labelledby="d3-cap">
       <svg class="diagram" viewBox="0 0 880 380" role="img" aria-labelledby="d3-title" aria-describedby="d3-desc">
-        <title id="d3-title">Cross-repo review as a stage between convergence and terminus</title>
+        <title id="d3-title">Cross-repo review as a perspective inside the review fan-out</title>
         <defs>
           <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -479,11 +494,11 @@
           <rect class="box-plain"       x="30" y="180" width="250" height="52" rx="8"/>
           <g text-anchor="middle">
             <text class="t-ink"  x="155" y="62">anchor — orchestrator</text>
-            <text class="t-ink3" x="155" y="80" font-size="11">per-repo review converged</text>
+            <text class="t-ink3" x="155" y="80" font-size="11">changed files, anchor paths</text>
             <text class="t-ink"  x="155" y="132">backend/ — code root</text>
-            <text class="t-ink3" x="155" y="150" font-size="11">per-repo review converged</text>
+            <text class="t-ink3" x="155" y="150" font-size="11">changed files as @backend/…</text>
             <text class="t-ink"  x="155" y="202">frontend/ — code root</text>
-            <text class="t-ink3" x="155" y="220" font-size="11">per-repo review converged</text>
+            <text class="t-ink3" x="155" y="220" font-size="11">changed files as @frontend/…</text>
           </g>
 
           <g class="flow">
@@ -495,9 +510,9 @@
 
           <rect class="box-anchor" x="400" y="140" width="250" height="112" rx="9"/>
           <g text-anchor="middle">
-            <text class="t-ink bold-svg" x="525" y="168" font-size="14">Cross-repo review</text>
-            <text class="t-ink2" x="525" y="190" font-size="11.5">reads the union under its own lease</text>
-            <text class="t-ink2" x="525" y="208" font-size="11.5">reports findings — demands no test</text>
+            <text class="t-ink bold-svg" x="525" y="168" font-size="14">Review fan-out</text>
+            <text class="t-ink2" x="525" y="190" font-size="11.5">every perspective reads the union</text>
+            <text class="t-ink2" x="525" y="208" font-size="11.5">crossrepo: relations between roots</text>
             <text class="t-acc code-svg" x="525" y="234" font-size="11">runs in strict AND vanilla</text>
           </g>
 
@@ -517,20 +532,20 @@
         </g>
       </svg>
     </div>
-    <figcaption id="d3-cap">One stage between convergence and terminus. The per-repo reviews are unchanged.</figcaption>
+    <figcaption id="d3-cap">No new stage. One fan-out reads every root, and crossrepo joins its panel.</figcaption>
     <details id="d3-desc" class="longdesc">
       <summary>Text description of the diagram</summary>
       <ol>
-        <li>Three per-repository reviews converge independently: the anchor (orchestrator), backend/ and frontend/.</li>
-        <li>They feed a single cross-repo review, which reads the union under its own lease, reports findings and demands no test, and runs in both strict and vanilla mode.</li>
-        <li>Only then does the chain reach its terminus, --chain-done.</li>
+        <li>Three trees feed one review: the anchor (orchestrator) with its own paths, and backend/ and frontend/, whose changed files reach the packet as @backend/… and @frontend/… paths.</li>
+        <li>The review fan-out reads the union. One more perspective, crossrepo, spawned only for a chain with code roots, looks solely at relations between roots; like every perspective it reports findings, demands no test, and runs in both strict and vanilla mode.</li>
+        <li>The chain then reaches its terminus, --chain-done, exactly as a single-root chain does.</li>
         <li>Findings return as an ordinary fix round in the affected root.</li>
       </ol>
     </details>
   </figure>
 
   <div class="note">
-    <strong>Why this stage is mode-independent.</strong>
+    <strong>Why this perspective is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
     runs “exactly as written” (<span class="mono">skills/tdd/references/modes.md:7</span>). The decisive difference
@@ -541,21 +556,25 @@
 
   <div class="note">
     <strong>The exception is data-driven, not blanket.</strong>
-    <p>The capability confinement is not opened but redirected: what is allowed is the union of the
-    <code>codeRoots</code> frozen at arming — not “anywhere”. It still confines, only to a
-    previously declared area. This stage's lease carries exactly that list, and the per-repo
-    reviewers keep their narrower confinement.</p>
+    <p>The capability confinement is not opened but redirected: what is allowed is the anchor plus
+    the declared roots — a list arming validated and every read re-checks as strings — not
+    “anywhere”. It still confines, only to a previously declared area, and a direct read of
+    every <code>.zensu</code> below the anchor or in a declared root is refused; a search rooted
+    above an undeclared nested work tree still reaches that tree's <code>.zensu</code>, a
+    residual the specification names. No reviewer needs a lease of its
+    own: the main thread already reads any of these files, so a reviewer that reads a validated
+    work tree gains nothing the session lacks.</p>
   </div>
 
   <div class="note">
-    <strong>The expensive part is the chain state machine.</strong>
-    <p>An extra stage between convergence and terminus means a new chain shape in
-    <code>classifyChain()</code>. The repository conventions name roughly eight consumers that must
-    travel with it: <code>--chain-status</code>, <code>--chain-recover</code>, the refusal-hint
-    renderer, the Stop enforcer, the doctor renderer, the ticket issuer, the rearm writer and the
-    <code>reviewRearm</code> validator.</p>
-    <p>The validator is the critical one: on an unexpected key set it rejects the entire workflow
-    document and fails every hook closed. A schema change has to land there first.</p>
+    <strong>No new chain shape, so the state machine stays as it is.</strong>
+    <p>The 2026-09-20 design put a stage between convergence and terminus, which meant a new chain
+    shape in <code>classifyChain()</code> and roughly eight consumers travelling with it, the
+    <code>reviewRearm</code> validator the critical one: on an unexpected key set it rejects the
+    entire workflow document and fails every hook closed.</p>
+    <p>A perspective needs none of that. <code>chainShape</code> reads workflow flags and the rearm
+    receipt, never panel state, and the fan-out runs in the main thread before the one ticketed
+    reviewer spawn, so a multi-root chain classifies exactly as a single-root chain does.</p>
   </div>
 
   <h3 class="minor">A complement, not a replacement: the mechanical detector</h3>
@@ -622,47 +641,55 @@
     <strong>The fix costs no schema — but it is not free.</strong>
     <p>This fix adds no write of its own — <code>trail.mjs</code>'s only write channel is the lineage ledger. It may read the anchor's workflow document, take
     the root list, and call <code>gitState</code> once per root. No new registry, no
-    change to <code>~/.claude</code>, no lineage cost. That places it in stage 2, not stage 3.</p>
+    change to <code>~/.claude</code>, no lineage cost. That places it in stage 2, in the pull
+    request that also carries the review side.</p>
     <p>The cost worth naming, as &sect;6.4 of the specification insists: <code>trail.mjs</code> may
-    run outside any session and outside every hook, so teaching it to read the root list makes it a
-    second consumer of the &sect;6.1.1 carrier, running <code>git -C</code> in paths
-    that carrier names — and until that section's precondition 1 ships, that carrier is still
-    writable from inside the session.</p>
+    run outside any session and outside every hook, so teaching it to read the root list makes it
+    one more consumer of a model-declared list, running <code>git -C</code> in paths that list
+    names. It therefore reads the list through the same validating reader as every other consumer,
+    and runs git with the read-only prefix that takes no index lock and runs no fsmonitor hook.</p>
   </div>
 </section>
 
 <section>
-  <h2><span class="num">7</span> Two constraints — and why the second is not met</h2>
+  <h2><span class="num">7</span> Two constraints — and how the redesign meets them</h2>
 
   <div class="note">
-    <strong>The root list must be frozen at arming — a carrier is chosen, and nothing holds it yet.</strong>
-    <p>It must not come from an environment variable and must not be derived from model-authored
-    text, because it governs the write gate and the capability confinement: extending it is a
-    capability grant, not configuration. Every root must canonicalize, be a real work tree, and be
-    neither a parent of the anchor nor a filesystem root.</p>
-    <p>The workflow document is <em>not</em> that carrier. It is writable from inside the session and
-    its validator is shape-only, so the gate would read its own boundary from a file the gated party
-    can rewrite. <code>vanilla</code> is not a precedent either: that flag only relaxes TDD
-    discipline, where a prose control is proportionate. The specification's §6.1.1 now answers this
-    as two questions rather than one — the Session Control record for integrity, an interactive
-    confirmation at arming for provenance — and §8.1 states what that pair does not buy: the record
-    does not authenticate its own contents either, so the list's security rests on the records
-    directory being unwritable. Stage 2 stays BLOCKED until §6.1.1's three preconditions are built
-    in order, the first of which is the containment gate that makes that directory unwritable.</p>
+    <strong>The root list is validated at arming, and it bounds accidents, not intent.</strong>
+    <p>The 2026-09-20 design treated the list as a capability grant: it governed the Bash write
+    gate and the reviewer confinement, so it had to come from the operator and live where the
+    session could not rewrite it. Both premises moved. The write gate became opt-in and off by
+    default on 2026-10-03, and a reviewer that reads a validated work tree gains nothing the main
+    thread lacks, because the main thread already reads those files.</p>
+    <p>So the list is a declaration held to the bar of the receipt and the run log beside it:
+    <code>codeRoots</code> in the workflow document bounds accidents, not intent. Every root must
+    canonicalize to the top of a git work tree, be neither the anchor, an ancestor of it nor a
+    filesystem root, be neither the home directory nor one of its ancestors, stay clear of the
+    plugin, its data and the operator's configuration in both directions, and overlap no other
+    live session or chain. A rejected entry refuses the arming. Every read re-checks the rules a
+    string comparison decides, so a hand edit into a shape they refuse falls back to the anchor
+    alone; the overlap with other sessions is judged at arming only.</p>
+    <p>The sealed pair of §6.1.1 — the Session Control record for integrity, an interactive
+    confirmation at arming for provenance — stays documented as history and as the path to a later
+    strict-evidence mode. §8.1 states why even that pair would not have bought intent resistance:
+    the record does not authenticate its own contents either.</p>
   </div>
 
   <div class="note">
     <strong>One field in the workflow document costs a minor release.</strong>
     <p>The repository's runtime-lineage rule makes every schema change a breaking change while the
     plugin sits at major 0. A <code>patch</code> would make a compatibility promise the code cannot
-    keep. This holds for <code>codeRoots[]</code> as much as for the new chain shape.</p>
+    keep. This holds for <code>codeRoots[]</code>, and the redesign adds no chain shape that would
+    cost a second one. The set ships as one <code>minor</code> in five pull requests, and arming
+    refuses <code>--code-root</code> until the last of them flips the dark-launch switch.</p>
   </div>
 </section>
 
 <section>
   <h2><span class="num">8</span> Staging</h2>
   <p class="sub">Stage one closes the silent pass and needs no new field. Stage two makes multi-repo
-  usable. Stage three delivers the actual payoff.</p>
+  usable, and since the redesign it also carries what stage three was for: the cross-repo
+  check.</p>
 
   <div class="stages">
     <div class="stage">
@@ -679,15 +706,16 @@
     <div class="stage">
       <span class="tag flat">Stage 2</span>
       <h3>Declared code roots</h3>
-      <p class="cost">schema change · minor</p>
+      <p class="cost">workflow-state field · minor · five pull requests</p>
       <ul>
-        <li><code>codeRoots[]</code> frozen at arming, in a carrier the session cannot rewrite —
-        <em>not</em> the workflow document, which &sect;8.1 rules out, but the Session Control record
-        that &sect;6.1.1 chose on 2026-09-20. Building that section's three preconditions is the
-        precondition of this stage, not part of it.</li>
-        <li>Root labels in the claim format and in the merged receipt.</li>
-        <li>The four multi-repo consumers from section 4 (the fifth, the capability confinement, belongs to stage 3).</li>
-        <li>Validation of each root before it enters the write gate or a lease.</li>
+        <li><code>codeRoots[]</code> declared at arming with <code>--code-root</code>, validated then,
+        re-checked as strings on every read, and kept in the workflow document as a declaration that
+        bounds accidents, not intent.</li>
+        <li>The <code>@label/</code> spelling in claims, round scopes, ledger anchors and the packet.</li>
+        <li>Every consumer from section 4, the capability confinement included, plus the full suite,
+        acceptance verification and the doctor row per root.</li>
+        <li>Every root's <code>.zensu</code> protected, a direct read of any <code>.zensu</code>
+        below the anchor refused, and every git call into a code root read-only.</li>
         <li><code>session-trail</code> reads <code>codeRoots[]</code> and calls <code>gitState</code>
         per root so the handover brief is true.</li>
       </ul>
@@ -695,12 +723,11 @@
     <div class="stage">
       <span class="tag flat">Stage 3</span>
       <h3>Cross-repo review</h3>
-      <p class="cost">new chain shape · minor</p>
+      <p class="cost">folded into stage 2 · no new chain shape</p>
       <ul>
-        <li>A new stage between per-repo convergence and terminus, once per chain.</li>
-        <li>Its own reviewer type, leased to the root union.</li>
-        <li>Capability confinement data-driven rather than blanket.</li>
-        <li>A new shape in <code>classifyChain()</code> plus its eight consumers.</li>
+        <li>One more perspective, <code>crossrepo</code>, inside the existing review fan-out.</li>
+        <li>Spawned only for a chain with code roots; a single-root chain prints nothing new.</li>
+        <li>No reviewer type, no lease and no shape in <code>classifyChain()</code> of its own.</li>
         <li>Optionally preceded by step 6b part (b) at warning level.</li>
       </ul>
     </div>
@@ -711,13 +738,12 @@
 
 <footer>
   Every code site cited here was read in the session that authored this page; the line numbers are
-  for that state of the tree. Two claims on this page rest on inference rather than a reading, and
-  the specification discloses both: the <code>classifyChain</code> consumer count comes from the
-  repository conventions in <span class="mono">CLAUDE.md</span>, and the two
-  <code>--chain-done</code> assertions — in the section&nbsp;4 terminus row and in the section&nbsp;5
-  diagram — were inferred from a comment beside that command, never from its implementation.
-  Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until §6.1.1's
-  preconditions for the carrier it chose are built in order. Companion documents:
+  for that state of the tree. The 2026-10-21 redesign replaced the two inferences an earlier
+  revision disclosed: the four callers of the change count were read, and the chain shape was read
+  in <code>chainShape</code> rather than taken from the repository conventions. The figure of
+  roughly eight <code>classifyChain</code> consumers in section&nbsp;5 still comes from those
+  conventions. Proposal — stage 1 is implemented, and stages 2 and 3 are REDESIGNED, NOT BUILT:
+  they ship in five pull requests behind a dark-launch switch. Companion documents:
   <a href="multi-repo-chains-spec.md">the specification</a> and
   <a href="multi-repo-chains-principle.html">the principle page</a>.
 </footer>
