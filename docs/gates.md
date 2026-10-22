@@ -227,6 +227,17 @@ the deny texts no longer name that prefix — they name `hooks.bashWriteGate` an
 command to the user, because the host's auto-mode classifier refuses a command that carries it.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
 
+**A program name counts the way a case-insensitive file system resolves it.** macOS and Windows
+resolve a program name in any letter case by default, Windows also with `.exe`, so the gate reads
+`GIT`, `git.exe`, `/usr/bin/GIT`, `SED -i`, `TEE`, `DD of=` and a wrapper such as `ENV` or `Sudo`
+like their lowercase spelling, on every platform, and on Windows also behind a path written with
+backslashes. A path to `tee` counts like `tee`, and BSD sed's `-I` counts as in-place like `-i`.
+Shell builtins keep their case: the shell runs any other spelling of `cd`, `export`, `unset`,
+`read` or `printf` as an external program, which cannot change the shell's directory or variables.
+The Session Control check reads wrappers and the `tee`, `sed -i` and `dd of=` channels the same
+way, so `ENV CLAUDE_CODE_SESSION_ID=…` or `TEE "$CLAUDE_ENV_FILE"` is refused whatever
+`hooks.bashWriteGate` says.
+
 **While the gate is enabled, the expected *legitimate* hit of rule (C) is a cross-worktree takeover.**
 At its default (off) nothing on this page refuses the commit or a `git worktree move` out of a
 session that was handed over; what still keys on the anchor is the review chain, whose reviewer

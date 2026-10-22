@@ -317,6 +317,29 @@ It is 600000 now. Adding checks costs Windows wall
 clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
 unverified regardless of how many checks passed before it.
 
+**Program names are read as a case-insensitive file system resolves them.** `programName(word,
+isWindows)` keeps the part after the last `/` (on win32 also after the last `\`), drops a `.exe`
+suffix in any case and folds with `toUpperCase().toLowerCase()`, on every platform: macOS and
+Windows resolve `GIT`, `git.exe` or `ENV` as the lowercase program, and the parser cannot know the
+file system of each `PATH` directory. `WRAP` matches on it in `detectControlMutation` and in the
+rule loop, a folded `program` decides `git`, `sed` and `dd`, and the tee channel is any token whose
+program name is `tee`, a path to it included. `cmd0` keeps the written basename for the builtins
+(`cd`, `export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `printf`, `read`), because the
+shell runs any other spelling as an external program, which cannot change the shell's directory or
+variables: folding them would add only false denies, and folding `cd` would move the tracked cwd
+where the shell's stays. `detectChannels` matches `tee`, `sed -i` and `dd of=` with the `iu` flags,
+an optional `.exe` and a backslash before the name, so the always-on `CLAUDE_ENV_FILE` deny reads
+them too. BSD sed's `-I` edits in place like `-i` and counts in both readers. The shell's quote
+removal is NOT applied: a fully quoted word loses its quotes through `unquote`, but a backslash or a
+quote inside the word (`\git`, `g'i't`, `\env`, `\export`) is read as written, as on the base, so
+those spellings pass the always-on check and every rule; only `detectChannels` sees a backslash
+before `tee`, `sed` or `dd`. Other gates read
+program names with code of their own; nothing compares them with this one. Pins: the program-name
+cases of `tests/structure/git-repo-escape.test.js` and W235-W253 in
+`tests/structure/test-bash-source-write-gate.sh`. **Version: `minor`** — the always-on Session
+Control check refuses calls it let through, which changes the capability set of every session a
+newer installation would serve (`.claude/rules/runtime-lineage.md`).
+
 **Cross-file couplings — stated as a CRITERION, never a count**, because the count was "Three" while the list already held four: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s

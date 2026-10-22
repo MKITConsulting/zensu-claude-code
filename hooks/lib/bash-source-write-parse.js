@@ -299,6 +299,12 @@ function unquote(t) {
   return t.replace(/^['"]+|['"]+$/g, "");
 }
 
+function programName(word, isWindows = IS_WINDOWS) {
+  const value = String(word || "");
+  const cut = isWindows ? Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) : value.lastIndexOf("/");
+  return value.slice(cut + 1).replace(/\.exe$/i, "").toUpperCase().toLowerCase();
+}
+
 // Absoluteness probe for a RAW spelling. A tilde only resolves to a fixed
 // location when HOME is non-empty — with an empty HOME `expand()` yields "",
 // and path.resolve(base, "") returns the base, i.e. position-DEPENDENT.
@@ -509,11 +515,11 @@ function detectChannels(cmd) {
     .replace(/>\|/g, ">")
     .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
   const REDIR = /(\d*)>>?(?!\s*&\s*[\d-])(?!\s*['"]?\/dev\/(?:null|stdout|stderr|tty)\b)/;
-  const VERB = "(^|\\s|;|\\||&|/)";
+  const VERB = "(^|\\s|;|\\||&|/|\\\\)";
   if (REDIR.test(collapsed)) found.add("redirect");
-  if (new RegExp(VERB + "tee(\\s|$)").test(cmd)) found.add("tee");
-  if (new RegExp(VERB + "sed\\s+(-[A-Za-z]*\\s+)*-i").test(cmd)) found.add("sed -i");
-  if (new RegExp(VERB + "dd\\s+[^\\n]*of=").test(cmd)) found.add("dd of=");
+  if (new RegExp(VERB + "tee(\\.exe)?(\\s|$)", "iu").test(cmd)) found.add("tee");
+  if (new RegExp(VERB + "sed(\\.exe)?\\s+(-[A-Za-z]*\\s+)*-i", "iu").test(cmd)) found.add("sed -i");
+  if (new RegExp(VERB + "dd(\\.exe)?\\s+[^\\n]*of=", "iu").test(cmd)) found.add("dd of=");
   if (/(?<!<)<<(?!<)[-~]?\s*['"]?[A-Za-z_]/.test(cmd)) found.add("heredoc");
   return Array.from(found).join("\n");
 }
@@ -609,7 +615,7 @@ function detectControlMutation(cmd) {
       if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
       i++;
     }
-    while (i < toks.length && WRAP.has(unquote(toks[i]).split("/").pop())) {
+    while (i < toks.length && WRAP.has(programName(unquote(toks[i])))) {
       i++;
       while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
         const name = bindingFromAssignment(toks[i]);
@@ -1049,7 +1055,7 @@ function main() {
     // spellings without widening which prefixes count as an escape hatch.
     let ci = 0;
     const wrapEnv = {};
-    while (ci < rest.length && WRAP.has(unquote(rest[ci]).split("/").pop())) {
+    while (ci < rest.length && WRAP.has(programName(unquote(rest[ci])))) {
       ci++;
       while (ci < rest.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[ci])) {
         const eq = rest[ci].indexOf("=");
@@ -1058,6 +1064,7 @@ function main() {
       }
     }
     const cmd0 = ci < rest.length ? unquote(rest[ci]).split("/").pop() : "";
+    const program = ci < rest.length ? programName(unquote(rest[ci])) : "";
 
     // `cd` updates the scoped cwd BEFORE the escape-hatch check — an escaped
     // segment may still change the directory for the commands that follow it.
@@ -1098,7 +1105,7 @@ function main() {
     // root that cannot be realpath'd (it was DELETED — the state this mode exists
     // for) now stays in the unresolved namespace while the payload cwd resolves,
     // and every git verb in the user's own tree would read as an escape.
-    if (cmd0 === "git" && !targetsOnly) {
+    if (program === "git" && !targetsOnly) {
       const pick = (k) => {
         if (wrapEnv[k] !== undefined) return wrapEnv[k];
         if (envp[k] !== undefined) return envp[k];
@@ -1119,7 +1126,7 @@ function main() {
         else if (rest[k + 1] !== undefined) { targets.push([rest[k + 1], "redirect"]); k++; }
       }
     }
-    const teeIdx = rest.findIndex((t) => unquote(t) === "tee");
+    const teeIdx = rest.findIndex((t) => programName(unquote(t)) === "tee");
     if (teeIdx !== -1) {
       for (let k = teeIdx + 1; k < rest.length; k++) {
         const t = rest[k];
@@ -1129,13 +1136,13 @@ function main() {
         targets.push([t, "tee"]);
       }
     }
-    if (cmd0 === "sed" && rest.some((t) => /^-i/.test(unquote(t)))) {
+    if (program === "sed" && rest.some((t) => /^-[iI]/.test(unquote(t)))) {
       for (const t of rest) {
         const u = unquote(t);
         if (u.charAt(0) !== "-" && SRC.has(extOf(abspath(u)))) targets.push([t, "sed -i"]);
       }
     }
-    if (cmd0 === "dd") {
+    if (program === "dd") {
       for (const t of rest) {
         const m = t.match(/^of=(.+)$/);
         if (m) targets.push([m[1], "dd of="]);
@@ -1176,6 +1183,7 @@ if (require.main === module) {
     stripHeredocs,
     gitTargets,
     msysToDrive,
+    programName,
     within,
     isUnsafeTempEntry,
     splitTempList,

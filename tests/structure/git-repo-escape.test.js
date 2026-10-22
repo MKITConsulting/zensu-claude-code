@@ -10,7 +10,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const path = require("node:path");
 
-const { gitTargets, msysToDrive, splitTempList, isUnsafeTempEntry, GIT_MUTATIONS, GIT_OPTS_WITH_OPERAND, GIT_READONLY_FORMS } = require(
+const { gitTargets, msysToDrive, splitTempList, isUnsafeTempEntry, programName, detectChannels, detectControlMutation, GIT_MUTATIONS, GIT_OPTS_WITH_OPERAND, GIT_READONLY_FORMS } = require(
   path.join(__dirname, "..", "..", "hooks", "lib", "bash-source-write-parse.js")
 );
 
@@ -527,4 +527,56 @@ test("a temp root spelled the Git Bash way compares equal to its native spelling
   assert.strictEqual(winWithin(temp, winResolve(WIN_ROOT, "/d/a/repo/tests/.bswgate-tmp.1")), true);
   assert.strictEqual(winWithin(temp, winResolve(WIN_ROOT, "/d/a/repo/tests/.bswgate-tmp.1/inner")), true);
   assert.strictEqual(winWithin(temp, winResolve(WIN_ROOT, "/d/a/repo/tests/.bswgate-tmp.2")), false);
+});
+
+test("programName reads a program the way a case-insensitive file system resolves it, and cuts a backslash path only on win32", () => {
+  const longS = String.fromCodePoint(0x17f);
+  for (const isWindows of [false, true]) {
+    assert.strictEqual(programName("GIT", isWindows), "git");
+    assert.strictEqual(programName("/usr/bin/Git", isWindows), "git");
+    assert.strictEqual(programName("Git.EXE", isWindows), "git");
+    assert.strictEqual(programName(`${longS}ed`, isWindows), "sed");
+    assert.strictEqual(programName("C:/tools/TEE.exe", isWindows), "tee");
+    assert.strictEqual(programName("", isWindows), "");
+  }
+  assert.strictEqual(programName("C:\\Program Files\\Git\\cmd\\git.exe", true), "git");
+  assert.strictEqual(programName("C:\\Program Files\\Git\\cmd\\git.exe", false), "c:\\program files\\git\\cmd\\git");
+});
+
+test("detectChannels reports tee, sed -i and dd of= in any letter case, with .exe and behind a backslash path", () => {
+  const longS = String.fromCodePoint(0x17f);
+  const has = (cmd, channel) => detectChannels(cmd).split("\n").includes(channel);
+  for (const cmd of ["echo x | TEE out.txt", "echo x | Tee.exe out.txt", "echo x | C:\\bin\\tee.exe out.txt", "echo x | /usr/bin/TEE out.txt"]) {
+    assert.ok(has(cmd, "tee"), cmd);
+  }
+  for (const cmd of ["SED -i s/a/b/ f", `${longS}ed -i s/a/b/ f`, "sed -E -I '' s/a/b/ f", "sed.EXE -i s/a/b/ f"]) {
+    assert.ok(has(cmd, "sed -i"), cmd);
+  }
+  for (const cmd of ["DD of=f", "Dd.exe if=a of=f"]) assert.ok(has(cmd, "dd of="), cmd);
+  for (const cmd of ["echo teepee", "SEDAN -i x", "addd of=f", "echo tees"]) assert.strictEqual(detectChannels(cmd), "", cmd);
+});
+
+test("the Session Control check reads a wrapper in any letter case and keeps shell builtins as written", () => {
+  const rebind = /Blocked a Bash rebind of protected Session Control input (\w+)\./;
+  const rebinds = {
+    "ENV CLAUDE_CODE_SESSION_ID=x bash x.sh": "CLAUDE_CODE_SESSION_ID",
+    "Sudo ZENSU_PROJECT_ROOT=/x true": "ZENSU_PROJECT_ROOT",
+    "/usr/bin/ENV ZENSU_SESSION_KEY=x true": "ZENSU_SESSION_KEY",
+    "NOHUP env ZENSU_RUNTIME_DIGEST=x true": "ZENSU_RUNTIME_DIGEST",
+  };
+  for (const [cmd, name] of Object.entries(rebinds)) {
+    const m = rebind.exec(detectControlMutation(cmd));
+    assert.ok(m, cmd);
+    assert.strictEqual(m[1], name, cmd);
+  }
+  const envFile = "$" + "CLAUDE_ENV_FILE";
+  for (const cmd of [`echo x | TEE "${envFile}"`, `SED -i s/a/b/ "${envFile}"`, `DD of="${envFile}"`, `echo x | Tee.exe "${envFile}"`]) {
+    assert.match(detectControlMutation(cmd), /^Blocked a Bash write to CLAUDE_ENV_FILE\./, cmd);
+  }
+  for (const cmd of ["EXPORT ZENSU_SESSION_KEY=x", "UNSET ZENSU_SESSION_KEY", "Read CLAUDE_CODE_SESSION_ID", "PRINTF -v ZENSU_SESSION_KEY x", "ENV FOO=1 true"]) {
+    assert.strictEqual(detectControlMutation(cmd), "", cmd);
+  }
+  for (const cmd of ["export ZENSU_SESSION_KEY=x", "unset ZENSU_SESSION_KEY", "read CLAUDE_CODE_SESSION_ID", "printf -v ZENSU_SESSION_KEY x"]) {
+    assert.notStrictEqual(detectControlMutation(cmd), "", cmd);
+  }
 });

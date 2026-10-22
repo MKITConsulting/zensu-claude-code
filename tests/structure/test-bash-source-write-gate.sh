@@ -513,6 +513,25 @@ run "W77 unset host session-id" "unset CLAUDE_CODE_SESSION_ID" DENY
 run "W78 printf -v host session-id rebind" "printf -v CLAUDE_CODE_SESSION_ID other" DENY
 run "W79 host session-id rebind ignores bashWriteGate:false" \
   "CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
+run "W235 an uppercase env wrapper still carries a host session-id rebind" "ENV CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
+run "W236 a mixed-case sudo wrapper still carries a Session Control rebind" "Sudo ZENSU_PROJECT_ROOT=/tmp/other true" DENY "$PROJ" "$CFG_OFF"
+run "W237 an env wrapper behind a path in another case still carries a rebind" "/usr/bin/ENV ZENSU_SESSION_KEY=x true" DENY "$PROJ" "$CFG_OFF"
+run "W238 an uppercase tee into CLAUDE_ENV_FILE" 'echo x | TEE "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W239 an uppercase sed -i on CLAUDE_ENV_FILE" 'SED -i s/a/b/ "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W240 an uppercase dd of= CLAUDE_ENV_FILE" 'DD of="$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_OFF"
+run "W241 an uppercase EXPORT is no builtin and rebinds nothing" "EXPORT ZENSU_SESSION_KEY=x" ALLOW "$PROJ" "$CFG_OFF"
+run "W242 an uppercase UNSET is no builtin and removes nothing" "UNSET ZENSU_SESSION_KEY" ALLOW "$PROJ" "$CFG_OFF"
+run "W243 uppercase git -C sibling add" "GIT -C $SIB add ." DENY
+run "W244 uppercase env wrapper before git -C sibling add" "ENV git -C $SIB add ." DENY
+run "W245 a path to git in another case" "/usr/bin/GIT -C $SIB add ." DENY
+run "W246 git.exe -C sibling add" "git.exe -C $SIB add ." DENY
+run "W247 an uppercase git read in the sibling still passes" "GIT -C $SIB status" ALLOW
+run "W248 uppercase sed -i on tracked .rs" "SED -i s/x/y/ src/app.rs" DENY
+run "W249 BSD sed -I on tracked .rs" "sed -I '' s/x/y/ src/app.rs" DENY
+run "W250 uppercase tee on tracked .rs" "echo x | TEE src/app.rs" DENY
+run "W251 a path to tee on tracked .rs" "echo x | /usr/bin/tee src/app.rs" DENY
+run "W252 uppercase dd of= tracked .rs" "DD of=src/app.rs" DENY
+run "W253 an uppercase CD is no builtin and keeps the cwd" "CD $SIB && git add ." ALLOW
 
 # The mandatory control parser is a trust boundary. A selective runtime failure
 # must deny before config and escape hatches instead of falling through.
