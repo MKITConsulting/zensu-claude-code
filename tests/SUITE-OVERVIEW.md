@@ -388,7 +388,8 @@ are never rendered in CI, so these four suites are the only thing that grades th
 `path:line` citations resolve to a substantive line, WCAG contrast holds across all three
 palettes on both pages, the pages carry landmarks, resolved ARIA references and no
 unresolvable `var()` in an SVG presentation attribute, and the three documents agree with
-each other on counts, terminology, navigation and the specification's BLOCKED status.
+each other on counts, terminology, navigation, the specification's REDESIGNED status and
+the bound its carrier states.
 
 ### Promptfoo local-only (7 — skipped under `--ci`)
 `claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·

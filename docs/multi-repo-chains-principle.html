@@ -132,7 +132,7 @@
   <p class="lede">The whole multi-repo proposal rests on a single distinction: what the session
   <em>is</em> exists exactly once. Where it may reach is a declared list. And what it must verify is
   always that same list — never less.</p>
-  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are BLOCKED.</strong> Stage 1
+  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are REDESIGNED, NOT BUILT.</strong> Stage 1
   removes the silent green — it detects and refuses — without making any of the three rules below true.
   <strong>And which half of that is universally live is narrower than “stage 1 is implemented”:</strong>
   the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the
@@ -140,10 +140,10 @@
   beginning with <code>/</code>. A foreign root outside every home directory and the project root is
   detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not, and
   one under another user's home or <code>/root</code> becomes <code>&lt;home&gt;</code> and names no root either.
-  They remain requirements, not achieved properties. A carrier was chosen on 2026-09-20 — the
-  Session Control record, sealed by a confirmation at arming — but the gate that makes its store
-  unwritable from inside a session is not built, so rule 2 is stated and not yet satisfied — see
-  §6.1.1 and §8.1 of the specification.</p>
+  They remain requirements, not achieved properties. On 2026-10-21 the design was loosened: the
+  sealed carrier chosen on 2026-09-20 is superseded, and <code>codeRoots</code> lives in the
+  workflow document as a validated declaration that bounds accidents, not intent — see §6.1.1 and
+  §8.1 of the specification. Rule 2 below is restated to match.</p>
 
   <figure>
     <div class="scroll" tabindex="0" role="group" aria-labelledby="p1-cap">
@@ -185,7 +185,7 @@
           <path d="M470,296 L470,312"/>
         </g>
         <text class="t-acc code-svg" x="470" y="330" text-anchor="middle" font-size="12.5">codeRoots[]</text>
-        <text class="t-ink2" x="470" y="348" text-anchor="middle" font-size="11.5">must freeze at arming · carrier chosen, not built</text>
+        <text class="t-ink2" x="470" y="348" text-anchor="middle" font-size="11.5">validated at arming · bounds accidents, not intent</text>
 
         <g class="flow">
           <path d="M470,358 L470,388"/>
@@ -227,7 +227,7 @@
       <summary>Text description of the diagram</summary>
       <ol>
         <li>Layer 1, identity: one anchor — the orchestrator repository, holding record, state, logs, resume and doctor. Exactly one, never more.</li>
-        <li>Layer 2, reach: the anchor (identity plus code) alongside backend/ and frontend/ (code only). Together they form codeRoots[], which must freeze at arming and must never be derived from model-authored text — a requirement the chosen carrier satisfies only once §6.1.1's preconditions are built. The anchor is a root too.</li>
+        <li>Layer 2, reach: the anchor (identity plus code) alongside backend/ and frontend/ (code only). The two declared roots form codeRoots[], held in the workflow document as a declaration that bounds accidents, not intent; with the anchor they make up the reach, written once at arming, validated then, and held to its string rules again on every read. The anchor is a root too.</li>
         <li>Layer 3, evidence duty: five checks read that same list — Edit landing (did every claim land?), Review packet (does the reviewer see it?), Write gate (may this be written?), Terminus (was there any work?), Cross-repo review (does it fit together?).</li>
         <li>Reach and evidence duty are the same set. Identity never is.</li>
       </ol>
@@ -246,13 +246,14 @@
     <div class="law">
       <span class="n">Rule 2</span>
       <h3>Reach is declared, never inferred</h3>
-      <p>The list must be written once at arming and be immutable afterwards, and must not come
-      from a plan, a specification, or a review comment. A root the model can name is a confinement
-      the model can leave. This is the rule the design does not yet meet: the workflow document is
-      writable from inside the session and its validator is shape-only, so it cannot enforce the
-      immutability the rule demands. §6.1.1 has since moved the field onto the Session Control
-      record and paired it with a confirmation at arming; that record's own store is writable from
-      inside a session until §6.1.1's first precondition ships.</p>
+      <p>The list is written once at arming, by an explicit declaration, and is never inferred from
+      a claim, a diff or a path the chain happens to touch; a foreign root the audit finds is
+      refused, not added. It is validated at arming and its string rules again on every read. Since
+      the 2026-10-21 redesign it is a declaration rather than a confinement: <code>codeRoots</code>
+      in the workflow document bounds accidents, not intent, the bar the receipt and the run log
+      beside it already meet. What a list written by arming can reach is bounded by that
+      validation, not by who wrote it. A list edited by hand afterwards is held only to the rules a
+      string comparison decides, so its overlap with another live session is not checked again.</p>
     </div>
     <div class="law">
       <span class="n">Rule 3</span>
@@ -270,14 +271,15 @@
       <dd>That is why the resume point stays the anchor. A resume inside a satellite would present a
       different <code>CLAUDE_PROJECT_DIR</code>, and the session would no longer bind.</dd>
 
-      <dt>The list governs two confinements, not one.</dt>
-      <dd>It opens Bash write access, while the opt-in write gate is on, and reviewer read access.
-      Both are capability grants, not settings — hence one list, one validation, one moment.</dd>
+      <dt>The list widens two checks, and neither is a capability grant.</dt>
+      <dd>It opens Bash write access while the opt-in write gate is on, which judges nothing at its
+      default, and reviewer read access, which hands a confined reader nothing the main thread
+      lacks. One list, validated at arming and re-checked on every read, serves both.</dd>
 
-      <dt>Wherever the list lands, a new persisted field costs a minor release.</dt>
+      <dt>The list lands in the workflow document, and that field costs a minor release.</dt>
       <dd>The runtime-lineage rule makes every schema change a breaking change while the plugin is
-      at major 0. The workflow document is the obvious place and is ruled out on integrity grounds,
-      so which document pays that cost is still open.</dd>
+      at major 0. The redesign adds no chain shape that would cost a second one, so the whole set
+      ships as one minor.</dd>
 
       <dt>Without a list, everything behaves exactly as it does today.</dt>
       <dd>With <code>codeRoots[]</code> absent, the union is the anchor alone. That is the state of
@@ -288,8 +290,8 @@
   <footer>
     Principle illustration for <a href="multi-repo-chains-spec.md">the specification</a>,
     alongside <a href="multi-repo-chains-overview.html">the overview page</a>.
-    Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until the
-    preconditions for the chosen carrier are built.
+    Proposal — stage 1 is implemented, and stages 2 and 3 are REDESIGNED, NOT BUILT:
+    they ship in five pull requests behind a dark-launch switch.
   </footer>
 
 </main>

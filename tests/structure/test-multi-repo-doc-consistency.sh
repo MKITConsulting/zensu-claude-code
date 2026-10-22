@@ -35,22 +35,30 @@
 #     the one registry all four multi-repo doc suites read. X2 and X4 take the
 #     first `.md` entry; X6 and X8 take the first two `.html` entries.
 #   - X7 pins VERBATIM status prose. It requires the literal
-#     `stages 2 and 3 are BLOCKED` in all three documents, so rewording the
-#     status is a deliberate three-file edit and not an accident — but a
-#     paraphrase that keeps the meaning still fails, and that is the intended
-#     cost. Its forbid-list ("non-negotiable" and the spellings beside it) can
-#     only ever cover named spellings; a paraphrase of the retracted claim
-#     passes. Its carrier conjunct's negator acquittal reads only the 20
-#     characters before the FIRST occurrence of the phrase, which narrows but
-#     does not close the channel in two ways: a negation inside that span
-#     acquits the sentence whatever it actually governs, and a sentence
-#     carrying the phrase twice is judged entirely on the first — a negated
-#     first mention acquits an un-negated second one.
+#     `stages 2 and 3 are REDESIGNED, NOT BUILT` in all three documents and
+#     forbids the retired `stages 2 and 3 are BLOCKED`, so rewording the status
+#     is a deliberate three-file edit and not an accident — but a paraphrase
+#     that keeps the meaning still fails, and that is the intended cost. Both
+#     literals and the forbid-list below are matched on the text with its HTML
+#     tags and its Markdown emphasis and code markers (`*`, `_`, backtick)
+#     removed and its whitespace folded again after that, so a line break, a
+#     tag or emphasis inside one does not evade the match; a tag that joins
+#     two words, such as `are<br>BLOCKED`, does. Its forbid-list
+#     ("non-negotiable" and the spellings beside it) can only ever cover named
+#     spellings; a paraphrase of the retracted claim passes. Its
+#     carrier conjunct requires the phrase "accidents, not intent" (the
+#     singular and a parenthetical after the first word admitted), so a
+#     sentence that keeps the phrase while contradicting it elsewhere passes.
+#     Its trigger is LEXICAL: a sentence that names `codeRoots` as a word of its
+#     own (so `readCodeRoots` does not count) and the workflow document. A carrier sentence that calls the list or the
+#     document something else ("the list", "the field", "the state file") is
+#     not judged, and a sentence that names both without stating a carrier
+#     must carry the bound or be reworded so that it names only one of them.
 #     Its carrier conjunct is SENTENCE-scoped: rewrapping cannot evade
 #     it, because the block is joined before matching, but a sentence
 #     terminator placed between the two phrases can — and whole-block scoping
-#     is NOT the fix, because it false-positives on the two passages that
-#     legitimately discuss the field's shape and its release cost.
+#     is NOT the fix, because it false-positives on the passage that
+#     legitimately discusses the field's release cost.
 #     Its `Phase 6` trigger requires the correction in the SAME BLOCK,
 #     not merely somewhere in the file.
 #   - X8 compares only the SHARED token names between the two pages, and only
@@ -187,32 +195,51 @@ else
   check "X6 both pages use one name for the open-anchor box class (ov=$ov_cls pr=$pr_cls)" FAIL
 fi
 
-# X7 — the BLOCKED status, and the two claims the specification retracted.
+# X7 — the REDESIGNED status, and the bound the redesign states.
 #
-# The specification's own status line says stages 2 and 3 are BLOCKED, and §8.1
-# says plainly that the workflow document is the wrong carrier and that `vanilla`
-# is not a valid precedent for it. A companion page that repeats the design
-# WITHOUT the blocker hands a reader the capability grant with the objection
-# removed — and the specification points readers at both pages, so a page is a
-# likelier destination than the section that retracts it.
+# The specification's own status line says stages 2 and 3 are REDESIGNED, NOT
+# BUILT, and §8.1 says plainly that the workflow document carries the root list
+# as a declaration that bounds accidents, not intent. A companion page that names
+# that carrier WITHOUT the bound hands a reader a capability grant the design no
+# longer makes — and the specification points readers at both pages, so a page is
+# a likelier destination than the section that states the bound.
 #
-# Three assertions, each anchored on a phrase the retraction owns:
-#   (a) every document carries the BLOCKED status;
-#   (b) no document calls the two constraints "non-negotiable" — §8.1 states
-#       that constraint 2 is not satisfied by the design as written;
+# Four assertions, each anchored on a phrase the redesign owns:
+#   (a) every document carries the REDESIGNED status and none the retired
+#       BLOCKED one, both matched on the whole document with its markup removed
+#       and its whitespace folded after that, because a per-line `grep` let a
+#       wrapped status pass the forbid and a rewrapped one fail the requirement,
+#       and a fold taken before the markup was removed left a double space
+#       where a tag had stood;
+#   (b) no document calls the constraints "non-negotiable" — §6.1.1 records
+#       that the redesign renegotiated the carrier — matched on the same folded
+#       text, so a phrase wrapped across a line break is caught as well;
 #   (c) a document that raises "Phase 6 NOT complete" must also carry §7.4's
 #       correction, which is that TWO edits are needed and that marking Phase 6
-#       incomplete is not by itself what keeps the audit out of vanilla.
+#       incomplete is not by itself what keeps the audit out of vanilla;
+#   (d) every sentence that names `codeRoots` and the workflow document together
+#       carries the bound as the phrase "accidents, not intent", and every
+#       document has one such sentence. The trigger is the pair of names, not a
+#       carrier phrase: an earlier trigger required the words "in the workflow
+#       document", so an active-voice carrier sentence was never judged, and its
+#       conjunct matched "accident" and "intent" as substrings, so "intentional
+#       … accidental" counted as the bound.
+folded_text() { tr -s '[:space:]' ' ' < "$1" | sed -e 's/<[^>]*>//g' -e 's/[*_`]//g' -e 's/  */ /g'; }
 x7=1
 for f in "${ALL[@]}"; do
-  grep -qF 'stages 2 and 3 are BLOCKED' "$f" \
-    || { echo "  ---   ${f##*/} does not carry the BLOCKED status of the specification"; x7=0; }
+  folded="$(folded_text "$f")"
+  printf '%s' "$folded" | grep -qF 'stages 2 and 3 are REDESIGNED, NOT BUILT' \
+    || { echo "  ---   ${f##*/} does not carry the REDESIGNED status of the specification"; x7=0; }
+  if printf '%s' "$folded" | grep -qF 'stages 2 and 3 are BLOCKED'; then
+    echo "  ---   ${f##*/} still carries the retired BLOCKED status"
+    x7=0
+  fi
   # A forbid-list can only ever cover the spellings it names. The hyphenated
   # form alone left "nonnegotiable" and "not negotiable" free to restate the
   # retracted claim, so the alternation covers the forms an author would
   # plausibly write. It cannot cover a paraphrase.
-  if grep -qiE 'non-?negotiable|not negotiable|not open to negotiation' "$f"; then
-    echo "  ---   ${f##*/} calls the constraints non-negotiable; spec section 8.1 says constraint 2 is not satisfied"
+  if printf '%s' "$folded" | grep -qiE 'non-?negotiable|not negotiable|not open to negotiation'; then
+    echo "  ---   ${f##*/} calls the constraints non-negotiable; spec section 6.1.1 records that the redesign renegotiated the carrier"
     x7=0
   fi
   # The trigger was a case-sensitive fixed literal that, in this corpus, occurs
@@ -236,19 +263,18 @@ for f in "${ALL[@]}"; do
     echo "  ---   ${f##*/} raises the Phase 6 NOT complete claim in a block that does not carry section 7.4 correction (two edits)"
     x7=0
   fi
-  # Section 8.1 rules the workflow document out as the carrier for the root
-  # list. A page that names it anyway hands the reader the capability grant
-  # with the objection removed, and the BLOCKED literal alone does not stop it.
+  # Section 8.1 makes the workflow document the carrier for the root list and
+  # bounds what that buys: accidents, not intent. A page that names the carrier
+  # without the bound hands the reader a capability grant the design no longer
+  # makes, and the status literal alone does not stop it. A page that never
+  # names the carrier with its bound fails too, so the check cannot pass on a
+  # corpus that has stopped stating it.
   #
   # Scoped to a SENTENCE, reached by SPLITTING rather than by a character
-  # window, and that choice fixes two defects a window had. `[^.!?]{0,120}`
-  # treated every citation dot as a sentence end, so an assertion carrying
-  # `zensu-log.sh:400` between its two phrases was missed entirely; and a
-  # window matches on proximity alone, so prose that DENIES carriage — "must
-  # not live in the workflow document" — was flagged as an assertion of it.
-  # Splitting on a terminator FOLLOWED BY A SPACE leaves `.sh:400` and `6.1.1`
-  # intact, because neither is followed by one. The negator list then acquits a
-  # sentence that states the correct position. It also removes the regex
+  # window. `[^.!?]{0,120}` treated every citation dot as a sentence end, so an
+  # assertion carrying `zensu-log.sh:400` between its two phrases was missed
+  # entirely. Splitting on a terminator FOLLOWED BY A SPACE leaves `.sh:400` and
+  # `6.1.1` intact, because neither is followed by one. It also avoids the regex
   # interval, whose support in the CI runner's awk was never verified.
   #
   # Markup is neutralized BEFORE the split, because in the two HTML pages a
@@ -256,37 +282,35 @@ for f in "${ALL[@]}"; do
   # character is `<` and not a space. Without that, two of the three graded
   # documents got a scope close to the whole-block scope this check rejects.
   #
-  # The negator is looked for in the 20 characters immediately PRECEDING the
-  # phrase, not anywhere in the sentence. "must not live in the workflow
-  # document" is acquitted; "is not optional, and the list is written in the
-  # workflow document" is not, because its negation governs something else and
-  # falls outside the span.
-  #
   # Line scope is not an option: all three documents are hand-wrapped at ~95
   # characters, so the pairing rarely lands on one physical line. Whole-BLOCK
-  # scope is not an option either: the overview's minor-release note
-  # (multi-repo-chains-overview.html:635-640) holds "in the workflow document"
-  # and "codeRoots[]" in ONE paragraph record while discussing release cost, not
-  # carriage, so a block-scoped check would flag it.
-  if awk -v RS='' '{
+  # scope is not an option either: the overview's minor-release note holds
+  # "workflow document" and "codeRoots[]" in ONE paragraph record while
+  # discussing release cost, not carriage, so a block-scoped check would demand
+  # the bound there.
+  carrier="$(awk -v RS='' '{
         s = tolower($0)
         gsub(/<[^>]*>/, " ", s)          # a sentence in HTML ends at a TAG, not a space
         gsub(/[ \t\n]+/, " ", s)
         n = split(s, sent, /[.!?] /)
         for (i = 1; i <= n; i++) {
-          if (sent[i] ~ /coderoots/ && sent[i] ~ /in the workflow document/) {
-            k = index(sent[i], "in the workflow document")
-            pre = substr(sent[i], (k > 20 ? k - 20 : 1), (k > 20 ? 20 : k - 1))
-            if (pre !~ /not |never |no |rules out|ruled out|wrong carrier|cannot|instead of/) hit = 1
+          if (sent[i] ~ /(^|[^a-z])coderoots([^a-z]|$)/ && sent[i] ~ /workflow[ -]document/) {
+            if (sent[i] ~ /accidents?( \([^)]*\))?, not intent([^a-z]|$)/) bounded = 1; else loose = 1
           }
         }
-      } END { exit hit ? 0 : 1 }' "$f"; then
-    echo "  ---   ${f##*/} names the workflow document as the carrier for codeRoots; spec section 8.1 rules it out"
-    x7=0
-  fi
+      } END { print (loose ? "unbounded" : (bounded ? "bounded" : "absent")) }' "$f")"
+  case "$carrier" in
+    bounded) : ;;
+    unbounded)
+      echo "  ---   ${f##*/} names codeRoots and the workflow document in a sentence without the bound of spec section 8.1 (accidents, not intent); state the bound there, or reword a sentence that does not name the carrier so it names only one of them"
+      x7=0 ;;
+    *)
+      echo "  ---   ${f##*/} never names the workflow document as the carrier for codeRoots together with the bound of spec section 8.1"
+      x7=0 ;;
+  esac
 done
-[ "$x7" -eq 1 ] && check "X7 every document carries the BLOCKED status and neither retracted claim" PASS \
-                || check "X7 every document carries the BLOCKED status and neither retracted claim" FAIL
+[ "$x7" -eq 1 ] && check "X7 every document carries the REDESIGNED status and states the carrier with its bound" PASS \
+                || check "X7 every document carries the REDESIGNED status and states the carrier with its bound" FAIL
 
 # X8 — the two pages hand-duplicate one design-token palette, and the contrast
 # suite grades each file independently, so a divergence that still clears 4.5:1
