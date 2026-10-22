@@ -160,16 +160,33 @@ denies one it cannot read: a call another command starts, a noun or verb built a
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
-is **localhost** — a throwaway dev/test DB where the conventions are meaningless. It reads that backend from
-`--api-url <url>` given as two words, or from `ZENSU_API_URL` as an inline prefix or in the hook's own
-environment. Without a two-word `--api-url` it also takes the one-word `--api-url=<url>`, but only in a call it
-reads in full: every such word, as the CLI receives it, names `localhost`, `127.0.0.1` or `0.0.0.0` with at
-most a port and a plain path, stands ahead of any `--` and right after no word that starts with `-` and holds no
-`=`, and the command holds no `$`, backtick, brace, carriage return, glob character (`*`, `?`, `[`), `xargs` or
-`watch`, on Windows no backslash, and no `zensu` call the shell model does not find, such as one inside an `ssh`
-string or any call while that model cannot load. In a
-Bash command a `--help`, `-h` or two-word `--api-url` word right after a word the shell expands at run time is
-read as that word's value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
+is **localhost** — a throwaway dev/test DB where the conventions are meaningless. It reads that backend the way
+the CLI does: from every `--api-url` flag, given as two words (`--api-url <url>`) or as one (`--api-url=<url>`),
+and from `ZENSU_API_URL` as an inline prefix or in the hook's own environment. The call is local only when every
+`--api-url` word names a local backend, since the CLI takes the last one, and when none of them is certain to reach
+the CLI as the flag, `ZENSU_API_URL` must name a local backend too. A word after a `--` or after a word built at
+run time, or right after a word that starts with `-` and holds no `=`, is not certain, because it may be that
+word's value or a positional argument, and a word built at run time may itself be a `--`. With no `--api-url` word
+at all `ZENSU_API_URL` decides alone: its inline assignment, even when it is empty, because it replaces the variable
+for that call, but never an inline `ZENSU_API_URL+=`, which appends to it; else the hook's own environment, but only
+while the command does not name `ZENSU_API_URL` anywhere, quoted or escaped included, since an earlier assignment,
+an `export`, an `unset` or a PowerShell `$env:` write changes what the CLI receives. A value is local when a URL
+parser reads `localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]` as its host, the value spells that host right after an
+optional `http://` or `https://`, and it carries no user name or password and only printable ASCII without a
+backslash. A part the shell expands at run time may follow only where the literal text before it already ends the
+host with `/`, `?` or `#` (`"http://localhost:8090/$PREFIX"`), because a run-time port or host part such as
+`localhost:$PORT` can expand to `8090@api.zensu.dev`. A two-word flag with no word after it is never local. The
+one-word spelling is local only in a call the gate reads in full: as the CLI receives the word, and in a command
+that holds no `$`, backtick, brace, carriage return, glob character (`*`, `?`, `[`), `xargs` or `watch`, on Windows
+no backslash, no word the shell or PowerShell builds at run time (a process substitution, an empty PowerShell
+argument or a splat), and no `zensu` call the shell model does not find, such as one inside an `ssh` string or any
+call while that model cannot load. On Windows the gate also reads a Bash command as a POSIX shell does, so an escaped
+`\--api-url` or `\--` counts there. A PowerShell call that holds a word built at run time is not local while the
+command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
+`--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
+string, still counts as local when it names `localhost`, although there `localhost` is the host the string reaches.
+In a Bash command a `--help` or `-h` word right after a word the shell expands at run time is read as that word's
+value, so such a call is gated like the command it belongs to. An inline `ZENSU_MCP_GATE=off` prefix still
 brings any such call to the binding, which denies it when it fails. A subagent's mutation is denied even while a window is open, because a child never
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound

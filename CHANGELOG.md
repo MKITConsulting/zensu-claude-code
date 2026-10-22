@@ -37,16 +37,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so each took the order's work out of its lease. The operator account now names the routes the
   gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
   pull request.
-- **CLI write-gate `--api-url=`**: the `zensu` CLI write-gate now reads the one-word
-  `--api-url=<url>` as a localhost backend, as it reads the two-word `--api-url <url>` and
-  `ZENSU_API_URL`, so a mutation such as
-  `zensu --api-url=http://localhost:8090 security classify f1` is no longer denied as a freelance
-  one. The spelling counts only where the gate reads the call in full: every such word names
-  `localhost`, `127.0.0.1` or `0.0.0.0` with at most a port and a plain path and stands in flag
-  position, and the command holds no `$`, backtick, brace, carriage return, glob character,
-  `xargs` or `watch`, on Windows no backslash, and no `zensu` call the shell model cannot find.
-  A local call that misses one of these keeps the earlier deny; the two-word spelling passes as
-  before.
+- **CLI write-gate `--api-url`**: the `zensu` CLI write-gate now reads the target backend the way
+  the CLI does. It reads the one-word `--api-url=<url>` beside the two-word `--api-url <url>`, so
+  a mutation such as `zensu --api-url=http://localhost:8090 security classify f1` is no longer
+  denied as a freelance one; the one-word spelling counts only where the gate reads the call in
+  full, so a command with a `$`, backtick, brace, carriage return, glob character, `xargs`,
+  `watch`, a word built at run time such as a process substitution, on Windows a backslash, or a
+  `zensu` call the shell model cannot find keeps the deny. `http://[::1]` now counts as local in
+  the two-word spelling and in `ZENSU_API_URL`. The gate now denies these calls, which the
+  released gate let through as local:
+  - a remote `--api-url` beside a local one, in either order and spelling, because the CLI takes
+    the last; on Windows this includes an escaped `\--api-url`, and an escaped `\--` counts as a
+    `--`;
+  - a local `--api-url` that may be another word's value or a positional argument: after a `--`
+    or after a word built at run time anywhere before it, or right after a word that starts with
+    `-` and holds no `=` (`--json --api-url http://localhost:8090`), unless `ZENSU_API_URL` is
+    local too;
+  - a local one-word `--api-url=<url>` in a call the gate cannot read in full, even beside a local
+    `ZENSU_API_URL`, because the flag overrides the variable;
+  - a remote one-word `--api-url=<url>` over a local `ZENSU_API_URL`, and in PowerShell a flag the
+    analyzer cannot read (`--api-url=$u`, or one after the stop-parsing token `--%`);
+  - an empty inline `ZENSU_API_URL=` over a local value in the hook's environment, an inline
+    `ZENSU_API_URL+=`, which appends to the variable, and the hook's local value in a command that
+    names `ZENSU_API_URL` in any word, a title included, such as an earlier assignment, an
+    `export`, an `unset` or a PowerShell `$env:` write;
+  - a two-word `--api-url` without a value;
+  - a value whose host a URL parser reads as remote (`http://localhost:8090@api.zensu.dev`), that
+    carries another scheme or a backslash, or that the shell completes at run time before its host
+    ends (`http://localhost:$PORT`).
+
+  A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
+  stays denied. When a local call is denied, spell the URL literally and either put the two-word
+  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`.
 
 ## [0.28.0] - 2026-10-21
 

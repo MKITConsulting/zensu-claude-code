@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
+unset ZENSU_API_URL ZENSU_MCP_GATE
 
 PASS=0; FAIL=0
 check() {
@@ -500,6 +501,55 @@ run "B35y3 --api-url=localhost, then a backslash-escaped prod flag -> DENY" "zen
 run "B35z --api-url=localhost inside quotes the CLI receives -> DENY" "zensu features create --product p --title t \"'--api-url=http://localhost:8090'\"" '' DENY
 run "B35v2 two chained one-word localhost calls -> ALLOW" "zensu --api-url=http://localhost:8090 security classify f1 && zensu --api-url=http://localhost:8090 features create --product p1 --title 'My Feature'" '' ALLOW
 run "B35v3 one-word localhost inside bash -c -> ALLOW" "bash -c 'zensu --api-url=http://localhost:8090 security classify f1'" '' ALLOW
+envrun() {
+  local label="$1" cmd="$2" url="$3" exp="$4" tool="${5:-Bash}"
+  local out
+  out="$(payload "$cmd" '' gate-test "$tool" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL="$url" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
+}
+run "B53a --api-url localhost, then --api-url prod -> DENY" "zensu --api-url http://localhost:8090 --api-url https://api.zensu.dev security classify f1" '' DENY
+run "B53b --api-url localhost, then --api-url=prod -> DENY" "zensu --api-url http://localhost:8090 security classify f1 --api-url=https://api.zensu.dev" '' DENY
+run "B53c --api-url localhost after -- -> DENY" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
+run "B53c2 --api-url localhost after -- and a positional word -> DENY" "zensu security classify f1 -- extra --api-url http://localhost:8090" '' DENY
+run "B53d --api-url localhost after -- beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 -- --api-url http://localhost:8090" '' ALLOW
+run "B53e two local two-word values -> ALLOW" "zensu --api-url http://localhost:8090 --api-url http://127.0.0.1:8090 security classify f1" '' ALLOW
+run "B53f --api-url=prod over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu --api-url=https://api.zensu.dev security classify f1" '' DENY
+envrun "B53g --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY
+run "B53h --api-url=localhost in a call not read in full, over an inline localhost ZENSU_API_URL -> DENY" 'ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url=http://localhost:8090 $X' '' DENY
+envrun "B53i an empty inline ZENSU_API_URL over the hook's localhost one" "ZENSU_API_URL= zensu security classify f1" http://localhost:8090 DENY
+envrun "B53j an inline localhost ZENSU_API_URL over the hook's prod one" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1" https://api.zensu.dev ALLOW
+run "B53k --api-url localhost as the value of --title -> DENY" "zensu features create --product p1 --title --api-url http://localhost:8090" '' DENY
+run "B53l --api-url localhost as the value of --title beside an inline localhost ZENSU_API_URL -> ALLOW" "ZENSU_API_URL=http://localhost:8090 zensu features create --product p1 --title --api-url http://localhost:8090" '' ALLOW
+run "B53m --api-url prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url https://api.zensu.dev" '' DENY
+run "B53n --api-url=prod right after a flag without a value, over an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --json --api-url=https://api.zensu.dev" '' DENY
+run "B53o --api-url localhost right after a flag without a value -> DENY" "zensu security classify f1 --json --api-url http://localhost:8090" '' DENY
+run "B53q --api-url with userinfo before a remote host -> DENY" "zensu --api-url http://localhost:8090@api.zensu.dev security classify f1" '' DENY
+run "B53q2 --api-url localhost with a user name -> DENY" "zensu --api-url http://localhost:x@localhost:8090 security classify f1" '' DENY
+run "B53r inline ZENSU_API_URL with userinfo before a remote host -> DENY" "ZENSU_API_URL=http://localhost:8090@api.zensu.dev zensu security classify f1" '' DENY
+envrun "B53s the hook's ZENSU_API_URL with userinfo before a remote host" "zensu security classify f1" http://localhost:8090@api.zensu.dev DENY
+run "B53t --api-url [::1] -> ALLOW" "zensu --api-url 'http://[::1]:8090' security classify f1" '' ALLOW
+run "B53u --api-url 127.1, which only a URL parser reads as loopback -> DENY" "zensu --api-url http://127.1:8090 security classify f1" '' DENY
+run "B53v --api-url localhost with a backslash -> DENY" "zensu --api-url 'http://localhost:8090\\@api.zensu.dev' security classify f1" '' DENY
+run "B53w --api-url without a value beside an inline localhost ZENSU_API_URL -> DENY" "ZENSU_API_URL=http://localhost:8090 zensu security classify f1 --api-url" '' DENY
+run "B53x --api-url localhost with an ftp scheme -> DENY" "zensu --api-url ftp://localhost:8090 security classify f1" '' DENY
+envrun "B53y the hook's ZENSU_API_URL [::1]" "zensu security classify f1" 'http://[::1]:8090' ALLOW
+run "B53z --api-url uppercase LOCALHOST -> ALLOW" "zensu --api-url HTTP://LOCALHOST:8090 security classify f1" '' ALLOW
+run "B54a --api-url localhost beside a quoted title naming --api-url -> ALLOW" 'zensu --api-url http://localhost:8090 features create --product p1 --title "Fix --api-url parsing"' '' ALLOW
+run "B54b --api-url localhost after a quoted title holding -- -> ALLOW" 'zensu features create --product p1 --title "Phase 1 -- login" --api-url http://localhost:8090' '' ALLOW
+run "B54c --api-url localhost after a quoted title ending in a dash word -> ALLOW" 'zensu features create --product p1 --title "use -v" --api-url http://localhost:8090' '' ALLOW
+run "B54d --api-url localhost beside a comment naming a remote one -> ALLOW" 'zensu --api-url http://localhost:8090 security classify f1 # --api-url https://api.zensu.dev' '' ALLOW
+run "B54e a quote-glued --api-url fragment inside an ssh string -> DENY" "ssh deploy@host \"cd /srv && zensu features create --product p1 --title x' '--api-url http://localhost:8090\"" '' DENY
+run "B54f --api-url localhost behind a run-time word further ahead -> DENY" 'zensu security classify f1 $X y --api-url http://localhost:8090' '' DENY
+run "B54g --api-url localhost with a run-time port -> DENY" 'zensu --api-url http://localhost:$PORT security classify f1' '' DENY
+run "B54h inline ZENSU_API_URL localhost with a run-time port -> DENY" 'ZENSU_API_URL=http://localhost:${PORT} zensu security classify f1' '' DENY
+run "B54i --api-url localhost with a run-time path part -> ALLOW" 'zensu --api-url "http://localhost:8090/$PREFIX" features create --product p1 --title t' '' ALLOW
+run "B54j --api-url https localhost -> ALLOW" "zensu --api-url https://localhost:8443 security classify f1" '' ALLOW
+envrun "B54k a remote ZENSU_API_URL assigned in an earlier command over the hook's localhost one" "ZENSU_API_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
+envrun "B54l a remote ZENSU_API_URL exported in an earlier command over the hook's localhost one" "export ZENSU_API_URL=https://api.zensu.dev && zensu security classify f1" http://localhost:8090 DENY
+envrun "B54m an inline += that appends localhost to the hook's remote ZENSU_API_URL" "ZENSU_API_URL+=localhost:8090 zensu security classify f1" https://api.zensu.dev/ DENY
+envrun "B54n a remote ZENSU_API_URL exported through a quoted name over the hook's localhost one" "export ZENSU_API\"\"_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
+envrun "B54o the hook's localhost ZENSU_API_URL in a command that names it only in a title" "zensu features create --product p1 --title 'set ZENSU_API_URL'" http://localhost:8090 DENY
+envrun "B54p the hook's localhost ZENSU_API_URL in a command that never names it" "zensu features create --product p1 --title t" http://localhost:8090 ALLOW
 
 # B36 localhost / prod via the hook's own ZENSU_API_URL process env
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
@@ -572,6 +622,14 @@ if [ "$LINES_W32_ESCAPED" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_W
   check "B52 on win32 a backslash keeps a one-word localhost --api-url= from relaxing, and a call without one still relaxes" PASS
 else
   check "B52 win32 backslash rule (escaped='$LINES_W32_ESCAPED' plain='$LINES_W32_PLAIN')" FAIL
+fi
+LINES_W32_LATER="$(printf '%s' 'zensu --api-url http://localhost:8090 security classify f1 \--api-url https://api.zensu.dev' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_DASHES="$(printf '%s' 'zensu security classify f1 \-- --api-url http://localhost:8090' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_PATH="$(printf '%s' 'zensu --api-url http://localhost:8090 features create --product p1 --title "C:\tmp\x"' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+if [ "$LINES_W32_LATER" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_DASHES" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_W32_PATH" ]; then
+  check "B52b on win32 the POSIX reading sees an escaped later --api-url and an escaped --, and a quoted Windows path still relaxes" PASS
+else
+  check "B52b win32 POSIX reading (later='$LINES_W32_LATER' dashes='$LINES_W32_DASHES' path='$LINES_W32_PATH')" FAIL
 fi
 
 source "$PLUGIN_DIR/hooks/lib/zensu-mcp-tools.sh"
@@ -832,6 +890,15 @@ psrun "B40o3 PowerShell --api-url=prod one word"          "zensu --api-url=https
 psrun "B40o4 PowerShell --api-url=localhost after a run-time argument" "zensu features create --product p1 \$t --api-url=http://localhost:8090" '' DENY
 psrun "B40o5 PowerShell --api-url=localhost inside quotes the CLI receives" "zensu features create --product p1 --title t \"'--api-url=http://localhost:8090'\"" '' DENY
 psrun "B40o6 PowerShell --api-url=localhost after an empty argument" "zensu features create --product p1 --title '' --api-url=http://localhost:8090" '' DENY
+psrun "B40o7 PowerShell --api-url localhost, then --api-url prod" "zensu --api-url http://localhost:8090 --api-url https://api.zensu.dev security classify f1" '' DENY
+psrun "B40o8 PowerShell --api-url localhost after a run-time argument" "zensu features create --product p1 --title \$t --api-url http://localhost:8090" '' DENY
+psrun "B40o9 PowerShell --api-url localhost after --" "zensu security classify f1 -- --api-url http://localhost:8090" '' DENY
+envrun "B40o10 PowerShell --api-url=prod over the hook's localhost ZENSU_API_URL" "zensu --api-url=https://api.zensu.dev security classify f1" http://localhost:8090 DENY PowerShell
+envrun "B40o11 PowerShell --api-url= with a run-time value over the hook's localhost ZENSU_API_URL" "zensu --api-url=\$u security classify f1" http://localhost:8090 DENY PowerShell
+envrun "B40o12 PowerShell stop-parsing token ahead of a remote --api-url over the hook's localhost ZENSU_API_URL" "zensu security classify f1 --% --api-url https://api.zensu.dev" http://localhost:8090 DENY PowerShell
+envrun "B40o13 PowerShell env: assignment of a remote value over the hook's localhost ZENSU_API_URL" "\$env:ZENSU_API_URL = 'https://api.zensu.dev'; zensu security classify f1" http://localhost:8090 DENY PowerShell
+psrun "B40o14 PowerShell --api-url localhost right after zensu beside a run-time title" "zensu --api-url http://localhost:8090 features create --product p1 --title \$t" '' ALLOW
+envrun "B40o15 PowerShell Set-Item of a joined env: name over the hook's localhost ZENSU_API_URL" "Set-Item -Path ('env:ZENSU_API' + '_URL') -Value https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY PowerShell
 psrun "B40p PowerShell --help"                            "zensu security classify f1 --help"                             '' ALLOW
 psrun "B40q PowerShell subagent mutation"                 "zensu security classify f1"                                    general-purpose DENY
 psrun "B40r PowerShell subagent read"                     "zensu features get f1"                                         general-purpose ALLOW
