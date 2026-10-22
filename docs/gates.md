@@ -109,9 +109,29 @@ also one inside a parameter or arithmetic expansion. The gate's own token scan s
 separators such as `;`, `&&`, `|` and a line break, whatever the quoting, and keeps every
 invocation it found before. So a call that follows `&&` inside an `ssh` or `su -c` command string
 is gated, and a line inside a heredoc fed to `cat` that names a mutation is still denied. A search
-pattern that names a mutation passes unless a separator precedes the name inside it. When the
-module cannot load, the token scan runs alone. A command name assembled from variables, a call
-made from interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
+pattern that names a mutation passes unless a separator precedes the name inside it. Both
+readings take the command name the way a case-insensitive file system resolves it, on every
+platform: its basename in any letter case, folded the way Unicode folds case, with quotes,
+backslashes and the `$` in front of an ANSI-C or locale string (`$'…'`, `$"…"`) removed and an
+optional `.exe`, so `ZENSU`, `Zensu.exe`, `/opt/homebrew/bin/ZENSU`, `z\ensu`, `zen$''su` and
+`zenſu`, whose long s the file system folds to `s`, count as `zensu`. Both join a line
+continuation inside the name the way the shell does, and the shell model reads a wrapper or a
+shell such as `ENV`, `XARGS` or `BASH` the same way and, on Windows, a path to the CLI written
+with backslashes, quoted or not. The token scan reads prose after a separator the same way too,
+so a commit message that reads `x; Zensu features create y` and a heredoc line that starts with
+`Zensu features create` are denied like their lowercase spelling; when only the token scan finds
+a call, the deny says so and names the file remedy (`git commit -F <file>`,
+`gh pr create --body-file <file>`). Neither reading counts a noun or verb in another letter case,
+because zensu-cli rejects it. The readings err toward a call: the text readings drop a backslash or
+a line continuation inside single quotes that the shell keeps (`'z\ensu'`), and the fold reads a
+dotless `ı` as `i`, as NTFS does and APFS does not, so such a command can be denied although it
+runs no CLI. When the module cannot load, the token scan runs alone and also
+misses a Windows path to the CLI written with backslashes. A command name assembled from
+variables or from an empty command substitution, a parameter default, a brace sequence, zsh's `=`
+expansion or a glob (`${X:-zensu}`, `zen$()su`, `{z..z}ensu`, `=zensu`, `/opt/homebrew/bin/zens?`),
+spelled with ANSI-C numeric escapes (`$'\x7a'ensu`) or as an ANSI-C string around a Windows path
+(`$'C:\…\zensu.exe'`), a `zensu.cmd` or `zensu.bat` shim named with its extension, a call that `trap` runs or that `hash -p` binds to another name, a call made from
+interpreter code and a `find -exec` command are not seen, and a call that `ssh`, `su`,
 `docker exec` or `kubectl exec` runs is seen only when a separator precedes it in the command
 text. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
 is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
@@ -120,9 +140,11 @@ the MCP write-gate it replaced).
 
 The gate classifies each distinct invocation once, however many of the two readings find it, and
 reads the session's declared workflow tools at most once per call. Both readings take time linear in
-the length of the command. A Bash call that names `zensu` and whose hook payload exceeds the session
+the length of the command. A Bash call that names `zensu`, in any letter case or with quotes or backslashes inside the name, and whose hook payload exceeds the session
 binder's limit (`MAX_PAYLOAD_BYTES` in `hooks/lib/claude-hook-session-v1.js`, 1 MiB) is denied before
-either reading runs, with a reason that names the payload's size and the limit. A PowerShell call
+either reading runs, with a reason that names the payload's size and the limit. A Bash call that
+names `zensu` and that the gate's parser fails to read is denied too, with a reason that asks to
+run each `zensu` call as a command of its own, rather than let through unread. A PowerShell call
 goes through the PowerShell analyzer instead; when the analyzer reports a `zensu` call or a construct
 it cannot judge, the failed bind names the size through the shared bind-deny ladder. The all-tool
 capability gate already denies every payload over that limit, so the decision does not change; the
@@ -155,8 +177,8 @@ disables the gate for a deliberate one-off — honored both as a session env and
 (`ZENSU_MCP_GATE=off zensu …`). The inline prefix works on the main thread only: the gate
 ignores it on a subagent's command, and a PowerShell command has none. A PowerShell command is
 read by the shared analyzer, which finds a literal `zensu` call in every spelling PowerShell runs
-it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`) and
-denies one it cannot read: a call another command starts, a noun or verb built at run time, an
+it (`zensu.exe`, `& 'C:\…\zensu.cmd'`, a call inside a block or a nested `pwsh -Command`), reads
+its noun and verb in any letter case, and denies one it cannot read: a call another command starts, a noun or verb built at run time, an
 argument that Windows PowerShell 5.1 or a batch-file `zensu` would read differently, or text it
 cannot parse. The gate is scoped to its threat model (a low-context agent writing to the
 *real tracked product*), so for a call it can judge it never fires on `--help`/`-h`, on a read in a session that binds, or on a write whose target backend
@@ -179,8 +201,9 @@ host with `/`, `?` or `#` (`"http://localhost:8090/$PREFIX"`), because a run-tim
 one-word spelling is local only in a call the gate reads in full: as the CLI receives the word, and in a command
 that holds no `$`, backtick, brace, carriage return, glob character (`*`, `?`, `[`), `xargs` or `watch`, on Windows
 no backslash, no word the shell or PowerShell builds at run time (a process substitution, an empty PowerShell
-argument or a splat), and no `zensu` call the shell model does not find, such as one inside an `ssh` string or any
-call while that model cannot load. On Windows the gate also reads a Bash command as a POSIX shell does, so an escaped
+argument or a splat), and no more words that name `zensu`, in any letter case, than the shell model finds calls:
+a call inside an `ssh` string, any call while that model cannot load, and also a title, an `echo` argument or a
+path segment such as `~/src/Zensu` count, so such a local call needs the two-word spelling. On Windows the gate also reads a Bash command as a POSIX shell does, so an escaped
 `\--api-url` or `\--` counts there. A PowerShell call that holds a word built at run time is not local while the
 command also holds the stop-parsing token `--%` or a `--api-url` the analyzer cannot read as a word, such as
 `--api-url=$u`. The gate cannot tell where a call runs: one only the token scan finds, such as a call inside an `ssh`
@@ -191,7 +214,9 @@ brings any such call to the binding, which denies it when it fails. A subagent's
 borrows the main thread's window; its deny names neither the escape nor a retry and tells it to
 report the operation to the main thread, which runs it through the matching skill. In a bound
 work-order session the gate leaves `zensu work ask` and `zensu work followup` to the work-order
-gate, which allows them there ([Work-order mode](work-order-mode.md)). Every other mutation
+gate, which allows them there ([Work-order mode](work-order-mode.md)). That gate reads the CLI
+name only as `zensu`, in lowercase and without `.exe`, so in such a session on macOS and Windows a
+`work ask` or `work followup` spelled another way is checked by neither gate. Every other mutation
 follows the ordinary rules in that session, where `/zensu:work` opens no window, and the deny of a
 person's decision points to a work-order question instead of a user. A work-order protocol command
 denied anywhere else gets a reason that names the worker and the `/zensu:work` helper, and a

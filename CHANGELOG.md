@@ -76,7 +76,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
   stays denied. When a local call is denied, spell the URL literally and either put the two-word
-  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`.
+  `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`. The
+  one-word spelling stays local only while no other word of the command names `zensu` in any
+  letter case, a title, an `echo` argument or a path such as `~/src/Zensu` included.
+- **CLI write-gate command name**: the `zensu` CLI write-gate now reads the command name the way a
+  case-insensitive file system resolves it, on every platform. A Bash call spelled `ZENSU`,
+  `Zensu`, `zenſu` or `/opt/homebrew/bin/ZENSU` runs the CLI on macOS and Windows, `ZENSU.EXE`
+  and a Windows path written with backslashes on Windows, and one with quotes, backslashes, an
+  ANSI-C or locale string or a line continuation inside the name (`z\ensu`, `zen""su`,
+  `zen$''su`) on every platform; the released gate let such a call through ungated unless the
+  command also named `zensu` plainly. It is now gated like `zensu`, also behind a wrapper or a
+  shell spelled in any letter case (`ENV`, `XARGS`, `BASH -c`), and after `&&` inside an `ssh`
+  string too. In a Bash call a noun or verb in another letter case is still not read as a
+  mutation, because zensu-cli rejects it. A command that names `zensu` but that the gate's parser
+  cannot read is now denied instead of let through, and on Windows the subagent accident guard
+  reads a program named by a path written with backslashes. Upgrade note: prose after a separator
+  inside a quoted string is read the same way, so a commit message such as
+  `-m "x; Zensu features create y"` is now denied like its lowercase spelling, and the deny names
+  the remedy: write such a message to a file and pass it with `-F`.
 - **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
   while its team review runs. A change in one of the session's review evidence leases (a seat
   bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop

@@ -162,6 +162,11 @@ grows past 64 directories is denied (`directories`).
   the allowlist leaves it out, and `test-reviewer-capability-gate.sh` pins the allowlist deny for
   a named neutral child's `Monitor` command. `PowerShell` is no `COMMAND_TOOLS` name either: the
   allowlist denies it to every non-main principal, which PS1 to PS6 pin.
+- On win32 `commandName` cuts a command word at its last `/` or `\`, because Git Bash runs a
+  Windows path to a program in either spelling, quoted or not; every command rule and the walker
+  read the program that way, and the test "Windows spellings reach the same rules" pins it with a
+  single-quoted path to `git.exe`. Only `commandInvocations` takes `foldNames`; the guard's own
+  rules keep `foldCase`.
 - The allowlist deny for an unlisted tool (`hostProfileAllowance`) lists `Bash behind an
   accident guard` while `grantRefusal` admits the caller and leaves it out otherwise, so it never
   contradicts the SubagentStart context, which tells a named neutral agent it may run `Bash`.
@@ -200,14 +205,18 @@ grows past 64 directories is denied (`directories`).
   the text at separators whatever the quoting and keeps every deny it made before, such as a
   `zensu` call after `&&` inside an `ssh` or `su -c` command string, which the walker does not
   run, and its false positive on a heredoc line fed to `cat`. The gate
-  runs the walker only when the command holds `zensu` as a word of its own, runs the token scan
+  runs either reading only when the command, as written or with quotes, backslashes and line
+  continuations removed, holds `zensu` as a word of its own in any letter case, asks the walker
+  to fold every command name (`foldNames`, the Unicode fold `toUpperCase().toLowerCase()`) in
+  the host platform's reading and, on win32, in the `linux` reading too, runs the token scan
   alone when the module cannot load, and keeps only the first line of a verb word, so a word that
   decodes to a line break cannot add a line to its tab-separated output. Its node child emits each
   distinct line once (a `Set`), because the walker and the token scan find the same invocation, and
   the shell resolves the workflow's tools once per run (`zensu_workflow_tools`), so the cost of a
   call no longer grows with repeated invocations. Before either reading runs it compares the
   payload with the binder's exported `MAX_PAYLOAD_BYTES` and turns an oversized Bash command that
-  names `zensu` into the size deny of `zensu_emit_oversized_payload_deny`.
+  names `zensu`, in any letter case or with quotes or backslashes inside the name, into the size
+  deny of `zensu_emit_oversized_payload_deny`.
 - The parse stays linear in the command length. `braceSpan` is one stack pass that keeps the
   leftmost brace group holding a comma, `endWord` keeps a per-command flag for leading
   assignments, the shell `-c` flag in the walker and in `commandItemViolation` goes through
@@ -249,10 +258,11 @@ grows past 64 directories is denied (`directories`).
   environment, selector and helper commands, the two documented obfuscation gaps as allowed, and
   the allowlist deny for unlisted tools.
 - `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 in
-  `tests/structure/test-bash-zensu-gate.sh` drives it, B39a-B39c drive the token scan alone
-  through a bound plugin copy without the module, P5n3 in `tests/structure/test-bypass-ledger.sh`
+  `tests/structure/test-bash-zensu-gate.sh` drives it, B55 and B56-B56e pin the name reading the
+  gate builds on `foldNames`, B39a-B39g drive the token scan alone and a failing parser through
+  a bound plugin copy without the module, P5n3 in `tests/structure/test-bypass-ledger.sh`
   pins the line-break guard, and the walker test in `subagent-shell-guard-v1.test.js` pins what
-  it finds.
+  it finds, `foldNames` and the win32 cut included.
 - `tests/structure/test-gauntlet-loop-skill.sh`: G0 requires the guard module, G8 pairs the
   skill's guarded-`Bash` claim and its two conditions with `isShellCall`, `CONFIG_KEY` and the
   `agent_type` refusal, G15 pins the allowlist bound, and G16 and G19 hold the skill's and the
@@ -309,8 +319,9 @@ grows past 64 directories is denied (`directories`).
   instead of an unconditional deny. Its shell-reader differential runs the no-HOME scenario on
   POSIX hosts only, because Git Bash may supply a HOME the test did not pass; that was not
   measured.
-- The CLI gate does not see a `zensu` name assembled from variables, a call made from interpreter
-  code, a `find -exec` command, a pipe into a shell or a command read from a file. It sees a call
+- The CLI gate does not see a `zensu` name assembled from variables or spelled with ANSI-C
+  numeric escapes (`$'\x7a'ensu`, which `parseScript` decodes as `x7aensu`), a call made from
+  interpreter code, a `find -exec` command, a pipe into a shell or a command read from a file. It sees a call
   that `ssh`, `su`, `docker exec` or `kubectl exec` runs only when a separator such as `&&`
   precedes the call in the command text. When the module cannot load, its token scan alone misses
   wrapped, loop and `-c` forms.

@@ -251,6 +251,11 @@ registration.
   each command three ways, with plain single quotes and with the ANSI-C quoting of bash and of zsh,
   so its deny set never shrinks below the plain reading; a reading the shell does not use can only
   add a deny.
+- The gate reads a program name only as written, through `commandName`: no case fold and no
+  `.exe` strip, so on macOS and Windows a `zensu` call or a wrapper spelled in another letter case
+  (`ZENSU`, `ENV zensu`) or with `.exe` passes its checks, the token-host deny included. The CLI
+  write-gate reads such a spelling and still leaves `work ask` and `work followup` to this gate in
+  a bound session, so neither gate checks them there.
 - The gate judges forge writes only in Bash command text, and tools by name only on the two
   Claude Desktop session servers. `SendMessage` stays allowed because it also continues this
   session's own subagents, and a deny would have to read its `to` argument; it can still ask

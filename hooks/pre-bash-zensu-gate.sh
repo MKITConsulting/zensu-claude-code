@@ -61,7 +61,13 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     sub = [j.agent_id, j.agent_type].some((v) => typeof v === "string" && v !== "");
     ps = j.tool_name === "PowerShell";
   } catch (_) { process.exit(0); }
-  if (!cmd || (!ps && !/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/.test(cmd))) process.exit(0);
+  const joinLines = (text) => text.replace(/\\([\s\S])/g, (pair, next) => (next === "\n" ? "" : pair));
+  const strip = (text) => text.replace(/\x24(?=[\x22\x27])/g, "").replace(/[\\\x22\x27]/g, "");
+  const joined = joinLines(cmd);
+  const plain = strip(joined);
+  const NAMED = /(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/iu;
+  const candidates = [cmd, plain, strip(cmd), strip(joinLines(cmd.replace(/(^|[\s;&|\x28])#[^\n]*/g, (comment, lead) => lead)))];
+  if (!cmd || (!ps && !candidates.some((text) => NAMED.test(text)))) process.exit(0);
   let cap = 0;
   try { cap = require(process.env.ZBIND).MAX_PAYLOAD_BYTES; } catch (_) {}
   if (!ps && Number.isSafeInteger(cap) && cap > 0 && size > cap) {
@@ -150,7 +156,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   }
   function tokenInvocations() {
     const found = [];
-    const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                      // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
+    const norm = joined.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                      // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
     for (const seg of norm.split(/\|\||&&|[;|\n&]/)) {
       const toks = seg.trim().split(/\s+/).filter(Boolean);
       let i = 0, base = "";
@@ -162,9 +168,9 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
           i++;
         }
         if (i >= toks.length) break;
-        const t = unquoted(toks[i].replace(/^\\/, ""));                           // strip a leading backslash and any wrapping quote chars
+        const t = strip(toks[i]).toUpperCase().toLowerCase();
         if (WRAP.has(t)) { i++; continue; }                                        // skip transparent wrappers (command/env/sudo/…)
-        base = t.split("/").pop(); break;                                           // resolved command basename
+        base = t.split("/").pop().replace(/\.exe(?![\s\S])/, ""); break;          // resolved command basename
       }
       if (base !== "zensu") continue;                                              // command basename must be zensu
       found.push({ envp, rest: toks.slice(i + 1) });
@@ -182,8 +188,8 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   let modeled = -1;
   if (!ps) try {
     const guard = require(process.env.ZGUARD);
-    const walk = (platform) => guard.commandInvocations(cmd, { platform })
-      .filter((c) => c.name === "zensu")
+    const walk = (platform) => guard.commandInvocations(cmd, { platform, foldNames: true })
+      .filter((c) => (process.platform === "win32" ? c.name.slice(c.name.lastIndexOf("\\") + 1) : c.name) === "zensu")
       .map((c) => ({ envp: c.environment, rest: c.words, exact: true }));
     const walked = walk(process.platform), posix = process.platform === "win32" ? walk("linux") : [];
     modeled = walked.length;
@@ -191,16 +197,15 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
   } catch (_) {}
   const apiNames = (text) => (text.match(/--api-url/gi) || []).length;
   const psHidden = ps && (/(?:^|\s)--%(?!\S)/.test(cmd) || apiNames(cmd.replace(/\x60/g, "")) > invocations.reduce((n, c) => n + apiNames(c.rest.join(" ")), 0));
-  const plain = cmd.replace(/\\\n/g, "").replace(/[\\\x22\x27]/g, "");
   let named = plain.replace(/\x60/g, "");
   if (ps) try { named += "\n" + require(process.env.ZPS || "").spellings(cmd); } catch (_) {}
   const envNamed = /ZENSU_API_URL/i.test(named);
   const envAppended = /(?:^|[^A-Za-z0-9_])ZENSU_API_URL\+=/.test(cmd);
-  invocations = invocations.concat(...invocations.map(dynamicReadings));
+  invocations = invocations.concat(invocations.flatMap(dynamicReadings));
   const oneWordTrusted = !/[\x24\x60{*?[\r]/.test(cmd)
-    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/i.test(plain)
+    && !/(?:^|[^A-Za-z0-9_.-])(?:xargs|watch)(?![A-Za-z0-9_-])/iu.test(plain)
     && !(process.platform === "win32" && cmd.indexOf("\\") !== -1)
-    && (ps || modeled === (plain.match(/(?:^|[^A-Za-z0-9_.-])zensu(?![A-Za-z0-9_-])/gi) || []).length);
+    && (ps || modeled === (plain.match(new RegExp(NAMED.source, "giu")) || []).length);
   for (const invocation of invocations) {
     const envp = invocation.envp, rest = ps ? invocation.rest.map((w) => w.toLowerCase()) : invocation.rest;
     if (envp.ZENSU_MCP_GATE === "off" && !sub) {                                   // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
@@ -233,8 +238,10 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     if (ps && third.indexOf(OPQ) !== -1 && GROUPS.has(noun + "\t" + verb)) { out.add(UNJ + "the subcommand of a zensu call is built at run time"); continue; }
     out.add(noun + "\t" + verb + "\t" + third.split(OPQ).join(""));
   }
+  if (modeled === 0 && invocations.every((c) => !c.exact) && [...out].some((line) => line.indexOf("__") !== 0)) out.add("__textonly__");
   process.stdout.write([...out].join("\n"));
 ' 2>/dev/null)"
+PARSE_STATUS=$?
 
 field() {
   printf '%s' "$INPUT" | F="$1" node -e '
@@ -250,7 +257,7 @@ field() {
 # (fail-open, mirroring the MCP gate's empty/non-JSON behaviour). Inline
 # bypasses still parse as __bypass__ marker lines, so a bypassed zensu segment
 # never lands in this hot-path exit.
-[ -z "$INVOCATIONS" ] && exit 0
+[ -z "$INVOCATIONS" ] && [ "$PARSE_STATUS" -eq 0 ] && exit 0
 
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the marker/escape handling so all Bash gates share the
@@ -305,7 +312,7 @@ record_bypass_markers() {
 }
 
 # Only markers, no real invocation left → allow.
-[ -z "$INVOCATIONS" ] && { record_bypass_markers; exit 0; }
+[ -z "$INVOCATIONS" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
@@ -380,9 +387,13 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && { record_bypass_markers; exit 0; }
+[ -z "$DENY_TOOL" ] && [ -z "$UNJUDGED" ] && [ "$PARSE_STATUS" -eq 0 ] && { record_bypass_markers; exit 0; }
 
-if [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
+if [ "$PARSE_STATUS" -ne 0 ] && [ "$IS_SUBAGENT" = true ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
+elif [ "$PARSE_STATUS" -ne 0 ]; then
+  REASON="A command that names zensu was blocked because the Zensu CLI write-gate could not read it. Run each zensu call as a command of its own. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
+elif [ -n "$UNJUDGED" ] && [ "$IS_SUBAGENT" = true ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Zensu CLI mutations are reserved for the interactive main thread. Do not retry this command. Report the operation you need to the main thread."
 elif [ -n "$UNJUDGED" ]; then
   REASON="A PowerShell command that names zensu was blocked because the Zensu CLI write-gate cannot judge it: ${UNJUDGED}. Run the zensu call through the Bash tool, or as a plain PowerShell command with a literal noun and verb (zensu <noun> <verb> ...) that no other command starts and no text built at run time names. Reads and --help pass; a mutation still needs the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review)."
@@ -409,6 +420,10 @@ elif zensu_is_work_order_tool "$DENY_TOOL"; then
     REASON="$REASON A subagent never sends it: report what you need to the main thread instead."
   fi
 fi
+
+case "$INVOCATIONS" in
+  (*__textonly__*) REASON="$REASON The shell model finds no zensu call in this command, so the call was read from text after a separator, such as a quoted message, an ssh string or a heredoc line; if no call is meant, pass that text through a file instead (git commit -F <file>, gh pr create --body-file <file>)." ;;
+esac
 
 REASON="$REASON" node -e '
   process.stdout.write(JSON.stringify({

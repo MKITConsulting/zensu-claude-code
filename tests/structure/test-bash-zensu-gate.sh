@@ -5,6 +5,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-zensu-gate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 unset ZENSU_API_URL ZENSU_MCP_GATE
+LONG_S="$(printf '\305\277')"
 
 PASS=0; FAIL=0
 check() {
@@ -182,6 +183,24 @@ fi
 OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_PLAIN" 2>/dev/null | classify)"
 [ "$OUT" = ALLOW ] && check "B48e an oversized command that names no zensu invocation stays outside this gate" PASS \
   || check "B48e oversized non-zensu command (got '$OUT')" FAIL
+SIZED_UPPER="$PROJECT/sized-upper.json"
+sized_payload "$SIZED_UPPER" "$((LIMIT + 150000))" "ZENSU features get f1"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$SIZED_UPPER" 2>/dev/null)"
+size_denied "$OUT" "$((LIMIT + 150000))" \
+  && check "B48h an oversized command that names the CLI in another letter case gets the same size deny" PASS \
+  || check "B48h oversized uppercase CLI command (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
+LONG_COMMAND="$PROJECT/long-command.json"
+node -e '
+  const name = "zen" + "su";
+  const command = name + " security classify f1 --classification public; exit 0; " + (name + ";").repeat(100000);
+  require("fs").writeFileSync(process.argv[1], JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command }, session_id: "gate-test", cwd: "/tmp" }));
+' "$LONG_COMMAND"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" < "$LONG_COMMAND" 2>/dev/null)"
+if [ "$(printf '%s' "$OUT" | classify)" = "DENY" ] && printf '%s' "$OUT" | grep -qF "maps to 'set_security_classification'"; then
+  check "B48i a command under the payload limit that names the CLI 100000 times is still read, and its mutation denied" PASS
+else
+  check "B48i long command (got '$(printf '%s' "$OUT" | cut -c1-200)')" FAIL
+fi
 SIZED_PS_MUTATION="$PROJECT/sized-ps-mutation.json"
 SIZED_PS_PLAIN="$PROJECT/sized-ps-plain.json"
 sized_payload "$SIZED_PS_MUTATION" "$((LIMIT + 150000))" "zensu security classify f1" "" PowerShell
@@ -360,9 +379,10 @@ FALLBACK_OUT="$(
   export CLAUDE_PROJECT_DIR="$FALLBACK_BASE/project"
   ZENSU_TEST_PLUGIN_DATA="$FALLBACK_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" fallback-gate "$FALLBACK_ROOT" || exit 1
   printf 'BOUND\n'
-  for cmd in 'zensu security classify f1' 'zensu features get f1' 'timeout 60 zensu security classify f1' 'zensu --api-url=http://localhost:8090 security classify f1'; do
+  for cmd in 'zensu security classify f1' 'zensu features get f1' 'timeout 60 zensu security classify f1' 'zensu --api-url=http://localhost:8090 security classify f1' 'ZENSU.EXE security classify f1' 'zen""su security classify f1' 'ENV ZENSU security classify f1' 'z\ensu security classify f1' "zen\\
+su security classify f1" "zen${LONG_S}u security classify f1"; do
     payload "$cmd" '' fallback-gate | env CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null | tr -d '\n'
-    printf '\n<<%s>>\n' "$cmd"
+    printf '\n<<%s>>\n' "$(printf '%s' "$cmd" | tr '\n' ' ')"
   done
 )"
 FALLBACK_BOUND="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '1p')"
@@ -370,6 +390,12 @@ FALLBACK_DENY="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '2p')"
 FALLBACK_READ="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '4p')"
 FALLBACK_WRAPPED="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '6p')"
 FALLBACK_ONE_WORD="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '8p')"
+FALLBACK_EXE="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '10p')"
+FALLBACK_QUOTED="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '12p')"
+FALLBACK_ENV="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '14p')"
+FALLBACK_BACKSLASH="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '16p')"
+FALLBACK_CONTINUED="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '18p')"
+FALLBACK_LONG_S="$(printf '%s\n' "$FALLBACK_OUT" | sed -n '20p')"
 if [ "$FALLBACK_BOUND" = "BOUND" ] && [ ! -e "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js" ] \
    && printf '%s' "$FALLBACK_DENY" | grep -qF "maps to 'set_security_classification'"; then
   check "B39a without the shell-model module the token scan still gates a mutation" PASS
@@ -385,6 +411,20 @@ if [ "$FALLBACK_BOUND" = "BOUND" ] && printf '%s' "$FALLBACK_ONE_WORD" | grep -q
 else
   check "B39d module-less one-word localhost (bound='$FALLBACK_BOUND' got '$FALLBACK_ONE_WORD')" FAIL
 fi
+if [ "$FALLBACK_BOUND" = "BOUND" ] && printf '%s' "$FALLBACK_EXE" | grep -qF "maps to 'set_security_classification'" \
+   && printf '%s' "$FALLBACK_QUOTED" | grep -qF "maps to 'set_security_classification'"; then
+  check "B39e without the shell-model module the token scan still reads an uppercase .EXE name and quotes inside the name" PASS
+else
+  check "B39e module-less name spellings (bound='$FALLBACK_BOUND' exe='$FALLBACK_EXE' quoted='$FALLBACK_QUOTED')" FAIL
+fi
+if [ "$FALLBACK_BOUND" = "BOUND" ] && printf '%s' "$FALLBACK_ENV" | grep -qF "maps to 'set_security_classification'" \
+   && printf '%s' "$FALLBACK_BACKSLASH" | grep -qF "maps to 'set_security_classification'" \
+   && printf '%s' "$FALLBACK_CONTINUED" | grep -qF "maps to 'set_security_classification'" \
+   && printf '%s' "$FALLBACK_LONG_S" | grep -qF "maps to 'set_security_classification'"; then
+  check "B39f without the shell-model module the token scan reads an uppercase env, a backslash, a line continuation and a long s inside the name" PASS
+else
+  check "B39f module-less name reading (bound='$FALLBACK_BOUND' env='$FALLBACK_ENV' backslash='$FALLBACK_BACKSLASH' continued='$FALLBACK_CONTINUED' long_s='$FALLBACK_LONG_S')" FAIL
+fi
 PARSER_SENTINEL="$FALLBACK_BASE/parser-loaded"
 node -e 'require("fs").writeFileSync(process.argv[1], "require(\"fs\").writeFileSync(" + JSON.stringify(process.argv[2]) + ", \"loaded\");\nmodule.exports = { commandInvocations: () => [] };\n")' \
   "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js" "$PARSER_SENTINEL"
@@ -398,6 +438,18 @@ if size_denied "$FALLBACK_OVERSIZED" "$((LIMIT + 1))" && [ "$PARSER_LOADED_OVERS
   check "B48d the size is compared before the parser runs: an oversized payload never loads the shell-model module, an ordinary one does" PASS
 else
   check "B48d size check before the parser (oversized loaded=$PARSER_LOADED_OVERSIZED small loaded=$PARSER_LOADED_SMALL got '$(printf '%s' "$FALLBACK_OVERSIZED" | cut -c1-120)')" FAIL
+fi
+node -e 'require("fs").writeFileSync(process.argv[1], "module.exports = { commandInvocations: () => [{ name: \"zensu\", environment: new Proxy({}, { get() { throw new Error(\"unreadable\"); } }), words: [\"security\", \"classify\", \"f1\"] }] };\n")' \
+  "$FALLBACK_ROOT/hooks/lib/subagent-shell-guard-v1.js"
+CRASH_OUT="$(
+  export CLAUDE_PROJECT_DIR="$FALLBACK_BASE/project"
+  ZENSU_TEST_PLUGIN_DATA="$FALLBACK_BASE/plugin-data" source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" crash-gate "$FALLBACK_ROOT" || exit 1
+  payload 'zensu security classify f1' '' crash-gate | env CLAUDE_PLUGIN_ROOT="$FALLBACK_ROOT" ZENSU_CONFIG="$CFG_ON" bash "$FALLBACK_ROOT/hooks/pre-bash-zensu-gate.sh" 2>/dev/null
+)"
+if [ "$(printf '%s' "$CRASH_OUT" | classify)" = "DENY" ] && printf '%s' "$CRASH_OUT" | grep -qF 'could not read it'; then
+  check "B39g a parser that fails denies the command that names zensu instead of letting it through" PASS
+else
+  check "B39g failing parser (got '$(printf '%s' "$CRASH_OUT" | cut -c1-160)')" FAIL
 fi
 rm -rf "$FALLBACK_BASE"
 
@@ -493,6 +545,10 @@ run "B35t2 --api-url=localhost beside a ? glob -> DENY" "zensu --api-url=http://
 run "B35t3 --api-url=localhost beside a bracket glob -> DENY" "zensu --api-url=http://localhost:8090 security classify f1 [a]" '' DENY
 run "B35q2 --api-url=localhost under an uppercase XARGS with prod on stdin -> DENY" "echo --api-url=https://api.zensu.dev | XARGS zensu --api-url=http://localhost:8090 security classify f1" '' DENY
 run "B35x9 --api-url=localhost under an uppercase WATCH with an escaped prod flag -> DENY" "WATCH -n 60 zensu --api-url=http://localhost:8090 security classify f1 \"\\\\--api-url=https://api.zensu.dev\"" '' DENY
+run "B35x10 an uppercase call the walker finds cannot offset a local call only the token scan sees inside an ssh string -> DENY" "ZENSU --api-url=http://localhost:8090 security classify f1; ssh h \"cd /x && zensu --api-url=http://localhost:8090 security classify f1\"" '' DENY
+run "B35x11 a line that ends in an escaped backslash cannot offset a local call only the token scan sees inside an ssh string -> DENY" "x\\\\
+zensu features get f1; ssh h \"cd /x && zensu --api-url=http://localhost:8090 security classify f1\"" '' DENY
+run "B35q3 --api-url=localhost under an xargs spelled with a long s with prod on stdin -> DENY" "echo --api-url=https://api.zensu.dev | xarg${LONG_S} zensu --api-url=http://localhost:8090 security classify f1" '' DENY
 run "B35x6 --api-url=localhost under a quoted xargs with prod on stdin -> DENY" "echo --api-url=https://api.zensu.dev | xa''rgs zensu --api-url=http://localhost:8090 security classify f1" '' DENY
 run "B35x7 --api-url=localhost under watch, which re-parses an escaped prod flag -> DENY" "watch -n 60 zensu --api-url=http://localhost:8090 security classify f1 \"\\\\--api-url=https://api.zensu.dev\"" '' DENY
 run "B35y --api-url=localhost, then a prod flag behind a brace sequence -> DENY" "zensu --api-url=http://localhost:8090 security classify f1 --api-ur{l..l}=https://api.zensu.dev" '' DENY
@@ -550,6 +606,44 @@ envrun "B54m an inline += that appends localhost to the hook's remote ZENSU_API_
 envrun "B54n a remote ZENSU_API_URL exported through a quoted name over the hook's localhost one" "export ZENSU_API\"\"_URL=https://api.zensu.dev; zensu security classify f1" http://localhost:8090 DENY
 envrun "B54o the hook's localhost ZENSU_API_URL in a command that names it only in a title" "zensu features create --product p1 --title 'set ZENSU_API_URL'" http://localhost:8090 DENY
 envrun "B54p the hook's localhost ZENSU_API_URL in a command that never names it" "zensu features create --product p1 --title t" http://localhost:8090 ALLOW
+run "B55a uppercase CLI name" "ZENSU security classify f1" '' DENY
+run "B55b capitalized CLI name" "Zensu features create --product p1 --title t" '' DENY
+run "B55c mixed-case CLI name behind an absolute path" "/opt/homebrew/bin/zEnSu security classify f1" '' DENY
+run "B55d uppercase CLI name with an uppercase .EXE suffix" "ZENSU.EXE security classify f1" '' DENY
+run "B55e backslash inside the CLI name" 'z\ensu security classify f1' '' DENY
+run "B55f empty quotes inside the CLI name" 'zen""su security classify f1' '' DENY
+run "B55g line continuation inside the CLI name" "zen\\
+su security classify f1" '' DENY
+run "B55h uppercase CLI name behind a leading backslash and inner quotes" "\\ZEN''SU security classify f1" '' DENY
+run "B55i uppercase CLI name behind timeout" "timeout 5 ZENSU security classify f1" '' DENY
+run "B55j uppercase CLI name behind an uppercase env" "ENV ZENSU security classify f1" '' DENY
+run "B55k uppercase CLI name inside bash -c" "bash -c 'ZENSU security classify f1'" '' DENY
+run "B55l uppercase CLI name after && inside an ssh string" "ssh deploy@host \"cd /srv && ZENSU security classify f1\"" '' DENY
+run "B55m uppercase CLI name from a subagent" "ZENSU security classify f1" general-purpose DENY
+run "B55n uppercase CLI read" "ZENSU features get f1" '' ALLOW
+run "B55o uppercase CLI name with a localhost two-word --api-url" "ZENSU --api-url http://localhost:8090 security classify f1" '' ALLOW
+run "B55p uppercase CLI name with a localhost one-word --api-url" "ZENSU --api-url=http://localhost:8090 security classify f1" '' ALLOW
+run "B55q uppercase CLI name with --help" "ZENSU security classify f1 --help" '' ALLOW
+run "B55r uppercase noun and verb, which the CLI rejects" "ZENSU SECURITY CLASSIFY f1" '' ALLOW
+run "B55s uppercase words that are no CLI call" "echo ZENSU security classify f1 && git commit -m \"Zensu security classify\" && cat ./ZENSU" '' ALLOW
+run "B55t inline gate escape in front of an uppercase CLI name" "ZENSU_MCP_GATE=off ZENSU security classify f1" '' ALLOW
+run "B55u a capitalized product name after a separator inside a quoted message is read like the lowercase name" "git commit -m \"x; Zensu features create y\"" '' DENY
+run "B55v a line that ends in an escaped backslash does not join the quoted CLI name on the next line" "x\\\\
+zen\"\"su security classify f1" '' DENY
+run "B55v2 a comment that ends in a backslash does not hide the quoted CLI name on the next line" "true # step 1\\
+zen''su security classify f1" '' DENY
+run "B55v3 a comment that ends in a backslash does not hide a CLI name split by a line continuation" "grep -rn TODO . # review\\
+zen\\
+su security classify f1" '' DENY
+run "B55w an empty ANSI-C string inside the CLI name" "zen\$''su security classify f1" '' DENY
+run "B55w2 an ANSI-C string that spells part of an uppercase CLI name" "ZEN\$'S'U features create --product p --title t" '' DENY
+run "B55w3 an empty locale string inside the CLI name" 'zen$""su security classify f1' '' DENY
+run "B55w4 an empty ANSI-C string inside the CLI name after && inside an ssh string" "ssh h \"cd /x && zen\$''su security classify f1\"" '' DENY
+run "B55x a line continuation inside the CLI name after && inside an ssh string" "ssh deploy@host \"cd /srv && zen\\
+su security classify f1\"" '' DENY
+run "B55y an uppercase env wrapper after && inside an ssh string" "ssh h \"cd /x && ENV ZENSU security classify f1\"" '' DENY
+run "B55y2 a backslash inside the CLI name after && inside an ssh string" "ssh h \"cd /x && z\\ensu security classify f1\"" '' DENY
+run "B55z a long s inside the CLI name, which a case-insensitive file system folds to s" "zen${LONG_S}u security classify f1" '' DENY
 
 # B36 localhost / prod via the hook's own ZENSU_API_URL process env
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
@@ -572,6 +666,13 @@ if printf '%s' "$REASON_S" | grep -qF 'never a route for a subagent. Do not retr
   check "B37b subagent deny reason withdraws the inline escapes; the main-thread reason does not" PASS
 else
   check "B37b subagent deny reason must name the withdrawn inline escape" FAIL
+fi
+REASON_TEXT_ONLY="$(payload 'git commit -m "x; Zensu features create y"' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$REASON_TEXT_ONLY" | grep -qF 'pass that text through a file instead (git commit -F <file>, gh pr create --body-file <file>)' \
+   && ! printf '%s' "$REASON_N" | grep -qF 'git commit -F'; then
+  check "B55u2 a call only the token scan reads from text gets the file remedy in its deny reason, and a call the shell model finds does not" PASS
+else
+  check "B55u2 text-only deny reason (got '$(printf '%s' "$REASON_TEXT_ONLY" | cut -c1-200)')" FAIL
 fi
 
 parser_lines() {
@@ -630,6 +731,56 @@ if [ "$LINES_W32_LATER" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_DA
   check "B52b on win32 the POSIX reading sees an escaped later --api-url and an escaped --, and a quoted Windows path still relaxes" PASS
 else
   check "B52b win32 POSIX reading (later='$LINES_W32_LATER' dashes='$LINES_W32_DASHES' path='$LINES_W32_PATH')" FAIL
+fi
+LINUX_PRELOAD="$PROJECT/linux-platform.js"
+printf '%s\n' 'Object.defineProperty(process, "platform", { value: "linux" });' > "$LINUX_PRELOAD"
+LINES_LINUX_UPPER="$(printf '%s' 'ZENSU security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_LOCAL="$(printf '%s' 'Zensu --api-url http://localhost:8090 security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_NOUN="$(printf '%s' 'ZENSU SECURITY CLASSIFY f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_W32_UPPER="$(printf '%s' 'ZENSU.EXE security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+if [ "$LINES_LINUX_UPPER" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_LINUX_LOCAL" ] && [ -z "$LINES_LINUX_NOUN" ] && [ "$LINES_W32_UPPER" = "security${TAB}classify${TAB}f1" ]; then
+  check "B56 the CLI name counts in any letter case on linux and with an uppercase .EXE on win32" PASS
+else
+  check "B56 CLI name case (linux='$LINES_LINUX_UPPER' local='$LINES_LINUX_LOCAL' noun='$LINES_LINUX_NOUN' win32='$LINES_W32_UPPER')" FAIL
+fi
+LINES_W32_PROGRAM="$(printf '%s' '"C:\Program Files\Zensu\zensu.exe" security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_RELATIVE="$(printf '%s' '".\zensu.exe" security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_UPPER_PATH="$(printf '%s' '"C:\tools\ZENSU.EXE" security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_SINGLE="$(printf '%s' "'C:\\Program Files\\Zensu\\zensu.exe' security classify f1" | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_DOUBLED="$(printf '%s' '"C:\\tools\\ZENSU.EXE" security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_UNQUOTED="$(printf '%s' 'C:\\tools\\zensu.exe security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_MIXED="$(printf '%s' 'C:\\Zensu\\z\ensu.exe security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+if [ "$LINES_W32_PROGRAM" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_RELATIVE" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_UPPER_PATH" = "security${TAB}classify${TAB}f1" ] \
+   && [ "$LINES_W32_SINGLE" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_DOUBLED" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_UNQUOTED" = "security${TAB}classify${TAB}f1" ] \
+   && [ "$LINES_W32_MIXED" = "security${TAB}classify${TAB}f1" ]; then
+  check "B56b on win32 a Windows path to the CLI is read in any letter case, double-quoted, single-quoted, with doubled backslashes or with an escaped letter" PASS
+else
+  check "B56b win32 CLI path (program='$LINES_W32_PROGRAM' relative='$LINES_W32_RELATIVE' upper='$LINES_W32_UPPER_PATH' single='$LINES_W32_SINGLE' doubled='$LINES_W32_DOUBLED' unquoted='$LINES_W32_UNQUOTED' mixed='$LINES_W32_MIXED')" FAIL
+fi
+LINES_LINUX_ENV="$(printf '%s' 'ENV ZENSU security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_SHELL="$(printf '%s' "BASH -c 'ZENSU security classify f1'" | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_XARGS="$(printf '%s' 'echo --api-url=https://api.zensu.dev | XARGS zensu --api-url=http://localhost:8090 security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_ENV_LOCAL="$(printf '%s' 'ENV ZENSU --api-url=http://localhost:8090 security classify f1' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+LINES_LINUX_EVAL="$(printf '%s' 'EVAL "zensu security classify f1"' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+if [ "$LINES_LINUX_ENV" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_LINUX_SHELL" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_LINUX_XARGS" = "security${TAB}classify${TAB}f1" ] && [ -z "$LINES_LINUX_ENV_LOCAL" ] \
+   && [ "$LINES_LINUX_EVAL" = "security${TAB}classify${TAB}f1" ]; then
+  check "B56c on linux the shell model reads wrapper, shell and eval names in any letter case, and a one-word localhost --api-url= behind an uppercase env still relaxes" PASS
+else
+  check "B56c linux wrapper case (env='$LINES_LINUX_ENV' shell='$LINES_LINUX_SHELL' xargs='$LINES_LINUX_XARGS' local='$LINES_LINUX_ENV_LOCAL' eval='$LINES_LINUX_EVAL')" FAIL
+fi
+LINES_W32_UPPER_LATER="$(printf '%s' 'ZENSU --api-url http://localhost:8090 security classify f1 \--api-url https://api.zensu.dev' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+LINES_W32_UPPER_DASHES="$(printf '%s' 'ZENSU security classify f1 \-- --api-url http://localhost:8090' | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$WIN32_PRELOAD")"
+if [ "$LINES_W32_UPPER_LATER" = "security${TAB}classify${TAB}f1" ] && [ "$LINES_W32_UPPER_DASHES" = "security${TAB}classify${TAB}f1" ]; then
+  check "B56d on win32 the POSIX reading folds the CLI name too, so an uppercase call keeps an escaped later --api-url and an escaped --" PASS
+else
+  check "B56d win32 POSIX reading of an uppercase name (later='$LINES_W32_UPPER_LATER' dashes='$LINES_W32_UPPER_DASHES')" FAIL
+fi
+LINES_LINUX_DECOY="$(printf '%s' "x\\\\
+ZENSU features get f1; ssh h \"cd /x && zensu --api-url=http://localhost:8090 security classify f1\"" | parser_lines "$PLUGIN_DIR/hooks/lib/subagent-shell-guard-v1.js" "$LINUX_PRELOAD")"
+if printf '%s\n' "$LINES_LINUX_DECOY" | grep -qx "security${TAB}classify${TAB}f1\""; then
+  check "B56e on linux a line that ends in an escaped backslash cannot make an uppercase call offset a local call only the token scan sees" PASS
+else
+  check "B56e linux escaped-backslash decoy (got '$LINES_LINUX_DECOY')" FAIL
 fi
 
 source "$PLUGIN_DIR/hooks/lib/zensu-mcp-tools.sh"
