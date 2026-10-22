@@ -323,10 +323,24 @@ fi
 SWAP_ENTERED="$ROOT/swap-entered"
 SWAP_RELEASE="$ROOT/swap-release"
 SWAP_CONTENDER_ENTERED="$ROOT/swap-contender-entered"
+SWAP_ACQUIRE_MARKER="$ROOT/swap-acquire-entered"
+SWAP_LOCK_TWIN="$ROOT/swap-lock-twin"
+ACQUIRE_PRELOAD="--require=$PLUGIN_DIR/tests/structure/fixtures/lease-acquire-entry-preload.js"
+wait_for_file_long() {
+  local file="$1" attempts=0
+  while [ ! -f "$file" ] && [ "$attempts" -lt 2000 ]; do
+    attempts=$((attempts + 1))
+    sleep 0.01 2>/dev/null || sleep 1
+  done
+  [ -f "$file" ]
+}
+plant_lock_twin() {
+  : > "$SWAP_LOCK_TWIN" && ln "$SWAP_LOCK_TWIN" "${STATE_FILE}.lock"
+}
 swap_holder_callback() {
   local attempts=0
   : > "$SWAP_ENTERED"
-  while [ ! -f "$SWAP_RELEASE" ] && [ "$attempts" -lt 500 ]; do
+  while [ ! -f "$SWAP_RELEASE" ] && [ "$attempts" -lt 3000 ]; do
     attempts=$((attempts + 1))
     sleep 0.01 2>/dev/null || sleep 1
   done
@@ -338,13 +352,19 @@ swap_contender_callback() {
 
 SWAP_HOLDER_RC=""
 SWAP_CONTENDER_RC=""
+SWAP_PLANTED=no
 _tdd_locked_run "$STATE_FILE" swap_holder_callback &
 SWAP_HOLDER_PID=$!
-if wait_for_file "$SWAP_ENTERED"; then
-  _tdd_locked_run "$STATE_FILE" swap_contender_callback 2>"$ROOT/swap-contender.err" &
+if wait_for_file_long "$SWAP_ENTERED"; then
+  (
+    export NODE_OPTIONS="$ACQUIRE_PRELOAD"
+    export ZENSU_TEST_LEASE_ACQUIRE_MARKER="$SWAP_ACQUIRE_MARKER"
+    _tdd_locked_run "$STATE_FILE" swap_contender_callback
+  ) 2>"$ROOT/swap-contender.err" &
   SWAP_CONTENDER_PID=$!
-  sleep 0.8
-  mkdir "${STATE_FILE}.lock"
+  if wait_for_file_long "$SWAP_ACQUIRE_MARKER" && plant_lock_twin; then
+    SWAP_PLANTED=yes
+  fi
   : > "$SWAP_RELEASE"
   wait "$SWAP_HOLDER_PID"; SWAP_HOLDER_RC=$?
   wait "$SWAP_CONTENDER_PID"; SWAP_CONTENDER_RC=$?
@@ -353,34 +373,71 @@ else
   wait "$SWAP_HOLDER_PID" 2>/dev/null || true
 fi
 SWAP_HOLDER_PID=""; SWAP_CONTENDER_PID=""
-if [ "$SWAP_HOLDER_RC" = 0 ] && [ -n "$SWAP_CONTENDER_RC" ] && [ "$SWAP_CONTENDER_RC" -ne 0 ] \
+if [ "$SWAP_PLANTED" = yes ] && [ "$SWAP_HOLDER_RC" = 0 ] \
+  && [ -n "$SWAP_CONTENDER_RC" ] && [ "$SWAP_CONTENDER_RC" -ne 0 ] \
   && [ ! -e "$SWAP_CONTENDER_ENTERED" ] \
   && [ ! -s "$ROOT/swap-contender.err" ] \
   && [ -n "$LEASE_FILE" ] && [ ! -e "$LEASE_FILE" ]; then
-  check "P7 storage made unsafe while a contender waits for the lease keeps its callback from running, and the lease it took is released" PASS
+  check "P7 a hard-linked lock file planted while a contender waits inside the acquisition keeps its callback from running, and the lease it took is released" PASS
 else
-  check "P7 storage made unsafe while a contender waits (holder=$SWAP_HOLDER_RC contender=$SWAP_CONTENDER_RC entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) lease=$([ -n "$LEASE_FILE" ] && [ -e "$LEASE_FILE" ] && echo kept || echo gone) err=$(cat "$ROOT/swap-contender.err" 2>/dev/null))" FAIL
+  check "P7 hard-linked lock file planted during the acquisition wait (planted=$SWAP_PLANTED holder=$SWAP_HOLDER_RC contender=$SWAP_CONTENDER_RC entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) lease=$([ -n "$LEASE_FILE" ] && [ -e "$LEASE_FILE" ] && echo kept || echo gone) err=$(cat "$ROOT/swap-contender.err" 2>/dev/null))" FAIL
 fi
 
 PRECHECK_TMP="$ROOT/precheck-tmp"
+PRECHECK_ACQUIRE_MARKER="$ROOT/precheck-acquire-entered"
 mkdir -p "$PRECHECK_TMP"
 rm -f "$SWAP_CONTENDER_ENTERED"
-if [ -d "${STATE_FILE}.lock" ]; then
-  ( export TMPDIR="$PRECHECK_TMP"; _tdd_locked_run "$STATE_FILE" swap_contender_callback ) 2>"$ROOT/precheck.err"
+[ -e "${STATE_FILE}.lock" ] || plant_lock_twin
+if [ -f "${STATE_FILE}.lock" ] && [ ! -L "${STATE_FILE}.lock" ]; then
+  (
+    export TMPDIR="$PRECHECK_TMP"
+    export NODE_OPTIONS="$ACQUIRE_PRELOAD"
+    export ZENSU_TEST_LEASE_ACQUIRE_MARKER="$PRECHECK_ACQUIRE_MARKER"
+    _tdd_locked_run "$STATE_FILE" swap_contender_callback
+  ) 2>"$ROOT/precheck.err"
   PRECHECK_RC=$?
 else
   PRECHECK_RC=""
 fi
 if [ -n "$PRECHECK_RC" ] && [ "$PRECHECK_RC" -ne 0 ] \
+  && [ ! -e "$PRECHECK_ACQUIRE_MARKER" ] \
   && [ ! -e "$SWAP_CONTENDER_ENTERED" ] \
   && [ ! -s "$ROOT/precheck.err" ] \
   && [ -z "$(ls -A "$PRECHECK_TMP")" ] \
   && [ -n "$LEASE_FILE" ] && [ ! -e "$LEASE_FILE" ]; then
-  check "P8 unsafe storage refuses before acquisition, silently, with no lease and no token file left behind" PASS
+  check "P8 a hard-linked lock file refuses before the acquisition starts, silently, with no lease and no token file left behind" PASS
 else
-  check "P8 unsafe storage before acquisition (rc=$PRECHECK_RC entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) tmp=$(ls -A "$PRECHECK_TMP" | tr '\n' ' ') err=$(cat "$ROOT/precheck.err" 2>/dev/null))" FAIL
+  check "P8 hard-linked lock file before acquisition (rc=$PRECHECK_RC acquire=$([ -e "$PRECHECK_ACQUIRE_MARKER" ] && echo entered || echo never) entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) tmp=$(ls -A "$PRECHECK_TMP" | tr '\n' ' ') err=$(cat "$ROOT/precheck.err" 2>/dev/null))" FAIL
 fi
-rmdir "${STATE_FILE}.lock" 2>/dev/null || true
+rm -f "${STATE_FILE}.lock" "$SWAP_LOCK_TWIN"
+
+LEASE_COUNT_BIN="$ROOT/lease-count-bin"
+LEASE_COUNT_FILE="$ROOT/lease-node-count"
+REAL_NODE="$(command -v node)"
+mkdir -p "$LEASE_COUNT_BIN"
+cat > "$LEASE_COUNT_BIN/node" <<EOF
+#!/bin/sh
+printf 'x\n' >> "\$ZENSU_TEST_LEASE_NODE_COUNT"
+exec "$REAL_NODE" "\$@"
+EOF
+chmod 700 "$LEASE_COUNT_BIN/node"
+lease_noop_callback() {
+  :
+}
+: > "$LEASE_COUNT_FILE"
+(
+  export PATH="$LEASE_COUNT_BIN:$PATH"
+  export ZENSU_TEST_LEASE_NODE_COUNT="$LEASE_COUNT_FILE"
+  _tdd_locked_run "$STATE_FILE" lease_noop_callback
+)
+LEASE_COUNT_RC=$?
+LEASE_SPAWNS="$(wc -l < "$LEASE_COUNT_FILE" | tr -d ' ')"
+if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then LEASE_WANT=1; else LEASE_WANT=2; fi
+if [ "$LEASE_COUNT_RC" -eq 0 ] && [ "$LEASE_SPAWNS" = "$LEASE_WANT" ]; then
+  check "P9 one lease on bash ${BASH_VERSINFO[0]} costs exactly $LEASE_WANT node process(es), because its path checks run inside the lock process" PASS
+else
+  check "P9 node processes per lease (rc=$LEASE_COUNT_RC spawned=$LEASE_SPAWNS want=$LEASE_WANT bash=${BASH_VERSINFO[0]})" FAIL
+fi
 
 echo "----"
 echo "test-tdd-no-flock-external-lease: $PASS PASS / $FAIL FAIL"

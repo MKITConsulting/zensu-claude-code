@@ -211,6 +211,10 @@ else
   check "P8 canonical project-bound state remains authoritative" FAIL
 fi
 
+. "$PLUGIN_DIR/tests/structure/lib-unit-registry.sh"
+unit_check "P9 the path-safety module unit file passes" "$PLUGIN_DIR/tests/structure/state-path-safety-v1.test.js"
+unit_check_done "P9z every unit file the registry gives this suite was graded"
+
 echo "----"
 echo "test-tdd-state-path-safety: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

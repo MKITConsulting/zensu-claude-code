@@ -215,6 +215,11 @@
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },
     {
+      "path": "tests/structure/state-path-safety-v1.test.js", "registered": 13, "skips": {"root": 1, "win32": 2},
+      "runs": [{ "driver": "tests/structure/test-tdd-state-path-safety.sh" }],
+      "summary": "The state path walk the tdd-phase lease processes and _tdd_paths_safe share: link, kind and link-count refusals, unreadable components, trusted-root and fallback anchors, and malformed requests."
+    },
+    {
       "path": "tests/structure/subagent-shell-guard-v1.test.js", "registered": 26, "skips": {"win32": 2},
       "runs": [{ "driver": "tests/structure/test-reviewer-capability-gate.sh" }],
       "summary": "The subagent shell guard: the accident rules, the shell parser and command walker, the config layers that withdraw the grant, and Windows spellings."
