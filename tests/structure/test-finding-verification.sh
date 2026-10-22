@@ -188,6 +188,13 @@ if grep -qF 'judge second pass → Finding Verification Gate → consume-mode re
 else
   check "P2j vanilla mode keeps the gate" FAIL
 fi
+if grep -qF -- '--input "{project_root}/.zensu/reviews/findings-round-<n>.json"' "$TDD_MD" \
+   && grep -qF 'Never put finding text into a shell argument, a command substitution or a heredoc' "$TDD_MD" \
+   && ! grep -qF 'using its marker form' "$TDD_MD"; then
+  check "P2k step 4c hands the findings to the grader as a JSON file, never through a shell" PASS
+else
+  check "P2k step 4c hands the findings to the grader as a JSON file, never through a shell" FAIL
+fi
 
 # ── P3 fix-routing consumers ─────────────────────────────────────────
 if grep -qF "items annotated '$MARKER' failed the Finding Verification Gate" "$DELEGATE"; then

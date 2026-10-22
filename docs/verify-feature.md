@@ -61,8 +61,13 @@ the skill verifies every active `AC-###` criterion of the chain's plan on this w
 cheapest driver that can observe it: the browser for a UI criterion, a simulator for a mobile
 app, and a shell check for an API, a CLI or a queue. A shell check runs through the plugin's
 evidence runner, so the plugin records its real exit code; it reaches only an unauthenticated
-loopback target and discards its own output, because the runner shows the tail of that output
-to the model. The skill records one verdict per criterion, and the chain closes only when every
+loopback target and prints no raw application, network or credential output, because the runner
+shows the tail of that output to the model. Against a proven synthetic fixture it may print
+bounded diagnostics instead — the criterion id, a fixed check name, the result, a fixed failure
+category and a child's exit status, at most 20 lines — so a failure shows which assertion broke
+(`skills/verify-feature/rules/acceptance-evidence.md`). One observed run may back every
+criterion it asserts, each recorded on its own and only while the tree is unchanged. The skill
+records one verdict per criterion, and the chain closes only when every
 active criterion has a `pass` on the tree that ships
 ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). It verifies a criterion
 that is missing, stale or partial, and never re-drives one that fails on this tree: that one needs

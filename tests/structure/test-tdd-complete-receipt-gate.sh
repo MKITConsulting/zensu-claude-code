@@ -662,7 +662,7 @@ check "I2 the library wrote a receipt under the audited project's state dir" "$(
 [ "$(basename "$LIB_WROTE")" = "$(basename "$EXPECTED")" ]
 check "I3 library and gate agree on the receipt FILENAME (session-key derivation matches)" "$(verdict $?)"
 # Same project for both: audit the session's own project root, as the skill does.
-bash "$LIB" --log "$REPO/run.log" --project "$REPO" --receipt "$EXPECTED" >/dev/null 2>&1
+bash "$LIB" --log "$REPO/run.log" --project "$REPO" --session "$SID_I" --receipt "$EXPECTED" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID_I" >/dev/null 2>&1
 [ $? -eq 0 ]
 check "I4 completion is accepted after the audit deposits the receipt where the gate reads" "$(verdict $?)"

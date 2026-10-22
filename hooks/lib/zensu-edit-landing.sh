@@ -15,8 +15,9 @@
 # Usage:
 #   zensu-edit-landing.sh --log <run-log> [--project <dir>] [--baseline <sha>]
 #                         [--session-epoch <n>] [--session <id>]
-#                         [--dirty-before <file>] [--receipt <path>]
+#                         [--dirty-before <file>] [--predicates <file>] [--receipt <path>]
 #   zensu-edit-landing.sh --inventory --log <run-log> [--project <dir>]
+#   zensu-edit-landing.sh --check-receipt [--allow-unclean] --project <dir> --session <id>
 #
 #   --log            the session run log holding the IMPL/WIRED claims (required)
 #   --project        repository root to audit (default: CLAUDE_PROJECT_DIR or .)
@@ -61,10 +62,20 @@ DIRTY_BEFORE=""
 RECEIPT_PATH=""
 RECEIPT_EXPLICIT=0
 RECEIPT_FAILED=0
-RECEIPT_RETIRED=""
+RECEIPT_MARKED=""
+RECEIPT_NOTES=""
+RECEIPT_KEY=""
 BASELINE_SEEN=0
 EPOCH_SEEN=0
 DIRTY_SEEN=0
+PREDICATES=""
+PREDICATES_SEEN=0
+CHECK_RECEIPT=0
+ALLOW_UNCLEAN=0
+CHECK_MANIFEST=""
+SCOPE_DIR=""
+CLAIM_INDEX=0
+BARE_WIRED=0
 INVENTORY=0
 INV_ROOTS=""
 # Per-run cap on the claims `--inventory` will classify. Each one costs an
@@ -92,13 +103,29 @@ while [ $# -gt 0 ]; do
     --session-epoch) [ $# -ge 2 ] || die "--session-epoch requires a value"; SESSION_EPOCH="$2"; EPOCH_SEEN=1; shift 2 ;;
     --session)       [ $# -ge 2 ] || die "--session requires a value"; SESSION_ID="$2"; SESSION_SEEN=1; shift 2 ;;
     --dirty-before)  [ $# -ge 2 ] || die "--dirty-before requires a value"; DIRTY_BEFORE="$2"; DIRTY_SEEN=1; shift 2 ;;
+    --predicates)    [ $# -ge 2 ] || die "--predicates requires a value"; PREDICATES="$2"; PREDICATES_SEEN=1; shift 2 ;;
     --receipt)       [ $# -ge 2 ] || die "--receipt requires a value"; RECEIPT_PATH="$2"; RECEIPT_EXPLICIT=1; shift 2 ;;
     --inventory)     INVENTORY=1; shift ;;
+    --check-receipt) CHECK_RECEIPT=1; shift ;;
+    --allow-unclean) ALLOW_UNCLEAN=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 
-[ -n "$LOG_FILE" ] || die "--log is required"
+if [ "$CHECK_RECEIPT" -eq 1 ]; then
+  [ "$INVENTORY" -eq 0 ] || die "--check-receipt and --inventory are separate modes"
+  [ -z "$LOG_FILE" ] || die "--check-receipt reads the run log its receipt names and does not accept --log"
+  [ "$SESSION_SEEN" -eq 1 ] && [ -n "$SESSION_ID" ] || die "--check-receipt requires a non-empty --session"
+  [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--check-receipt reads the session receipt and does not accept --receipt"
+  [ "$BASELINE_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --baseline"
+  [ "$EPOCH_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --session-epoch"
+  [ "$DIRTY_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --dirty-before"
+  [ "$PREDICATES_SEEN" -eq 0 ] || die "--check-receipt grades nothing and does not accept --predicates"
+else
+  [ -n "$LOG_FILE" ] || die "--log is required"
+  [ "$ALLOW_UNCLEAN" -eq 0 ] || die "--allow-unclean applies only to --check-receipt"
+fi
+[ "$PREDICATES_SEEN" -eq 0 ] || [ -n "$PREDICATES" ] || die "--predicates must name a proof file"
 # `--inventory` reports; it grades nothing and writes nothing. A write-mode
 # operand that parses and is then ignored is the shape `zensu-log.sh` refuses
 # for its own verbs through `invalid_known_flag`: silently dropping an operand
@@ -113,18 +140,129 @@ if [ "$INVENTORY" -eq 1 ]; then
   [ "$BASELINE_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --baseline"
   [ "$EPOCH_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --session-epoch"
   [ "$DIRTY_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --dirty-before"
+  [ "$PREDICATES_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --predicates"
 fi
 # An empty --session yields no receipt path at all, and the refusal branch that
 # would announce it suppresses its own message on an empty path — so the audit
 # would exit 0 having written nothing, and `--tdd-complete` would then blame a
 # missing receipt. Refuse the operand instead, the way --log is refused.
 [ "$SESSION_SEEN" -eq 0 ] || [ -n "$SESSION_ID" ] || die "--session must not be empty"
-[ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
+[ "$CHECK_RECEIPT" -eq 1 ] || [ -f "$LOG_FILE" ] || die "run log not found: $LOG_FILE"
 [ -d "$PROJECT_DIR" ] || die "project dir not found: $PROJECT_DIR"
 
 # Resolve the project root before anything else. An unresolvable root must not
 # silently degrade into auditing the current directory.
 PROJECT_ABS="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)" || die "cannot resolve project dir: $PROJECT_DIR"
+EL_LIB_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)" || die "cannot resolve the directory of this script"
+EL_SELF="$EL_LIB_DIR/$(basename "$0")"
+EL_RECEIPT_LIB="$EL_LIB_DIR/edit-landing-receipt-v1.js"
+el_receipt_lib_present() { [ -f "$EL_RECEIPT_LIB" ] && [ ! -L "$EL_RECEIPT_LIB" ]; }
+
+# Screen a filesystem root before it reaches a verdict line. Both callers below
+# are MODEL-READ channels: skills/tdd/references/audit.md step 5b b) instructs the model to
+# copy every non-`EDIT LANDED` line verbatim into the run log, the final report
+# and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
+# REVIEW PACKET. The value itself is a work-tree root discovered by walking up
+# from a path a session-writable run log named, so it is attacker-influenced by
+# this file's own account of that directory.
+#
+# The screen lives in hooks/lib/zensu-safe-render.sh and is SOURCED, not copied.
+# It was two near-duplicates — this one and `_tc_render_stem` in zensu-log.sh —
+# documented as carrying the same rules while already divergent on the
+# empty-value arm, and both wrong in the same two ways. That library's header
+# carries the rules, the escape/withhold split and the locale pin; do not
+# restate them here, because a second statement of a rule is how the pair
+# drifted in the first place.
+#
+# `render_claim_value` is the local NAME, and it is value-neutral on purpose:
+# the retired `render_claim_root` described a filesystem root while the function
+# screens step ids, repo-relative paths and a work-tree root across every emit.
+_EL_SAFE_RENDER_LIB="$(dirname "$0")/zensu-safe-render.sh"
+if [ -f "$_EL_SAFE_RENDER_LIB" ] && [ ! -L "$_EL_SAFE_RENDER_LIB" ] && [ -r "$_EL_SAFE_RENDER_LIB" ]; then
+  # shellcheck source=hooks/lib/zensu-safe-render.sh
+  . "$_EL_SAFE_RENDER_LIB"
+fi
+if ! command -v zensu_safe_render >/dev/null 2>&1; then
+  # Fail CLOSED on a missing screen. Rendering raw would put an unscreened
+  # author-written value into a verdict a model relays, which is the one
+  # outcome the screen exists to prevent; a withheld value costs a name.
+  zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
+fi
+render_claim_value() { zensu_safe_render "$1"; }
+el_receipt_path() { printf '%s\n' "$PROJECT_ABS/.zensu/state/edit-landing-$1.json"; }
+
+_key_refusal="the session key resolved empty"
+if [ -n "$SESSION_ID" ]; then
+  # Canonicalize through the same helper the rest of the plugin uses, so the
+  # receipt lands where `--tdd-complete` looks for it. A harness session id and
+  # its on-disk state key are not the same string.
+  if [ -f "$(dirname "$0")/session-control-core-v1.js" ] && command -v node >/dev/null 2>&1; then
+    RECEIPT_KEY="$(node "$(dirname "$0")/session-control-core-v1.js" session-key "$SESSION_ID" 2>/dev/null)"
+  fi
+  # The fallback is the RAW --session operand, and it lands in a filesystem path
+  # below. Anything that is not the canonical key shape is refused: a
+  # value like `../../tmp/x` yields an absolute path that passes every guard
+  # below and would place session state outside .zensu/state entirely.
+  if [ -z "$RECEIPT_KEY" ]; then
+    _EL_SESSION_LIB="$(dirname "$0")/zensu-session.sh"
+    _key_shape_rc=2
+    if [ -f "$_EL_SESSION_LIB" ] && [ ! -L "$_EL_SESSION_LIB" ] && [ -r "$_EL_SESSION_LIB" ]; then
+      (
+        set +u
+        unset -f zensu_session_key_canonical
+        . "$_EL_SESSION_LIB" || exit 2
+        zensu_session_key_canonical "$SESSION_ID"
+      ) >/dev/null 2>&1
+      _key_shape_rc=$?
+    fi
+    case "$_key_shape_rc" in
+      0) RECEIPT_KEY="$SESSION_ID" ;;
+      1) ;;
+      *) _key_refusal="the session-key shape check in zensu-session.sh could not be loaded" ;;
+    esac
+  fi
+fi
+
+if [ "$CHECK_RECEIPT" -eq 1 ]; then
+  command -v node >/dev/null 2>&1 || die "--check-receipt needs node to read the receipt"
+  el_receipt_lib_present || die "--check-receipt needs edit-landing-receipt-v1.js beside this script"
+  [ -n "$RECEIPT_KEY" ] || die "--check-receipt cannot locate the receipt: ${_key_refusal}"
+  RECEIPT_PATH="$(el_receipt_path "$RECEIPT_KEY")"
+  LOG_FILE=/dev/null
+  CHECK_LOG_REL="$(ZENSU_ELR_RECEIPT="$RECEIPT_PATH" ZENSU_ELR_PROJECT_ROOT="$PROJECT_ABS" \
+    node "$EL_RECEIPT_LIB" receipt-log 2>/dev/null)" || CHECK_LOG_REL=""
+  if [ -n "$CHECK_LOG_REL" ] && [ -f "$PROJECT_ABS/$CHECK_LOG_REL" ] && [ ! -L "$PROJECT_ABS/$CHECK_LOG_REL" ]; then
+    LOG_FILE="$PROJECT_ABS/$CHECK_LOG_REL"
+  fi
+fi
+
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$SESSION_SEEN" -eq 0 ]; then
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && command -v node >/dev/null 2>&1 && el_receipt_lib_present; then
+    GATE_ROOT="$PROJECT_ABS"
+    GATE_SESSION="$CLAUDE_CODE_SESSION_ID"
+    if [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ -f "$EL_LIB_DIR/zensu-session.sh" ] && [ ! -L "$EL_LIB_DIR/zensu-session.sh" ]; then
+      GATE_BINDING="$(
+        set +u
+        unset -f zensu_bind_model_session
+        . "$EL_LIB_DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+        zensu_bind_model_session >/dev/null 2>&1 || exit 1
+        [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ -n "${ZENSU_SESSION_KEY:-}" ] || exit 1
+        printf '%s\t%s' "$ZENSU_PROJECT_ROOT" "$ZENSU_SESSION_KEY"
+      )" || GATE_BINDING=""
+      case "$GATE_BINDING" in
+        (*$'\t'*)
+          GATE_ROOT="${GATE_BINDING%%$'\t'*}"
+          GATE_SESSION="${GATE_BINDING#*$'\t'}"
+          ;;
+      esac
+    fi
+    ZEL_AMBIENT_SESSION="$GATE_SESSION" ZEL_ROOT="$GATE_ROOT" ZEL_LOG="$LOG_FILE" ZEL_HELPER="$EL_SELF" \
+      node "$EL_RECEIPT_LIB" session-gate || exit 2
+  fi
+  if [ "$RECEIPT_EXPLICIT" -eq 0 ] || [ "$RECEIPT_PATH" = "-" ]; then
+    echo "STANDALONE AUDIT — this run names no --session, so it writes no workflow receipt and its result cannot complete a workflow." >&2
+  fi
+fi
 
 # Every `git` call in this script runs through `_el_git`, which unsets the
 # discovery and config-injection variables that would otherwise override `-C`.
@@ -227,7 +365,11 @@ REPO_CANON="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" || REPO_CANON="$REPO_ROOT"
 # Anchored with -C so the current working directory cannot narrow it: `ls-files`
 # is cwd-scoped and would silently drop everything outside a subdirectory.
 UNION_FILE="$(mktemp)" || die "mktemp failed"
-cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" "${INV_ROOTS:-}" 2>/dev/null; return 0; }
+cleanup() {
+  rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" "${INV_ROOTS:-}" "${CHECK_MANIFEST:-}" 2>/dev/null
+  [ -z "${SCOPE_DIR:-}" ] || rm -rf "$SCOPE_DIR" 2>/dev/null
+  return 0
+}
 # A bash trap handler that RETURNS resumes the script, so `trap cleanup ... TERM`
 # made the caller's deadline unenforceable: `spawnSync`'s default killSignal is
 # SIGTERM, and the doctor bounds this child at 5 s. Worse, `cleanup` unlinks
@@ -237,6 +379,92 @@ cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" "${INV
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
+
+receipt_note() { RECEIPT_NOTES="${RECEIPT_NOTES}$1"$'\n'; }
+
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && { [ "$RECEIPT_EXPLICIT" -eq 0 ] || [ "$RECEIPT_PATH" != "-" ]; }; then
+  if [ -z "$RECEIPT_PATH" ] && [ -n "$SESSION_ID" ]; then
+    RECEIPT_PATH="$(el_receipt_path "$RECEIPT_KEY")"
+  fi
+  # A receipt whose name ends in `-` means the session key resolved empty; a
+  # RELATIVE path means the caller's cwd decides where it lands. Both have put
+  # `edit-landing-.json` in a repository root. Refuse rather than write blind:
+  # the receipt is state, and state belongs under the project's .zensu/state.
+  # A DERIVED receipt path must still live under the audited project's own state
+  # directory — that is what bounds the session-key fallback above. An EXPLICIT
+  # `--receipt` is a caller-chosen destination and keeps its documented freedom;
+  # the shape checks below still apply to it.
+  if [ "$RECEIPT_EXPLICIT" -eq 0 ]; then
+    case "$RECEIPT_PATH" in
+      *"/../"*|*/..)
+        receipt_note "RECEIPT REFUSED — the derived receipt path contains a parent-directory segment ($(zensu_safe_render "${RECEIPT_PATH}"))"
+        RECEIPT_PATH=""; RECEIPT_FAILED=1
+        ;;
+    esac
+    case "$RECEIPT_PATH" in
+      ""|"$PROJECT_ABS"/.zensu/state/*) ;;
+      *)
+        receipt_note "RECEIPT REFUSED — the derived receipt path escapes $(zensu_safe_render "${PROJECT_ABS}")/.zensu/state ($(zensu_safe_render "${RECEIPT_PATH}"))"
+        RECEIPT_PATH=""; RECEIPT_FAILED=1
+        ;;
+    esac
+  fi
+  case "$RECEIPT_PATH" in
+    ""|*/edit-landing-.json|edit-landing-.json)
+      # `RECEIPT_FAILED=1` only when a receipt was actually EXPECTED. An invocation
+      # that asked for none (no `--session`, no `--receipt`) arrives here with an
+      # empty path and must still exit 0; one whose key resolved empty asked for a
+      # receipt and got none, and exiting 0 there is what makes `--tdd-complete`
+      # blame a missing receipt instead of naming this cause. It is deliberately
+      # NOT `CLEAN=0` — see the exit contract at the foot of this file: the claims
+      # may all have landed perfectly, and saying otherwise names the wrong cause.
+      [ -n "$RECEIPT_PATH" ] && { receipt_note "RECEIPT REFUSED — ${_key_refusal}, so no receipt was written (would have been $(zensu_safe_render "${RECEIPT_PATH}"))"; RECEIPT_FAILED=1; }
+      RECEIPT_PATH=""
+      ;;
+    /*) ;;
+    *)
+      receipt_note "RECEIPT REFUSED — a relative --receipt path would land in the caller's cwd, not the project state dir ($(zensu_safe_render "${RECEIPT_PATH}"))"
+      RECEIPT_PATH=""; RECEIPT_FAILED=1
+      ;;
+  esac
+fi
+
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    [ "$PREDICATES_SEEN" -eq 0 ] || die "--predicates needs node to verify its proofs"
+  elif ! el_receipt_lib_present; then
+    [ "$PREDICATES_SEEN" -eq 0 ] || die "--predicates needs edit-landing-receipt-v1.js beside this script to verify its proofs"
+  elif [ -n "$SESSION_ID" ] && [ -z "$RECEIPT_KEY" ]; then
+    [ "$PREDICATES_SEEN" -eq 0 ] || die "--predicates needs the audit scope, and ${_key_refusal}"
+  else
+    SCOPE_DIR="$(mktemp -d)" || die "mktemp failed"
+    SCOPE_DISCARD=0
+    SCOPE_DEST="$RECEIPT_PATH"
+    if [ "$RECEIPT_EXPLICIT" -eq 1 ] && [ "$RECEIPT_PATH" = "-" ]; then
+      SCOPE_DISCARD=1
+      SCOPE_DEST=""
+    fi
+    SCOPE_SOURCE="$SCOPE_DEST"
+    if [ -n "$RECEIPT_KEY" ]; then
+      SCOPE_CANONICAL="$(el_receipt_path "$RECEIPT_KEY")"
+      if [ -z "$SCOPE_SOURCE" ] || [ -e "$SCOPE_CANONICAL" ] || [ -L "$SCOPE_CANONICAL" ]; then
+        SCOPE_SOURCE="$SCOPE_CANONICAL"
+      fi
+    fi
+    ZEL_SCOPE_DIR="$SCOPE_DIR" ZEL_ROOT="$PROJECT_ABS" ZEL_CLAIM_ROOT="$REPO_CANON" ZEL_LOG="$LOG_FILE" \
+    ZEL_SESSION="$SESSION_ID" ZEL_RECEIPT="$SCOPE_DEST" ZEL_SCOPE_SOURCE="$SCOPE_SOURCE" \
+    ZEL_CHECKPOINT="$([ -n "$SCOPE_DEST" ] && echo 1 || echo 0)" ZEL_DISCARD="$SCOPE_DISCARD" \
+    ZEL_GIT_FAULT="$([ -n "$GIT_FAULT" ] && echo 1 || echo 0)" \
+    ZEL_BASELINE_SEEN="$BASELINE_SEEN" ZEL_BASELINE="$BASELINE_SHA" \
+    ZEL_EPOCH_SEEN="$EPOCH_SEEN" ZEL_EPOCH="$SESSION_EPOCH" \
+    ZEL_DIRTY_SEEN="$DIRTY_SEEN" ZEL_DIRTY="$DIRTY_BEFORE" \
+      node "$EL_RECEIPT_LIB" scope-prepare || die "the audit scope could not be bound, so no claim was graded"
+    BASELINE_SHA="$(cat "$SCOPE_DIR/baseline")" || die "the audit scope could not be read back"
+    SESSION_EPOCH="$(cat "$SCOPE_DIR/epoch")" || die "the audit scope could not be read back"
+    DIRTY_BEFORE="$SCOPE_DIR/dirty"
+    : > "$SCOPE_DIR/landed" || die "the audit scope could not be prepared"
+  fi
+fi
 
 union_add() {
   local listing rc
@@ -251,7 +479,7 @@ union_add() {
     || die "the change union could not be written"
 }
 
-if [ "$INVENTORY" -eq 0 ] && [ "$IN_GIT" -eq 1 ] && [ -z "$GIT_FAULT" ]; then
+if [ "$INVENTORY" -eq 0 ] && [ "$CHECK_RECEIPT" -eq 0 ] && [ "$IN_GIT" -eq 1 ] && [ -z "$GIT_FAULT" ]; then
   _el_git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD >/dev/null 2>&1
   HEAD_RC=$?
   case "$HEAD_RC" in
@@ -301,38 +529,6 @@ trim_claim() {
   p="${p%"${p##*[![:space:]]}"}"
   printf '%s' "$p"
 }
-
-# Screen a filesystem root before it reaches a verdict line. Both callers below
-# are MODEL-READ channels: skills/tdd/references/audit.md step 5b b) instructs the model to
-# copy every non-`EDIT LANDED` line verbatim into the run log, the final report
-# and the CHAIN-END SUMMARY, and step 10.2c carries the close marker into the
-# REVIEW PACKET. The value itself is a work-tree root discovered by walking up
-# from a path a session-writable run log named, so it is attacker-influenced by
-# this file's own account of that directory.
-#
-# The screen lives in hooks/lib/zensu-safe-render.sh and is SOURCED, not copied.
-# It was two near-duplicates — this one and `_tc_render_stem` in zensu-log.sh —
-# documented as carrying the same rules while already divergent on the
-# empty-value arm, and both wrong in the same two ways. That library's header
-# carries the rules, the escape/withhold split and the locale pin; do not
-# restate them here, because a second statement of a rule is how the pair
-# drifted in the first place.
-#
-# `render_claim_value` is the local NAME, and it is value-neutral on purpose:
-# the retired `render_claim_root` described a filesystem root while the function
-# screens step ids, repo-relative paths and a work-tree root across every emit.
-_EL_SAFE_RENDER_LIB="$(dirname "$0")/zensu-safe-render.sh"
-if [ -f "$_EL_SAFE_RENDER_LIB" ] && [ ! -L "$_EL_SAFE_RENDER_LIB" ] && [ -r "$_EL_SAFE_RENDER_LIB" ]; then
-  # shellcheck source=hooks/lib/zensu-safe-render.sh
-  . "$_EL_SAFE_RENDER_LIB"
-fi
-if ! command -v zensu_safe_render >/dev/null 2>&1; then
-  # Fail CLOSED on a missing screen. Rendering raw would put an unscreened
-  # author-written value into a verdict a model relays, which is the one
-  # outcome the screen exists to prevent; a withheld value costs a name.
-  zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
-fi
-render_claim_value() { zensu_safe_render "$1"; }
 
 canon_claim() {
   local p="$1" d rest c
@@ -654,8 +850,14 @@ normalize_claim() {
   return 1
 }
 
+record_landed() {
+  [ -z "$SCOPE_DIR" ] || printf '%s\n' "$CLAIM_INDEX" >> "$SCOPE_DIR/landed" \
+    || die "the landed-claim record could not be written"
+}
+
 grade_claim() {
   local step="$1" raw="$2" resolved rc
+  CLAIM_INDEX=$((CLAIM_INDEX + 1))
   CLAIM_COUNT=$((CLAIM_COUNT + 1))
   resolved="$(normalize_claim "$raw")"
   rc=$?
@@ -679,15 +881,20 @@ grade_claim() {
     emit "UNVERIFIED — $(render_claim_value "${step}"): claimed \"$(render_claim_value "$(trim_claim "$raw")")\" could not be resolved to a repo-root-relative path"
     return
   fi
-  if in_union "$resolved"; then
-    # Membership is worktree-scoped: a file already dirty before this round
-    # reads as landed even when THIS round's replacement matched nothing.
-    if was_dirty_before "$resolved"; then
-      PENDING=$((PENDING + 1))
-      emit "PENDING PREDICATE — $(render_claim_value "${step}"): $(render_claim_value "${resolved}") was already dirty before this round; union membership is not evidence — re-read the target predicate"
-      return
-    fi
+  if [ -n "$SCOPE_DIR" ] && { grep -qxF -- "$CLAIM_INDEX" "$SCOPE_DIR/certified" || grep -qxF -- "$CLAIM_INDEX" "$SCOPE_DIR/proved"; }; then
     LANDED=$((LANDED + 1))
+    record_landed
+    emit "EDIT LANDED (verified predicate or unchanged prior certification) — $(render_claim_value "${step}"): $(render_claim_value "${resolved}")"
+    return
+  fi
+  if was_dirty_before "$resolved"; then
+    PENDING=$((PENDING + 1))
+    emit "PENDING PREDICATE — $(render_claim_value "${step}"): $(render_claim_value "${resolved}") was already dirty before this claim or was audited earlier in this generation; union membership is not evidence — supply a current literal/hash proof with --predicates"
+    return
+  fi
+  if in_union "$resolved"; then
+    LANDED=$((LANDED + 1))
+    record_landed
     emit "EDIT LANDED — $(render_claim_value "${step}"): $(render_claim_value "${resolved}")"
     return
   fi
@@ -695,6 +902,7 @@ grade_claim() {
   if is_ignored "$resolved"; then
     EXEMPT_IGNORED=$((EXEMPT_IGNORED + 1))
     LANDED=$((LANDED + 1))
+    record_landed
     emit "EDIT LANDED (untracked-by-design) — $(render_claim_value "${resolved}")"
     return
   fi
@@ -782,7 +990,12 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
     WIRED)
       [ "$INVENTORY" -eq 1 ] && continue
+      if [ "$CHECK_RECEIPT" -eq 1 ]; then
+        BARE_WIRED=$((BARE_WIRED + 1))
+        continue
+      fi
       [ -z "$GIT_FAULT" ] || continue
+      BARE_WIRED=$((BARE_WIRED + 1))
       UNVERIFIED=$((UNVERIFIED + 1))
       CLAIM_COUNT=$((CLAIM_COUNT + 1))
       # The LINE NUMBER, never the line. This value is wholly author-written and
@@ -924,8 +1137,32 @@ if [ "$INVENTORY" -eq 1 ]; then
   exit 0
 fi
 
+if [ "$CHECK_RECEIPT" -eq 1 ]; then
+  CHECK_MANIFEST="$(mktemp)" || die "mktemp failed"
+  while IFS="$(printf '\t')" read -r step raw; do
+    [ -n "${raw// /}" ] || continue
+    printf '%s\0%s\0\0' "$step" "$raw" >> "$CHECK_MANIFEST" || die "the claim manifest could not be written"
+  done < "$CLAIMS_FILE"
+  ZENSU_ELR_RECEIPT="$RECEIPT_PATH" ZENSU_ELR_PROJECT_ROOT="$PROJECT_ABS" ZENSU_ELR_SESSION="$SESSION_ID" \
+  ZENSU_ELR_MANIFEST="$CHECK_MANIFEST" ZENSU_ELR_BARE_WIRED="$BARE_WIRED" ZENSU_ELR_HELPER="$EL_SELF" \
+  ZENSU_ELR_ALLOW_UNCLEAN="$ALLOW_UNCLEAN" node "$EL_RECEIPT_LIB" fresh
+  exit $?
+fi
+
 # The pipeline above runs in a subshell, so grade in the parent to keep counters.
 if [ -z "$GIT_FAULT" ]; then
+  if [ -n "$SCOPE_DIR" ]; then
+    : > "$SCOPE_DIR/manifest" || die "the claim manifest could not be written"
+    while IFS="$(printf '\t')" read -r step raw; do
+      [ -n "${raw// /}" ] || continue
+      scope_resolved="$(normalize_claim "$raw")" || scope_resolved=""
+      printf '%s\0%s\0%s\0' "$step" "$raw" "$scope_resolved" >> "$SCOPE_DIR/manifest" \
+        || die "the claim manifest could not be written"
+    done < "$CLAIMS_FILE"
+    ZEL_SCOPE_DIR="$SCOPE_DIR" ZEL_MANIFEST="$SCOPE_DIR/manifest" ZEL_PREDICATES="$PREDICATES" \
+      node "$EL_RECEIPT_LIB" scope-claims \
+      || die "the audit claims or a predicate proof could not be verified, so no claim was graded"
+  fi
   while IFS="$(printf '\t')" read -r step raw; do
     [ -n "${raw// /}" ] || continue
     grade_claim "$step" "$raw"
@@ -950,89 +1187,24 @@ fi
 if [ "$RECEIPT_EXPLICIT" -eq 1 ] && [ "$RECEIPT_PATH" = "-" ]; then
   :
 else
-  _key_refusal="the session key resolved empty"
-  if [ -z "$RECEIPT_PATH" ] && [ -n "$SESSION_ID" ]; then
-    # Canonicalize through the same helper the rest of the plugin uses, so the
-    # receipt lands where `--tdd-complete` looks for it. A harness session id and
-    # its on-disk state key are not the same string.
-    _key=""
-    if [ -f "$(dirname "$0")/session-control-core-v1.js" ] && command -v node >/dev/null 2>&1; then
-      _key="$(node "$(dirname "$0")/session-control-core-v1.js" session-key "$SESSION_ID" 2>/dev/null)"
-    fi
-    # The fallback is the RAW --session operand, and it lands in a filesystem path
-    # two lines down. Anything that is not the canonical key shape is refused: a
-    # value like `../../tmp/x` yields an absolute path that passes every guard
-    # below and would place session state outside .zensu/state entirely.
-    if [ -z "$_key" ]; then
-      _EL_SESSION_LIB="$(dirname "$0")/zensu-session.sh"
-      _key_shape_rc=2
-      if [ -f "$_EL_SESSION_LIB" ] && [ ! -L "$_EL_SESSION_LIB" ] && [ -r "$_EL_SESSION_LIB" ]; then
-        (
-          set +u
-          unset -f zensu_session_key_canonical
-          . "$_EL_SESSION_LIB" || exit 2
-          zensu_session_key_canonical "$SESSION_ID"
-        ) >/dev/null 2>&1
-        _key_shape_rc=$?
-      fi
-      case "$_key_shape_rc" in
-        0) _key="$SESSION_ID" ;;
-        1) ;;
-        *) _key_refusal="the session-key shape check in zensu-session.sh could not be loaded" ;;
-      esac
-    fi
-    RECEIPT_PATH="$PROJECT_ABS/.zensu/state/edit-landing-${_key}.json"
-  fi
-  # A receipt whose name ends in `-` means the session key resolved empty; a
-  # RELATIVE path means the caller's cwd decides where it lands. Both have put
-  # `edit-landing-.json` in a repository root. Refuse rather than write blind:
-  # the receipt is state, and state belongs under the project's .zensu/state.
-  # A DERIVED receipt path must still live under the audited project's own state
-  # directory — that is what bounds the session-key fallback above. An EXPLICIT
-  # `--receipt` is a caller-chosen destination and keeps its documented freedom;
-  # the shape checks below still apply to it.
-  if [ "$RECEIPT_EXPLICIT" -eq 0 ]; then
-    case "$RECEIPT_PATH" in
-      *"/../"*|*/..)
-        emit "RECEIPT REFUSED — the derived receipt path contains a parent-directory segment ($(zensu_safe_render "${RECEIPT_PATH}"))"
-        RECEIPT_PATH=""; RECEIPT_FAILED=1
-        ;;
-    esac
-    case "$RECEIPT_PATH" in
-      ""|"$PROJECT_ABS"/.zensu/state/*) ;;
-      *)
-        emit "RECEIPT REFUSED — the derived receipt path escapes $(zensu_safe_render "${PROJECT_ABS}")/.zensu/state ($(zensu_safe_render "${RECEIPT_PATH}"))"
-        RECEIPT_PATH=""; RECEIPT_FAILED=1
-        ;;
-    esac
-  fi
-  case "$RECEIPT_PATH" in
-    ""|*/edit-landing-.json|edit-landing-.json)
-      # `RECEIPT_FAILED=1` only when a receipt was actually EXPECTED. An invocation
-      # that asked for none (no `--session`, no `--receipt`) arrives here with an
-      # empty path and must still exit 0; one whose key resolved empty asked for a
-      # receipt and got none, and exiting 0 there is what makes `--tdd-complete`
-      # blame a missing receipt instead of naming this cause. It is deliberately
-      # NOT `CLEAN=0` — see the exit contract at the foot of this file: the claims
-      # may all have landed perfectly, and saying otherwise names the wrong cause.
-      [ -n "$RECEIPT_PATH" ] && { emit "RECEIPT REFUSED — ${_key_refusal}, so no receipt was written (would have been $(zensu_safe_render "${RECEIPT_PATH}"))"; RECEIPT_FAILED=1; }
-      RECEIPT_PATH=""
-      ;;
-    /*) ;;
-    *)
-      emit "RECEIPT REFUSED — a relative --receipt path would land in the caller's cwd, not the project state dir ($(zensu_safe_render "${RECEIPT_PATH}"))"
-      RECEIPT_PATH=""; RECEIPT_FAILED=1
-      ;;
-  esac
+  [ -z "$RECEIPT_NOTES" ] || printf '%s' "$RECEIPT_NOTES"
   if [ -n "$RECEIPT_PATH" ] && [ -n "$GIT_FAULT" ]; then
     if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
-      rm -f "$RECEIPT_PATH" 2>/dev/null
-      if [ -e "$RECEIPT_PATH" ] || [ -L "$RECEIPT_PATH" ]; then
-        emit "RECEIPT REFUSED — the earlier receipt at $(zensu_safe_render "${RECEIPT_PATH}") could not be removed, so it still records an audit this run could not repeat"
-        RECEIPT_FAILED=1
+      if ! command -v node >/dev/null 2>&1 || ! el_receipt_lib_present; then
+        emit "RECEIPT REFUSED — this audit did not complete and node or edit-landing-receipt-v1.js is unavailable, so the receipt at $(zensu_safe_render "${RECEIPT_PATH}") could not be marked nonclean; it still records the earlier audit"
       else
-        RECEIPT_RETIRED="$RECEIPT_PATH"
+        tmp_receipt="$(mktemp "${RECEIPT_PATH}.tmp.XXXXXX" 2>/dev/null)" || tmp_receipt=""
+        if [ -n "$tmp_receipt" ] && [ ! -L "$tmp_receipt" ] \
+            && ZENSU_ELR_RECEIPT="$RECEIPT_PATH" node "$EL_RECEIPT_LIB" failed > "$tmp_receipt" \
+            && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null; then
+          RECEIPT_MARKED="$RECEIPT_PATH"
+        else
+          emit "RECEIPT REFUSED — this audit did not complete and the receipt at $(zensu_safe_render "${RECEIPT_PATH}") could not be marked nonclean; resolve the state-write failure before continuing"
+        fi
+        [ -z "$tmp_receipt" ] || rm -f "$tmp_receipt" 2>/dev/null
+        tmp_receipt=""
       fi
+      RECEIPT_FAILED=1
     fi
   elif [ -n "$RECEIPT_PATH" ]; then
     mkdir -p "$(dirname "$RECEIPT_PATH")" 2>/dev/null
@@ -1078,13 +1250,26 @@ else
       case "$LOG_ABS" in
         "$PROJECT_ABS"/*) LOG_ABS="${LOG_ABS#"$PROJECT_ABS"/}" ;;
       esac
-      if command -v node >/dev/null 2>&1; then
-        ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_CLAIMS="$CLAIM_COUNT" \
+      if ! command -v node >/dev/null 2>&1; then
+        # No node: the values would have to be interpolated into JSON unescaped, and
+        # this file is now a gate input rather than a report. A quote in either value
+        # breaks the document or injects a sibling key, so the fallback ANNOUNCES a
+        # refusal instead of writing a document it cannot encode safely.
+        emit "RECEIPT REFUSED — node is unavailable, so the receipt could not be encoded safely and none was written"
+        RECEIPT_FAILED=1
+      elif [ -z "$SCOPE_DIR" ]; then
+        emit "RECEIPT REFUSED — the audit scope was not bound, so no receipt was written to $(zensu_safe_render "${RECEIPT_PATH}")"
+        RECEIPT_FAILED=1
+      elif ! ZEL_SCOPE_DIR="$SCOPE_DIR" ZEL_BARE_WIRED="$BARE_WIRED" node "$EL_RECEIPT_LIB" scope-finish > "$SCOPE_DIR/final.json"; then
+        emit "RECEIPT REFUSED — the audit scope could not be sealed, so $(zensu_safe_render "${RECEIPT_PATH}") keeps its nonclean checkpoint"
+        RECEIPT_FAILED=1
+      elif ZEL_SESSION="$SESSION_ID" ZEL_LOG="$LOG_ABS" ZEL_CLAIMS="$CLAIM_COUNT" \
         ZEL_LANDED="$LANDED" ZEL_NOT="$NOT_LANDED" ZEL_UNVERIFIED="$UNVERIFIED" \
         ZEL_PENDING="$PENDING" ZEL_EXI="$EXEMPT_IGNORED" ZEL_EXV="$EXEMPT_VERIFIED" \
-        ZEL_CLEAN="$([ "$CLEAN" -eq 1 ] && echo true || echo false)" \
+        ZEL_CLEAN="$([ "$CLEAN" -eq 1 ] && echo true || echo false)" ZEL_SCOPE_FILE="$SCOPE_DIR/final.json" \
         node -e '
           const e = process.env;
+          const scope = JSON.parse(require("node:fs").readFileSync(e.ZEL_SCOPE_FILE, "utf8"));
           process.stdout.write(JSON.stringify({
             // `edit-landing-v2`, because the MEANING of `log` moved: v1 persisted the
             // raw `--log` spelling as the caller wrote it, v2 persists a
@@ -1111,15 +1296,13 @@ else
             exemptIgnored: Number(e.ZEL_EXI),
             exemptVerified: Number(e.ZEL_EXV),
             clean: e.ZEL_CLEAN === "true",
+            auditScope: scope,
           }) + "\n");
-        ' > "$tmp_receipt" 2>/dev/null && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null \
-          || { emit "RECEIPT REFUSED — the receipt could not be written to $(zensu_safe_render "${RECEIPT_PATH}")"; RECEIPT_FAILED=1; }
+        ' > "$tmp_receipt" 2>/dev/null && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null; then
+        TREE_NOTE="$(ZENSU_ELR_RECEIPT="$RECEIPT_PATH" node "$EL_RECEIPT_LIB" tree-note 2>/dev/null)" || TREE_NOTE=""
+        [ -z "$TREE_NOTE" ] || emit "$(render_claim_value "$TREE_NOTE")"
       else
-        # No node: the values would have to be interpolated into JSON unescaped, and
-        # this file is now a gate input rather than a report. A quote in either value
-        # breaks the document or injects a sibling key, so the fallback ANNOUNCES a
-        # refusal instead of writing a document it cannot encode safely.
-        emit "RECEIPT REFUSED — node is unavailable, so the receipt could not be encoded safely and none was written"
+        emit "RECEIPT REFUSED — the receipt could not be written to $(zensu_safe_render "${RECEIPT_PATH}")"
         RECEIPT_FAILED=1
       fi
       rm -f "$tmp_receipt" 2>/dev/null
@@ -1128,9 +1311,9 @@ else
 fi
 
 if [ -n "$GIT_FAULT" ]; then
-  RETIRED_CLAUSE=""
-  [ -z "$RECEIPT_RETIRED" ] || RETIRED_CLAUSE="; the earlier receipt at $(render_claim_value "$RECEIPT_RETIRED") was removed"
-  emit "EDIT LANDING AUDIT FAULT — $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT"). This is a git fault, not a verdict about any claim: no claim was graded and no receipt was written${RETIRED_CLAUSE}. Resolve the git error, then re-run the audit."
+  MARKED_CLAUSE=""
+  [ -z "$RECEIPT_MARKED" ] || MARKED_CLAUSE="; the receipt at $(render_claim_value "$RECEIPT_MARKED") was marked nonclean and keeps its audit scope for the retry"
+  emit "EDIT LANDING AUDIT FAULT — $(render_claim_value "$GIT_FAULT_CMD") exited ${GIT_FAULT_RC} on the audited root $(render_claim_value "$GIT_FAULT_ROOT"): $(render_claim_value "$GIT_FAULT"). This is a git fault, not a verdict about any claim: no claim was graded and no clean receipt was written${MARKED_CLAUSE}. Resolve the git error, then re-run the audit."
   exit 2
 fi
 

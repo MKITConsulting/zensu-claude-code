@@ -42,7 +42,7 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:147-154`), and
 `pre-bash-source-write-gate.sh:264-271` refuses an empty recorded root outright,
 while that opt-in gate is on, rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.
@@ -50,10 +50,10 @@ Nothing in this proposal weakens that.
 
 One of the consumers named in §6.3 does NOT sit on that binding: the audit's
 default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
-(`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
+(`hooks/lib/zensu-edit-landing.sh:56`) — ambient, with a `.` fallback. The Terminus
 row covers TWO sites, and neither is ambient. `--tdd-complete`'s change count
 resolves its root through `zensu_resolve_project_dir()`
-(`hooks/lib/zensu-log.sh:1536`) and counts through the shared helper (`:1574`),
+(`hooks/lib/zensu-log.sh:1636`) and counts through the shared helper (`:1674`),
 which runs every `git` call with the discovery and config-injection variables unset
 (`:89`, `:118-119`). The `--chain-done` zero-change terminus counts through the same
 helper, on the
@@ -63,11 +63,11 @@ variable names for the audit in a multi-root topology, and what the fallback mea
 when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:90`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:241-266`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:984`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:56`, flag at `:101`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:469-494`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:192`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:1525`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:1620`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, and so is a RELATIVE

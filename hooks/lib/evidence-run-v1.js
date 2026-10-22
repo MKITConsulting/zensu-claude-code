@@ -376,19 +376,22 @@ function runDirectory(projectRoot, requested, limits = LIMITS) {
   return { cwd: projectRoot, moved: true };
 }
 
-function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = []) {
+function computeTree(projectRoot, scratchDirectory, limits = LIMITS, options = {}) {
+  const everyDepth = options.workflowStateAtEveryDepth === true;
+  const excluded = Array.isArray(options.excluded) ? options.excluded : [];
   const inside = git(projectRoot, ['rev-parse', '--is-inside-work-tree']);
   if (!inside.ok || inside.stdout.trim() !== 'true') return { tree: null, reason: 'not a git work tree' };
   const prefix = git(projectRoot, ['rev-parse', '--show-prefix']);
   if (!prefix.ok) return { tree: null, reason: prefix.reason };
   const indexPath = git(projectRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
   if (!indexPath.ok) return { tree: null, reason: indexPath.reason };
-  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ':(exclude).zensu',
+  const untracked = git(projectRoot, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.',
+    everyDepth ? ':(exclude,glob)**/.zensu/**' : ':(exclude).zensu',
     ...excluded.map((entry) => `:(exclude,literal)${entry}`)], { encoding: 'buffer' });
   if (!untracked.ok) return { tree: null, reason: untracked.reason };
   const untrackedPaths = untracked.stdout.toString('utf8').split('\0').filter(Boolean);
   if (untrackedPaths.length > limits.untrackedMaxFiles) {
-    return { tree: null, reason: `more than ${limits.untrackedMaxFiles} untracked files` };
+    return { tree: null, reason: `more than ${limits.untrackedMaxFiles} untracked files`, limited: true };
   }
   let untrackedBytes = 0;
   for (const relative of untrackedPaths) {
@@ -396,7 +399,7 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = 
       untrackedBytes += fs.lstatSync(path.join(projectRoot, relative)).size;
     } catch { }
     if (untrackedBytes > limits.untrackedMaxBytes) {
-      return { tree: null, reason: `untracked files exceed ${Math.round(limits.untrackedMaxBytes / (1024 * 1024))} MiB` };
+      return { tree: null, reason: `untracked files exceed ${Math.round(limits.untrackedMaxBytes / (1024 * 1024))} MiB`, limited: true };
     }
   }
   const temporaryIndex = path.join(scratchDirectory, `index-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
@@ -410,7 +413,8 @@ function computeTree(projectRoot, scratchDirectory, limits = LIMITS, excluded = 
     const env = { GIT_INDEX_FILE: temporaryIndex };
     const added = git(projectRoot, ['add', '-A', '--', '.'], { env });
     if (!added.ok) return { tree: null, reason: added.reason };
-    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--', '.zensu',
+    const pruned = git(projectRoot, ['rm', '-r', '-f', '--cached', '--ignore-unmatch', '-q', '--',
+      everyDepth ? ':(glob)**/.zensu/**' : '.zensu',
       ...excluded.map((entry) => `:(literal)${entry}`)], { env });
     if (!pruned.ok) return { tree: null, reason: pruned.reason };
     const relativePrefix = prefix.stdout.trim();

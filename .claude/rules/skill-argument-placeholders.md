@@ -65,8 +65,9 @@ project `.zensu/config.json` only from `CLAUDE_PROJECT_DIR`, and the model's Bas
 that variable, so every probe passes it. The anchor is the Session Control record's project root, the
 path `zensu-log.sh --project-root` prints, because the hooks read the same keys there:
 `post-review-tdd-delegate.sh` exports it from `zensu_resolve_project_dir` before it reads
-`reviewPanel`, `findingVerification` and `criticalReproduction`, and the `zensu-log.sh` bind exports
-it before `--external-review` reads `reviewJudge`. `/zensu:tdd` passes `{project_root}` from Phase 0.
+`reviewPanel`, `findingVerification` and `criticalReproduction`, and the review packet gate's
+`reviewPacketGate` and `reviewJudge`, and the `zensu-log.sh` bind exports it before
+`--external-review` reads `reviewJudge`. `/zensu:tdd` passes `{project_root}` from Phase 0.
 `/zensu:plan-review` and `/zensu:pr-team-review` resolve it inline through `$(… zensu-log.sh
 --project-root)`, never from their `$REPO`: plan-review's is the working directory, which after
 `/zensu:adopt-session --reanchor` is not the bound root, and pr-team-review's is the reviewed

@@ -19,13 +19,17 @@ moves roughly **3.4M** tokens and `autoFixMaxRounds: 5` multiplied that by up to
 those figures as ONE measurement over six recent sessions, not a bound.
 
 **`hooks.incrementalReviewRounds` narrows rounds 2..N to that round's OWN delta.** Round 1 is
-unchanged. The delta comes from the run log the model already writes — every routed round logs
+unchanged. The delta travels on a `review_scope:` line after the round's canonical
+`REVIEW PACKET v1`, which `agents/review-aspect.md` reads; the packet itself keeps the full
+cumulative change set, because one canonical block serves every reviewer of the round
+(`.claude/rules/review-packet-gate.md`). The delta comes from the run log the model already writes — every routed round logs
 `R<n>-<step> IMPL completed — files: …` — so nothing new is persisted and no workflow-state
 field moves. **The reduction is redundancy, not coverage:** an aspect agent re-reading a file
 unchanged since the previous round cites the same lines and cannot raise a new finding.
 
 **The JUDGE is excluded, and that exclusion is what makes the narrowing safe at all.**
-`zensu:review-judge` always receives the full cumulative `changed_files`, because cross-cutting
+`zensu:review-judge` reads the same packet with no `review_scope:` line, so it always reviews the
+full cumulative `changed_files`, because cross-cutting
 drift into a file THIS round did not touch is precisely what a delta hides — it is the one
 finding class a narrowed panel structurally cannot raise. Never "simplify" the judge onto the
 delta; that deletes the compensating control rather than a redundancy.
@@ -157,7 +161,7 @@ walk: no key was added, both reads stay permissive, and only directive text move
 **Known gaps, accepted and named:**
 
 - **The delta is only as complete as the model's own claims.** A round that edits a file without
-  logging its `R<n>-*` IMPL claim narrows the packet past that file. The Phase 6 step 5b Edit
+  logging its `R<n>-*` IMPL claim narrows the `review_scope:` line past that file. The Phase 6 step 5b Edit
   Landing Audit is what surfaces an unlogged edit and the convergence branch's full-suite re-run
   is the backstop, but neither is a review of that file BY the panel in that round.
 - **The activation classifier is path-shaped.** A production file living under `tests/` reads as

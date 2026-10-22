@@ -219,14 +219,14 @@ wait
 DEFAULTS="$(context_of defaults)" && check "I30 the default render is valid PostToolUse context" PASS \
   || check "I30 the default render is valid PostToolUse context" FAIL
 check "I30a the default fix round activates over this round's changed_files" "$(has "$DEFAULTS" "aspect-activation-v1.js --panel lean --round re answers spawn for this round's changed_files)")"
-check "I30b the default fix round narrows to the round delta" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js")"
+check "I30b the default fix round names the round delta on a review_scope line" "$(has "$DEFAULTS" "hooks.incrementalReviewRounds is on: name THIS round's delta, resolved via hooks/lib/review-round-scope-v1.js, on a 'review_scope:' line after each aspect's block")"
 check "I30c the default fix round keeps the round delta on" "$(lacks "$DEFAULTS" 'hooks.incrementalReviewRounds is off')"
 check "I30d the default fix round keeps activation on" "$(lacks "$DEFAULTS" 'hooks.aspectActivation is off')"
 ACT_OFF="$(context_of activation-off)" && check "I31 the activation-off render is valid PostToolUse context" PASS \
   || check "I31 the activation-off render is valid PostToolUse context" FAIL
 check "I31a activation off re-reviews over an empty change set" "$(has "$ACT_OFF" 'aspect-activation-v1.js --panel lean --round re answers spawn for an empty change set, because hooks.aspectActivation is off)')"
 check "I31b activation off never activates over the round's changed_files" "$(lacks "$ACT_OFF" "answers spawn for this round's changed_files")"
-check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" 'hooks.incrementalReviewRounds is on: scope THIS round')"
+check "I31c activation off leaves the round delta to its own key" "$(has "$ACT_OFF" 'hooks.incrementalReviewRounds is on: name THIS round')"
 for name in rounds-off-project rounds-off-important rounds-off-all; do
   case "$name" in
     (rounds-off-project) status_line="'Fixing critical findings in-thread, then re-reviewing (round 1/2)'" ;;
@@ -238,7 +238,7 @@ for name in rounds-off-project rounds-off-important rounds-off-all; do
   check "I32a $name renders its own severity arm" "$(has "$ROUNDS_OFF" "$status_line")"
   check "I32b $name keeps the whole diff for every agent" "$(has "$ROUNDS_OFF" "hooks.incrementalReviewRounds is off, so THIS round's packet keeps the whole diff as changed_files for the zensu:review-aspect agents and the zensu:review-judge alike")"
   check "I32c $name still names the round-scope helper for convergence" "$(has "$ROUNDS_OFF" 'hooks/lib/review-round-scope-v1.js --log {log_file} --root "$TOP", with --round 1 and node ')"
-  check "I32e $name never narrows to the round delta" "$(lacks "$ROUNDS_OFF" 'to the round delta')"
+  check "I32e $name never names the round delta" "$(lacks "$ROUNDS_OFF" "THIS round's delta")"
   check "I32f $name never carries the narrowing trigger" "$(lacks "$ROUNDS_OFF" 'hooks.incrementalReviewRounds is on')"
   check "I32d $name still activates over the round's changed_files" "$(has "$ROUNDS_OFF" "answers spawn for this round's changed_files)")"
 done
