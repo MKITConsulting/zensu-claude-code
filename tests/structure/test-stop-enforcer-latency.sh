@@ -10,7 +10,12 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 SESSION_LIB="$PLUGIN_DIR/hooks/lib/zensu-session.sh"
 REAL_NODE="$(command -v node)"
 IDLE_SPAWN_BUDGET=4
-ARMED_SPAWN_BUDGET=60
+HOOK_BASH_MAJOR="$(bash -c 'printf %s "${BASH_VERSINFO[0]:-0}"' 2>/dev/null)"
+if [ "${HOOK_BASH_MAJOR:-0}" -ge 4 ] 2>/dev/null; then
+  ARMED_SPAWN_BUDGET=30
+else
+  ARMED_SPAWN_BUDGET=32
+fi
 
 PASS=0; FAIL=0
 check() {

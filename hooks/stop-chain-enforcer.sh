@@ -97,7 +97,12 @@ command -v node >/dev/null 2>&1 || exit 0
 [ -r "$AGENT_CONTEXT_LIB" ] || exit 0
 # shellcheck disable=SC1090
 source "$AGENT_CONTEXT_LIB"
-zensu_hook_is_main_principal "$INPUT" Stop || exit 0
+PRINCIPAL_OUT="$(zensu_hook_principal "$INPUT" Stop transcript_path 2>/dev/null)"
+[ "${PRINCIPAL_OUT%%$'\n'*}" = "main-v1" ] || exit 0
+case "$PRINCIPAL_OUT" in
+  *$'\n'*) TRANSCRIPT_PATH="${PRINCIPAL_OUT#*$'\n'}" ;;
+  *) TRANSCRIPT_PATH="" ;;
+esac
 
 
 SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
@@ -504,17 +509,6 @@ if [ "$DURABLE_STATE_HINT_EXISTS" = "false" ] && [ "${ZENSU_CHAIN:-}" != "off" ]
   esac
 fi
 
-read_field() {
-  printf '%s' "$INPUT" | FIELD="$1" node -e '
-    try {
-      const j=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
-      const v=j[process.env.FIELD];
-      process.stdout.write(typeof v==="string"?v:(typeof v==="boolean"?String(v):""));
-    } catch (_) { process.stdout.write(""); }
-  ' 2>/dev/null
-}
-
-TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "$SESSION_LIB"
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
 SESSION_ID="$(zensu_resolve_session_id "")" || exit 0
@@ -875,8 +869,13 @@ reviewer_denial_note_clear() {
 # of this hot — this writer was reached only from the blocked-Stop routing site and
 # the cap-release site, and now runs on every dirty turn end past the threshold, which
 # also makes the reap's own guard pass every time.
+reviewer_denial_note_acts() {
+  reviewer_spawn_denied || [ "$REVIEWER_DENIAL_STATUS" = "clear" ]
+}
+
 reviewer_denial_note_write_unlocked() {
   local note
+  reviewer_denial_note_acts || return 0
   note="$(reviewer_denial_note_path)" || return 0
   # Deliberately NOT redirected: `dirname` reads argv and cannot block on stdin, so it
   # is the one child in this lease region the rule above does not apply to.
@@ -919,7 +918,7 @@ reviewer_denial_note_write_unlocked() {
         try { fs.rmSync(tmp,{force:true}); } catch (_) { /* nothing else to do */ }
       }
     ' </dev/null >/dev/null 2>&1 || true
-  elif [ "$REVIEWER_DENIAL_STATUS" = "clear" ]; then
+  else
     # The UNLOCKED spelling on purpose: this already runs inside the lease, and
     # the lease is not reentrant — taking it again here would fail to acquire and
     # fall back to an unlocked clear anyway, at the cost of a second keeper
@@ -936,32 +935,35 @@ reviewer_denial_note() {
   # with no deadline above it. The probe memoizes, so the callback re-reads
   # nothing and the verdict it acts on is the same one.
   reviewer_spawn_denial_probe
+  reviewer_denial_note_acts || return 0
   reviewer_note_locked reviewer_denial_note_write_unlocked
 }
 
-INNER_SNAPSHOT=""
-if INNER_SNAPSHOT="$(tdd_chain_snapshot "$STATE_FILE" "$SESSION_ID" 2>/dev/null)"; then
+inner_flags_ok() {
+  local flag
+  for flag in "$SESSION_ACTIVE" "$SESSION_IMPL_COMPLETE" "$SESSION_CHAIN_DONE" "$_SESSION_CODE_REVIEW_DONE"; do
+    case "$flag" in
+      true|false) ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
+INNER_FIELDS=""
+if INNER_FIELDS="$(tdd_chain_snapshot "$STATE_FILE" "$SESSION_ID" stop-fields 2>/dev/null)"; then
   INNER_STATUS=0
 else
   INNER_STATUS=$?
 fi
 case "$INNER_STATUS" in
   0)
-    INNER_FIELDS="$(printf '%s' "$INNER_SNAPSHOT" | node -e '
-      try {
-        const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
-        process.stdout.write([s.active,s.implComplete,s.chainDone,s.codeReviewDone,
-          s.autopilot?s.autopilot.runId:"",s.autopilot?s.autopilot.attempt:"",
-          s.autopilot?s.autopilot.returnStage:"",
-          s.autopilot?s.autopilot.chainId:""].join("\t"));
-      } catch (_) { process.exit(3); }
-    ' 2>/dev/null)" || {
-      printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: current-session inner state is corrupt or unsafe."}'
-      exit 0
-    }
     IFS=$'\t' read -r SESSION_ACTIVE SESSION_IMPL_COMPLETE SESSION_CHAIN_DONE \
       _SESSION_CODE_REVIEW_DONE INNER_BOUND_RUN INNER_BOUND_ATTEMPT \
       INNER_BOUND_RETURN_STAGE INNER_BOUND_CHAIN <<<"$INNER_FIELDS"
+    inner_flags_ok || {
+      printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: current-session inner state is corrupt or unsafe."}'
+      exit 0
+    }
     ;;
   1)
     # SessionStart creates this baseline before any model action. Once the
@@ -1425,19 +1427,17 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
         ;;
     esac
   fi
-  if INNER_SNAPSHOT="$(tdd_chain_snapshot "$STATE_FILE" "$SESSION_ID" 2>/dev/null)"; then
-    INNER_FIELDS="$(printf '%s' "$INNER_SNAPSHOT" | node -e '
-      const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
-      process.stdout.write([s.active,s.implComplete,s.chainDone,s.codeReviewDone,
-        s.autopilot?s.autopilot.runId:"",s.autopilot?s.autopilot.attempt:"",
-        s.autopilot?s.autopilot.returnStage:"",
-        s.autopilot?s.autopilot.chainId:""].join("\t"));
-    ' 2>/dev/null)" || { emit_block "Zensu review-chain Stop denied: adopted inner state could not be validated."; exit 0; }
+  if INNER_FIELDS="$(tdd_chain_snapshot "$STATE_FILE" "$SESSION_ID" stop-fields 2>/dev/null)"; then
     IFS=$'\t' read -r SESSION_ACTIVE SESSION_IMPL_COMPLETE SESSION_CHAIN_DONE \
       _SESSION_CODE_REVIEW_DONE INNER_BOUND_RUN INNER_BOUND_ATTEMPT \
       INNER_BOUND_RETURN_STAGE INNER_BOUND_CHAIN <<<"$INNER_FIELDS"
+    inner_flags_ok || { emit_block "Zensu review-chain Stop denied: adopted inner state could not be validated."; exit 0; }
   else
     SNAPSHOT_RC=$?
+    if [ "$SNAPSHOT_RC" -eq 64 ]; then
+      emit_block "Zensu review-chain Stop denied: adopted inner state could not be validated."
+      exit 0
+    fi
     if [ "$SNAPSHOT_RC" -eq 1 ]; then
       SESSION_ACTIVE=false; SESSION_IMPL_COMPLETE=false; SESSION_CHAIN_DONE=false
       _SESSION_CODE_REVIEW_DONE=false; INNER_BOUND_RUN=""; INNER_BOUND_ATTEMPT=""

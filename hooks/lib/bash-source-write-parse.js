@@ -168,15 +168,15 @@ function stripSlash(p) {
 
 // Same containment predicate hooks/lib/reviewer-capability-v1.js uses, and that
 // session-control-core-v1.js and review-evidence-lease-v1.js each hand-copy,
-// alongside an inline copy in hooks/lib/zensu-tdd-phase.sh's `node -e`.
+// alongside the copy in hooks/lib/state-path-safety-v1.js, the tdd-phase path walk.
 // It sits at MODULE scope and is EXPORTED, so a consumer in this process can
 // call it rather than growing a sixth copy — `skills/session-trail/scripts/
 // trail.mjs` (`writeAnchor`) took the seam first, and `hooks/lib/
 // plugin-data-guard-v1.js` is the SECOND consumer. That one changes the blast
 // radius of this export list: removing `within` or `msysToDrive` no longer only
 // degrades a skill's rendering, it degrades a PreToolUse DENY gate to allow via
-// its `GUARD_UNAVAILABLE` fault direction. The shell copies
-// cannot take the seam: they run in a `node -e` string with no require of this file.
+// its `GUARD_UNAVAILABLE` fault direction. The path-walk copy keeps its own body:
+// it runs in every Stop-path lease and loads only node built-ins, never this parser.
 // The `..` test must be anchored on a separator and on the exact `..`: a bare
 // startsWith("..") also rejects a legitimately nested `..bak`, whose relative
 // path is `..bak`, and the empty relative path means "is the root itself".
