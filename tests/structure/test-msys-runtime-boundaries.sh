@@ -67,14 +67,20 @@ else
 fi
 
 if printf '%s\n' "$PATH_SAFETY_BLOCK" \
-      | grep -qF "MSYS2_ARG_CONV_EXCL='*' node \"\$_ZENSU_TDD_PATH_SAFETY\" \"\${_ZENSU_TDD_PATHS_ARGV[@]}\"" \
+      | grep -qF "PATH_SAFETY=\"\$_ZENSU_TDD_PATH_SAFETY\" MSYS2_ARG_CONV_EXCL='*' node -e '" \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF 'require(process.env.PATH_SAFETY).pathsSafeArgv(process.argv.slice(1)) === true ? 0 : 3' \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF "' -- \"\${_ZENSU_TDD_PATHS_ARGV[@]}\"" \
     && printf '%s\n' "$PATH_SAFETY_BLOCK" \
       | grep -qF '"$native_project_root" "$native_temp_root" "$native_home_root"' \
     && printf '%s\n' "$PATH_SAFETY_BLOCK" \
       | grep -qF '"${native_path_args[@]}"' \
+    && ! printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT)' \
     && [ -f "$PATH_SAFETY_MODULE" ] \
-    && grep -qF 'const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(2);' "$PATH_SAFETY_MODULE" \
-    && ! grep -qF 'process.env' "$PATH_SAFETY_MODULE"; then
+    && grep -qF 'module.exports = { pathsSafe, pathsSafeArgv };' "$PATH_SAFETY_MODULE" \
+    && ! grep -Eq 'process\.(env|argv)' "$PATH_SAFETY_MODULE"; then
   check "path safety transports every pre-rendered native anchor and operand through rewrite-disabled argv" PASS
 else
   check "path safety native argv transport contract" FAIL
@@ -88,6 +94,13 @@ if printf '%s\n' "$LOCK_KEEPER_BLOCK" | grep -qF "MSYS2_ARG_CONV_EXCL='*' node -
     && printf '%s\n' "$LOCKED_RUN_BLOCK" | grep -qF "if MSYS2_ARG_CONV_EXCL='*' node -e" \
     && printf '%s\n' "$LOCKED_RUN_BLOCK" \
       | grep -qF '"$_ZENSU_TDD_PATH_SAFETY" "${#storage_argv[@]}" "${storage_argv[@]}" "${token_argv[@]}"' \
+    && printf '%s\n' "$LOCK_KEEPER_BLOCK" | grep -qF 'if (safety.pathsSafeArgv(storage) !== true) {' \
+    && printf '%s\n' "$LOCK_KEEPER_BLOCK" \
+      | grep -qF 'safety.pathsSafeArgv(storage) === true ? "READY\n" : "UNSAFE-HELD\n"' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF 'const storageSafe = () => safety.pathsSafeArgv(checks.slice(0, split)) === true;' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF 'const tokenSafe = () => safety.pathsSafeArgv(checks.slice(split)) === true;' \
     && ! printf '%s\n' "$LOCK_KEEPER_BLOCK$LOCKED_RUN_BLOCK" \
       | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT|SAFETY|STORAGE)'; then
   check "the lease processes receive the same rendered path-safety argv through rewrite-disabled argv" PASS

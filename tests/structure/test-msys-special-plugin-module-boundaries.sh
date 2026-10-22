@@ -479,6 +479,20 @@ else
   check "evidence runner converts and loads (with its sibling requires) from the special plugin root" FAIL
 fi
 
+PATH_SAFETY_PROBE="$(CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PROJECT_DIR="$NATIVE_PROJECT" bash -c '
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh" || exit 1
+  _tdd_paths_safe "$1" regular && echo safe
+  if ln "$1" "$1.twin" 2>/dev/null; then
+    _tdd_paths_safe "$1" regular || echo refused
+    rm -f -- "$1.twin"
+  fi
+' _ "$NATIVE_PROJECT/README.md" 2>/dev/null)"
+if [ "$PATH_SAFETY_PROBE" = "$(printf 'safe\nrefused')" ]; then
+  check "tdd-phase path walk loads its module from the special plugin root and still refuses a hard-linked leaf" PASS
+else
+  check "tdd-phase path walk loads its module from the special plugin root (got: $(printf '%s' "$PATH_SAFETY_PROBE" | tr '\n' ' '))" FAIL
+fi
+
 
 if [ "$FAIL" -ne 0 ]; then
   for diagnostic in "$RAW_TMP"/*.err; do
