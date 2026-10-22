@@ -58,6 +58,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
   again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
   `gtimeout` is installed, counts the Stop as before.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
+  `takeover`.
 
 ## [0.28.0] - 2026-10-21
 

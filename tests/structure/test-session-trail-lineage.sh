@@ -1940,7 +1940,7 @@ L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
 # rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
 # findPlanDocs/nearestRepoRoot/releaseSubject take it as a filesystem path, Set/toLowerCase build
 # a match structure, and ===/!==/typeof/.length compare it.
-L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|chipProposal\(|chipRepository\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|releaseSubject\(|firstRepositoryOf\(|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
 # The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
 # raw interpolation on one of those four lines stays visible.
 # Comment lines are excluded: they describe the rule rather than render anything,
@@ -2012,7 +2012,16 @@ fi
 # suppress a line, never surface one, so it must report itself rather than widen
 # the filter silently. Fails, never skips, on zero.
 L61_STALE=""
-for alt in 'oneLine' 'flatPath' 'briefPath' 'briefShellArg' 'writeAnchor' 'rel\(' 'path\.' 'gitState' 'gitDiffText' 'findPlanDocs' 'nearestRepoRoot' 'new Set\(' '===' '!==' '\.toLowerCase' 'const r ' 'r\.cwd !== r\.wt'; do
+L61_INNER="${L61_OK#(}"
+L61_INNER="${L61_INNER%)}"
+IFS='|' read -r -a L61_ALTS <<< "$L61_INNER"
+L61_JOINED="$(IFS='|'; printf '(%s)' "${L61_ALTS[*]}")"
+if [ "${#L61_ALTS[@]}" -gt 1 ] && [ "$L61_JOINED" = "$L61_OK" ]; then
+  check "L61d-control the stale-entry list is derived from L61_OK and reproduces it (${#L61_ALTS[@]} entries)" PASS
+else
+  check "L61d-control the stale-entry list does not reproduce L61_OK (${#L61_ALTS[@]} entries), so L61d checks another list" FAIL
+fi
+for alt in "${L61_ALTS[@]}"; do
   if [ "$(grep -cE "$L61_PAT" "$L61_SRC" 2>/dev/null || echo 0)" = "0" ]; then break; fi
   HITS="$(grep -E "$L61_PAT" "$L61_SRC" | grep -cE "$alt" || true)"
   [ "$HITS" = "0" ] && L61_STALE="$L61_STALE $alt"
