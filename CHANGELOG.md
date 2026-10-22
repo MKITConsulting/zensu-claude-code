@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
 - **session-trail task chips**: a takeover now carries the old session's open task chips over as
   Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
   session is released, each chip the brief marks **propose** gets one `start_session` call with
@@ -69,6 +77,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A value that names a loopback host only once a URL parser normalizes it (`http://127.1:8090`)
   stays denied. When a local call is denied, spell the URL literally and either put the two-word
   `--api-url <url>` right after `zensu`, or drop the flag and set a local `ZENSU_API_URL`.
+- **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
+  while its team review runs. A change in one of the session's review evidence leases (a seat
+  bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
+  while a review seat is still in flight does not count toward the three-stop budget until the
+  lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
+  three times without progress after that still ends the order as blocked.
+- **autopilot**: a Stop of a durable Autopilot run no longer counts against the stage budget of 12
+  Stops while the session's review evidence lease has a review seat in flight, so a long PR team
+  review no longer moves a healthy run to `BLOCKED` with `STOP_BUDGET_EXHAUSTED`. The block names
+  the seats and the time the lease stops taking results and reads `stopBlock=uncounted`. Once no
+  seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
+  again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
+  `gtimeout` is installed, counts the Stop as before.
 
 ## [0.28.0] - 2026-10-21
 
@@ -80,8 +101,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
 - **session-trail**: Continue a taken-over session's linked sessions (#464)
 
+### Changed
+
+- **tdd-phase**: Run the external lease's path checks inside the lock process (#478)
+
 ### Fixed
 
+- **hooks**: Find a shell's -c flag in linear time in the work-order and consent gates (#481)
 - **skills**: Define the fallback for hosts with the task tools switched off (#473)
 - **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
 - **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
@@ -174,14 +200,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
   that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
   `zensu auth login`, which cannot help there.
-- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
-  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
-  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
-  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
-  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
-  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
-  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
-  bound session's project config, never the reviewed repository's.
 
 ## [0.27.0] - 2026-10-17
 

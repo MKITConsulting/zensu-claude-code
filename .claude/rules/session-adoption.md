@@ -513,7 +513,10 @@ exact drift in its own words ("state the base or the count means nothing"):
   mode/uid pair verbatim, because the two do different things with the same
   predicate: the owner REPAIRS with a chmod, this one may only LOOK. It is a
   read-only twin, not a removed copy — do not "align" them, and do not read "the
-  copies are gone" as covering it.
+  copies are gone" as covering it. The owner's pair now lives in
+  `assertPrivateDirectory`, which `ensurePrivateDirectory` runs after its chmod and the
+  lock-free `leaseProgress` reader runs without one; `privateEnough` answers a boolean
+  on an `lstat` it already holds, so the pair is still spelled twice.
 
   **The stated cost was paid, not avoided:** the sweep is an EIGHTH host obligation
   now, not part of the cross-host core half. `adoptContext` no longer sweeps at all
