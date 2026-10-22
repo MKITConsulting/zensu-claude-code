@@ -30,6 +30,8 @@ cleanup() {
   [ -n "${MIXED_ENV_PID:-}" ] && kill "$MIXED_ENV_PID" 2>/dev/null || true
   [ -n "${AUTO_PATH_PID:-}" ] && kill "$AUTO_PATH_PID" 2>/dev/null || true
   [ -n "${AUTO_ENV_PID:-}" ] && kill "$AUTO_ENV_PID" 2>/dev/null || true
+  [ -n "${SWAP_HOLDER_PID:-}" ] && kill "$SWAP_HOLDER_PID" 2>/dev/null || true
+  [ -n "${SWAP_CONTENDER_PID:-}" ] && kill "$SWAP_CONTENDER_PID" 2>/dev/null || true
   rm -rf "$ROOT"
 }
 trap cleanup EXIT
@@ -317,6 +319,68 @@ if _tdd_locked_run "$STATE_FILE" reclaimed_callback \
 else
   check "P4 a lease left by a killed owner is reclaimed" FAIL
 fi
+
+SWAP_ENTERED="$ROOT/swap-entered"
+SWAP_RELEASE="$ROOT/swap-release"
+SWAP_CONTENDER_ENTERED="$ROOT/swap-contender-entered"
+swap_holder_callback() {
+  local attempts=0
+  : > "$SWAP_ENTERED"
+  while [ ! -f "$SWAP_RELEASE" ] && [ "$attempts" -lt 500 ]; do
+    attempts=$((attempts + 1))
+    sleep 0.01 2>/dev/null || sleep 1
+  done
+  [ -f "$SWAP_RELEASE" ]
+}
+swap_contender_callback() {
+  : > "$SWAP_CONTENDER_ENTERED"
+}
+
+SWAP_HOLDER_RC=""
+SWAP_CONTENDER_RC=""
+_tdd_locked_run "$STATE_FILE" swap_holder_callback &
+SWAP_HOLDER_PID=$!
+if wait_for_file "$SWAP_ENTERED"; then
+  _tdd_locked_run "$STATE_FILE" swap_contender_callback 2>"$ROOT/swap-contender.err" &
+  SWAP_CONTENDER_PID=$!
+  sleep 0.8
+  mkdir "${STATE_FILE}.lock"
+  : > "$SWAP_RELEASE"
+  wait "$SWAP_HOLDER_PID"; SWAP_HOLDER_RC=$?
+  wait "$SWAP_CONTENDER_PID"; SWAP_CONTENDER_RC=$?
+else
+  : > "$SWAP_RELEASE"
+  wait "$SWAP_HOLDER_PID" 2>/dev/null || true
+fi
+SWAP_HOLDER_PID=""; SWAP_CONTENDER_PID=""
+if [ "$SWAP_HOLDER_RC" = 0 ] && [ -n "$SWAP_CONTENDER_RC" ] && [ "$SWAP_CONTENDER_RC" -ne 0 ] \
+  && [ ! -e "$SWAP_CONTENDER_ENTERED" ] \
+  && [ ! -s "$ROOT/swap-contender.err" ] \
+  && [ -n "$LEASE_FILE" ] && [ ! -e "$LEASE_FILE" ]; then
+  check "P7 storage made unsafe while a contender waits for the lease keeps its callback from running, and the lease it took is released" PASS
+else
+  check "P7 storage made unsafe while a contender waits (holder=$SWAP_HOLDER_RC contender=$SWAP_CONTENDER_RC entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) lease=$([ -n "$LEASE_FILE" ] && [ -e "$LEASE_FILE" ] && echo kept || echo gone) err=$(cat "$ROOT/swap-contender.err" 2>/dev/null))" FAIL
+fi
+
+PRECHECK_TMP="$ROOT/precheck-tmp"
+mkdir -p "$PRECHECK_TMP"
+rm -f "$SWAP_CONTENDER_ENTERED"
+if [ -d "${STATE_FILE}.lock" ]; then
+  ( export TMPDIR="$PRECHECK_TMP"; _tdd_locked_run "$STATE_FILE" swap_contender_callback ) 2>"$ROOT/precheck.err"
+  PRECHECK_RC=$?
+else
+  PRECHECK_RC=""
+fi
+if [ -n "$PRECHECK_RC" ] && [ "$PRECHECK_RC" -ne 0 ] \
+  && [ ! -e "$SWAP_CONTENDER_ENTERED" ] \
+  && [ ! -s "$ROOT/precheck.err" ] \
+  && [ -z "$(ls -A "$PRECHECK_TMP")" ] \
+  && [ -n "$LEASE_FILE" ] && [ ! -e "$LEASE_FILE" ]; then
+  check "P8 unsafe storage refuses before acquisition, silently, with no lease and no token file left behind" PASS
+else
+  check "P8 unsafe storage before acquisition (rc=$PRECHECK_RC entered=$([ -e "$SWAP_CONTENDER_ENTERED" ] && echo yes || echo no) tmp=$(ls -A "$PRECHECK_TMP" | tr '\n' ' ') err=$(cat "$ROOT/precheck.err" 2>/dev/null))" FAIL
+fi
+rmdir "${STATE_FILE}.lock" 2>/dev/null || true
 
 echo "----"
 echo "test-tdd-no-flock-external-lease: $PASS PASS / $FAIL FAIL"

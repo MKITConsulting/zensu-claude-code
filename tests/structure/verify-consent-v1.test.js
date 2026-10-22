@@ -1257,6 +1257,18 @@ test('a command beyond the size bound is refused only when it names a zensu-veri
   assert.deepEqual(decide(`playwright-cli snapshot # ${padding}`), { verdict: 'none' });
 });
 
+test('the largest command the gate parses stays linear on a long shell flag', () => {
+  const prefix = `${cli('snapshot')}; bash -`;
+  const length = 262144 - Buffer.byteLength(prefix) - 3;
+  assert.equal(denied(`${prefix}${'c'.repeat(length)}1 xx`), REASONS.COMMAND_TOO_LARGE);
+  const command = `${JSON.stringify(prefix)} + 'c'.repeat(${length}) + '1 x'`;
+  const expression = `require(${JSON.stringify(MODULE)}).evaluate({ command: ${command}, payload: {}, env: {}, records: [], policy: null }).reason`;
+  const run = spawnSync(process.execPath, ['-e', `process.stdout.write(${expression});`], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(run.status, 0, run.signal || (run.error && run.error.code) || run.stderr);
+  assert.equal(run.stdout, REASONS.NOT_PLAIN);
+  assert.equal(denied(`bash -cx '${cli('eval 1')}'`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
+});
+
 test('a gated command the lexer cannot close is refused as unjudged', () => {
   assert.equal(denied(cli("goto 'http://127.0.0.1:4200/")), REASONS.UNJUDGED_BODY);
 });

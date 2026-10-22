@@ -170,7 +170,7 @@ n="$(grep -cF -- '${CONVERGENCE_CLAUSE}' "$DELEGATE")"
 [ "$n" -eq 3 ] && check "R15 every severity arm interpolates the clause (${n}x)" PASS \
                || check "R15 every severity arm interpolates the clause (${n}x, want 3)" FAIL
 RULE_LINES="$(grep -F 'IMPORTANT_RULE="' "$DELEGATE")"
-for needle in 'step 4c Finding Verification Gate' 'hooks.incrementalReviewRounds is enabled' 'review-round-scope-v1.js' \
+for needle in 'step 4c Finding Verification Gate' '${ACTIVATION_INPUT}' '${ROUND_SCOPE}' 'review-round-scope-v1.js' \
               'status=empty or status=degraded' 'always keeps the full cumulative diff' 'aspect-activation-v1.js --panel ${PANEL} --round re' \
               're-run the FULL test suite over the current tree in the FOREGROUND' '${CLAUDE_PLUGIN_ROOT}'; do
   case "$CLAUSE_LINE$RULE_LINES" in
@@ -273,6 +273,7 @@ check "LC4e the rubric doc states the critical default" "$(grep_ok "$RUBRIC_DOC"
 check "LC2 the delegate reads hooks.criticalReproduction behind the verification gate" "$(grep_ok "$DELEGATE" 'zensu_hook_enabled criticalReproduction && zensu_hook_enabled findingVerification')"
 check "LC2b the convergence clause requires a reproduction for a re-review CRITICAL" "$(grep_ok "$DELEGATE" 'routes only after /zensu:tdd step 4c stage 3 reproduced it')"
 check "LC2c step 4c carries stage 3" "$(grep_ok "$TDD_MD" '**Stage 3 (reproduction, re-reviews only, config-gated).**')"
+check "LC2k stage 3 resolves its flag with the step-4c probe" "$(grep_ok "$TDD_MD" '**Stage 3 (reproduction, re-reviews only, config-gated).** Resolve the flag the same way with `zensu_hook_enabled criticalReproduction`.')"
 check "LC2d the log line is named" "$(grep_ok "$TDD_MD" 'FINDING REPRODUCTION — <ledger-id> <REPRODUCED|NOT-REPRODUCED|NOT-TESTABLE>')"
 check "LC2e self-review fixes only reproduced re-review CRITICALs" "$(grep_ok "$SELF_REVIEW_MD" 'CRITICAL finding from a re-review is a must-fix only when its FINDING REPRODUCTION line reads REPRODUCED')"
 check "LC2f the rubric doc states the rule" "$(grep_ok "$RUBRIC_DOC" 'a CRITICAL finding of a re-review routes only when a failing test reproduces it')"
@@ -287,6 +288,10 @@ printf '%s\n' '{"hooks":{"reviewPanel":"wide"}}' > "$LC3_CFG"
 check "LC3j an unknown panel value reads as lean" "$(bash -c 'source "$1/hooks/lib/zensu-config.sh"; ZENSU_CONFIG="$2" zensu_review_panel' _ "$ROOT" "$LC3_CFG" | grep -qx lean && echo PASS || echo FAIL)"
 rm -f "$LC3_CFG"
 check "LC3b step 3 resolves the panel and the round" "$(grep_ok "$TDD_MD" 'aspect-activation-v1.js" --panel <panel> --round <round>')"
+IFS= read -r LC3K_PROBE <<'PROBE'
+the panel that `ZENSU_ROOT="{plugin_root}" CLAUDE_PROJECT_DIR="{project_root}" bash -c 'source "$ZENSU_ROOT/hooks/lib/zensu-config.sh"; zensu_review_panel'` prints
+PROBE
+check "LC3k step 3 reads hooks.reviewPanel against the bound project root" "$(grep_ok "$TDD_MD" "$LC3K_PROBE")"
 check "LC3c the fix-round directive re-reviews with the round flag" "$([ "$(grep -cF 'aspect-activation-v1.js --panel ${PANEL} --round re' "$DELEGATE")" -eq 3 ] && echo PASS || echo FAIL)"
 check "LC3d the judge re-runs only on the full panel" "$([ "$(grep -cF 're-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full' "$DELEGATE")" -eq 3 ] && echo PASS || echo FAIL)"
 check "LC3e step 4b skips the judge on a lean re-review" "$(grep_ok "$TDD_MD" 'On a re-review with the lean panel, skip this step')"

@@ -1,5 +1,6 @@
 {
   "hooks": {
+    "aspectActivation": false,
     "autoFix": false,
     "autopilotEnforcer": false,
     "bestSolutionFirst": false,
@@ -7,6 +8,7 @@
     "criticalReproduction": false,
     "externalReviewImport": false,
     "findingVerification": false,
+    "incrementalReviewRounds": false,
     "intentRouter": false,
     "mcpGate": false,
     "pulseSession": false,
