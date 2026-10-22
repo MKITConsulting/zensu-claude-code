@@ -55,17 +55,30 @@ The hook payload itself was not logged live; the prompt shape comes from the tra
   it answers.
 - **The entry hook filters in bash.** `user-prompt-review-handback.sh` passes a prompt on only when
   its JSON holds `<agent-message from=` and `[Subagent hand-back]`; every other prompt costs one
-  bash start and one `case`, and a hand-back that matches no live binding exits before any output.
+  bash start and one `case`, about 5 ms. Every hand-back frame, whichever agent sent it, runs the
+  delegate, which binds the session, verifies the project root and checks the state path before
+  `handback-input` compares the agent id: about 0.8 s per frame, measured on macOS. A frame that
+  matches no live binding then exits without output and without a write. The entry hook ends with
+  `exit 0`, so a delegate refusal never blocks or erases the prompt.
 - **Forgery bound.** The host sets `from` and indents every report line, so another agent, another
   session or a report cannot produce a column-zero frame naming the bound agent. A typed imitation
   is the user's own act. The model steering its reviewer through `SendMessage` gains nothing it
   could not already write into the reviewer's prompt.
-- **The Stop guard waits.** `review_handback_wait` sits beside the external-review workflow wait,
-  after `outer_finish` and before the inner budget increment. It releases a standalone chain's Stop
-  at the code-review stage while the binding is live and `background_tasks` lists the bound agent
-  with a status from `RUNNING_TASK_STATUSES` of `external-review-v1.js` (one owner) and an
-  `agent_type` that is absent or `zensu:code-reviewer`. Its exclusions are the workflow wait's: a
-  live Autopilot run, an Autopilot-bound chain, a deferred-review adoption or claim.
+- **The Stop guard waits for a standalone chain and never misdirects the others.**
+  `review_handback_in_flight` asks whether the binding is live and `background_tasks` lists the
+  bound agent with a status from `RUNNING_TASK_STATUSES` of `external-review-v1.js` (one owner) and
+  an `agent_type` that is absent or `zensu:code-reviewer`. `review_handback_wait`, beside the
+  external-review workflow wait, after `outer_finish` and before the inner budget increment,
+  releases the Stop only when `tdd_review_handback_releases_stop` in `zensu-tdd-phase.sh` holds as
+  well: no nonterminal (live or BLOCKED) Autopilot run of this session, no Autopilot-bound chain,
+  no deferred-review adoption in this Stop and no claim file. The Stop hook sets `OUTER_PRESENT`
+  back to false for a DONE or CANCELLED run (`outer_is_stop_terminal`). That predicate is the one
+  answer to "will the guard release": the delegate's launch text asks it too, with no outer run for
+  every standalone launch, because the standalone preflight admits one only without a run or with a
+  DONE or CANCELLED one, so the text says the turn may end only when the guard will release.
+  A Stop it does not release is charged as before, and while the agent still runs its reason names
+  that agent and forbids a fresh ticket, because a fresh ticket drops the binding and the in-flight
+  hand-back would then consume nothing.
 
 ## Coupled sites
 
@@ -74,13 +87,16 @@ workflow validator, the bind critical section and the module all call it. Every 
 deletes the field, the same roster `implStopCount` uses (`tdd_set_flag` on `active`, the begin,
 reset, clear and chain-reset sections in `zensu-tdd-phase.sh`, `resetDeferredReviewState` and the
 deferred-review transfer in the core) plus ticket issuance. The frame grammar lives in
-`review-handback-v1.js` and in the prefilter of the entry hook. Pins: `H1`–`H14` in
+`review-handback-v1.js` and in the prefilter of the entry hook, and its preamble set is shared with
+`zensu_prompt_origin` in `hooks/lib/zensu-prompt-origin.sh`. `tdd_review_handback_releases_stop`
+has two callers, `review_handback_wait` and the delegate's launch text, and its exclusions are the
+workflow wait's. Pins: `H1`–`H23` in
 `tests/structure/test-post-review-tdd-scope.sh`, and the roster entry (`U5`) and zero budget for
 every prompt kind (`U6`, `U7`) in `tests/structure/test-user-prompt-budget.sh`. Operator accounts: the delegate, entry-hook and Stop
 rows of `docs/configuration.md`, §"A consume-mode reviewer the host runs in the background" of
 `docs/review-chain.md`, the review-chain paragraph of `docs/tdd-manager-workflow.md`, the prompt
-cost paragraph of `docs/architecture.md`, step 5 of `skills/tdd/references/review-chain.md` and the
-table in `.claude/rules/prompt-origin.md`.
+cost paragraph of `docs/architecture.md`, the binding-hook roster of `docs/session-control.md`,
+step 5 of `skills/tdd/references/review-chain.md` and the table in `.claude/rules/prompt-origin.md`.
 
 ## Version: `minor`
 
@@ -92,8 +108,25 @@ breaking side of the list, whatever the permissive readers of older runtimes wou
 
 - No live desktop run of the whole flow exists; the hooks were driven with payloads shaped after
   the measured host records.
-- An Autopilot-bound chain gets no wait: its Stops keep blocking while the reviewer runs, as
-  before this change.
+- An Autopilot-bound chain, a session that owns a nonterminal Autopilot run and a project holding
+  a deferred-review claim get no release: every Stop while the reviewer runs is charged, so a
+  model that keeps ending its turn there can still spend the budget. The launch text and the block
+  reason tell it to wait in the turn instead.
+- Every background hand-back of the chain, the panel's and the judges' included, pays the
+  delegate's bind and root verification (about 0.8 s on macOS) before the agent id is compared. A
+  cheaper test ahead of the bind would need the session's state path, which only the bind yields.
+- The parser accepts the preamble `Another Claude session sent a message while you were working:`,
+  which `zensu_prompt_origin` in `hooks/lib/zensu-prompt-origin.sh` does not know; such a hand-back
+  is consumed here but classified `typed` by the reminder and router hooks. The two preamble sets
+  are coupled sites.
+- `handbackReviewInput` ignores a payload `origin`. The 2.1.304 builder sends none; a host that
+  sends `origin.kind: human` would still let a typed exact frame naming the bound agent consume.
+- A hand-back the host has queued but not yet delivered when it already lists the agent as
+  finished gets the ordinary resume reason, which orders a fresh ticket; following it drops the
+  binding before the hand-back arrives.
+- Only the consume-mode reviewer is waited for. The panel and the judges run in the background on
+  the same host, and a Stop during the fan-out blocks and orders the fan-out again. A wait for
+  every running review agent, bounded like the workflow wait, is a separate change.
 - The wait has no count bound: it releases on every Stop while the host lists the agent as
   running, which is the host's own definition of "paused waiting for background work".
 - A reviewer that ends without a hand-back consumes nothing; once the host stops listing it the

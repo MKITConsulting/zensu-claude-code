@@ -3232,6 +3232,17 @@ zensu_pending_review_claim_file() {
   echo "${pending_file}.claim"
 }
 
+tdd_review_handback_releases_stop() {
+  local outer_present="${1:-true}" inner_bound_run="${2:-}" deferred_adopted="${3:-true}" pending claim
+  [ "$outer_present" = false ] || return 1
+  [ -z "$inner_bound_run" ] || return 1
+  [ "$deferred_adopted" = false ] || return 1
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  return 0
+}
+
 zensu_external_review_wait_file() {
   local key="${1:-}"
   command -v zensu_session_key_canonical >/dev/null 2>&1 \

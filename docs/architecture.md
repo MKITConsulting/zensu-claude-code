@@ -181,7 +181,7 @@ all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg: `UserPromptSubmit` fires
-on every prompt with no de-bounce, and seven hooks are registered on it. Three of them send their
+on every prompt with no de-bounce, and eight hooks are registered on it. Three of them send their
 full text only once per context generation and a short line after that, through the prompt
 ledger `hooks/session-start-prompt-ledger.sh` clears at every `SessionStart`.
 `tests/structure/test-user-prompt-budget.sh` drives every one of them on five prompt kinds — a

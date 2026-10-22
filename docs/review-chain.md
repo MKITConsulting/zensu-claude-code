@@ -80,7 +80,13 @@ hand-back instead of a foreground completion.
 - **Waiting.** While the Stop input's `background_tasks` lists the bound agent with a running
   status, the Stop guard releases a standalone chain's `Stop` without charging the review
   budget, because the hand-back wakes the session. An Autopilot-bound chain, a session that
-  owns a live Autopilot run and a deferred-review adoption never wait.
+  owns a nonterminal (live or BLOCKED) Autopilot run, a deferred-review adoption and a project
+  holding a deferred-review claim never wait; a DONE or CANCELLED run of the session does not
+  stop the wait. Their `Stop` blocks and is charged as before, but its reason names the
+  running agent and forbids a fresh ticket, which would drop the binding, instead of ordering a
+  new review; the launch says in advance whether the guard will release. Only the consume-mode
+  reviewer is waited for: a `Stop` while the panel or the judges run in the background blocks
+  as before.
 - **Foreground is unchanged.** A completion with any other status consumes the ticket as
   before and removes a binding too, so a late hand-back of that ticket is a no-op.
 

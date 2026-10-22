@@ -8,3 +8,4 @@ case "$INPUT" in
 esac
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 0
 printf '%s' "$INPUT" | bash "$HOOK_DIR/post-review-tdd-delegate.sh" --handback
+exit 0

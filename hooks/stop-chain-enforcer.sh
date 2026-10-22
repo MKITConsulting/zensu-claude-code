@@ -717,22 +717,16 @@ external_review_workflow_wait() {
   return 0
 }
 
-review_handback_wait() {
-  local lib verdict pending claim native_state
+review_handback_in_flight() {
+  local lib verdict native_state
   REVIEW_HANDBACK_AGENT=""
   case "$INPUT" in
     *'"background_tasks"'*) ;;
     *) return 1 ;;
   esac
-  [ "$OUTER_PRESENT" = false ] || return 1
-  [ "$DEFERRED_ADOPTED" = false ] || return 1
-  [ -z "$INNER_BOUND_RUN" ] || return 1
   grep -qF '"reviewHandback"' "$STATE_FILE" 2>/dev/null || return 1
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-handback-v1.js"
   [ -f "$lib" ] && [ ! -L "$lib" ] || return 1
-  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
-  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
-  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
   native_state="$(_tdd_native_project_path "$STATE_FILE" 2>/dev/null)" || return 1
   verdict="$(printf '%s' "$INPUT" | zensu_run_bounded node "$lib" stop-wait --state "$native_state" 2>/dev/null)" || return 1
   case "$verdict" in
@@ -743,6 +737,11 @@ review_handback_wait() {
     *[!A-Za-z0-9_-]*) REVIEW_HANDBACK_AGENT=""; return 1 ;;
   esac
   return 0
+}
+
+review_handback_wait() {
+  review_handback_in_flight || return 1
+  tdd_review_handback_releases_stop "$OUTER_PRESENT" "$INNER_BOUND_RUN" "$DEFERRED_ADOPTED"
 }
 
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
@@ -1992,6 +1991,9 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   else
     REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. /zensu:reset-review-limit cannot repair this state either — it rebinds a RETAINED consumed ticket, which is exactly what is missing here. FIRST read the chain shape with: ${LOG_COMMAND} --chain-status. Act on it ONLY if it reports shape=wedged-stale-rearm with recoverable=true — then /zensu:recover-chain repairs exactly that and the chain can continue. For this state it will normally report shape=self-review-unbindable, whose own next step is the fresh generation below. Re-enter /zensu:tdd for the current task, whose fresh --tdd-begin resets this session's review ticket, round counter, and chain flags in one transition, so the reviewer chain can run again and its terminus can bind."
   fi
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
+elif [ -n "${REVIEW_HANDBACK_AGENT:-}" ] && review_handback_in_flight; then
+  REASON="STOP intercepted by zensu chain-enforcer. The consume-mode zensu:code-reviewer bound to this chain's review ticket still runs in the background as agent ${REVIEW_HANDBACK_AGENT}, and this chain's Stop guard does not release while it runs. Do NOT issue a fresh review ticket and do NOT launch another reviewer: a fresh ticket drops the binding, and only the hand-back of agent ${REVIEW_HANDBACK_AGENT} consumes the current ticket and brings the post-review instructions. Do NOT fix anything inline first and do NOT run --code-review-done or --chain-done before it arrives; wait for it in this turn instead of ending the turn."
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 elif reviewer_spawn_denied; then
   # This branch fires on EVERY blocked Stop up to the cap, and the reason carries

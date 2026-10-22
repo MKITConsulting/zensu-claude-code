@@ -325,7 +325,17 @@ if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
   fi
   case "$BIND_RC:$BIND_RESULT" in
     0:bound)
-      LAUNCH_MSG="The zensu:code-reviewer call above runs in the background as agent ${LAUNCH_AGENT}, and its review ticket is now bound to that agent. Its hand-back, the report it sends when it finishes, consumes the ticket and brings the post-review instructions; until it arrives the review chain does not advance. Do NOT launch another consume-mode reviewer for this ticket, do NOT fix anything, and do NOT run --code-review-done or --chain-done before it arrives. You may end your turn while it runs: the Stop guard releases while this reviewer is in flight."
+      LAUNCH_OUTER_PRESENT=false
+      LAUNCH_INNER_BOUND=""
+      if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+        LAUNCH_OUTER_PRESENT=true
+        LAUNCH_INNER_BOUND="$PROMPT_AUTOPILOT_RUN"
+      fi
+      LAUNCH_STOP="Do NOT end your turn while it runs: this chain's Stop guard keeps blocking while the reviewer is in flight and charges every blocked Stop against the chain's Stop budget, so wait for the hand-back in this turn."
+      if tdd_review_handback_releases_stop "$LAUNCH_OUTER_PRESENT" "$LAUNCH_INNER_BOUND" false; then
+        LAUNCH_STOP="You may end your turn while it runs: the Stop guard releases while this reviewer is in flight."
+      fi
+      LAUNCH_MSG="The zensu:code-reviewer call above runs in the background as agent ${LAUNCH_AGENT}, and its review ticket is now bound to that agent. Its hand-back, the report it sends when it finishes, consumes the ticket and brings the post-review instructions; until it arrives the review chain does not advance. Do NOT launch another consume-mode reviewer for this ticket and do NOT issue a fresh review ticket, which drops this binding; do NOT fix anything, and do NOT run --code-review-done or --chain-done before it arrives. ${LAUNCH_STOP}"
       ;;
     "0:held "?*)
       LAUNCH_HOLDER="${BIND_RESULT#held }"

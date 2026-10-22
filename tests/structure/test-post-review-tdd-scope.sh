@@ -567,6 +567,39 @@ HI_INVALID="$(tdd_state_status "$(state "$HI")")"
   && check "H13 the workflow document validates reviewHandback with an exact key set" PASS \
   || check "H13 the workflow document validates reviewHandback with an exact key set ($HI_VALID then $HI_INVALID)" FAIL
 
+start_session background-stale
+HS="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HS"
+log --tdd-complete --session "$HS"
+HS_T1="$(issue_ticket "$HS")"
+HS_T2="$(issue_ticket "$HS")"
+HS_STATE="$(state "$HS")"
+HS_FRESH="$(digest "$HS_STATE")"
+HS_LAUNCH="$(run_launch "$HS" "$(review_prompt "$HS_T1")" async_launched "$AGENT_A")"
+[ -n "$HS_T2" ] && [ -z "$HS_LAUNCH" ] && [ "$(digest "$HS_STATE")" = "$HS_FRESH" ] \
+  && [ "$(binding_of "$HS")" = absent ] \
+  && check "H15 a background launch for a stale ticket is a silent, byte-stable no-op" PASS \
+  || check "H15 a background launch for a stale ticket is a silent, byte-stable no-op (binding=$(binding_of "$HS"))" FAIL
+
+FILE="$HS_STATE" TICKET="$HS_T1" AGENT="$AGENT_A" node -e '
+  const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  s.reviewHandback = {schemaVersion: 1, ticket: process.env.TICKET, agentId: process.env.AGENT, envelope: []};
+  fs.writeFileSync(process.env.FILE, JSON.stringify(s, null, 2));
+'
+HS_STALE="$(digest "$HS_STATE")"
+HS_HANDBACK="$(run_handback "$HS" "$(handback_prompt "$AGENT_A")")"
+[ "$(tdd_state_status "$HS_STATE")" = valid ] && [ -z "$HS_HANDBACK" ] \
+  && [ "$(digest "$HS_STATE")" = "$HS_STALE" ] && [ "$(ticket_consumed "$HS")" = "false" ] \
+  && check "H16 the hand-back of an agent bound to a stale ticket consumes nothing and emits nothing" PASS \
+  || check "H16 the hand-back of an agent bound to a stale ticket consumes nothing and emits nothing (consumed=$(ticket_consumed "$HS"))" FAIL
+
+H17_BAD=""
+[ "$(stop_decision "$HS" "$(reviewer_tasks "$AGENT_A")")" = block ] || H17_BAD="$H17_BAD stale-binding"
+[ "$(stop_decision "$HU" "$(reviewer_tasks "$AGENT_A")")" = block ] || H17_BAD="$H17_BAD no-binding"
+[ -z "$H17_BAD" ] \
+  && check "H17 the Stop guard blocks a running reviewer whose binding is stale or absent" PASS \
+  || check "H17 the Stop guard blocks a running reviewer whose binding is stale or absent:$H17_BAD" FAIL
+
 # State remains session-local even when another canonical baseline becomes current.
 start_session session-a
 S9A="$STARTED_SESSION_KEY"
@@ -799,6 +832,199 @@ esac
   && [ "$(ticket_consumed "$HB")" = "true" ] && [ "$(review_round "$HB")" = "1" ] \
   && check "H14 an Autopilot-bound background reviewer binds its envelope and its hand-back routes with the official envelope" PASS \
   || check "H14 an Autopilot-bound background reviewer binds its envelope and its hand-back routes with the official envelope (ticket=$HB_TICKET bound=$HB_BOUND text=$HB_TEXT consumed=$(ticket_consumed "$HB"))" FAIL
+
+block_reason() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s.trim());
+        if (j.decision === "block" && typeof j.reason === "string") process.stdout.write(j.reason);
+      } catch (_) {}
+    });
+  '
+}
+
+WAIT_PROJECT="$ROOT/bound-wait-project"
+mkdir -p "$WAIT_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd "$WAIT_PROJECT" && pwd -P)"
+start_session background-bound-wait
+HW="$STARTED_SESSION_KEY"
+HW_RUN=handback_wait_run
+HW_CHAIN=handback-wait-chain
+autopilot_begin_run "$HW_RUN" "$HW" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1
+autopilot_apply_event "$HW_RUN" "plan-$HW_RUN" PLAN_APPROVED "{\"approvedPlanSha256\":\"$HB_SHA\"}" \
+  "$CLAUDE_PROJECT_DIR" "$HW" >/dev/null 2>&1
+log --tdd-begin --session "$HW" --autopilot-run "$HW_RUN" --autopilot-attempt 1 \
+  --autopilot-return-stage GATES --chain-id "$HW_CHAIN"
+log --tdd-complete --session "$HW" --autopilot-run "$HW_RUN" --autopilot-attempt 1 \
+  --autopilot-return-stage GATES --chain-id "$HW_CHAIN"
+HW_TICKET="$(issue_ticket "$HW")"
+HW_PROMPT="$(printf '%s\nREVIEW-TICKET: %s\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=%s attempt=1 chain=%s\nAUTOPILOT-STAGE: GATES\nfixture' \
+  "$MARKER" "$HW_TICKET" "$HW_RUN" "$HW_CHAIN")"
+HW_LAUNCH="$(run_launch "$HW" "$HW_PROMPT" async_launched "$AGENT_A" | context_of)"
+HW_REASON="$(stop_with_tasks "$HW" "$(reviewer_tasks "$AGENT_A")" 2>/dev/null | block_reason)"
+case "$HW_REASON" in
+  *"issue a fresh review ticket, then"*) H18_TEXT=no ;;
+  *"still runs in the background as agent $AGENT_A"*"Do NOT issue a fresh review ticket"*) H18_TEXT=yes ;;
+  *) H18_TEXT=no ;;
+esac
+[ -n "$HW_TICKET" ] && [ "$H18_TEXT" = yes ] && [ "$(binding_of "$HW")" = "$HW_TICKET $AGENT_A 3" ] \
+  && [ "$(ticket_consumed "$HW")" = "false" ] \
+  && check "H18 the Stop of an Autopilot-bound chain blocks while its bound reviewer runs, names the agent, orders no fresh ticket and keeps the binding" PASS \
+  || check "H18 the Stop of an Autopilot-bound chain blocks while its bound reviewer runs, names the agent, orders no fresh ticket and keeps the binding (text=$H18_TEXT binding=$(binding_of "$HW") reason=$HW_REASON)" FAIL
+
+CLAIM_PROJECT="$ROOT/claim-project"
+mkdir -p "$CLAIM_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd "$CLAIM_PROJECT" && pwd -P)"
+start_session background-claim
+HC="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$HC"
+log --tdd-complete --session "$HC"
+HC_TICKET="$(issue_ticket "$HC")"
+mkdir -p "$CLAUDE_PROJECT_DIR/.zensu/state"
+printf '{}\n' > "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim"
+HC_LAUNCH="$(run_launch "$HC" "$(review_prompt "$HC_TICKET")" async_launched "$AGENT_A" | context_of)"
+rm -f "$CLAUDE_PROJECT_DIR/.zensu/state/pending-review.json.claim"
+H19_BAD=""
+case "$H1_OUT" in *"You may end your turn while it runs"*) ;; *) H19_BAD="$H19_BAD standalone" ;; esac
+for H19_CASE in bound claim; do
+  if [ "$H19_CASE" = bound ]; then H19_OUT="$HW_LAUNCH"; else H19_OUT="$HC_LAUNCH"; fi
+  case "$H19_OUT" in
+    *"You may end your turn"*) H19_BAD="$H19_BAD $H19_CASE" ;;
+    "PostToolUse"$'\n'*"Do NOT end your turn while it runs"*) ;;
+    *) H19_BAD="$H19_BAD $H19_CASE" ;;
+  esac
+done
+[ -z "$H19_BAD" ] && [ "$(binding_of "$HC")" = "$HC_TICKET $AGENT_A 0" ] \
+  && check "H19 a background launch says the turn may end only where the Stop guard releases it" PASS \
+  || check "H19 a background launch says the turn may end only where the Stop guard releases it:$H19_BAD (binding=$(binding_of "$HC"))" FAIL
+
+TERMINAL_PROJECT="$ROOT/terminal-run-project"
+mkdir -p "$TERMINAL_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd "$TERMINAL_PROJECT" && pwd -P)"
+start_session background-terminal-run
+HT="$STARTED_SESSION_KEY"
+HT_RUN=handback_terminal_run
+autopilot_begin_run "$HT_RUN" "$HT" "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1
+autopilot_apply_event "$HT_RUN" "cancel-$HT_RUN" CANCEL '{}' "$CLAUDE_PROJECT_DIR" "$HT" >/dev/null 2>&1
+log --tdd-begin --session "$HT"
+log --tdd-complete --session "$HT"
+HT_TICKET="$(issue_ticket "$HT")"
+HT_STATE="$(state "$HT")"
+HT_LAUNCH="$(run_launch "$HT" "$(review_prompt "$HT_TICKET")" async_launched "$AGENT_A" | context_of)"
+HT_STOPS="$(tdd_get_counter "$HT_STATE" stopBlockCount)"
+HT_OUT="$(stop_with_tasks "$HT" "$(reviewer_tasks "$AGENT_A")" 2>"$ROOT/ht.err")"; HT_RC=$?
+case "$HT_LAUNCH" in
+  "PostToolUse"$'\n'*"You may end your turn while it runs"*) HT_TEXT=yes ;;
+  *) HT_TEXT=no ;;
+esac
+if [ -n "$HT_TICKET" ] && [ "$HT_TEXT" = yes ] && [ "$(binding_of "$HT")" = "$HT_TICKET $AGENT_A 0" ] \
+  && [ "$HT_RC" -eq 0 ] && [ -z "$HT_OUT" ] \
+  && grep -qF "runs in the background as agent $AGENT_A" "$ROOT/ht.err" \
+  && [ "$(tdd_get_counter "$HT_STATE" stopBlockCount)" = "$HT_STOPS" ]; then
+  check "H20 a standalone chain whose session owns a CANCELLED Autopilot run is told it may end its turn, and its Stop releases without a budget charge" PASS
+else
+  check "H20 a standalone chain whose session owns a CANCELLED Autopilot run is told it may end its turn, and its Stop releases without a budget charge (text=$HT_TEXT binding=$(binding_of "$HT") rc=$HT_RC out=$HT_OUT)" FAIL
+fi
+
+INFLIGHT_FN="$(sed -n '/^review_handback_in_flight() {/,/^}/p' "$STOP_HOOK")"
+HANDBACK_WAIT_FN="$(sed -n '/^review_handback_wait() {/,/^}/p' "$STOP_HOOK")"
+RELEASE_FN="$(sed -n '/^tdd_review_handback_releases_stop() {/,/^}/p' "$PHASE")"
+PROBE_DIR="$ROOT/handback-probe"
+mkdir -p "$PROBE_DIR"
+printf '{"reviewHandback":{}}\n' >"$PROBE_DIR/bound.json"
+printf '{}\n' >"$PROBE_DIR/unbound.json"
+probe_handback_wait() {
+  OUTER="$1" BOUND="$2" ADOPTED="$3" CLAIM="$4" TASKS="$5" STATEF="$PROBE_DIR/$6.json" \
+    INFLIGHT_FN="$INFLIGHT_FN" HANDBACK_WAIT_FN="$HANDBACK_WAIT_FN" RELEASE_FN="$RELEASE_FN" \
+    PLUGIN_DIR="$PLUGIN_DIR" PROBE_DIR="$PROBE_DIR" AGENT="$AGENT_A" bash -c '
+    eval "$INFLIGHT_FN"
+    eval "$HANDBACK_WAIT_FN"
+    eval "$RELEASE_FN"
+    INPUT="{}"
+    [ "$TASKS" = yes ] && INPUT="{\"background_tasks\":[]}"
+    OUTER_PRESENT="$OUTER"
+    INNER_BOUND_RUN="$BOUND"
+    DEFERRED_ADOPTED="$ADOPTED"
+    STATE_FILE="$STATEF"
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+    rm -f "$PROBE_DIR/pending-review.json.claim" "$PROBE_DIR/probed"
+    [ "$CLAIM" = yes ] && : >"$PROBE_DIR/pending-review.json.claim"
+    zensu_pending_review_file() { printf "%s\n" "$PROBE_DIR/pending-review.json"; }
+    zensu_pending_review_claim_file() { printf "%s\n" "$1.claim"; }
+    _tdd_native_project_path() { printf "%s\n" "$1"; }
+    zensu_run_bounded() { : >"$PROBE_DIR/probed"; printf "wait agent=%s" "$AGENT"; }
+    if review_handback_wait; then verdict=released; else verdict=kept; fi
+    probed=no
+    [ -e "$PROBE_DIR/probed" ] && probed=yes
+    printf "%s %s %s\n" "$verdict" "${REVIEW_HANDBACK_AGENT:-none}" "$probed"
+  ' 2>/dev/null
+}
+H21_BAD=""
+[ -n "$INFLIGHT_FN" ] && [ -n "$HANDBACK_WAIT_FN" ] && [ -n "$RELEASE_FN" ] || H21_BAD="$H21_BAD extraction"
+[ "$(probe_handback_wait false "" false no yes bound)" = "released $AGENT_A yes" ] || H21_BAD="$H21_BAD standalone"
+[ "$(probe_handback_wait true "" false no yes bound)" = "kept $AGENT_A yes" ] || H21_BAD="$H21_BAD outer-run"
+[ "$(probe_handback_wait false run-x false no yes bound)" = "kept $AGENT_A yes" ] || H21_BAD="$H21_BAD bound-chain"
+[ "$(probe_handback_wait false "" true no yes bound)" = "kept $AGENT_A yes" ] || H21_BAD="$H21_BAD adopted"
+[ "$(probe_handback_wait false "" false yes yes bound)" = "kept $AGENT_A yes" ] || H21_BAD="$H21_BAD claim"
+[ "$(probe_handback_wait false "" false no no bound)" = "kept none no" ] || H21_BAD="$H21_BAD no-tasks"
+[ "$(probe_handback_wait false "" false no yes unbound)" = "kept none no" ] || H21_BAD="$H21_BAD no-binding"
+[ -z "$H21_BAD" ] \
+  && check "H21 the shipped Stop wait releases only a standalone chain and keeps the Stop, naming the agent, for an Autopilot run, a bound chain, an adoption and a claim" PASS \
+  || check "H21 the shipped Stop wait releases only a standalone chain and keeps the Stop, naming the agent, for an Autopilot run, a bound chain, an adoption and a claim:$H21_BAD" FAIL
+
+SHAPE_PROJECT="$ROOT/shape-project"
+mkdir -p "$SHAPE_PROJECT"
+export CLAUDE_PROJECT_DIR="$(cd "$SHAPE_PROJECT" && pwd -P)"
+bound_session() {
+  start_session "$1"
+  BOUND_KEY="$STARTED_SESSION_KEY"
+  log --tdd-begin --session "$BOUND_KEY"
+  log --tdd-complete --session "$BOUND_KEY"
+  BOUND_TICKET="$(issue_ticket "$BOUND_KEY")"
+  run_launch "$BOUND_KEY" "$(review_prompt "$BOUND_TICKET")" async_launched "$AGENT_A" >/dev/null
+}
+consumed_by() {
+  local out
+  out="$(run_handback "$1" "$2" | context_of)"
+  case "$out" in
+    "UserPromptSubmit"$'\n'*"just finished"*) ;;
+    *) return 1 ;;
+  esac
+  [ "$(ticket_consumed "$1")" = "true" ]
+}
+H22_BAD=""
+bound_session shape-preamble
+SP="$BOUND_KEY"
+SP_STATE="$(state "$SP")"
+SP_DIGEST="$(digest "$SP_STATE")"
+[ -z "$(run_handback "$SP" "$(printf '<agent-message from="%s">\n[Subagent hand-back] one\n[Subagent hand-back] two\n  body\n</agent-message>' "$AGENT_A")")" ] || H22_BAD="$H22_BAD two-frames"
+[ -z "$(run_handback "$SP" "$(printf '<system-reminder>\nnote\n%s' "$(handback_prompt "$AGENT_A")")")" ] || H22_BAD="$H22_BAD unclosed-reminder"
+[ -z "$(run_handback "$SP" "$(printf 'Another Claude session sent a message:\n%s' "$(handback_prompt "$AGENT_B")")")" ] || H22_BAD="$H22_BAD foreign-after-preamble"
+[ "$(digest "$SP_STATE")" = "$SP_DIGEST" ] || H22_BAD="$H22_BAD refusal-moved-state"
+consumed_by "$SP" "$(printf 'Another Claude session sent a message:\n%s' "$(handback_prompt "$AGENT_A")")" || H22_BAD="$H22_BAD preamble"
+bound_session shape-working
+consumed_by "$BOUND_KEY" "$(printf 'Another Claude session sent a message while you were working:\n%s' "$(handback_prompt "$AGENT_A")")" || H22_BAD="$H22_BAD preamble-while-working"
+bound_session shape-reminder
+consumed_by "$BOUND_KEY" "$(printf '<system-reminder>\nnote\n</system-reminder>\n%s' "$(handback_prompt "$AGENT_A")")" || H22_BAD="$H22_BAD leading-reminder"
+bound_session shape-attribute
+consumed_by "$BOUND_KEY" "$(handback_prompt "$AGENT_A" | sed '1s/">$/" origin="agent">/')" || H22_BAD="$H22_BAD extra-attribute"
+[ -z "$H22_BAD" ] \
+  && check "H22 both preamble spellings, a leading system reminder and an extra attribute consume a live binding; two frame lines, an unclosed reminder and another agent behind a preamble consume nothing" PASS \
+  || check "H22 both preamble spellings, a leading system reminder and an extra attribute consume a live binding; two frame lines, an unclosed reminder and another agent behind a preamble consume nothing:$H22_BAD" FAIL
+
+H23_RC="$(SID="${CLAUDE_CODE_SESSION_ID:-fixture}" PROMPT="$(handback_prompt "$AGENT_A")" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "UserPromptSubmit",
+    prompt: process.env.PROMPT,
+    session_id: process.env.SID
+  }));
+' | CLAUDE_PLUGIN_ROOT="$ROOT" bash "$HANDBACK_HOOK" >/dev/null 2>&1; echo $?)"
+[ "$H23_RC" = 0 ] \
+  && check "H23 the hand-back entry hook exits 0 when the delegate refuses with exit 2, so the prompt is never blocked" PASS \
+  || check "H23 the hand-back entry hook exits 0 when the delegate refuses with exit 2, so the prompt is never blocked (rc=$H23_RC)" FAIL
 
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"
