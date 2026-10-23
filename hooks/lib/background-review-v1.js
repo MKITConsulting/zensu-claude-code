@@ -3,7 +3,9 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { REVIEWER_TYPES } = require('./claude-principal-v1.js');
 const { ensurePrivateDirectory } = require('./review-evidence-lease-v1.js');
+const { REVIEWER_SUBAGENT_TYPE } = require('./reviewer-spawn-denial-v1.js');
 const { claimableTicket } = require('./review-ticket-state-v1.js');
 
 const SCHEMA = 'background-review-v1';
@@ -22,7 +24,8 @@ const ENVELOPE_PREFIXES = Object.freeze(['ZENSU-DELEGATED-CALLER: ', 'AUTOPILOT-
 const ENVELOPES = Object.freeze({ standalone: 2, bound: 5 });
 const RECORD_KEYS = Object.freeze(['agent_id', 'header', 'launched_at_ms', 'schema', 'session_key', 'ticket']);
 const FANOUT_KEYS = Object.freeze(['agent_id', 'launched_at_ms', 'schema', 'session_key', 'subagent_type']);
-const FANOUT_TYPES = Object.freeze(['zensu:review-aspect', 'zensu:review-judge']);
+const FANOUT_TYPES = Object.freeze([...REVIEWER_TYPES]
+  .filter((type) => type.startsWith('zensu:') && type !== REVIEWER_SUBAGENT_TYPE));
 const VERDICTS = Object.freeze(['claim', 'ended', 'none']);
 const ARRIVALS = Object.freeze(['handback', 'notification']);
 const WAIT_KINDS = Object.freeze(['consume', 'fanout']);
