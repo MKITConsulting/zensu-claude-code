@@ -950,6 +950,7 @@ _tdd_write_flag_critical() {
           state.reviewRound = 0;
           state.stopBlockCount = 0;
           delete state.implStopCount;
+          delete state.reviewHandback;
         }
         if (process.env.KEY === "codeReviewDone" && value) state.stopBlockCount = 0;
         return state;
@@ -1055,6 +1056,7 @@ _tdd_write_clear_critical() {
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
       delete s.implStopCount;
       delete s.reviewRearm;
+      delete s.reviewHandback;
       delete s.autopilotRunId; delete s.autopilotAttempt;
       delete s.autopilotReturnStage; delete s.chainId; delete s.chainOutcome;
       s.phase = "UNINITIALIZED"; s.step_id = ""; s.history = [];
@@ -1092,6 +1094,7 @@ _tdd_clear_standalone_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
+      delete s.reviewHandback;
       s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
     });
@@ -1131,6 +1134,7 @@ _tdd_clear_autopilot_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
+      delete s.reviewHandback;
       delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
       delete s.chainId;delete s.chainOutcome;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
@@ -1167,6 +1171,7 @@ _tdd_write_chain_reset_critical() {
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
       delete s.implStopCount;
       delete s.reviewRearm;
+      delete s.reviewHandback;
       return s;
     });
   ' 2>/dev/null
@@ -1236,6 +1241,7 @@ _tdd_begin_session_critical() {
       delete s.implStopCount;
       s.bypasses = [];
       delete s.reviewRearm;
+      delete s.reviewHandback;
       if (process.env.AUTOPILOT_RUN_ID) {
         s.autopilotRunId = process.env.AUTOPILOT_RUN_ID;
         s.autopilotAttempt = Number.parseInt(process.env.AUTOPILOT_ATTEMPT, 10);
@@ -1700,6 +1706,7 @@ _tdd_issue_review_ticket_critical() {
     // Issuing the first post-rearm ticket is forward progress. The old
     // crash-retry receipt must not survive into another exhausted budget.
     delete s.reviewRearm;
+    delete s.reviewHandback;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
@@ -1734,7 +1741,7 @@ tdd_issue_review_ticket() {
 }
 
 _tdd_consume_review_ticket_critical() {
-  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}"
+  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}" agent="${5:-}"
   local state_dir state_tmp next_file native_state_file native_state_tmp native_next_file
   state_dir="$(dirname "$state_file")"
   state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
@@ -1755,7 +1762,7 @@ _tdd_consume_review_ticket_critical() {
     return 1
   }
 
-  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" AGENT="$agent" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1805,12 +1812,19 @@ _tdd_consume_review_ticket_critical() {
       && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
       && s.reviewRound < Number.MAX_SAFE_INTEGER;
     if (!valid) process.exit(3);
+    if (process.env.AGENT !== "") {
+      const binding = s.reviewHandback;
+      const bound = binding && typeof binding === "object" && !Array.isArray(binding)
+        && binding.ticket === process.env.TICKET && binding.agentId === process.env.AGENT;
+      if (!bound) process.exit(3);
+    }
 
     // The ticket-bound Session Control document is the sole review-budget
     // authority. No parallel rounds file is consulted or written.
     const next = s.reviewRound + 1;
     s.reviewTicketConsumed = true;
     s.reviewRound = next;
+    delete s.reviewHandback;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], JSON.stringify({next, autopilot}));
   ' "$native_state_tmp" "$native_next_file" 2>/dev/null; then
@@ -1835,14 +1849,116 @@ _tdd_consume_review_ticket_critical() {
 # the same locked read that consumes the one-shot ticket. `autopilot:null`
 # denotes a truly standalone chain; partial linkage is rejected pre-mutation.
 tdd_consume_review_ticket_context() {
-  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}"
+  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}" agent="${4:-}"
   local state_file
   [ -n "$session_id" ] || return 1
   _tdd_review_ticket_shape_ok "$ticket" || return 1
+  if [ -n "$agent" ]; then
+    _tdd_review_handback_agent_shape_ok "$agent" || return 1
+  fi
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")"
   _tdd_locked_run "$state_file" \
-    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file"
+    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file" "$agent"
+}
+
+_tdd_review_handback_agent_shape_ok() {
+  local agent="${1:-}"
+  [ -n "$agent" ] && [ "${#agent}" -le 128 ] || return 1
+  case "$agent" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  return 0
+}
+
+_tdd_bind_review_handback_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" agent="$4" envelope="$5"
+  local tmp native_state_file native_tmp verdict_file native_verdict_file verdict
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  verdict_file="$(mktemp "${state_file}.bind.XXXXXX" 2>/dev/null)" || { rm -f "$tmp"; return 1; }
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp" "$verdict_file"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp" "$verdict_file"; return 1; }
+  native_verdict_file="$(_tdd_native_project_path "$verdict_file")" || { rm -f "$tmp" "$verdict_file"; return 1; }
+
+  local node_rc=0
+  STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" AGENT="$agent" \
+    ENVELOPE="$envelope" CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    let core;
+    try { core = require(process.env.CONTROL_CORE); } catch (_) { process.exit(1); }
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && s.active === true && s.implComplete === true
+      && s.chainDone === false && s.codeReviewDone === false
+      && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
+      && s.reviewTicketConsumed === false;
+    if (!valid) process.exit(3);
+    const envelope = process.env.ENVELOPE === "" ? [] : process.env.ENVELOPE.split("\n");
+    const binding = {
+      schemaVersion: 1,
+      ticket: process.env.TICKET,
+      agentId: process.env.AGENT,
+      envelope,
+    };
+    if (typeof core.reviewHandbackShapeOk !== "function" || !core.reviewHandbackShapeOk(binding)) {
+      process.exit(1);
+    }
+    const held = s.reviewHandback;
+    if (held !== undefined) {
+      if (!core.reviewHandbackShapeOk(held)) process.exit(1);
+      if (held.ticket === process.env.TICKET) {
+        const same = held.agentId === process.env.AGENT
+          && JSON.stringify(held.envelope) === JSON.stringify(envelope);
+        fs.writeFileSync(process.argv[2], same ? "same" : `held ${held.agentId}`);
+        process.exit(0);
+      }
+    }
+    s.reviewHandback = binding;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], "bound");
+  ' "$native_tmp" "$native_verdict_file" 2>/dev/null || node_rc=$?
+  if [ "$node_rc" -ne 0 ]; then
+    rm -f "$tmp" "$verdict_file" 2>/dev/null
+    return "$node_rc"
+  fi
+
+  verdict="$(cat "$verdict_file" 2>/dev/null)"
+  rm -f "$verdict_file" 2>/dev/null
+  case "$verdict" in
+    bound)
+      if [ ! -s "$tmp" ]; then rm -f "$tmp" 2>/dev/null; return 1; fi
+      _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+        || { rm -f "$tmp"; return 1; }
+      printf 'bound\n'
+      ;;
+    same)
+      rm -f "$tmp" 2>/dev/null
+      printf 'bound\n'
+      ;;
+    "held "?*)
+      rm -f "$tmp" 2>/dev/null
+      printf '%s\n' "$verdict"
+      ;;
+    *)
+      rm -f "$tmp" 2>/dev/null
+      return 1
+      ;;
+  esac
+}
+
+tdd_bind_review_handback() {
+  local session_id="${1:-}" ticket="${2:-}" agent="${3:-}" envelope="${4:-}"
+  local state_file
+  [ -n "$session_id" ] || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  _tdd_review_handback_agent_shape_ok "$agent" || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" \
+    _tdd_bind_review_handback_critical "$state_file" "$session_id" "$ticket" "$agent" "$envelope"
 }
 
 # Compatibility view for existing library callers. The authoritative claim
@@ -3156,6 +3272,17 @@ zensu_pending_review_claim_file() {
     pending_file="$(zensu_pending_review_file)" || return 1
   fi
   echo "${pending_file}.claim"
+}
+
+tdd_review_handback_releases_stop() {
+  local outer_present="${1:-true}" inner_bound_run="${2:-}" deferred_adopted="${3:-true}" pending claim
+  [ "$outer_present" = false ] || return 1
+  [ -z "$inner_bound_run" ] || return 1
+  [ "$deferred_adopted" = false ] || return 1
+  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
+  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
+  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
+  return 0
 }
 
 zensu_external_review_wait_file() {

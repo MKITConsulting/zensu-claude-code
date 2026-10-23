@@ -29,8 +29,10 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 { INPUT="$(cat)"; } 2>/dev/null
+HOOK_EVENT=PostToolUse
+[ "${1:-}" = "--handback" ] && HOOK_EVENT=UserPromptSubmit
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
+zensu_hook_is_main_principal "$INPUT" "$HOOK_EVENT" || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 zensu_bind_hook_session "$INPUT" || exit 0
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
@@ -38,6 +40,42 @@ export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 AUTO_FIX_ON=1
 zensu_hook_enabled autoFix || AUTO_FIX_ON=0
+
+emit_post_context() {
+  HOOK_EVENT="$HOOK_EVENT" node -e '
+    const msg = require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{
+      hookEventName:process.env.HOOK_EVENT, additionalContext:msg
+    }}));
+  '
+  echo
+}
+
+REVIEW_INPUT="$INPUT"
+HANDBACK_AGENT=""
+if [ "$HOOK_EVENT" = UserPromptSubmit ]; then
+  HANDBACK_SESSION_ID="$(node -e '
+    try {
+      const id = JSON.parse(require("fs").readFileSync(0, "utf8")).session_id;
+      process.stdout.write(typeof id === "string" ? id : "");
+    } catch (_) {}
+  ' <<<"$INPUT" 2>/dev/null)"
+  HANDBACK_SESSION_ID="$(zensu_resolve_session_id "$HANDBACK_SESSION_ID")" || exit 0
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  HANDBACK_STATE_FILE="$(tdd_state_file "$HANDBACK_SESSION_ID")"
+  _tdd_state_storage_safe "$HANDBACK_STATE_FILE" || exit 0
+  _tdd_path_safe "$HANDBACK_STATE_FILE" regular "$(dirname "$HANDBACK_STATE_FILE")" || exit 0
+  NATIVE_HANDBACK_STATE_FILE="$(_tdd_native_project_path "$HANDBACK_STATE_FILE")" || exit 0
+  REVIEW_INPUT="$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-handback-v1.js" handback-input \
+    --state "$NATIVE_HANDBACK_STATE_FILE" <<<"$INPUT" 2>/dev/null)" || exit 0
+  HANDBACK_AGENT="$(node -e '
+    try {
+      const r = JSON.parse(require("fs").readFileSync(0, "utf8")).tool_response;
+      if (r && typeof r.agentId === "string") process.stdout.write(r.agentId);
+    } catch (_) {}
+  ' <<<"$REVIEW_INPUT" 2>/dev/null)"
+  [ -n "$HANDBACK_AGENT" ] || exit 0
+fi
 
 SUBAGENT_TYPE="$(node -e '
   let s = "";
@@ -48,7 +86,7 @@ SUBAGENT_TYPE="$(node -e '
       console.log((j.tool_input && j.tool_input.subagent_type) || "");
     } catch (_) { console.log(""); }
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
 
 if [ "$SUBAGENT_TYPE" != "zensu:code-reviewer" ]; then
   exit 0
@@ -65,7 +103,7 @@ PROMPT_HEADER="$(node -e '
       process.stdout.write((lines[0] || "") + "\n" + (lines[1] || ""));
     } catch (_) { process.stdout.write("\n"); }
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
 PROMPT_FIRST_LINE="${PROMPT_HEADER%%$'\n'*}"
 if [ "$PROMPT_FIRST_LINE" = "$PROMPT_HEADER" ]; then
   PROMPT_SECOND_LINE=""
@@ -116,7 +154,7 @@ PROMPT_ENVELOPE_FIELDS="$(node -e '
       process.stdout.write(["bound", binding[1], binding[2], binding[3], stage[1]].join("\t"));
     } catch (_) { process.exit(3); }
   });
-' <<<"$INPUT" 2>/dev/null)" || exit 0
+' <<<"$REVIEW_INPUT" 2>/dev/null)" || exit 0
 IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
   PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
   <<<"$PROMPT_ENVELOPE_FIELDS"
@@ -254,15 +292,63 @@ REVIEW_LAUNCH_STATUS="$(node -e '
       }
     } catch (_) {}
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
+LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
+LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+
 if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
-  printf '%s' "The zensu:code-reviewer call above returned status async_launched: it runs in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, with the same prompt and its same header lines; only a foreground completion advances the chain. Ignore the background run's notification when it arrives, and do NOT end your turn first." | node -e '
-    const msg = require("node:fs").readFileSync(0, "utf8");
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{
-      hookEventName:"PostToolUse", additionalContext:msg
-    }}));
-  '
-  echo
+  LAUNCH_FIELDS="$(KIND="$PROMPT_AUTOPILOT_KIND" node -e '
+    try {
+      const input = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      const r = input.tool_response;
+      const agent = r && typeof r === "object" && typeof r.agentId === "string"
+        && /^[A-Za-z0-9_-]{1,128}$/.test(r.agentId) ? r.agentId : "-";
+      const lines = input.tool_input.prompt.split(/\r?\n/);
+      const envelope = process.env.KIND === "bound" ? lines.slice(2, 5) : [];
+      process.stdout.write([agent, ...envelope].join("\n"));
+    } catch (_) { process.exit(3); }
+  ' <<<"$REVIEW_INPUT" 2>/dev/null)" || exit 0
+  LAUNCH_AGENT="${LAUNCH_FIELDS%%$'\n'*}"
+  [ "$LAUNCH_AGENT" = "-" ] && LAUNCH_AGENT=""
+  LAUNCH_ENVELOPE=""
+  [ "$LAUNCH_FIELDS" = "${LAUNCH_FIELDS#*$'\n'}" ] || LAUNCH_ENVELOPE="${LAUNCH_FIELDS#*$'\n'}"
+  BIND_RESULT=""
+  BIND_RC=1
+  if [ -n "$LAUNCH_AGENT" ]; then
+    if BIND_RESULT="$(tdd_bind_review_handback "$SESSION_ID" "$REVIEW_TICKET" \
+      "$LAUNCH_AGENT" "$LAUNCH_ENVELOPE")"; then
+      BIND_RC=0
+    else
+      BIND_RC=$?
+    fi
+  fi
+  case "$BIND_RC:$BIND_RESULT" in
+    0:bound)
+      LAUNCH_OUTER_PRESENT=false
+      LAUNCH_INNER_BOUND=""
+      if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+        LAUNCH_OUTER_PRESENT=true
+        LAUNCH_INNER_BOUND="$PROMPT_AUTOPILOT_RUN"
+      fi
+      LAUNCH_STOP="Do NOT end your turn while it runs: this chain's Stop guard keeps blocking while the reviewer is in flight and charges every blocked Stop against the chain's Stop budget, so wait for the hand-back in this turn."
+      if tdd_review_handback_releases_stop "$LAUNCH_OUTER_PRESENT" "$LAUNCH_INNER_BOUND" false; then
+        LAUNCH_STOP="You may end your turn while it runs: the Stop guard releases while this reviewer is in flight."
+      fi
+      LAUNCH_MSG="The zensu:code-reviewer call above runs in the background as agent ${LAUNCH_AGENT}, and its review ticket is now bound to that agent. Its hand-back, the report it sends when it finishes, consumes the ticket and brings the post-review instructions; until it arrives the review chain does not advance. Do NOT launch another consume-mode reviewer for this ticket and do NOT issue a fresh review ticket, which drops this binding; do NOT fix anything, and do NOT run --code-review-done or --chain-done before it arrives. ${LAUNCH_STOP}"
+      ;;
+    "0:held "?*)
+      LAUNCH_HOLDER="${BIND_RESULT#held }"
+      LAUNCH_MSG="The zensu:code-reviewer call above was launched in the background as agent ${LAUNCH_AGENT}, but its review ticket is already bound to agent ${LAUNCH_HOLDER}, and only the hand-back of that agent consumes it. Do NOT launch another consume-mode reviewer for this ticket; wait for the hand-back of agent ${LAUNCH_HOLDER}. If that agent can no longer report, issue a fresh ticket with ${LOG_COMMAND} --review-ticket and launch the consume-mode reviewer again with it."
+      ;;
+    3:*)
+      exit 0
+      ;;
+    *)
+      LAUNCH_MSG="The zensu:code-reviewer call above runs in the background, but its review ticket could not be bound to it, so its hand-back will not advance the review chain and the ticket stays unconsumed. Issue a fresh ticket with ${LOG_COMMAND} --review-ticket and launch the consume-mode reviewer again with it."
+      ;;
+  esac
+  printf '%s' "$LAUNCH_MSG" | emit_post_context
   exit 0
 fi
 
@@ -271,7 +357,7 @@ fi
 # post-claim linkage reread: partial linkage fails before state/counter mutation,
 # while a concurrent generation reset makes every later bound CAS stale.
 CLAIM_CONTEXT="$(tdd_consume_review_ticket_context \
-  "$SESSION_ID" "$REVIEW_TICKET")" || exit 0
+  "$SESSION_ID" "$REVIEW_TICKET" "" "$HANDBACK_AGENT")" || exit 0
 CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
   try {
     const value = JSON.parse(process.env.CLAIM_CONTEXT);
@@ -405,9 +491,6 @@ fi
 
 BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE_TRAILING"
 [ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE"
-LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
-PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
-LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
 FULL_SUITE_STEP="run the FULL test suite through the evidence runner, skipping it only when the newest full-suite record is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope full --if-stale --cmd '<full test command>' --log <run log> (drop --cmd when evidence.fullSuiteCommand is configured)"
 AFFECTED_SUITE_STEP="re-run the affected-suite command of Phase 6 step 1 through the evidence runner, skipping it only when the newest run of that command is already green on the current tree: ${LOG_COMMAND} --evidence-run --scope scoped --if-stale --cmd '<the Phase 6 affected-suite command>' --log <run log>"
 CONVERGENCE_CLAUSE=""
@@ -456,16 +539,6 @@ if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
   CLOSE_SUITE_STEP="$AFFECTED_SUITE_STEP"
   CLOSE_SUITE_REASON="this run is the only local test measurement of the tree that ships, and CI runs the full suite"
 fi
-
-emit_post_context() {
-  node -e '
-    const msg = require("node:fs").readFileSync(0, "utf8");
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{
-      hookEventName:"PostToolUse", additionalContext:msg
-    }}));
-  '
-  echo
-}
 
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
