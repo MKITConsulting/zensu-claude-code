@@ -17,7 +17,9 @@ mistake this section exists to prevent.
 
 - **Who may see and drive it — the OWNER session.** The active pointer is
   `.zensu/state/autopilot-active-<sha256(ownerSessionId)>.json`, built by
-  `_autopilot_active_path`. `autopilot_read_active` takes the owner and filters the
+  `_autopilot_active_path` for the writers and by the `read-active` worker itself from the
+  same digest rule, which saves the Stop path a hashing child. `autopilot_read_active` takes
+  the owner and filters the
   inventory by it: another session's run is not an orphan, not a hidden run, and not a
   conflict — it is invisible.
 - **What it may collide on — the WORKSPACE.** The run records `workspaceRoot`, the git

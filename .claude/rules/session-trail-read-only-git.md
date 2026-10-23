@@ -13,6 +13,18 @@ and `handoff`, and that session may still be live. The prefix is `--no-optional-
 caller's own tree, because every call in the file is a read. A git call that bypasses `git()`
 loses all three, so add new calls through the helper.
 
+**`git()` also runs every call in `gitEnvironment(process.env)` from
+`hooks/lib/worktree-keep-v1.js`**, which deletes `GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`
+and the other discovery and config variables of its `GIT_ENV_SCRUB` and sets
+`GIT_TERMINAL_PROMPT=0`. Measured against git 2.51.0: with `GIT_DIR` exported,
+`rev-parse --git-common-dir` answers that repository from any folder, one in no repository
+included, so every repository verdict of `takeover` would read the same repository. The list has
+one owner, and `gitChildEnvironment` fails with the plugin-tree-incomplete diagnostic when that
+module cannot be loaded, so every sandbox that stages `trail.mjs` (`mutant_path` and
+`cont_mutant` in `test-session-trail-verdict.sh`) copies it beside `claude-path-v1.js`. `CH13`
+there pins it: `CH7`'s takeover run from another repository with `GIT_DIR` and with
+`GIT_COMMON_DIR` exported gives the verdicts of the run without them.
+
 **MEASURED against git 2.51.0**, with a stat-dirty tracked file, the index mtime set to a fixed
 past time and a `core.fsmonitor` hook that logs each run:
 

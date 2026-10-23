@@ -15,6 +15,16 @@ Stage 1 of `docs/multi-repo-chains-spec.md` §5. It ships NO multi-root capabili
 removes the SILENT GREEN a chain produced when its work landed in a repository the
 anchor cannot see. Four behaviours, three files, one shared claim grammar.
 
+**Stages 2 and 3 were redesigned on 2026-10-21 and are not built** (spec §6 to §9). The
+sealed carrier of §6.1.1 is superseded: code roots are declared at arming with
+`--tdd-begin --code-root <label>=<path>`, kept as `codeRoots` in the workflow document as a
+declaration that bounds accidents, not intent, and claimed as `@<label>/<path>`; the
+cross-repository check is a `crossrepo` perspective inside the review fan-out. The design
+ships in five pull requests behind `CODE_ROOTS_ENABLED` in a new `code-roots-v1` module, and
+until the last one flips it, everything below is all of multi-repo that runs. A stage-2 change
+to the audit, the terminus or the doctor row must keep every rule here for the anchor and for
+an undeclared foreign root.
+
 **The terminus judges the receipt's VERDICT, never its existence.** The audit writes
 its receipt BEFORE its own exit status, carrying `clean` as a field rather than as a
 precondition for writing, so an existence-and-not-a-symlink test accepted a receipt
@@ -185,7 +195,8 @@ superseded, the §5 heading and the pin roster at the end of §10) together with
 `docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
 carry the same status lede and the same superseded facts in their own words. Naming the
 spec alone was wrong and produced real drift: `test-multi-repo-doc-consistency.sh` X7
-requires the literal `stages 2 and 3 are BLOCKED` in all three, so a status reword is a
+requires the literal `stages 2 and 3 are REDESIGNED, NOT BUILT` in all three and forbids the
+retired `stages 2 and 3 are BLOCKED`, so a status reword is a
 deliberate three-file edit, and the overview's finding cards restate terminus behaviour
 that §2 now marks superseded.
 
@@ -370,7 +381,7 @@ exit-2 cause under its existing "did not complete" contract.
 - **A RELATIVE claim naming a SIBLING repository's file is ungradeable and stays so.**
   `src/index.ts` from a sibling repository is textually identical to an anchor claim, and
   where the anchor holds a dirty file of that name it grades as LANDED — a false green INSIDE
-  the audit, in the exact direction stage 1 exists to close. Only the stage 2 root label
+  the audit, in the exact direction stage 1 exists to close. Only the stage 2 `@<label>/` spelling
   closes it; `X6` in `tests/structure/test-edit-landing-audit.sh` pins the current behaviour
   so the gap cannot be mistaken for detection, and `X6a` pins that a relative claim climbing
   into the sibling with `..` keeps the anchor's grading as well. A relative claim into a work

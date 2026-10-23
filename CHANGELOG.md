@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
+  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+  `read_widget_context`, which neither start nor move work, so
+  `mcp__ccd_session__hand_off_to_session`,
+  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
+  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
+  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
+  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
+  session in the cloud and archives it here, and a message asks another session to take work up,
+  so each took the order's work out of its lease. The operator account now names the routes the
+  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
+  pull request.
+- **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
+  while its team review runs. A change in one of the session's review evidence leases (a seat
+  bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
+  while a review seat is still in flight does not count toward the three-stop budget until the
+  lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
+  three times without progress after that still ends the order as blocked.
+- **autopilot**: a Stop of a durable Autopilot run no longer counts against the stage budget of 12
+  Stops while the session's review evidence lease has a review seat in flight, so a long PR team
+  review no longer moves a healthy run to `BLOCKED` with `STOP_BUDGET_EXHAUSTED`. The block names
+  the seats and the time the lease stops taking results and reads `stopBlock=uncounted`. Once no
+  seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
+  again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
+  `gtimeout` is installed, counts the Stop as before.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
+  `takeover`.
+
 ## [0.28.0] - 2026-10-21
 
 ### Added
@@ -17,8 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
 - **session-trail**: Continue a taken-over session's linked sessions (#464)
 
+### Changed
+
+- **tdd-phase**: Run the external lease's path checks inside the lock process (#478)
+
 ### Fixed
 
+- **hooks**: Find a shell's -c flag in linear time in the work-order and consent gates (#481)
 - **skills**: Define the fallback for hosts with the task tools switched off (#473)
 - **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
 - **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
@@ -111,14 +192,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
   that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
   `zensu auth login`, which cannot help there.
-- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
-  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
-  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
-  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
-  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
-  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
-  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
-  bound session's project config, never the reviewed repository's.
 
 ## [0.27.0] - 2026-10-17
 

@@ -76,8 +76,11 @@ passes the `PROJECT_ROOT` its Phase 1 reads from `zensu-log.sh --project-root`.
 
 **Coupled sites.** The probes, and the checks that pin each: `skills/self-review/SKILL.md` Phase 3
 (`R25f` in `tests/structure/test-review-convergence.sh`); `skills/tdd/references/review-chain.md`
-step 3 (`LC3k`, same suite), step 4b (`P3h` in `tests/structure/test-review-judge.sh`, and `P3h2`
-runs it against a project overlay), step 4c (`P2c` in `tests/structure/test-finding-verification.sh`);
+step 3 (`LC3k`, same suite, for the panel probe; `I11` in
+`tests/structure/test-incremental-review-rounds.sh` for the `hooks.aspectActivation` probe, and
+`I11c` and `I11d` run it against a project overlay), step 4b (`P3h` in
+`tests/structure/test-review-judge.sh`, and `P3h2` runs it against a project overlay), step 4c
+(`P2c` in `tests/structure/test-finding-verification.sh`);
 `skills/plan-review/SKILL.md` step 3b and `skills/pr-team-review/references/debate.md` step 4b
 (`P4i`). Each of those pins holds the whole command, so a probe that drops the `CLAUDE_PROJECT_DIR`
 assignment fails it. The second run in step 4b and stage 3 of step 4c resolve their flags "the

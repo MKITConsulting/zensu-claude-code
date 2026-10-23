@@ -78,10 +78,14 @@ decision made later reaches the next session of the order, not the running one.
 
 ## The tool hooks
 
-`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools and the
-task-chip tool, a raw push, opening or merging a pull request outside the helpers, `zensu auth`,
-the `zensu work` and `zensu plan` verbs a worker session must not call, the usual spellings that
-print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`,
+`hooks/pre-work-order-gate.sh` runs before every tool call. It denies the prompt tools; every
+Claude Desktop session tool except the four that neither start nor move work (`dismiss_task`,
+`mark_chapter`, `list_start_targets` and `read_widget_context`), so `spawn_task`, `start_session`,
+`hand_off_to_session`, `move_to_cloud` and any session tool a later Claude Desktop adds are denied;
+`mcp__ccd_session_mgmt__send_message`, which asks another session to take work up; a raw
+`git push`; `gh pr create`, `glab mr create`, `gh pr merge` and `glab mr merge`; `zensu auth`;
+the `zensu work` and `zensu plan` verbs a worker session must not call; the usual spellings that
+print, read, unset or override `ZENSU_SESSION_TOKEN` or that set, change or remove `ZENSU_API_URL`;
 and `--api-url` on `zensu`. Each denial says why and, where a helper verb does the job, names it. Once the lease is lost, or while Zensu refused it and a send without an answer still waits for its replay, it also denies every forge command. It renews the lease when due
 and never allows anything, so the host's own permission rules still decide every call it does not
 deny.
@@ -116,10 +120,27 @@ a direct `zensu work ask` blocked the order.
 ## The Stop hook
 
 `hooks/stop-work-order.sh` keeps a work-order session from ending without a reported outcome. It
-blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without a
-new Autopilot ledger event end the order on its own: it reports `ready_for_merge` for a `DONE` run and
+blocks the Stop until the order reported `ready_for_merge` or a block. Three Stops in a row without
+progress end the order on its own: it reports `ready_for_merge` for a `DONE` run and
 `blocked(worker_error)` for any other, then lets the session stop. A lost lease ends the session
 without a report.
+
+Progress is a new Autopilot ledger event or a change in one of the session's review evidence
+leases: a seat bound, a worker result recorded, a lease sealed or closed. A team review spawns its
+seats in the background and the ledger moves only when the review is published, so the lease is
+what shows that the review advances. While an active lease still has a seat in flight, a bound or
+retrying worker, a Stop is blocked without counting. That wait ends when the last seat reports or
+when the lease stops taking results: at its expiry, and at the latest 3600 seconds after it was
+created. After that, three Stops without progress end the order as before. A lease store the hook
+cannot read counts as no progress, so a fault never extends the wait. The hook reads the store as
+strictly as the review workers write it: a lease whose review workspace is gone fails the read,
+and a lease dated more than 60 seconds ahead of the clock holds no seat in flight.
+
+The Autopilot Stop hook runs in the same Stop and counts every Stop against its own budget of
+12 Stops per stage, which only a stage move resets. It reads the same lease and skips that count
+while a seat is in flight, so a review wait exhausts neither budget; once no seat is in flight,
+both count again. A store either hook cannot read counts the Stop in that hook, and so does an
+Autopilot read that does not finish within five seconds where `timeout` or `gtimeout` is installed.
 
 ## The launcher and the manifest
 
@@ -179,6 +200,12 @@ raw output to a file there; nothing else keeps it.
 - The gate reads command text. A command assembled at run time, such as a script the session
   wrote and then runs, an interpreter one-liner, or a spelling the gate does not know is not
   judged; the worker's slot sandbox, not the gate, is the boundary.
+- The gate judges forge writes only in Bash command text, and tools by name only on the Claude
+  Desktop session servers. An MCP tool that pushes, opens or merges a pull request is not judged,
+  nor is `RemoteTrigger`, which can create and run a remote routine, nor `SendMessage`, which can
+  ask another running session to take work up and stays allowed because it also continues the
+  session's own subagents. The slot's MCP configuration, its permission mode and the host's own
+  rules are the boundary there.
 - `--start` releases only runs of the same order. A nonterminal run of another order in a reused
   checkout still holds the new run off, and the session ends with a stated reason.
 - Zensu records `zensu-cli` and the CLI version as the client of every question and follow-up,
@@ -194,3 +221,6 @@ raw output to a file there; nothing else keeps it.
   started some other way keeps the PowerShell tool as its host configures it, and every PowerShell
   command there is refused.
 - The launcher prints no `usage` line and enforces no cost cap. Both belong to the worker slice.
+- A session can write its own review evidence lease store with a shell command, so a forged
+  record can fake progress or hold a review wait open in both Stop hooks, as a deliberate write
+  can defeat every plugin store.

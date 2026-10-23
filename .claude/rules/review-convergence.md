@@ -139,8 +139,9 @@ CRITICAL, because a deflated blocker is the one error convergence must never mak
 `${LOG_HELPER_Q}` and the hook runs under `set -u`, and interpolated in ALL THREE
 severity arms right before `${FIX_DONE_PHRASE}`, so the clause is read before the fix-done
 instruction — the clause must contain none of the phrases `P3b`, `I17` and `S17` count per
-line, and never the literal `review-round-scope-v1.js`, which is why it says "the round-scope
-helper"); the one `CONVERGENCE_ON` read that gates both the clause and the `LEDGER_OPEN_ROWS`
+line, and never the literal `review-round-scope-v1.js`, which is why it names that helper through
+`SCOPE_HELPER_Q`, defined beside `LEDGER_HELPER_Q`, since the arms' `ROUND_SCOPE` names the file only
+while `hooks.incrementalReviewRounds` is on); the one `CONVERGENCE_ON` read that gates both the clause and the `LEDGER_OPEN_ROWS`
 fragment; `LEDGER_STATES`, `UNFIXED_STATES`, `UNAVAILABLE_ROUTE` and `PARK_CLAUSE`, which only the
 `critical` arm changes, while `important` and `all` render the clause byte for byte as before; the `R${NEXT}-{step_id}` claim prefix in every arm, which `hooks.incrementalReviewRounds`
 depends on and which is therefore NOT gated on this key; the widened case (A) and the
