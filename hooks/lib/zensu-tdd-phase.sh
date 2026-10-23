@@ -30,6 +30,7 @@ _ZENSU_TDD_PATH_SAFETY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/state-path-sa
 [ -f "$_ZENSU_TDD_PATH_SAFETY" ] && [ ! -L "$_ZENSU_TDD_PATH_SAFETY" ] \
   || { return 2 2>/dev/null || exit 2; }
 _ZENSU_TDD_CHAIN_RECOVERY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/chain-recovery-v1.js"
+_ZENSU_TDD_TICKET_STATE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-ticket-state-v1.js"
 
 _tdd_chain_recovery_module_ok() {
   [ -f "$_ZENSU_TDD_CHAIN_RECOVERY" ] && [ ! -L "$_ZENSU_TDD_CHAIN_RECOVERY" ]
@@ -950,7 +951,6 @@ _tdd_write_flag_critical() {
           state.reviewRound = 0;
           state.stopBlockCount = 0;
           delete state.implStopCount;
-          delete state.reviewHandback;
         }
         if (process.env.KEY === "codeReviewDone" && value) state.stopBlockCount = 0;
         return state;
@@ -1056,7 +1056,6 @@ _tdd_write_clear_critical() {
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
       delete s.implStopCount;
       delete s.reviewRearm;
-      delete s.reviewHandback;
       delete s.autopilotRunId; delete s.autopilotAttempt;
       delete s.autopilotReturnStage; delete s.chainId; delete s.chainOutcome;
       s.phase = "UNINITIALIZED"; s.step_id = ""; s.history = [];
@@ -1094,7 +1093,6 @@ _tdd_clear_standalone_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
-      delete s.reviewHandback;
       s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
     });
@@ -1134,7 +1132,6 @@ _tdd_clear_autopilot_session_critical() {
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
       s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
-      delete s.reviewHandback;
       delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
       delete s.chainId;delete s.chainOutcome;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
@@ -1171,7 +1168,6 @@ _tdd_write_chain_reset_critical() {
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
       delete s.implStopCount;
       delete s.reviewRearm;
-      delete s.reviewHandback;
       return s;
     });
   ' 2>/dev/null
@@ -1241,7 +1237,6 @@ _tdd_begin_session_critical() {
       delete s.implStopCount;
       s.bypasses = [];
       delete s.reviewRearm;
-      delete s.reviewHandback;
       if (process.env.AUTOPILOT_RUN_ID) {
         s.autopilotRunId = process.env.AUTOPILOT_RUN_ID;
         s.autopilotAttempt = Number.parseInt(process.env.AUTOPILOT_ATTEMPT, 10);
@@ -1706,7 +1701,6 @@ _tdd_issue_review_ticket_critical() {
     // Issuing the first post-rearm ticket is forward progress. The old
     // crash-retry receipt must not survive into another exhausted budget.
     delete s.reviewRearm;
-    delete s.reviewHandback;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
@@ -1741,7 +1735,7 @@ tdd_issue_review_ticket() {
 }
 
 _tdd_consume_review_ticket_critical() {
-  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}" agent="${5:-}"
+  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}"
   local state_dir state_tmp next_file native_state_file native_state_tmp native_next_file
   state_dir="$(dirname "$state_file")"
   state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
@@ -1762,69 +1756,25 @@ _tdd_consume_review_ticket_critical() {
     return 1
   }
 
-  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" AGENT="$agent" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" \
+    TICKET_STATE="$_ZENSU_TDD_TICKET_STATE" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
-    const linkKeys = [
-      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
-    ];
-    const hasOwn = key => Object.prototype.hasOwnProperty.call(s, key);
-    const linkCount = s && typeof s === "object" && !Array.isArray(s)
-      ? linkKeys.filter(hasOwn).length : 0;
-    const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
-      && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
-    let autopilot = null;
-    if (linkCount !== 0) {
-      const completeLink = linkCount === linkKeys.length
-        && linkId(s.autopilotRunId)
-        && Number.isInteger(s.autopilotAttempt)
-        && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
-        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
-          .includes(s.autopilotReturnStage)
-        && linkId(s.chainId)
-        && s.chainOutcome === "";
-      if (!completeLink) process.exit(3);
-      autopilot = {
-        runId: s.autopilotRunId,
-        attempt: s.autopilotAttempt,
-        returnStage: s.autopilotReturnStage,
-        chainId: s.chainId,
-        outcome: s.chainOutcome
-      };
+    let context;
+    try { context = require(process.env.TICKET_STATE).claimContext(s, process.env.SID); }
+    catch (_) { process.exit(3); }
+    if (!context || s.reviewTicket !== process.env.TICKET || s.reviewTicketConsumed !== false) {
+      process.exit(3);
     }
-    const valid = s && typeof s === "object" && !Array.isArray(s)
-      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
-      && typeof s.phase === "string"
-      && Array.isArray(s.history)
-      && Array.isArray(s.bypasses)
-      && typeof s.active === "boolean" && s.active === true
-      && typeof s.vanilla === "boolean"
-      && typeof s.implComplete === "boolean" && s.implComplete === true
-      && typeof s.chainDone === "boolean" && s.chainDone === false
-      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
-      && typeof s.selfReviewFixed === "boolean"
-      && typeof s.reviewTicket === "string"
-      && s.reviewTicket === process.env.TICKET
-      && typeof s.reviewTicketConsumed === "boolean"
-      && s.reviewTicketConsumed === false
-      && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
-      && s.reviewRound < Number.MAX_SAFE_INTEGER;
-    if (!valid) process.exit(3);
-    if (process.env.AGENT !== "") {
-      const binding = s.reviewHandback;
-      const bound = binding && typeof binding === "object" && !Array.isArray(binding)
-        && binding.ticket === process.env.TICKET && binding.agentId === process.env.AGENT;
-      if (!bound) process.exit(3);
-    }
+    const autopilot = context.autopilot;
 
     // The ticket-bound Session Control document is the sole review-budget
     // authority. No parallel rounds file is consulted or written.
     const next = s.reviewRound + 1;
     s.reviewTicketConsumed = true;
     s.reviewRound = next;
-    delete s.reviewHandback;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], JSON.stringify({next, autopilot}));
   ' "$native_state_tmp" "$native_next_file" 2>/dev/null; then
@@ -1849,116 +1799,14 @@ _tdd_consume_review_ticket_critical() {
 # the same locked read that consumes the one-shot ticket. `autopilot:null`
 # denotes a truly standalone chain; partial linkage is rejected pre-mutation.
 tdd_consume_review_ticket_context() {
-  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}" agent="${4:-}"
+  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}"
   local state_file
   [ -n "$session_id" ] || return 1
   _tdd_review_ticket_shape_ok "$ticket" || return 1
-  if [ -n "$agent" ]; then
-    _tdd_review_handback_agent_shape_ok "$agent" || return 1
-  fi
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")"
   _tdd_locked_run "$state_file" \
-    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file" "$agent"
-}
-
-_tdd_review_handback_agent_shape_ok() {
-  local agent="${1:-}"
-  [ -n "$agent" ] && [ "${#agent}" -le 128 ] || return 1
-  case "$agent" in *[!A-Za-z0-9_-]*) return 1 ;; esac
-  return 0
-}
-
-_tdd_bind_review_handback_critical() {
-  local state_file="$1" session_id="$2" ticket="$3" agent="$4" envelope="$5"
-  local tmp native_state_file native_tmp verdict_file native_verdict_file verdict
-  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  verdict_file="$(mktemp "${state_file}.bind.XXXXXX" 2>/dev/null)" || { rm -f "$tmp"; return 1; }
-  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp" "$verdict_file"; return 1; }
-  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp" "$verdict_file"; return 1; }
-  native_verdict_file="$(_tdd_native_project_path "$verdict_file")" || { rm -f "$tmp" "$verdict_file"; return 1; }
-
-  local node_rc=0
-  STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" AGENT="$agent" \
-    ENVELOPE="$envelope" CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" node -e '
-    const fs = require("fs");
-    let s;
-    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
-    catch (_) { process.exit(3); }
-    let core;
-    try { core = require(process.env.CONTROL_CORE); } catch (_) { process.exit(1); }
-    const valid = s && typeof s === "object" && !Array.isArray(s)
-      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
-      && s.active === true && s.implComplete === true
-      && s.chainDone === false && s.codeReviewDone === false
-      && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
-      && s.reviewTicketConsumed === false;
-    if (!valid) process.exit(3);
-    const envelope = process.env.ENVELOPE === "" ? [] : process.env.ENVELOPE.split("\n");
-    const binding = {
-      schemaVersion: 1,
-      ticket: process.env.TICKET,
-      agentId: process.env.AGENT,
-      envelope,
-    };
-    if (typeof core.reviewHandbackShapeOk !== "function" || !core.reviewHandbackShapeOk(binding)) {
-      process.exit(1);
-    }
-    const held = s.reviewHandback;
-    if (held !== undefined) {
-      if (!core.reviewHandbackShapeOk(held)) process.exit(1);
-      if (held.ticket === process.env.TICKET) {
-        const same = held.agentId === process.env.AGENT
-          && JSON.stringify(held.envelope) === JSON.stringify(envelope);
-        fs.writeFileSync(process.argv[2], same ? "same" : `held ${held.agentId}`);
-        process.exit(0);
-      }
-    }
-    s.reviewHandback = binding;
-    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-    fs.writeFileSync(process.argv[2], "bound");
-  ' "$native_tmp" "$native_verdict_file" 2>/dev/null || node_rc=$?
-  if [ "$node_rc" -ne 0 ]; then
-    rm -f "$tmp" "$verdict_file" 2>/dev/null
-    return "$node_rc"
-  fi
-
-  verdict="$(cat "$verdict_file" 2>/dev/null)"
-  rm -f "$verdict_file" 2>/dev/null
-  case "$verdict" in
-    bound)
-      if [ ! -s "$tmp" ]; then rm -f "$tmp" 2>/dev/null; return 1; fi
-      _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
-        || { rm -f "$tmp"; return 1; }
-      printf 'bound\n'
-      ;;
-    same)
-      rm -f "$tmp" 2>/dev/null
-      printf 'bound\n'
-      ;;
-    "held "?*)
-      rm -f "$tmp" 2>/dev/null
-      printf '%s\n' "$verdict"
-      ;;
-    *)
-      rm -f "$tmp" 2>/dev/null
-      return 1
-      ;;
-  esac
-}
-
-tdd_bind_review_handback() {
-  local session_id="${1:-}" ticket="${2:-}" agent="${3:-}" envelope="${4:-}"
-  local state_file
-  [ -n "$session_id" ] || return 1
-  _tdd_review_ticket_shape_ok "$ticket" || return 1
-  _tdd_review_handback_agent_shape_ok "$agent" || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  state_file="$(tdd_state_file "$session_id")"
-  _tdd_state_storage_safe "$state_file" || return 1
-  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
-  _tdd_locked_run "$state_file" \
-    _tdd_bind_review_handback_critical "$state_file" "$session_id" "$ticket" "$agent" "$envelope"
+    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file"
 }
 
 # Compatibility view for existing library callers. The authoritative claim
@@ -3274,17 +3122,6 @@ zensu_pending_review_claim_file() {
   echo "${pending_file}.claim"
 }
 
-tdd_review_handback_releases_stop() {
-  local outer_present="${1:-true}" inner_bound_run="${2:-}" deferred_adopted="${3:-true}" pending claim
-  [ "$outer_present" = false ] || return 1
-  [ -z "$inner_bound_run" ] || return 1
-  [ "$deferred_adopted" = false ] || return 1
-  pending="$(zensu_pending_review_file 2>/dev/null)" || return 1
-  claim="$(zensu_pending_review_claim_file "$pending" 2>/dev/null)" || return 1
-  if [ -e "$claim" ] || [ -L "$claim" ]; then return 1; fi
-  return 0
-}
-
 zensu_external_review_wait_file() {
   local key="${1:-}"
   command -v zensu_session_key_canonical >/dev/null 2>&1 \
@@ -4043,7 +3880,7 @@ case "${OSTYPE:-}" in
     # Export the module paths only after they were derived from, and
     # identity-checked against, the executing library above. Exported helpers
     # must never fall back to an inherited ZENSU_* module path.
-    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY _ZENSU_TDD_PATH_SAFETY
+    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY _ZENSU_TDD_PATH_SAFETY _ZENSU_TDD_TICKET_STATE
     export -f _tdd_core_lock_keeper 2>/dev/null || true
     export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_leaf_safe _tdd_paths_safe_argv _tdd_paths_safe_check _tdd_paths_safe _tdd_path_safe _tdd_state_storage_argv _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_zero_change_ticket _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows zensu_workflow_tools tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true

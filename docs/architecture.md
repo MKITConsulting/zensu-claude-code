@@ -195,13 +195,15 @@ every prompt while the route is decided, and a note under 400 characters on a CI
 a prompt carries a planning keyword outside paths, `zensu:` skill names and `--repo` operands),
 `user-prompt-zen-mode.sh` (the 3.1 K or 4.4 K above once per generation and about 1.4 K after
 that with no chain armed or 1.7 K with one, on every prompt kind because the reply is user-visible) and this hook's reminder (354
-characters, on every prompt kind for the same reason). Two emit
-only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold, and
-`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose.
+characters, on every prompt kind for the same reason). Three emit
+only on a condition: `user-prompt-context-nudge.sh` once per 10% band past its threshold,
+`user-prompt-worktree-keep.sh` only in an app-managed worktree with something to disclose, and
+`user-prompt-review-handback.sh` only for the hand-back or completion notification of a pending
+background reviewer, where it carries the review's routing directive; it exits before any `node`
+child on a prompt that carries neither marker, and on one that does while no background review is
+pending in the plugin's store.
 `user-prompt-session-hub-receipt.sh` never emits text; it only writes a receipt for the Session Hub's
-takeover command. `user-prompt-review-handback.sh` emits only on the hand-back of the background
-`zensu:code-reviewer` its chain bound to a review ticket, where it carries the post-review directive
-the foreground completion used to carry. With
+takeover command. With
 zen-mode active — the shipped default — a typed code request with a planning keyword therefore
 costs about **11.1 K characters on the first prompt of a generation and 5.3 K on every later
 one** (12.5 K on every turn before the ledger), and a task notification, subagent hand-back or

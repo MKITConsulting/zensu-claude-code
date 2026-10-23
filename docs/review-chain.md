@@ -56,40 +56,6 @@ refinement context remain untrusted data and cannot widen this contract.
 
 > **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to parallel `review-aspect` subagents (three on the default lean panel since 0.24.0, five with `hooks.reviewPanel: full`), optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps. `hooks.reviewConvergence` (default on) then bounds the loop itself: every merged finding is recorded in a findings ledger (`FINDING LEDGER` run-log lines read by `hooks/lib/review-ledger-v1.js`), the judge receives that ledger, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited (every IMPORTANT finding when `hooks.selfReview` is off), deferring the rest to the terminal self-review and the `## Open` table. The terminal self-review also verifies every active acceptance criterion again through `/zensu:verify-feature --chain` when the review rounds made the acceptance records stale, because the terminus refuses a criterion verified on an older tree ([Acceptance Verification Gate](gates.md#acceptance-verification-gate)). All three reviewer agents rate severity on the shared scale in [review-severity.md](review-severity.md).
 
-#### A consume-mode reviewer the host runs in the background
-
-Some hosts launch every subagent in the background: the Agent tool of the Claude desktop app
-offers no `run_in_background` parameter and answers the consume-mode `zensu:code-reviewer` spawn
-with `tool_response.status` `async_launched`. The chain then advances on the reviewer's
-hand-back instead of a foreground completion.
-
-- **Binding.** On `async_launched`, `post-review-tdd-delegate.sh` checks the launch exactly as it
-  checks a completion (the two header lines, an Autopilot envelope, the chain state) and binds
-  the chain's current unconsumed ticket to the `agentId` the launch returned. The binding,
-  `reviewHandback` in the workflow document, keeps the ticket, the agent id and the envelope
-  lines. The first launch wins: a second background reviewer for the same ticket is told which
-  agent holds it, and a fresh `--review-ticket` drops the binding.
-- **Consumption.** The host hands the reviewer's report to the main thread as a
-  `UserPromptSubmit` prompt: `<agent-message from="<agent id>">`, one `[Subagent hand-back]`
-  line at column zero, the report indented by two spaces, `</agent-message>`.
-  `user-prompt-review-handback.sh` passes only such a frame on, and the delegate acts only on
-  the bound agent's: it consumes the ticket in the same locked write that removes the binding
-  and returns the post-review directive as `UserPromptSubmit` context, beside the report it
-  routes. A repeat, another agent's hand-back, an imitation without the host's indentation and
-  a stale binding consume nothing.
-- **Waiting.** While the Stop input's `background_tasks` lists the bound agent with a running
-  status, the Stop guard releases a standalone chain's `Stop` without charging the review
-  budget, because the hand-back wakes the session. An Autopilot-bound chain, a session that
-  owns a nonterminal (live or BLOCKED) Autopilot run, a deferred-review adoption and a project
-  holding a deferred-review claim never wait; a DONE or CANCELLED run of the session does not
-  stop the wait. Their `Stop` blocks and is charged as before, but its reason names the
-  running agent and forbids a fresh ticket, which would drop the binding, instead of ordering a
-  new review; the launch says in advance whether the guard will release. Only the consume-mode
-  reviewer is waited for: a `Stop` while the panel or the judges run in the background blocks
-  as before.
-- **Foreground is unchanged.** A completion with any other status consumes the ticket as
-  before and removes a binding too, so a late hand-back of that ticket is a no-op.
-
 #### Ultracode and external reviews
 
 Claude Code's workflows (the `Workflow` tool) can review a change on their own, for example
@@ -229,6 +195,51 @@ import unavailable or degraded instead of passing it. The import never reads a f
 thread names, but the run record and the journal sit in the session's own project directory,
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
+
+#### Background review agents
+
+A host may start every `Agent` spawn in the background: the Claude desktop app does, and its
+Agent tool offers no `run_in_background` parameter. Every review agent of the chain then answers
+`async_launched`, and no report exists yet when the post-review hook runs.
+
+- **Launch.** The post-review hook records each launch in the plugin's private data store under
+  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect` or `zensu:review-judge` launch
+  becomes one entry per agent under `fanout/<scv1-session-key>/`. The consume-mode
+  `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
+  the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
+  claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
+  Autopilot-bound chain to keep its turn. No ticket is consumed and no second reviewer is spawned.
+- **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
+  the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
+  without a `node` child unless the prompt carries one of the two markers and the store holds a
+  pending record or entry. A fan-out agent's arrival retires its entry. The consume reviewer's
+  arrival claims the ticket once, through the claim the foreground path uses, and returns that
+  path's routing directive as context of the prompt. A hand-back retires the record only after
+  the claim, so a hand-back the host abandons halfway, or whose claim fails, leaves the record
+  for the notification that follows. The notification is the last arrival, so it retires the
+  record whether its claim succeeds, fails or is killed, and the next Stop no longer waits for a
+  reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
+  line follows, because the host indents every line of a report it forwards. A notification with
+  another status, such as `failed`, ends the consume record without a claim and asks for a
+  re-spawn with the same ticket.
+- **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
+  fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
+  end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
+  its Stop blocks, names the agents that still run, and does not count against the inner Stop
+  budget. A session that owns a live Autopilot run without a bound chain, and a Stop that adopted
+  a deferred review, take neither; their resume directive opens with a sentence naming the
+  running agents.
+
+**Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
+measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
+resume directive applies again. The column-zero rule rests on the host indenting what it forwards:
+a peer message the host does not indent, and that names a pending agent id, could still carry a
+forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
+not recorded, so a turn end while only a persona runs blocks as before. A notification that says
+no report was delivered still claims the ticket, and the directive tells the main thread to ask
+the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
+runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
+post-review hook.
 
 #### Custom review personas (repo-local)
 
