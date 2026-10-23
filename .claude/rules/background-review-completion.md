@@ -127,7 +127,10 @@ reviewer's report reaches the main thread, with the routing directive the foregr
 - The `wait` line `wait kind= agent= age= count= ttl=` is parsed by `background_review_wait`, and
   the `recorded agent= ttl=` line by the delegate's launch arm.
 - The fan-out types are `FANOUT_TYPES` in the module and the `case` in the delegate's PostToolUse
-  branch.
+  branch. `FANOUT_TYPES` is derived, never spelled: the `zensu:` names in `REVIEWER_TYPES` of
+  `claude-principal-v1.js` other than `REVIEWER_SUBAGENT_TYPE`, because
+  `tests/structure/reviewer-spawn-allow-v1.test.js` fails on any second spelled copy of a confined
+  reviewer under `hooks/`.
 - The store is in both protected-root lists of `reviewer-capability-v1.js` (`BR1a`).
 - The prompt hook has a `budget()` row in `tests/structure/test-user-prompt-budget.sh` and a row in
   the table of `.claude/rules/prompt-origin.md`; the hook count in `docs/configuration.md` moved
