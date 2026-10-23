@@ -43,6 +43,10 @@
       "reason": "The complete full cycle remains in weekly Windows Safety; its Windows payload-store boundary is extracted into the focused bound-payload contract."
     },
     {
+      "path": "tests/structure/test-background-review.sh",
+      "reason": "The only native-Windows marker is BR2's host branch, which skips the 0600 mode check of the launch record on a host without POSIX mode bits; it asserts no Windows behavior. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it. Its Windows wall clock is unmeasured, and a blocking shard would have to be paid for by moving another suite off."
+    },
+    {
       "path": "tests/structure/test-chain-recover.sh",
       "reason": "The only native-Windows branch passes T30 when Git Bash cannot create a real file symlink, so it asserts nothing there; the weekly Windows Safety run covers the suite."
     },

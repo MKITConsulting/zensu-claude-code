@@ -165,7 +165,9 @@ reviewer's report reaches the main thread, with the routing directive the foregr
   reach it. Which signal the host's hook timeout sends was not measured.
 - **Not measured live.** The suite drives the real hooks with payloads shaped like the
   measurements; no desktop session has run the patched plugin yet.
-- **Windows is unmeasured.** The suite is in `ciStructureTests` and in no blocking Windows shard.
+- **Windows is unmeasured.** The suite is in `ciStructureTests` and in no blocking Windows shard;
+  `tests/profiles/windows-native-structure.v1.json` lists it as excluded, because BR2's host
+  branch is a native-Windows marker that `windows-ci-contract.test.js` audits.
 - `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not changed.
 
 ## Version: `patch`
