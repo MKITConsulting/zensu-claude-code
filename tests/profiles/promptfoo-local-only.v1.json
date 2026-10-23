@@ -21,6 +21,7 @@
     "test-autopilot-skill.sh",
     "test-autopilot-state-machine.sh",
     "test-autopilot-stop-enforcer.sh",
+    "test-background-review.sh",
     "test-bash-source-write-gate.sh",
     "test-bash-zensu-gate.sh",
     "test-bash32-portability.sh",

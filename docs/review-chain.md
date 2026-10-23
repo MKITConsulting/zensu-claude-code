@@ -196,6 +196,51 @@ thread names, but the run record and the journal sit in the session's own projec
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
 
+#### Background review agents
+
+A host may start every `Agent` spawn in the background: the Claude desktop app does, and its
+Agent tool offers no `run_in_background` parameter. Every review agent of the chain then answers
+`async_launched`, and no report exists yet when the post-review hook runs.
+
+- **Launch.** The post-review hook records each launch in the plugin's private data store under
+  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect` or `zensu:review-judge` launch
+  becomes one entry per agent under `fanout/<scv1-session-key>/`. The consume-mode
+  `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
+  the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
+  claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
+  Autopilot-bound chain to keep its turn. No ticket is consumed and no second reviewer is spawned.
+- **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
+  the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
+  without a `node` child unless the prompt carries one of the two markers and the store holds a
+  pending record or entry. A fan-out agent's arrival retires its entry. The consume reviewer's
+  arrival claims the ticket once, through the claim the foreground path uses, and returns that
+  path's routing directive as context of the prompt. A hand-back retires the record only after
+  the claim, so a hand-back the host abandons halfway, or whose claim fails, leaves the record
+  for the notification that follows. The notification is the last arrival, so it retires the
+  record whether its claim succeeds, fails or is killed, and the next Stop no longer waits for a
+  reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
+  line follows, because the host indents every line of a report it forwards. A notification with
+  another status, such as `failed`, ends the consume record without a claim and asks for a
+  re-spawn with the same ticket.
+- **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
+  fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
+  end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
+  its Stop blocks, names the agents that still run, and does not count against the inner Stop
+  budget. A session that owns a live Autopilot run without a bound chain, and a Stop that adopted
+  a deferred review, take neither; their resume directive opens with a sentence naming the
+  running agents.
+
+**Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
+measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
+resume directive applies again. The column-zero rule rests on the host indenting what it forwards:
+a peer message the host does not indent, and that names a pending agent id, could still carry a
+forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
+not recorded, so a turn end while only a persona runs blocks as before. A notification that says
+no report was delivered still claims the ticket, and the directive tells the main thread to ask
+the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
+runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
+post-review hook.
+
 #### Custom review personas (repo-local)
 
 Projects extend the review panel without forking the plugin: drop agent definitions at `.claude/agents/zensu-review-*.md` (standard agent frontmatter + body prompt; Claude Code registers them at session start — a file added mid-session is not yet spawnable and gets logged as `PERSONA SKIPPED — <name> (not registered)`). The frontmatter `name:` must equal the filename stem and match `zensu-review-[A-Za-z0-9_-]+` — anything else is skipped as malformed. An optional `activation:` field holds comma-separated glob patterns (items may be quoted) matched against the changed-file paths — `**` crosses directory separators on segment boundaries (`"**/domain/**"` matches `src/domain/x.ts` but not `src/subdomain/x.ts`), `*`/`?` stay within one segment, and a pattern without `/` also matches the basename. Project-agnostic examples: `"**/domain/**"` (DDD rules), `"**/*.tf"` (infrastructure), `"**/*.component.ts"` (frontend components). A persona with no `activation:` field always joins; one whose globs match nothing is skipped AND named in the run log (`PERSONA SKIPPED — <name> (no activation match)`) — never silently omitted; malformed files (bad frontmatter, name/stem mismatch, symlinks) are skipped with a log line and never abort the chain. Extra personas are capped at five per run — glob-matched personas take slots before always-join ones (relevance wins), each group lexicographic; overflow is logged as dropped. **Output contract:** a persona reports exactly like a built-in aspect — `## Aspect: <persona-name>` header with `- [SEVERITY] file:line — finding` bullets — except every finding is prefixed with the persona's uppercased `<NAME>-<n>` ID for provenance. **Trust boundary:** a persona file is a repo-controlled prompt at the same trust level as any `.claude/agents` definition or a checked-in `CLAUDE.md` — the read-only/no-build contract is carried by the spawn prompt and the persona's own `tools:` frontmatter, not by promotion to the built-in reviewer principal. Custom personas stay neutral `host-profile-v1`: the all-tool gate prevents Session Control/workflow-root access and `main-v1` impersonation, but their ordinary host tools remain governed by their own frontmatter. Audit `zensu-review-*.md` files in third-party repos before running `/zensu:tdd` or `/zensu:plan-review` (both spawn personas from the local working checkout; `/zensu:pr-team-review` is base-scoped). Matching is decided deterministically by `hooks/lib/persona-activation.js` (changed files on stdin, personas dir as argv; verdict lines `spawn`/`skip`/`drop`).

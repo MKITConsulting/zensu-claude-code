@@ -1,8 +1,8 @@
 #!/bin/bash
-# PostToolUse hook fired when the Agent (code-reviewer) tool completes.
-# Routes only the consume-mode `zensu:code-reviewer` completion belonging to a
-# live, implementation-complete TDD review chain. Every other Agent completion
-# is a total no-op: it cannot read or mutate the auto-fix counter or chain state.
+# PostToolUse hook for Agent completions and, with --background-arrival, the
+# UserPromptSubmit handler of a background reviewer's report. Routes only the
+# consume-mode `zensu:code-reviewer` of a live, implementation-complete TDD review
+# chain; no other Agent completion can read or mutate the auto-fix counter or chain state.
 #
 # Behavior is configurable via ~/.zensu/config.json (resolution order: env,
 # project-local, global):
@@ -29,8 +29,10 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 { INPUT="$(cat)"; } 2>/dev/null
+HOOK_EVENT=PostToolUse
+if [ "${1:-}" = "--background-arrival" ]; then HOOK_EVENT=UserPromptSubmit; fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
+zensu_hook_is_main_principal "$INPUT" "$HOOK_EVENT" || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 zensu_bind_hook_session "$INPUT" || exit 0
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
@@ -38,6 +40,98 @@ export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 AUTO_FIX_ON=1
 zensu_hook_enabled autoFix || AUTO_FIX_ON=0
+
+ARRIVAL_LEAD=""
+emit_post_context() {
+  LEAD="$ARRIVAL_LEAD" EVENT="$HOOK_EVENT" node -e '
+    const msg = (process.env.LEAD || "") + require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{
+      hookEventName:process.env.EVENT, additionalContext:msg
+    }}));
+  '
+  echo
+}
+
+background_review_env() {
+  local data exclusions
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA ZENSU_BR_STATE_FILE 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  BACKGROUND_REVIEW_DATA="$data"
+  BACKGROUND_REVIEW_EXCLUSIONS="$exclusions"
+}
+
+background_review_retire() {
+  MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" \
+    ZENSU_BR_SESSION_KEY="$ARRIVAL_SESSION" ZENSU_BR_AGENT="$ARRIVAL_AGENT" \
+    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" retire </dev/null >/dev/null 2>&1
+  return 0
+}
+
+REVIEW_INPUT="$INPUT"
+if [ "$HOOK_EVENT" = UserPromptSubmit ]; then
+  ARRIVAL_SESSION="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const id = JSON.parse(s).session_id;
+        process.stdout.write(typeof id === "string" ? id : "");
+      } catch (_) { process.stdout.write(""); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+  ARRIVAL_SESSION="$(zensu_resolve_session_id "$ARRIVAL_SESSION")" || exit 0
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+  ARRIVAL_STATE_FILE="$(tdd_state_file "$ARRIVAL_SESSION")"
+  _tdd_state_storage_safe "$ARRIVAL_STATE_FILE" || exit 0
+  _tdd_path_safe "$ARRIVAL_STATE_FILE" regular "$(dirname "$ARRIVAL_STATE_FILE")" || exit 0
+  ARRIVAL_NATIVE_STATE="$(_tdd_native_project_path "$ARRIVAL_STATE_FILE")" || exit 0
+  background_review_env || exit 0
+  ARRIVAL_MATCH="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
+    ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" ZENSU_BR_SESSION_KEY="$ARRIVAL_SESSION" \
+    ZENSU_BR_STATE_FILE="$ARRIVAL_NATIVE_STATE" \
+    node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" match 2>/dev/null)" || exit 0
+  ARRIVAL_VERDICT="$(MATCH="$ARRIVAL_MATCH" node -e '
+    try {
+      const m = JSON.parse(process.env.MATCH);
+      const agent = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+      if (m.verdict === "claim" && ["handback", "notification"].includes(m.arrival) && agent.test(m.agentId)) {
+        process.stdout.write(["claim", m.arrival, m.agentId].join("\t"));
+      } else if (m.verdict === "ended" && /^[a-z][a-z_-]{0,31}$/.test(m.status) && agent.test(m.agentId)) {
+        process.stdout.write(["ended", m.status, m.agentId].join("\t"));
+      } else {
+        process.exit(3);
+      }
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null)" || exit 0
+  IFS=$'\t' read -r ARRIVAL_KIND ARRIVAL_DETAIL ARRIVAL_AGENT <<<"$ARRIVAL_VERDICT"
+  if [ "$ARRIVAL_KIND" = ended ]; then
+    printf '%s' "The background zensu:code-reviewer (agent ${ARRIVAL_AGENT}) ended with status ${ARRIVAL_DETAIL} before it completed its review, so its review ticket was NOT consumed and the review chain did not advance. Spawn zensu:code-reviewer again with the same prompt and the same header lines: that ticket stays valid until a completed review claims it. Do NOT fix anything before a review report arrives, and if the reviewer cannot complete again, report it to the user." | emit_post_context
+    exit 0
+  fi
+  [ "$ARRIVAL_KIND" = claim ] || exit 0
+  if [ "$ARRIVAL_DETAIL" = handback ]; then trap 'trap - EXIT; exit 0' HUP INT TERM; fi
+  trap background_review_retire EXIT
+  REVIEW_INPUT="$(MATCH="$ARRIVAL_MATCH" node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const m = JSON.parse(process.env.MATCH);
+        const input = JSON.parse(s);
+        if (typeof m.prompt !== "string" || typeof input.session_id !== "string") process.exit(3);
+        process.stdout.write(JSON.stringify({
+          session_id: input.session_id,
+          tool_input: {subagent_type: "zensu:code-reviewer", prompt: m.prompt}
+        }));
+      } catch (_) { process.exit(3); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)" || exit 0
+  if [ "$ARRIVAL_DETAIL" = handback ]; then
+    ARRIVAL_LEAD="BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent ${ARRIVAL_AGENT}) delivered its report in this message as its hand-back, and its review ticket was claimed. Wherever the directive below refers to the zensu:code-reviewer, its report or its findings, it means that hand-back."$'\n\n'
+  else
+    ARRIVAL_LEAD="BACKGROUND REVIEW REPORT. The background zensu:code-reviewer (agent ${ARRIVAL_AGENT}) completed, and its review ticket was claimed. Its report is the hand-back message that reached you just before this notification, or this notification's own result; wherever the directive below refers to the zensu:code-reviewer, its report or its findings, it means that report. If neither carries a report, first ask the reviewer for its full report with SendMessage to '${ARRIVAL_AGENT}', and classify only the report it sends."$'\n\n'
+  fi
+fi
 
 SUBAGENT_TYPE="$(node -e '
   let s = "";
@@ -48,7 +142,21 @@ SUBAGENT_TYPE="$(node -e '
       console.log((j.tool_input && j.tool_input.subagent_type) || "");
     } catch (_) { console.log(""); }
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
+
+if [ "$HOOK_EVENT" = PostToolUse ]; then
+  case "$SUBAGENT_TYPE" in
+    zensu:review-aspect|zensu:review-judge)
+      case "$INPUT" in *'"async_launched"'*) ;; *) exit 0 ;; esac
+      FANOUT_SESSION="$(zensu_resolve_session_id "")" || exit 0
+      background_review_env || exit 0
+      printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
+        ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" ZENSU_BR_SESSION_KEY="$FANOUT_SESSION" \
+        node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" fanout >/dev/null 2>&1
+      exit 0
+      ;;
+  esac
+fi
 
 if [ "$SUBAGENT_TYPE" != "zensu:code-reviewer" ]; then
   exit 0
@@ -65,7 +173,7 @@ PROMPT_HEADER="$(node -e '
       process.stdout.write((lines[0] || "") + "\n" + (lines[1] || ""));
     } catch (_) { process.stdout.write("\n"); }
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
 PROMPT_FIRST_LINE="${PROMPT_HEADER%%$'\n'*}"
 if [ "$PROMPT_FIRST_LINE" = "$PROMPT_HEADER" ]; then
   PROMPT_SECOND_LINE=""
@@ -116,7 +224,7 @@ PROMPT_ENVELOPE_FIELDS="$(node -e '
       process.stdout.write(["bound", binding[1], binding[2], binding[3], stage[1]].join("\t"));
     } catch (_) { process.exit(3); }
   });
-' <<<"$INPUT" 2>/dev/null)" || exit 0
+' <<<"$REVIEW_INPUT" 2>/dev/null)" || exit 0
 IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
   PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
   <<<"$PROMPT_ENVELOPE_FIELDS"
@@ -254,15 +362,35 @@ REVIEW_LAUNCH_STATUS="$(node -e '
       }
     } catch (_) {}
   });
-' <<<"$INPUT" 2>/dev/null)"
+' <<<"$REVIEW_INPUT" 2>/dev/null)"
 if [ "$REVIEW_LAUNCH_STATUS" = "async_launched" ]; then
-  printf '%s' "The zensu:code-reviewer call above returned status async_launched: it runs in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, with the same prompt and its same header lines; only a foreground completion advances the chain. Ignore the background run's notification when it arrives, and do NOT end your turn first." | node -e '
-    const msg = require("node:fs").readFileSync(0, "utf8");
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{
-      hookEventName:"PostToolUse", additionalContext:msg
-    }}));
-  '
-  echo
+  LAUNCH_RECORD="unrecorded reason=store"
+  if background_review_env; then
+    LAUNCH_RECORD="$(printf '%s' "$INPUT" | MSYS2_ENV_CONV_EXCL="$BACKGROUND_REVIEW_EXCLUSIONS" \
+      ZENSU_BR_PLUGIN_DATA="$BACKGROUND_REVIEW_DATA" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
+      ZENSU_BR_STATE_FILE="$NATIVE_TDD_STATE_FILE" ZENSU_BR_ENVELOPE="$PROMPT_AUTOPILOT_KIND" \
+      node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" record 2>/dev/null)"
+  fi
+  case "$LAUNCH_RECORD" in
+    "recorded agent="*)
+      LAUNCH_TTL="${LAUNCH_RECORD##* ttl=}"
+      LAUNCH_SPAN="for up to ${LAUNCH_TTL} minutes after the launch"
+      case "$LAUNCH_TTL" in ''|*[!0-9]*) LAUNCH_SPAN="for a bounded time after the launch" ;; esac
+      LAUNCH_WAIT="End your turn now and wait for the report: the Stop guard lets this chain wait for this reviewer ${LAUNCH_SPAN}."
+      if [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
+        LAUNCH_WAIT="Keep this turn open and wait for the report: this chain is Autopilot-bound, so the Stop guard holds every Stop while this reviewer runs, without charging the inner Stop budget, ${LAUNCH_SPAN}."
+      fi
+      printf '%s' "The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, so no review report exists yet and the review chain did not advance. Its review ticket was NOT consumed yet: the plugin recorded this launch and claims the ticket when the reviewer's report reaches you, as its hand-back message or its completion notification, and the routing directive arrives with that report. Do NOT classify or fix anything, do NOT spawn another zensu:code-reviewer and do NOT re-run the review fan-out. ${LAUNCH_WAIT}" | emit_post_context
+      ;;
+    "unrecorded reason=ticket-not-issued")
+      printf '%s' "The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, and its REVIEW-TICKET is not this chain's issued, unconsumed ticket, so its report cannot advance the review chain and its ticket was NOT consumed. Do NOT act on that report. Issue a fresh ticket with --review-ticket and spawn zensu:code-reviewer again with that ticket in its header." | emit_post_context
+      ;;
+    *)
+      LAUNCH_REASON="${LAUNCH_RECORD#unrecorded reason=}"
+      case "$LAUNCH_REASON" in ''|*[!a-z-]*) LAUNCH_REASON=unknown ;; esac
+      printf '%s' "The zensu:code-reviewer call above returned status async_launched: the host runs it in the background, and the plugin could not record that launch (${LAUNCH_REASON}), so its report cannot advance the review chain and its review ticket was NOT consumed. Do NOT fix anything on the strength of that report. Report this to the user with the reason above; /zensu:doctor checks the plugin's state." | emit_post_context
+      ;;
+  esac
   exit 0
 fi
 
@@ -270,8 +398,13 @@ fi
 # fully-validated Autopilot binding from the same locked state read. There is no
 # post-claim linkage reread: partial linkage fails before state/counter mutation,
 # while a concurrent generation reset makes every later bound CAS stale.
+if [ "$HOOK_EVENT" = UserPromptSubmit ] && [ "$ARRIVAL_DETAIL" = handback ]; then trap - EXIT; fi
 CLAIM_CONTEXT="$(tdd_consume_review_ticket_context \
   "$SESSION_ID" "$REVIEW_TICKET")" || exit 0
+if [ "$HOOK_EVENT" = UserPromptSubmit ]; then
+  trap - EXIT
+  background_review_retire
+fi
 CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
   try {
     const value = JSON.parse(process.env.CLAIM_CONTEXT);
@@ -450,16 +583,6 @@ if [ "$FULL_SUITE_RUNNER" = "ci" ]; then
   CLOSE_SUITE_REASON="this run is the only local test measurement of the tree that ships, and CI runs the full suite"
 fi
 
-emit_post_context() {
-  node -e '
-    const msg = require("node:fs").readFileSync(0, "utf8");
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{
-      hookEventName:"PostToolUse", additionalContext:msg
-    }}));
-  '
-  echo
-}
-
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
   DISABLED_TAIL=""
@@ -542,11 +665,11 @@ if zensu_hook_enabled reviewSpawnScopeSentence; then
 fi
 
 if [ "$SEVERITY" = "all" ]; then
-  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings, or every finding carries a do-not-fix annotation ('[Panel-FP-neutralized — do not fix]', '[Unverified — do not fix]' or '[Deferred — do not fix]') — reply 'No fixes needed: review passed' when there are no findings, or 'No critical/important findings — suggestions only' followed by the annotated findings verbatim under the heading '### Suggestions (not auto-fixed)' when every finding is annotated, then ${CLOSE_PASS}\n\n(B) ANY finding without a do-not-fix annotation present (any of Critical, Important, Suggestion, Minor, Nit) — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_ALL}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nInclude EVERY finding the reviewer raised — Critical, Important, Suggestion, Minor, Nit — without filtering (three exceptions: items annotated '[Panel-FP-neutralized — do not fix]' are judged false positives, items annotated '[Unverified — do not fix]' failed the Finding Verification Gate, and items annotated '[Deferred — do not fix]' were deferred by review convergence — never fix any of them).${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case B. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing all findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case B) | 'No fixes needed: review passed' (case A) | 'No critical/important findings — suggestions only' (case A, every finding annotated)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
+  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings, or every finding carries a do-not-fix annotation ('[Panel-FP-neutralized — do not fix]', '[Unverified — do not fix]' or '[Deferred — do not fix]') — reply 'No fixes needed: review passed' when there are no findings, or 'No critical/important findings — suggestions only' followed by the annotated findings verbatim under the heading '### Suggestions (not auto-fixed)' when every finding is annotated, then ${CLOSE_PASS}\n\n(B) ANY finding without a do-not-fix annotation present (any of Critical, Important, Suggestion, Minor, Nit) — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_ALL}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nInclude EVERY finding the reviewer raised — Critical, Important, Suggestion, Minor, Nit — without filtering (three exceptions: items annotated '[Panel-FP-neutralized — do not fix]' are judged false positives, items annotated '[Unverified — do not fix]' failed the Finding Verification Gate, and items annotated '[Deferred — do not fix]' were deferred by review convergence — never fix any of them).${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case B. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing all findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case B) | 'No fixes needed: review passed' (case A) | 'No critical/important findings — suggestions only' (case A, every finding annotated)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
 elif [ "$SEVERITY" = "important" ]; then
-  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ONLY Suggestions / Minor / Nits (no Critical AND no Important) — do NOT fix. Reply with a status line 'No critical/important findings — suggestions only' followed by the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical OR Important findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical and Important findings. EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain.${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical+important findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case C) | 'No critical/important findings — suggestions only' (case B) | 'No fixes needed: review passed' (case A)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
+  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ONLY Suggestions / Minor / Nits (no Critical AND no Important) — do NOT fix. Reply with a status line 'No critical/important findings — suggestions only' followed by the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical OR Important findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical and Important findings. EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain.${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical+important findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case C) | 'No critical/important findings — suggestions only' (case B) | 'No fixes needed: review passed' (case A)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
 else
-  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act. hooks.autoFixSeverity is critical: this loop fixes only Critical findings, and /zensu:self-review fixes every Important finding once at the end of the chain, so park each Important finding instead of fixing it. The one exception is a review you logged 'CONVERGENCE UNAVAILABLE' for: no ledger carries its findings to /zensu:self-review, so treat its Important findings like Critical ones.\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) No Critical findings (only Important findings, Suggestions, Minor or Nits) — do NOT fix.${PARK_CLAUSE} Reply with the status line 'No critical findings — important findings parked for /zensu:self-review' when you parked any, otherwise 'No critical/important findings — suggestions only', followed by the parked Important findings under the heading '### Important (parked for /zensu:self-review)' and the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical findings. EXCLUDE all Important findings, which you park through the ledger below, and EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain.${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case C) | 'No critical findings — important findings parked for /zensu:self-review' (case B) | 'No critical/important findings — suggestions only' (case B, nothing parked) | 'No fixes needed: review passed' (case A)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
+  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act. hooks.autoFixSeverity is critical: this loop fixes only Critical findings, and /zensu:self-review fixes every Important finding once at the end of the chain, so park each Important finding instead of fixing it. The one exception is a review you logged 'CONVERGENCE UNAVAILABLE' for: no ledger carries its findings to /zensu:self-review, so treat its Important findings like Critical ones.\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) No Critical findings (only Important findings, Suggestions, Minor or Nits) — do NOT fix.${PARK_CLAUSE} Reply with the status line 'No critical findings — important findings parked for /zensu:self-review' when you parked any, otherwise 'No critical/important findings — suggestions only', followed by the parked Important findings under the heading '### Important (parked for /zensu:self-review)' and the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical findings. EXCLUDE all Important findings, which you park through the ledger below, and EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain.${CONVERGENCE_CLAUSE} ${FIX_DONE_PHRASE}, log this round's 'R${NEXT}-{step_id} IMPL completed — files: {list}' claims and re-run the /zensu:tdd Phase 6 step 5b Edit Landing Audit over them (a fix round is where a no-op mechanical replacement hides; carry any EDIT NOT LANDED line verbatim into your status line and into whatever end-of-chain summary this session renders), then re-run the /zensu:tdd review sequence to re-verify: re-fan-out the zensu:review-aspect agents (the perspectives hooks/lib/aspect-activation-v1.js --panel ${PANEL} --round re answers spawn for this round's changed_files) — when hooks.incrementalReviewRounds is enabled (the default) scope THIS round's packet changed_files to the round delta via hooks/lib/review-round-scope-v1.js and fall back to the whole diff on its status=empty or status=degraded, while the zensu:review-judge packet always keeps the full cumulative diff — re-merge, re-run the zensu:review-judge second pass only when hooks.reviewJudge is enabled and hooks.reviewPanel is full, re-run the /zensu:tdd Phase 6 step 4c Finding Verification Gate over THIS round's merged list when hooks.findingVerification is enabled (never carry a prior round's verification verdicts forward), then issue a FRESH one-shot ticket by running: ${LOG_COMMAND} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'.${AUTOPILOT_RESPAWN_PHRASE} ${IN_SCOPE_CLAUSE}The Stop-hook backstop enforces this, so do NOT end your turn first.${IN_SCOPE_EXCEPTION} Do NOT reuse a prior ticket. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case C) | 'No critical findings — important findings parked for /zensu:self-review' (case B) | 'No critical/important findings — suggestions only' (case B, nothing parked) | 'No fixes needed: review passed' (case A)${WITHHOLD_STATUS_LINE}.${TAIL_DIRECTIVE}"
 fi
 
 EXPANDED_MSG="${MSG//\$\{NEXT\}/$NEXT}"

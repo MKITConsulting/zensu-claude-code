@@ -717,6 +717,77 @@ external_review_workflow_wait() {
   return 0
 }
 
+BACKGROUND_REVIEW_PENDING=false
+BACKGROUND_REVIEW_KIND=""
+BACKGROUND_REVIEW_AGENT=""
+BACKGROUND_REVIEW_AGE=""
+BACKGROUND_REVIEW_COUNT=""
+BACKGROUND_REVIEW_TTL=""
+background_review_wait() {
+  local store record fanout entry pending data native_state exclusions verdict word kind agent age count ttl
+  BACKGROUND_REVIEW_PENDING=false
+  BACKGROUND_REVIEW_KIND=""
+  BACKGROUND_REVIEW_AGENT=""
+  BACKGROUND_REVIEW_AGE=""
+  BACKGROUND_REVIEW_COUNT=""
+  BACKGROUND_REVIEW_TTL=""
+  zensu_session_key_canonical "$SESSION_ID" || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  store="${CLAUDE_PLUGIN_DATA}/background-review/v1"
+  record="${store}/records/${SESSION_ID}.json"
+  fanout="${store}/fanout/${SESSION_ID}"
+  pending=false
+  if [ -f "$record" ] && [ ! -L "$record" ]; then
+    pending=true
+  elif [ -d "$fanout" ] && [ ! -L "$fanout" ]; then
+    for entry in "$fanout"/*.json; do
+      if [ -f "$entry" ] && [ ! -L "$entry" ]; then
+        pending=true
+        break
+      fi
+    done
+  fi
+  [ "$pending" = true ] || return 1
+  data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}" 2>/dev/null)" || return 1
+  native_state="$(_tdd_native_project_path "$STATE_FILE" 2>/dev/null)" || return 1
+  exclusions="$(zensu_msys_env_exclusions ZENSU_BR_PLUGIN_DATA ZENSU_BR_STATE_FILE 2>/dev/null)" || exclusions="${MSYS2_ENV_CONV_EXCL:-}"
+  verdict="$(MSYS2_ENV_CONV_EXCL="$exclusions" ZENSU_BR_PLUGIN_DATA="$data" ZENSU_BR_SESSION_KEY="$SESSION_ID" \
+    ZENSU_BR_STATE_FILE="$native_state" \
+    zensu_run_bounded node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/background-review-v1.js" wait </dev/null 2>/dev/null)" || return 1
+  read -r word kind agent age count ttl <<<"$verdict"
+  [ "$word" = "wait" ] || return 1
+  kind="${kind#kind=}"
+  agent="${agent#agent=}"
+  age="${age#age=}"
+  count="${count#count=}"
+  ttl="${ttl#ttl=}"
+  case "$kind" in consume|fanout) ;; *) return 1 ;; esac
+  case "$agent" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
+  case "$age" in ''|*[!0-9]*) return 1 ;; esac
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  case "$ttl" in ''|*[!0-9]*) return 1 ;; esac
+  BACKGROUND_REVIEW_PENDING=true
+  BACKGROUND_REVIEW_KIND="$kind"
+  BACKGROUND_REVIEW_AGENT="$agent"
+  BACKGROUND_REVIEW_AGE="$age"
+  BACKGROUND_REVIEW_COUNT="$count"
+  BACKGROUND_REVIEW_TTL="$ttl"
+  [ "$OUTER_PRESENT" = false ] || return 1
+  [ "$DEFERRED_ADOPTED" = false ] || return 1
+  [ -z "$INNER_BOUND_RUN" ] || return 1
+  return 0
+}
+
+background_review_subject() {
+  if [ "$BACKGROUND_REVIEW_KIND" = consume ]; then
+    printf 'the background zensu:code-reviewer (agent %s, launched %s min ago) for the issued ticket' \
+      "$BACKGROUND_REVIEW_AGENT" "$BACKGROUND_REVIEW_AGE"
+  else
+    printf '%s background review agent(s) of this chain (the newest, agent %s, launched %s min ago)' \
+      "$BACKGROUND_REVIEW_COUNT" "$BACKGROUND_REVIEW_AGENT" "$BACKGROUND_REVIEW_AGE"
+  fi
+}
+
 # Best-effort only: /zensu:doctor has no transcript path of its own, so without
 # this note the diagnosis would exist for exactly one Stop and nowhere else.
 # A failed write never changes the decision this hook emits.
@@ -1691,10 +1762,22 @@ if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && external_review_workflow_wait; 
   exit 0
 fi
 
+if [ "$_SESSION_CODE_REVIEW_DONE" != "true" ] && background_review_wait; then
+  outer_finish
+  if [ "${DECISION_EMITTED:-false}" != "true" ]; then
+    echo "zensu chain-enforcer: releasing this Stop, still running: $(background_review_subject). The review chain stays armed: each report reaches the main thread as a hand-back or completion notification, a consume reviewer's report claims the ticket and routes the review, and the wait ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch." >&2
+  fi
+  exit 0
+fi
+
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
 INNER_CAP_BLOCKED=false
+if [ "$BACKGROUND_REVIEW_PENDING" = "true" ] && [ -n "$INNER_BOUND_RUN" ]; then
+  emit_block "Zensu review-chain Stop held, still running: $(background_review_subject). This Autopilot-bound chain keeps its turn while its background review runs, so this Stop does not count against the inner Stop budget of ${CAP}; the hold ends ${BACKGROUND_REVIEW_TTL} minutes after the newest launch. Do NOT spawn another reviewer or re-run the review fan-out: each report reaches you as a hand-back or completion notification, and a consume reviewer's report claims the ticket and routes the review. Wait for those reports, then continue the review sequence from them."
+  exit 0
+fi
 if [ -n "$INNER_BOUND_RUN" ]; then
   # Every bound-Inner increment is one Outer -> Inner transaction. Besides the
   # exact run/attempt/chain binding, stage and event count are a generation CAS,
@@ -2051,8 +2134,11 @@ else
     full) REVIEW_PERSPECTIVES="conventions, bugs, architecture, tests, security" ;;
     *) REVIEW_PANEL="lean"; REVIEW_PERSPECTIVES="correctness, design, security" ;;
   esac
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the ${REVIEW_PANEL} review panel (${REVIEW_PERSPECTIVES}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' and run_in_background: false, ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the complete REVIEW PACKET v1 and then the merged findings. On the first review, and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished Workflow run of the plugin's review template (templates/workflows/zensu-review-v1.js) covered this change: it runs zensu-log.sh --external-review, and only an ok or degraded answer replaces the panel's aspect agents, after which it always runs the zensu:review-judge and spawns one aspect per GAP line the judge names; every other answer leaves the panel fan-out as stated, and the rest of this sequence stays as stated either way. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: build the step 10.2c REVIEW PACKET v1 over the change set step 10.2 enumerates, which includes untracked files and mid-run commits that 'git diff --name-only HEAD' does not list, fan out one zensu:review-aspect agent per perspective of the ${REVIEW_PANEL} review panel (${REVIEW_PERSPECTIVES}), plus the repo-local personas step 10.2b selects, each given that packet, merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default; on the first review together with its independent second run in the same tool message while hooks.reviewJudgeSecondRun is enabled), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' (with run_in_background: false where the Agent tool offers that parameter; a background run is routed when its report arrives), ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the complete REVIEW PACKET v1 and then the merged findings. On the first review, and only while hooks.reviewJudge is enabled, take the Phase 6.10 step 3 import path when a finished Workflow run of the plugin's review template (templates/workflows/zensu-review-v1.js) covered this change: it runs zensu-log.sh --external-review, and only an ok or degraded answer replaces the panel's aspect agents, after which it always runs the zensu:review-judge and spawns one aspect per GAP line the judge names; every other answer leaves the panel fan-out as stated, and the rest of this sequence stays as stated either way. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
   REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
+  if [ "$BACKGROUND_REVIEW_PENDING" = "true" ]; then
+    REASON="Still running: $(background_review_subject), so the resume sequence below does not apply while it runs: do NOT spawn another reviewer or re-run the review fan-out, because each report reaches you as a hand-back or completion notification, and a consume reviewer's report claims the ticket and routes the review. ${REASON}"
+  fi
 fi
 
 if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then
