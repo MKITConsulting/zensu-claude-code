@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-23
+
+### Added
+
+- **review-chain**: Consume the review ticket from a background consume-mode reviewer (#490)
+- **session-trail**: Decide the same checkout by repository identity (#487)
+- **session-trail**: Carry task chips over as start_session proposals (#466)
+
+### Changed
+
+- **ci**: Re-budget the Windows reviewer-capability-gate cap against nine measured runs (#493)
+- **stop**: Cut the armed Stop's remaining node spawns (#492)
+- **multi-repo**: Redesign stages 2 and 3 around declared code roots (#491)
+- **changelog**: List #478 and #481 in the 0.28.0 notes and move #480's note to Unreleased (#489)
+
+### Fixed
+
+- **review-chain**: Derive the background-review fan-out types from the principal module (#495)
+- **review-chain**: Replace #490's background ticket claim with launch records (#494)
+- **work-order,autopilot**: Wait on in-flight review seats in both Stop budgets (#483)
+- **review-chain**: Resolve aspectActivation and incrementalReviewRounds (#472)
+- **work-order**: Deny every non-inert Claude Desktop session tool (#486)
+- **secret-scan**: Exempt the plugin's own team-review operation key from the entropy rule (#479)
+- **review-chain**: Read the project config in the tdd, plan-review and pr-team-review flag probes (#480)
+
 ### Upgrade notes
 
 - **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
