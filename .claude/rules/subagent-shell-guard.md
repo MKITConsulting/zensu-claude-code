@@ -11,15 +11,17 @@ paths:
 
 # Subagent Shell Guard (`hooks/lib/subagent-shell-guard-v1.js`)
 
-A named neutral `host-profile-v1` subagent may run `Bash`, and `Bash` is the only command tool
-it may run. The grant sits in `hostProfileToolViolation` in `reviewer-capability-v1.js`, inside
-the allowlist `.claude/rules/reviewer-capability-gate.md` describes: a call that `isShellCall`
-accepts (`tool_name` exactly `Bash`) goes through `shellViolation` before the `COMMAND_TOOLS`
-check, so the other five names keep `COMMAND_TOOL_DENY` and its search remedy, the literal
-`test-gauntlet-loop-skill.sh` G8 pins. Every other tool outside the allowlist stays denied, and
-an MCP tool other than the two named Context7 tools and the Zensu MCP tools whose last name
-segment `MCP_COMMAND_SEGMENT_RE` matches gets the command deny. The operator
-account is in `docs/configuration.md` and `docs/session-control.md`.
+A named neutral `host-profile-v1` subagent may run `Bash` and `Monitor` commands, and they are
+the only host shell tools it may run. The grant sits in `hostProfileToolViolation` in
+`reviewer-capability-v1.js`, inside the Zensu-state boundary
+`.claude/rules/reviewer-capability-gate.md` describes: a call that `isShellCall` accepts
+(`tool_name` exactly `Bash`) or that `isMonitorCommand` accepts (`Monitor` with a `command`)
+goes through `shellViolation` before the `COMMAND_TOOLS` check, so the other five names keep
+`COMMAND_TOOL_DENY` and its search remedy, the literal `test-gauntlet-loop-skill.sh` G8 pins.
+`PowerShell` stays denied. Every other tool is admitted unless it reaches Zensu state, and a tool
+whose inputs the gate does not know is refused when `inputMention`, this module's text rules
+without the shell parse, finds Zensu state in its input. The operator account is in
+`docs/configuration.md` and `docs/session-control.md`.
 
 **The grant.** `grantRefusal` refuses, in this order: an `agent_type` that is absent, blank,
 longer than 512 characters or contains a NUL, carriage return or line feed; a present `agent_id`
@@ -41,7 +43,8 @@ line break: a relative `ZENSU_CONFIG` resolves against whichever directory a rea
 the gate's own process runs in `hooks/lib`. A differential unit test pins `strictFlagEnabled`
 against `zensu_hook_enabled_strict`.
 
-**Deny texts.** Every reason reaches the model behind the `reviewer-capability-v1 deny: ` prefix.
+**Deny texts.** Every reason reaches the model behind the
+`Zensu capability gate (reviewer-capability-v1) deny: ` prefix.
 
 - A refused grant: `host-profile-v1 cannot invoke command-execution tools: <cause>. <search
   remedy> Report the need to the main thread instead.` It is `COMMAND_TOOL_DENY`, the
@@ -157,14 +160,14 @@ grows past 64 directories is denied (`directories`).
 
 **Decisions.**
 
-- `Bash` only. The five other shell names have no guard, G8 pins the six-name `COMMAND_TOOLS`
-  set and its arity, and `isShellCall` matches `Bash` alone. `Monitor` stays outside the grant:
-  the allowlist leaves it out, and `test-reviewer-capability-gate.sh` pins the allowlist deny for
-  a named neutral child's `Monitor` command. `PowerShell` is no `COMMAND_TOOLS` name either: the
-  allowlist denies it to every non-main principal, which PS1 to PS6 pin.
-- The allowlist deny for an unlisted tool (`hostProfileAllowance`) lists `Bash behind an
-  accident guard` while `grantRefusal` admits the caller and leaves it out otherwise, so it never
-  contradicts the SubagentStart context, which tells a named neutral agent it may run `Bash`.
+- `Bash` and a `Monitor` command only. The five other shell names have no guard, G8 pins the
+  six-name `COMMAND_TOOLS` set and its arity, and `isShellCall` matches `Bash` alone, so the
+  `Monitor` route has its own predicate, `isMonitorCommand`; a `Monitor` stream (`ws`) runs no
+  command and needs no grant. `PowerShell` is no `COMMAND_TOOLS` name either: the gate denies it
+  to every non-main principal because this guard reads Bash only, which PS1 to PS6 pin.
+- `inputMention` and `MENTIONS` reuse `textMention`, the text half of `textViolation`, so a tool
+  the capability gate does not know meets the same `.zensu`, protected-form and
+  `/proc/<pid>/environ` rules as a `Bash` command, without the shell parse.
 - Detached `tmux` and `screen` sessions are background shells, because they outlive the
   subagent like `npm run dev &` and are where a model goes once `&` is refused. Other ways to
   keep a process running are known gaps rather than rules.
@@ -229,9 +232,9 @@ grows past 64 directories is denied (`directories`).
 - The grant refusal: `test-reviewer-capability-gate.sh` (the unnamed child, the withdrawn flag
   and the main-thread tail), `tests/structure/subagent-shell-guard-v1.test.js` and the
   withdrawn-grant fixture in `evals/session-control/tests/live-evidence-negative.test.js`.
-- The allowlist deny (`hostProfileAllowance`): the `allowance` and `shellAllowance` literals and
-  the `Monitor` rows of `test-reviewer-capability-gate.sh`, and `neutralAllowance` in
-  `evals/session-control/lib/contract-provider.js`.
+- The mention deny (`inputMention`, `MENTIONS`): the policy batch and the ctx_execute row of
+  `test-reviewer-capability-gate.sh`, the mention unit test in `subagent-shell-guard-v1.test.js`,
+  and C39 in `evals/session-control/lib/contract-provider.js`.
 - The guard deny and the `REASONS` strings: `test-reviewer-capability-gate.sh`,
   `subagent-shell-guard-v1.test.js`, `contract-provider.js` (`guardTail`, `guardRules`),
   `evals/session-control/lib/live-evidence.js`,
@@ -240,14 +243,14 @@ grows past 64 directories is denied (`directories`).
 - The config-layer deny: `test-reviewer-capability-gate.sh`.
 - The neutral sentence of `renderHostContext` in `hooks/lib/session-control-core-v1.js`: pinned
   verbatim in `tests/structure/test-session-control-claude.sh` and
-  `evals/session-control/tests/wrapper-selftest.sh`; `test-reviewer-capability-gate.sh` parses
-  its allowlist back and compares it with the module's exports.
+  `evals/session-control/tests/wrapper-selftest.sh`; `test-reviewer-capability-gate.sh` checks
+  its boundary phrases.
 - The C39 contract marker
-  `Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied`:
+  `Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedShellAndMonitor:ZensuStateAndShellAliasesDenied`:
   `contract-provider.js`, `evals/session-control/tests/contract-provider.test.js` and
   `evals/session-control/scenarios/catalog.yaml`. The same contract drives the guard deny for
-  environment, selector and helper commands, the two documented obfuscation gaps as allowed, and
-  the allowlist deny for unlisted tools.
+  environment, selector and helper commands, the two documented obfuscation gaps as allowed, the
+  tools admitted outside Zensu state, the mention denies and the PowerShell deny.
 - `commandInvocations`: `hooks/pre-bash-zensu-gate.sh` requires it by path, B38 in
   `tests/structure/test-bash-zensu-gate.sh` drives it, B39a-B39c drive the token scan alone
   through a bound plugin copy without the module, P5n3 in `tests/structure/test-bypass-ledger.sh`
@@ -255,7 +258,7 @@ grows past 64 directories is denied (`directories`).
   it finds.
 - `tests/structure/test-gauntlet-loop-skill.sh`: G0 requires the guard module, G8 pairs the
   skill's guarded-`Bash` claim and its two conditions with `isShellCall`, `CONFIG_KEY` and the
-  `agent_type` refusal, G15 pins the allowlist bound, and G16 and G19 hold the skill's and the
+  `agent_type` refusal, G15 pins the Zensu-state bound, and G16 and G19 hold the skill's and the
   harness's wording about what a critic runs.
 - Operator prose: the capability-gate and `subagentShell` rows and the plugin-data guard
   residuals of `docs/configuration.md`, `docs/session-control.md`, the inline-prefix sentence of
@@ -299,7 +302,7 @@ grows past 64 directories is denied (`directories`).
   is unmeasured; a child without one gets no shell. The agent's transcript meta file names its
   type `workflow-subagent` (read on 2026-10-11), which suggests the payload carries one. L04
   accepts both deny reasons, so it does not measure this either.
-- No banner or `/zensu:doctor` row discloses the grant.
+- No banner line discloses the grant; the `/zensu:doctor` `subagents:` row does.
 - The unit file runs natively on the Windows CI shard; on POSIX hosts its Windows spellings are
   tested with a stub filesystem only.
 - On Windows the guard resolves `/` through `realpathSync.native`, which answers the root of the
@@ -322,5 +325,7 @@ wrapper, in a loop or `-c` body or in `eval`, on the main thread too. A gate tha
 every session a newer installation would serve, which `.claude/rules/runtime-lineage.md` makes
 breaking. No persisted shape, strict key set or hook registration changes. The rules for a
 helper path quoted inside interpreter code and for a detached `tmux` or `screen` session refuse
-more as well, so they are `minor` for the same reason; the `Bash` entry in the allowlist deny
-only rewords a deny text, which alone would be a `patch`.
+more as well, so they are `minor` for the same reason. Routing a `Monitor` command through the
+grant and the mention rule for tools the gate does not know came with the removal of the tool
+allowlist, and both deny strictly less than the outright deny they replaced, so that change is a
+`patch`.

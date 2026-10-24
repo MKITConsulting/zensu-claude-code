@@ -26,39 +26,36 @@ isolation wrong silently destroys the method.
 This skill is an execution loop, not a Zensu lifecycle stage. It arms no chain and
 closes none.
 
-- **A subagent gets only the allowlist and at most a guarded `Bash`. The lead runs every gate.**
-  `hooks/hooks.json` registers `pre-reviewer-capability-gate.sh` on the PreToolUse
-  matcher `.*`, and for a neutral `host-profile-v1` child its allowlist is
-  `HOST_PROFILE_TOOLS` plus a few read-only MCP tools
-  (`hooks/lib/reviewer-capability-v1.js`). Every command-execution tool is outside
-  that list: the six shell names `Bash`, `shell`, `exec`, `exec_command`,
-  `terminal`, `command`, the host's `Monitor`, and every command-executing MCP tool
-  such as `ctx_execute`. `Explore` and `general-purpose` both
+- **A subagent may use every tool that stays clear of Zensu's state, and at most a guarded shell. The lead runs every gate.**
+  `pre-reviewer-capability-gate.sh` runs on the PreToolUse matcher `.*`; for a neutral
+  `host-profile-v1` child (`hooks/lib/reviewer-capability-v1.js`) it denies Session
+  Control and workflow paths, `.zensu/`, writes to the installed plugin or its private
+  data, Zensu configuration layers, Zensu MCP mutations, `PowerShell` and the five
+  shell aliases `shell`, `exec`, `exec_command`, `terminal` and `command`. A
+  command-execution tool from an MCP server, such as `ctx_execute`, is admitted unless
+  its input names that state. `Explore` and `general-purpose` both
   classify as `host-profile-v1`, so **a builder or critic that reports its `agent_type`
-  may hold a guarded `Bash` unless `hooks.subagentShell` is `false`** — the guard
-  (`hooks/lib/subagent-shell-guard-v1.js`) prevents accidents and is not a sandbox.
-  They may still read, and may write files
-  including outside the project root: `neutralViolation` denies a write to the
-  installed plugin runtime, to private plugin data, to `.zensu/` and to Session
-  Control paths, but it applies NO project-root confinement, and
-  `tests/structure/test-reviewer-capability-gate.sh` pins an external write as
-  allowed. A builder's shell reaches as far. Size a builder's blast radius from that,
-  not from the word "project".
+  may hold a guarded `Bash` unless `hooks.subagentShell` is `false`**, and a `Monitor`
+  command passes the same guard — the guard (`hooks/lib/subagent-shell-guard-v1.js`)
+  prevents accidents and is not a sandbox. They may still read, and may write files
+  including outside the project root: `neutralViolation` applies NO project-root
+  confinement, and `tests/structure/test-reviewer-capability-gate.sh` pins an external
+  write as allowed. A builder's shell and every MCP tool reach as far. Size a builder's
+  blast radius from that, not from the word "project".
 
   Be precise about the bound, because an overclaim here is worse than none — it is
-  what makes you stop checking. It is an ALLOWLIST plus a guarded `Bash`, not a
-  denylist, so a tool a later host adds stays denied until the list names it. Every
-  other MCP tool is denied too, browser and preview tools included.
-  Two admitted tools still matter. `Agent` is on the list, so a neutral child keeps
-  its nested-spawn capability and `tests/structure/test-reviewer-capability-gate.sh`
-  pins that allowance. A `general-purpose` builder can therefore start its own
-  fan-out — outside this loop's packet discipline and uncounted against the
-  concurrency cap in step 6 — so the packet has to forbid sub-spawning in words, the
-  same way the read-only instruction is what removes a critic's intent rather than
-  its reach. `SendMessage` is admitted too, so builders can message each other; plan
-  changes still go through the lead.
-  Whether the harness grants any of these to a given child is a separate question
-  this repo does not answer, so restraint there is the packet's job, not the gate's.
+  what makes you stop checking. It is a DENYLIST around Zensu's own state, not an
+  allowlist, so a tool a later host adds is admitted the day it ships, browser and
+  desktop-session tools included. `Agent` is admitted, so a neutral child keeps its
+  nested-spawn capability and `tests/structure/test-reviewer-capability-gate.sh` pins
+  that allowance. A `general-purpose` builder can therefore start its own fan-out —
+  outside this loop's packet discipline and uncounted against the concurrency cap in
+  step 6 — so the packet has to forbid sub-spawning in words, the same way the
+  read-only instruction is what removes a critic's intent rather than its reach.
+  `SendMessage` is admitted too, so builders can message each other; plan changes
+  still go through the lead. Whether the harness grants any of these to a given child
+  is a separate question this repo does not answer, so restraint there is the
+  packet's job, not the gate's.
 
   One premise underneath is a host property this repository cannot verify at all.
   `classifyPreToolPayload` (`hooks/lib/claude-principal-v1.js`) reads the payload's

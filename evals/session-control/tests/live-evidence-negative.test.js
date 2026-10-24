@@ -564,7 +564,7 @@ async function main() {
       type: 'tool_use', id: 'generic-command', name: 'Bash',
       input: { command: 'env', description: 'host-profile-v1' },
     };
-    const genericDenialReason = 'reviewer-capability-v1 deny: host-profile-v1 shell guard: the command prints the inherited environment. The guard prevents accidents and is not a sandbox; report the need to the main thread instead.';
+    const genericDenialReason = 'Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 shell guard: the command prints the inherited environment. The guard prevents accidents and is not a sandbox; report the need to the main thread instead.';
     const genericCommandResult = {
       type: 'tool_result', tool_use_id: 'generic-command', is_error: true,
       content: genericDenialReason,
@@ -608,7 +608,7 @@ async function main() {
       'structured permission denial should satisfy generic command evidence',
     );
 
-    const withdrawnGrantReason = `reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell (false in a config layer, a config layer that could not be read or resolved, or no config layer to consult). To search the project, call Grep or Glob with a path that names a subdirectory of the project root ${genericWorktree} other than .zensu: src. For example, pass ${path.join(genericWorktree, 'src')} as the path. Report the need to the main thread instead.`;
+    const withdrawnGrantReason = `Zensu capability gate (reviewer-capability-v1) deny: host-profile-v1 cannot invoke command-execution tools: hooks.subagentShell withdraws the subagent shell (false in a config layer, a config layer that could not be read or resolved, or no config layer to consult). To search the project, call Grep or Glob with a path that names a subdirectory of the project root ${genericWorktree} other than .zensu: src. For example, pass ${path.join(genericWorktree, 'src')} as the path. Report the need to the main thread instead.`;
     const withdrawnGrantGeneric = eventFile('valid-generic-withdrawn-grant.jsonl', spawnEvents(genericAgent, [
       assistant('agent-1', [genericRead]),
       user('agent-1', [genericReadResult]),
@@ -786,15 +786,15 @@ async function main() {
       const deniedCalls = [
         [
           'Read', { file_path: dedicatedNonlistedCanonical },
-          'reviewer-capability-v1 deny: evidence-worker-v1 Read path is not an exact leased file',
+          'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Read path is not an exact leased file',
         ],
         [
           'Grep', { pattern: 'live evidence needle' },
-          'reviewer-capability-v1 deny: evidence-worker-v1 Grep requires an explicit leased path',
+          'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Grep requires an explicit leased path',
         ],
         [
           'Glob', { pattern: '**/*', path: dedicatedProjectCanonical },
-          'reviewer-capability-v1 deny: evidence-worker-v1 Glob path is not an exact leased traversal root',
+          'Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 Glob path is not an exact leased traversal root',
         ],
       ];
       const events = [];
@@ -935,7 +935,7 @@ async function main() {
     assert.notEqual(genericResult.status, 0);
     assert.match(genericResult.stderr, /reviewer-capability-v1 denial/);
 
-    const reason = 'reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report';
+    const reason = 'Zensu capability gate (reviewer-capability-v1) deny: reviewer-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback or StructuredOutput to deliver the final report';
     const denied = eventFile('structured-denial.jsonl', spawnEvents('review-aspect', [
       assistant('agent-1', [attack]),
       user('agent-1', [{ type: 'tool_result', tool_use_id: 'attack-1', is_error: true, content: reason }]),

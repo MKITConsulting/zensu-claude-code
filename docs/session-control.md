@@ -90,7 +90,9 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   re-arm with `/zensu:tdd`; `/zensu:adopt-session` does not apply, because it
   repairs a lineage break and not a changed session id. The three exact
   reviewer identities `zensu:code-reviewer`, `zensu:review-aspect` and
-  `zensu:review-judge` (and their bare names) receive `reviewer-readonly-v1`;
+  `zensu:review-judge` receive `reviewer-readonly-v1`, and their bare names do so
+  only under the evaluation opt-in `ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=1`,
+  because a project may define its own agent of that name;
   the two evidence workers `zensu:plan-review-worker` and
   `zensu:pr-review-worker` receive `evidence-worker-v1`; the plugin-scoped
   `zensu:zensu-plm` and every other unknown or custom agent receive neutral
@@ -101,12 +103,12 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
   report tool in the next item, and the evidence workers to
   `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
-  host-profile children keep only the tools on the capability gate's allowlist
-  (see **Security boundary** below) that Claude and their agent definitions grant.
-  A child that reports a usable `agent_type` may also run `Bash` behind an
-  accident guard, a grant that `hooks.subagentShell` can withdraw; every other
-  shell/command tool stays denied, `Monitor` included, and so does the `Bash` of
-  an unnamed child or of a `zensu-review-*` persona. The guard prevents accidents
+  host-profile children may use every tool that Claude and their agent definitions
+  grant, except what reaches Zensu's own state (see **Security boundary** below).
+  A child that reports a usable `agent_type` may also run `Bash` and `Monitor`
+  commands behind an accident guard, a grant that `hooks.subagentShell` can
+  withdraw; `PowerShell` and the five other shell/command aliases stay denied, and
+  so does the shell of an unnamed child or of a `zensu-review-*` persona. The guard prevents accidents
   and is not a sandbox, because command text cannot be safely confined by token
   inspection. A child's file tools also cannot edit a Zensu config layer,
   because those layers decide the grant; the guard refuses a command that names
@@ -154,13 +156,17 @@ processes that can mutate the worktree between check and use. Run untrusted
 project code inside an OS sandbox/container with a separate UID and restricted
 mounts; do not treat `host-profile-v1` as a host sandbox. Normal report prose
 cannot impersonate a principal: identity comes only from trusted hook payload
-fields. For neutral children the gate admits only an allowlist of host tools
-plus a short named list of read-only MCP tools, which the capability-gate row
-in [Configuration](configuration.md) spells out. Every other tool is denied:
-every command tool but `Bash`, `Monitor` included, and every other MCP tool,
-including third-party servers that
-expose arbitrary local execution such as `ctx_execute` or `run_in_terminal`, so a
-newly connected MCP server never widens a neutral child. `Bash` is granted only
+fields. For neutral children the gate blocks only what reaches Zensu's own
+state, which the capability-gate row in [Configuration](configuration.md) spells
+out: `PowerShell` and the five shell/command aliases other than `Bash` are
+denied, and a tool whose inputs the gate does not know, a third-party MCP server
+that exposes local execution such as `ctx_execute` or `run_in_terminal`
+included, is admitted unless a path it takes reaches the installed plugin, its
+private data or a config layer, or a string of its input names that state, the
+session record or a `.zensu` directory. That check reads text and is not a
+sandbox either: such a tool runs whatever its server runs, so the host's own
+permission rules decide how far a newly connected MCP server reaches.
+`Bash`, and a `Monitor` command, are granted only
 to a child that reports a usable `agent_type`, and a usable `agent_id` whenever
 it reports one, and that is not a `zensu-review-*` persona. `hooks.subagentShell`
 withdraws the grant when it is `false` in a config file the gate consults: the
@@ -173,17 +179,20 @@ object; when a consulted path is relative or spans lines; and when neither
 does not exist withdraws nothing, so the grant is on by default. While
 `ZENSU_CONFIG` is set, a `false` in the global file or the project overlay is
 not read and does not withdraw the grant. A refused grant
-denies `Bash` before its command is considered. A granted command must still
+denies `Bash` and a `Monitor` command before the command is considered. A granted command must still
 pass the accident guard in `hooks/lib/subagent-shell-guard-v1.js`, which parses
 it as shell and denies, among other rules, protected paths, `.zensu`
 directories, a command that runs a Zensu session or workflow helper such as
 `zensu-log.sh`, and Session Control selector variables. The guard prevents
 accidents and is not a sandbox: a deliberately obfuscated command can still
 reach Zensu's state past it, as the main thread can, and an OS sandbox is the
-boundary. Within the allowlist the
+boundary. For every tool the
 gate blocks actual protected paths, protected traversal roots, edits of a Zensu
 config layer, and mutating Zensu
-operations. `Grep`/`Glob` must target a concrete safe subtree; omitted paths and
+operations. Every deny reason starts with
+`Zensu capability gate (reviewer-capability-v1) deny:` and ends with the switch
+that lifts it or with the advice to report the need to the main thread, and the
+`/zensu:doctor` `subagents:` row shows the boundary and the grant. `Grep`/`Glob` must target a concrete safe subtree; omitted paths and
 project/plugin/plugin-data ancestors are denied, and that deny, like the command
 deny, names the project's subdirectories that are safe to search.
 Neutral file mutations also deny the complete installed-plugin and private

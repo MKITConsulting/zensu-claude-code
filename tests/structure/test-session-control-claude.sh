@@ -176,7 +176,8 @@ session_context_has_project() {
 
 run_hook() {
   CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$ENV_FILE" \
-    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK"
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY -u ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES \
+    ${EVAL_BARE_IDENTITIES:+"ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=$EVAL_BARE_IDENTITIES"} bash "$HOOK"
 }
 
 run_copy_hook() {
@@ -187,7 +188,8 @@ run_copy_hook() {
 
 run_agent_hook() {
   CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$AGENT_ENV_FILE" \
-    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK"
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY -u ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES \
+    ${EVAL_BARE_IDENTITIES:+"ZENSU_SESSION_CONTROL_EVAL_BARE_IDENTITIES=$EVAL_BARE_IDENTITIES"} bash "$HOOK"
 }
 
 if payload SessionStart 'claude/missing-env-variable' "$ENV_FAILURE_PROJECT" \
@@ -806,17 +808,17 @@ fi
 # Claude documents agent_type on SessionStart for top-level `claude --agent`
 # sessions. The same trusted payload fields must select the same principal as
 # PreToolUse; only a SessionStart with neither agent field is the main thread.
-TOP_BARE_REVIEWER_SID='claude/top-agent-bare-reviewer'
+TOP_CODE_REVIEWER_SID='claude/top-agent-code-reviewer'
 TOP_SCOPED_REVIEWER_SID='claude/top-agent-scoped-reviewer'
 TOP_UNKNOWN_SID='claude/top-agent-unknown'
 TOP_PLM_SID='claude/top-agent-plm'
 TOP_ID_ONLY_SID='claude/top-agent-id-only'
-OUT_TOP_BARE_REVIEWER="$(payload SessionStart "$TOP_BARE_REVIEWER_SID" "$PROJECT_A" '' code-reviewer startup \
-  | run_agent_hook 2>"$TMP/top-bare-reviewer.err")"
+OUT_TOP_CODE_REVIEWER="$(payload SessionStart "$TOP_CODE_REVIEWER_SID" "$PROJECT_A" '' zensu:code-reviewer startup \
+  | run_agent_hook 2>"$TMP/top-code-reviewer.err")"
 OUT_TOP_SCOPED_REVIEWER="$(payload SessionStart "$TOP_SCOPED_REVIEWER_SID" "$PROJECT_A" '' zensu:review-aspect startup \
   | run_agent_hook 2>"$TMP/top-scoped-reviewer.err")"
-if [ "$(printf '%s' "$OUT_TOP_BARE_REVIEWER$OUT_TOP_SCOPED_REVIEWER" | grep -oF 'principal=reviewer-readonly-v1' | wc -l | tr -d ' ')" -eq 2 ] \
-  && ! printf '%s' "$OUT_TOP_BARE_REVIEWER$OUT_TOP_SCOPED_REVIEWER" | grep -qF 'principal=main-v1'; then
+if [ "$(printf '%s' "$OUT_TOP_CODE_REVIEWER$OUT_TOP_SCOPED_REVIEWER" | grep -oF 'principal=reviewer-readonly-v1' | wc -l | tr -d ' ')" -eq 2 ] \
+  && ! printf '%s' "$OUT_TOP_CODE_REVIEWER$OUT_TOP_SCOPED_REVIEWER" | grep -qF 'principal=main-v1'; then
   check "SessionStart --agent exact reviewer identities receive reviewer-readonly-v1" PASS
 else
   check "SessionStart --agent exact reviewer identities receive reviewer-readonly-v1" FAIL
@@ -835,13 +837,13 @@ else
   check "SessionStart --agent unknown, PLM, and partial identities stay host-profile-v1" FAIL
 fi
 
-TOP_REVIEWER_KEY="$(node "$CORE" session-key "$TOP_BARE_REVIEWER_SID")"
+TOP_REVIEWER_KEY="$(node "$CORE" session-key "$TOP_CODE_REVIEWER_SID")"
 TOP_REVIEWER_RECORD="$CONTROL/records/$TOP_REVIEWER_KEY.json"
 TOP_REVIEWER_RECORD_BEFORE="$(cat "$TOP_REVIEWER_RECORD")"
 TOP_REVIEWER_STATE="$PROJECT_A/.zensu/state/tdd-phase-$TOP_REVIEWER_KEY.json"
 TOP_REVIEWER_STATE_BEFORE="$(cat "$TOP_REVIEWER_STATE")"
 mkdir -p "$TMP/top-agent-external-cwd"
-OUT_TOP_REVIEWER_RESUME="$(payload SessionStart "$TOP_BARE_REVIEWER_SID" "$TMP/top-agent-external-cwd" '' code-reviewer resume \
+OUT_TOP_REVIEWER_RESUME="$(payload SessionStart "$TOP_CODE_REVIEWER_SID" "$TMP/top-agent-external-cwd" '' zensu:code-reviewer resume \
   | run_agent_hook 2>"$TMP/top-reviewer-resume.err")"
 if printf '%s' "$OUT_TOP_REVIEWER_RESUME" | grep -qF 'principal=reviewer-readonly-v1' \
   && ! printf '%s' "$OUT_TOP_REVIEWER_RESUME" | grep -qF 'principal=main-v1' \
@@ -869,10 +871,13 @@ else
 fi
 
 OUT_BARE_REVIEW="$(payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-fixture code-reviewer | run_hook 2>"$TMP/reviewer-fixture.err")"
-if printf '%s' "$OUT_BARE_REVIEW" | grep -qF 'principal=reviewer-readonly-v1'; then
-  check "exact bare --agents reviewer fixture remains read-only" PASS
+OUT_BARE_OPTIN="$(payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-fixture-optin code-reviewer | EVAL_BARE_IDENTITIES=1 run_hook 2>"$TMP/reviewer-fixture-optin.err")"
+if printf '%s' "$OUT_BARE_REVIEW" | grep -qF 'principal=host-profile-v1' \
+  && ! printf '%s' "$OUT_BARE_REVIEW" | grep -Eq 'principal=(main-v1|reviewer-readonly-v1)' \
+  && printf '%s' "$OUT_BARE_OPTIN" | grep -qF 'principal=reviewer-readonly-v1'; then
+  check "a bare reviewer name is host-profile-v1 unless the --agents evaluation opt-in makes it read-only" PASS
 else
-  check "exact bare --agents reviewer fixture remains read-only" FAIL
+  check "a bare reviewer name is host-profile-v1 unless the --agents evaluation opt-in makes it read-only" FAIL
 fi
 
 mkdir -p "$PLUGIN_COPY"
@@ -942,7 +947,7 @@ OUT_CUSTOM_REVIEW="$(payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-custom
 OUT_UNKNOWN="$(payload SubagentStart "$SID_A" "$PROJECT_A" unknown-custom arbitrary-custom-agent | run_hook 2>"$TMP/unknown-custom.err")"
 if printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF '[zensu-host-context]' \
   && [ "$(printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -oF 'principal=host-profile-v1' | wc -l | tr -d ' ')" -eq 2 ] \
-  && printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits only Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, apply_patch, LSP, WebFetch, WebSearch, ToolSearch, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, Agent, SendMessage, AskUserQuestion, StructuredOutput, ReportFindings, and SubagentHandback, plus the MCP tools mcp__plugin_context7_context7__resolve-library-id and mcp__plugin_context7_context7__query-docs and read-only Zensu MCP tools; it denies every other tool but Bash, so every shell alias, Monitor and every other MCP tool are unavailable. A named neutral agent may run Bash behind an accident guard unless hooks.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-* persona and a read-only Zensu agent hold no shell.' \
+  && printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'Within this agent definition and Claude Code host permissions, the Zensu capability gate admits every tool except what reaches Zensu'\''s own state: Session Control and workflow paths, the project'\''s .zensu directory, writes to the installed plugin or its private data, Zensu configuration layers, Zensu MCP mutations, PowerShell and every shell alias other than Bash; a tool whose inputs the gate does not know may not name the installed plugin, its private data, the session record, a Zensu configuration layer or a .zensu directory anywhere in its input. A named neutral agent may run Bash and Monitor commands behind an accident guard unless hooks.subagentShell is false; the guard prevents accidents and is not a sandbox, and an unnamed agent, a zensu-review-* persona and a read-only Zensu agent hold no shell.' \
   && ! printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -qF 'must not use shell/control tools' \
   && ! printf '%s' "$OUT_CUSTOM_REVIEW$OUT_UNKNOWN" | grep -Eq 'principal=(main-v1|reviewer-readonly-v1)'; then
   check "unknown and repo-local custom agents receive only neutral host-profile-v1" PASS

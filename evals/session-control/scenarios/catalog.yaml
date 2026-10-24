@@ -62,8 +62,8 @@
   vars: { scenario_id: no-attestation, expected_valid: false }
 - description: "C32 reordered canonical fields are rejected"
   vars: { scenario_id: reordered-fields, expected_valid: false }
-- description: "C33 plugin-scoped reviewers and exact bare fixtures receive reviewer-readonly-v1"
-  vars: { scenario_id: bare-reviewer-types, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1' }
+- description: "C33 plugin-scoped reviewers receive reviewer-readonly-v1, and bare fixtures do so only under the evaluation opt-in"
+  vars: { scenario_id: bare-reviewer-types, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1:BareNamesNeutralWithoutEvalOptIn' }
 - description: "C34 unknown custom agents receive neutral host-profile-v1"
   vars: { scenario_id: unknown-neutral-profile, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:SessionStartAgent:Unknown:host-profile-v1' }
 - description: "C35 missing private parent record is denied at PreToolUse"
@@ -74,8 +74,8 @@
   vars: { scenario_id: pretool-deleted-cas-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
 - description: "C38 PLM stays neutral and read-only in frontmatter plus PreToolUse"
   vars: { scenario_id: plm-readonly-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied' }
-- description: "C39 generic review workers keep the allowlisted host tools and a guarded Bash shell while every other command tool and every unlisted tool is denied"
-  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied' }
+- description: "C39 generic review workers may use every tool that stays clear of Zensu state, with Bash and Monitor commands behind the accident guard, while Zensu state, the shell aliases and PowerShell stay denied"
+  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedShellAndMonitor:ZensuStateAndShellAliasesDenied' }
 - description: "C40 native skill helper binds per call, ignores ambient selectors, rejects foreign and derived session ids, and leaves CLAUDE_ENV_FILE untouched"
   vars: { scenario_id: native-helper-binding, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied' }
 - description: "C41 dedicated evidence-worker definitions expose only leased Read, Grep, and Glob and receive their exact principals"

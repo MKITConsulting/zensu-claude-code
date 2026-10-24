@@ -86,12 +86,13 @@ State the property, not the grant list — "no write tool, no spawn" — and alw
 "inspect only, change nothing" in the packet, because an instruction is what removes
 intent while a grant only removes reach.
 
-**Inside the Zensu plugin an `Explore` critic runs commands only through a guarded
-`Bash`.** The `.*` PreToolUse capability gate denies every other command-execution
-tool, and every MCP tool outside a short read-only list, to a neutral
-`host-profile-v1` child. It admits `Bash` only for a child that reports its
-`agent_type`, only while `hooks.subagentShell` is not `false`, and only past a guard
-that prevents accidents and is not a sandbox. `Explore` is such a child *while the
+**Inside the Zensu plugin an `Explore` critic runs shell commands only through a
+guarded `Bash` or `Monitor`.** The `.*` PreToolUse capability gate denies the other
+shell aliases and `PowerShell` to a neutral `host-profile-v1` child and otherwise
+blocks only what reaches Zensu's own state, so an MCP tool that runs code is
+admitted unless its input names that state. It admits `Bash` only for a child that
+reports its `agent_type`, only while `hooks.subagentShell` is not `false`, and only
+past a guard that prevents accidents and is not a sandbox. `Explore` is such a child *while the
 host reports its `agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"
 states why this plugin cannot establish that it always does, and that bound applies
 here unchanged. The lead still runs the build, the tests, the dev server and the
@@ -157,7 +158,7 @@ Never grade a summary. The tools that make real inspection cheap:
 - **Files, images, PDFs, notebooks:** `Read`.
 
 Inside the Zensu plugin every one of these except `Read` is **lead-only** — a
-subagent's browser, preview and simulator tools are denied, its shell is at most a
+subagent may hold browser, preview and simulator tools, but its shell is at most a
 guarded `Bash` that can be off or refuse, and the frozen measurement is the lead's.
 Run them yourself and put the redacted output in the packet: the redaction rule in
 [SKILL.md](../SKILL.md) is unconditional and the packet is one of the paths it

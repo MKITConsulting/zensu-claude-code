@@ -615,10 +615,29 @@ test('every string field is scanned, not only the command', () => {
   );
 });
 
-test('only Bash is a shell call; Monitor and the other command names stay with the allowlist', () => {
+test('a mention of Zensu state in any tool input is named, and nothing else is', () => {
+  const fixture = layout();
+  const mention = (input) => guard.inputMention({ tool_name: 'mcp__x__run', tool_input: input }, fixture.trusted, fixture.env);
+  assert.equal(mention({ code: 'cat .zensu/state/run.json' }), guard.MENTIONS.workflowDirectory);
+  assert.equal(mention({ nested: [{ url: `file://${fixture.trusted.projectRoot}/.zensu/logs/x.log` }] }), guard.MENTIONS.workflowDirectory);
+  assert.equal(mention({ command: `ls ${fixture.trusted.pluginData}` }), guard.MENTIONS.protectedPath);
+  assert.equal(mention({ query: 'see ~/.claude/plugins/cache/zensu/zensu/9.9.9/hooks' }), guard.MENTIONS.protectedPath);
+  assert.equal(mention({ target: '/proc/self/environ' }), guard.MENTIONS.dump);
+  for (const input of [{ code: 'ls src' }, { query: 'zensu docs' }, { text: 'my.zensu.example' }, {}]) {
+    assert.equal(mention(input), null, JSON.stringify(input));
+  }
+  assert.deepEqual(Object.keys(guard.MENTIONS).sort(), ['dump', 'protectedPath', 'workflowDirectory']);
+});
+
+test('only Bash is a shell call and only a Monitor command is a monitor command', () => {
   assert.equal(guard.isShellCall({ tool_name: 'Bash', tool_input: {} }), true);
   for (const name of ['Monitor', 'shell', 'exec', 'exec_command', 'terminal', 'command', 'bash', 'BASH']) {
     assert.equal(guard.isShellCall({ tool_name: name, tool_input: { command: 'x' } }), false, name);
+  }
+  assert.equal(guard.isMonitorCommand({ tool_name: 'Monitor', tool_input: { command: 'tail -f x' } }), true);
+  assert.equal(guard.isMonitorCommand({ tool_name: 'Monitor', tool_input: { ws: { url: 'wss://e.test' } } }), false);
+  for (const name of ['Bash', 'monitor', 'MONITOR', 'mcp__x__Monitor']) {
+    assert.equal(guard.isMonitorCommand({ tool_name: name, tool_input: { command: 'x' } }), false, name);
   }
 });
 
@@ -629,8 +648,11 @@ test('the grant refuses unnamed children, read-only identities and personas', ()
   assert.match(refuse({ agent_id: 'a', agent_type: ' ' }), /no usable agent_type/);
   assert.match(refuse({ agent_id: 'a', agent_type: 'x'.repeat(513) }), /no usable agent_type/);
   assert.match(refuse({ agent_id: 'x'.repeat(600), agent_type: 'general-purpose' }), /unusable agent_id/);
-  for (const type of ['zensu:review-aspect', 'review-judge', 'zensu:zensu-plm', 'zensu:pr-review-worker']) {
+  for (const type of ['zensu:review-aspect', 'zensu:review-judge', 'zensu:zensu-plm', 'zensu:pr-review-worker']) {
     assert.match(refuse({ agent_id: 'a', agent_type: type }), /read-only Zensu agent/, type);
+  }
+  for (const type of ['code-reviewer', 'review-judge', 'zensu-plm']) {
+    assert.equal(refuse({ agent_id: 'a', agent_type: type }), null, type);
   }
   assert.match(refuse({ agent_id: 'a', agent_type: 'zensu-review-domain' }), /zensu-review-\* persona/);
   assert.match(refuse({ agent_id: 'a', agent_type: 'acme:zensu-review-security' }), /zensu-review-\* persona/);

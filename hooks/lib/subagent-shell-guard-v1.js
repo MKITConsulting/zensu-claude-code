@@ -28,6 +28,11 @@ const REASONS = Object.freeze({
   projectRoot: 'the command removes or moves the project root or one of its parents',
   directories: 'the command changes directory more often than the guard can follow',
 });
+const MENTIONS = Object.freeze({
+  protectedPath: 'its input names the private plugin data, the installed plugin, the session record or the Zensu config file',
+  workflowDirectory: 'its input names a .zensu directory, which holds Zensu workflow state or configuration',
+  dump: 'its input names the environment file of a process',
+});
 
 const SELECTOR = 'CLAUDE_CODE_SESSION_ID|CLAUDE_PLUGIN_[A-Za-z0-9_]*|CLAUDE_ENV_FILE|ZENSU_[A-Za-z0-9_]+';
 const SELECTOR_NAME_RE = new RegExp(`^(?:${SELECTOR})$`);
@@ -232,6 +237,13 @@ function configAuthorities(environment = process.env) {
 
 function isShellCall(payload) {
   return payload.tool_name === 'Bash';
+}
+
+function isMonitorCommand(payload) {
+  const input = payload.tool_input;
+  return payload.tool_name === 'Monitor'
+    && Boolean(input) && typeof input === 'object' && !Array.isArray(input)
+    && Object.prototype.hasOwnProperty.call(input, 'command');
 }
 
 function grantRefusal(payload, environment = process.env, options = {}) {
@@ -1717,13 +1729,18 @@ function withoutComments(text, context) {
   return parts.join('');
 }
 
-function textViolation(value, context) {
+function textMention(value, context) {
   const raw = shellText(value, context.home, context.platform, context.root);
   const folded = foldCase(raw, context.platform);
-  if (context.protectedForms.some((root) => mentionsPath(folded, root))) return REASONS.protectedPath;
-  if (/(?:^|[\s/=;|&(){}<>`,:])\.zensu(?=$|[\s/;|&(){}<>`,*?:\]])/.test(folded)) return REASONS.workflowDirectory;
-  if (TEXT_DUMP_RES.some((pattern) => pattern.test(raw))) return REASONS.dump;
+  if (context.protectedForms.some((root) => mentionsPath(folded, root))) return 'protectedPath';
+  if (/(?:^|[\s/=;|&(){}<>`,:])\.zensu(?=$|[\s/;|&(){}<>`,*?:\]])/.test(folded)) return 'workflowDirectory';
+  if (TEXT_DUMP_RES.some((pattern) => pattern.test(raw))) return 'dump';
   return null;
+}
+
+function textViolation(value, context) {
+  const kind = textMention(value, context);
+  return kind ? REASONS[kind] : null;
 }
 
 function protectedParentsOf(forms, homeForm, projectForms) {
@@ -1803,6 +1820,15 @@ function accidentReason(payload, trusted, environment = process.env, options = {
   return null;
 }
 
+function inputMention(payload, trusted, environment = process.env, options = {}) {
+  const context = guardContext(trusted, environment, options);
+  for (const value of inputStrings(payload.tool_input)) {
+    const kind = textMention(value, context);
+    if (kind) return MENTIONS[kind];
+  }
+  return null;
+}
+
 function shellViolation(payload, trusted, environment = process.env, options = {}) {
   const refusal = grantRefusal(payload, environment, options);
   if (refusal) return { kind: 'grant', reason: `${refusal}.` };
@@ -1815,11 +1841,14 @@ module.exports = {
   CONFIG_KEY,
   GRANT_TAIL,
   GUARD_TAIL,
+  MENTIONS,
   REASONS,
   accidentReason,
   commandInvocations,
   configAuthorities,
   grantRefusal,
+  inputMention,
+  isMonitorCommand,
   isShellCall,
   parseScript,
   shellText,

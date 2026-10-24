@@ -10577,6 +10577,55 @@ if [ -z "$ZC_ROW_MISSING" ] && grep -qF 'read `references/zensu-cli.md`' "$SKILL
 else
   check "P8z15 every zensu CLI row phrase is emitted by the report and documented in skills/doctor/references/zensu-cli.md, which the skill names (missing:$ZC_ROW_MISSING)" FAIL
 fi
+SA_OFF_CFG="$SBOX/subagent-shell-off.json"
+SA_BAD_CFG="$SBOX/subagent-shell-bad.json"
+printf '%s\n' '{"hooks":{"subagentShell":false}}' > "$SA_OFF_CFG"
+printf '%s\n' '{"hooks":' > "$SA_BAD_CFG"
+SA_ON="$(run_report "$PLUGIN_DIR" - "$EMPTY_PROJECT")"
+SA_OFF="$(run_report "$PLUGIN_DIR" "$SA_OFF_CFG" "$EMPTY_PROJECT")"
+SA_BAD="$(run_report "$PLUGIN_DIR" "$SA_BAD_CFG" "$EMPTY_PROJECT")"
+case "$SA_ON" in
+  *"✅  subagents: a neutral subagent may use every tool except what reaches Zensu's own state"*"A named neutral subagent may run Bash and Monitor commands behind an accident guard, which prevents accidents and is not a sandbox"*)
+    check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" PASS ;;
+  *) check "P8sa1 the subagents row states the Zensu-state boundary and the guarded shell" FAIL ;;
+esac
+case "$SA_OFF" in
+  *"✅  subagents: a neutral subagent may use every tool except"*"The subagent shell is off (hooks.subagentShell=false)"*)
+    check "P8sa2 hooks.subagentShell=false renders the boundary with the shell switched off" PASS ;;
+  *) check "P8sa2 hooks.subagentShell=false renders the boundary with the shell switched off" FAIL ;;
+esac
+case "$SA_BAD" in
+  *"⚠️  subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false"*)
+    check "P8sa3 an unreadable config layer renders the withdrawn shell as a warning" PASS ;;
+  *) check "P8sa3 an unreadable config layer renders the withdrawn shell as a warning" FAIL ;;
+esac
+SA_PLUG="$SBOX/subagent-plug"
+mkdir -p "$SA_PLUG/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js" "$SA_PLUG/hooks/lib/reviewer-capability-v1.js"
+SA_BROKEN="$(run_report "$SA_PLUG" - "$EMPTY_PROJECT")"
+SA_PREDATES="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
+case "$SA_BROKEN" in
+  *"⚠️  subagents: the capability gate is installed but its shell-guard module hooks/lib/subagent-shell-guard-v1.js"*)
+    case "$SA_PREDATES" in
+      *"subagents:"*) check "P8sa4 a plugin root without the capability gate must render no subagents row" FAIL ;;
+      *) check "P8sa4 a missing shell-guard module beside the gate warns, and a root without the gate stays silent" PASS ;;
+    esac ;;
+  *) check "P8sa4 a missing shell-guard module beside the gate must warn" FAIL ;;
+esac
+SA_REF="$PLUGIN_DIR/skills/doctor/references/coexistence.md"
+SA_ROW_MISSING=""
+for SA_ROW in 'a neutral subagent may use every tool except what reaches Zensu' \
+  'A named neutral subagent may run Bash and Monitor commands behind an accident guard' \
+  'The subagent shell is off (hooks.subagentShell=false)' \
+  'subagents: the subagent shell is withdrawn although no config file this check read sets hooks.subagentShell=false' \
+  'subagents: the capability gate is installed but its shell-guard module'; do
+  grep -qF -- "$SA_ROW" "$REPORT" && grep -qF -- "$SA_ROW" "$SA_REF" || SA_ROW_MISSING="$SA_ROW_MISSING [$SA_ROW]"
+done
+if [ -z "$SA_ROW_MISSING" ] && grep -qF 'read `references/coexistence.md`' "$SKILL_MD"; then
+  check "P8sa5 every subagents row phrase is emitted by the report and documented in skills/doctor/references/coexistence.md, which the skill names" PASS
+else
+  check "P8sa5 every subagents row phrase is emitted by the report and documented in skills/doctor/references/coexistence.md, which the skill names (missing:$SA_ROW_MISSING)" FAIL
+fi
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"

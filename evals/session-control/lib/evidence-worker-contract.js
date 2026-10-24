@@ -123,7 +123,7 @@ function assertDenied(result, label, fragment) {
     fail(`${label} was not denied by PreToolUse`);
   }
   const reason = String(specific.permissionDecisionReason || '');
-  if (!reason.startsWith('reviewer-capability-v1 deny: evidence-worker-v1 ')) {
+  if (!reason.startsWith('Zensu capability gate (reviewer-capability-v1) deny: evidence-worker-v1 ')) {
     fail(`${label} used a non-worker denial: ${reason}`);
   }
   if (fragment && !reason.includes(fragment)) fail(`${label} denial reason drifted: ${reason}`);

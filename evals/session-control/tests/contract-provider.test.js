@@ -32,10 +32,10 @@ function runScenario(scenario) {
 
 runScenario('pretool-deleted-cas-deny');
 for (const [scenario, expectedMarker] of [
-  ['bare-reviewer-types', 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1'],
+  ['bare-reviewer-types', 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1:BareNamesNeutralWithoutEvalOptIn'],
   ['unknown-neutral-profile', 'Contract:SessionStartAgent:Unknown:host-profile-v1'],
   ['plm-readonly-boundary', 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied'],
-  ['generic-review-worker-boundary', 'Contract:GeneralPurpose:host-profile-v1:AllowlistedToolsAllowed:GuardedShell:OtherCommandAndUnlistedToolsDenied'],
+  ['generic-review-worker-boundary', 'Contract:GeneralPurpose:host-profile-v1:ToolsOutsideZensuStateAllowed:GuardedShellAndMonitor:ZensuStateAndShellAliasesDenied'],
   ['native-helper-binding', 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied'],
 ]) {
   const attestation = runScenario(scenario);
