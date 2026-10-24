@@ -865,7 +865,8 @@ every tool, the deny costs the session everything — Edit, Write, Bash, subagen
 
 What changed is that the state is **named and repairable** instead of a permanent wedge. The
 cause is ordinary: a git worktree deleted and re-created loses the document, because
-`.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
+`.zensu/state/` is never committed (it belongs in `.gitignore`; Zensu writes no ignore rule
+for it), and a compaction continues the SAME session rather than
 minting a new one.
 
 - **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`
