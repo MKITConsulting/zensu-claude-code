@@ -485,6 +485,7 @@ first 100 ghost-scan candidates and read only the first page of wiki lists.
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, how to continue in a nested worktree when it happened anyway, and how `release` lifts the marker after a takeover |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
+| [Automatic work capture](docs/ai-work-capture.md) | What Claude records about an agreed goal, what the Stop hook submits, and how you accept a reported version |
 
 ## Contributing
 
