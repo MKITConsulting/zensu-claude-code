@@ -30,7 +30,7 @@ Every `zensu` command this skill runs except `zensu auth` accepts `--json`, and 
 
 ## Workflow
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,update_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu wiki create` / `zensu wiki update` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
 
 ### Step 1: Load Feature Context
 
@@ -105,23 +105,39 @@ implemented, not a restatement of the feature record.
    to the doc type's focus and audience. Do NOT condense the context metadata
    into `## Purpose / ## Source files / ## Security / ## Notes` sections — that
    metadata dump is the exact failure this step prevents.
-4. Publish with `zensu wiki create --product <product-id> --title <title> --content <markdown>`
-   (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`).
+4. Publish, and update a page that already exists instead of creating it again. Look
+   the page up first. A feature-linked page lives at `/features/<feature slug>/<doc type>`,
+   an unlinked one at `/custom/<slug of the title>`. Its id is the `wikiPageId` of the
+   `existingDocs` entry for this doc type in the item 1 `zensu doc gen-context` output, or the `id` of the
+   `zensu wiki list --product <product-id> --json` entry whose `path` is that path.
+   - **The page exists:** `zensu wiki update <page-id> --content <markdown> --change-summary "<what changed>"`.
+   - **No page yet:** `zensu wiki create --product <product-id> --title <title> --content <markdown>`
+     (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`). It creates new pages
+     only: when a page already exists at the new page's path, it fails with
+     `a wiki page already exists at <path> (<page-id>) and was left unchanged` and changes
+     nothing. Run `zensu wiki update` with the page id that error names. Never retry the
+     create under another title to get past the error: that leaves the old page stale
+     beside a duplicate. An older zensu-cli, or a Zensu backend before v0.89.2 or wiki
+     before v0.15.1, does not refuse: it updates the existing page and still reports a
+     created one, which is why the lookup comes first.
 
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
 - `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
 - `--title` (optional): Document title
-- `--content` (optional): wiki page markdown — authors/updates the linked wiki page in this same call
+- `--content` (optional): wiki page markdown — creates the linked wiki page when the feature has none for this doc type yet; it never changes an existing page
 - `--file` (optional): Path to the doc file
 - `--external-url` (optional): External URL
 - `--audience` (optional): end_user | developer | admin | internal
 - `--publication-status` (optional): draft | published | archived
 
-**One-call form.** Passing `--content <markdown>` to `zensu link docs` folds authoring +
-linking into a single call: it creates (or updates) the feature-linked wiki page and
-recomputes the score, so the separate `zensu wiki create` in step 4 is not needed. This
-is the form the `/zensu:docs` skill uses; the two-step `wiki create` + `link docs` above
-stays valid when you want explicit control over the page (`--entity-*`, visibility).
+**One-call form.** When the feature has no page for this doc type yet, passing
+`--content <markdown>` to `zensu link docs` folds authoring + linking into a single call:
+it creates the feature-linked wiki page and recomputes the score, so the `wiki create` in
+step 4 is not needed. It never changes an existing page, so a re-run updates the page with
+`zensu wiki update` (step 4) and then runs `zensu link docs` without `--content`. The
+`/zensu:docs` skill uses this form under the same rule; the two-step `wiki create` +
+`link docs` above stays valid when you want explicit control over the page (`--entity-*`,
+visibility).
 
 Run `zensu link docs` alone (no wiki page) only for docs that already live in the repo
 or at an external URL.
@@ -176,7 +192,9 @@ Present a completion summary:
 | `zensu link test` | 4 | Link test files |
 | `zensu link source` | 5 | Map source files to feature (bulk via repeated `--file`) |
 | `zensu doc gen-context` | 6 | Get the context map to read source before writing docs |
-| `zensu wiki create` | 6 | Publish authored markdown to the wiki |
+| `zensu wiki list` | 6 | Find the page a re-run must update (`--json` lists each page's `id` and `path`) |
+| `zensu wiki update` | 6 | Change a wiki page that already exists |
+| `zensu wiki create` | 6 | Publish authored markdown as a new wiki page |
 | `zensu link docs` | 6 | Register the doc; updates docs score |
 | `zensu features revision` | 7 | Create feature revision |
 | `zensu security validate` | 8 | Check release readiness |

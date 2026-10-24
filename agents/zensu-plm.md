@@ -79,7 +79,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 
 ### Linking Artifacts
 - `zensu link test <feature-id>` — Link a test file (`--file` and `--test-type` required: unit|integration|e2e|security|performance|accessibility)
-- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also writes the linked wiki page)
+- `zensu link docs <feature-id>` — Link documentation to a feature (`--doc-type` required; `--content` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one)
 - `zensu link source <feature-id>` — Map source files (repeatable `--file`; covers bulk mapping)
 
 ### Security
@@ -158,9 +158,9 @@ These commands dispatch and decide autonomous work. A verb marked **person** rec
 - `zensu doc gen-context <feature-id> --doc-type <type>` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
 
 ### Wiki
-- `zensu wiki create` — Create a wiki page (`--product`, `--title` and `--content` required)
-- `zensu wiki update <id>` — Update a wiki page
-- `zensu wiki list --product <id>` — List wiki pages
+- `zensu wiki create` — Create a new wiki page (`--product`, `--title` and `--content` required); when a page already exists at the new page's path, it fails and names that page's id (an older CLI or server updates that page instead)
+- `zensu wiki update <page-id>` — Change an existing wiki page (`--content`, `--title`, `--change-summary`, `--visibility`)
+- `zensu wiki list --product <id>` — List wiki pages (`--json` carries each page's `id` and `path`)
 
 ### Knowledge (Second-Brain)
 - `zensu knowledge search --query <text>` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
@@ -238,7 +238,7 @@ Use the `/zensu:pulse` skill workflow:
 1. Run `zensu doc gen-context <feature-id> --doc-type <type>` — this is the context *map* (source-file paths, symbols, security posture), not the source itself
 2. **Read the real source files it names** (Read/Grep) — the map is not the territory
 3. Author code-grounded Markdown matched to the doc type's focus and audience (8 types: `user_facing`, `api_reference`, `tutorial`, `adr`, `release_notes`, `internal`, `migration_guide`, `overview`)
-4. Publish with `zensu wiki create`, then `zensu link docs` to update the docs score
+4. Publish: update a page that already exists with `zensu wiki update <page-id>` (the id is the `wikiPageId` in the context's `existingDocs`, or the `id` of the matching `path` in `zensu wiki list --product <id> --json`), and create a missing one with `zensu wiki create`. When create reports that a page already exists at that path, update the page it names; never retry under another title. Then `zensu link docs` to update the docs score
 
 Never condense the context metadata straight into a wiki page — that is the forbidden metadata-dump anti-pattern (see Important Rule 10).
 
