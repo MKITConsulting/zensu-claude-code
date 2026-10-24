@@ -440,7 +440,7 @@ d17_carrier() { # $1 repo-relative file, $2.. clauses that must ALL be present
 }
 d17_carrier docs/configuration.md 'naming the four mutually exclusive delivery routes'
 d17_carrier docs/architecture.md 'ask which delivery route;<br/>only the /zensu:tdd route is drawn'
-d17_carrier README.md 'autopilot to a reviewed PR, the guided workflow'
+d17_carrier README.md 'Autopilot to a reviewed pull request, the Zensu workflow with its review chain'
 d17_carrier skills/tdd/SKILL.md '`/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly'
 d17_carrier skills/gauntlet-loop/SKILL.md 'hands the mission to whichever is chosen' 'it offers neither'
 # An empty roster must FAIL rather than report a clean sweep: deleting the

@@ -76,6 +76,12 @@ To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`;
 
 ## CLI Write-Gate
 
+The main thread may run `ai-work start` and `ai-work submit` without a workflow
+window to report an agreed goal and result during direct implementation. They
+remain classified as mutations and are denied to subagents; this narrow exception
+does not admit other commands chained after them. Personal OAuth and the separate
+capture API enforce the account. There is no CLI acceptance/revocation command.
+
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must
@@ -860,7 +866,8 @@ every tool, the deny costs the session everything — Edit, Write, Bash, subagen
 
 What changed is that the state is **named and repairable** instead of a permanent wedge. The
 cause is ordinary: a git worktree deleted and re-created loses the document, because
-`.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
+`.zensu/state/` is never committed (it belongs in `.gitignore`; Zensu writes no ignore rule
+for it), and a compaction continues the SAME session rather than
 minting a new one.
 
 - **The deny names the cause and, for the main thread, the command** — `/zensu:adopt-session`

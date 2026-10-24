@@ -111,7 +111,7 @@ flowchart TD
     P4 --> P5[Phase 5: Checkpoint<br/>scoped suites + linter]
     P5 --> P6[Phase 6: Audit and Final Report<br/>full suite · build · coverage · drift audit · mtime · live acceptance]
     P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook enforces it, bounded]
-    Review --> Findings{Critical or<br/>Important findings?}
+    Review --> Findings{Routed findings?<br/>Critical by default}
     Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 2 rounds by default]
     AutoFix --> Review
     Findings -->|None or max rounds| SelfRev["/zensu:self-review<br/>terminal · ≤ 1 fix round · re-verifies acceptance"]
@@ -451,7 +451,7 @@ flowchart LR
     P6[Phase 6 complete<br/>--tdd-complete] --> Spawn[skill spawns<br/>zensu:code-reviewer]
     Stop[/Stop hook backstop:<br/>block until chainDone<br/>or the Stop cap/] -.enforces.-> Spawn
     Spawn --> Reviewer[zensu:code-reviewer<br/>consume mode:<br/>merged review-aspect<br/>panel findings]
-    Reviewer --> Findings{Critical or<br/>Important?}
+    Reviewer --> Findings{Routed findings?<br/>Critical by default}
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
     Fix --> Spawn
     Findings -->|None or<br/>max rounds| CRD[--code-review-done]
@@ -469,9 +469,9 @@ flowchart LR
 
 Reviewer returns findings in three tiers:
 
-- **Critical**: blocks ship. Auto-fix attempted.
-- **Important**: should land before merge. Auto-fix attempted.
-- **Suggestions**: nice-to-have. NOT auto-fixed.
+- **Critical**: blocks ship. Routed to the auto-fix loop under every `hooks.autoFixSeverity` value.
+- **Important**: should land before merge. Routed only under `important` or `all`; under the default `critical` it is parked and `/zensu:self-review` fixes it once at the end of the chain.
+- **Suggestions**: nice-to-have. Routed only under `all` (or the legacy `hooks.autoFixIncludeSuggestions`), never a self-review candidate.
 
 The three reviewer agents carry the exact definitions from [review-severity.md](review-severity.md). By default (`hooks.autoFixSeverity: critical`) the loop fixes only CRITICAL findings and parks every IMPORTANT finding for the terminal self-review; `important` fixes IMPORTANT findings too, and `all`, or the legacy `hooks.autoFixIncludeSuggestions`, also fixes suggestions, in the first review only while `hooks.reviewConvergence` is enabled.
 

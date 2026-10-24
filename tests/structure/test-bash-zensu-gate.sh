@@ -114,6 +114,13 @@ LARGE_SUB="$PROJECT/large-subagent.json"
 large_payload "$LARGE_MAIN"
 large_payload "$LARGE_SUB" general-purpose
 
+run "B48 capture start in direct mode" "zensu ai-work start --id goal --title agreed" '' ALLOW
+run "B48b capture submit in direct mode" "zensu ai-work submit goal --event-id event" '' ALLOW
+run "B48c capture start denied to child" "zensu ai-work start --id goal --title agreed" general-purpose DENY
+run "B48d capture submit denied to child" "zensu ai-work submit goal --event-id event" general-purpose DENY
+run "B48e capture does not allow chained mutation" "zensu ai-work start --id goal --title agreed && zensu security classify f1" '' DENY
+run "B48f capture reads remain reads" "zensu ai-work context && zensu ai-work get goal" '' ALLOW
+
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
 run "B7 neutral zensu-plm has no mutation exemption" "zensu security classify f1"                    zensu-plm DENY

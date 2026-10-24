@@ -81,24 +81,47 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    signatures, endpoints, and behavior — matched to the doc type's Focus and the
    audience. No invented APIs; if you did not see it in the source, do not claim
    it.
-4. **Publish.** `create_wiki_page` with the markdown `content`, `entity_type`,
-   `entity_id`, `doc_type`, and `audience`. Then `link_docs` to update the
-   feature's docs score. Use `link_docs` alone (no wiki page) only for docs that
-   already live in the repo or at an external URL.
+4. **Publish, updating a page that already exists.** A re-run changes the page it
+   published before; it never creates a second one. Look the page up first: the
+   context's `existingDocs` entry for the `doc_type` carries the linked page's
+   `wikiPageId`, and `list_wiki_pages` (`zensu wiki list --product <id> --json`)
+   returns every page with its `id` and `path`. A feature-linked page lives at
+   `/features/<feature slug>/<doc_type>`, an unlinked one at
+   `/custom/<slug of the title>`.
+   - **The page exists:** `update_wiki_page` with its `page_id`, the new markdown
+     `content`, and a `change_summary` (`zensu wiki update <page-id> --content
+     <markdown> --change-summary <text>`).
+   - **No page yet:** `create_wiki_page` with the markdown `content`, `entity_type`,
+     `entity_id`, `doc_type`, and `audience` (`zensu wiki create`). Create never
+     changes an existing page: when a page already exists at the new page's path,
+     it fails, names that page's id and path, and leaves it unchanged. Update the
+     page it names. Never retry the create under another title to get past the
+     error; that leaves the old page stale beside a duplicate. A client that does
+     not send `createOnly` (an older zensu-cli or MCP server), or a Zensu backend
+     before v0.89.2 or wiki before v0.15.1, does not refuse: create then updates
+     the existing page and still reports a created one, which is why the lookup
+     comes first.
 
-   *CLI one-call form.* `zensu link docs <feature-id> --doc-type <type> --content
-   <markdown>` folds these two steps into one — `--content` creates (or updates) the
-   feature-linked wiki page and recomputes the score. This is the form the
-   `/zensu:docs` skill uses; the two-step `create_wiki_page` + `link_docs` above stays
-   valid when you want explicit control over the page.
+   Then `link_docs` to update the feature's docs score. Use `link_docs` alone (no
+   wiki page) only for docs that already live in the repo or at an external URL.
+
+   *CLI one-call form.* For a feature that has no page for the `doc_type` yet,
+   `zensu link docs <feature-id> --doc-type <type> --content <markdown>` folds
+   these two steps into one — `--content` creates the feature-linked wiki page and
+   recomputes the score. It never changes an existing page, so a re-run updates
+   the page as above and then runs `zensu link docs` without `--content`. The
+   `/zensu:docs` skill uses this form under the same rule; the two-step
+   `create_wiki_page` + `link_docs` above stays valid when you want explicit
+   control over the page.
 
 ## Tools
 
 | Tool | Role |
 |------|------|
 | `get_doc_generation_context` | Fetch the context (the map). Read the named source before writing. |
-| `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). |
-| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs <feature-id> --doc-type <type> --content <markdown>` also authors/updates the linked wiki page in the same call; `--file` / `--external-url` register a repo or external doc. |
+| `list_wiki_pages` | List a product's wiki pages with their `id` and `path`, to find the page a re-run updates. |
+| `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). Create a new page with `create_wiki_page`; change a page that already exists with `update_wiki_page`. |
+| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs <feature-id> --doc-type <type> --content <markdown>` also creates the linked wiki page when the feature has none for that doc type yet, and never changes an existing one; `--file` / `--external-url` register a repo or external doc. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
 **frontend-only** — it is not exposed as an MCP tool. Agents do not call it;
