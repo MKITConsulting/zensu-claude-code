@@ -110,15 +110,20 @@ requires the lease owner, which requires the binder, which requires the core, so
 top-level require cycles.
 
 - **Opted in:** the CLI's hook-payload modes (every shell gate, the Stop hook, the consent
-  hooks), `revalidateSessionContext` in `reviewer-capability-v1.js`, both halves of
-  `review-evidence-hook-v1.js`, and the adapter's resume/compact and SubagentStart
+  hooks), `revalidateSessionContext` in `reviewer-capability-v1.js`, the `start` and `stop`
+  modes of `review-evidence-hook-v1.js`, and the adapter's resume/compact and SubagentStart
   branches through `serveOrAdopt`. The evidence hook opts in for two different reasons:
-  its start half shares the SubagentStart matcher with the adapter and races it, and its
-  stop half runs on SubagentStop, where no adapter binds, so an adoption that fell due
+  its `start` mode shares the SubagentStart matcher with the adapter and races it, and its
+  `stop` mode runs on SubagentStop, where no adapter binds, so an adoption that fell due
   while the worker ran lands there or the worker's result is lost with its lease
   retirement.
 - **Never opted in:** `model-bind` (`zensu-doctor.sh` stays write-free and no `zensu-log.sh`
-  verb re-mints a record), `resolveFreshHookProject` and `bindFromModelEnvironment`.
+  verb re-mints a record), `resolveFreshHookProject`, `bindFromModelEnvironment`, and the
+  lease reader `hookLeaseProgress` / `hookLeaseWait` in `review-evidence-lease-v1.js`, which
+  the work-order stop verb and the `wait` mode of `review-evidence-hook-v1.js` call. The
+  reader writes nothing, and both callers run inside a Stop hook whose own
+  `zensu_bind_hook_session` binds first with the adoption opted in, so an adoption that fell
+  due has landed before the reader binds.
 
 After an adoption the binder re-reads STRICTLY. An adopted record whose project root is
 gone re-throws the core's `context project root does not exist`, and the gates' orphan

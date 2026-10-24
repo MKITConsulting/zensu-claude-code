@@ -94,7 +94,10 @@ boundary, and at every boundary, marked or not, it carries each open entry forwa
 `G<g>:R<k>-F<n>` id naming the generation it came from, so a reset never hides an open finding.
 Only a `fixed` line may carry that qualifier; it closes the carried entry and routing ignores it.
 Both `## Open` renderers add ledger rows only while `hooks.reviewConvergence` is on: with the key
-off the hook's `LEDGER_OPEN_ROWS` fragment is empty and self-review skips the ledger.
+off the hook's `LEDGER_OPEN_ROWS` fragment is empty and self-review skips the ledger. The hook
+and self-review read the key against the same Session Control record root: the hook exports it
+as `CLAUDE_PROJECT_DIR`, and the self-review probe passes the `PROJECT_ROOT` that
+`zensu-log.sh --project-root` prints.
 
 **Deferred is not dropped.** The main thread ledgers every finding it defers right after
 classifying, so a review that closes the loop still hands its deferred findings on. Every
@@ -136,8 +139,9 @@ CRITICAL, because a deflated blocker is the one error convergence must never mak
 `${LOG_HELPER_Q}` and the hook runs under `set -u`, and interpolated in ALL THREE
 severity arms right before `${FIX_DONE_PHRASE}`, so the clause is read before the fix-done
 instruction — the clause must contain none of the phrases `P3b`, `I17` and `S17` count per
-line, and never the literal `review-round-scope-v1.js`, which is why it says "the round-scope
-helper"); the one `CONVERGENCE_ON` read that gates both the clause and the `LEDGER_OPEN_ROWS`
+line, and never the literal `review-round-scope-v1.js`, which is why it names that helper through
+`SCOPE_HELPER_Q`, defined beside `LEDGER_HELPER_Q`, since the arms' `ROUND_SCOPE` names the file only
+while `hooks.incrementalReviewRounds` is on); the one `CONVERGENCE_ON` read that gates both the clause and the `LEDGER_OPEN_ROWS`
 fragment; `LEDGER_STATES`, `UNFIXED_STATES`, `UNAVAILABLE_ROUTE` and `PARK_CLAUSE`, which only the
 `critical` arm changes, while `important` and `all` render the clause byte for byte as before; the `R${NEXT}-{step_id}` claim prefix in every arm, which `hooks.incrementalReviewRounds`
 depends on and which is therefore NOT gated on this key; the widened case (A) and the
@@ -170,10 +174,6 @@ together with `parked` and the `G<g>:` qualifier, so no released reader predates
 - **Self-review needs the chain's run-log path.** It reads the ledger of the log the chain wrote
   in this session and never resolves one by recency; when the session no longer knows the path,
   it skips the ledger and the deferred findings survive only in the buffered report blocks.
-- **Self-review reads the key against `$TOP`, the hook against the Session Control record
-  root.** Both resolve the same project `.zensu/config.json` for a session started at the
-  repository root; a session started in a subdirectory that carries its own config can still
-  see them disagree.
 - **The reset marker depends on a known log path.** `/zensu:reset-review-limit` never searches
   for a log; without the path it skips the marker. An id reuse or a round regression then turns
   the routing read `degraded` and makes the report read open a new generation, but a reset stays

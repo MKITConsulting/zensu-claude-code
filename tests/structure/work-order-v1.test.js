@@ -2,10 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const MODULE = path.join(__dirname, '..', '..', 'hooks', 'lib', 'work-order-v1.js');
 const FAKE = path.join(__dirname, 'lib-fake-zensu-work.js');
@@ -30,6 +31,9 @@ function sandbox() {
     FAKE_ZENSU_STATE: stateFile,
     FAKE_ZENSU_CALLS: callsFile,
     ZENSU_SESSION_TOKEN: TOKEN,
+    ZENSU_API_URL: 'http://127.0.0.1:9',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
     ZENSU_WORK_ORDER_RETRY_MS: '1',
     ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '50',
   };
@@ -50,11 +54,11 @@ function sandbox() {
       questions: [],
       followups: [],
       policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
-      plan: { base_branch: 'main', integration_branch: 'integration/widgets' },
+      plan: { base_branch: 'main', integration_branch: 'plan/widgets' },
       order: {
         id: ORDER,
         work_plan_id: '11111111-1111-4111-8111-111111111111',
-        repository: 'https://github.com/acme/widgets',
+        repository: 'github.com/acme/widgets',
         kind: 'implement',
         status: 'claimed',
         attempt: 1,
@@ -62,6 +66,7 @@ function sandbox() {
         claim_confirmed_at: new Date().toISOString(),
         lease_expires_at: Date.now() + 1800000,
         spec_hash: 'a'.repeat(64),
+        spec_stale: false,
         branch: null,
         pr_url: null,
         pr_number: null,
@@ -176,7 +181,48 @@ test('the status and code are read when context follows the suffix and the messa
   const flagError = wo.cliOutcome({ status: 1, stdout: '', stderr: 'error: unknown flag --bogus\n{"error":{"message":"unknown flag --bogus"}}\n' });
   assert.equal(flagError.status, null);
   assert.equal(flagError.code, null);
-  assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.classifyFailure(flagError).verdict, wo.VERDICTS.FINAL);
+  assert.equal(wo.describeFailure(wo.classifyFailure(flagError)), 'the zensu CLI refused the call: unknown flag --bogus');
+});
+
+test('a CLI error without a status is final unless it shows that no answer came, and its own line is quoted', () => {
+  const classify = (stderr, status = 1) => wo.classifyFailure(wo.cliOutcome({ status, stdout: '', stderr }));
+  const withJson = (message) => `error: ${message}\n${JSON.stringify({ error: { message } })}\n`;
+  for (const message of [
+    'unknown flag: --autopilot-stage',
+    'flag needs an argument: --stage',
+    'invalid argument "x" for "--pr-number" flag: strconv.ParseInt: parsing "x": invalid syntax',
+    'accepts 1 arg(s), received 0',
+    '--blocked needs --reason',
+    'exactly one of --stage, --artifact or --blocked is required',
+  ]) {
+    for (const stderr of [withJson(message), `error: ${message}\n`]) {
+      const failure = classify(stderr);
+      assert.equal(failure.verdict, wo.VERDICTS.FINAL, message);
+      assert.equal(wo.describeFailure(failure), `the zensu CLI refused the call: ${message}`);
+    }
+  }
+  for (const message of [
+    'Post "http://127.0.0.1:9/api/work-orders/x/events": dial tcp 127.0.0.1:9: connect: connection refused',
+    'Get "https://zensu.example/api/work-orders/x": context deadline exceeded (Client.Timeout exceeded while awaiting headers)',
+    'Post "https://zensu.example/api/work-orders/x/heartbeat": EOF',
+    'reading response body: unexpected EOF',
+    'invalid event response: unexpected end of JSON input',
+    'read tcp 127.0.0.1:52144->127.0.0.1:18080: read: connection reset by peer',
+  ]) {
+    const failure = classify(withJson(message));
+    assert.equal(failure.verdict, wo.VERDICTS.TRANSIENT, message);
+    assert.equal(wo.describeFailure(failure), `the zensu CLI failed without a status: ${message}`);
+  }
+  const crash = classify('panic: runtime error: index out of range [3] with length 3\n\ngoroutine 1 [running]:\nmain.main()\n', 2);
+  assert.equal(crash.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(crash), 'the zensu CLI failed without a status: panic: runtime error: index out of range [3] with length 3');
+  const killed = wo.classifyFailure(wo.cliOutcome({ status: null, signal: 'SIGKILL', stdout: '', stderr: '' }));
+  assert.equal(killed.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(killed), 'no answer from Zensu');
+  const late = wo.classifyFailure(wo.cliOutcome({ error: Object.assign(new Error('spawnSync zensu ETIMEDOUT'), { code: 'ETIMEDOUT' }) }));
+  assert.equal(late.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.describeFailure(late), 'the zensu CLI failed without a status: the zensu CLI did not answer in time');
 });
 
 test('clientEventId is deterministic, prefixed and inside the backend pattern', () => {
@@ -251,6 +297,33 @@ test('loadContext is inert without the token or the marker and refuses a marker 
   assert.equal(bound.marker.orderId, ORDER);
 });
 
+test('the bound verb answers bound only for a marker that binds this session and writes nothing', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  const bound = () => spawnSync(process.execPath, [MODULE, 'bound'], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  let answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: wo.sessionKeyOf('another-session-99'), orderId: ORDER, attempt: 1 });
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  fs.writeFileSync(files.marker, '{');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.NOT_BOUND);
+  assert.equal(answer.stdout, '');
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const before = fs.readFileSync(files.marker, 'utf8');
+  answer = bound();
+  assert.equal(answer.status, wo.EXIT.OK, answer.stderr);
+  assert.equal(answer.stdout, '\nbound\n');
+  assert.equal(fs.readFileSync(files.marker, 'utf8'), before);
+  assert.deepEqual(box.calls(), []);
+});
+
 test('state files refuse symlinks, hard links, oversized bodies and foreign schemas', () => {
   const box = sandbox();
   const files = wo.sessionFiles(box.project, box.sessionKey);
@@ -317,7 +390,7 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(result.exit, wo.EXIT.OK, result.message);
   assert.equal(result.summary.action, 'implement');
-  assert.equal(result.summary.integrationBranch, 'integration/widgets');
+  assert.equal(result.summary.integrationBranch, 'plan/widgets');
   assert.equal(result.summary.pulse, 'linked');
   assert.equal(result.summary.leaseSeconds, 1800);
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
@@ -327,6 +400,140 @@ test('start reads the order, writes the marker, renews and links Pulse', () => {
   assert.equal(box.fake().pulse.clientVersion, wo.pluginVersion());
   const again = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
   assert.equal(again.exit, wo.EXIT.OK);
+});
+
+test('the work branch carries the branch prefix the order spec names', () => {
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'wo-' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'agents/wo-' } }), 'agents/wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: '../x' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({ spec: { branch_prefix: 'a..b' } }), 'wo-');
+  assert.equal(wo.branchPrefixOf({}), 'wo-');
+  const box = sandbox();
+  box.seed();
+  const result = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  assert.equal(result.summary.branchPrefix, 'wo-');
+  assert.equal(result.summary.workBranch, `wo-${ORDER.slice(0, 8)}`);
+  const recorded = sandbox();
+  recorded.seed({ order: { branch: 'wo-earlier1' } });
+  const resumed = wo.start({ env: recorded.env, projectRoot: recorded.project, sessionKey: recorded.sessionKey, orderId: ORDER });
+  assert.equal(resumed.summary.workBranch, 'wo-earlier1');
+});
+
+test('the fake refuses a stage branch outside the order branch prefix, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  assert.equal(wo.sendEvent(context, ['--stage', 'planning', '--client-event-id', wo.clientEventId('r', 'start')], { env: box.env }).verdict, wo.VERDICTS.OK);
+  const refused = wo.sendEvent(context, ['--stage', 'implementing', '--branch', 'zensu/work-22222222', '--client-event-id', wo.clientEventId('r', 'bound')], { env: box.env, target: 'implementing' });
+  assert.equal(refused.verdict, wo.VERDICTS.FINAL);
+  assert.equal(refused.failure.code, 'invalid_branch');
+  const accepted = wo.sendEvent(context, ['--stage', 'implementing', '--branch', `wo-${ORDER.slice(0, 8)}`, '--client-event-id', wo.clientEventId('r', 'bound-2')], { env: box.env, target: 'implementing' });
+  assert.equal(accepted.verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.branch, `wo-${ORDER.slice(0, 8)}`);
+});
+
+test('the fake refuses an artifact link the service redaction would change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const sha = 'e'.repeat(40);
+  const send = (url, key) => wo.sendEvent(context, ['--artifact', 'plan', '--path', `.zensu/plans/${ORDER}.md`, '--sha', sha, '--url', url,
+    '--client-event-id', wo.clientEventId('artifact', key)], { env: box.env });
+  for (const [url, key] of [
+    [`https://gitlab.acme-secret:8443/acme/widgets/-/blob/${sha}/.zensu/plans/${ORDER}.md`, 'host-port'],
+    ['https://example.com/plan?token=abcdef12', 'token'],
+    ['https://user:pass@example.com/plan', 'credentials'],
+    [`https://github.com/acme/sk-payments-gateway-service/blob/${sha}/.zensu/plans/${ORDER}.md`, 'secret-name'],
+  ]) {
+    const refused = send(url, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_url', url);
+  }
+  assert.equal(send(`https://github.com/acme/widgets/blob/${sha}/.zensu/plans/${ORDER}.md`, 'plain').verdict, wo.VERDICTS.OK);
+});
+
+test('the fake takes the pull request links the service takes and refuses the rest', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { repository: 'gitlab.com/acme/widgets', status: 'implementing' } });
+  const send = (url, number, key) => wo.sendEvent(context, ['--stage', 'pr_open', '--pr-url', url, '--pr-number', String(number),
+    '--client-event-id', wo.clientEventId('r', key)], { env: box.env, target: 'pr_open' });
+  for (const [url, number, key] of [
+    ['https://github.com/acme/widgets/pull/7', 7, 'other-host'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/7?x=1', 7, 'query'],
+    ['https://gitlab.com/acme/widgets/-/merge_requests/8', 7, 'mismatch'],
+    ['https://gitlab.com/acme/widgets/../widgets/-/merge_requests/7', 7, 'dot-segment'],
+  ]) {
+    const refused = send(url, number, key);
+    assert.equal(refused.verdict, wo.VERDICTS.FINAL, url);
+    assert.equal(refused.failure.code, 'invalid_pr_url', url);
+  }
+  assert.equal(send('https://GitLab.com/Acme/Widgets/-/merge_requests/7', 7, 'gitlab').verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.pr_url, 'https://gitlab.com/acme/widgets/-/merge_requests/7');
+  const second = wo.sendEvent(context, ['--stage', 'reviewing', '--pr-url', 'https://gitlab.com/acme/widgets/-/merge_requests/8', '--pr-number', '8',
+    '--client-event-id', wo.clientEventId('r', 'second-pr')], { env: box.env, target: 'reviewing' });
+  assert.equal(second.verdict, wo.VERDICTS.FINAL);
+  assert.equal(second.failure.code, 'pr_mismatch');
+});
+
+test('the fake answers an expired lease with 401 and speaks the service response shapes', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const upper = 'C'.repeat(40);
+  assert.equal(wo.sendEvent(context, ['--stage', 'implementing', '--head', upper, '--client-event-id', wo.clientEventId('r', 'upper')], { env: box.env, target: 'implementing' }).verdict, wo.VERDICTS.OK);
+  assert.equal(box.fake().order.head_sha, 'c'.repeat(40));
+  const bad = wo.sendEvent(context, ['--stage', 'implementing', '--head', 'abc', '--client-event-id', wo.clientEventId('r', 'bad-head')], { env: box.env, target: 'implementing' });
+  assert.equal(bad.failure.code, 'invalid_sha');
+  const filed = wo.runZensu(['work', 'followup', ORDER, '--title', 'Cache the list', '--rationale', 'It is read on every request.', '--severity', 'low',
+    '--client-event-id', wo.clientEventId('f', 'shape'), '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(filed.json).sort(), ['event', 'order', 'replay']);
+  const linked = box.fake().pulse.id;
+  const pulse = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
+  assert.match(pulse.json.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(pulse.json.work_order_id, ORDER);
+  assert.deepEqual([pulse.json.id, pulse.json.created], [linked, false]);
+  box.mutate((state) => { state.order.attempt = 2; });
+  const next = wo.runZensu(['pulse', 'start', '--work-order', ORDER, '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--json'], { env: box.env });
+  assert.equal(next.json.created, true);
+  assert.notEqual(next.json.id, linked);
+  box.mutate((state) => { state.order.attempt = 1; });
+  const events = wo.runZensu(['work', 'events', ORDER, '--page', '1', '--per-page', '50', '--json'], { env: box.env });
+  assert.deepEqual(Object.keys(events.json).sort(), ['data', 'page', 'perPage', 'total']);
+  box.mutate((state) => { state.now = Date.now() + 3600000; });
+  for (const argv of [['work', 'heartbeat', ORDER, '--json'], ['work', 'get', ORDER, '--json'], ['work', 'events', ORDER, '--json'],
+    ['work', 'event', ORDER, '--stage', 'implementing', '--client-name', wo.CLIENT_NAME, '--client-version', '1.0.0', '--client-event-id', wo.clientEventId('r', 'late'), '--json']]) {
+    const outcome = wo.runZensu(argv, { env: box.env });
+    assert.equal(outcome.status, 401, argv.join(' '));
+    assert.equal(outcome.code, 'invalid_session_token', argv.join(' '));
+  }
+});
+
+test('the fake counts follow-ups per attempt, as the service does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const seeded = (attempt) => Array.from({ length: 20 }, (_, index) => ({ title: `Follow-up ${index}`, rationale: 'r', severity: 'low', paths: [], attempt }));
+  box.mutate((state) => { state.followups = seeded(1); state.order.attempt = 2; });
+  const next = wo.followup(context, { env: box.env, title: 'Index widgets by owner', rationale: 'The owner filter scans the table.', severity: 'medium' });
+  assert.equal(next.exit, wo.EXIT.OK, next.message);
+  box.mutate((state) => { state.followups = [...seeded(1), ...seeded(2)]; });
+  const limited = wo.followup(context, { env: box.env, title: 'Paginate the widget list', rationale: 'Long lists load slowly.', severity: 'low' });
+  assert.equal(limited.exit, wo.EXIT.REFUSED);
+  assert.match(limited.message, /followup_limit_reached/);
+  assert.match(limited.message, /file no more follow-ups in this attempt/);
+});
+
+test('push refuses a working branch without the order branch prefix before any forge write', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const git = (...args) => execFileSync('git', ['-C', box.project, ...args], { encoding: 'utf8', env: gitEnv });
+  git('init', '-q');
+  git('checkout', '-q', '-b', 'feature/widgets');
+  fs.writeFileSync(path.join(box.project, 'a.txt'), 'a\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'init');
+  const pushed = wo.push(context, { env: box.env });
+  assert.equal(pushed.exit, wo.EXIT.REFUSED);
+  assert.match(pushed.message, /feature\/widgets does not start with wo-/);
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event').length, 0);
 });
 
 test('start refuses without the token, without zensu work, and for an order of another session', () => {
@@ -344,6 +551,28 @@ test('start refuses without the token, without zensu work, and for an order of a
   assert.equal(foreign.exit, wo.EXIT.NOT_BOUND);
   assert.match(foreign.message, /another session/);
   assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+});
+
+test('start stops with exit 3 when the session environment names no Zensu host for the token', () => {
+  const box = sandbox();
+  box.seed();
+  const env = { ...box.env };
+  delete env.ZENSU_API_URL;
+  const result = wo.start({ env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(result.exit, wo.EXIT.NO_CLI, result.message);
+  assert.match(result.message, /ZENSU_API_URL/);
+  assert.doesNotMatch(result.message, /did not answer/);
+  assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+  box.mutate((state) => { state.failNext = [{ command: 'get', status: 503, code: 'unavailable', times: 1 }]; });
+  const transient = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(transient.exit, wo.EXIT.TRANSIENT);
+  const malformed = wo.start({ env: { ...box.env, ZENSU_SESSION_TOKEN: 'bad' }, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(malformed.exit, wo.EXIT.NO_CLI, malformed.message);
+  assert.match(malformed.message, /must hold a work order session token/);
+  assert.match(malformed.message, /zst_ session token of its claim/);
+  assert.doesNotMatch(malformed.message, /ZENSU_API_URL/);
+  assert.equal(wo.describeFailure({ status: null, message: 'unknown flag: --bogus\n' }), 'the zensu CLI failed without a status: unknown flag: --bogus');
+  assert.equal(wo.describeFailure({ status: null, message: '' }), 'no answer from Zensu');
 });
 
 test('an unsupported kind ends with blocked(worker_error) naming the kind', () => {
@@ -405,7 +634,7 @@ test('renew queues the answers of non-blocking questions', () => {
   box.seed();
   assert.equal(wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER }).exit, wo.EXIT.OK);
   box.mutate((state) => {
-    state.questions.push({ id: 'q-answered', category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
+    state.questions.push({ id: 'q-answered', work_order_id: ORDER, category: 'technical_choice', question: 'Which queue?', answer: 'Use the existing queue.', status: 'answered', blocking: false });
   });
   const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
   const beat = wo.renew(context, { env: box.env, force: true });
@@ -477,6 +706,31 @@ function writeRun(box, stage, events) {
   fs.mkdirSync(dir, { recursive: true });
   const evidence = { pr: { number: 7, url: 'https://github.com/acme/widgets/pull/7', headSha: HEAD } };
   fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({ runId: RUN, stage, events, evidence }));
+}
+
+function writeBoundRun(box, stage = 'PLANNING', events = DONE_LEDGER.slice(0, 1)) {
+  const dir = path.join(box.project, '.zensu', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `autopilot-run-${RUN}.json`), JSON.stringify({
+    runId: RUN, stage, events, evidence: {}, workOrder: { orderId: ORDER, attempt: 1, specHash: 'a'.repeat(64) },
+  }));
+}
+
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+
+function gitProject(box, branch = `wo-${ORDER.slice(0, 8)}`) {
+  const remote = path.join(box.root, 'remote.git');
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '--bare', remote);
+  git('-C', box.project, 'init', '-q');
+  git('-C', box.project, 'config', 'user.name', 'Test');
+  git('-C', box.project, 'config', 'user.email', 'test@example.invalid');
+  git('-C', box.project, 'checkout', '-q', '-b', branch);
+  git('-C', box.project, 'remote', 'add', 'origin', remote);
+  fs.writeFileSync(path.join(box.project, 'README.md'), 'widgets\n');
+  git('-C', box.project, 'add', 'README.md');
+  git('-C', box.project, 'commit', '-q', '-m', 'init');
+  return (...args) => git('-C', box.project, ...args);
 }
 
 function ledger(...steps) {
@@ -591,18 +845,583 @@ test('a BLOCKED run finishes without a reason and names its block code', () => {
   assert.match(box.fake().order.blocked_reason, /did not converge/);
 });
 
-test('the approved plan is the last plan artifact before the last approval of the spec hash', () => {
+test('a DONE run whose pr_open stage Zensu refuses ends blocked with worker_error naming the refusal', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the pr_open stage \(status 422, code invalid_pr_url\)/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /pr open stage with code invalid_pr_url/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 0);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('the post-tool update tells the model when Zensu refuses a stage, and names a lease lost on a drained event', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const refused = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(refused.additionalContext, /refused the pr_open stage/);
+  assert.match(refused.additionalContext, /--finish --reason/);
+  box.mutate((state) => { state.staleAttempt = true; });
+  const lost = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(lost.additionalContext, /is lost \(stale_attempt\)/);
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a block reason Zensu refuses as prose is sent once more as a safe sentence', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  const result = wo.finish(context, { env: box.env, reason: 'npm test fails on the integration branch, so the change cannot be validated.' });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the stated reason as prose/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.equal(order.blocked_reason, 'The session ended before its Autopilot run reached a ready pull request.');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+  const blocks = stageCalls(box).filter((call) => call.blocked === 'worker_error');
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].id, blocks[1].id);
+});
+
+test('a working branch without the order prefix is left out of drained stages and ready_for_merge, which Zensu then accepts', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box, 'main');
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const calls = stageCalls(box);
+  assert.ok(calls.some((call) => call.stage === 'pr_open'));
+  assert.ok(calls.some((call) => call.stage === 'ready_for_merge'));
+  assert.equal(calls.filter((call) => call.argv.includes('--branch')).length, 0);
+  assert.equal(box.fake().order.status, 'ready_for_merge');
+});
+
+test('a DONE run whose ready_for_merge Zensu refuses ends blocked with worker_error naming it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  writeRun(box, 'DONE', DONE_LEDGER);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+  const result = wo.finish(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  assert.match(result.message, /refused the ready_for_merge stage \(status 422, code invalid_pr_url\)/);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /ready for merge stage with code invalid_pr_url/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'ready_for_merge').length, 1);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+});
+
+test('a refused stage on a DONE run is named in the block, also when the stated reason or the Stop fallback would hide it', () => {
+  for (const variant of ['prose', 'stop']) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeRun(box, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+    assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK, variant);
+    writeRun(box, 'DONE', DONE_LEDGER);
+    box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; });
+    if (variant === 'prose') {
+      const result = wo.finish(context, { env: box.env, reason: 'gh pr view shows the pull request open, but Zensu refused its link.' });
+      assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+    } else {
+      let decided = null;
+      for (let stop = 0; stop < 5; stop += 1) {
+        decided = wo.stopDecision(context, { env: box.env });
+        if (decided.decision !== 'block') break;
+      }
+      assert.equal(decided.decision, 'allow');
+    }
+    const order = box.fake().order;
+    assert.equal(order.blocked_kind, 'worker_error', variant);
+    assert.match(order.blocked_reason, /pr open stage with code invalid_pr_url/, variant);
+  }
+});
+
+test('a terminal event whose answer never arrived is replayed on the next renewal instead of reading as a lost lease', () => {
+  const block = sandbox();
+  const blockContext = startedContext(block);
+  wo.markerRun(blockContext, RUN);
+  writeRun(block, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(blockContext, { env: block.env }).verdict, wo.VERDICTS.OK);
+  block.mutate((state) => { state.dropAnswers = 1000; });
+  const unanswered = wo.finish(blockContext, { env: block.env, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(unanswered.exit, wo.EXIT.TRANSIENT, unanswered.message);
+  assert.equal(block.fake().order.blocked_kind, 'worker_error');
+  assert.ok(wo.readState(blockContext.files.outbox).inflight);
+  block.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(blockContext, { env: block.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(blockContext.files.lost), null);
+  assert.deepEqual([wo.readState(blockContext.files.ended).kind, wo.readState(blockContext.files.ended).delivered], ['blocked:worker_error', true]);
+  assert.deepEqual(wo.readState(blockContext.files.outbox).inflight, []);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.TRANSIENT);
+  merge.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(mergeContext, { env: merge.env, force: true }).verdict, 'ended');
+  assert.deepEqual([wo.readState(mergeContext.files.ended).kind, wo.readState(mergeContext.files.ended).outcome], ['ready_for_merge', 'success']);
+
+  const asked = sandbox();
+  const askContext = startedContext(asked);
+  asked.mutate((state) => { state.dropAnswers = 1000; });
+  const question = wo.ask(askContext, { env: asked.env, category: 'clarification', question: 'Should deleted widgets stay visible to admins?', blocking: true });
+  assert.equal(question.exit, wo.EXIT.TRANSIENT, question.message);
+  assert.match(question.message, /the zensu CLI failed without a status: read: connection reset by peer/);
+  asked.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(askContext, { env: asked.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(askContext.files.ended).kind, 'blocked:question');
+
+  const revoked = sandbox();
+  const revokedContext = startedContext(revoked);
+  wo.markerRun(revokedContext, RUN);
+  writeRun(revoked, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(revokedContext, { env: revoked.env }).verdict, wo.VERDICTS.OK);
+  revoked.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(revokedContext, { env: revoked.env, reason: 'The gates fail on a missing database migration.' }).exit, wo.EXIT.TRANSIENT);
+  revoked.mutate((state) => { state.dropAnswers = 0; state.mode = 'revoked'; });
+  assert.equal(wo.renew(revokedContext, { env: revoked.env, force: true }).verdict, wo.VERDICTS.LOST);
+  assert.ok(wo.readState(revokedContext.files.lost));
+});
+
+function unansweredBlock(box, context) {
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(context, { env: box.env, reason: 'The gates fail on a missing database migration.' }).exit, wo.EXIT.TRANSIENT);
+}
+
+test('a replay without an answer keeps the send for the next renewal, and every route that meets the ended session replays it first', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const unanswered = wo.renew(context, { env: box.env, force: true });
+  assert.equal(unanswered.verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  assert.equal(wo.renew(context, { env: box.env, force: true }).verdict, 'ended');
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const refused = sandbox();
+  const refusedContext = startedContext(refused);
+  wo.markerRun(refusedContext, RUN);
+  writeRun(refused, 'OPEN_PR', DONE_LEDGER.slice(0, 7));
+  assert.equal(wo.drain(refusedContext, { env: refused.env }).verdict, wo.VERDICTS.OK);
+  writeRun(refused, 'DONE', DONE_LEDGER);
+  refused.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_pr_url', times: 1 }]; state.dropAnswers = 1000; });
+  assert.equal(wo.finish(refusedContext, { env: refused.env }).exit, wo.EXIT.TRANSIENT);
+  refused.mutate((state) => { state.dropAnswers = 0; });
+  const again = wo.finish(refusedContext, { env: refused.env });
+  assert.equal(again.exit, wo.EXIT.ENDED, again.message);
+  assert.equal(wo.readState(refusedContext.files.lost), null);
+  assert.deepEqual([wo.readState(refusedContext.files.ended).kind, wo.readState(refusedContext.files.ended).delivered], ['blocked:worker_error', true]);
+
+  const pushed = sandbox();
+  const pushContext = startedContext(pushed);
+  unansweredBlock(pushed, pushContext);
+  pushed.mutate((state) => { state.dropAnswers = 0; });
+  const push = wo.push(pushContext, { env: pushed.env });
+  assert.equal(push.exit, wo.EXIT.ENDED, push.message);
+  assert.match(push.message, /\(blocked:worker_error\); no push/);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.TRANSIENT);
+  merge.mutate((state) => { state.dropAnswers = 0; });
+  const update = wo.postToolUpdate(mergeContext, { tool_name: 'Read', tool_input: {} }, { env: merge.env, now: () => Date.now() + 120000 });
+  assert.match(update.additionalContext, /Zensu recorded ready_for_merge for work order/);
+  assert.doesNotMatch(update.additionalContext, /blocked/);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
+});
+
+test('a refused lease whose replay gets no answer closes the forge fence until a renewal succeeds, and records the loss once the lease time has run out', () => {
+  const comment = { tool_name: 'Bash', tool_input: { command: 'gh pr comment 7 --body done' } };
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  const fenced = wo.gateDecision(context, comment, { env: box.env, now: () => Date.now() + 120000 });
+  assert.equal(fenced && fenced.code, 'lease');
+  assert.match(fenced.reason, /Zensu refused the lease of work order \S+ \(invalid_session_token\), and an unanswered send still waits for its replay/);
+  assert.match(fenced.reason, /may run until a lease renewal succeeds\. Run zensu-work-order\.sh --renew --force/);
+  assert.doesNotMatch(fenced.reason, /may run any more/);
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(wo.readState(context.files.outbox).inflight.length, 1);
+  assert.equal(wo.gateDecision(context, { tool_name: 'Bash', tool_input: { command: 'git status' } }, { env: box.env, now: () => Date.now() + 120000 }), null);
+  assert.equal(wo.renew(context, { env: box.env, force: true, now: Date.now() + 1801000 }).verdict, wo.VERDICTS.LOST);
+  assert.equal(wo.readState(context.files.lost).code, 'invalid_session_token');
+
+  const flaky = sandbox();
+  const flakyContext = startedContext(flaky);
+  flaky.mutate((state) => { state.dropAnswers = 1; });
+  const asked = wo.ask(flakyContext, { env: flaky.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' });
+  assert.equal(asked.exit, wo.EXIT.TRANSIENT, asked.message);
+  flaky.mutate((state) => { state.dropAnswers = 1; state.failNext = [{ command: 'heartbeat', status: 409, code: 'stale_attempt', times: 1 }]; });
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.TRANSIENT);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }).code, 'lease');
+  assert.equal(wo.renew(flakyContext, { env: flaky.env, force: true }).verdict, wo.VERDICTS.OK);
+  assert.equal(wo.readState(flakyContext.files.outbox).leaseRefusal, null);
+  assert.equal(wo.gateDecision(flakyContext, comment, { env: flaky.env }), null);
+  assert.equal(wo.readState(flakyContext.files.lost), null);
+
+  const replayed = sandbox();
+  const replayContext = startedContext(replayed);
+  wo.markerRun(replayContext, RUN);
+  writeRun(replayed, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  replayed.mutate((state) => { state.dropAnswers = 1000; });
+  assert.equal(wo.drain(replayContext, { env: replayed.env }).verdict, wo.VERDICTS.TRANSIENT);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(replayContext, { env: replayed.env, category: 'clarification', question: 'Should archived widgets keep their tags?', defaultOption: 'keep' }).exit, wo.EXIT.TRANSIENT);
+  replayed.mutate((state) => { state.staleAttempt = true; state.dropAnswers = 1; });
+  const renewedAt = wo.readState(replayContext.files.lease).lastSuccessAt;
+  wo.postToolUpdate(replayContext, { tool_name: 'Read', tool_input: {} }, { env: replayed.env, now: () => Date.now() + 61000 });
+  assert.equal(wo.readState(replayContext.files.outbox).deliveredRank, 1);
+  assert.ok(wo.readState(replayContext.files.outbox).leaseRefusal);
+  assert.equal(wo.readState(replayContext.files.lease).lastSuccessAt, renewedAt);
+  replayed.mutate((state) => { state.dropAnswers = 1; });
+  const held = wo.gateDecision(replayContext, comment, { env: replayed.env, now: () => Date.now() + 63000 });
+  assert.equal(held && held.code, 'lease');
+  assert.match(held.reason, /\(stale_attempt\), and an unanswered send still waits for its replay/);
+  assert.equal(wo.readState(replayContext.files.lost), null);
+});
+
+test('a terminal send is in the outbox before its first attempt, so a renewal that meets the ended session meanwhile replays it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.dropAnswers = 1; });
+  let watchdog = null;
+  let pending = null;
+  const now = () => {
+    const at = Date.now();
+    if (!watchdog && box.fake().order.status === 'blocked') {
+      pending = wo.readState(context.files.outbox).inflight;
+      watchdog = wo.renew(context, { env: box.env, force: true });
+    }
+    return at;
+  };
+  const env = { ...box.env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '60000' };
+  const finished = wo.finish(context, { env, now, reason: 'The gates fail on a missing database migration.' });
+  assert.equal(Array.isArray(pending) && pending.length, 1);
+  assert.equal(watchdog && watchdog.verdict, 'ended');
+  assert.equal(wo.readState(context.files.lost), null);
+  assert.equal(finished.exit, wo.EXIT.ENDED, finished.message);
+  assert.match(finished.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)$/);
+  assert.deepEqual(wo.readState(context.files.outbox).inflight, []);
+  assert.equal(wo.readState(context.files.ended).delivered, true);
+
+  const merge = sandbox();
+  const mergeContext = startedContext(merge);
+  wo.markerRun(mergeContext, RUN);
+  writeRun(merge, 'DELIVER', DONE_LEDGER.slice(0, 12));
+  assert.equal(wo.drain(mergeContext, { env: merge.env }).verdict, wo.VERDICTS.OK);
+  writeRun(merge, 'DONE', DONE_LEDGER);
+  merge.mutate((state) => { state.outboxProbe = mergeContext.files.outbox; });
+  const asked = wo.ask(mergeContext, { env: merge.env, category: 'clarification', question: 'Should the changelog name the new widget?', defaultOption: 'yes' });
+  assert.equal(asked.exit, wo.EXIT.OK, asked.message);
+  assert.equal(wo.finish(mergeContext, { env: merge.env }).exit, wo.EXIT.OK);
+  const seen = merge.fake().outboxSeen;
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen.map((call) => Boolean(call.id) && call.inflight.includes(call.id)), [true, true]);
+  assert.deepEqual(wo.readState(mergeContext.files.outbox).inflight, []);
+});
+
+test('the drain, renew, bind-spec and plan-approval helpers name the ended kind when a replay ends the session under them', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  unansweredBlock(box, context);
+  box.mutate((state) => { state.dropAnswers = 0; });
+  const cli = (...argv) => spawnSync(process.execPath, [MODULE, ...argv], {
+    env: { ...box.env, WO_PROJECT_ROOT: box.project, WO_SESSION_KEY: box.sessionKey },
+    encoding: 'utf8',
+  });
+  const renewed = cli('renew', '--force');
+  assert.equal(renewed.status, wo.EXIT.ENDED, renewed.stderr);
+  assert.match(renewed.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(context.files.lost), null);
+  const drained = cli('drain');
+  assert.equal(drained.status, wo.EXIT.ENDED, drained.stderr);
+  assert.match(drained.stderr, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+
+  const bound = sandbox();
+  const boundContext = startedContext(bound);
+  wo.markerRun(boundContext, RUN);
+  writeBoundRun(bound);
+  bound.mutate((state) => { state.dropAnswers = 1; });
+  assert.equal(wo.ask(boundContext, { env: bound.env, category: 'scope', question: 'Should the export include archived widgets?', blocking: true }).exit, wo.EXIT.TRANSIENT);
+  const spec = wo.bindSpec(boundContext, { env: bound.env, runId: RUN });
+  assert.equal(spec.exit, wo.EXIT.ENDED, spec.message);
+  assert.match(spec.message, /Zensu ended the session of work order \S+ \(blocked:spec_change\)/);
+
+  const planned = sandbox();
+  const planContext = startedContext(planned);
+  unansweredBlock(planned, planContext);
+  planned.mutate((state) => { state.dropAnswers = 0; });
+  writeRun(planned, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 8));
+  fs.mkdirSync(path.join(planned.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(planned.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const approval = wo.planApproval(planContext, { env: planned.env });
+  assert.equal(approval.exit, wo.EXIT.ENDED, approval.message);
+  assert.match(approval.message, /Zensu ended the session of work order \S+ \(blocked:worker_error\)/);
+  assert.equal(wo.readState(planContext.files.lost), null);
+});
+
+test('a block Zensu refuses for another reason writes no ended marker, so a later finish still reports it', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  assert.equal(wo.drain(context, { env: box.env }).verdict, wo.VERDICTS.OK);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'field_not_allowed', times: 1 }]; });
+  const reason = 'The gates fail on a missing database migration.';
+  const refused = wo.finish(context, { env: box.env, reason });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.equal(wo.readState(context.files.ended), null);
+  const delivered = wo.finish(context, { env: box.env, reason });
+  assert.equal(delivered.exit, wo.EXIT.ENDED, delivered.message);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a push of an unchanged head after a stage advance gets its own event id, and a refused head is final', () => {
+  const box = sandbox();
+  const context = startedContext(box, { order: { status: 'implementing' } });
+  gitProject(box);
+  const first = wo.push(context, { env: box.env });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  box.mutate((state) => { state.order.status = 'reviewing'; state.order.pr_url = 'https://github.com/acme/widgets/pull/7'; state.order.pr_number = 7; });
+  const again = wo.push(context, { env: box.env });
+  assert.equal(again.exit, wo.EXIT.OK, again.message);
+  const pushes = stageCalls(box).filter((call) => call.argv.includes('--head'));
+  assert.deepEqual(pushes.map((call) => call.stage), ['implementing', 'reviewing']);
+  assert.notEqual(pushes[0].id, pushes[1].id);
+  box.mutate((state) => { state.failNext = [{ command: 'event', status: 409, code: 'client_event_id_reused', times: 1 }]; });
+  const refused = wo.push(context, { env: box.env });
+  assert.equal(refused.exit, wo.EXIT.REFUSED);
+  assert.match(refused.message, /client_event_id_reused/);
+});
+
+test('a plan-approval block that Zensu does not need sends the session back to --bind-spec', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.REFUSED, result.message);
+  assert.match(result.message, /run --bind-spec/);
+  assert.equal(result.cancelRun, undefined);
+  assert.equal(wo.readState(context.files.ended), null);
+});
+
+test('a plan artifact whose summary Zensu refuses is sent once more with the fixed summary', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 } });
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget list.\n');
+  box.mutate((state) => { state.failNext = [{ command: 'event', flag: 'artifact', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: detail.summary: code_block; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const artifacts = box.fake().events.filter((event) => event.event_type === 'artifact');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].detail.summary, 'Implementation plan for this work order.');
+  assert.equal(artifacts[0].detail.url, `https://github.com/acme/widgets/blob/${artifacts[0].detail.sha}/.zensu/plans/${ORDER}.md`);
+  assert.equal(box.fake().order.blocked_kind, 'plan_approval');
+});
+
+test('a plan link Zensu refuses as invalid_url is dropped, and the artifact goes once more with path and commit only', () => {
+  const box = sandbox();
+  const context = startedContext(box, {
+    policy: { plan_approval: 'required', lease_minutes: 30, max_questions_per_order: 5, max_order_runtime_minutes: 240 },
+    order: { repository: 'github.com/acme/sk-payments-gateway-service' },
+  });
+  gitProject(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'PLANNING', DONE_LEDGER.slice(0, 1));
+  fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the payment list.\n');
+  const result = wo.planApproval(context, { env: box.env });
+  assert.equal(result.exit, wo.EXIT.OK, result.message);
+  const sent = box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event' && argv.includes('--artifact'));
+  assert.deepEqual(sent.map((argv) => argv.includes('--url')), [true, false]);
+  const artifacts = box.fake().events.filter((event) => event.event_type === 'artifact');
+  assert.equal(artifacts.length, 1);
+  assert.equal(artifacts[0].detail.url, undefined);
+  assert.equal(artifacts[0].detail.path, `.zensu/plans/${ORDER}.md`);
+  assert.equal(result.value.link, null);
+  assert.equal(box.fake().order.blocked_kind, 'plan_approval');
+});
+
+test('the approved plan is the last plan artifact of the attempt whose plan the last approval of the spec hash approved', () => {
   const spec = 'b'.repeat(64);
   const events = [
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
-    { event_type: 'artifact', detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
-    { event_type: 'artifact', detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
-    { event_type: 'approved', detail: { subject: 'implementation_plan', spec_hash: spec } },
-    { event_type: 'artifact', detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '1'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'report', sha: '9'.repeat(40), path: 'r.md' } },
+    { event_type: 'artifact', attempt: 2, detail: JSON.stringify({ kind: 'plan', sha: '2'.repeat(40), path: '.zensu/plans/x.md' }) },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 3, detail: { kind: 'plan', sha: '3'.repeat(40), path: '.zensu/plans/x.md' } },
   ];
   assert.equal(wo.approvedPlanCommit(events, spec).sha, '2'.repeat(40));
   assert.equal(wo.approvedPlanCommit(events, 'd'.repeat(64)), null);
+  const fastClock = [
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '4'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'blocked', attempt: 1, detail: { blocked_kind: 'plan_approval' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(fastClock, spec).sha, '4'.repeat(40));
+  const recut = [
+    { event_type: 'artifact', attempt: 1, detail: { kind: 'plan', sha: '5'.repeat(40), path: '.zensu/plans/x.md' } },
+    { event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: 'c'.repeat(64) } },
+    { event_type: 'approved', attempt: 2, detail: { subject: 'implementation_plan', spec_hash: spec } },
+    { event_type: 'artifact', attempt: 2, detail: { kind: 'plan', sha: '6'.repeat(40), path: '.zensu/plans/x.md' } },
+  ];
+  assert.equal(wo.approvedPlanCommit(recut, spec).sha, '6'.repeat(40));
+  assert.equal(wo.approvedPlanCommit([{ event_type: 'approved', attempt: 1, detail: { subject: 'implementation_plan', spec_hash: spec } }], spec), null);
+});
+
+test('bind-spec blocks an order Zensu marked spec_stale although its spec hash is unchanged', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  box.mutate((state) => { state.order.spec_stale = true; });
+  const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(result.exit, wo.EXIT.ENDED, result.message);
+  const order = box.fake().order;
+  assert.equal(order.blocked_kind, 'worker_error');
+  assert.match(order.blocked_reason, /spec changed while the session ran/);
+  assert.equal(stageCalls(box).filter((call) => call.stage === 'implementing').length, 0);
+});
+
+test('bind-spec refuses a working branch without the order branch prefix before it sends any event', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  gitProject(box, 'feature/widgets');
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(result.exit, wo.EXIT.REFUSED, result.message);
+  assert.match(result.message, /feature\/widgets does not start with wo-/);
+  assert.match(result.message, /workBranch/);
+  assert.equal(stageCalls(box).length, 0);
+  assert.equal(wo.readState(context.files.ended), null);
+});
+
+test('bind-spec and plan-approval exit 8 on a refused planning stage, and a spec-change block keeps a refusal or a lost lease apart', () => {
+  for (const verb of ['bindSpec', 'planApproval']) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeBoundRun(box);
+    fs.mkdirSync(path.join(box.project, '.zensu', 'plans'), { recursive: true });
+    fs.writeFileSync(path.join(box.project, '.zensu', 'plans', `${ORDER}.md`), '# Plan\n\nRender the widget.\n');
+    box.mutate((state) => { state.failNext = [{ command: 'event', status: 422, code: 'invalid_autopilot_run_id', times: 1 }]; });
+    const result = wo[verb](context, { env: box.env, runId: RUN });
+    assert.equal(result.exit, wo.EXIT.REFUSED, `${verb}: ${result.message}`);
+    assert.match(result.message, /refused the planning stage \(status 422, code invalid_autopilot_run_id\)/, verb);
+  }
+  for (const [status, code, exit, said, times] of [
+    [422, 'field_not_allowed', wo.EXIT.REFUSED, /spec changed during the session; Zensu refused the block \(status 422, code field_not_allowed\); end the session/, 1],
+    [401, 'invalid_session_token', wo.EXIT.LOST, /the lease is lost, so the block could not be reported \(status 401, code invalid_session_token\)/, 2],
+  ]) {
+    const box = sandbox();
+    const context = startedContext(box);
+    wo.markerRun(context, RUN);
+    writeBoundRun(box);
+    box.mutate((state) => { state.order.spec_stale = true; state.failNext = [{ command: 'event', flag: 'blocked', status, code, times }]; });
+    const result = wo.bindSpec(context, { env: box.env, runId: RUN });
+    assert.equal(result.exit, exit, `${code}: ${result.message}`);
+    assert.match(result.message, said);
+    assert.notEqual(box.fake().order.status, 'blocked', code);
+    if (exit === wo.EXIT.LOST) {
+      assert.ok(wo.readState(context.files.lost), code);
+    } else {
+      assert.equal(wo.readState(context.files.ended), null, code);
+      assert.equal(wo.readState(context.files.lost), null, code);
+    }
+  }
+  const quiet = sandbox();
+  const quietContext = startedContext(quiet);
+  wo.markerRun(quietContext, RUN);
+  writeBoundRun(quiet);
+  assert.equal(wo.drain(quietContext, { env: quiet.env }).verdict, wo.VERDICTS.OK);
+  quiet.mutate((state) => { state.order.spec_stale = true; state.dropAnswers = 1000; });
+  const pending = wo.bindSpec(quietContext, { env: quiet.env, runId: RUN });
+  assert.equal(pending.exit, wo.EXIT.TRANSIENT, pending.message);
+  assert.match(pending.message, /the block is not delivered yet \(the zensu CLI failed without a status: read: connection reset by peer\); run --bind-spec again/);
+});
+
+test('bind-spec hands over a plan-wide decision made after --start, and an automatic answer is no plan-wide decision', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeBoundRun(box);
+  const sibling = { work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'plan', category: 'product_decision' };
+  box.mutate((state) => {
+    state.questions = [
+      { ...sibling, id: 'q-auto', question: 'Which date format do lists use?', answer: 'Lists use the ISO date format.', status: 'auto_answered' },
+      { ...sibling, id: 'q-later', question: 'Which currency do prices use?', answer: 'Prices are in euro across the plan.', status: 'answered' },
+    ];
+  });
+  const bound = wo.bindSpec(context, { env: box.env, runId: RUN });
+  assert.equal(bound.exit, wo.EXIT.OK, bound.message);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Prices are in euro across the plan/);
+  assert.doesNotMatch(update.additionalContext, /ISO date format/);
+  const read = wo.runZensu(['work', 'get', ORDER, '--json'], { env: box.env });
+  assert.deepEqual(read.json.decision_log.map((entry) => entry.id), ['q-later']);
+  const decided = wo.planDecisions({ decision_log: [{ id: 'q-auto', status: 'auto_answered' }, { id: 'q-later', status: 'answered' }] });
+  assert.deepEqual(decided.map((entry) => [entry.id, entry.planWide]), [['q-later', true]]);
+});
+
+test('the plan blob link takes the scheme-less repository Zensu stores and an https one alike', () => {
+  const sha = 'e'.repeat(40);
+  const file = `.zensu/plans/${ORDER}.md`;
+  assert.equal(wo.blobLink('github.com/acme/widgets', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('https://github.com/acme/widgets.git', sha, file), `https://github.com/acme/widgets/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('gitlab.com/group/project', sha, file), `https://gitlab.com/group/project/-/blob/${sha}/${file}`);
+  assert.equal(wo.blobLink('bitbucket.org/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('http://github.com/acme/widgets', sha, file), null);
+  assert.equal(wo.blobLink('', sha, file), null);
 });
 
 test('the Stop decision blocks until three stops pass without progress, then ends the order', () => {
@@ -625,6 +1444,413 @@ test('the Stop decision blocks until three stops pass without progress, then end
   assert.equal(closed.cancelRun, RUN);
   assert.equal(box.fake().order.blocked_kind, 'worker_error');
   assert.equal(wo.stopDecision(context, { env: box.env }).decision, 'allow');
+});
+
+const LEASE = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'review-evidence-lease-v1.js'));
+const SEAT_ROLES = ['bug-hunter', 'maintainability', 'security', 'adversarial', 'tests-qa', 'backend-idiom'];
+
+function reviewLease(box, seats) {
+  const pluginData = path.join(box.root, 'plugin-data');
+  const workspace = path.join(box.root, 'review-workspace');
+  fs.mkdirSync(pluginData, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(workspace, { mode: 0o700 });
+  fs.chmodSync(workspace, 0o700);
+  fs.mkdirSync(path.join(box.project, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(box.project, 'src', 'app.js'), 'const value = 1;\n');
+  const file = (name, text) => {
+    fs.writeFileSync(path.join(workspace, name), text);
+    return path.join(workspace, name);
+  };
+  const binding = {
+    sessionKey: box.sessionKey,
+    projectRoot: box.project,
+    pluginRoot: path.resolve(__dirname, '..', '..'),
+    pluginData,
+    context: { session_id_hash: `sha256:${'1'.repeat(64)}`, runtime_digest: `sha256:${'2'.repeat(64)}` },
+  };
+  const leaseId = LEASE.createLease(binding, {
+    kind: 'pr-review',
+    filesManifest: file('FILES.txt', `${path.join(box.project, 'src', 'app.js')}\n`),
+    safeSubtreesManifest: file('ROOTS.txt', `${path.join(box.project, 'src')}\n`),
+    nameStatusFile: file('NAME-STATUS.txt', 'M\tsrc/app.js\n'),
+    changedProductionFilesFile: file('CHANGED.txt', 'src/app.js\n'),
+    maxWorkers: seats,
+    ttlSeconds: 3600,
+  });
+  const worker = (role) => ({ agent_type: 'zensu:pr-review-worker', agent_id: `agent-${role}` });
+  const result = (role) => JSON.stringify({
+    kind: 'pr-review', role, verdict_hint: 'approve', summary: 'No blocking issue found.', inline_findings: [], overall_notes: [], positives: [],
+  });
+  return {
+    binding,
+    leaseId,
+    pluginData,
+    bind: (role) => LEASE.bindWorker(worker(role), binding),
+    report: (role) => LEASE.storeWorkerResult({ ...worker(role), last_assistant_message: result(role) }, binding),
+    seal: () => LEASE.finalizeLease(binding, { leaseId }),
+    read: (now) => LEASE.leaseProgress(binding, now),
+  };
+}
+
+function blockedSends(box) {
+  return stageCalls(box).filter((call) => call.blocked);
+}
+
+test('a team review keeps the work order alive while its seats report between stops, and the budget still ends it afterwards', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const lease = reviewLease(box, SEAT_ROLES.length);
+  SEAT_ROLES.forEach((role) => lease.bind(role));
+  const stop = () => wo.stopDecision(context, { env: box.env, review: () => lease.read() });
+  const stopState = () => JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+  const first = stop();
+  assert.equal(first.decision, 'block');
+  assert.equal(stopState().count, 0);
+  assert.match(first.reason, /6 review seats/);
+  lease.report('bug-hunter');
+  assert.equal(stop().decision, 'block');
+  lease.report('maintainability');
+  lease.report('security');
+  assert.equal(stop().decision, 'block');
+  assert.equal(stop().decision, 'block');
+  assert.equal(stop().decision, 'block');
+  assert.equal(stopState().count, 0);
+  lease.report('adversarial');
+  lease.report('tests-qa');
+  lease.report('backend-idiom');
+  const settled = stop();
+  assert.equal(settled.decision, 'block');
+  assert.doesNotMatch(settled.reason, /review seats? .*in flight/);
+  assert.equal(stopState().count, 1);
+  assert.equal(stop().decision, 'block');
+  lease.seal();
+  assert.equal(stop().decision, 'block');
+  assert.equal(stopState().count, 1);
+  assert.equal(stop().decision, 'block');
+  assert.equal(stop().decision, 'block');
+  assert.deepEqual(blockedSends(box), []);
+  assert.notEqual(box.fake().order.status, 'blocked');
+  const closed = stop();
+  assert.equal(closed.decision, 'allow');
+  assert.equal(closed.cancelRun, RUN);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a review wait whose seats never report ends the order within three stops after the lease deadline', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const lease = reviewLease(box, 2);
+  lease.bind('bug-hunter');
+  lease.bind('security');
+  const open = lease.read();
+  assert.equal(open.inFlight, 2);
+  const until = new Date(open.deadlineMs).toISOString();
+  for (let index = 0; index < 6; index += 1) {
+    const decided = wo.stopDecision(context, { env: box.env, review: () => lease.read() });
+    assert.equal(decided.decision, 'block');
+    assert.match(decided.reason, /2 review seats of this session are still in flight/);
+    assert.ok(decided.reason.includes(until), decided.reason);
+    assert.match(decided.reason, /does not count against this work order's stop budget or the Autopilot run's stage budget/);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(context.files.stop, 'utf8')).count, 0);
+  const late = () => wo.stopDecision(context, { env: box.env, review: () => lease.read(open.deadlineMs) });
+  for (let index = 0; index < 3; index += 1) {
+    const decided = late();
+    assert.equal(decided.decision, 'block');
+    assert.match(decided.reason, /3 stops in a row without progress/);
+  }
+  assert.deepEqual(blockedSends(box), []);
+  const closed = late();
+  assert.equal(closed.decision, 'allow');
+  assert.equal(closed.cancelRun, RUN);
+  assert.equal(box.fake().order.status, 'blocked');
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a lease read that fails never counts as progress, never resets the count and keeps the recorded progress key', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const lease = reviewLease(box, 1);
+  lease.bind('bug-hunter');
+  lease.report('bug-hunter');
+  const progress = lease.read().progress;
+  const seen = () => JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+  assert.equal(wo.stopDecision(context, { env: box.env, review: () => null }).decision, 'block');
+  assert.deepEqual([seen().count, seen().seen], [1, `${RUN}:9`]);
+  assert.equal(wo.stopDecision(context, { env: box.env, review: () => lease.read() }).decision, 'block');
+  assert.deepEqual([seen().count, seen().seen], [2, `${RUN}:9#${progress}`]);
+  const thrown = wo.stopDecision(context, { env: box.env, review: () => { throw new Error('lease store unreadable'); } });
+  assert.equal(thrown.decision, 'block');
+  assert.deepEqual([seen().count, seen().seen], [3, `${RUN}:9#${progress}`]);
+  assert.equal(wo.stopDecision(context, { env: box.env, review: () => ({ progress: -1, inFlight: 4 }) }).decision, 'allow');
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('a terminal run and a session without a run never read the lease store, and an empty store keeps the three-stop budget', () => {
+  for (const stage of ['BLOCKED', 'CANCELLED', null]) {
+    const box = sandbox();
+    const context = startedContext(box);
+    if (stage) {
+      wo.markerRun(context, RUN);
+      writeRun(box, stage, DONE_LEDGER.slice(0, 4));
+    }
+    let reads = 0;
+    const review = () => {
+      reads += 1;
+      return { progress: reads, inFlight: 1, deadlineMs: Date.now() + 60000 };
+    };
+    for (let index = 0; index < 3; index += 1) assert.equal(wo.stopDecision(context, { env: box.env, review }).decision, 'block', String(stage));
+    assert.equal(wo.stopDecision(context, { env: box.env, review }).decision, 'allow', String(stage));
+    assert.equal(reads, 0, String(stage));
+  }
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'GATES', DONE_LEDGER.slice(0, 4));
+  const binding = {
+    sessionKey: box.sessionKey,
+    projectRoot: box.project,
+    pluginRoot: path.resolve(__dirname, '..', '..'),
+    pluginData: box.root,
+    context: { session_id_hash: `sha256:${'1'.repeat(64)}`, runtime_digest: `sha256:${'2'.repeat(64)}` },
+  };
+  const review = () => LEASE.leaseProgress(binding);
+  for (let index = 0; index < 3; index += 1) assert.equal(wo.stopDecision(context, { env: box.env, review }).decision, 'block');
+  assert.equal(JSON.parse(fs.readFileSync(context.files.stop, 'utf8')).seen, `${RUN}:4#0`);
+  assert.equal(wo.stopDecision(context, { env: box.env, review }).decision, 'allow');
+  assert.equal(fs.existsSync(path.join(box.root, 'review-evidence')), false);
+});
+
+test('the lease reader sums every revision, counts only bound or retrying seats before the clamped deadline, ignores a lease dated ahead of the clock and refuses a foreign entry', () => {
+  const box = sandbox();
+  startedContext(box);
+  const lease = reviewLease(box, 3);
+  assert.deepEqual(lease.read(), { progress: 1, inFlight: 0, deadlineMs: null });
+  lease.bind('bug-hunter');
+  lease.bind('security');
+  const bound = lease.read();
+  assert.deepEqual([bound.progress, bound.inFlight], [3, 2]);
+  lease.report('bug-hunter');
+  const rejected = LEASE.storeWorkerResult({ agent_type: 'zensu:pr-review-worker', agent_id: 'agent-security', last_assistant_message: 'not json' }, lease.binding);
+  assert.equal(rejected.action, 'block');
+  const retrying = lease.read();
+  assert.deepEqual([retrying.progress, retrying.inFlight], [5, 1]);
+  const records = path.join(lease.pluginData, 'review-evidence', 'v1', 'records', box.sessionKey);
+  const file = path.join(records, `${lease.leaseId}.json`);
+  const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const created = record.created_at_ms;
+  assert.equal(retrying.deadlineMs, created + LEASE.MAX_TTL_SECONDS * 1000);
+  fs.writeFileSync(file, `${JSON.stringify(LEASE.sealRecord({ ...record, expires_at_ms: created + 10 * LEASE.MAX_TTL_SECONDS * 1000 }))}\n`, { mode: 0o600 });
+  const stretched = lease.read(created + LEASE.MAX_TTL_SECONDS * 1000 - 1);
+  assert.deepEqual([stretched.inFlight, stretched.deadlineMs], [1, created + LEASE.MAX_TTL_SECONDS * 1000]);
+  assert.equal(lease.read(created + LEASE.MAX_TTL_SECONDS * 1000).inFlight, 0);
+  const datedAhead = (offset) => {
+    const shift = Date.now() + offset - created;
+    const workers = Object.fromEntries(Object.entries(record.workers).map(([agentId, worker]) => [agentId, {
+      ...worker,
+      bound_at_ms: worker.bound_at_ms + shift,
+      ...(worker.finished_at_ms === undefined ? {} : { finished_at_ms: worker.finished_at_ms + shift }),
+    }]));
+    const dated = { ...record, workers, created_at_ms: created + shift, expires_at_ms: created + shift + 600000 };
+    fs.writeFileSync(file, `${JSON.stringify(LEASE.sealRecord(dated))}\n`, { mode: 0o600 });
+  };
+  datedAhead(10 * 60 * 1000);
+  assert.deepEqual(lease.read(), { progress: 5, inFlight: 0, deadlineMs: null });
+  datedAhead(30 * 1000);
+  assert.equal(lease.read().inFlight, 1);
+  fs.writeFileSync(path.join(records, LEASE.temporaryRecordName(lease.leaseId)), '{');
+  assert.equal(lease.read().progress, 5);
+  fs.writeFileSync(path.join(records, 'notes.txt'), 'x');
+  assert.throws(() => lease.read(), /unexpected entry/);
+});
+
+test('the lease reader refuses a store directory that is a symlink, not a directory or open to other users', () => {
+  const box = sandbox();
+  startedContext(box);
+  const lease = reviewLease(box, 1);
+  const v1 = path.join(lease.pluginData, 'review-evidence', 'v1');
+  const records = path.join(v1, 'records', box.sessionKey);
+  assert.equal(lease.read().progress, 1);
+  fs.chmodSync(v1, 0o750);
+  assert.throws(() => lease.read(), /permissions are unsafe/);
+  fs.chmodSync(v1, 0o700);
+  const moved = path.join(box.root, 'records-elsewhere');
+  fs.renameSync(records, moved);
+  fs.symlinkSync(moved, records);
+  assert.throws(() => lease.read(), /private lease path is unsafe/);
+  fs.unlinkSync(records);
+  fs.writeFileSync(records, '{}');
+  assert.throws(() => lease.read(), /private lease path is unsafe/);
+  fs.unlinkSync(records);
+  assert.deepEqual(lease.read(), { progress: 0, inFlight: 0, deadlineMs: null });
+});
+
+test('the lease reader sums every lease of the session and keeps the later deadline, and a new lease counts as progress', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const first = reviewLease(box, 1);
+  first.bind('bug-hunter');
+  first.report('bug-hunter');
+  const records = path.join(first.pluginData, 'review-evidence', 'v1', 'records', box.sessionKey);
+  const recordOf = (leaseId) => JSON.parse(fs.readFileSync(path.join(records, `${leaseId}.json`), 'utf8'));
+  const past = Date.now() - 2 * LEASE.MAX_TTL_SECONDS * 1000;
+  fs.writeFileSync(path.join(records, `${first.leaseId}.json`), `${JSON.stringify(LEASE.sealRecord({ ...recordOf(first.leaseId), created_at_ms: past, expires_at_ms: past + 600000 }))}\n`, { mode: 0o600 });
+  const stop = () => wo.stopDecision(context, { env: box.env, review: () => first.read() });
+  const stopState = () => {
+    const state = JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+    return [state.count, state.seen];
+  };
+  assert.equal(stop().decision, 'block');
+  assert.equal(stop().decision, 'block');
+  assert.deepEqual(stopState(), [2, `${RUN}:9#3`]);
+  const workspace = path.join(box.root, 'review-workspace');
+  const second = LEASE.createLease(first.binding, {
+    kind: 'pr-review',
+    filesManifest: path.join(workspace, 'FILES.txt'),
+    safeSubtreesManifest: path.join(workspace, 'ROOTS.txt'),
+    nameStatusFile: path.join(workspace, 'NAME-STATUS.txt'),
+    changedProductionFilesFile: path.join(workspace, 'CHANGED.txt'),
+    maxWorkers: 2,
+    ttlSeconds: 600,
+  });
+  assert.equal(recordOf(first.leaseId).status, 'closed');
+  assert.equal(stop().decision, 'block');
+  assert.deepEqual(stopState(), [1, `${RUN}:9#5`]);
+  const planWorkspace = path.join(box.root, 'plan-workspace');
+  fs.mkdirSync(planWorkspace, { mode: 0o700 });
+  fs.chmodSync(planWorkspace, 0o700);
+  fs.writeFileSync(path.join(planWorkspace, 'FILES.txt'), `${path.join(box.project, 'src', 'app.js')}\n`);
+  fs.writeFileSync(path.join(planWorkspace, 'ROOTS.txt'), `${path.join(box.project, 'src')}\n`);
+  const plan = LEASE.createLease(first.binding, {
+    kind: 'plan-review',
+    filesManifest: path.join(planWorkspace, 'FILES.txt'),
+    safeSubtreesManifest: path.join(planWorkspace, 'ROOTS.txt'),
+    maxWorkers: 1,
+    ttlSeconds: 1200,
+  });
+  LEASE.bindWorker({ agent_type: 'zensu:pr-review-worker', agent_id: 'agent-second-1' }, first.binding);
+  LEASE.bindWorker({ agent_type: 'zensu:pr-review-worker', agent_id: 'agent-second-2' }, first.binding);
+  LEASE.bindWorker({ agent_type: 'zensu:plan-review-worker', agent_id: 'agent-plan-1' }, first.binding);
+  const later = recordOf(plan).expires_at_ms;
+  assert.ok(later > recordOf(second).expires_at_ms);
+  assert.deepEqual(first.read(), { progress: 9, inFlight: 3, deadlineMs: later });
+  const waiting = stop();
+  assert.equal(waiting.decision, 'block');
+  assert.match(waiting.reason, /3 review seats of this session are still in flight/);
+  assert.ok(waiting.reason.includes(new Date(later).toISOString()), waiting.reason);
+  assert.deepEqual(stopState(), [0, `${RUN}:9#9`]);
+});
+
+test('a lease whose review workspace is gone fails the read, so its seat holds no wait and every stop counts', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.markerRun(context, RUN);
+  writeRun(box, 'TEAM_REVIEW', DONE_LEDGER.slice(0, 9));
+  const lease = reviewLease(box, 1);
+  lease.bind('bug-hunter');
+  assert.equal(lease.read().inFlight, 1);
+  const workspace = path.join(box.root, 'review-workspace');
+  fs.renameSync(workspace, `${workspace}-moved`);
+  assert.throws(() => lease.read(), /workspace/);
+  const stop = () => wo.stopDecision(context, { env: box.env, review: () => lease.read() });
+  for (let index = 0; index < 3; index += 1) {
+    const decided = stop();
+    assert.equal(decided.decision, 'block');
+    assert.match(decided.reason, /3 stops in a row without progress/);
+  }
+  const state = JSON.parse(fs.readFileSync(context.files.stop, 'utf8'));
+  assert.deepEqual([state.count, state.seen], [3, `${RUN}:9`]);
+  const closed = stop();
+  assert.equal(closed.decision, 'allow');
+  assert.equal(closed.cancelRun, RUN);
+  assert.equal(box.fake().order.blocked_kind, 'worker_error');
+});
+
+test('the hook-side lease reader binds the payload under the executing plugin root, reads once more after a failure and answers nothing when the binding or both reads fail', (t) => {
+  assert.equal(LEASE.hookLeaseProgress({}, { env: {} }), null);
+  const hookSession = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'claude-hook-session-v1.js'));
+  let binding = { sessionKey: 'scv1_stub' };
+  const binds = [];
+  t.mock.method(hookSession, 'resolveHookSession', (payload, env) => {
+    binds.push({ payload, root: env.CLAUDE_PLUGIN_ROOT, marker: env.MARKER });
+    return binding;
+  });
+  const answers = [];
+  const read = (bound, now) => {
+    assert.equal(bound, binding);
+    const next = answers.shift();
+    if (next instanceof Error) throw next;
+    return { ...next, now };
+  };
+  answers.push(new Error('busy'), { progress: 4, inFlight: 1, deadlineMs: 9 });
+  assert.deepEqual(LEASE.hookLeaseProgress({ session_id: 's' }, { env: { MARKER: 'm' }, now: () => 7, read }), { progress: 4, inFlight: 1, deadlineMs: 9, now: 7 });
+  assert.deepEqual(binds, [{ payload: { session_id: 's' }, root: path.resolve(__dirname, '..', '..'), marker: 'm' }]);
+  answers.push(new Error('busy'), new Error('busy'), { progress: 1, inFlight: 0, deadlineMs: null });
+  assert.equal(LEASE.hookLeaseProgress('not a payload', { env: {}, now: () => 7, read }), null);
+  assert.equal(answers.length, 1);
+  assert.deepEqual(binds[1].payload, {});
+  const box = sandbox();
+  startedContext(box);
+  const lease = reviewLease(box, 1);
+  lease.bind('bug-hunter');
+  binding = lease.binding;
+  const expected = lease.read();
+  assert.equal(expected.inFlight, 1);
+  assert.deepEqual(LEASE.hookLeaseProgress({ session_id: 's' }, { env: {} }), expected);
+});
+
+test('the wait mode of the evidence hook prints the seats in flight and the lease deadline only while a seat is in flight', () => {
+  const evidenceHook = path.join(__dirname, '..', '..', 'hooks', 'lib', 'review-evidence-hook-v1.js');
+  const { waitLine } = require(evidenceHook);
+  assert.equal(waitLine({ progress: 9, inFlight: 2, deadlineMs: Date.UTC(2026, 9, 21, 20, 0, 0) }), '2\t2026-10-21T20:00:00.000Z\n');
+  const quiet = [
+    null,
+    { progress: 9, inFlight: 0, deadlineMs: null },
+    { progress: 9, inFlight: 1, deadlineMs: null },
+    { progress: 9, inFlight: -1, deadlineMs: 5 },
+    { progress: 9, inFlight: 1.5, deadlineMs: 5 },
+    { progress: 9, inFlight: 1, deadlineMs: 8640000000000001 },
+  ];
+  for (const progress of quiet) assert.equal(waitLine(progress), '', JSON.stringify(progress));
+  const run = (payload) => spawnSync(process.execPath, [evidenceHook, 'wait'], {
+    input: JSON.stringify(payload), encoding: 'utf8', env: { PATH: process.env.PATH },
+  });
+  const refused = run({ hook_event_name: 'SubagentStop', session_id: 'wo-wait-session' });
+  assert.equal(refused.status, 1);
+  assert.equal(refused.stdout, '');
+  const unbound = run({ hook_event_name: 'Stop', session_id: 'wo-wait-session' });
+  assert.equal(unbound.status, 0);
+  assert.equal(unbound.stdout, '');
+});
+
+test('the wait entry answers no seat without binding while the session has no evidence store, and binds once the store exists', (t) => {
+  const hookSession = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'claude-hook-session-v1.js'));
+  const core = require(path.join(__dirname, '..', '..', 'hooks', 'lib', 'session-control-core-v1.js'));
+  const binds = [];
+  t.mock.method(hookSession, 'resolveHookSession', (payload) => {
+    binds.push(payload);
+    throw new Error('unbound');
+  });
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'wo-wait-store-'));
+  t.after(() => fs.rmSync(data, { recursive: true, force: true }));
+  const payload = { hook_event_name: 'Stop', session_id: 'wo-wait-store-session' };
+  assert.deepEqual(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: data } }), { progress: 0, inFlight: 0, deadlineMs: null });
+  assert.equal(binds.length, 0);
+  assert.equal(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: 'relative/data' } }), null);
+  assert.equal(LEASE.hookLeaseWait({ hook_event_name: 'Stop' }, { env: { CLAUDE_PLUGIN_DATA: data } }), null);
+  assert.equal(binds.length, 2);
+  fs.mkdirSync(path.join(data, 'review-evidence', 'v1', 'records', core.sessionKey(payload.session_id)), { recursive: true, mode: 0o700 });
+  assert.equal(LEASE.hookLeaseWait(payload, { env: { CLAUDE_PLUGIN_DATA: data } }), null);
+  assert.equal(binds.length, 3);
+  assert.deepEqual(binds[2], payload);
 });
 
 test('binding answers only for this session\'s order and the push refuses before any write when the lease is stale', () => {
@@ -659,6 +1885,10 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'zensu auth login': 'auth',
     'zensu work approve 1234': 'human-gate',
     'zensu work policy set --plan-approval auto': 'human-gate',
+    'zensu work policy get --product p1': 'order-file',
+    'zensu work list': 'order-file',
+    'zensu work questions --plan p1': 'order-file',
+    'zensu work repositories list --product p1': 'order-file',
     'zensu plan approve abc': 'human-gate',
     'zensu work event 1234 --stage implementing': 'helper-verb',
     'zensu work heartbeat 1234': 'helper-verb',
@@ -676,6 +1906,61 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
     'env -u ZENSU_SESSION_TOKEN zensu work get 1': 'token',
     'export ZENSU_SESSION_TOKEN=abc': 'token',
     'cat /proc/self/environ': 'token',
+    'env -i HOME=x zensu work get 1': 'token',
+    'env - HOME=x zensu products list': 'token',
+    'env --ignore-environment zensu work get 1': 'token',
+    'env -vi zensu work get 1': 'token',
+    'zensu --api-url https://h work event 1 --stage implementing': 'token-host',
+    "zensu --api-url '' work heartbeat 1": 'token-host',
+    'zensu --api-url=https://h work get 1': 'token-host',
+    'ZENSU_API_URL=https://h zensu work get 1': 'token-host',
+    'CLAUDE_PLUGIN_DATA=x ZENSU_API_URL=https://h bash "$WO" --start --order 1': 'token-host',
+    'export ZENSU_API_URL=https://h': 'token-host',
+    'unset ZENSU_API_URL': 'token-host',
+    'env -u ZENSU_API_URL zensu work get 1': 'token-host',
+    "zensu $'work' event 1 --stage ready_for_merge": 'helper-verb',
+    'zensu $"work" heartbeat 1': 'helper-verb',
+    "zensu $'\\x77ork' heartbeat 1": 'helper-verb',
+    "$'git' push origin HEAD": 'push',
+    "gh $'pr' create --fill": 'open-pr',
+    "bash -c -- 'git push'": 'shell-option',
+    "bash -c -e 'zensu work event 1'": 'shell-option',
+    "echo $'\\c'; git push origin HEAD": 'push',
+    "echo $'\\c\\\\'; git push origin HEAD; echo 'x'": 'push',
+    "echo $$'\\'; git push origin HEAD; echo 'x'": 'push',
+    "zensu $'work\\0' heartbeat 1": 'helper-verb',
+    "zensu $'wo\\0x'rk heartbeat 1": 'helper-verb',
+    "$'git\\0' push origin HEAD": 'push',
+    "zensu work$'\\0'x heartbeat 1": 'helper-verb',
+    "echo $'it\\'s'; git push origin HEAD": 'push',
+    "echo $'x\\'; git push origin HEAD #'": 'push',
+    "bash -c +x 'git push origin HEAD'": 'shell-option',
+    "bash -co pipefail 'git push origin HEAD'": 'shell-option',
+    "bash +c 'git push origin HEAD'": 'push',
+    "bash -o pipefail -c 'git push origin HEAD'": 'push',
+    "eval -- 'git push origin HEAD'": 'push',
+    'env -vu ZENSU_SESSION_TOKEN zensu work get 1': 'token',
+    'env -vu ZENSU_API_URL zensu work get 1': 'token-host',
+    'env --ignore-env zensu work get 1': 'token',
+    'env --uns=ZENSU_API_URL zensu work get 1': 'token',
+    "env -S 'git push origin HEAD'": 'push',
+    'env -C . git push origin HEAD': 'push',
+    'env -P /usr/bin git push origin HEAD': 'push',
+    'exec -c zensu work get 1': 'token',
+    'printf -v ZENSU_API_URL %s https://h': 'token-host',
+    'printf -v ZENSU_SESSION_TOKEN %s x': 'token',
+    'read ZENSU_API_URL': 'token-host',
+    'read -r ZENSU_SESSION_TOKEN': 'token',
+    'for ZENSU_API_URL in https://h; do zensu work get 1; done': 'token-host',
+    'declare -n ref=ZENSU_API_URL': 'token-host',
+    'declare -gn ref=ZENSU_SESSION_TOKEN': 'token',
+    'local -n ref=ZENSU_API_URL': 'token-host',
+    'let ZENSU_API_URL=1': 'token-host',
+    'let ZENSU_SESSION_TOKEN++': 'token',
+    "let 'ZENSU_API_URL[0]=1'": 'token-host',
+    'let x=ZENSU_API_URL=1': 'token-host',
+    'let 1,ZENSU_SESSION_TOKEN=1': 'token',
+    'let ++ZENSU_API_URL': 'token-host',
   };
   for (const [command, code] of Object.entries(denied)) {
     const analysis = wo.analyzeBash(command);
@@ -685,8 +1970,11 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
   const allowed = [
     'git status', 'git commit -m "do not git push here"', 'git log --oneline -3', 'printenv PATH', 'set -e',
     'export PATH=/usr/bin:$PATH', 'zensu work get 1234 --json', 'zensu work ask 1234 --category scope --question "Which?" --default-option a',
-    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work policy get', 'gh pr view 7', 'echo hello',
-    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1',
+    'zensu work followup 1234 --title t --rationale r --severity low', 'zensu work events 1234 --json', 'gh pr view 7', 'echo hello',
+    "cat <<'MSG' > /tmp/m\ngit push is a step\nMSG", 'local x=1', 'echo $ZENSU_API_URL', "echo $'a\\tb'", 'env -0 zensu work get 1',
+    'bash scripts/test.sh -race -v', "read -r -d $'\\0' line", 'printf -v line %s x', 'read -r answer', 'for f in a b; do echo $f; done',
+    'bash -lc "git status"', 'local key=ZENSU_API_URL', 'export KEY=ZENSU_API_URL', 'declare name=ZENSU_SESSION_TOKEN',
+    'declare +n ref=ZENSU_API_URL', 'let ZENSU_API_URL_COUNT=5', 'let NO_ZENSU_SESSION_TOKEN=1',
   ];
   for (const command of allowed) assert.equal(wo.analyzeBash(command).deny, null, command);
   assert.equal(wo.analyzeBash('gh pr view 7').forge, true);
@@ -695,10 +1983,89 @@ test('the Bash analysis denies raw forge writes, human-gate verbs and token hand
   assert.equal(wo.analyzeBash('zensu-vcs.sh --pr-state 7').forge, true);
 });
 
+test('the Bash analysis reads the zensu command words as cobra does, so no flag value or empty word hides the noun or the verb', () => {
+  const denied = {
+    'zensu --head-sha abc work confirm-merge 1234': ['human-gate', 'zensu work confirm-merge'],
+    'zensu --reason x plan abandon p1': ['human-gate', 'zensu plan abandon'],
+    'zensu -o x plan approve p1': ['human-gate', 'zensu plan approve'],
+    "zensu '' plan approve p1": ['human-gate', 'zensu plan approve'],
+    'zensu plan --product p1 finalize p1': ['human-gate', 'zensu plan finalize'],
+    'zensu --title t work heartbeat 1234': ['helper-verb', 'zensu work heartbeat'],
+    'zensu --product p1 work list': ['order-file', 'zensu work list'],
+    'zensu work --product p1 policy get': ['order-file', 'zensu work policy get'],
+    'zensu work policy --product p1 set --plan-approval auto': ['human-gate', 'zensu work policy set'],
+    'zensu --x y auth login': ['auth', null],
+    'zensu --json=true plan approve p1': ['human-gate', 'zensu plan approve'],
+    'zensu -vq plan approve p1': ['human-gate', 'zensu plan approve'],
+  };
+  for (const [command, [code, detail]] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, code, command);
+    assert.equal(analysis.deny.detail, detail, command);
+  }
+  for (const command of ['zensu --question q work ask 1234', 'zensu work --category scope ask 1234', 'zensu -- plan approve p1', 'zensu plan -- approve p1']) {
+    assert.equal(wo.analyzeBash(command).deny, null, command);
+  }
+});
+
+test('the Bash analysis denies every plan verb that records a person\'s decision, push and followup included, and passes the plan reads', () => {
+  const denied = {
+    'zensu plan push plan.md': 'zensu plan push',
+    'zensu plan followup accept p1 f1': 'zensu plan followup accept',
+    'zensu plan followup dismiss p1 f1': 'zensu plan followup dismiss',
+    'zensu plan approve p1': 'zensu plan approve',
+    'zensu plan finalize p1': 'zensu plan finalize',
+    'zensu plan abandon p1': 'zensu plan abandon',
+    'zensu plan confirm-merge p1 --head-sha abc': 'zensu plan confirm-merge',
+  };
+  for (const [command, detail] of Object.entries(denied)) {
+    const analysis = wo.analyzeBash(command);
+    assert.ok(analysis.deny, command);
+    assert.equal(analysis.deny.code, 'human-gate', command);
+    assert.equal(analysis.deny.detail, detail, command);
+  }
+  for (const command of ['zensu plan status p1', 'zensu plan list', 'zensu plan followups p1']) {
+    assert.equal(wo.analyzeBash(command).deny, null, command);
+  }
+});
+
+test('the Bash analysis treats the repos alias of zensu work repositories like the full name', () => {
+  const pairs = [
+    ['zensu work repos list --product p1', 'zensu work repositories list --product p1', 'order-file', 'zensu work repositories list'],
+    ['zensu work repos add --product p1 --repository r', 'zensu work repositories add --product p1 --repository r', 'human-gate', 'zensu work repositories add'],
+    ['zensu work repos remove --product p1 --repository r', 'zensu work repositories remove --product p1 --repository r', 'human-gate', 'zensu work repositories remove'],
+  ];
+  for (const [alias, full, code, detail] of pairs) {
+    for (const command of [alias, full]) {
+      const analysis = wo.analyzeBash(command);
+      assert.ok(analysis.deny, command);
+      assert.equal(analysis.deny.code, code, command);
+      assert.equal(analysis.deny.detail, detail, command);
+    }
+  }
+});
+
+test('the Bash analysis stays linear on a long shell flag', () => {
+  const expression = `JSON.stringify(require(${JSON.stringify(MODULE)}).analyzeBash('bash -' + 'c'.repeat(400000) + '1 x'))`;
+  const run = spawnSync(process.execPath, ['-e', `process.stdout.write(${expression});`], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(run.status, 0, run.signal || (run.error && run.error.code) || run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), { deny: null, forge: false });
+  for (const command of ["bash -cx 'git push origin main'", "bash +xc 'git push origin main'"]) {
+    assert.equal(wo.analyzeBash(command).deny.code, 'push', command);
+  }
+});
+
 test('the gate is inert outside work-order mode and denies prompts, chips and raw pushes inside it', () => {
   const payload = (tool, command) => ({ tool_name: tool, tool_input: command === undefined ? {} : { command } });
   assert.equal(wo.gateDecision(null, payload('AskUserQuestion')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__start_session')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__hand_off_to_session')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__move_to_cloud')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session__future_tool')), null);
+  assert.equal(wo.gateDecision(null, payload('mcp__ccd_session_mgmt__send_message')), null);
   assert.equal(wo.gateDecision(null, payload('Bash', 'git push')), null);
+  assert.equal(wo.gateDecision(null, payload('PowerShell', 'git push')), null);
   const box = sandbox();
   const context = startedContext(box);
   for (const tool of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']) {
@@ -706,15 +2073,28 @@ test('the gate is inert outside work-order mode and denies prompts, chips and ra
     assert.equal(decided.code, 'ask', tool);
     assert.match(decided.reason, new RegExp(`zensu work ask ${ORDER}`));
   }
-  const chip = wo.gateDecision(context, payload('mcp__ccd_session__spawn_task'), { env: box.env });
-  assert.match(chip.reason, new RegExp(`zensu work followup ${ORDER}`));
+  for (const tool of ['mcp__ccd_session__spawn_task', 'mcp__ccd_session__start_session', 'mcp__ccd_session__hand_off_to_session', 'mcp__ccd_session__move_to_cloud', 'mcp__ccd_session__future_tool', 'mcp__ccd_session_mgmt__send_message']) {
+    const decided = wo.gateDecision(context, payload(tool), { env: box.env });
+    assert.equal(decided.code, 'chip', tool);
+    assert.match(decided.reason, new RegExp(`zensu work followup ${ORDER}`), tool);
+    assert.match(decided.reason, /a proposed session reaches nobody/, tool);
+    assert.match(decided.reason, /handed off from here, this session moved to the cloud/, tool);
+    assert.match(decided.reason, /moves the order's work out of its lease/, tool);
+  }
+  for (const tool of ['mcp__ccd_session__dismiss_task', 'mcp__ccd_session__mark_chapter', 'mcp__ccd_session__list_start_targets', 'mcp__ccd_session__read_widget_context', 'mcp__ccd_session_mgmt__list_sessions']) {
+    assert.equal(wo.gateDecision(context, payload(tool), { env: box.env }), null, tool);
+  }
   assert.match(wo.gateDecision(context, payload('Bash', 'git push'), { env: box.env }).reason, /zensu-work-order\.sh --push/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
   assert.equal(wo.gateDecision(context, payload('Read'), { env: box.env }), null);
+  const powershell = wo.gateDecision(context, payload('PowerShell', 'Get-ChildItem'), { env: box.env });
+  assert.equal(powershell.code, 'powershell');
+  assert.match(powershell.reason, /judges Bash commands only\. Run the command through the Bash tool\.$/);
   wo.markLost(context, { code: 'stale_attempt', via: 'test', at: Date.now() });
   const lost = wo.gateDecision(context, payload('Bash', 'gh pr view 7'), { env: box.env });
   assert.equal(lost.code, 'lease');
   assert.match(lost.reason, /stale_attempt/);
+  assert.match(lost.reason, /may run any more\. Run zensu-work-order\.sh --finish once and end the session/);
   assert.equal(wo.gateDecision(context, payload('Bash', 'git status'), { env: box.env }), null);
 });
 
@@ -753,6 +2133,150 @@ test('ask continues with the default, and a blocking question ends the session',
   assert.equal(wo.forgeWriteVerdict(context).allowed, false);
 });
 
+test('a call the zensu CLI refuses is sent once and never retried, and a refused heartbeat fences the lease as cli_refused', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const env = { ...box.env, ZENSU_WORK_ORDER_RETRY_BUDGET_MS: '3000' };
+  const eventCalls = () => box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'event').length;
+  const before = eventCalls();
+  box.mutate((state) => { state.failNext = [{ command: 'event', cli: 'unknown flag: --autopilot-stage', times: 20 }]; });
+  const sent = wo.sendEvent(context, ['--stage', 'planning', '--client-event-id', 'zcc-cli-refused-0001'], { env });
+  assert.equal(sent.verdict, wo.VERDICTS.FINAL);
+  assert.equal(wo.describeFailure(sent.failure), 'the zensu CLI refused the call: unknown flag: --autopilot-stage');
+  assert.equal(eventCalls(), before + 1);
+  assert.equal(wo.readState(context.files.lost), null);
+  box.mutate((state) => { state.failNext = [{ command: 'heartbeat', cli: 'unknown flag: --json' }]; });
+  const beat = wo.renew(context, { env, force: true });
+  assert.equal(beat.verdict, wo.VERDICTS.LOST);
+  assert.equal(wo.readState(context.files.lost).code, 'cli_refused');
+  assert.equal(wo.forgeWriteVerdict(context).allowed, false);
+});
+
+test('a helper that meets a CLI refusal names the CLI and its line: exit 3 at --start, exit 8 and no pending send for a question', () => {
+  const box = sandbox();
+  box.seed({ failNext: [{ command: 'get', cli: 'unknown flag: --json' }] });
+  const refusedStart = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(refusedStart.exit, wo.EXIT.NO_CLI, refusedStart.message);
+  assert.equal(refusedStart.message, 'the zensu CLI refused the order read (unknown flag: --json); the session cannot run the order with this zensu CLI');
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'get').length, 1);
+  assert.equal(wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey }), null);
+
+  const asked = sandbox();
+  const context = startedContext(asked);
+  asked.mutate((state) => { state.failNext = [{ command: 'ask', cli: 'unknown flag: --requirement' }]; });
+  const question = wo.ask(context, { env: asked.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' });
+  assert.equal(question.exit, wo.EXIT.REFUSED, question.message);
+  assert.equal(question.message, 'the zensu CLI refused the question (unknown flag: --requirement); continue with your default option, or finish with --reason when the work cannot go on');
+  assert.deepEqual(wo.readState(context.files.outbox).inflight, []);
+  asked.mutate((state) => { state.failNext = [{ command: 'ask', status: 422, code: 'field_not_allowed', message: 'the question names a field Zensu does not take' }]; });
+  const backend = wo.ask(context, { env: asked.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' });
+  assert.equal(backend.exit, wo.EXIT.REFUSED, backend.message);
+  assert.match(backend.message, /^Zensu refused the question \(status 422, code field_not_allowed\): the question names a field Zensu does not take/);
+});
+
+test('ask refuses inputs Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, category: 'technical_choice', question: 'Which queue library should the worker use?', options: ['pg-boss', 'bullmq'], defaultOption: 'pg-boss' };
+  const cases = [
+    [{ defaultOption: 'pg-boss (recommended)' }, /--default-option must repeat one --option verbatim/],
+    [{ category: 'design' }, /--category must be one of clarification/],
+    [{ options: Array.from({ length: 11 }, (_, index) => `option ${index}`), defaultOption: 'option 0' }, /at most 10 times/],
+    [{ options: ['pg-boss', ' pg-boss '] }, /given twice/],
+    [{ options: ['pg-boss', 'x'.repeat(301)] }, /at most 300 bytes/],
+    [{ options: ['pg-boss', ' '] }, /every --option needs text/],
+    [{ requirements: ['AC-1'] }, /must look like AC-001/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.ask(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+});
+
+test('ask takes one requirement id per flag, while the fake splits a comma-joined value as the CLI does', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const refused = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should deleted widgets stay visible?', options: ['no', 'yes'], defaultOption: 'no', requirements: ['AC-001,AC-002'] });
+  assert.equal(refused.exit, wo.EXIT.USAGE);
+  assert.match(refused.message, /one id per flag/);
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'ask').length, 0);
+  const split = wo.runZensu(['work', 'ask', ORDER, '--category', 'clarification', '--question', 'Should deleted widgets stay visible?',
+    '--option', 'no', '--default-option', 'no', '--requirement', 'AC-001,AC-002', '--client-event-id', wo.clientEventId('ask', 'split'), '--json'], { env: box.env });
+  assert.equal(split.exitCode, 0, split.message);
+  assert.deepEqual(box.fake().questions[0].requirement_ids, ['AC-001', 'AC-002']);
+});
+
+test('the fake refuses a question the way the service does', () => {
+  const box = sandbox();
+  startedContext(box);
+  const ask = (extra) => wo.runZensu(['work', 'ask', ORDER, '--category', 'technical_choice', '--question', 'Which queue library should the worker use?',
+    '--client-event-id', wo.clientEventId('ask', JSON.stringify(extra)), ...extra, '--json'], { env: box.env });
+  const cases = [
+    [[...Array.from({ length: 11 }, (_, index) => ['--option', `option ${index}`]).flat(), '--default-option', 'option 0'], 'invalid_options'],
+    [['--option', 'a', '--option', 'a', '--default-option', 'a'], 'invalid_options'],
+    [['--option', 'x'.repeat(301), '--default-option', 'x'.repeat(301)], 'content_not_allowed'],
+    [['--option', 'a', '--option', 'b', '--default-option', 'c'], 'invalid_default'],
+    [['--option', 'a', '--default-option', 'a', '--requirement', 'AC-1'], 'invalid_requirements'],
+  ];
+  for (const [extra, code] of cases) {
+    const outcome = ask(extra);
+    assert.equal(outcome.status, 422, code);
+    assert.equal(outcome.code, code);
+  }
+  const category = wo.runZensu(['work', 'ask', ORDER, '--category', 'design', '--question', 'Which queue?', '--default-option', 'a', '--json'], { env: box.env });
+  assert.equal(category.code, 'invalid_category');
+  assert.equal(box.fake().questions.length, 0);
+});
+
+test('a question asked again as blocking is a new question, and only a blocking scope question blocks with spec_change', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const scope = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', options: ['no', 'yes'], defaultOption: 'no' });
+  assert.equal(scope.exit, wo.EXIT.OK, scope.message);
+  assert.equal(scope.value.ended, false);
+  assert.equal(box.fake().order.status, 'claimed');
+  const escalated = wo.ask(context, { env: box.env, category: 'scope', question: 'Should archived widgets be listed too?', blocking: true });
+  assert.equal(escalated.exit, wo.EXIT.ENDED, escalated.message);
+  assert.equal(escalated.value.replay, false);
+  assert.equal(box.fake().questions.length, 2);
+  assert.equal(box.fake().order.blocked_kind, 'spec_change');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:spec_change');
+});
+
+test('a question past the order limit escalates the order and ends the session', () => {
+  const box = sandbox();
+  const context = startedContext(box, { policy: { plan_approval: 'auto', lease_minutes: 30, max_questions_per_order: 1, max_order_runtime_minutes: 240 } });
+  const first = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list paginate?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(first.exit, wo.EXIT.OK, first.message);
+  const second = wo.ask(context, { env: box.env, category: 'clarification', question: 'Should the list sort by name?', options: ['yes', 'no'], defaultOption: 'yes' });
+  assert.equal(second.exit, wo.EXIT.ENDED, second.message);
+  assert.equal(box.fake().order.blocked_kind, 'escalated');
+  assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
+});
+
+test('a decision a person made for the whole plan reaches the model as a plan-wide decision, and heartbeats carry only this order', () => {
+  const box = sandbox();
+  box.seed({
+    questions: [
+      { id: 'q-sibling', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'plan', category: 'product_decision', question: 'Which currency do prices use?', answer: 'Prices are in euro across the plan.', status: 'answered' },
+      { id: 'q-sibling-local', work_plan_id: '11111111-1111-4111-8111-111111111111', work_order_id: '33333333-3333-4333-8333-333333333333', scope: 'order', category: 'clarification', question: 'Which table holds sizes?', answer: 'The sizes table.', status: 'answered' },
+    ],
+  });
+  const started = wo.start({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey, orderId: ORDER });
+  assert.equal(started.exit, wo.EXIT.OK, started.message);
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const beat = wo.renew(context, { env: box.env, force: true });
+  assert.deepEqual(beat.answers, []);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Prices are in euro across the plan/);
+  assert.doesNotMatch(update.additionalContext, /sizes table/);
+  assert.doesNotMatch(update.additionalContext, /this order asked earlier/);
+  assert.equal(wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env }).additionalContext, null);
+});
+
 test('followup files once per title and the CLI parser collects repeated flags', () => {
   const box = sandbox();
   const context = startedContext(box);
@@ -764,6 +2288,48 @@ test('followup files once per title and the CLI parser collects repeated flags',
     { option: ['a', 'b'], blocking: true, question: 'q', requirement: ['AC-001'] });
 });
 
+test('followup refuses inputs the CLI or Zensu would refuse before it runs the CLI', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const base = { env: box.env, title: 'Add an index on widgets.owner_id', rationale: 'The list query scans the table.', severity: 'medium' };
+  const cases = [
+    [{ severity: 'major' }, /--severity must be one of low, medium, high, critical/],
+    [{ paths: ['src/auth/'] }, /clean relative file path/],
+    [{ paths: ['./src/a.ts'] }, /clean relative file path/],
+    [{ paths: ['src/**'] }, /clean relative file path/],
+    [{ paths: Array.from({ length: 21 }, (_, index) => `src/file${index}.ts`) }, /at most 20 times/],
+    [{ title: 'x'.repeat(201) }, /--title holds at most 200 bytes/],
+  ];
+  for (const [overrides, rule] of cases) {
+    const result = wo.followup(context, { ...base, ...overrides });
+    assert.equal(result.exit, wo.EXIT.USAGE, JSON.stringify(overrides).slice(0, 80));
+    assert.match(result.message, rule);
+  }
+  assert.equal(box.calls().filter((argv) => argv[0] === 'work' && argv[1] === 'followup').length, 0);
+  const filed = wo.followup(context, { ...base, paths: ['src/widgets/list.ts', '.github/workflows/ci.yml'] });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+});
+
+test('a refused question or follow-up names the rule Zensu gave and what to shorten', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  box.mutate((state) => { state.failNext = [{ command: 'followup', status: 422, code: 'content_not_allowed', message: 'content_not_allowed: rationale: too_long; send metadata and short prose only, never code, commands, logs or diffs', times: 1 }]; });
+  const followup = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'The list is read on every request.', severity: 'low' });
+  assert.equal(followup.exit, wo.EXIT.REFUSED);
+  assert.match(followup.message, /content_not_allowed: rationale: too_long/);
+  assert.match(followup.message, /shorten rationale and file it again/);
+  const asked = wo.ask(context, { env: box.env, category: 'technical_choice', question: 'git checkout the old branch first?', options: ['yes', 'no'], defaultOption: 'no' });
+  assert.equal(asked.exit, wo.EXIT.REFUSED);
+  assert.match(asked.message, /question: command_line/);
+  assert.match(asked.message, /rewrite it as plain prose and ask again/);
+  const filed = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'The list is read on every request.', severity: 'low' });
+  assert.equal(filed.exit, wo.EXIT.OK, filed.message);
+  const refiled = wo.followup(context, { env: box.env, title: 'Cache the widget list', rationale: 'npm install fails on the list page', severity: 'low' });
+  assert.equal(refiled.exit, wo.EXIT.REFUSED, refiled.message);
+  assert.match(refiled.message, /rationale: command_line/);
+  assert.equal(box.fake().followups.length, 1);
+});
+
 test('the post-tool update hands answers over once and ends the session on a blocked direct ask', () => {
   const box = sandbox();
   const context = startedContext(box);
@@ -773,6 +2339,11 @@ test('the post-tool update hands answers over once and ends the session on a blo
   assert.match(first.additionalContext, /active ones only/);
   const second = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
   assert.equal(second.additionalContext, null);
+  const escalated = { stdout: JSON.stringify({ question: { id: 'q-3', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
+  const powershellAsk = wo.postToolUpdate(context, { tool_name: 'PowerShell', tool_input: { command: `zensu work ask ${ORDER} --category scope --question "x" --blocking --json` }, tool_response: escalated }, { env: box.env });
+  assert.equal(powershellAsk.cancelRun, null);
+  assert.equal(powershellAsk.additionalContext, null);
+  assert.equal(fs.existsSync(context.files.ended), false);
   wo.markerRun(context, RUN);
   writeRun(box, 'TDD_RUNNING', DONE_LEDGER.slice(0, 3));
   const response = { stdout: JSON.stringify({ question: { id: 'q-2', status: 'awaiting_human' }, order: { id: ORDER, status: 'blocked', blocked_kind: 'escalated' }, escalated: true }) };
@@ -782,11 +2353,140 @@ test('the post-tool update hands answers over once and ends the session on a blo
   assert.equal(wo.readState(context.files.ended).kind, 'blocked:escalated');
 });
 
+test('an automatic answer a person overturns reaches the model again as a replacement, and an unchanged answer stays deduplicated', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  const t1 = '2026-10-14T10:00:00.000Z';
+  const t2 = '2026-10-14T11:00:00.000Z';
+  const automatic = { id: 'q1', category: 'technical_choice', question: 'Which store?', status: 'auto_answered', answer: 'A', answered_at: t1 };
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 1);
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 0);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['A']);
+  assert.equal(wo.recordAnswers(context, [automatic]).length, 0);
+  const overturn = { ...automatic, status: 'answered', answer: 'B', answered_at: t2, overturned_at: t2 };
+  const added = wo.recordAnswers(context, [overturn]);
+  assert.deepEqual(added.map((entry) => [entry.id, entry.answer, entry.overturnedAt]), [['q1', 'B', t2]]);
+  assert.equal(wo.recordAnswers(context, [overturn]).length, 0);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /Answer: "B"/);
+  assert.match(update.additionalContext, /replaced the automatic answer Zensu gave to a question this order asked earlier, so that automatic answer no longer holds/);
+  assert.doesNotMatch(update.additionalContext, /Answer: "A"/);
+  assert.doesNotMatch(update.additionalContext, /keep the default you continued with/);
+  assert.equal(wo.recordAnswers(context, [overturn]).length, 0);
+  assert.equal(wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env }).additionalContext, null);
+});
+
+test('a changed answer replaces its pending entry, an answer without answered_at is keyed by its text, and a replaced plan-wide decision keeps the plan-wide wording', () => {
+  const box = sandbox();
+  const context = startedContext(box);
+  wo.recordAnswers(context, [{ id: 'q1', question: 'Which store?', status: 'auto_answered', answer: 'A', answered_at: 't1' }]);
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', question: 'Which store?', status: 'answered', answer: 'B', answered_at: 't2', overturned_at: 't2' }]).length, 1);
+  assert.deepEqual(wo.readState(context.files.answers).pending.map((entry) => [entry.id, entry.answer]), [['q1', 'B']]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['B']);
+  const textKey = (text) => `sha256:${crypto.createHash('sha256').update(text, 'utf8').digest('hex')}`;
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 1);
+  assert.equal(wo.readState(context.files.answers).pending[0].version, textKey('C'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 0);
+  wo.takePendingAnswers(context);
+  assert.equal(wo.readState(context.files.answerKeys).keys.q2, textKey('C'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q2', answer: 'C' }]).length, 0);
+  assert.deepEqual(wo.recordAnswers(context, [{ id: 'q2', answer: 'D' }]).map((entry) => entry.answer), ['D']);
+  wo.takePendingAnswers(context);
+  wo.recordAnswers(context, [{ id: 'p1', category: 'product_decision', question: 'Which currency?', status: 'answered', answer: 'Euro.', answered_at: 't3', overturned_at: 't3', planWide: true }]);
+  const update = wo.postToolUpdate(context, { tool_name: 'Read', tool_input: {} }, { env: box.env });
+  assert.match(update.additionalContext, /decided these questions for the whole work plan/);
+  assert.match(update.additionalContext, /Answer: "Euro\." A person replaced the automatic answer Zensu gave to this question, so that automatic answer no longer holds\./);
+  assert.doesNotMatch(update.additionalContext, /this order asked earlier/);
+});
+
+test('an answers file an older runtime wrote keeps its meaning, an id it delivered takes the next key without being handed over again, and the delivered list stays bounded', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const older = Array.from({ length: 498 }, (_, index) => `old-${index}`);
+  wo.writeState(box.project, files.answers, { delivered: [...older, 'q3', 'q1'], pending: [{ id: 'q2', category: null, question: 'Which queue?', answer: 'The existing one.', status: 'answered', planWide: false }] });
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'A', answered_at: 't1' }]).length, 0);
+  assert.equal(wo.readState(files.answerKeys).keys.q1, 't1');
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'A', answered_at: 't1' }]).length, 0);
+  assert.equal(wo.recordAnswers(context, [{ id: 'q3', answer: 'C', answered_at: 't5', overturned_at: 't5' }]).length, 0);
+  wo.recordAnswers(context, [{ id: 'q2', answer: 'The existing one.', answered_at: 't2' }]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), ['q2']);
+  const stored = wo.readState(files.answers);
+  assert.equal(stored.delivered.length, 500);
+  assert.deepEqual(stored.delivered.slice(0, 2), ['old-1', 'old-2']);
+  assert.deepEqual(stored.delivered.slice(-2), ['q1', 'q2']);
+  assert.deepEqual(Object.keys(stored).sort(), ['delivered', 'pending', 'schemaVersion']);
+  assert.deepEqual(wo.readState(files.answerKeys).keys, { q1: 't1', q2: 't2', q3: 't5' });
+  assert.ok(stored.delivered.every((id) => typeof id === 'string'));
+  assert.equal(wo.recordAnswers(context, [{ id: 'q1', answer: 'B', answered_at: 't3', overturned_at: 't3' }]).length, 1);
+  const pending = wo.readState(files.answers).pending;
+  assert.deepEqual(pending.map((entry) => [entry.id, entry.category, entry.question, entry.answer, entry.status, entry.planWide]), [['q1', null, null, 'B', null, false]]);
+});
+
+test('a key this runtime recorded survives an older runtime rewriting the answers file, so a later overturn still reaches the model once', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const overturn = { id: 'q1', answer: 'B', status: 'answered', answered_at: 't2', overturned_at: 't2' };
+  const queued = { id: 'q2', answer: 'The existing one.', status: 'answered', answered_at: 't3' };
+  wo.recordAnswers(context, [{ id: 'q1', answer: 'A', status: 'auto_answered', answered_at: 't1' }]);
+  wo.takePendingAnswers(context);
+  wo.writeState(box.project, files.answers, { delivered: ['q1'], pending: [{ id: 'q2', category: null, question: 'Which queue?', answer: 'The existing one.', status: 'answered', planWide: false }] });
+  assert.deepEqual(wo.recordAnswers(context, [overturn, queued]).map((entry) => [entry.id, entry.answer]), [['q1', 'B'], ['q2', 'The existing one.']]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), ['q1', 'q2']);
+  wo.writeState(box.project, files.answers, { delivered: ['q1', 'q2', 'q1', 'q2'], pending: [] });
+  assert.equal(wo.recordAnswers(context, [overturn, queued]).length, 0);
+  assert.deepEqual(wo.takePendingAnswers(context), []);
+});
+
+test('an overturn the pending bound pushes out is queued again by the next heartbeat', () => {
+  const box = sandbox();
+  const files = wo.sessionFiles(box.project, box.sessionKey);
+  wo.writeState(box.project, files.marker, { sessionKey: box.sessionKey, clientSessionKey: box.sessionKey, orderId: ORDER, attempt: 1 });
+  const context = wo.loadContext({ env: box.env, projectRoot: box.project, sessionKey: box.sessionKey });
+  const overturn = { id: 'q1', answer: 'B', status: 'answered', answered_at: 't2', overturned_at: 't2' };
+  const flood = Array.from({ length: 50 }, (_, index) => ({ id: `n${index}`, answer: `N${index}`, status: 'answered', answered_at: 'tn' }));
+  wo.recordAnswers(context, [{ id: 'q1', answer: 'A', status: 'auto_answered', answered_at: 't1' }]);
+  wo.takePendingAnswers(context);
+  wo.recordAnswers(context, [overturn, ...flood]);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.id), flood.map((entry) => entry.id));
+  assert.deepEqual(wo.recordAnswers(context, [overturn, ...flood]).map((entry) => entry.answer), ['B']);
+  assert.deepEqual(wo.takePendingAnswers(context).map((entry) => entry.answer), ['B']);
+  assert.equal(wo.recordAnswers(context, [overturn, ...flood]).length, 0);
+});
+
 test('the plan summary carries no markup, command line or control character', () => {
   const summary = wo.planSummary('# Plan\n\n```bash\ngit push\n```\n- **AC-001** `widgets` render\n<!-- hidden -->\u0007bell');
   assert.ok(!/[`*#<>\u0000-\u001f]/.test(summary), summary);
   assert.ok(summary.length <= 400);
   assert.match(summary, /^Implementation plan\./);
+  const { proseViolation } = require(FAKE);
+  for (const plan of [
+    '# Plan: Highlight <code> blocks\nWrap logs in <pre> tags.\nTraceback (most recent call last) stays visible.',
+    'Exception in thread "main" is logged\u2028goroutine 7 [running]\u0085panic: boom',
+    'npm install x\n$ make\n- git push origin main\n    indented\n    twice\n    thrice',
+    'diff --git a/x b/x\n@@ -1,2 +1,2 @@\n--- a/x\n+++ b/x',
+  ]) {
+    const text = wo.planSummary(plan);
+    assert.equal(proseViolation(text), null, text);
+    assert.doesNotMatch(text, /<(pre|code)|Traceback \(|Exception in thread "|goroutine \d+ \[/);
+  }
+});
+
+test('the fake guards prose with the service rules in both directions and with the per-field caps', () => {
+  const { proseViolation } = require(FAKE);
+  for (const text of ['pnpm install fails', '$ make', '<code>x</code>', 'Traceback (most recent call last)', '- npm install x', 'Run `git push --force` now', 'C:\\> dir']) {
+    assert.notEqual(proseViolation(text), null, text);
+  }
+  for (const text of ['go ahead with the default', 'node version 20', 'make test fails', 'Use ``` fences in docs', 'make sure the index exists']) {
+    assert.equal(proseViolation(text), null, text);
+  }
+  assert.equal(proseViolation('x'.repeat(201), 200), 'too_long');
+  assert.equal(proseViolation('x'.repeat(301), 300), 'too_long');
+  assert.equal(proseViolation('tab\there', 300), null);
+  assert.equal(proseViolation('bell\u0007', 300), 'control_characters');
 });
 
 test('the order-bound review key matches the state library helper and differs per order and head', () => {

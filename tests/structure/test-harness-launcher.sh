@@ -85,6 +85,7 @@ export FAKE_ZENSU_CALLS="$SBOX/calls.jsonl"
 export ZENSU_WORK_ORDER_RETRY_MS=1
 export ZENSU_WORK_ORDER_RETRY_BUDGET_MS=50
 export ZENSU_SESSION_TOKEN="zst_fake_session_token"
+export ZENSU_API_URL="http://127.0.0.1:9"
 export ZENSU_LAUNCHER_TICK_MS=100
 export ZENSU_LAUNCHER_STOP_GRACE_MS=2000
 
@@ -96,6 +97,7 @@ const fs = require('fs');
 const mode = process.env.FAKE_CLAUDE_MODE || 'success';
 if (process.env.FAKE_CLAUDE_ARGV) fs.writeFileSync(process.env.FAKE_CLAUDE_ARGV, JSON.stringify(process.argv.slice(2)));
 if (process.env.FAKE_CLAUDE_PID) fs.writeFileSync(process.env.FAKE_CLAUDE_PID, String(process.pid));
+if (process.env.FAKE_CLAUDE_ENV) fs.writeFileSync(process.env.FAKE_CLAUDE_ENV, String(process.env.CLAUDE_CODE_USE_POWERSHELL_TOOL));
 const sessionId = process.argv[process.argv.indexOf('--session-id') + 1];
 const line = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 line({ type: 'system', subtype: 'init', cwd: process.cwd(), session_id: sessionId, tools: ['Bash'], model: 'fake' });
@@ -151,7 +153,8 @@ reap() {
   wait "$launcher_pid"
 }
 
-FAKE_CLAUDE_MODE=success FAKE_CLAUDE_ARGV="$SBOX/argv.json" launch "$SBOX/success.out" --permission-mode acceptEdits -- --model fake-model
+FAKE_CLAUDE_MODE=success FAKE_CLAUDE_ARGV="$SBOX/argv.json" FAKE_CLAUDE_ENV="$SBOX/powershell-env.txt" CLAUDE_CODE_USE_POWERSHELL_TOOL=1 \
+  launch "$SBOX/success.out" --permission-mode acceptEdits -- --model fake-model
 RC=$?
 if [ "$RC" -eq 0 ] && json_lines_ok "$SBOX/success.out" \
     'lines.length === 2 && lines[0].event === "session_started" && lines[0].client_session_id === "'"$SID"'" && lines[1].event === "exited" && lines[1].status === "success" && lines[1].exit_code === 0'; then
@@ -179,6 +182,12 @@ if ARGV_FILE="$SBOX/argv.json" SID="$SID" ORDER="$ORDER" node -e '
   check "H4 the launcher starts claude -p with stream-json, --verbose, user settings only, a strict MCP config, the slot options and /zensu:work <id>" PASS
 else
   check "H4 the launcher builds the claude command line ($(cat "$SBOX/argv.json" 2>/dev/null))" FAIL
+fi
+
+if [ "$(cat "$SBOX/powershell-env.txt" 2>/dev/null)" = "0" ]; then
+  check "H4p the launcher starts claude with the PowerShell tool off, even when the worker environment turns it on" PASS
+else
+  check "H4p the launcher starts claude with the PowerShell tool off (got: $(cat "$SBOX/powershell-env.txt" 2>/dev/null))" FAIL
 fi
 
 BEFORE="$(node -e 'process.stdout.write(String(Date.now()))')"

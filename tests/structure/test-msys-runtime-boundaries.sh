@@ -19,10 +19,13 @@ PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
 PR_SCOUT="$ROOT/skills/pr-team-review/references/scout.md"
 STATE_READER_BLOCK="$(awk '/^_tdd_read_validated_state\(\)/,/^}/' "$PHASE")"
 PATH_SAFETY_BLOCK="$(awk '
-  /^_tdd_paths_safe\(\)/ { capture=1 }
+  /^_tdd_paths_safe_argv\(\)/ { capture=1 }
   /^_tdd_path_safe\(\)/ { capture=0 }
   capture
 ' "$PHASE")"
+PATH_SAFETY_MODULE="$ROOT/hooks/lib/state-path-safety-v1.js"
+LOCK_KEEPER_BLOCK="$(sed -n '/^_tdd_core_lock_keeper() {$/,/^}$/p' "$PHASE")"
+LOCKED_RUN_BLOCK="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
 AUTOPILOT_NODE_BLOCK="$(awk '
   /^_autopilot_node\(\)/ { capture=1 }
   /^_autopilot_begin_critical\(\)/ { capture=0 }
@@ -63,18 +66,46 @@ else
   check "shared native-host path boundaries exist" FAIL
 fi
 
-if printf '%s\n' "$PATH_SAFETY_BLOCK" | grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" \
+if printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF "PATH_SAFETY=\"\$_ZENSU_TDD_PATH_SAFETY\" MSYS2_ARG_CONV_EXCL='*' node -e '" \
     && printf '%s\n' "$PATH_SAFETY_BLOCK" \
-      | grep -qF 'const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(1);' \
+      | grep -qF 'require(process.env.PATH_SAFETY).pathsSafeArgv(process.argv.slice(1)) === true ? 0 : 3' \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF "' -- \"\${_ZENSU_TDD_PATHS_ARGV[@]}\"" \
     && printf '%s\n' "$PATH_SAFETY_BLOCK" \
       | grep -qF '"$native_project_root" "$native_temp_root" "$native_home_root"' \
     && printf '%s\n' "$PATH_SAFETY_BLOCK" \
       | grep -qF '"${native_path_args[@]}"' \
     && ! printf '%s\n' "$PATH_SAFETY_BLOCK" \
-      | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT)'; then
+      | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT)' \
+    && [ -f "$PATH_SAFETY_MODULE" ] \
+    && grep -qF 'module.exports = { pathsSafe, pathsSafeArgv };' "$PATH_SAFETY_MODULE" \
+    && ! grep -Eq 'process\.(env|argv)' "$PATH_SAFETY_MODULE"; then
   check "path safety transports every pre-rendered native anchor and operand through rewrite-disabled argv" PASS
 else
   check "path safety native argv transport contract" FAIL
+fi
+
+if printf '%s\n' "$LOCK_KEEPER_BLOCK" | grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" \
+    && printf '%s\n' "$LOCK_KEEPER_BLOCK" \
+      | grep -qF 'const [corePath, lockDirectory, resourcePath, safetyPath, ...storage] = process.argv.slice(1);' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF '_tdd_core_lock_keeper \"\$core_path\" \"\$native_lock_directory\" \"\$native_state_file\" \"\$_ZENSU_TDD_PATH_SAFETY\" \"\${storage_argv[@]}\"' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" | grep -qF "if MSYS2_ARG_CONV_EXCL='*' node -e" \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF '"$_ZENSU_TDD_PATH_SAFETY" "${#storage_argv[@]}" "${storage_argv[@]}" "${token_argv[@]}"' \
+    && printf '%s\n' "$LOCK_KEEPER_BLOCK" | grep -qF 'if (safety.pathsSafeArgv(storage) !== true) {' \
+    && printf '%s\n' "$LOCK_KEEPER_BLOCK" \
+      | grep -qF 'safety.pathsSafeArgv(storage) === true ? "READY\n" : "UNSAFE-HELD\n"' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF 'const storageSafe = () => safety.pathsSafeArgv(checks.slice(0, split)) === true;' \
+    && printf '%s\n' "$LOCKED_RUN_BLOCK" \
+      | grep -qF 'const tokenSafe = () => safety.pathsSafeArgv(checks.slice(split)) === true;' \
+    && ! printf '%s\n' "$LOCK_KEEPER_BLOCK$LOCKED_RUN_BLOCK" \
+      | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT|SAFETY|STORAGE)'; then
+  check "the lease processes receive the same rendered path-safety argv through rewrite-disabled argv" PASS
+else
+  check "lease path-safety argv transport contract" FAIL
 fi
 
 if printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \

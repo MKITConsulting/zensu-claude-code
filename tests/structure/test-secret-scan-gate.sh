@@ -72,7 +72,7 @@ WIRING="$(node -e '
     g.matcher === m &&
     (g.hooks || []).some((x) => typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1)
   );
-  process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash")].join(","));
+  process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash|PowerShell")].join(","));
 ' "$HOOKS_JSON" 2>/dev/null)"
 TIMEOUTS="$(node -e '
   const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -86,13 +86,13 @@ TIMEOUTS="$(node -e '
   }
   process.stdout.write(found.sort().join(" "));
 ' "$HOOKS_JSON" 2>/dev/null)"
-if [ "$TIMEOUTS" = "Bash=60 Edit|Write|MultiEdit=60 NotebookEdit=60" ]; then
+if [ "$TIMEOUTS" = "Bash|PowerShell=60 Edit|Write|MultiEdit=60 NotebookEdit=60" ]; then
   check "P1b every registration carries the 60 s gate timeout ($TIMEOUTS)" PASS
 else
   check "P1b every registration carries the 60 s gate timeout (got: $TIMEOUTS)" FAIL
 fi
 if [ "$WIRING" = "true,true,true" ]; then
-  check "P1 hook wired under Edit|Write|MultiEdit + NotebookEdit + Bash matchers" PASS
+  check "P1 hook wired under Edit|Write|MultiEdit + NotebookEdit + Bash|PowerShell matchers" PASS
 else
   check "P1 hook wired under all three matchers (got: $WIRING)" FAIL
 fi
@@ -205,6 +205,44 @@ OUT="$(engine_rules 'api_key = "XXXX9aB3kZpQ7Lm2XXXX"')"
 OUT="$(engine_rules 'plain text, nothing secret here')"
 [ "$OUT" = '{"matches":[]}' ] && check "U13 engine: clean input -> empty matches" PASS || check "U13 engine: clean input -> empty matches" FAIL
 
+OPKEY_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+OPKEY_RUN="run_5d1e8a3f9c2b7e40"
+OPKEY_HEAD="3f1c9a7e5b2d4f6081a3c5e7f9b1d3a5c7e9f1b3"
+AP_KEY="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c 'source "$1" && autopilot_team_review_operation_key "$2" "$3"' _ "$OPKEY_LIB" "$OPKEY_RUN" "$OPKEY_HEAD" 2>/dev/null)"
+WO_KEY="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c 'source "$1" && autopilot_work_order_review_operation_key "$2" "$3"' _ "$OPKEY_LIB" 6f9b1c2d-3e4a-4b5c-8d6e-7f8091a2b3c4 "$OPKEY_HEAD" 2>/dev/null)"
+OPKEY_HEX="${AP_KEY#team-review:v1:}"
+
+OUT="$(engine_rules "{operationKey:\"$AP_KEY\",marker:\$m,headSha:\"$OPKEY_HEAD\",provider:\"github\"}")"
+if [ -n "$OPKEY_HEX" ] && [ "$OPKEY_HEX" != "$AP_KEY" ] && [ "$OUT" = '{"matches":[]}' ]; then
+  check "U14 engine: the Autopilot producer's team-review operation key is not a secret" PASS
+else
+  check "U14 engine: Autopilot team-review operation key (key '$AP_KEY', got $OUT)" FAIL
+fi
+
+OUT="$(engine_rules "OPERATION_KEY=\"$WO_KEY\"")"
+if [ -n "$WO_KEY" ] && [ "${WO_KEY#team-review:v1:}" != "$WO_KEY" ] && [ "$OUT" = '{"matches":[]}' ]; then
+  check "U15 engine: the work-order producer's team-review operation key is not a secret" PASS
+else
+  check "U15 engine: work-order team-review operation key (key '$WO_KEY', got $OUT)" FAIL
+fi
+
+OPKEY_UNFLAGGED=""
+for OPKEY_VARIANT in "${AP_KEY%?}" "${AP_KEY}0" "team-review:v1:$(printf '%s' "$OPKEY_HEX" | tr 'a-f' 'A-F')" \
+  "team-review:v2:$OPKEY_HEX" "zensu-review:v1:$OPKEY_HEX" "x$AP_KEY" "$OPKEY_HEX"; do
+  case "$(engine_rules "{operationKey:\"$OPKEY_VARIANT\"}")" in
+    *'"high-entropy-assignment"'*) ;;
+    *) OPKEY_UNFLAGGED="$OPKEY_UNFLAGGED $OPKEY_VARIANT" ;;
+  esac
+done
+if [ -n "$OPKEY_HEX" ] && [ -z "$OPKEY_UNFLAGGED" ]; then
+  check "U16 engine: every near miss of the operation-key shape is still flagged (leading prefix, 63 or 65 hex, uppercase, v2, other namespace, bare hex)" PASS
+else
+  check "U16 engine: near misses of the operation-key shape (not flagged:$OPKEY_UNFLAGGED)" FAIL
+fi
+
+OUT="$(engine_rules "{operationKey:\"$AP_KEY\",api_token:\"f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj\"}")"
+case "$OUT" in *'"high-entropy-assignment"'*) check "U17 engine: a real secret after an exempt operation key on the same line is still flagged" PASS;; *) check "U17 engine: secret beside an operation key (got $OUT)" FAIL;; esac
+
 # D — detectChannels unit cases (direct parser invocation, BSWG_MODE=detect)
 detect() { PAYLOAD="{\"tool_input\":{\"command\":$1}}" BSWG_MODE=detect node "$PARSER" 2>/dev/null; }
 
@@ -231,6 +269,9 @@ case "$OUT" in *redirect*) check "D7 detect: glued redirect" PASS;; *) check "D7
 
 OUT="$(detect '"git status && ls"')"
 [ -z "$OUT" ] && check "D8 detect: read-only command -> no channel" PASS || check "D8 detect: read-only command -> no channel" FAIL
+
+OUT="$(detect '"M=\"<!-- marker -->\""')"
+case "$OUT" in *redirect*) check "D9 detect: a quoted --> still reads as a redirect (the deny path keeps its over-detection)" PASS;; *) check "D9 detect: quoted --> (got: $OUT)" FAIL;; esac
 
 # F — hook functional cases. Hermetic: ZENSU_CONFIG temp override, ambient
 # ZENSU_SECRET_SCAN/BSWG_MODE neutralized (empty is not "off"); extra env
@@ -318,6 +359,24 @@ if is_deny "$OUT"; then check "F7c escape token inside heredoc BODY does not dis
 OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"echo ghp_''123456789012345678901234567890123456"}}')"
 [ -z "$OUT" ] && check "F8 Bash without write channel -> allow" PASS || check "F8 Bash without write channel -> allow" FAIL
 
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
+case "$OUT" in *"$DENY"*github-token*"A PowerShell command is scanned as a whole"*) check "F8p PowerShell write with GitHub token -> deny (rule and whole-text scope named)" PASS;; *) check "F8p PowerShell write with GitHub token (got '$OUT')" FAIL;; esac
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Write-Output ghp_''123456789012345678901234567890123456"}}')"
+if is_deny "$OUT"; then check "F8p2 PowerShell without a recognized write channel is still scanned" PASS; else check "F8p2 PowerShell channel-less scan (got '$OUT')" FAIL; fi
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"$env:ZENSU_SECRET_SCAN = \"off\"; Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}')"
+if is_deny "$OUT"; then check "F8p3 a PowerShell env statement is no inline escape" PASS; else check "F8p3 PowerShell inline escape (got '$OUT')" FAIL; fi
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Set-Content creds.env \"ghp_''123456789012345678901234567890123456\""}}' ZENSU_SECRET_SCAN=off)"
+[ -z "$OUT" ] && check "F8p4 PowerShell + ZENSU_SECRET_SCAN=off env -> allow" PASS || check "F8p4 PowerShell env escape (got '$OUT')" FAIL
+
+OUT="$(run_hook '{"tool_name":"PowerShell","tool_input":{"command":"Get-ChildItem -Recurse | Select-String TODO"}}')"
+[ -z "$OUT" ] && check "F8p5 PowerShell without a secret -> allow" PASS || check "F8p5 PowerShell clean command (got '$OUT')" FAIL
+
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"cat > creds.env <<EOF\nghp_''123456789012345678901234567890123456\nEOF"}}')"
+case "$OUT" in *"A PowerShell command is scanned as a whole"*) check "F8p6 the Bash deny carries no PowerShell sentence" FAIL;; *"$DENY"*) check "F8p6 the Bash deny carries no PowerShell sentence" PASS;; *) check "F8p6 Bash deny (got '$OUT')" FAIL;; esac
+
 OUT="$(run_hook '{"tool_name":"MultiEdit","tool_input":{"file_path":"/x/src/n.go","edits":[{"new_string":"ok"},{"new_string":"t := \"xox''b-1234567890-abcdefghij\""}]}}')"
 case "$OUT" in *"$DENY"*slack-token*) check "F9 MultiEdit with Slack token -> deny (rule named)" PASS;; *) check "F9 MultiEdit with Slack token -> deny (rule named)" FAIL;; esac
 
@@ -329,6 +388,64 @@ OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","c
 
 OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/readme.md","content":"plain documentation text, nothing secret"}}')"
 [ -z "$OUT" ] && check "F12 clean content -> allow" PASS || check "F12 clean content -> allow" FAIL
+
+bash_payload() { node -e 'process.stdout.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: process.argv[1] } }))' "$1"; }
+bash_channels() { PAYLOAD="$(bash_payload "$1")" BSWG_MODE=detect node "$PARSER" 2>/dev/null; }
+OPKEY_MARKER="$(node -e '
+  const crypto = require("crypto");
+  const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
+  process.stdout.write("<!-- zensu-review:v1:" + digest(process.argv[1]) + ":" + digest("payload") + ":" + process.argv[2] + ":1:part=1/1 -->");
+' "$AP_KEY" "$OPKEY_HEAD")"
+opkey_command() {
+  local s="${1%$'\n'}"
+  s="${s//@RUN@/$OPKEY_RUN}"
+  s="${s//@HEAD@/$OPKEY_HEAD}"
+  s="${s//@MARKER@/$OPKEY_MARKER}"
+  printf '%s' "${s//@KEY@/$AP_KEY}"
+}
+IFS= read -r -d '' OPKEY_INLINE <<'CMD'
+bash "$ROOT/hooks/lib/zensu-log.sh" --autopilot-event --run @RUN@ --event TEAM_REVIEW_PUBLISHED --event-id "team-review-published:@HEAD@" --payload "$(jq -nc --arg m '@MARKER@' '{operationKey:"@KEY@",marker:$m,headSha:"@HEAD@",provider:"github"}')"
+CMD
+IFS= read -r -d '' OPKEY_ASSIGNED <<'CMD'
+M='@MARKER@'; bash "$ROOT/hooks/lib/zensu-log.sh" --autopilot-event --run @RUN@ --event TEAM_REVIEW_PUBLISHED --event-id "team-review-published:@HEAD@" --payload "$(jq -nc --arg m "$M" '{operationKey:"@KEY@",marker:$m,headSha:"@HEAD@",provider:"github"}')"
+CMD
+IFS= read -r -d '' OPKEY_REDIRECT <<'CMD'
+jq -nc '{operationKey:"@KEY@",headSha:"@HEAD@",provider:"github"}' > team-review-published.json
+CMD
+
+OPKEY_CMD="$(opkey_command "$OPKEY_INLINE")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12b the smoke run's TEAM_REVIEW_PUBLISHED event (inline quoted --> marker plus operation key) is scanned and allowed" PASS
+else
+  check "F12b TEAM_REVIEW_PUBLISHED event with an inline marker (got '$OUT')" FAIL
+fi
+
+OPKEY_CMD2="$(opkey_command "$OPKEY_ASSIGNED")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD2")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD2")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12c the same event with the marker assigned to M= first is scanned and allowed" PASS
+else
+  check "F12c TEAM_REVIEW_PUBLISHED event with M= marker (got '$OUT')" FAIL
+fi
+
+OPKEY_CMD3="$(opkey_command "$OPKEY_REDIRECT")"
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD3")")"
+if [ -n "$AP_KEY" ] && [ "$(bash_channels "$OPKEY_CMD3")" = redirect ] && [ -z "$OUT" ]; then
+  check "F12d the operation key written through a real redirect is allowed" PASS
+else
+  check "F12d operation key through a real redirect (got '$OUT')" FAIL
+fi
+
+OUT="$(run_hook "$(node -e 'process.stdout.write(JSON.stringify({ tool_name: "Write", tool_input: { file_path: "/x/src/review.js", content: "const event = { operationKey: \"" + process.argv[1] + "\" };" } }))' "$AP_KEY")")"
+if [ -n "$AP_KEY" ] && [ -z "$OUT" ]; then
+  check "F12e a Write of a source file carrying the operation key is allowed" PASS
+else
+  check "F12e Write with the operation key (got '$OUT')" FAIL
+fi
+
+OUT="$(run_hook "$(bash_payload "$OPKEY_CMD; GH_TOKEN=\"f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj\" gh auth status")")"
+case "$OUT" in *"$DENY"*high-entropy-assignment*) check "F12f a real secret in the same command as the operation key still denies" PASS;; *) check "F12f secret beside the operation key (got '$OUT')" FAIL;; esac
 
 mkdir -p "$TMPD/shim"
 cat > "$TMPD/shim/node" <<'SHIM'
@@ -417,6 +534,26 @@ if node -e '
     *) check "F19 foreign-installation record (got '$OUT')" FAIL ;; esac
 else
   check "F19 foreign-installation fixture could not be minted" FAIL
+fi
+
+F20_LIMIT="$(node -e 'const cap = require(process.argv[1]).MAX_PAYLOAD_BYTES; process.stdout.write(Number.isSafeInteger(cap) ? String(cap) : "1048576")' "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" 2>/dev/null)"
+F20_PAYLOAD="$TMPD/oversized-bash.json"
+node -e '
+  const [file, total, cwd] = process.argv.slice(1);
+  const base = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo " }, session_id: "secret-scan-test", cwd };
+  base.tool_input.command += "a".repeat(Number(total) - Buffer.byteLength(JSON.stringify(base)));
+  require("fs").writeFileSync(file, JSON.stringify(base));
+' "$F20_PAYLOAD" "$((F20_LIMIT + 1))" "$TMPD"
+OUT="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= \
+  STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" bash "$HOOK" < "$F20_PAYLOAD" 2>/dev/null)"
+if is_deny "$OUT" \
+  && printf '%s' "$OUT" | grep -qF "payload is $((F20_LIMIT + 1)) bytes, over the ${F20_LIMIT}-byte limit" \
+  && ! printf '%s' "$OUT" | grep -qF 'binding is unavailable or invalid'; then
+  check "F20 a Bash call one byte over the binder's payload limit is denied with a reason that names its size, not a broken binding" PASS
+else
+  check "F20 oversized Bash deny names its size (got '${OUT:0:240}')" FAIL
 fi
 
 echo "----"

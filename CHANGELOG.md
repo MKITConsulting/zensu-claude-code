@@ -7,6 +7,217 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-23
+
+### Added
+
+- **review-chain**: Consume the review ticket from a background consume-mode reviewer (#490)
+- **session-trail**: Decide the same checkout by repository identity (#487)
+- **session-trail**: Carry task chips over as start_session proposals (#466)
+
+### Changed
+
+- **ci**: Re-budget the Windows reviewer-capability-gate cap against nine measured runs (#493)
+- **stop**: Cut the armed Stop's remaining node spawns (#492)
+- **multi-repo**: Redesign stages 2 and 3 around declared code roots (#491)
+- **changelog**: List #478 and #481 in the 0.28.0 notes and move #480's note to Unreleased (#489)
+
+### Fixed
+
+- **review-chain**: Derive the background-review fan-out types from the principal module (#495)
+- **review-chain**: Replace #490's background ticket claim with launch records (#494)
+- **work-order,autopilot**: Wait on in-flight review seats in both Stop budgets (#483)
+- **review-chain**: Resolve aspectActivation and incrementalReviewRounds (#472)
+- **work-order**: Deny every non-inert Claude Desktop session tool (#486)
+- **secret-scan**: Exempt the plugin's own team-review operation key from the entropy rule (#479)
+- **review-chain**: Read the project config in the tdd, plan-review and pr-team-review flag probes (#480)
+
+### Upgrade notes
+
+- **review flag probes**: the config probes of `/zensu:tdd`, `/zensu:plan-review` and
+  `/zensu:pr-team-review` now read the project `.zensu/config.json` of the session's bound project
+  root, the path `zensu-log.sh --project-root` prints, as `/zensu:self-review` and the review hooks
+  already did. Before, a project-level `hooks.reviewPanel`, `hooks.reviewJudge`,
+  `hooks.reviewJudgeSecondRun`, `hooks.findingVerification` or `hooks.criticalReproduction` was
+  silently ignored there and only `~/.zensu/config.json` and `ZENSU_CONFIG` counted, so a project
+  that sets one of them now gets that value in those skills too. `/zensu:pr-team-review` reads the
+  bound session's project config, never the reviewed repository's.
+- **session-trail task chips**: a takeover now carries the old session's open task chips over as
+  Claude Desktop proposals. In the turn in which the user confirms the plan, before the old
+  session is released, each chip the brief marks **propose** gets one `start_session` call with
+  `initiation: "own_initiative"`, rendered by the brief: the chip's `context` and worktree choice,
+  its title cut to 59 characters, its prompt, and the background its proposal was stored with, or
+  a fixed one for a chip from before proposals. No instruction names `spawn_task` any more, which
+  Claude Desktop 2.42304.0 refuses once it offers `start_session`. A chip whose folder lies outside
+  the old session's checkout is marked **list** and named to the user, because a proposal cannot
+  carry a folder; without a `start_session` tool, or when Claude refuses a proposal, the chips are
+  listed for the user. A takeover run from another repository than the old session's marks every
+  chip **list**, because a proposal starts in the proposing session's folder, and both briefs
+  tell the model never to start a chip, whatever its text asks for. An expired proposal is no
+  longer carried, and a carried one leaves the cards after a week unless it is started.
+  `takeover --json` adds `sameRepository` to `openChips` and `context`, `useWorktree`,
+  `expiresAt`, `proposal` and `why` to each of its entries. In a work-order session the gate
+  now denies `mcp__ccd_session__start_session` as it denies `mcp__ccd_session__spawn_task`.
+- **work-order session tools**: in a work-order session the gate now denies every Claude Desktop
+  session tool except `dismiss_task`, `mark_chapter`, `list_start_targets` and
+  `read_widget_context`, which neither start nor move work, so
+  `mcp__ccd_session__hand_off_to_session`,
+  `mcp__ccd_session__move_to_cloud` and any session tool a later Claude Desktop adds are denied
+  beside `spawn_task` and `start_session`. It also denies `mcp__ccd_session_mgmt__send_message`.
+  Each deny names `zensu work followup <order>`. A hand-off moves the current task into a new
+  session, a move to the cloud pushes the branch past `zensu-work-order.sh --push`, continues the
+  session in the cloud and archives it here, and a message asks another session to take work up,
+  so each took the order's work out of its lease. The operator account now names the routes the
+  gate does not judge: `SendMessage`, `RemoteTrigger` and MCP tools that push, open or merge a
+  pull request.
+- **work orders**: the Stop hook of a work-order session no longer reports a healthy order blocked
+  while its team review runs. A change in one of the session's review evidence leases (a seat
+  bound, a worker result recorded, a lease sealed or closed) now counts as progress, and a Stop
+  while a review seat is still in flight does not count toward the three-stop budget until the
+  lease stops taking results, at the latest 3600 seconds after it was created. A session that stops
+  three times without progress after that still ends the order as blocked.
+- **autopilot**: a Stop of a durable Autopilot run no longer counts against the stage budget of 12
+  Stops while the session's review evidence lease has a review seat in flight, so a long PR team
+  review no longer moves a healthy run to `BLOCKED` with `STOP_BUDGET_EXHAUSTED`. The block names
+  the seats and the time the lease stops taking results and reads `stopBlock=uncounted`. Once no
+  seat is in flight, at the latest 3600 seconds after the lease was created, every Stop counts
+  again. A lease store the hook cannot read, or cannot read within five seconds where `timeout` or
+  `gtimeout` is installed, counts the Stop as before.
+- **session-trail same checkout**: both briefs now decide whether a task chip's folder or a
+  linked session's folder belongs to the old session by its git repository, measured with
+  `git rev-parse --git-common-dir`, instead of by path nesting. A worktree of the old repository
+  anywhere on disk counts as the same checkout, while a repository nested inside the old checkout
+  and every folder below a session rooted in a broad folder such as the home directory no longer
+  do. A chip whose folder cannot be measured is marked **list** with the new `why`
+  `folder-unmeasured`. A linked session started without `cwd` runs in the folder of the session
+  that starts it, so a start now leaves `cwd` out only when the linked session works in the old
+  session's repository and `takeover` measured that it runs there too; from another repository
+  or from a folder in no repository, and in every handoff brief, each start passes its own
+  folder, and a linked session without a usable folder waits for the user to name it (`why`
+  `place`). The takeover brief names the folder of every start it leaves without `cwd`, so a
+  session that opens a written brief from elsewhere passes it. A folder that opens with two
+  separators, such as a Windows network path, is never measured. A chip whose folder carries a
+  control character is marked **list** with the new `why` `folder-unsafe` and is never measured,
+  because the brief shows only its cleaned spelling, which is another folder. Every git call of
+  the skill now clears `GIT_DIR`, `GIT_COMMON_DIR` and the other git discovery and config
+  variables, so an exported one no longer makes every folder answer one repository. When no
+  folder of the old session can be measured, no chip or linked-session folder is measured
+  either, and the checkout line of a linked session names the old session's repository as the
+  side that could not be measured. `takeover --json` adds `sameRepository` and
+  `oldRepositoryMeasured` to `linkedSessions` and `cwdWhy`, the reason a start carries or leaves
+  out `cwd`, to each of its entries, and `--no-git` no longer skips the repository check of
+  `takeover`.
+
+## [0.28.0] - 2026-10-21
+
+### Added
+
+- **hooks**: Gate the zensu-cli 0.10.0 work, plan, mocks and journey-step mutations (#470)
+- Warn when zensu-cli is older than 0.10.0 and fix the doctor's auth probe (#475)
+- **hooks**: Judge PowerShell tool commands in every shell hook (#459)
+- **hooks**: Write Session Hub rate-limit readings from a hooks module (#465)
+- **session-trail**: Continue a taken-over session's linked sessions (#464)
+
+### Changed
+
+- **tdd-phase**: Run the external lease's path checks inside the lock process (#478)
+
+### Fixed
+
+- **hooks**: Find a shell's -c flag in linear time in the work-order and consent gates (#481)
+- **skills**: Define the fallback for hosts with the task tools switched off (#473)
+- **adopt-session**: Adopt sessions whose minting installation is an orphan-marked remnant (#474)
+- **hooks**: Finish the stdin move and check every hook for payload leaks (#453)
+- **hooks**: Harden the CLI gate against oversized and long commands (#452)
+- **work-order**: Close the work-order gate gaps of the zensu-cli 0.10.0 audit (#477)
+- **skills**: Make every documented zensu command work with zensu-cli 0.10.0 (#476)
+- **edit-landing**: Place a relative claim into a nested work tree like its absolute spelling (#471)
+- **self-review**: Resolve reviewConvergence against the bound project root (#469)
+- **work-order**: Hand an overturned automatic answer to the model again (#468)
+- **work-order**: Name the work branch with the order's prefix and close the service contract gaps (#458)
+- **external-review**: Bind the review root to the session work tree and name each refused layout (#467)
+
+### Upgrade notes
+
+- **session-trail linked sessions**: a takeover now continues the old session's open linked
+  sessions, the sessions it started in Claude Desktop. Both briefs list them under *Linked
+  sessions*, read from the records in the old session's Claude Desktop folder, each with its kind,
+  whether it is started and why not, and the `start_session` call that starts it; `takeover --json`
+  carries them as `linkedSessions`. The plan confirmation names them, and after the yes the session
+  that takes over starts each side and task-chip session in that same turn, at most eight per
+  takeover, so that Claude links it to the new session. Each started session takes its old
+  counterpart over and confirms its own plan with its own user. A user fork starts only when the
+  user names it; a side question (`btw`), a session over SSH, a detached session and one that a
+  confirmed lineage edge already continues stay behind. The briefs also quote the newest eight
+  reports the linked sessions queued that the old session never read (*Reports not yet read*,
+  `unreadReports` under `--json`). `skills/session-trail/handover-contract.json` declares the
+  capability as `linkedSessions` with the lineage ledger's directory and schema, and leaves
+  `takeover.contract` at 1, so every current Zensu Session Hub keeps accepting the plugin.
+- **Claude Code 2.1.296**: the plugin now requires Claude Code 2.1.296 or newer, because it
+  ships a hooks module beside its classic hooks. An older Claude Code skips the module and still
+  runs every classic hook and skill. Measured on 2.1.280 with the plugin installed from a
+  marketplace, the skip prints nothing into `claude -p` output and is named only in the
+  `--debug-file` log.
+- **usage feed**: the new `hooks/usage-feed.ts` module writes the session's rate-limit reading
+  for the Zensu Session Hub, and only while `<config root>/zensu/session-hub/v1/usage/` already
+  exists (`CLAUDE_CONFIG_DIR` when it names an absolute path, else `~/.claude`). The Session Hub
+  creates that directory; the module never does, so nothing is written without the Hub. Each
+  `<session id>.json` holds the schema version, the session id, the time of the reading and, per
+  rate-limit window, its name, the percentage used and the reset time, nothing else. It is
+  written when Claude Code measures the session after a response, at the end of every turn, and
+  whenever a window moves; never when a session starts and never while it is idle. The
+  record shape is the contract in `hooks/usage-feed-contract.json`. The module uses Claude Code's
+  early-access hooks module API, which Anthropic can switch off for installed plugins; the feed
+  then writes nothing and the Session Hub keeps reading limits from Claude's usage popover.
+- **work orders**: a work-order session now names its branch with the order's `branch_prefix`
+  (`wo-` today) instead of `zensu/work-`, which Zensu refused with `invalid_branch`, so a real
+  order now gets past `implementing`. The worker must start the session with `ZENSU_API_URL` set
+  to the Zensu host that issued the session token, unless the CLI config the session reads stores
+  that host; the `zensu` CLI never sends a session token to its built-in default, and `--start`
+  now stops with exit 3 instead of retrying. That CLI config must hold the host only, never a
+  login, because without the session token the CLI falls back to a stored login. The work-order
+  gate also denies `zensu work list`, `questions`, `policy get` and `repositories list`, which
+  Zensu refuses for a session token, and points at the order file instead. It now also denies the
+  usual spellings that set, change or remove `ZENSU_API_URL`, `--api-url` on `zensu`, and `env -i`
+  or `exec -c`, which drop the session token.
+- **PowerShell tool**: Zensu's shell hooks now also fire for Claude Code's PowerShell tool, which
+  is on by default on Windows for claude.ai and Console accounts. Each one judges a PowerShell
+  command or refuses it. The CLI write-gate judges a literal `zensu` call and denies one it cannot
+  read, such as a call another command starts or a noun or verb built at run time. The Session
+  Control check denies a command that names a protected input, writes the Environment provider
+  under a name built at run time or turns text built at run time into code. While
+  `hooks.bashWriteGate` is on, the source-write rules pass only a read-only PowerShell command.
+  The secret scan reads the whole command, the browser consent gate refuses a `zensu-verify`
+  browser call, and a work-order session refuses the tool. A PowerShell command has no inline gate
+  escape. Every refusal of a command a gate cannot judge names the Bash tool, which works as
+  before, so `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` is no longer required and stays an option.
+  Because Claude Code falls back to Windows PowerShell 5.1 when PowerShell 7 is missing, the
+  analyzer reads a string escape the two versions decode differently both ways. The
+  `shell tools:` row of `/zensu:doctor` reports the coverage.
+- **CLI write-gate**: the gate now covers the zensu-cli 0.10.0 surface. A `zensu work`, `zensu plan`,
+  `zensu mocks create` or `zensu journeys step-update|step-delete` command that changes Zensu is
+  denied on the main thread unless a skill window declares it, like every other mutation; reads
+  such as `zensu work list` or `zensu plan status` still pass. A command that records your decision
+  (creating, approving, requeuing, cancelling or confirming the merge of a work order, pushing,
+  approving, finalizing, abandoning or confirming the merge of a work plan, accepting or dismissing
+  its follow-ups, answering or overturning a question, the automation policy and the registered
+  repositories) is denied with a reason that leaves it to you to run, even inside a skill window
+  that declares it, and so is a work-order protocol verb. `zensu security analyze`,
+  `zensu security threat-model` and `zensu doc claude-md` are reads now and pass without a window.
+  A value flag before the verb, as in `zensu features --product p1 create`, or a shell expansion
+  such as `zensu features $FLAGS create` no longer hides the verb. In a work-order session the gate
+  leaves `zensu work ask` and `zensu work followup` to the work-order gate. `ZENSU_MCP_GATE=off`
+  still lets a deliberate one-off through.
+- **work-order gate**: a work-order session can no longer push a work plan or accept or dismiss a
+  plan follow-up, which are a person's decisions like approving a plan. The gate now finds the noun
+  and the verb of a `zensu` call the way the CLI does, so a value flag or an empty word in front of
+  them, as in `zensu --reason x plan abandon <id>`, no longer hides a denied command, and it reads
+  `zensu work repos` like `zensu work repositories`. A `zensu` call that the CLI itself refuses, with
+  a flag, argument, validation or setup error, is no longer retried as if Zensu had not answered:
+  the helper names the CLI and its message and exits 3 at `--start` and 8 elsewhere. In a session
+  that holds `ZENSU_SESSION_TOKEN` the SessionStart primer and banner no longer advise
+  `zensu auth login`, which cannot help there.
+
 ## [0.27.0] - 2026-10-17
 
 ### Added

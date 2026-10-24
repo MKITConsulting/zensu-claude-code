@@ -252,8 +252,9 @@ parser RETURNS a deny reason, so an exception would exit non-zero and the hook's
 branch would deny every Bash call in the session rather than the one command — and
 `/var/folders/x`, a DEFAULT entry of the rule-(B) temp list, is one of the spellings that
 policy throws on. That is the whole reason the split exists; do not "simplify" the parser
-onto `normalizeHostPathInput`. This is the ONE sibling `require` in
-`bash-source-write-parse.js`, taken deliberately so a fourth `within()`↔`isInside()`-style
+onto `normalizeHostPathInput`. This is the one EAGER sibling `require` in
+`bash-source-write-parse.js` (the other, `./powershell-command-v1.js`, loads only for a
+PowerShell payload, and a failed load denies that call with its own reason), taken deliberately so a fourth `within()`↔`isInside()`-style
 hand-copy never has to be maintained; if the module were missing the parser would fail to
 load and its hook would deny, which is the fail-closed direction. W3d pins the delegation,
 pins that no private copy reappears (the parser keeps exactly two `([A-Za-z])` rules of its
@@ -334,8 +335,8 @@ underneath a live durable run in the same tree. W18b in
 forbids the bare `startsWith("..")` form returning; W18 alone did not, and no fixture
 builds a `..`-prefixed worktree, so the revert was green from both directions — and the same
 predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
-`hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
-native-path validator), with an UNANCHORED `startsWith("..")` variant in
+`hooks/lib/state-path-safety-v1.js` (the path walk that `_tdd_paths_safe` and the tdd-phase
+lease processes load), with an UNANCHORED `startsWith("..")` variant in
 `finding-verify-v1.js` that has the `..bak` defect this gate fixed.
 `skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and was the FIRST
 consumer that proved the seam works; `hooks/lib/plugin-data-guard-v1.js` is the SECOND, which

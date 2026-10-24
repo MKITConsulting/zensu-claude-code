@@ -84,7 +84,7 @@
           "runner": "bash",
           "path": "tests/structure/test-reviewer-capability-gate.sh",
           "args": [],
-          "timeoutMs": 300000
+          "timeoutMs": 480000
         },
         {
           "id": "runtime-fixture-installer-concurrency",
@@ -163,6 +163,13 @@
           "path": "tests/structure/test-vcs-review-marker-reconcile.sh",
           "args": [],
           "timeoutMs": 300000
+        },
+        {
+          "id": "powershell-tool-coverage",
+          "runner": "bash",
+          "path": "tests/structure/test-powershell-tool-coverage.sh",
+          "args": [],
+          "timeoutMs": 180000
         },
         {
           "id": "windows-profile-lifecycle-contract",

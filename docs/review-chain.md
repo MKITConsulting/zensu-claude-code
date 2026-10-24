@@ -120,7 +120,25 @@ reads an Ultracode or effort setting. It reacts to what demonstrably ran:
   passing silently. A result for another tree answers `status=stale reason=tree`; when no tree
   can be computed, the change-time check decides alone and the line says `tree=unverified`. A
   run that has not completed answers `status=unavailable reason=run-not-completed`, and a run
-  whose arguments left a changed path out `reason=files-not-reviewed`. The first line names
+  whose arguments left a changed path out `reason=files-not-reviewed`. The `--root` of both
+  calls must be the root of the session's work tree: the top level `git rev-parse
+  --show-toplevel` prints for the project root, or the project root itself when it lies outside
+  git. Any other root answers `status=unavailable reason=root layout=<layout>` (with `--stage`
+  or `--tree`, `stage=unavailable` or `tree=unavailable` in its place, and no copy is written)
+  followed by what the layout is and the next
+  step: `nested-work-tree` for a separate work tree nested inside the session's own, such as a
+  worktree of another repository, `nested-in-folder` for a repository inside a project folder
+  that is not a git work tree, `outside` for a sibling, `enclosing` for a directory above the
+  work tree, `subdirectory` for one below its top level, `unresolved-root` or
+  `unresolved-project-root` for a path that is missing, is not a directory or ends in a symbolic
+  link (`zensu-log.sh` resolves symbolic links in the path's ancestors first), and
+  `undetermined` when git cannot answer. A chain reviews one root, so for the first three the
+  aspect panel reviews this change, and a workflow review of the other work tree imports only in
+  a session started in it. `enclosing`, `subdirectory` and `unresolved-root` ask for a re-run
+  with that root, `unresolved-project-root` points at `/zensu:doctor`, and `undetermined` names
+  git's fault in `detail=`: for the review root it asks for the same re-run, because only that
+  root imports whatever the fault hid, and for the project root it asks for the fault to be
+  fixed first. The first line names
   the lenses the run reviewed (`lenses=`), which the judge receives. The import then compares
   the result's agent counts with the run journal the workflow runtime wrote (`journal.jsonl`
   in the launch's transcript directory, where only the outcome of each label's latest start
@@ -177,6 +195,51 @@ import unavailable or degraded instead of passing it. The import never reads a f
 thread names, but the run record and the journal sit in the session's own project directory,
 which the main thread can write: a deliberate write there can still forge a result, as for
 every plugin store, and a count that disagrees with the journal only degrades the import.
+
+#### Background review agents
+
+A host may start every `Agent` spawn in the background: the Claude desktop app does, and its
+Agent tool offers no `run_in_background` parameter. Every review agent of the chain then answers
+`async_launched`, and no report exists yet when the post-review hook runs.
+
+- **Launch.** The post-review hook records each launch in the plugin's private data store under
+  `background-review/v1/`, at mode `0600`. A `zensu:review-aspect` or `zensu:review-judge` launch
+  becomes one entry per agent under `fanout/<scv1-session-key>/`. The consume-mode
+  `zensu:code-reviewer` becomes the session's one record under `records/`, holding the agent id,
+  the ticket and the prompt's header lines, but only while its `REVIEW-TICKET` is the ticket the
+  claim would accept. Its directive tells a standalone chain to end its turn and wait, and an
+  Autopilot-bound chain to keep its turn. No ticket is consumed and no second reviewer is spawned.
+- **Arrival.** A report reaches the main thread as a prompt: a hand-back whose frame line names
+  the agent id, then a completion notification. `hooks/user-prompt-review-handback.sh` exits
+  without a `node` child unless the prompt carries one of the two markers and the store holds a
+  pending record or entry. A fan-out agent's arrival retires its entry. The consume reviewer's
+  arrival claims the ticket once, through the claim the foreground path uses, and returns that
+  path's routing directive as context of the prompt. A hand-back retires the record only after
+  the claim, so a hand-back the host abandons halfway, or whose claim fails, leaves the record
+  for the notification that follows. The notification is the last arrival, so it retires the
+  record whether its claim succeeds, fails or is killed, and the next Stop no longer waits for a
+  reviewer that has already reported. A frame counts only on a line of its own at column zero that the host's `[Subagent hand-back]`
+  line follows, because the host indents every line of a report it forwards. A notification with
+  another status, such as `failed`, ends the consume record without a claim and asks for a
+  re-spawn with the same ticket.
+- **Stop.** While a consume record younger than 60 minutes still matches the issued ticket, or a
+  fan-out entry younger than 60 minutes exists, the Stop guard releases a standalone chain's turn
+  end with one stderr line and charges no review budget. An Autopilot-bound chain is held instead:
+  its Stop blocks, names the agents that still run, and does not count against the inner Stop
+  budget. A session that owns a live Autopilot run without a bound chain, and a Stop that adopted
+  a deferred review, take neither; their resume directive opens with a sentence naming the
+  running agents.
+
+**Residuals.** The arrival relies on the host firing `UserPromptSubmit` for queued prompts, as
+measured in the desktop app; without it every wait ends 60 minutes after the newest launch and the
+resume directive applies again. The column-zero rule rests on the host indenting what it forwards:
+a peer message the host does not indent, and that names a pending agent id, could still carry a
+forged frame; that id sits only in the session's own `0600` store. Repo-local review personas are
+not recorded, so a turn end while only a persona runs blocks as before. A notification that says
+no report was delivered still claims the ticket, and the directive tells the main thread to ask
+the reviewer for its report with `SendMessage` first. A kill that lands while the claim itself
+runs loses the routing directive once the ticket is consumed, as it does for a killed foreground
+post-review hook.
 
 #### Custom review personas (repo-local)
 

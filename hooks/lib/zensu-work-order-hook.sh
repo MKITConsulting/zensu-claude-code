@@ -5,7 +5,7 @@ zensu_work_order_hook() {
   [ -n "${ZENSU_SESSION_TOKEN:-}" ] || return 0
   [ -n "$input" ] || return 0
   case "$verb" in
-    gate|post|stop) ;;
+    gate|post|stop|bound) ;;
     *) return 0 ;;
   esac
   root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd -P)" || return 0

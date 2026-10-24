@@ -1,1 +1,1 @@
-{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1}}
+{"schemaVersion":1,"takeover":{"contract":1,"prefix":"/zensu:session-trail takeover ","suffix":" --all","receipt":" --receipt "},"receipts":{"directory":"zensu/session-hub/v1/receipts","schemaVersion":1},"linkedSessions":{"contract":1,"lineage":{"directory":"zensu/session-lineage/v1/edges","schemaVersion":1}}}

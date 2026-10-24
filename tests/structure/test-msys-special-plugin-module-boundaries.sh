@@ -254,6 +254,27 @@ else
   check "banner loads plugin.json from the special plugin root" FAIL
 fi
 
+PS_BANNER_OUT="$(session_payload \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" CLAUDE_CODE_USE_POWERSHELL_TOOL=1 \
+    bash "$PLUGIN/hooks/session-start-banner.sh" 2>"$RAW_TMP/banner-powershell.err" | node -e '
+  let s = ""; process.stdin.on("data", (c) => { s += c; });
+  process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(s).systemMessage); } catch (_) { process.exit(1); } });
+' 2>/dev/null)"
+PS_EXPECTED="$(cd -P -- "$PLUGIN" && node -e '
+  const coverage = require("./hooks/lib/shell-tool-coverage-v1.js");
+  const manifest = JSON.parse(require("node:fs").readFileSync("./hooks/hooks.json", "utf8"));
+  const environment = { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" };
+  process.stdout.write(coverage.bannerLine(manifest, environment, process.platform) || coverage.steerLine(manifest, environment, process.platform));
+' 2>/dev/null)"
+if [ -n "$PS_EXPECTED" ] \
+  && printf '%s\n' "$PS_BANNER_OUT" | grep -qxF -- "$PS_EXPECTED" \
+  && ! printf '%s' "$PS_EXPECTED" | grep -qF 'could not read'; then
+  PS_VERDICT=PASS
+else
+  PS_VERDICT=FAIL
+fi
+check "banner reads the shell-tool coverage of hooks.json from the special plugin root" "$PS_VERDICT"
+
 REANCHOR_OUT="$(cd -- "$PROJECT" \
   && CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" HOME="$HOME_DIR" \
     ZENSU_CONFIG="$CONFIG" bash "$PLUGIN/hooks/lib/zensu-session-reanchor.sh" \
@@ -375,6 +396,43 @@ else
   check "Bash source gate loads both parser passes from the special plugin root" FAIL
 fi
 
+powershell_payload() {
+  SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" COMMAND_VALUE="$1" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse", session_id: process.env.SESSION_VALUE,
+      cwd: process.env.PROJECT_VALUE, tool_name: "PowerShell",
+      tool_input: { command: process.env.COMMAND_VALUE },
+    }));
+  '
+}
+PS_CONTROL_OUT="$(powershell_payload "\$env:ZENSU_SESSION_KEY = 'x'" \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+    bash "$PLUGIN/hooks/pre-bash-source-write-gate.sh" 2>"$RAW_TMP/powershell-control.err")"
+if printf '%s' "$PS_CONTROL_OUT" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$PS_CONTROL_OUT" | grep -qF 'names the protected Session Control input ZENSU_SESSION_KEY'; then
+  check "source gate loads the PowerShell analyzer from the special plugin root" PASS
+else
+  check "source gate loads the PowerShell analyzer from the special plugin root" FAIL
+fi
+PS_READ_OUT="$(powershell_payload 'zensu features list' \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+    bash "$PLUGIN/hooks/pre-bash-zensu-gate.sh" 2>"$RAW_TMP/powershell-cli-read.err")"
+PS_TICK_COMMAND='zen`su features create --name x'
+PS_WRITE_OUT="$(powershell_payload "$PS_TICK_COMMAND" \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+    bash "$PLUGIN/hooks/pre-bash-zensu-gate.sh" 2>"$RAW_TMP/powershell-cli-write.err")"
+if ! printf '%s' "$PS_READ_OUT" | grep -qF '"permissionDecision"' \
+    && printf '%s' "$PS_WRITE_OUT" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$PS_WRITE_OUT" | grep -qF 'A PowerShell command has no inline gate escape' \
+    && ! printf '%s' "$PS_WRITE_OUT" | grep -qF 'could not be loaded'; then
+  check "CLI gate loads the PowerShell analyzer from the special plugin root" PASS
+else
+  check "CLI gate loads the PowerShell analyzer from the special plugin root" FAIL
+fi
+
 # The plan gate uses the second accepted mechanism (see the header): the module
 # path never enters argv, so the shim above cannot see it. What has to hold is
 # that the DIRECTORY conversion survives a root carrying whitespace and an
@@ -419,6 +477,20 @@ if [ -n "$EVIDENCE_LIB" ] && [ -f "$EVIDENCE_LIB" ] && [ -r "$EVIDENCE_LIB" ] &&
   check "evidence runner converts and loads (with its sibling requires) from the special plugin root" PASS
 else
   check "evidence runner converts and loads (with its sibling requires) from the special plugin root" FAIL
+fi
+
+PATH_SAFETY_PROBE="$(CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PROJECT_DIR="$NATIVE_PROJECT" bash -c '
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh" || exit 1
+  _tdd_paths_safe "$1" regular && echo safe
+  if ln "$1" "$1.twin" 2>/dev/null; then
+    _tdd_paths_safe "$1" regular || echo refused
+    rm -f -- "$1.twin"
+  fi
+' _ "$NATIVE_PROJECT/README.md" 2>/dev/null)"
+if [ "$PATH_SAFETY_PROBE" = "$(printf 'safe\nrefused')" ]; then
+  check "tdd-phase path walk loads its module from the special plugin root and still refuses a hard-linked leaf" PASS
+else
+  check "tdd-phase path walk loads its module from the special plugin root (got: $(printf '%s' "$PATH_SAFETY_PROBE" | tr '\n' ' '))" FAIL
 fi
 
 

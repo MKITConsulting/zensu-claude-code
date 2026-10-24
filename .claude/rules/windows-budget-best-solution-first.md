@@ -207,3 +207,12 @@ step took 3-45 s; with the 45 s teardown that is at most 253 s of the 300 s. A w
 that reaches the job limit anyway still ends the step and runs the `always()` steps, so the
 report is uploaded either way. The defence that does not depend on the runner is headroom: a
 shard that ends well inside its envelope never reaches either limit.
+
+**`reviewer-capability-gate` on `windows-shard-2`: cap 300000 -> 480000.** Nine green pull-request
+runs of 2026-10-21 and 2026-10-22 (39680170551, 39680666951, 39683120873, 39689929252, 39762775968,
+39772728566, 39791463657, 39841992586, 39842477715) measured it at 152380 to 276879 ms, up to 92%
+of the old cap. Run 39663189139, whose branch added three cases to the suite, was killed at
+300149 ms after 403 of its 419 checks had passed and none had failed. The shard pays for the new
+cap: the slowest of those nine runs, 39683120873, summed its seven suites to 1219185 ms of the
+1800000 ms envelope, 275125 ms of it this suite, so a run that uses the whole new cap stays below
+1424060 ms. Re-measure on the next green Windows run and replace these figures.

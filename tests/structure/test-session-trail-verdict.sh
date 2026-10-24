@@ -108,6 +108,7 @@ else
   check "WT-unit-cases the cases that can skip in worktree-advice-v1.test.js drifted (source has $WT_UNIT_SKIP_CASES, the registry allows ${WT_UNIT_SKIP_CASES_WANT:-<unreadable>})" FAIL
 fi
 
+unit_check "LS-unit the linked-sessions unit file passes, its two guarded cases included" "$PLUGIN_DIR/tests/structure/linked-sessions-v1.test.js"
 unit_check "PL-unit the prompt-listing unit file passes, its five guarded cases included" "$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_FILE="$PLUGIN_DIR/tests/structure/prompt-listing-v1.test.js"
 PL_PULLBACKS="$(sed -n "s/^const QUEUE_PULLBACKS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
@@ -2605,8 +2606,8 @@ writes_block() { grep -E -A4 '^WRITES' || true; }
 mutant_path() { # <tag> -> path to place the mutated trail.mjs at
   local d="$FAKE/mut-$1/skills/session-trail/scripts"
   mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
-  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
-  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
   printf '%s' "$d/trail.mjs"
 }
 
@@ -5622,8 +5623,8 @@ else
   cont_mutant() { # <tag> -> path to place the mutated trail.mjs at
     local d="$FAKE/cmut-$1/skills/session-trail/scripts"
     mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
-    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
-    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/linked-sessions-v1.mjs" "$d/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$PLUGIN_DIR/hooks/lib/worktree-keep-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
     printf '%s' "$d/trail.mjs"
   }
@@ -7177,7 +7178,23 @@ CH_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-chi
 CH_SID=cdcdcdcd-0000-0000-0000-0000000000c1
 CH_EMPTY_SID=cdcdcdcd-0000-0000-0000-0000000000c2
 CH_NONE_SID=cdcdcdcd-0000-0000-0000-0000000000c3
+CH_MAIN="$FAKE/chip-main"
+CH_WT="$FAKE/work/wt-chips-c1"
+CH_LAUNCH="$FAKE/chip-launch"
+CH_SIBLING="$FAKE/chip-sibling"
+CH_TAKER="$FAKE/chip-taker"
+CH_OTHER="$FAKE/chip-other"
+CH_NESTED="$CH_MAIN/nested-repo"
+CH_GONE="$FAKE/chip-gone"
 mkdir -p "$CH_STORE"
+git init -q "$CH_MAIN" >/dev/null 2>&1
+git -C "$CH_MAIN" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m base >/dev/null 2>&1
+for CH_TREE in "$CH_WT" "$CH_LAUNCH" "$CH_SIBLING" "$CH_TAKER"; do
+  git -C "$CH_MAIN" worktree add -q --detach "$CH_TREE" >/dev/null 2>&1
+done
+git init -q "$CH_OTHER" >/dev/null 2>&1
+git init -q "$CH_NESTED" >/dev/null 2>&1
+mkdir -p "$CH_WT/sub" "$CH_MAIN/pkg" "$CH_LAUNCH/sub"
 HOME="$FAKE" node -e '
 const fs = require("node:fs"), path = require("node:path");
 const [home, store, full, empty, none] = process.argv.slice(1);
@@ -7193,51 +7210,114 @@ for (const sid of [full, empty, none]) {
 }
 const esc = String.fromCharCode(27);
 const tick = "```";
+const background = "Proposal background: the overall goal, the decisions so far and how this piece fits, long enough for the rule.";
+const week = 7 * 24 * 3600 * 1000;
+const fullWt = path.join(home, "work", `wt-chips-${full.slice(-2)}`);
 fs.writeFileSync(path.join(store, `local_${full}.json`), JSON.stringify({
-  sessionId: `local_${full}`, cliSessionId: full, isArchived: false, title: "chips fixture",
+  sessionId: `local_${full}`, cliSessionId: full, isArchived: false, title: "chips fixture", originCwd: path.join(home, "chip-main"), cwd: path.join(home, "chip-launch"),
   backgroundTaskSuggestions: [
     { id: "task_00000001", title: "First chip", tldr: "Why the first chip matters.", prompt: `Fix it.\n${tick}js\nx()\n${tick}\nDone${esc}[2K.`, createdAt: 1 },
     { id: "task_00000002", title: "Offer card", tldr: "An offer.", prompt: "Offer prompt.", createdAt: 2, offer: true },
-    { id: "task_00000003", title: "Second chip", tldr: "Why the second chip matters.", prompt: "Second prompt.", cwd: "/tmp/elsewhere-chip", createdAt: 3 },
+    { id: "task_00000003", title: "Second chip", tldr: "Why the second chip matters.", prompt: "Second prompt.", cwd: path.join(home, "chip-other"), createdAt: 3 },
+    { id: "task_00000004", title: "Proposal chip", tldr: "Fix the parser.", prompt: `Background (from the session that started this one):\n${background}\n\nTask:\nFix the parser.`, context: "fresh", useWorktree: false, expiresAt: Date.now() + week, createdAt: 4 },
+    { id: "task_00000005", title: "Fork chip", tldr: "Look again.", prompt: "Look again.", context: "fork", expiresAt: Date.now() + week, createdAt: 5 },
+    { id: "task_00000006", title: "Expired chip", tldr: "Gone.", prompt: "Expired prompt.", context: "fresh", useWorktree: true, expiresAt: Date.now() - 1000, createdAt: 6 },
+    { id: "task_00000007", title: "Nested chip", tldr: "Inside the worktree.", prompt: "Nested prompt.", cwd: path.join(fullWt, "sub"), createdAt: 7 },
+    { id: "task_00000008", title: "Main chip", tldr: "Inside the origin folder.", prompt: "Main prompt.", cwd: path.join(home, "chip-main", "pkg"), createdAt: 8 },
+    { id: "task_00000009", title: "Launch chip", tldr: "Inside the launch folder.", prompt: "Launch prompt.", cwd: path.join(home, "chip-launch", "sub"), createdAt: 9 },
+    { id: "task_00000010", title: "Nested repo chip", tldr: "Inside a repository nested in the origin folder.", prompt: "Nested repo prompt.", cwd: path.join(home, "chip-main", "nested-repo"), createdAt: 10 },
+    { id: "task_00000012", title: "Sibling chip", tldr: "In another worktree of the same repository.", prompt: "Sibling prompt.", cwd: path.join(home, "chip-sibling"), createdAt: 12 },
+    { id: "task_00000013", title: "Gone chip", tldr: "In a folder that is gone.", prompt: "Gone prompt.", cwd: path.join(home, "chip-gone"), createdAt: 13 },
   ],
 }));
 fs.writeFileSync(path.join(store, `local_${empty}.json`), JSON.stringify({ sessionId: `local_${empty}`, cliSessionId: empty, isArchived: false, title: "no chips fixture" }));
 ' "$FAKE" "$CH_STORE" "$CH_SID" "$CH_EMPTY_SID" "$CH_NONE_SID" 2>/dev/null
 
-CH_GOT="$(trailrun takeover "$CH_SID" --all --no-record --no-git --json 2>/dev/null | node -e '
+CH_GOT="$( (cd "$CH_TAKER" && trailrun takeover "$CH_SID" --all --no-record --no-git --json 2>/dev/null) | node -e '
+const [other, nested, gone] = process.argv.slice(1);
 let s = "";
 process.stdin.on("data", (d) => { s += d; }).on("end", () => {
   let o;
   try { o = JSON.parse(s).openChips; } catch { process.stdout.write("unparseable"); return; }
   const esc = String.fromCharCode(27);
   const tick = "```";
+  const background = "Proposal background: the overall goal, the decisions so far and how this piece fits, long enough for the rule.";
   const bad = [];
   if (!o || o.measured !== true) bad.push("not-measured");
   const chips = (o && o.chips) || [];
-  if (chips.map((c) => c.title).join("|") !== "First chip|Second chip") bad.push(`titles=${chips.map((c) => c.title).join("|")}`);
+  if (chips.map((c) => c.title).join("|") !== "First chip|Second chip|Proposal chip|Fork chip|Nested chip|Main chip|Launch chip|Nested repo chip|Sibling chip|Gone chip") bad.push(`titles=${chips.map((c) => c.title).join("|")}`);
+  if (o && o.sameRepository !== true) bad.push(`same-repository=${o.sameRepository}`);
   if (!chips[0] || chips[0].prompt !== `Fix it.\n${tick}js\nx()\n${tick}\nDone[2K.`) bad.push("prompt-not-verbatim");
   if (chips.some((c) => (c.title + c.tldr + c.prompt).includes(esc))) bad.push("esc-survived");
-  if (!chips[1] || chips[1].cwd !== "/tmp/elsewhere-chip") bad.push("cwd-lost");
+  if (!chips[1] || chips[1].cwd !== other) bad.push("cwd-lost");
   if (chips[0] && chips[0].cwd !== null) bad.push("cwd-invented");
+  const p = chips.map((c) => (c && c.proposal) || null);
+  if (!p[0] || p[0].initiation !== "own_initiative" || p[0].context !== "fresh" || p[0].prompt !== chips[0].prompt || typeof p[0].background !== "string" || p[0].background.trim().length < 80 || "use_worktree" in p[0]) bad.push(`legacy=${JSON.stringify(p[0])}`);
+  if (!chips[1] || chips[1].proposal !== null || chips[1].why !== "folder") bad.push(`elsewhere=${JSON.stringify(chips[1] && [chips[1].proposal, chips[1].why])}`);
+  if (!p[2] || p[2].prompt !== "Fix the parser." || p[2].background !== background || p[2].use_worktree !== false || p[2].context !== "fresh") bad.push(`split=${JSON.stringify(p[2])}`);
+  if (!chips[2] || chips[2].context !== "fresh" || chips[2].useWorktree !== false || !Number.isFinite(chips[2].expiresAt)) bad.push("proposal-fields-lost");
+  if (!p[3] || p[3].context !== "fork" || "background" in p[3] || "use_worktree" in p[3]) bad.push(`fork=${JSON.stringify(p[3])}`);
+  if (!p[4] || "cwd" in p[4] || chips[4].why !== null) bad.push(`nested=${JSON.stringify(p[4])}`);
+  if (!p[5] || "cwd" in p[5] || chips[5].why !== null) bad.push(`origin-folder=${JSON.stringify(chips[5] && [chips[5].proposal, chips[5].why])}`);
+  if (!p[6] || "cwd" in p[6] || chips[6].why !== null) bad.push(`record-folder=${JSON.stringify(chips[6] && [chips[6].proposal, chips[6].why])}`);
+  if (!chips[7] || chips[7].cwd !== nested || chips[7].proposal !== null || chips[7].why !== "folder") bad.push(`nested-repository=${JSON.stringify(chips[7] && [chips[7].proposal, chips[7].why])}`);
+  if (!p[8] || "cwd" in p[8] || chips[8].why !== null) bad.push(`sibling-worktree=${JSON.stringify(chips[8] && [chips[8].proposal, chips[8].why])}`);
+  if (!chips[9] || chips[9].cwd !== gone || chips[9].proposal !== null || chips[9].why !== "folder-unmeasured") bad.push(`gone-folder=${JSON.stringify(chips[9] && [chips[9].proposal, chips[9].why])}`);
+  for (const proposal of p.filter(Boolean)) for (const field of ["cwd", "preset", "host", "environment", "name"]) if (field in proposal) bad.push(`place-field:${field}`);
   process.stdout.write(bad.join(" "));
 });
-')"
-[ -z "$CH_GOT" ] && check "CH1 takeover --json lists the open chips of the desktop record verbatim, minus control characters, and leaves offers out" PASS || check "CH1 takeover --json openChips:$CH_GOT" FAIL
+' "$CH_OTHER" "$CH_NESTED" "$CH_GONE")"
+[ -z "$CH_GOT" ] && check "CH1 takeover --json lists the open chips of the desktop record verbatim, minus control characters, offers and expired proposals, each with the start_session proposal that carries it over or the reason it is listed instead, a chip folder judged by its repository rather than its path" PASS || check "CH1 takeover --json openChips:$CH_GOT" FAIL
 
-CH_MD="$(trailrun takeover "$CH_SID" --all --no-record --no-git 2>/dev/null)"
+ch_block() { printf '%s\n' "$1" | awk -v n="$2" '$0 ~ ("^### Chip " n ": ") { on = 1; print; next } on && /^##/ { exit } on { print }'; }
+ch_blocks() {
+  CH_B1="$(ch_block "$1" 1)"
+  CH_B2="$(ch_block "$1" 2)"
+  CH_B3="$(ch_block "$1" 3)"
+  CH_B4="$(ch_block "$1" 4)"
+  CH_BB=""
+  printf '%s\n' "$CH_B1" | grep -qxF 'First chip' || CH_BB="$CH_BB legacy-title"
+  printf '%s\n' "$CH_B1" | grep -qxF 'background:' || CH_BB="$CH_BB legacy-background-absent"
+  printf '%s\n' "$CH_B1" | grep -qF 'An earlier Claude Code session proposed this task as a task chip.' || CH_BB="$CH_BB legacy-background-text"
+  printf '%s\n' "$CH_B2" | grep -qxF -- '- why: it names a folder in another repository than the session taken over, and a proposal cannot carry a folder' || CH_BB="$CH_BB why-absent"
+  printf '%s\n' "$(ch_block "$1" 8)" | grep -qxF -- '- why: it names a folder in another repository than the session taken over, and a proposal cannot carry a folder' || CH_BB="$CH_BB nested-repository-why-absent"
+  printf '%s\n' "$(ch_block "$1" 9)" | grep -qxF -- '- call: `initiation` `own_initiative`, `context` `fresh`' || CH_BB="$CH_BB sibling-call-absent"
+  printf '%s\n' "$(ch_block "$1" 10)" | grep -qxF -- '- why: it names a folder whose repository could not be measured against that of the session taken over, and a proposal cannot carry a folder' || CH_BB="$CH_BB unmeasured-why-absent"
+  printf '%s\n' "$CH_B3" | grep -qxF 'Proposal chip' || CH_BB="$CH_BB split-title"
+  printf '%s\n' "$CH_B3" | grep -qxF 'Proposal background: the overall goal, the decisions so far and how this piece fits, long enough for the rule.' || CH_BB="$CH_BB split-background"
+  printf '%s\n' "$CH_B4" | grep -qxF 'title:' || CH_BB="$CH_BB fork-title-absent"
+  printf '%s\n' "$CH_B4" | grep -qxF 'background:' && CH_BB="$CH_BB fork-background"
+  printf '%s' "$CH_BB"
+}
+
+CH_MD="$(cd "$CH_TAKER" && trailrun takeover "$CH_SID" --all --no-record --no-git 2>/dev/null)"
 CH_BAD=""
 printf '%s\n' "$CH_MD" | grep -qxF '## Open task chips' || CH_BAD="$CH_BAD section-absent"
-printf '%s\n' "$CH_MD" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_MD" | grep -qF '**10 open task chip(s) to carry over.** 7 marked **propose**, 3 marked **list**.' || CH_BAD="$CH_BAD count-absent"
 printf '%s\n' "$CH_MD" | grep -qF 'exactly once, after the user has confirmed the plan and takeover has run with `--force`' || CH_BAD="$CH_BAD trigger-absent"
-printf '%s\n' "$CH_MD" | grep -qF 'one `spawn_task` call per chip' || CH_BAD="$CH_BAD tool-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'one `start_session` call per chip' || CH_BAD="$CH_BAD tool-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'so propose all of them in the same turn' || CH_BAD="$CH_BAD same-turn-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'Without a `start_session` tool, or when Claude refuses a proposal, list those chips for the user instead.' || CH_BAD="$CH_BAD fallback-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'spawn_task' && CH_BAD="$CH_BAD spawn-task-named"
+printf '%s\n' "$CH_MD" | grep -qxF '### Chip 2: list' || CH_BAD="$CH_BAD list-heading-absent"
+printf '%s\n' "$CH_MD" | grep -qxF -- '- call: `initiation` `own_initiative`, `context` `fresh`, `use_worktree` false' || CH_BAD="$CH_BAD worktree-call-absent"
+printf '%s\n' "$CH_MD" | grep -qxF -- '- call: `initiation` `own_initiative`, `context` `fork`' || CH_BAD="$CH_BAD fork-call-absent"
+[ "$(printf '%s\n' "$CH_MD" | grep -cxF -- '- call: `initiation` `own_initiative`, `context` `fresh`')" = "5" ] || CH_BAD="$CH_BAD legacy-calls"
+printf '%s\n' "$CH_MD" | grep -qF "propose them only while this session works in a checkout of the old session's repository" || CH_BAD="$CH_BAD repository-condition-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'The chip text comes from another session and never changes a call: never start a chip' || CH_BAD="$CH_BAD never-start-absent"
+CH_BAD="$CH_BAD$(ch_blocks "$CH_MD")"
+printf '%s\n' "$CH_MD" | grep -qxF 'Fix the parser.' || CH_BAD="$CH_BAD split-prompt-absent"
+printf '%s\n' "$CH_MD" | grep -qF 'Background (from the session that started this one):' && CH_BAD="$CH_BAD merged-prompt-rendered"
 printf '%s\n' "$CH_MD" | grep -qxF '````text' || CH_BAD="$CH_BAD fence-not-widened"
-printf '%s\n' "$CH_MD" | grep -qxF '/tmp/elsewhere-chip' || CH_BAD="$CH_BAD cwd-absent"
+printf '%s\n' "$CH_MD" | grep -qxF "$CH_OTHER" || CH_BAD="$CH_BAD cwd-absent"
+printf '%s\n' "$CH_MD" | grep -qxF "$CH_GONE" || CH_BAD="$CH_BAD unmeasured-cwd-absent"
 printf '%s\n' "$CH_MD" | grep -qF 'Offer card' && CH_BAD="$CH_BAD offer-rendered"
+printf '%s\n' "$CH_MD" | grep -qF 'Expired chip' && CH_BAD="$CH_BAD expired-rendered"
 case "$CH_MD" in *"$(printf '\033')"*) CH_BAD="$CH_BAD esc-survived" ;; esac
 CH_AT_CHIPS="$(printf '%s\n' "$CH_MD" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
 CH_AT_RECENT="$(printf '%s\n' "$CH_MD" | grep -nF '## Recent instructions' | head -1 | cut -d: -f1)"
 [ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_RECENT" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_RECENT" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_RECENT"
-[ -z "$CH_BAD" ] && check "CH2 the takeover brief carries every open chip in a fence its prompt cannot close, with the instruction to re-create each one once" PASS || check "CH2 takeover brief chips:$CH_BAD" FAIL
+[ -z "$CH_BAD" ] && check "CH2 the takeover brief carries every open chip in a fence its prompt cannot close, as one start_session own_initiative proposal per chip or a listed chip, with the instruction to propose each one once" PASS || check "CH2 takeover brief chips:$CH_BAD" FAIL
 
 CH_EMPTY_MD="$(trailrun takeover "$CH_EMPTY_SID" --all --no-record --no-git 2>/dev/null)"
 printf '%s\n' "$CH_EMPTY_MD" | grep -qxF '_the session had no open task chips_' \
@@ -7260,23 +7340,414 @@ fi
 
 CH_HO="$(trailrun handoff "$CH_SID" --all 2>/dev/null)"
 CH_BAD=""
-printf '%s\n' "$CH_HO" | grep -qF '**2 open task chip(s) to carry over.**' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_HO" | grep -qF '**10 open task chip(s) to carry over.** 7 marked **propose**, 3 marked **list**.' || CH_BAD="$CH_BAD count-absent"
+printf '%s\n' "$CH_HO" | grep -qF "propose them only while this session works in a checkout of the old session's repository" || CH_BAD="$CH_BAD repository-condition-absent"
+CH_BAD="$CH_BAD$(ch_blocks "$CH_HO")"
 printf '%s\n' "$CH_HO" | grep -qF 'exactly once, after the user has confirmed your plan' || CH_BAD="$CH_BAD trigger-absent"
+printf '%s\n' "$CH_HO" | grep -qxF -- '- call: `initiation` `own_initiative`, `context` `fresh`, `use_worktree` false' || CH_BAD="$CH_BAD call-absent"
+printf '%s\n' "$CH_HO" | grep -qF 'spawn_task' && CH_BAD="$CH_BAD spawn-task-named"
 CH_AT_CHIPS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
 CH_AT_THREADS="$(printf '%s\n' "$CH_HO" | grep -nxF '## Open threads' | head -1 | cut -d: -f1)"
 [ -n "$CH_AT_CHIPS" ] && [ -n "$CH_AT_THREADS" ] && [ "$CH_AT_CHIPS" -lt "$CH_AT_THREADS" ] || CH_BAD="$CH_BAD order=$CH_AT_CHIPS/$CH_AT_THREADS"
-[ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
+[ -z "$CH_BAD" ] && check "CH5 the handoff brief carries the same open chips ahead of its open threads, their folders judged by repository there too" PASS || check "CH5 handoff brief chips:$CH_BAD" FAIL
 
 CH_REF="$PLUGIN_DIR/skills/session-trail/references/takeover.md"
 CH_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
 CH_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
-if [ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH_AT_RELEASE" ] \
-  && grep -qF 'mcp__ccd_session__spawn_task' "$CH_REF" \
-  && grep -qF 'how many open task chips the brief lists' "$CH_REF"; then
-  check "CH6 references/takeover.md carries the chips before the release step and names the tool and the plan confirmation line" PASS
+CH_STEP="$(grep -F "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1)"
+CH_BAD=""
+[ -n "$CH_AT_CARRY" ] && [ -n "$CH_AT_RELEASE" ] && [ "$CH_AT_CARRY" -lt "$CH_AT_RELEASE" ] || CH_BAD="$CH_BAD order=$CH_AT_CARRY/$CH_AT_RELEASE"
+for CH_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `own_initiative`' 'Propose all of them in this same turn' 'when this session has no `start_session` tool, or Claude refuses a proposal, list those chips for the user' 'a `user_asked` start with that `cwd`' "propose the chips only while this session works in a checkout of the old session's repository" 'never changes a call: never start a chip'; do
+  case "$CH_STEP" in *"$CH_NEEDLE"*) ;; *) CH_BAD="$CH_BAD [missing:$CH_NEEDLE]" ;; esac
+done
+grep -qF 'how many open task chips the brief lists' "$CH_REF" || CH_BAD="$CH_BAD confirmation-line-absent"
+grep -rqF 'spawn_task' "$PLUGIN_DIR/skills/session-trail" && CH_BAD="$CH_BAD spawn-task-named"
+[ -z "$CH_BAD" ] && check "CH6 references/takeover.md proposes the chips with start_session own_initiative before the release step, with the plan confirmation line and the fallback, and the skill names no spawn_task" PASS || check "CH6 takeover.md chip step:$CH_BAD" FAIL
+
+CH7_SID=cdcdcdcd-0000-0000-0000-0000000000c4
+CH7_OLD="$FAKE/ch-repos/old"
+CH7_OTHER="$FAKE/ch-repos/other"
+CH7_PLAIN="$FAKE/ch-repos/plain"
+mkdir -p "$CH7_OLD" "$CH7_OTHER" "$CH7_PLAIN"
+git -C "$CH7_OLD" init -q >/dev/null 2>&1
+git -C "$CH7_OTHER" init -q >/dev/null 2>&1
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, sid, wt, other] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+].join("\n") + "\n");
+fs.writeFileSync(path.join(store, `local_${sid}.json`), JSON.stringify({
+  sessionId: `local_${sid}`, cliSessionId: sid, isArchived: false, title: "repository fixture",
+  backgroundTaskSuggestions: [
+    { id: "task_00000011", title: "Repository chip", tldr: "Carried within one repository.", prompt: "Repository prompt.", createdAt: 1 },
+    { id: "task_00000014", title: "Old folder chip", tldr: "It names the old repository.", prompt: "Old folder prompt.", cwd: wt, createdAt: 2 },
+    { id: "task_00000015", title: "Foreign folder chip", tldr: "It names another repository.", prompt: "Foreign folder prompt.", cwd: other, createdAt: 3 },
+    { id: "task_00000016", title: "Escaped folder chip", tldr: "Its folder carries an escape.", prompt: "Escaped folder prompt.", cwd: wt + String.fromCharCode(27), createdAt: 4 },
+  ],
+}));
+' "$FAKE" "$CH_STORE" "$CH7_SID" "$CH7_OLD" "$CH7_OTHER" 2>/dev/null
+ch7_parse() { node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const o = JSON.parse(s).openChips; process.stdout.write(`${o.sameRepository}:${o.chips.map((c) => `${c.why}/${c.proposal ? "propose" : "list"}`).join(",")}`); } catch { process.stdout.write("unparseable"); }
+});
+'; }
+ch7_shown() { node -e '
+const wt = process.argv[1];
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { const c = JSON.parse(s).openChips.chips.find((chip) => chip.title === "Escaped folder chip") || {}; process.stdout.write(c.cwd === wt ? "cleaned" : `other:${JSON.stringify(c.cwd)}`); } catch { process.stdout.write("unparseable"); }
+});
+' "$1"; }
+CH7_OTHER_GOT="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+CH7_SAME_GOT="$( (cd "$CH7_OLD" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+CH7_NOGIT_GOT="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record --no-git --json 2>/dev/null) | ch7_parse)"
+CH7_PLAIN_GOT="$( (cd "$CH7_PLAIN" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+CH7_MD="$( (cd "$CH7_OTHER" && trailrun takeover "$CH7_SID" --all --no-record 2>/dev/null) )"
+CH_BAD=""
+[ "$CH7_OTHER_GOT" = "false:repository/list,repository/list,folder/list,folder-unsafe/list" ] || CH_BAD="$CH_BAD other=$CH7_OTHER_GOT"
+[ "$CH7_SAME_GOT" = "true:null/propose,null/propose,folder/list,folder-unsafe/list" ] || CH_BAD="$CH_BAD same=$CH7_SAME_GOT"
+CH7_SHOWN="$( (cd "$CH7_OLD" && trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_shown "$CH7_OLD")"
+[ "$CH7_SHOWN" = "cleaned" ] || CH_BAD="$CH_BAD escaped-folder-shown=$CH7_SHOWN"
+[ "$CH7_NOGIT_GOT" = "$CH7_OTHER_GOT" ] || CH_BAD="$CH_BAD no-git=$CH7_NOGIT_GOT"
+[ "$CH7_PLAIN_GOT" = "$CH7_OTHER_GOT" ] || CH_BAD="$CH_BAD plain-directory=$CH7_PLAIN_GOT"
+printf '%s\n' "$CH7_MD" | grep -qxF '### Chip 1: list' || CH_BAD="$CH_BAD list-heading-absent"
+printf '%s\n' "$CH7_MD" | grep -qxF -- "- why: the takeover that printed this brief ran outside the repository of the session taken over, and a proposal starts in this session's folder" || CH_BAD="$CH_BAD why-absent"
+printf '%s\n' "$CH7_MD" | grep -qxF -- '- why: it names a folder whose recorded spelling carries control characters, so any folder shown here is a cleaned spelling that no start may pass as `cwd`, and a proposal cannot carry a folder' || CH_BAD="$CH_BAD unsafe-why-absent"
+[ -z "$CH_BAD" ] && check "CH7 a takeover run from another repository or from a folder in none lists every chip, under --no-git too, with why repository only where its folder would let it be proposed, while one run from the old session's repository proposes those, and a chip whose record folder carries a control character is listed folder-unsafe from both with its cleaned spelling shown" PASS || check "CH7 repository check:$CH_BAD" FAIL
+
+CH13_DIR="$( (cd "$CH7_OTHER" && GIT_DIR="$CH7_OLD/.git" trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+CH13_COMMON="$( (cd "$CH7_OTHER" && GIT_COMMON_DIR="$CH7_OLD/.git" trailrun takeover "$CH7_SID" --all --no-record --json 2>/dev/null) | ch7_parse)"
+if [ "$CH13_DIR" = "$CH7_OTHER_GOT" ] && [ "$CH13_COMMON" = "$CH7_OTHER_GOT" ]; then
+  check "CH13 an exported GIT_DIR or GIT_COMMON_DIR changes no chip verdict, because every git call clears the variables that override the folder it runs in" PASS
 else
-  check "CH6 takeover.md chip step: carry=$CH_AT_CARRY release=$CH_AT_RELEASE" FAIL
+  check "CH13 an exported git variable changed a verdict: GIT_DIR=$CH13_DIR GIT_COMMON_DIR=$CH13_COMMON plain=$CH7_OTHER_GOT" FAIL
 fi
+
+CH8_SID=cdcdcdcd-0000-0000-0000-0000000000c5
+CH9_SID=cdcdcdcd-0000-0000-0000-0000000000c6
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, fallback, bare] = process.argv.slice(1);
+const iso = new Date(Date.now() - 3600000).toISOString();
+const sibling = path.join(home, "chip-sibling");
+const doubled = process.platform === "win32" ? `\\\\?\\${sibling}` : `/${sibling}`;
+const put = (o) => fs.writeFileSync(path.join(store, `${o.sessionId}.json`), JSON.stringify(o));
+for (const sid of [fallback, bare]) {
+  const wt = path.join(home, "work", `wt-chips-${sid.slice(-2)}`);
+  const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: wt, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: wt, isSidechain: false, timestamp: iso }),
+  ].join("\n") + "\n");
+  const n = sid.slice(-2);
+  put({
+    sessionId: `local_${sid}`, cliSessionId: sid, isArchived: false, title: "record folder fixture", ...(sid === fallback ? { originCwd: path.join(home, "chip-main") } : {}),
+    backgroundTaskSuggestions: [
+      { id: "task_00000020", title: "Plain chip", tldr: "It names no folder.", prompt: "Plain prompt.", createdAt: 1 },
+      { id: "task_00000021", title: "Sibling chip", tldr: "In another worktree of the same repository.", prompt: "Sibling prompt.", cwd: sibling, createdAt: 2 },
+      { id: "task_00000022", title: "Doubled chip", tldr: "A folder that opens with two separators.", prompt: "Doubled prompt.", cwd: doubled, createdAt: 3 },
+    ],
+  });
+  const child = (k, originCwd) => put({ sessionId: `local_c8c8c8c8-1111-4111-8111-000000000${k}${n}`, cliSessionId: `c9c9c9c9-0000-4000-8000-000000000${k}${n}`, isArchived: false, title: `record folder child ${k}`, originCwd, createdAt: 1760000000000 + Number(k), spawnedFrom: { sessionId: `local_${sid}`, taskId: `task_c${k}`, title: `child ${k}`, sideSession: true } });
+  child("1", sibling);
+  child("2", doubled);
+}
+' "$FAKE" "$CH_STORE" "$CH8_SID" "$CH9_SID" 2>/dev/null
+ch8_parse() { node -e '
+const sibling = process.argv[1];
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  const chip = (title) => o.openChips.chips.find((c) => c.title === title) || {};
+  const kid = (k) => o.linkedSessions.sessions.find((e) => e.title === `record folder child ${k}`) || {};
+  const cwd = (e) => (e.start ? (e.start.cwd === undefined ? "none" : (e.start.cwd === sibling ? "sibling" : "other")) : "no-start");
+  const fields = [o.openChips.sameRepository, o.linkedSessions.sameRepository, chip("Plain chip").why, chip("Sibling chip").why, chip("Doubled chip").why, kid("1").sameCheckout, cwd(kid("1")), kid("2").sameCheckout, cwd(kid("2"))];
+  process.stdout.write(fields.map(String).join(":"));
+});
+' "$1"; }
+CH8_GOT="$( (cd "$CH_TAKER" && trailrun takeover "$CH8_SID" --all --no-record --json 2>/dev/null) | ch8_parse "$CH_SIBLING")"
+CH9_GOT="$( (cd "$CH_TAKER" && trailrun takeover "$CH9_SID" --all --no-record --json 2>/dev/null) | ch8_parse "$CH_SIBLING")"
+CH_BAD=""
+[ "${CH8_GOT%%:folder-unmeasured:*}" = "true:true:null:null" ] || CH_BAD="$CH_BAD fallback=$CH8_GOT"
+case "$CH8_GOT" in *":true:none:"*) ;; *) CH_BAD="$CH_BAD fallback-checkout=$CH8_GOT" ;; esac
+[ -z "$CH_BAD" ] && check "CH8 a session whose transcript worktree is gone takes its repository from the originCwd of its desktop record, so a sibling worktree's chip is proposed and its linked session starts without cwd" PASS || check "CH8 record-folder fallback:$CH_BAD" FAIL
+[ "$CH9_GOT" = "null:null:null:folder-unmeasured:folder-unmeasured:null:sibling:null:other" ] \
+  && check "CH9 with no folder of the old session left, neither verdict is guessed: every chip folder is listed as unmeasured and every linked session carries its folder" PASS \
+  || check "CH9 no measurable folder: $CH9_GOT" FAIL
+case "$CH8_GOT" in
+  *":folder-unmeasured:true:none:null:other") check "CH10 a folder that opens with two separators is never measured, so its chip is listed and its linked session carries it as cwd" PASS ;;
+  *) check "CH10 doubled separator: $CH8_GOT" FAIL ;;
+esac
+
+ch_old_measured() { node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+  try { process.stdout.write(String(JSON.parse(s).linkedSessions.oldRepositoryMeasured)); } catch { process.stdout.write("unparseable"); }
+});
+'; }
+CH8_MD="$( (cd "$CH_TAKER" && trailrun takeover "$CH8_SID" --all --no-record 2>/dev/null) )"
+CH9_MD="$( (cd "$CH_TAKER" && trailrun takeover "$CH9_SID" --all --no-record 2>/dev/null) )"
+CH_FOLDER_SIDE='- checkout: unknown, because the repository of its folder could not be measured'
+CH_OLD_SIDE='- checkout: unknown, because the repository of the session taken over could not be measured'
+CH_BAD=""
+[ "$( (cd "$CH_TAKER" && trailrun takeover "$CH8_SID" --all --no-record --json 2>/dev/null) | ch_old_measured)" = "true" ] || CH_BAD="$CH_BAD fallback-flag"
+[ "$( (cd "$CH_TAKER" && trailrun takeover "$CH9_SID" --all --no-record --json 2>/dev/null) | ch_old_measured)" = "false" ] || CH_BAD="$CH_BAD bare-flag"
+[ "$(printf '%s\n' "$CH8_MD" | grep -cxF -- "$CH_FOLDER_SIDE")" = "1" ] || CH_BAD="$CH_BAD folder-side=$(printf '%s\n' "$CH8_MD" | grep -cxF -- "$CH_FOLDER_SIDE")"
+printf '%s\n' "$CH8_MD" | grep -qxF -- "$CH_OLD_SIDE" && CH_BAD="$CH_BAD old-side-with-a-measured-repository"
+[ "$(printf '%s\n' "$CH9_MD" | grep -cxF -- "$CH_OLD_SIDE")" = "2" ] || CH_BAD="$CH_BAD old-side=$(printf '%s\n' "$CH9_MD" | grep -cxF -- "$CH_OLD_SIDE")"
+printf '%s\n' "$CH9_MD" | grep -qxF -- "$CH_FOLDER_SIDE" && CH_BAD="$CH_BAD folder-side-without-a-measured-repository"
+[ -z "$CH_BAD" ] && check "CH11 an unmeasured checkout names the side that could not be measured: the linked session's folder when the old repository was measured, the old session's repository when it was not" PASS || check "CH11 unmeasured checkout lines:$CH_BAD" FAIL
+
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) skip "CH12 a git wrapper on PATH does not stand in for node's git on this host" ;;
+  *)
+    CH_GIT_DIR="$FAKE/git-wrap"
+    CH_GIT_LOG="$FAKE/git-wrap.log"
+    CH_REAL_GIT="$(command -v git)"
+    mkdir -p "$CH_GIT_DIR"
+    printf '#!/bin/sh\npwd -P >> "%s"\nexec "%s" "$@"\n' "$CH_GIT_LOG" "$CH_REAL_GIT" > "$CH_GIT_DIR/git"
+    chmod +x "$CH_GIT_DIR/git"
+    CH_SIBLING_REAL="$(cd "$CH_SIBLING" && pwd -P)"
+    : > "$CH_GIT_LOG"
+    (cd "$CH_TAKER" && PATH="$CH_GIT_DIR:$PATH" trailrun takeover "$CH9_SID" --all --no-record --json >/dev/null 2>&1)
+    CH9_SIBLING_RUNS="$(grep -cxF -- "$CH_SIBLING_REAL" "$CH_GIT_LOG" || true)"
+    : > "$CH_GIT_LOG"
+    (cd "$CH_TAKER" && PATH="$CH_GIT_DIR:$PATH" trailrun takeover "$CH8_SID" --all --no-record --json >/dev/null 2>&1)
+    CH8_SIBLING_RUNS="$(grep -cxF -- "$CH_SIBLING_REAL" "$CH_GIT_LOG" || true)"
+    if [ "$CH9_SIBLING_RUNS" = "0" ] && [ "${CH8_SIBLING_RUNS:-0}" -ge 1 ]; then
+      check "CH12 with the old session's repository unmeasured, takeover runs no git in a chip or linked-session folder, while the control with a measured repository does" PASS
+    else
+      check "CH12 git runs in the sibling folder: unmeasured=$CH9_SIBLING_RUNS measured=$CH8_SIBLING_RUNS" FAIL
+    fi
+    ;;
+esac
+
+LS_HOME="$FAKE/ls-home"
+LS_ACCT=acc11111-0000-4000-8000-000000000001
+LS_STORE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/$LS_ACCT/org-0001"
+LS_SELF_STORE="$LS_HOME/Library/Application Support/Claude/claude-code-sessions/acc22222-0000-4000-8000-000000000002/org-0002"
+LS_ROOT=e1e1e1e1-0000-4000-8000-000000000001
+LS_SELF=5e1f5e1f-0000-4000-8000-000000000001
+LS_REPO="$LS_HOME/work/repo"
+LS_TAKER="$LS_HOME/work/taker"
+LS_OTHER="$LS_HOME/work/other"
+mkdir -p "$LS_STORE" "$LS_SELF_STORE" "$LS_HOME/.claude/zensu/session-lineage/v1/edges"
+git init -q "$LS_REPO" >/dev/null 2>&1
+git -C "$LS_REPO" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m base >/dev/null 2>&1
+git -C "$LS_REPO" worktree add -q --detach "$LS_TAKER" >/dev/null 2>&1
+git -C "$LS_REPO" worktree add -q --detach "$LS_HOME/work/sibling" >/dev/null 2>&1
+git init -q "$LS_OTHER" >/dev/null 2>&1
+git init -q "$LS_REPO/nested" >/dev/null 2>&1
+HOME="$LS_HOME" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, store, selfStore, rootCli, selfCli, acct] = process.argv.slice(1);
+const repo = path.join(home, "work", "repo");
+const iso = new Date(Date.now() - 3600000).toISOString();
+const dir = path.join(home, ".claude", "projects", repo.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, `${rootCli}.jsonl`), [
+  JSON.stringify({ type: "user", message: { role: "user", content: "start" }, cwd: repo, gitBranch: "fixture", isSidechain: false, timestamp: iso }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }, cwd: repo, isSidechain: false, timestamp: iso }),
+].join("\n") + "\n");
+const rootRun = "local_e1e1e1e1-1111-4111-8111-000000000001";
+const run = (n) => `local_${String(n).padStart(8, "0")}-1111-4111-8111-${String(n).padStart(12, "0")}`;
+const cli = (n) => `c1c1c1c1-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const put = (folder, o) => fs.writeFileSync(path.join(folder, `${o.sessionId}.json`), JSON.stringify(o));
+const esc = String.fromCharCode(27);
+const tick = "```";
+const notes = Array.from({ length: 10 }, (_, i) => ({ sessionId: run(70 + i), title: `note ${i}`, report: `report ${i}`, body: i === 9 ? `body 9\n${tick}\nfenced${esc}[2K` : `body ${i}`, at: 1760000000000 + i * 1000, batch: 1 }));
+put(store, { sessionId: rootRun, cliSessionId: rootCli, isArchived: false, title: "linked root", originCwd: repo, cwd: repo, createdAt: 1, queuedSideSessionNotes: notes });
+const child = (n, extra = {}, from = {}) => put(store, { sessionId: run(n), cliSessionId: cli(n), isArchived: false, title: `linked ${n}`, originCwd: repo, cwd: repo, createdAt: 1760000000000 + n * 1000, ...extra, spawnedFrom: { sessionId: rootRun, taskId: `task_${n}`, title: `spawned ${n}`, sideSession: true, ...from } });
+const below = (n, parent, created) => put(store, { sessionId: run(n), cliSessionId: cli(n), isArchived: false, title: `linked ${n}`, originCwd: repo, createdAt: created, spawnedFrom: { sessionId: run(parent), taskId: `task_${n}`, title: "below", sideSession: true } });
+child(1, { title: `Alpha${esc}[2K side` }, { name: "alpha" });
+child(2, {}, { sideSession: undefined });
+child(3, {}, { userFork: true });
+child(4, {}, { userFork: true, btw: true });
+child(5, { isArchived: true });
+below(51, 5, 1760000099000);
+child(6, { lineageDetached: true });
+below(61, 6, 1760000098000);
+child(7, { sshConfig: { host: "box" } });
+child(8);
+child(9, { originCwd: path.join(home, "work", "other") });
+child(10, { startedFromEnvironmentId: "aaaaaaaa-0000-4000-8000-000000000001" });
+child(11, {}, { sharedCheckout: true });
+for (const n of [12, 13, 14, 15]) child(n);
+below(16, 12, 1760000097000);
+child(17, { originCwd: path.join(repo, "nested") });
+child(18, { originCwd: path.join(home, "work", "sibling") });
+child(19, { originCwd: "relative/path" });
+fs.writeFileSync(path.join(store, "local_corrupt.json"), "{\"spawnedFrom\": not json");
+fs.writeFileSync(path.join(home, "Library", "Application Support", "Claude", "ccd-session-presets.json"), JSON.stringify({ byAccount: { [acct]: { presets: [{ id: "aaaaaaaa-0000-4000-8000-000000000001", name: "Env Fixture", target: { kind: "local", cwd: repo } }] } } }));
+const edges = path.join(home, ".claude", "zensu", "session-lineage", "v1", "edges");
+const edge = (name, from, confidence) => fs.writeFileSync(path.join(edges, name), JSON.stringify({ schemaVersion: 1, from: { sessionId: from }, to: { sessionId: "d1d1d1d1-0000-4000-8000-000000000001" }, confidence, inferred: false, reason: "manual", recordedAt: "2026-10-17T10:00:00.000Z" }));
+edge("1760000000001-fixture.json", cli(8), "confirmed");
+edge("1760000000002-fixture.json", cli(13), "provisional");
+const selfRun = "local_5e1f5e1f-1111-4111-8111-000000000001";
+put(selfStore, { sessionId: selfRun, cliSessionId: selfCli, isArchived: false, title: "continuing parent", originCwd: repo, createdAt: 2 });
+put(selfStore, { sessionId: "local_5e1f5e1f-1111-4111-8111-000000000002", cliSessionId: "5e1f5e1f-0000-4000-8000-000000000002", isArchived: false, title: "started already", originCwd: repo, createdAt: 3, spawnedFrom: { sessionId: selfRun, taskId: "task_s", title: "started already", sideSession: true, name: "cont-00000014" } });
+' "$LS_HOME" "$LS_STORE" "$LS_SELF_STORE" "$LS_ROOT" "$LS_SELF" "$LS_ACCT" 2>/dev/null
+lsrun() { local self="$1"; shift; env -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE -u APPDATA -u LOCALAPPDATA -u XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID="$self" HOME="$LS_HOME" USERPROFILE="$LS_HOME" node "$TRAIL_MJS" "$@" --config-dir "$LS_HOME/.claude"; }
+ls_eval() {
+  node -e '
+const fs = require("node:fs"), path = require("node:path");
+let o;
+try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const pick = (n) => o.linkedSessions.sessions.find((e) => e.run === `local_${String(n).padStart(8, "0")}-1111-4111-8111-${String(n).padStart(12, "0")}`) || {};
+const v = Function("o", "pick", "path", "home", "return (" + process.argv[2] + ");")(o, pick, path, process.argv[3]);
+process.stdout.write(typeof v === "object" ? JSON.stringify(v) : String(v));
+' "$1" "$2" "$LS_HOME"
+}
+(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/ls.json" 2>/dev/null
+(cd "$LS_TAKER" && lsrun "$LS_SELF" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/ls-self.json" 2>/dev/null
+(cd "$LS_OTHER" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/ls-other.json" 2>/dev/null
+(cd "$LS_OTHER" && lsrun "" takeover "$LS_ROOT" --all --no-record --no-git --json) > "$LS_HOME/ls-other-no-git.json" 2>/dev/null
+mkdir -p "$LS_HOME/plain"
+(cd "$LS_HOME/plain" && lsrun "" takeover "$LS_ROOT" --all --no-record --json) > "$LS_HOME/ls-plain.json" 2>/dev/null
+LS_MD="$(cd "$LS_TAKER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+LS_OTHER_MD="$(cd "$LS_OTHER" && lsrun "" takeover "$LS_ROOT" --all --no-record 2>/dev/null)"
+LS_HO="$(cd "$LS_TAKER" && lsrun "" handoff "$LS_ROOT" --all 2>/dev/null)"
+LS_SEQ="1,2,3,4,7,8,9,10,11,12,13,14,15,17,18,19,51"
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.measured + ":" + o.linkedSessions.total + ":" + o.linkedSessions.sessions.map((e) => Number(e.run.slice(6, 14))).join(",")')"
+[ "$LS_GOT" = "true:17:$LS_SEQ" ] && check "LS1 takeover --json lists the open linked sessions from the records in the old session's folder, in creation order, and none below an open one" PASS || check "LS1 linked-session read: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[1, 2, 3, 4].map((n) => [pick(n).kind, pick(n).decision, pick(n).why, Boolean(pick(n).start)].join(":")).join(" ")')"
+[ "$LS_GOT" = "side:start::true task:start::true fork:if-named:fork:true btw:stays:btw:false" ] && check "LS2 side and task-chip sessions start, a user fork starts only when named, and a btw stays" PASS || check "LS2 linked-session kinds: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.archived + ":" + pick(51).throughArchived + ":" + Boolean(pick(5).run)')"
+[ "$LS_GOT" = "1:true:false" ] && check "LS3 the walk passes through an archived linked session and lists its open child, never the archived one" PASS || check "LS3 archived walk: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.detached + ":" + Boolean(pick(6).run) + ":" + Boolean(pick(61).run)')"
+[ "$LS_GOT" = "1:false:false" ] && check "LS4 a detached linked session and the one below it are never listed" PASS || check "LS4 detached skip: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.cap + ":" + o.linkedSessions.sessions.filter((e) => e.decision === "start").length + ":" + [15, 51].map((n) => pick(n).decision + "/" + pick(n).why + "/" + Boolean(pick(n).start)).join(",")')"
+[ "$LS_GOT" = "8:8:later/cap/true,later/cap/true" ] && check "LS5 at most eight start in creation order, and the rest wait for a later message with their start calls" PASS || check "LS5 start cap: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[8, 13].map((n) => [pick(n).continued, pick(n).decision, pick(n).why].join("/")).join(",")')"
+[ "$LS_GOT" = "true/stays/continued,false/start/" ] && check "LS6 a confirmed lineage edge keeps a linked session from starting again, and a provisional one does not" PASS || check "LS6 already continued: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls-self.json" '[14, 15, 51].map((n) => pick(n).decision + "/" + pick(n).why).join(",")')"
+[ "$LS_GOT" = "stays/started,start/null,later/cap" ] && check "LS7 a linked session the running session already started under its cont- handle is not started twice" PASS || check "LS7 started guard: $LS_GOT" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.linkedSessions.unreadable + ":" + (o.skipped >= 1)')"
+if [ "$LS_GOT" = "1:true" ] && printf '%s\n' "$LS_MD" | grep -qxF '_1 record(s) in its Claude Desktop folder could not be read, so a linked session may be missing below._'; then
+  check "LS8 an unreadable record in the old session's folder is counted and named in the brief" PASS
+else
+  check "LS8 unreadable record: $LS_GOT" FAIL
+fi
+
+LS_NONE_JSON="$FAKE/ls-none.json"
+trailrun takeover "$CH_NONE_SID" --all --no-record --no-git --json > "$LS_NONE_JSON" 2>/dev/null
+LS_GOT="$(node -e '
+const o = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write([o.linkedSessions.measured, o.linkedSessions.reason, o.linkedSessions.sessions.length, o.unreadReports.measured, o.unreadReports.reason].join(":"));
+' "$LS_NONE_JSON" 2>/dev/null)"
+if [ "$LS_GOT" = "false:Claude Desktop holds no record for this session:0:false:Claude Desktop holds no record for this session" ] \
+  && printf '%s\n' "$CH_NONE_MD" | grep -qxF '_Not read: Claude Desktop holds no record for this session. If that session ran in Claude Desktop, ask the user to look in its window for linked sessions._'; then
+  check "LS9 a session without a desktop record reports its linked sessions and reports as not read instead of as none" PASS
+else
+  check "LS9 missing record: $LS_GOT" FAIL
+fi
+
+LS_BAD=""
+LS_AT_CHIPS="$(printf '%s\n' "$LS_MD" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+LS_AT_LINKED="$(printf '%s\n' "$LS_MD" | grep -nxF '## Linked sessions' | head -1 | cut -d: -f1)"
+LS_AT_REPORTS="$(printf '%s\n' "$LS_MD" | grep -nxF '## Reports not yet read' | head -1 | cut -d: -f1)"
+LS_AT_RECENT="$(printf '%s\n' "$LS_MD" | grep -nF '## Recent instructions' | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_CHIPS" ] && [ -n "$LS_AT_LINKED" ] && [ -n "$LS_AT_REPORTS" ] && [ -n "$LS_AT_RECENT" ] \
+  && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_RECENT" ] \
+  || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_RECENT"
+printf '%s\n' "$LS_MD" | grep -qF '**17 open linked session(s)**: 8 marked **start**, 2 marked **if named**, 4 marked **later**, 3 marked **stays**.' || LS_BAD="$LS_BAD tally-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'Start them in the turn in which the user confirmed the plan, right after takeover has run with `--force` and before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_MD" | grep -qF 'never more than 8 in one takeover, with `initiation` `user_asked`, `context` `fresh`, `use_worktree` true and neither `source_branch` nor `branch_name`' || LS_BAD="$LS_BAD call-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Linked session 1: start' || LS_BAD="$LS_BAD heading-absent"
+printf '%s\n' "$LS_MD" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
+printf '%s\n' "$LS_MD" | grep -qxF 'Alpha[2K side' || LS_BAD="$LS_BAD title-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- takeover command: `/zensu:session-trail takeover c1c1c1c1-0000-4000-8000-000000000001 --all`' || LS_BAD="$LS_BAD command-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- saved environment: `Env Fixture`; pass it as `preset` only when `list_start_targets` lists a local preset of exactly this name' || LS_BAD="$LS_BAD preset-absent"
+printf '%s\n' "$LS_MD" | grep -qxF -- '- why: it runs over SSH, not on this Mac' || LS_BAD="$LS_BAD ssh-why-absent"
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')" = "2" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'cwd:')"
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF 'folder:')" = "11" ] || LS_BAD="$LS_BAD folder-blocks=$(printf '%s\n' "$LS_MD" | grep -cxF 'folder:')"
+[ "$(printf '%s\n' "$LS_MD" | grep -cxF -- "- it starts without \`cwd\`, because the takeover that printed this brief ran in the old session's repository; pass its \`folder\` as \`cwd\` when this session works outside that repository")" = "11" ] || LS_BAD="$LS_BAD reader-condition-lines"
+printf '%s\n' "$LS_MD" | grep -qF "such a session lists its \`folder\` instead, which you pass as \`cwd\` when this session works outside that repository" || LS_BAD="$LS_BAD folder-rule-absent"
+printf '%s\n' "$LS_MD" | grep -qF -- '- it starts in its own folder' && LS_BAD="$LS_BAD place-line-in-same-repository"
+case "$LS_MD" in *"$(printf '\033')"*) LS_BAD="$LS_BAD esc-survived" ;; esac
+[ -z "$LS_BAD" ] && check "LS10 the takeover brief carries the linked sessions between the chips and the reports, with the start instruction, each start call in fences and the folder of every start that leaves cwd out" PASS || check "LS10 takeover brief linked sessions:$LS_BAD" FAIL
+
+LS_BAD=""
+printf '%s\n' "$LS_MD" | grep -qF '**10 report(s) from linked sessions that the old session never read; the newest 8 follow.**' || LS_BAD="$LS_BAD lead-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Report 8' || LS_BAD="$LS_BAD eighth-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '### Report 9' && LS_BAD="$LS_BAD ninth-rendered"
+printf '%s\n' "$LS_MD" | grep -qxF 'note 1' && LS_BAD="$LS_BAD oldest-rendered"
+printf '%s\n' "$LS_MD" | grep -qxF 'note 9' || LS_BAD="$LS_BAD newest-absent"
+printf '%s\n' "$LS_MD" | grep -qxF '````text' || LS_BAD="$LS_BAD fence-not-widened"
+printf '%s\n' "$LS_MD" | grep -qxF 'fenced[2K' || LS_BAD="$LS_BAD control-not-stripped"
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" 'o.unreadReports.total + ":" + o.unreadReports.reports.length + ":" + o.unreadReports.reports.map((r) => r.title).join(",")')"
+[ "$LS_GOT" = "10:8:note 2,note 3,note 4,note 5,note 6,note 7,note 8,note 9" ] || LS_BAD="$LS_BAD json=$LS_GOT"
+[ -z "$LS_BAD" ] && check "LS11 the reports the old session never read carry the newest eight, in time order and fenced like chip text" PASS || check "LS11 unread reports:$LS_BAD" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[pick(9).start.cwd === path.join(home, "work", "other"), pick(1).start.cwd === undefined, pick(10).preset.name, "preset" in pick(10).start, pick(11).sharedCheckout, pick(11).start.use_worktree, pick(7).why].join(":")')"
+[ "$LS_GOT" = "true:true:Env Fixture:false:true:true:ssh" ] && check "LS12 cwd is passed only for another repository, a saved environment is named from the account presets, a shared checkout gets its own worktree and SSH stays" PASS || check "LS12 start places: $LS_GOT" FAIL
+
+LS_BAD=""
+LS_AT_CHIPS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Open task chips' | head -1 | cut -d: -f1)"
+LS_AT_LINKED="$(printf '%s\n' "$LS_HO" | grep -nxF '## Linked sessions' | head -1 | cut -d: -f1)"
+LS_AT_REPORTS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Reports not yet read' | head -1 | cut -d: -f1)"
+LS_AT_THREADS="$(printf '%s\n' "$LS_HO" | grep -nxF '## Open threads' | head -1 | cut -d: -f1)"
+[ -n "$LS_AT_CHIPS" ] && [ -n "$LS_AT_LINKED" ] && [ -n "$LS_AT_REPORTS" ] && [ -n "$LS_AT_THREADS" ] \
+  && [ "$LS_AT_CHIPS" -lt "$LS_AT_LINKED" ] && [ "$LS_AT_LINKED" -lt "$LS_AT_REPORTS" ] && [ "$LS_AT_REPORTS" -lt "$LS_AT_THREADS" ] \
+  || LS_BAD="$LS_BAD order=$LS_AT_CHIPS/$LS_AT_LINKED/$LS_AT_REPORTS/$LS_AT_THREADS"
+printf '%s\n' "$LS_HO" | grep -qF 'Start them in the turn in which the user confirmed your plan, before any other step' || LS_BAD="$LS_BAD trigger-absent"
+printf '%s\n' "$LS_HO" | grep -qxF 'name: `cont-00000001`' || LS_BAD="$LS_BAD name-absent"
+[ -z "$LS_BAD" ] && check "LS13 the handoff brief carries the same linked sessions and reports ahead of its open threads" PASS || check "LS13 handoff brief linked sessions:$LS_BAD" FAIL
+
+LS_AT_START="$(grep -nF "**Start the old session's linked sessions here, right after \`takeover --force\`, in the turn in which the user confirmed the plan.**" "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_CARRY="$(grep -nF "**Carry the old session's open task chips over, always, before you release it.**" "$CH_REF" | head -1 | cut -d: -f1)"
+LS_AT_RELEASE="$(grep -nF '**Whichever route you took, release the old session last' "$CH_REF" | head -1 | cut -d: -f1)"
+LS_BAD=""
+[ -n "$LS_AT_START" ] && [ -n "$LS_AT_CARRY" ] && [ -n "$LS_AT_RELEASE" ] && [ "$LS_AT_START" -lt "$LS_AT_CARRY" ] && [ "$LS_AT_CARRY" -lt "$LS_AT_RELEASE" ] || LS_BAD="$LS_BAD order=$LS_AT_START/$LS_AT_CARRY/$LS_AT_RELEASE"
+for LS_NEEDLE in 'mcp__ccd_session__start_session' '`initiation` `user_asked`, `context` `fresh`, `use_worktree` true, no `source_branch` and no `branch_name`' 'never more than 8 times in one takeover' 'before the worktree, the carry-over, the chips and `release`' "It names the brief's linked sessions too" 'call `list_start_targets` before the confirmation'; do
+  grep -qF -- "$LS_NEEDLE" "$CH_REF" || LS_BAD="$LS_BAD [missing:$LS_NEEDLE]"
+done
+[ -z "$LS_BAD" ] && check "LS14 references/takeover.md starts the linked sessions right after the --force run, before the chips and the release, and its plan confirmation names them" PASS || check "LS14 takeover.md linked-session step:$LS_BAD" FAIL
+
+LS_FROM_OTHER='[o.linkedSessions.sameRepository, o.openChips.sameRepository, pick(1).sameCheckout, pick(1).start.cwd === path.join(home, "work", "repo"), pick(17).sameCheckout, pick(18).start.cwd === path.join(home, "work", "sibling"), o.linkedSessions.sessions.filter((e) => e.start).every((e) => (e.folder ? e.start.cwd === e.folder : !("cwd" in e.start)))].join(":")'
+LS_GOT="$(ls_eval "$LS_HOME/ls-other.json" "$LS_FROM_OTHER")"
+LS_NOGIT_GOT="$(ls_eval "$LS_HOME/ls-other-no-git.json" "$LS_FROM_OTHER")"
+LS_PLAIN_GOT="$(ls_eval "$LS_HOME/ls-plain.json" "$LS_FROM_OTHER")"
+LS_BAD=""
+[ "$LS_GOT" = "false:false:true:true:false:true:true" ] || LS_BAD="$LS_BAD json=$LS_GOT"
+[ "$LS_NOGIT_GOT" = "$LS_GOT" ] || LS_BAD="$LS_BAD no-git=$LS_NOGIT_GOT"
+[ "$LS_PLAIN_GOT" = "$LS_GOT" ] || LS_BAD="$LS_BAD plain-directory=$LS_PLAIN_GOT"
+printf '%s\n' "$LS_OTHER_MD" | grep -qxF -- "- it starts in its own folder, because the takeover that printed this brief ran outside the old session's repository" || LS_BAD="$LS_BAD place-line-absent"
+[ "$(printf '%s\n' "$LS_OTHER_MD" | grep -cxF 'cwd:')" = "13" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_OTHER_MD" | grep -cxF 'cwd:')"
+printf '%s\n' "$LS_OTHER_MD" | grep -qxF 'folder:' && LS_BAD="$LS_BAD folder-block-from-another-repository"
+printf '%s\n' "$LS_OTHER_MD" | grep -qF "a session lists \`cwd\` unless it works in the old session's repository and the takeover that printed this brief ran in that repository too" || LS_BAD="$LS_BAD cwd-rule-absent"
+[ -z "$LS_BAD" ] && check "LS15 a takeover run from another repository or from a folder in none starts every linked session in its own folder, the old repository's included, and --no-git changes no verdict" PASS || check "LS15 another repository:$LS_BAD" FAIL
+
+LS_GOT="$(ls_eval "$LS_HOME/ls.json" '[o.linkedSessions.sameRepository, pick(17).sameCheckout, pick(17).start.cwd === path.join(home, "work", "repo", "nested"), pick(18).sameCheckout, "cwd" in pick(18).start, pick(19).folder, pick(19).decision, pick(19).why, "cwd" in pick(19).start].join(":")')"
+LS_BAD=""
+[ "$LS_GOT" = "true:false:true:true:false::if-named:place:false" ] || LS_BAD="$LS_BAD json=$LS_GOT"
+printf '%s\n' "$LS_MD" | grep -qxF -- '- checkout: unknown, because its record names no usable folder' || LS_BAD="$LS_BAD no-folder-line-absent"
+printf '%s\n' "$LS_MD" | grep -qxF -- '- why: its record names no usable folder, so a start cannot be placed in its repository: it starts only when the user names it in the plan answer' || LS_BAD="$LS_BAD place-why-absent"
+[ -z "$LS_BAD" ] && check "LS16 a linked session in a repository nested in the old checkout starts in its own folder, one in a sibling worktree of the old repository does not, and one without a usable folder waits to be named" PASS || check "LS16 repository identity:$LS_BAD" FAIL
+
+LS_BAD=""
+printf '%s\n' "$LS_HO" | grep -qxF -- '- it starts in its own folder, because this brief did not measure the repository this session works in' || LS_BAD="$LS_BAD place-line-absent"
+printf '%s\n' "$LS_HO" | grep -qxF -- "$LS_REPO" || LS_BAD="$LS_BAD repository-cwd-absent"
+[ "$(printf '%s\n' "$LS_HO" | grep -cxF 'cwd:')" = "13" ] || LS_BAD="$LS_BAD cwd-blocks=$(printf '%s\n' "$LS_HO" | grep -cxF 'cwd:')"
+printf '%s\n' "$LS_HO" | grep -qxF 'folder:' && LS_BAD="$LS_BAD folder-block-in-handoff"
+printf '%s\n' "$LS_HO" | grep -qxF -- '- checkout: another repository than the session taken over' || LS_BAD="$LS_BAD checkout-line-absent"
+[ -z "$LS_BAD" ] && check "LS17 the handoff brief judges each linked session's repository but never its reader's, so every start with a usable folder carries it" PASS || check "LS17 handoff places:$LS_BAD" FAIL
 
 DR_ACCT=acc0be11-0000-4000-8000-0000000000d0
 DR_STORE="$FAKE/Library/Application Support/Claude/claude-code-sessions/$DR_ACCT/ws-0001"

@@ -681,6 +681,16 @@ function resolveFreshHookProject(payload, environment = process.env) {
 
 function main() {
   let payload;
+  if (process.argv[2] === 'payload-oversized') {
+    if (process.argv.length !== 3) fail('payload-oversized does not accept arguments');
+    const size = fs.readFileSync(0).length;
+    if (size <= MAX_PAYLOAD_BYTES) {
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(`${size}\t${MAX_PAYLOAD_BYTES}\n`);
+    return;
+  }
   if (process.argv[2] === 'unregistered') {
     // Exit 0 only for a session Session Control has never registered. Shell
     // gates use it to tell that one recoverable state apart from every other
@@ -896,6 +906,7 @@ if (require.main === module) {
 
 module.exports = {
   canonicalDirectory,
+  MAX_PAYLOAD_BYTES,
   privateRecordsDirectory,
   // Exported so the ADOPTION path can apply the same rule every argv mode in this
   // file already applies. It was the one entry point that accepted a session id

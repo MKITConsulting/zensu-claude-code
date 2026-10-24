@@ -300,6 +300,8 @@ REMEDY_LOCKSTEP="$(
     else if (genericRemedy !== remedy.generic) faults.push("remedy differs: generic");
     if (!/report this refusal and ask the user/.test(js.get("opted-out") || "")) faults.push("opted-out remedy does not ask the user");
     if (/--confirm yourself/.test(js.get("opted-out") || "")) faults.push("opted-out remedy still tells the model to run --confirm itself");
+    if (!/\/zensu:adopt-session names why each record reader refused it/.test(js.get("record-unreadable") || "")) faults.push("record-unreadable remedy does not name the per-reader report");
+    if (/cannot tell|cannot name/.test(js.get("record-unreadable") || "")) faults.push("record-unreadable remedy still claims the causes cannot be told apart");
 
     // VERB: the incomplete set, and the two sentences it selects between.
     const incomplete = gate.match(/^const ADOPTION_INCOMPLETE_REASONS = Object\.freeze\(\[([^\]]*)\]\);$/m);
@@ -3417,16 +3419,16 @@ EOF
   PRUNED_MODE_AFTER_ADOPTION=no
   pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_MODE_AFTER_ADOPTION=yes
   if grep -qF 'ADOPTABLE' "$PRUNED_REPORT_OUT" \
-      && grep -qF 'installation no longer on disk' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'installation pruned from the plugin cache' "$PRUNED_REPORT_OUT" \
       && grep -qF 'ADOPTED' "$PRUNED_CONFIRM_OUT" \
-      && grep -qF 'installation no longer on disk' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'installation pruned from the plugin cache' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'could not be re-measured' "$PRUNED_REPORT_OUT" \
       && grep -qF 'could not be re-measured' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'record minted by : 0.17.0' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'now served by    : 0.18.0' "$PRUNED_CONFIRM_OUT" \
       && [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.superseded-0.17.0.json" ] \
       && [ "$PRUNED_BOUND" = yes ] && [ "$PRUNED_MODE_AFTER_ADOPTION" = no ]; then
-    check "AC-D06 the pruned record adopts end to end, says the installation is gone, keeps the superseded copy, and binds from the successor afterwards" PASS
+    check "AC-D06 the pruned record adopts end to end, says the installation was pruned, keeps the superseded copy, and binds from the successor afterwards" PASS
   else
     check "AC-D06 the pruned record adopts end to end (bound=$PRUNED_BOUND mode-after=$PRUNED_MODE_AFTER_ADOPTION)" FAIL
     head -c 400 "$PRUNED_REPORT_OUT" 2>/dev/null

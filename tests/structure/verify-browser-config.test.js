@@ -385,7 +385,7 @@ test('the run directory must be an absolute, existing, real directory', async (t
   await assert.rejects(helper.run(['--run-dir', weird, ...origin], undefined, NO_POLICY, READY), /no session name/);
 });
 
-test('the helper writes no run config unless both consent hooks are registered on the Bash matcher', async (t) => {
+test('the helper writes no run config unless both consent hooks are registered on both shell tools', async (t) => {
   const origin = ['--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
   const cases = [
     [{ hooks: registration('PreToolUse', consent.CONSENT_HOOK_FILE) }, /consent hook: registered; consent recorder: unregistered/],
