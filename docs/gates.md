@@ -76,6 +76,12 @@ To keep Claude on the Bash tool anyway, set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0`;
 
 ## CLI Write-Gate
 
+The main thread may run `ai-work start` and `ai-work submit` without a workflow
+window to report an agreed goal and result during direct implementation. They
+remain classified as mutations and are denied to subagents; this narrow exception
+does not admit other commands chained after them. Personal OAuth and the separate
+capture API enforce the account. There is no CLI acceptance/revocation command.
+
 The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
 updating features, security classifications, tiers, journeys and their steps, revisions, mocks,
 work orders, work plans, …) run directly on the main thread is **denied by default** — it must

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **tdd task labels**: every step task `/zensu:tdd` creates now carries a short name after its
+  tag, such as `S1 [impl] Config parser`, shortened from the step's `Description` in the plan's
+  Steps table. The user reads the task list without the plan open, and a bare `S1 [impl]` named
+  nothing they could recognize. The in-progress text names the step as well
+  (`Implementing S1: Config parser`). Strict and vanilla mode and the integration `[wire]` task
+  follow the same rule.
+
 ## [0.29.0] - 2026-10-23
 
 ### Added

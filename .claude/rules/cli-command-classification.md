@@ -11,6 +11,12 @@ paths:
 
 # CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
+`ZENSU_AI_WORK_CAPTURE_TOOL_NAMES` is a narrow main-thread exception for
+`ai-work start/submit`: they remain mutations, but report only an agreed goal
+or result, also in direct mode. They cannot decide acceptance and are denied to
+subagents. Mixed commands still check every other operation. The backend requires
+personal CLI OAuth; no worker/shared-key identity is inferred.
+
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
 The plugin drives Zensu through the typed `zensu` CLI (the MCP server still exists for the Zensu web app, but is no longer wired into the plugin). The write-gate now intercepts `zensu <noun> <verb>` Bash invocations rather than MCP tool calls.
