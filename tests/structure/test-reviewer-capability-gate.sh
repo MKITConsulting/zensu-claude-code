@@ -742,7 +742,7 @@ WRONG_SESSION="$(PAYLOAD_SESSION_ID='different-session' payload arbitrary-custom
 EXTERNAL_CWD="$(PAYLOAD_CWD="$OTHER" payload arbitrary-custom Read '{"file_path":"x"}' | decision)"
 [ "$EXTERNAL_CWD" = allow ] && check "host-reported external cwd remains valid after CwdChanged" PASS || check "host-reported external cwd remains valid after CwdChanged" FAIL
 
-FAKE_BIN="$TMP/fake-bin"
+FAKE_BIN="$RAW_TMP/fake-bin"
 mkdir -p "$FAKE_BIN"
 printf '#!/bin/sh\nprintf leaked-output\nprintf "secret child diagnostic\\n" >&2\nexit 127\n' >"$FAKE_BIN/node"
 chmod +x "$FAKE_BIN/node"
@@ -781,7 +781,7 @@ else
   check "plugin-root mismatch drains payload (producer=$DRAIN_PRODUCER_STATUS hook=$DRAIN_HOOK_STATUS)" FAIL
 fi
 
-NO_NODE_BIN="$TMP/no-node-bin"
+NO_NODE_BIN="$RAW_TMP/no-node-bin"
 mkdir -p "$NO_NODE_BIN"
 for no_node_tool in dirname cat; do
   printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$no_node_tool")" >"$NO_NODE_BIN/$no_node_tool"
