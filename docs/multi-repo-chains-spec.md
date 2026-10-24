@@ -407,7 +407,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:291`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:292`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming

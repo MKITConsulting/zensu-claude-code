@@ -100,7 +100,8 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   interactive `main-v1` principal. The PLM and
   reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
   report tool in the next item, and the evidence workers to
-  `Read`/`Grep`/`Glob` on the paths their private lease names; ordinary
+  `Read`/`Grep`/`Glob` on the paths their private lease names plus that report
+  tool for their one validated JSON result; ordinary
   host-profile children keep only the tools on the capability gate's allowlist
   (see **Security boundary** below) that Claude and their agent definitions grant.
   A child that reports a usable `agent_type` may also run `Bash` behind an
@@ -135,10 +136,16 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   `SendMessage`, case variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
   exactly `Read, Grep, Glob`: the host injects the tool, and the reviewer-spawn
   grant admits only agents whose `tools:` line is that exact trio. The two
-  evidence workers do NOT receive it: `review-evidence-lease-v1.js` reads their
-  result from `SubagentStop`'s `last_assistant_message`, which a worker that
-  handed its JSON back would leave without the JSON, so they keep the bare trio,
-  are denied the handback, and end with the JSON as their final message.
+  evidence workers receive it under a narrower contract: their `message` must be
+  the one raw, schema-valid JSON result their final message would otherwise have
+  to be, judged by the same rules. `review-evidence-lease-v1.js` validates it when
+  the call is made and, when it passes, stores it as the worker's create-once
+  result before the host delivers it, because `SubagentStop`'s
+  `last_assistant_message` carries only the text blocks of the last assistant
+  message and so never the handed-back JSON. A message that fails is denied with
+  the validation reason and changes nothing; a completed worker may hand back only
+  its identical stored result again; and a `SubagentStop` after the handback
+  accepts a final text without a result, also once the lease is finalized.
   `tests/structure/test-reviewer-capability-gate.sh` pins these verdicts and
   cross-checks the name against every Claude Code host bundle it finds on the
   machine; a host that renames or drops the tool fails that check.

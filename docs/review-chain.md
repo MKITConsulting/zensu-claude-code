@@ -11,8 +11,8 @@ skeletons they anchor on.
 | **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from the parallel `review-aspect` panel — three perspectives by default, five with `hooks.reviewPanel: full` (no re-read, no build/test). |
 | **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns one per perspective of the panel in a single parallel batch — `correctness`, `design` and `security` by default (`hooks.reviewPanel: lean`, whose fix-round re-reviews spawn `correctness` alone), or `conventions`, `bugs`, `architecture`, `tests` and `security` with `hooks.reviewPanel: full` — then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
 | **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the aspect merge (gated by `hooks.reviewJudge`, default on; on the lean panel for the first review only, and on any review the Stop hook resumes). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. It also traces every guarantee a query or call inherits from session or connection state (row-level security, a tenant setting, the connecting role) through each connection mode the code still supports, and reports a defect such a mode reaches with its condition, even when committed configuration disables the mode, which may lower the severity by one level but never below IMPORTANT. On the first review it runs twice, independently and side by side (`hooks.reviewJudgeSecondRun`, default on): the second run reads what the changed files depend on before the files themselves and only adds `JUDGE-B<n>` findings, which the main thread merges as a union. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
-| **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object as its final message; only the main thread validates and materializes that result. |
-| **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
+| **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object through the host's `SubagentHandback` tool, or as its final message where the host offers no such tool; only the main thread collects and materializes that validated result. |
+| **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object through the host's `SubagentHandback` tool, or as its final message without it; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
 
 The built-in reviewer boundary uses each agent's exact
 `tools: Read, Grep, Glob` allowlist. There is no shell or Git exception and no
@@ -25,8 +25,9 @@ the three reviewers), then repeats the exact three-tool reviewer allowlist. The
 plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. The three
 reviewers and the PLM may additionally call the host's `SubagentHandback` report
 tool, with exactly one string `message` field, because Claude Code in `auto`
-mode delivers a subagent's report only through that call; the two workers do
-not, since their result is read from `SubagentStop` (see
+mode delivers a subagent's report only through that call; the two workers may
+call it only to deliver their one JSON result, which the gate validates against
+their lease with the final-message rules before the host delivers it (see
 [Session Control](session-control.md)). Inside a Claude Code workflow the same
 reviewers and the PLM may also call `StructuredOutput`, through which a workflow
 agent returns the result its script asked for; it carries data to that script and
@@ -47,9 +48,10 @@ never exposes the lease id or plugin-data path to the worker. Each tool call
 revalidates canonical paths, symlink/path identity, and the creation snapshot so
 TOCTOU replacement fails closed. PR leases also bind the exact
 `core.quotePath=false` name-status manifest; ambiguous quoted/backslash paths and
-findings outside that changed-path set fail closed. `SubagentStop` captures the
-worker's one raw JSON result; collection requires the exact worker id, result
-kind, and role.
+findings outside that changed-path set fail closed. The capability gate captures
+the worker's one raw JSON result from its `SubagentHandback` call before the host
+delivers it, and `SubagentStop` from its final message; collection requires the
+exact worker id, result kind, and role.
 Only then may the main thread write a debug JSON file, and it closes the lease on
 success and failure. Repository instructions, diffs, source text, overlays, and
 refinement context remain untrusted data and cannot widen this contract.

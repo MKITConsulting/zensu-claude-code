@@ -218,6 +218,7 @@ const MUTATING_FILE_TOOLS = new Set([
   'apply_patch',
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
+const HOST_HANDBACK_TOOL = evidenceLeases.HANDBACK_TOOL;
 const HOST_PROFILE_TOOLS = new Set([
   'Read',
   'Grep',
@@ -241,14 +242,14 @@ const HOST_PROFILE_TOOLS = new Set([
   'AskUserQuestion',
   'StructuredOutput',
   'ReportFindings',
-  'SubagentHandback',
+  HOST_HANDBACK_TOOL,
 ]);
 const HOST_PROFILE_MCP_READ_TOOLS = new Set([
   'mcp__plugin_context7_context7__resolve-library-id',
   'mcp__plugin_context7_context7__query-docs',
 ]);
 const MCP_COMMAND_SEGMENT_RE = /(^|_)(exec|execute|run|shell|terminal|command|code)(_|$)/i;
-const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', 'SubagentHandback', 'AskUserQuestion']);
+const NON_PATH_TOOLS = new Set(['StructuredOutput', 'ReportFindings', HOST_HANDBACK_TOOL, 'AskUserQuestion']);
 const SEARCH_EXAMPLE_LIMIT = 12;
 
 // `systemMessage` is optional and user-facing. It rides in the ONE object this run
@@ -798,15 +799,11 @@ function neutralViolation(payload, trusted) {
   return null;
 }
 
-const HOST_HANDBACK_TOOL = 'SubagentHandback';
 const WORKFLOW_RESULT_TOOL = 'StructuredOutput';
 const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
 
 function handbackViolation(payload, profile) {
-  const keys = Object.keys(payload.tool_input);
-  if (keys.length === 1 && keys[0] === 'message' && typeof payload.tool_input.message === 'string') {
-    return null;
-  }
+  if (evidenceLeases.handbackInputValid(payload.tool_input)) return null;
   return `${profile} may invoke ${HOST_HANDBACK_TOOL} only with exactly one string field, message`;
 }
 
@@ -1092,14 +1089,21 @@ function main() {
 
 // The per-principal capability judgement, after the bind and the workflow
 // revalidation have both passed. RETURNS the deny reason, or null for an allow —
-// it writes nothing itself, so the caller owns the run's single JSON object. The
+// it prints nothing itself, so the caller owns the run's single JSON object. The
 // branch order is unchanged.
 function judgePrincipal(payload, bound, principal) {
   let trusted = bound;
   if (principal === principals.PRINCIPALS.MAIN) return null;
   if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
+    const handback = payload.tool_name === HOST_HANDBACK_TOOL;
+    if (handback) {
+      const shapeViolation = handbackViolation(payload, 'evidence-worker-v1');
+      if (shapeViolation) return shapeViolation;
+    }
     try {
-      const violation = evidenceLeases.toolViolation(payload, trusted);
+      const violation = handback
+        ? evidenceLeases.admitHandback(payload, trusted)
+        : evidenceLeases.toolViolation(payload, trusted);
       if (!violation) return null;
       return violation.startsWith('evidence-worker-v1') ? violation : `evidence-worker-v1 ${violation}`;
     } catch (error) {
