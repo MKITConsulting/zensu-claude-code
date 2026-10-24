@@ -33,6 +33,11 @@ Any language, any stack. Nothing to configure, and no account needed to start.
   from writing into a sibling checkout. Each one has a documented escape hatch.
 - **Features, not commits.** Security profiles, user journeys, tiers, and
   release readiness live in a dashboard instead of in your head.
+- **Work capture without duplicate entry.** With personal CLI OAuth and a
+  compatible backend/CLI, the agent records the agreed goal and reports new
+  committed results automatically. You accept the exact version through its web
+  review link. This also works during direct implementation; it never treats
+  stopping, merging or releasing as acceptance. See [automatic work capture](docs/ai-work-capture.md).
 
 ## Install
 

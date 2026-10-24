@@ -66,7 +66,7 @@ INVOCATIONS="$(if cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null; then Z
     process.exit(0);
   }
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",mock:"mocks",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
-  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
+  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys mocks design link ghost wiki doc knowledge pulse ai-work work plan meta org auth product feature subfeature roadmaps tier sec journey mock docs kb wiki-pages".split(" "));
   const GROUPS = new Set(["work\tpolicy", "work\trepositories", "work\trepos", "plan\tfollowup"]);
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = new Set();
@@ -310,6 +310,9 @@ while IFS="$(printf '\t')" read -r noun verb third; do
   zensu_is_read_tool "$TOOL" && continue              # read → allow
   zensu_is_mutation_tool "$TOOL" || continue          # not a known mutation → allow (safety)
   if [ "$IS_SUBAGENT" != true ]; then
+    # Capture only reports an agreed goal/version. It also works in direct mode;
+    # the backend requires personal OAuth and exposes no acceptance operation.
+    zensu_tool_in_list "$TOOL" "$ZENSU_AI_WORK_CAPTURE_TOOL_NAMES" && continue
     work_order_session_owns "$TOOL" && continue
     if ! zensu_is_human_decision_tool "$TOOL" && ! zensu_is_work_order_tool "$TOOL"; then
       tool_allowed_by_workflow "$TOOL" && continue    # workflow-driven → allow
