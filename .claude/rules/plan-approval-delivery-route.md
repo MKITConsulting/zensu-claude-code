@@ -2,6 +2,7 @@
 paths:
   - "hooks/plan-approved-delegate.sh"
   - "hooks/user-prompt-tdd-reminder.sh"
+  - "hooks/lib/zensu-human-present.sh"
   - "evals/plan-approval-hook/**"
   - "tests/structure/test-plan-approved-delegate.sh"
 ---
@@ -51,8 +52,8 @@ exclusive options and no others" contract environment-dependent and therefore un
 that the half that actually matters — whether the CLI is AUTHENTICATED and the feature already
 tracked — needs a network call this hook must not make.
 
-**Auto Mode must NEVER select `/zensu:autopilot` OR `/zensu:pilot`, and this is the one safety
-property in the section.** Autopilot pushes a branch and opens a pull request; pilot commits,
+**A session without a human to answer must NEVER select `/zensu:autopilot` OR `/zensu:pilot`, and this is
+the one safety property in the section.** Autopilot pushes a branch and opens a pull request; pilot commits,
 opens a pull request and mutates tracked feature state behind a per-transition confirm. TWO clauses choose a route
 without asking, and saying "the non-interactive one is the only place" was the overstatement
 review caught: fast-path (B) also selects without asking and carries no interactivity scope of
@@ -312,3 +313,62 @@ and firing no hook, and whether any other headless permission mode can produce a
 ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` alone, which grades
 the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
 escalation is a spelling list, not a property, in BOTH the `(B)` slice and the question block.
+
+## Who can answer: the `ZENSU HUMAN PRESENT:` field (`hooks/lib/zensu-human-present.sh`)
+
+Clause (C) used to tell the model to skip the question when it ran "non-interactively (Auto Mode /
+headless)". Auto mode only lets a classifier answer permission prompts; the person stays at the
+interface, and a plugin `ask` still reaches them there (measured 2026-10-09 in the desktop app). A
+model reading that clause in an attended auto-mode session skipped the route question. The hook now
+decides, the directive names the field, and the words "Auto Mode" are gone from both ask-hooks, the
+primer and the two skills that summarize the clause.
+
+`zensu_human_present <payload>` answers one of three values:
+
+- `no` when `CLAUDE_CODE_ENTRYPOINT` is `sdk-cli` or `claude-code-github-action`, or the payload's
+  `permission_mode` is `dontAsk`;
+- `yes` when the entrypoint is `cli`, `claude-desktop` or `claude-vscode`, in every other permission
+  mode, auto, plan and bypassPermissions included;
+- `unknown` for any other entrypoint (`sdk-ts`, `sdk-py`, `local-agent`, the remote kinds) and for none.
+
+Measured in the 2.1.308 binary: the CLI sets `sdk-cli` from the same flag it uses to mark the
+session non-interactive, when the entrypoint was unset or `cli`, sets `cli` otherwise, and keeps
+any other value a launcher preset; the desktop app starts the CLI with `claude-desktop`; `dontAsk`
+is described as "deny if not pre-approved"; the hook base input carries `permission_mode`. The mode
+is read with a bash regex on the raw payload, without `node`: a JSON string cannot hold an unescaped
+`"permission_mode":`, and the host serializes the base fields before `tool_input`.
+
+(C) keys on the field and on a question that came back refused unanswered, so `unknown` asks and a
+host that cannot show the question still lands in (C). The (B) guard removes `/zensu:autopilot` and
+`/zensu:pilot` unless the field reads `yes`; an `unknown` session reaches them only through a human
+answer to the question. The reminder carries the field in its ask shapes only, both heredocs and the
+short line, right above the route block, which stays the last text of the reminder (`R13a2`); the
+decided line and the CI note ask nothing and carry none. The value is a closed
+vocabulary, so `zensu_human_present_substitute` fills `__ZENSU_HUMAN_PRESENT__` by parameter
+expansion after `zensu_delivery_route_substitute`, inside each hook's `emit_route_context`, and the
+`cat <<'JSON' | emit_route_context` lines that `R12` and `R13` count stay as they are.
+
+Bounds, named:
+
+- A print-mode run started from inside an attended session inherits that session's entrypoint, so a
+  `claude -p` launched from the desktop app's Bash tool reads `yes`. The CLI also exports
+  `CLAUDE_CODE_CHILD_SESSION=1` and `CLAUDE_CODE_SESSION_ATTENDED=1` to its tool children (measured
+  in a Bash tool child, absent from the CLI's own start environment), which would tell that case
+  apart, but whether hook processes see them was not measured, so the field does not read them. The
+  refused-question arm of (C) is the fallback there.
+- `bypassPermissions` reads `yes` on an attended host, so a container that drives an interactive CLI
+  with nobody behind it reads `yes` as well.
+- An entrypoint outside both lists reads `unknown`, so a new host kind asks until it is listed.
+- No behavioural eval covers the field. `C30` and `C30b` in `tests/structure/test-tdd-reminder-hook.sh`
+  and `D45` in `tests/structure/test-plan-approved-delegate.sh` drive it through both hooks.
+
+Coupled sites: both heredocs of both hooks and the reminder's short line; `B_GUARD` and the `(C)`
+needle of `D13`; the `P1` and `P2` needles and the `P1b5` and `P1b6` spans in
+`tests/structure/test-tdd-vanilla-mode.sh`; `R12D`, `R13b` and `R13g` in
+`tests/structure/test-delivery-route.sh`; `C12` in `tests/structure/test-tdd-reminder-hook.sh`; the
+fast-path recap in both primer heredocs; the first `## When to Use` bullet of `skills/tdd/SKILL.md`;
+the interception paragraph of `skills/gauntlet-loop/SKILL.md`; and
+`evals/route-short-line-reaction/scenarios/ask-headless-code-change.yaml`.
+
+Version: `patch`. One library added and two `additionalContext` texts changed; no hook, matcher, key
+set, schema field, config key or attestation moves, and neither hook returns a `permissionDecision`.

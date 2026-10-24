@@ -35,7 +35,7 @@ classified as a typed prompt before and now gets what a task notification gets.
 **Every short line is written to work ALONE.** The full text is not guaranteed to be in context
 (see the known gaps), so a short line carries every obligation its prompt can need: the zen safety
 exception that lifts the one-question and one-next-step caps, the zen substance list and ranking
-rule, all five consent disclosures, the declined-call line and the Auto Mode default of the
+rule, all five consent disclosures, the declined-call line and the human-present default of the
 reminder, what a typed preference does and that it records nothing, the own-text-only scoping of
 the decided line, the router's routing and its Plan-mode permission. Restating them is most of
 what a later prompt costs. Do not trim a short line without checking that the obligation it drops
@@ -49,8 +49,8 @@ is not needed on that turn; the needles in `R13f`, `R13g`, `C24`, `Z101` and `Z1
   declined-call line (say in one line that nothing was recorded and that the question will come
   back, then continue), both status lines, never recording `--direct`, every skip case (not a code
   change, Plan mode or an active chain, an explicit preference the user typed, which decides this
-  request only and records nothing, Auto Mode or headless) and the uncertainty rule, followed by
-  the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
+  request only and records nothing, a human-present field reading `no` or a refused question)
+  and the uncertainty rule, followed by the field. A strict/vanilla switch is a different ledger entry, so the other mode's full text
   arrives once as well.
 - **`user-prompt-tdd-reminder.sh`, route `tdd` or `direct`:** the decided line on EVERY prompt,
   the first one included, because a decided route needs none of the question machinery: the

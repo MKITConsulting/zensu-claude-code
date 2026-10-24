@@ -142,12 +142,12 @@ if [ -n "$AC12" ] \
    && printf '%s' "$AC12" | grep -qi 'AskUserQuestion' \
    && printf '%s' "$AC12" | grep -qi 'use tdd' \
    && printf '%s' "$AC12" | grep -qi 'no tdd' \
-   && printf '%s' "$AC12" | grep -qi 'Auto Mode' \
+   && printf '%s' "$AC12" | grep -qF 'ZENSU HUMAN PRESENT: ' \
    && printf '%s' "$AC12" | grep -qi 'Plan mode' \
    && printf '%s' "$AC12" | grep -qi 'IGNORE' \
    && printf '%s' "$AC12" | grep -qF 'ZENSU DELIVERY ROUTE:' \
    && printf '%s' "$AC12" | grep -qF '/zensu:delivery-route'; then
-  check "C12 directive carries ask-first + fast-paths (use/no tdd, Auto Mode) + dismiss clauses (Plan mode, IGNORE) + the delivery-route field" PASS
+  check "C12 directive carries ask-first + fast-paths (use/no tdd, the human-present field) + dismiss clauses (Plan mode, IGNORE) + the delivery-route field" PASS
 else
   fired12="$([ -n "$AC12" ] && echo yes || echo no)"
   check "C12 directive content (fired=$fired12)" FAIL
@@ -253,6 +253,37 @@ if [ -z "$C17_LEAK" ]; then
 else
   check "C17 a node child takes the hook payload from its environment or argv, so an oversized payload fails the exec silently (${C17_LEAK:0:120})" FAIL
 fi
+
+P30="$(mktemp -d -t tddrem-XXXXXX)"
+human_field() {
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const t=JSON.parse(s).hookSpecificOutput.additionalContext;const m=t.match(/\nZENSU HUMAN PRESENT: ([a-z]+)\n<!-- zensu:delivery-route -->\nZENSU DELIVERY ROUTE: [^\n]*\n<!-- \/zensu:delivery-route -->$/);process.stdout.write(m?m[1]:"absent")}catch(_){process.stdout.write("unparseable")}})'
+}
+reminder_with_host() {
+  local entry="$1" mode="$2" sid="$3"
+  payload "build a rate limiter" "$sid" "$P30" \
+    | sed "s/^{/{\"permission_mode\":\"$mode\",/" \
+    | env -u CLAUDE_CODE_ENTRYPOINT ${entry:+CLAUDE_CODE_ENTRYPOINT="$entry"} CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PLUGIN_DATA="$P30/plugin-data" CLAUDE_PROJECT_DIR="$P30" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null
+}
+C30_BAD=""
+for c30_case in "sdk-cli:default:no" "claude-code-github-action:default:no" "cli:dontAsk:no" "claude-desktop:auto:yes" \
+  "cli:bypassPermissions:yes" "claude-vscode:plan:yes" "sdk-ts:default:unknown" ":auto:unknown"; do
+  c30_entry="${c30_case%%:*}"; c30_rest="${c30_case#*:}"; c30_mode="${c30_rest%%:*}"; c30_want="${c30_rest#*:}"
+  c30_got="$(reminder_with_host "$c30_entry" "$c30_mode" "s30-${c30_entry:-none}-$c30_mode" | human_field)"
+  [ "$c30_got" = "$c30_want" ] || C30_BAD="$C30_BAD [${c30_entry:-unset}/$c30_mode: $c30_got]"
+done
+[ -z "$C30_BAD" ] \
+  && check "C30 the full reminder carries the human-present field right above its closing route field, read from the host entrypoint and the payload permission mode, auto mode included" PASS \
+  || check "C30 human-present field in the full reminder:$C30_BAD" FAIL
+C30B="$(reminder_with_host claude-desktop auto s30-claude-desktop-auto)"
+if [ "$(printf '%s' "$C30B" | human_field)" = yes ] \
+   && printf '%s' "$C30B" | grep -qF 'the full reminder given earlier in this context still applies' \
+   && ! printf '%s' "$C30B" | grep -qF '__ZENSU_HUMAN_PRESENT__'; then
+  check "C30b the short ask line of a later prompt carries the same human-present field" PASS
+else
+  check "C30b short ask line human-present field (out=$(printf '%s' "$C30B" | head -c 400))" FAIL
+fi
+rm -rf "$P30"
 
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
