@@ -40,8 +40,10 @@ removes the workflow together with the question.
    reminder's negation-then-affirmation arms — judged by the model and never recorded;
 2. the session marker `<project>/.zensu/state/delivery-route-<session-key>.json`
    (`{"route":"tdd"|"direct"}`; `{"route":"auto"}` is a recorded release and falls through);
-3. `hooks.defaultDeliveryRoute` ∈ `tdd | direct | ask`;
-4. ask.
+3. the inherited route `<project>/.zensu/state/inherited-route-<session-key>.json`
+   (`{"route":"tdd"}` only), which a released own marker skips (§"Linked sessions inherit `tdd`");
+4. `hooks.defaultDeliveryRoute` ∈ `tdd | direct | ask`;
+5. ask.
 
 `zensu_delivery_route_resolve <root> <key>` answers `route<TAB>source`,
 `zensu_delivery_route_field` renders the ONE spelling both directives and the doctor carry, and
@@ -126,6 +128,75 @@ the marker leaf after the temp exists, and each helper must refuse with its own 
 link target empty and leave no temp. R8k requires both helpers to source the library and neither
 to keep its own `mktemp` or `mv -f`.
 
+## Linked sessions inherit `tdd`
+
+A session another Claude Desktop session started (`start_session`, fresh or forked context) has its
+own CLI session id and key, so the parent's marker never reached it: over 424 linked sessions
+measured on 2026-10-18, none opened with a decided route, the 6 whose parent had recorded `tdd`
+included. Its first prompt is the brief the parent wrote, and it arrives as `typed`, so a route
+named in a brief acted as the user's own preference. The measurements and decisions are in
+`docs/superpowers/specs/2026-10-18-linked-session-route-design.md`.
+
+**Lineage comes from the desktop's own records, located through the hook environment.**
+`hooks/lib/linked-session-v1.js` reads `CLAUDE_CODE_HOST_SESSION_ID`, `CLAUDE_CODE_ACCOUNT_UUID` and
+`CLAUDE_CODE_ORGANIZATION_UUID` (a `UserPromptSubmit` hook run by the desktop's own Claude Code
+2.1.299 binary saw all three), opens `<store>/<account>/<org>/<host id>.json` and follows
+`spawnedFrom.sessionId` to the parent's record in the same directory. A set `ZENSU_CCD_STORE`,
+trimmed and MSYS-mapped, is the only store candidate, with no fallback behind it, the rule of
+`ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, so a store the user pointed
+session-trail at is the store this module reads; a relative value names no store here, because a
+hook's working directory is not the user's. Binding checks: the shape of
+each id; the store, account and organization directories real directories; each record a regular
+file opened without following a link, at most 8 MiB; the own record's `sessionId` equal to the host
+id; its `cliSessionId`, when present, equal to the payload's `session_id`; a parent id other than
+the own one. The parent's project root comes from the parent's Session Control record (`sessionKey`
+of the parent's `cliSessionId`, read through `privateRecordsDirectory` after `CLAUDE_PLUGIN_DATA` is
+canonicalized by the binder's own `canonicalDirectory`, as `resolveHookSession` does, at most 1 MiB,
+schema and version checked, a canonical existing directory), never from the desktop record's `cwd`, which
+session-trail measured disagreeing with a fork's own records. Inheritance needs both roots to share
+one real `git rev-parse --git-common-dir`.
+
+**One answer per session.** `zensu_linked_session_resolve` in `hooks/lib/zensu-linked-session.sh`
+runs the module and keeps the answer in `linked-session-<key>.json`
+(`{"state":"linked"|"none"|"unresolved"}`). `linked` and `none` are final. `unresolved`, an own
+record that is missing or unreadable, is retried once and then written as `none`. A session without
+`CLAUDE_CODE_HOST_SESSION_ID`, without a payload session id or without node answers `none` with no
+process and no file, and so does one whose `.zensu/state` cannot be written:
+`_zensu_linked_session_cache_writable` creates the directory as the marker writer does and requires
+it writable and searchable before the module starts, because an answer that cannot be cached would
+start the module again on every prompt. `zensu_linked_session_pending` answers the same cheap questions without a
+process, so a caller that would have to start one only to read the payload session id asks it first:
+the plan gate reads that id once, where its Autopilot branch already reads it, and calls the resolver
+only while the lineage is pending. On `linked`, a same-repository parent whose own marker reads `tdd`, or whose own
+marker is absent and whose inherited marker reads `tdd`, makes it write `inherited-route-<key>.json`
+before the linked marker. The parent's markers are read through `zensu_delivery_route_marker_state`
+and `zensu_inherited_route_state`, so each format keeps one reader. Every fault falls back to the
+ladder without the inherited rank.
+
+**Only `tdd` is inherited**, by the rule in §"Two writers": an inherited `tdd` adds the review chain
+and never removes it. A parent's `direct`, a released parent marker and a configured default pass
+nothing on. The answer is a snapshot: later changes in the parent do not move the child. The
+inherited rank sits below the own marker and above the config key, because it is a choice the user
+made for the same work. A released own marker (`--auto`) skips it, and `--direct` writes an own
+marker that wins. `zensu-delivery-route.sh` keeps its four verbs: only the hooks write the two new
+files.
+
+**The brief note.** Both ask-hooks resolve the lineage: the reminder on a typed, slash-with-arguments
+or CI-monitor prompt while no chain is active, and the plan gate on its standalone branch. The
+resolver answers `fresh-linked` only on the run that wrote the linked marker from absent AND only
+while the own desktop record shows no completed turn, and only the reminder then prefixes
+`ZENSU_LINKED_BRIEF_LEAD` from `hooks/lib/zensu-directive.sh` to whichever shape it emits, through
+the optional third argument of `zensu_delivery_route_substitute`. The marker alone cannot say that a
+prompt is the brief: it is keyed by root and session key, so a patch update reaching a running
+session, `--restore-root`, a re-anchor or a new CLI session id under the same desktop session all
+find it absent on a prompt the user typed. The desktop's own `completedTurns`, which its result
+handler raises after every successful turn and which is absent before the first, is the
+session-wide fact; the module reads it as the sixth field of its line, `first` or `later`. The lead is
+added on the parsed JSON, never in a third heredoc, so `P1`, `P2` and `R13` are untouched. A retry
+that resolves `linked` answers `linked`, because a later prompt is the user's own. The plan gate adds
+no sentence: its fast path (B) reads only the user's own approval message, and its heredocs sit close
+to `D44`'s 9,000-character bound.
+
 ## Placeholders, not interpolation
 
 Each ask-hook keeps exactly TWO quoted `cat <<'JSON'` heredocs, because the parity helper in
@@ -141,7 +212,9 @@ the raw body, with no process, because that value is a closed vocabulary that ne
 escaping. Each hook that substitutes sources the directive library itself. The substitution is
 one pass, so a value is never scanned for another placeholder. When node cannot substitute, the
 delivery-route wrapper still emits valid JSON with the skill sentence in place of the command, so
-the directive is never routed to silence; the primer emits nothing, as before. The reminder's other
+the directive is never routed to silence, and it puts the brief lead right after the
+`additionalContext` opener, in either spelling the hooks emit, so the note survives the fallback;
+the primer emits nothing, as before. The reminder's other
 three shapes are `printf` literals through the same wrapper, never a third heredoc: the CI note, the
 decided line it sends on every prompt while the field reads `tdd` or `direct`, and the short line it
 sends on a later `ask` prompt of a context generation that already received the full text
@@ -191,8 +264,26 @@ route: a route change moves only the field, and every shape of the reminder carr
 ## Coupled sites
 
 - `zensu-config.sh`: `zensu_delivery_route_marker_path`, `zensu_delivery_route_marker_state`,
+  `zensu_inherited_route_marker_path`, `zensu_inherited_route_state`,
+  `zensu_linked_session_marker_path`, `zensu_linked_session_state`,
   `zensu_default_delivery_route`, `zensu_delivery_route_resolve`, `zensu_delivery_route_field`,
   `zensu_delivery_route_status_line`, and the header census of what that file opens.
+- The lineage pair: `hooks/lib/linked-session-v1.js` (`KINDS`, `REASONS`, `REPOSITORY`, `TURNS`,
+  the six-field `renderVerdict` line the shell reads with one tab-split `read`) and
+  `hooks/lib/zensu-linked-session.sh` (`zensu_linked_session_pending`, `zensu_linked_session_resolve`);
+  the guarded `source` of the latter in both ask-hooks, which stays guarded because
+  `test-autopilot-plan-delegate.sh` copies a subset of `hooks/lib` without it; the plan gate's one
+  `RAW_SESSION_ID` read in its Autopilot branch, which its lineage call reuses; the
+  `canonicalDirectory` export of `hooks/lib/claude-hook-session-v1.js`, which the resolver applies
+  to `CLAUDE_PLUGIN_DATA` before `privateRecordsDirectory`; `SESSION_MARKERS` in
+  `hooks/lib/session-reanchor-v1.js`, which moves `inherited-route` and then `linked-session` with
+  the anchor and holds `linked-session` back when `inherited-route` did not move; `storeCandidates`
+  in the resolver and `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, which apply
+  one `ZENSU_CCD_STORE` rule, so a change to either side's override moves both, together with
+  `.claude/rules/session-lineage-ledger.md`, which states that rule for session-trail;
+  `ZENSU_LINKED_BRIEF_LEAD` and the `ZENSU_DIRECTIVE_LEAD` name in `zensu-directive.sh`; the
+  closed spelling list in the doctor probe of `zensu-doctor.sh` and the two source regexes in
+  `zensu-doctor-report.js`, which accept `inherited from parent session`.
 - `zensu-directive.sh`: `zensu_delivery_route_record_command`,
   `ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK`, `zensu_directive_substitute`,
   `zensu_delivery_route_substitute`, its header naming the two substitution conventions, and the
@@ -224,6 +315,13 @@ route: a route change moves only the field, and every shape of the reminder carr
   `tests/profiles/windows-native-structure.v1.json`: R9h's `MSYS2_ENV_CONV_EXCL` probe matches a
   native-Windows marker there, and `windows-ci-contract.test.js` fails for a marked suite that
   list does not name.
+- `tests/structure/test-linked-session-route.sh`, registered in `ciStructureTests` and in
+  `tests/SUITE-OVERVIEW.md`, drives both ask-hooks, the helper and the doctor against a fake
+  desktop store, real git worktrees and real Session Control records, and counts resolver
+  processes through a `node` shim on `PATH`. It skips on native Windows, where the store layout
+  it builds is unverified, and carries no native-Windows marker, so
+  `windows-native-structure.v1.json` does not list it. It has no `ci-shard-weights.v1.json`
+  figure yet; take one from its first green CI run.
 - `evals/plan-approval-hook/`: `route_recorded` in the runner grades `T2.9` on the marker the
   helper writes, through `zensu_delivery_route_marker_path` and
   `zensu_delivery_route_marker_state` rather than a copy of either, the expect script's
@@ -238,6 +336,10 @@ route: a route change moves only the field, and every shape of the reminder carr
 schema field (the marker is a new file in `.zensu/state`, the same class as the tdd-mode
 marker), no strict key set, no hook added, removed or renamed, no matcher changed, the config key
 is read permissively, no attestation change, and both hooks still emit only `additionalContext`.
+The linked-session inheritance is `patch` on the same walk: two new one-line files in
+`.zensu/state`, read permissively, one new source spelling that only the model and the doctor
+read, no config key, and the helper keeps its four verbs. An older runtime of the same lineage
+ignores both files and asks, which is the fail-safe direction.
 
 ## Known bounds
 
@@ -313,3 +415,46 @@ is read permissively, no attestation change, and both hooks still emit only `add
   sequence into a shared library, not onto zen-mode's primitive. Unifying all three is a separate
   change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
   `mv`, R8k pins its shape, and all of them would be re-authored with it.
+- The desktop record format is private and unversioned; the resolver was written against Claude
+  Desktop 2.42304.0 on macOS. Drift reads as `none` or `unresolved`, which is the ladder without
+  the inherited rank, never a wrong route. Windows and Linux are unverified: `storeCandidates`
+  takes `APPDATA`/`LOCALAPPDATA` and `XDG_CONFIG_HOME`/`~/.config`, inferred from
+  `ccdStoreCandidates` in `skills/session-trail/scripts/trail.mjs`, and the three variables were
+  observed on macOS only. `ccdStoreCandidates` probes every platform's candidates on every host
+  and resolves a relative `ZENSU_CCD_STORE` against its working directory, while `storeCandidates`
+  takes only the platform's own and refuses a relative override; both name the same store wherever
+  the desktop app writes one.
+- A `.zensu/state` that passes the writable test and still refuses the write, on a full disk for
+  example, leaves the answer uncached, so the module starts again on the next prompt. The test
+  covers the read-only and the foreign-owned directory, the common cases.
+- The desktop records and the parent's markers are ordinary user-writable files. A forged lineage
+  can add the workflow, because only `tdd` is inherited, or drop the brief note, which is the
+  behavior from before inheritance.
+- A brief that is a bare slash command is skipped by the reminder, like every bare slash command,
+  so the lineage resolves on the next typed prompt. That prompt carries no brief note once the slash
+  command's turn completed and raised `completedTurns`; after a turn that ended in an error, the
+  user's own next prompt still carries it, and for that one request a route preference the user
+  typed decides nothing.
+- With `hooks.tddReminder=false` no brief note appears; the plan gate still resolves the
+  inheritance. Forks the user starts (the desktop's fork action, `--fork-session`) carry no
+  `spawnedFrom` and inherit nothing; their lineage source is different and is a follow-up.
+- The one resolution is a cross-session read: two desktop records, one Session Control record, up
+  to two markers of another session, and `git rev-parse` in both roots. Measured on 2026-10-18:
+  p95 26 ms in-process, and p95 174 ms through the CLI at a load average of 27, where a bare `node`
+  start alone took p50 81 ms. Later prompts read one marker in bash and start no process.
+- The parent is looked up under its current `cliSessionId` only. A parent whose record lists
+  `priorCliSessionIds` and whose marker was written under one of those earlier ids passes nothing
+  on.
+- The brief is recognized through `completedTurns` in the own desktop record, a private field. A
+  first turn that ended in an error leaves it absent, so a re-resolution after such a turn still adds
+  the note; a desktop build that never writes it makes every re-resolution `first`, which is the
+  behavior from before the check; and the field must be on disk before the next prompt's hook reads
+  it, which the desktop's save after each result makes likely but which was not observed live.
+- A linked session that is already running when the release carrying this arrives resolves its
+  lineage on its first prompt under the new runtime. It gets no brief note, because its
+  `completedTurns` is set, but it can start inheriting `tdd` mid-session, which the field discloses.
+- A new CLI session id under the same desktop session resolves again under the new key. It gets no
+  note, but it inherits from the parent's CURRENT markers rather than the snapshot the old key took,
+  and a desktop that has not yet written the new `cliSessionId` answers `cli-session-mismatch`, a
+  final `none`. None of the 525 linked records on this machine carried `priorCliSessionIds` on
+  2026-10-18.

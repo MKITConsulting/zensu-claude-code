@@ -58,6 +58,7 @@
     "test-impl-stop-counter.sh",
     "test-incremental-review-rounds.sh",
     "test-intent-router-hook.sh",
+    "test-linked-session-route.sh",
     "test-msys-runtime-boundaries.sh",
     "test-msys-special-plugin-module-boundaries.sh",
     "test-multi-repo-doc-citations.sh",

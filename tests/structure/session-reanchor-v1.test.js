@@ -679,21 +679,47 @@ test('performReanchor moves this session\'s markers, replaces a stale copy and l
   const stateB = path.join(f.b, '.zensu', 'state');
   fs.writeFileSync(path.join(stateA, `tdd-mode-${f.key}.json`), '{"mode":"strict"}\n');
   fs.writeFileSync(path.join(stateA, `delivery-route-${f.key}.json`), '{"route":"tdd"}\n');
+  fs.writeFileSync(path.join(stateA, `inherited-route-${f.key}.json`), '{"route":"tdd"}\n');
+  fs.writeFileSync(path.join(stateA, `linked-session-${f.key}.json`), '{"state":"linked"}\n');
   fs.symlinkSync(path.join(f.base, 'elsewhere.json'), path.join(stateA, `zen-mode-${f.key}.json`));
   fs.mkdirSync(stateB, { recursive: true });
   fs.writeFileSync(path.join(stateB, `tdd-mode-${f.key}.json`), '{"mode":"vanilla"}\n');
   const outcome = reanchor.performReanchor(f.request());
   assert.equal(outcome.ok, true, JSON.stringify(outcome));
-  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route']);
+  assert.deepEqual(outcome.markers.moved, ['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session']);
   assert.deepEqual(outcome.markers.faults, ['zen-mode: the marker is not a regular file']);
   assert.equal(fs.readFileSync(path.join(stateB, `tdd-mode-${f.key}.json`), 'utf8'), '{"mode":"strict"}\n');
   assert.equal(fs.readFileSync(path.join(stateB, `delivery-route-${f.key}.json`), 'utf8'), '{"route":"tdd"}\n');
+  assert.equal(fs.readFileSync(path.join(stateB, `inherited-route-${f.key}.json`), 'utf8'), '{"route":"tdd"}\n');
+  assert.equal(fs.readFileSync(path.join(stateB, `linked-session-${f.key}.json`), 'utf8'), '{"state":"linked"}\n');
   assert.equal(fs.existsSync(path.join(stateA, `tdd-mode-${f.key}.json`)), false);
+  assert.equal(fs.existsSync(path.join(stateA, `inherited-route-${f.key}.json`)), false);
+  assert.equal(fs.existsSync(path.join(stateA, `linked-session-${f.key}.json`)), false);
   assert.equal(fs.lstatSync(path.join(stateA, `zen-mode-${f.key}.json`)).isSymbolicLink(), true);
   const rendered = reanchor.renderReanchorOutcome(outcome);
-  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route\)/);
+  assert.match(rendered.text, /session markers +: moved \(tdd-mode, delivery-route, inherited-route, linked-session\)/);
   assert.match(rendered.text, /^  marker fault +: .*zen-mode.*the marker is not a regular file/m);
   assert.match(rendered.text, /Set that preference again from here/);
+});
+
+test('performReanchor holds the linked-session marker back when the inherited-route marker cannot move', (t) => {
+  const f = fixture(t);
+  const stateA = path.join(f.a, '.zensu', 'state');
+  const stateB = path.join(f.b, '.zensu', 'state');
+  fs.writeFileSync(path.join(stateA, `inherited-route-${f.key}.json`), '{"route":"tdd"}\n');
+  fs.writeFileSync(path.join(stateA, `linked-session-${f.key}.json`), '{"state":"linked"}\n');
+  fs.mkdirSync(path.join(stateB, `inherited-route-${f.key}.json`), { recursive: true });
+  const outcome = reanchor.performReanchor(f.request());
+  assert.equal(outcome.ok, true, JSON.stringify(outcome));
+  assert.deepEqual(outcome.markers.moved, []);
+  assert.deepEqual(outcome.markers.faults, [
+    'inherited-route: the marker is not a regular file',
+    'linked-session: held back because the inherited-route marker did not move',
+  ]);
+  assert.equal(fs.readFileSync(path.join(stateA, `linked-session-${f.key}.json`), 'utf8'), '{"state":"linked"}\n');
+  assert.equal(fs.existsSync(path.join(stateB, `linked-session-${f.key}.json`)), false);
+  const rendered = reanchor.renderReanchorOutcome(outcome);
+  assert.match(rendered.text, /^  marker fault +: .*linked-session.*held back because the inherited-route marker did not move/m);
 });
 
 test('the report lists the uncommitted paths of the new anchor', (t) => {

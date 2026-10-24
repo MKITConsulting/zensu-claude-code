@@ -16,16 +16,19 @@
 # for an opt-in key read through `zensu_hook_opted_in`.
 #
 # ONE exception to "this file only reads config": the session-marker helpers that
-# follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
-# `<project>/.zensu/state/` — the tdd-mode marker and the delivery-route marker. Every
+# follow `zensu_tdd_strict_enabled` also read FOUR session-scoped markers under
+# `<project>/.zensu/state/` — the tdd-mode, delivery-route, inherited-route and
+# linked-session markers. Every
 # config getter spawns node through `_zensu_config_node`; the getters after the marker
 # section do too. Beyond those config reads, an auditor asking "what in
 # the marker section opens something" must get exactly these names and no others:
 # `zensu_tdd_mode_state_linked` (the `-L` probes, shared by both marker pairs) and
 # `_zensu_marker_one_line_value` (the ONE bounded read behind both marker readers).
 # `zensu_default_delivery_route` is one more config getter. `zensu_tdd_mode_marker_path`
-# / `zensu_delivery_route_marker_path` only spell a path, `zensu_tdd_mode_marker_state`
-# / `zensu_delivery_route_marker_state` only map what the shared reader returned onto
+# / `zensu_delivery_route_marker_path` / `zensu_inherited_route_marker_path` /
+# `zensu_linked_session_marker_path` only spell a path, `zensu_tdd_mode_marker_state`
+# / `zensu_delivery_route_marker_state` / `zensu_inherited_route_state` /
+# `zensu_linked_session_state` only map what the shared reader returned onto
 # their own vocabularies, and `zensu_tdd_mode_override` / `zensu_tdd_strict_effective` /
 # `zensu_delivery_route_resolve` / `zensu_delivery_route_field` /
 # `zensu_delivery_route_status_line` only reduce those answers. The marker reads are
@@ -335,6 +338,51 @@ zensu_delivery_route_marker_state() {
   esac
 }
 
+zensu_inherited_route_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/inherited-route-$session_key.json"
+}
+
+zensu_inherited_route_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
+  marker="$(zensu_inherited_route_marker_path "$project_dir" "$session_key")" || { echo "none"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker" || [ ! -f "$marker" ]; then
+    echo "none"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" route)" in
+    (tdd) echo "tdd" ;;
+    (*)   echo "none" ;;
+  esac
+}
+
+zensu_linked_session_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/linked-session-$session_key.json"
+}
+
+zensu_linked_session_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "absent"; return 0; }
+  marker="$(zensu_linked_session_marker_path "$project_dir" "$session_key")" || { echo "absent"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker"; then
+    echo "none"
+    return 0
+  fi
+  if [ ! -e "$marker" ]; then
+    echo "absent"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" state)" in
+    (linked)     echo "linked" ;;
+    (unresolved) echo "unresolved" ;;
+    (*)          echo "none" ;;
+  esac
+}
+
 # hooks.defaultDeliveryRoute, read PERMISSIVELY: `tdd` or `direct` verbatim, and `ask`
 # for everything else — absent, the explicit `ask`, an empty string, a quoted or
 # capitalized spelling, a boolean, or a host without node. An unknown value never
@@ -359,14 +407,15 @@ zensu_default_delivery_route() {
 }
 
 # The ladder both ask-hooks, `--status` and the /zensu:doctor row resolve: the session
-# marker outranks the config key, and neither outranks an explicit preference in the
+# marker outranks a `tdd` a linked session inherited from its parent, which a released
+# marker skips, and both outrank the config key; none outranks an explicit preference in the
 # user's own text — that rank is judged by the model from the directive, so it never
-# reaches this function. Both mechanical ranks are read under the ONE project root the
-# caller passes: the marker lives there, and the config overlay is read from there
+# reaches this function. The mechanical ranks are read under the ONE project root the
+# caller passes: the markers live there, and the config overlay is read from there
 # rather than from the ambient CLAUDE_PROJECT_DIR, so no caller can pair a recorded
 # session's marker with another tree's config. No root means no decision: `ask`.
 # Prints `<route>\t<source>` with route ∈ tdd|direct|ask and source ∈
-# session|config|none.
+# session|inherited|config|none.
 zensu_delivery_route_resolve() {
   local project_dir="${1:-}" session_key="${2:-}" route
   [ -n "$project_dir" ] || { printf 'ask\tnone\n'; return 0; }
@@ -374,6 +423,10 @@ zensu_delivery_route_resolve() {
   case "$route" in
     (tdd|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
   esac
+  if [ "$route" != released ] && [ "$(zensu_inherited_route_state "$project_dir" "$session_key")" = tdd ]; then
+    printf 'tdd\tinherited\n'
+    return 0
+  fi
   route="$(zensu_default_delivery_route "$project_dir")"
   case "$route" in
     (tdd|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
@@ -394,8 +447,9 @@ zensu_delivery_route_status_line() {
     released=", session choice released"
   fi
   case "$source" in
-    (session) printf '%s (session)\n' "$route" ;;
-    (config)  printf '%s (config%s)\n' "$route" "$released" ;;
+    (session)   printf '%s (session)\n' "$route" ;;
+    (inherited) printf '%s (inherited from parent session)\n' "$route" ;;
+    (config)    printf '%s (config%s)\n' "$route" "$released" ;;
     (*)       printf 'ask (default%s)\n' "$released" ;;
   esac
 }
@@ -408,8 +462,9 @@ zensu_delivery_route_field() {
   route="${pair%%$'\t'*}"
   source="${pair#*$'\t'}"
   case "$source" in
-    (session) printf '%s (session marker)\n' "$route" ;;
-    (config)  printf '%s (hooks.defaultDeliveryRoute)\n' "$route" ;;
+    (session)   printf '%s (session marker)\n' "$route" ;;
+    (inherited) printf '%s (inherited from parent session)\n' "$route" ;;
+    (config)    printf '%s (hooks.defaultDeliveryRoute)\n' "$route" ;;
     (*)       printf 'ask\n' ;;
   esac
 }

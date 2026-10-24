@@ -180,7 +180,7 @@
       "summary": "The session-trail lineage ledger: the record schema, the refusal table, the symlink and ceiling rules and the chain walk."
     },
     {
-      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 67, "skips": {"win32": 1},
+      "path": "tests/structure/session-reanchor-v1.test.js", "registered": 68, "skips": {"win32": 1},
       "runs": [{ "driver": "tests/structure/test-session-reanchor.sh" }],
       "summary": "Verified re-anchor of a session record to a sibling worktree: git identity, worktree registration and every refusal reason."
     },

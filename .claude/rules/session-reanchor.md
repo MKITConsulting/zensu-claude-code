@@ -95,13 +95,19 @@ set-aside name is `<key>.superseded-reanchor-<UTC stamp>.json`, so a second move
 with the first. Provenance, the lease sweep, the keep-anchor move and the marker move run AFTER
 the lock, and each reports its own outcome rather than failing the move.
 
-**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`
-and `zen-mode-<key>.json` live under the project root, so a marker left behind stops applying. They
-are RENAMED into the new root's state directory, replacing a stale copy of this session's own
-marker there; a marker that is not a regular file, or a `.zensu`/`.zensu/state` component that is
-not a plain directory, is left in place and reported as a `marker fault`. The three names are the
-path templates of `zensu-config.sh` and `zensu-zen-mode.sh`; a new per-session marker belongs in
-`SESSION_MARKERS` too.
+**Per-session markers move with the anchor.** `tdd-mode-<key>.json`, `delivery-route-<key>.json`,
+`inherited-route-<key>.json`, `linked-session-<key>.json` and `zen-mode-<key>.json` live under the
+project root, so a marker left behind stops applying. They are RENAMED into the new root's state
+directory, replacing a stale copy of this session's own marker there; a marker that is not a regular
+file, or a `.zensu`/`.zensu/state` component that is not a plain directory, is left in place and
+reported as a `marker fault`. The five names are the path templates of `zensu-config.sh` and
+`zensu-zen-mode.sh`; a new per-session marker belongs in `SESSION_MARKERS` too. `inherited-route`
+moves before `linked-session`: a linked marker that arrives without its inherited marker makes every
+later ask-hook run answer from the cache without the route, while an inherited marker that arrives
+alone only makes the next run resolve the lineage once more. For the same reason the linked marker
+stays under the old root, reported as a `marker fault` that says it was held back, whenever an
+inherited marker was there and did not move, so an interruption between the two renames and a fault
+on the inherited marker alone end the same way.
 
 **Provenance is a history VALUE, reserved in both guard bodies.** `PROJECT_ROOT_REANCHORED` and
 the `project-root-reanchored: ` reason prefix sit beside the other reserved pairs in

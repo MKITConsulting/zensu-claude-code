@@ -68,13 +68,22 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 
 | Hook | Typed, slash with arguments | Task notification, subagent hand-back, `!` input, bare slash | CI-monitor event |
 |---|---|---|---|
-| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct` | silent | route field + one standing-authorization sentence, at most about 400 characters |
+| `user-prompt-tdd-reminder.sh` | full reminder once per context generation, then a short line; the decided line on every prompt while the route is `tdd` or `direct`; on a linked session's brief, one more opening sentence | silent | route field + one standing-authorization sentence, at most about 400 characters |
 | `user-prompt-intent-router.sh` | keyword screen; full notice once per context generation, then a short line | silent | silent |
 | `user-prompt-zen-mode.sh` | directive once per context generation and anchor variant, then a short body | same | same |
 | `user-prompt-best-solution-first.sh` | one-line reminder | one-line reminder | one-line reminder |
 | `user-prompt-context-nudge.sh` | once per band | once per band | once per band |
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
 | `user-prompt-session-hub-receipt.sh` | silent; writes a receipt only for the Session Hub's exact takeover command | silent | silent |
+
+**A linked session's brief is `typed`, and the origin is not what marks it.** The first prompt of a
+session another Claude Desktop session started is the brief that session wrote. It arrives with
+`origin.kind: human` (335 of the 424 measured on 2026-10-18) or with none (87), behind the
+reminders the desktop adds, so the classifier answers `typed` and does not try to tell it apart.
+The reminder marks it through the session's lineage instead: on the prompt that first resolves the
+lineage as linked, its directive opens with one sentence saying the prompt is another session's
+brief, so a route preference in it decides nothing (`.claude/rules/session-delivery-route.md`
+§"Linked sessions inherit `tdd`"). No other hook reads the lineage.
 
 `.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided
@@ -115,3 +124,6 @@ exemption already covers.
   desktop-app transcript.
 - The desktop app's hook payload for a slash command was not observed; both the raw and the tag
   spelling are classified.
+- `user-prompt-intent-router.sh` still reads a linked session's brief as the user's own text, so a
+  brief with a planning keyword can trigger its triage. Reusing the linked-session marker there is
+  a follow-up.

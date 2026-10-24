@@ -564,7 +564,7 @@ span_pair "P1b7 (A), the (B) source scoping and its non-interactive removal guar
 # names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot
 # conductor skill" sentence, so a bare `/zensu:pilot` needle stays satisfied after
 # the route clause is deleted — measured, not assumed.
-P3="$(parity "$PRIMER" "/zensu:tdd (this plan now," "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "a configured hooks.defaultDeliveryRoute" "recorded for this session by /zensu:delivery-route" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot or /zensu:pilot")"
+P3="$(parity "$PRIMER" "/zensu:tdd (this plan now," "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "a configured hooks.defaultDeliveryRoute" "recorded for this session by /zensu:delivery-route" "a tdd route this session inherited from the session that started it" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot or /zensu:pilot")"
 [ "$P3" = "OK" ] && check "P3 primer heredocs: shared invariants present in BOTH branches" PASS || check "P3 primer parity ($P3)" FAIL
 
 echo "== Banner + primer: mode-aware wording =="

@@ -49,7 +49,7 @@ const AUTOPILOT_READER_FAULTS = Object.freeze({
   97: 'the Autopilot state library did not load',
 });
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
-const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'zen-mode']);
+const SESSION_MARKERS = Object.freeze(['tdd-mode', 'delivery-route', 'inherited-route', 'linked-session', 'zen-mode']);
 const MAX_REGISTRY_ENTRIES = 1024;
 const MAX_REGISTRY_BYTES = 65536;
 const MAX_RECORD_BYTES = 1024 * 1024;
@@ -560,6 +560,7 @@ function regularOrAbsent(file) {
 function moveSessionMarkers(from, to, key) {
   const moved = [];
   const faults = [];
+  const stayed = new Set();
   const stateDirectories = [from, to].every((root) => realDirectory(path.join(root, '.zensu'))
     && realDirectory(path.join(root, '.zensu', 'state')));
   for (const kind of SESSION_MARKERS) {
@@ -570,10 +571,16 @@ function moveSessionMarkers(from, to, key) {
     if (sourceShape === 'absent') continue;
     if (!stateDirectories) {
       faults.push(`${kind}: a state directory is not a plain directory`);
+      stayed.add(kind);
+      continue;
+    }
+    if (kind === 'linked-session' && stayed.has('inherited-route')) {
+      faults.push(`${kind}: held back because the inherited-route marker did not move`);
       continue;
     }
     if (sourceShape !== 'file' || regularOrAbsent(destination) === 'other') {
       faults.push(`${kind}: the marker is not a regular file`);
+      stayed.add(kind);
       continue;
     }
     try {
@@ -581,6 +588,7 @@ function moveSessionMarkers(from, to, key) {
       moved.push(kind);
     } catch (error) {
       faults.push(`${kind}: ${error && error.code ? error.code : 'not moved'}`);
+      stayed.add(kind);
     }
   }
   return { moved, faults };
@@ -713,8 +721,8 @@ function renderReanchorVerdict(verdict, confirmed) {
   text += '/zensu:plan-review, /zensu:setup, /zensu:cover, /zensu:autopilot and /zensu:pilot still\n';
   text += 'read plans, config, overlays and templates from the start directory. The workflow\n';
   text += 'document under the recorded root stays where it is; review-evidence leases bound to it\n';
-  text += 'are set aside, and this session\'s tdd-mode, delivery-route and zen-mode markers move\n';
-  text += 'with the anchor.\n';
+  text += 'are set aside, and this session\'s tdd-mode, delivery-route, inherited-route,\n';
+  text += 'linked-session and zen-mode markers move with the anchor.\n';
   text += '\nNothing has been changed. Run the same command with --confirm to move the anchor.\n';
   return { text, code: 0, proceed: false };
 }

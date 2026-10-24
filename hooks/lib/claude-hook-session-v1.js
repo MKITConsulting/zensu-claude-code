@@ -895,6 +895,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  canonicalDirectory,
   privateRecordsDirectory,
   // Exported so the ADOPTION path can apply the same rule every argv mode in this
   // file already applies. It was the one entry point that accepted a session id

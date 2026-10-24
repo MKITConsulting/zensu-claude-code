@@ -305,8 +305,8 @@ and nothing else changed — the same installation, runtime digest, version and
 `<session-key>.superseded-reanchor-<UTC stamp>.json`. It then creates this session's
 workflow document under the new worktree when there is none, writes one
 `PROJECT_ROOT_REANCHORED` history entry into the new AND the old workflow document, sets
-aside review-evidence leases bound to the old root, moves this session's `tdd-mode`,
-`delivery-route` and `zen-mode` markers to the new worktree, and, while
+aside review-evidence leases bound to the old root, moves this session's per-session
+markers to the new worktree, and, while
 `hooks.worktreeKeep` is on, ages this session's keep anchor in the old worktree and
 writes one in the new one. The move takes effect from the next tool call for the
 source-write gate, the reviewers and the `zensu-log.sh` verbs. The host does not move: it

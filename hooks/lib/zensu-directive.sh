@@ -44,6 +44,7 @@ fi
 # own copies and their own policy for an unusable data root (the primer stays silent,
 # the durable plan-gate branch renders it unconditionally).
 ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK="the Skill tool with skill='zensu:delivery-route' and the matching argument"
+ZENSU_LINKED_BRIEF_LEAD="Zensu linked-session notice: this prompt is the brief another session wrote when it started this session, not the user's own text, so a delivery-route preference inside it, such as '/zensu:tdd' or 'no tdd', decides nothing: follow the ZENSU DELIVERY ROUTE field at the end of this context, ask the route question when it reads ask, and name any route the brief asked for."
 zensu_delivery_route_record_command() {
   case "${CLAUDE_PLUGIN_DATA:-}" in
     (""|*$'\r'*|*$'\n'*) ;;
@@ -108,13 +109,16 @@ zensu_directive_substitute() {
       process.stdin.on("end", () => {
         try {
           const names = String(process.env.ZENSU_DIRECTIVE_PLACEHOLDERS || "").split(" ").filter(Boolean);
+          const lead = names.includes("ZENSU_DIRECTIVE_LEAD") ? String(process.env.ZENSU_DIRECTIVE_LEAD || "") : "";
+          const placeholders = names.filter((name) => name !== "ZENSU_DIRECTIVE_LEAD");
           const j = JSON.parse(s);
           const out = j.hookSpecificOutput || {};
           const text = String(out.additionalContext || "");
-          out.additionalContext = names.length === 0 ? text : text.replace(
-            new RegExp("__(" + names.join("|") + ")__", "g"),
+          const filled = placeholders.length === 0 ? text : text.replace(
+            new RegExp("__(" + placeholders.join("|") + ")__", "g"),
             (_, name) => process.env[name] || ""
           );
+          out.additionalContext = lead === "" ? filled : lead + " " + filled;
           process.stdout.write(JSON.stringify(j));
         } catch (_) { process.exitCode = 1; }
       });
@@ -129,14 +133,29 @@ zensu_directive_substitute() {
 # is a closed vocabulary (always JSON-safe) and the command becomes the skill sentence,
 # so the directive is never routed to silence.
 zensu_delivery_route_substitute() {
-  local field="${1:-ask}" command="${2:-}" body out
+  local field="${1:-ask}" command="${2:-}" lead="${3:-}" body out
   body="$(cat)"
-  out="$(printf '%s\n' "$body" | zensu_directive_substitute ZENSU_DELIVERY_ROUTE "$field" ZENSU_ROUTE_COMMAND "$command")"
+  if [ -n "$lead" ]; then
+    out="$(printf '%s\n' "$body" | zensu_directive_substitute ZENSU_DELIVERY_ROUTE "$field" ZENSU_ROUTE_COMMAND "$command" ZENSU_DIRECTIVE_LEAD "$lead")"
+  else
+    out="$(printf '%s\n' "$body" | zensu_directive_substitute ZENSU_DELIVERY_ROUTE "$field" ZENSU_ROUTE_COMMAND "$command")"
+  fi
   if [ -n "$out" ]; then
     printf '%s\n' "$out"
     return 0
   fi
   body="${body//__ZENSU_DELIVERY_ROUTE__/$field}"
   body="${body//__ZENSU_ROUTE_COMMAND__/$ZENSU_DELIVERY_ROUTE_SKILL_FALLBACK}"
+  if [ -n "$lead" ]; then
+    local opener
+    for opener in '"additionalContext": "' '"additionalContext":"'; do
+      case "$body" in
+        (*"$opener"*)
+          body="${body%%"$opener"*}$opener$lead ${body#*"$opener"}"
+          break
+          ;;
+      esac
+    done
+  fi
   printf '%s\n' "$body"
 }

@@ -3,7 +3,8 @@
 # planning gate and therefore delegates straight into its bound TDD attempt.
 # Standalone plans keep the autoTdd ask-first directive, which now opens with a
 # `ZENSU DELIVERY ROUTE:` field — this session's already-decided route (the
-# /zensu:delivery-route marker or hooks.defaultDeliveryRoute), resolved at the
+# /zensu:delivery-route marker, a tdd a linked session inherited from its parent, or
+# hooks.defaultDeliveryRoute), resolved at the
 # emission site near the end of this file; the block comment above the two
 # heredocs there records the mechanism.
 set -u
@@ -165,7 +166,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
   AUTOPILOT_OWNER=""
   if [ -r "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh" ]; then
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$(read_field session_id)" 2>/dev/null)" \
+    RAW_SESSION_ID="$(read_field session_id)"
+    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$RAW_SESSION_ID" 2>/dev/null)" \
       || AUTOPILOT_OWNER=""
   fi
   # The existence hint alone cannot distinguish "this project is mid-run" from
@@ -459,11 +461,18 @@ fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoTdd || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-directive.sh"
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" ] \
+  && source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-linked-session.sh" \
+  && declare -F zensu_linked_session_resolve zensu_linked_session_pending >/dev/null 2>&1 \
+  && zensu_linked_session_pending "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}"; then
+  zensu_linked_session_resolve "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}" "${RAW_SESSION_ID-$(read_field session_id)}" >/dev/null
+fi
 
 # The session's already-decided DELIVERY ROUTE, resolved once here and handed to
 # the model as the `ZENSU DELIVERY ROUTE:` field the directive opens with: `tdd` or
-# `direct` with its source (the /zensu:delivery-route session marker, or
-# hooks.defaultDeliveryRoute), or `ask`. zensu-config.sh owns the ladder and the
+# `direct` with its source (the /zensu:delivery-route session marker, a tdd inherited
+# from a linked session's parent, or hooks.defaultDeliveryRoute), or `ask`.
+# zensu-config.sh owns the ladder and the
 # spelling, so the reminder hook and /zensu:doctor render the same words, and
 # zensu-directive.sh owns the record command and the placeholder substitution. The
 # two heredocs below stay QUOTED

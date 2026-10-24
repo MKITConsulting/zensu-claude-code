@@ -83,6 +83,8 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 Answer the route question with the Zensu workflow once: the session remembers that answer (a
 direct, autopilot or pilot answer decides only that plan or request), and
 `/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
+A session that this one starts in Claude Desktop on the same repository takes that Zensu-workflow
+answer over too.
 
 ## What's included
 

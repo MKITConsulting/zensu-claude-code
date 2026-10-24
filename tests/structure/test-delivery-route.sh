@@ -7,7 +7,7 @@
 #
 # The ladder both hooks apply is:
 #   explicit preference in the user's own text  >  session marker  >
-#   hooks.defaultDeliveryRoute  >  ask
+#   inherited tdd (test-linked-session-route.sh)  >  hooks.defaultDeliveryRoute  >  ask
 # The first rank is judged by the model from the directive and never reaches the
 # library, so this suite pins ranks 2-4 behaviourally and rank 1's WORDING in the
 # directive. Fail-safety is pinned in the other direction: an absent, malformed,
@@ -1242,7 +1242,7 @@ A direct answer is never recorded: it decides only the request or plan it answer
 `/zensu:autopilot` and `/zensu:pilot` stay reachable by naming them in the approval message, and `--auto` below hands the decision back to `hooks.defaultDeliveryRoute`, so the question returns only where no default is configured.
 Four surfaces disclose the route: the `ZENSU DELIVERY ROUTE:` field that opens the plan directive and ends the reminder, the status line the model opens with, `--status`, and the `delivery route:` row `/zensu:doctor` renders for a bound session.
 The SessionStart banner names a configured default only; it never reads the session marker.
-The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the route.
+The marker is session-scoped: a session with a new key starts from the configured default again, unless it is a linked session whose parent recorded `tdd`, and one that keeps its key keeps the route.
 SENTENCES
 for stale in 'therefore also skips the four-route question' 'brings the question back' 'always disclosed' 'so a workflow-or-direct answer is remembered' 'it never follows the user into their next'; do
   grep -qF -- "$stale" "$SKILL" && R16C_BAD="$R16C_BAD [stale: $stale]"
@@ -1274,7 +1274,7 @@ grep -qF 'deliberate standing configuration is not ledgered' "$CONFIG_DOC" \
 # four-route sentences, which survive a deletion of these).
 R17D_BAD=""
 r17d() { grep -qF -- "$2" "$PLUGIN_DIR/$1" || R17D_BAD="$R17D_BAD [$1]"; }
-r17d skills/tdd/SKILL.md 'recorded via `/zensu:delivery-route` or `hooks.defaultDeliveryRoute`, which is never one of those two'
+r17d skills/tdd/SKILL.md 'recorded via `/zensu:delivery-route`, inherited as `tdd` from its parent session or set in `hooks.defaultDeliveryRoute`, which is never one of those two'
 r17d skills/gauntlet-loop/SKILL.md 'answers the question without asking but still hands the mission to that route'
 r17d skills/gauntlet-loop/SKILL.md 'or the route this session already recorded'
 r17d README.md 'Answer the route question with the Zensu workflow once: the session remembers that answer'
@@ -1293,7 +1293,7 @@ done
 r17d docs/configuration.md 'A configured `hooks.defaultDeliveryRoute` (`tdd` or `direct`) is disclosed ABOVE that gate'
 r17d docs/configuration.md 'names a route already recorded by `/zensu:delivery-route`'
 r17d docs/configuration.md 'The standalone directive opens with a `ZENSU DELIVERY ROUTE:` field'
-r17d docs/configuration.md 'the `/zensu:delivery-route` marker, then `hooks.defaultDeliveryRoute`, rendered as the `ZENSU DELIVERY ROUTE:` field'
+r17d docs/configuration.md 'the `/zensu:delivery-route` marker, then a `tdd` inherited from the parent session, then `hooks.defaultDeliveryRoute`, rendered as the `ZENSU DELIVERY ROUTE:` field'
 r17d docs/configuration.md 'Coarser than `defaultDeliveryRoute` below'
 r17d docs/configuration.md 'the plan-approval half applies only while `autoTdd` is on'
 r17d docs/architecture.md '/zensu:delivery-route'
