@@ -78,7 +78,9 @@ already rely on:
   and the banner), about 9,100 characters on the first prompt of a session and
   on the first prompt after `/compact` or `/clear` (about 11,200 when the prompt
   carries a planning keyword), and about 1,800 to 5,300 characters on every
-  later prompt. The skill listing carries Zensu's skill descriptions on top.
+  later prompt. Automatic work capture, added after 0.29.0, adds about 760
+  characters to every session start. The skill listing carries Zensu's skill
+  descriptions on top.
   [Architecture](docs/architecture.md#context-added-to-every-session) says how
   this was measured and breaks it down per hook.
 - **zen-mode is on by default.** Replies open with a one-line recap, put the
@@ -91,6 +93,17 @@ already rely on:
   workflow. `/zensu:delivery-route` or
   `hooks.defaultDeliveryRoute` answers it ahead of time; `hooks.autoTdd: false`
   and `hooks.tddReminder: false` switch the two questions off.
+- **Work capture can report your commits to Zensu.** At every session start
+  Zensu tells Claude to record an agreed implementation goal in Zensu, with or
+  without the Zensu workflow, through the `ai-work` commands of the `zensu` CLI
+  and your personal `zensu auth login`. Once a goal is begun, a Stop hook
+  reports each new clean commit for it and returns a review link where you
+  accept that exact version; nothing accepts it for you. It sends the goal's
+  title (at most 160 characters), its key, a criteria version or digest and the
+  commit SHA, never transcripts, prompts, diffs or file lists. Neither hook has
+  a key. Without a CLI that provides `ai-work` and a personal login, capture is
+  reported as unavailable and the work continues.
+  [Automatic work capture](docs/ai-work-capture.md).
 - **The Stop hook can hold the turn.** While a Zensu workflow chain is open and
   its implementation is marked complete, Claude cannot end its turn until the
   review chain closes. That hold is bounded (`hooks.autoFixMaxRounds` plus
@@ -291,7 +304,7 @@ Not every hook can be turned off:
 | **Switched off by a config key** | The banner and primer, the pulse banner, the intent router, zen-mode, both delivery-route questions, the best-solution-first reminder (main thread only), the context nudge, the worktree-keep hooks, the Session Hub receipt, the reviewer-spawn grant, the auto-fix loop, the workflow-launch recorder, the Stop backstops, the Zensu CLI write-gate and the secret scan | A `hooks.*` key, or `context.compactionNudge`, set to `false` |
 | **Off unless you opt in** | The source-write gate's checks of Bash writes | `hooks.bashWriteGate: true` |
 | **Bypassed only through the environment** | The TDD phase gate | `ZENSU_TDD_GATE=off` in the environment Claude Code starts with |
-| **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session) and the background-review hand-back | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
+| **Always on while the plugin is enabled** | Session Control and the capability gate that confines subagents (`hooks.subagentShell: false` only withdraws their `Bash`), the Session Control check inside the source-write gate, evidence discipline, the plugin-data guard, the browser consent gate and its recorder, the artifact path redactor, the prompt-ledger reset, Autopilot resume context, the review-evidence hooks, the work-order hooks (inert outside a work-order session), the background-review hand-back and both automatic work-capture hooks | Disable the plugin ([Turn Zensu off or remove it](#turn-zensu-off-or-remove-it)) |
 
 The full flag reference, the merge order, and the hook table are in
 [docs/configuration.md](docs/configuration.md). [`config.example.json`](config.example.json)
@@ -369,7 +382,8 @@ Verify with `zensu auth status`, clear with `zensu auth logout`. A headless
 ## Data & privacy
 
 The `zensu` CLI sends data over HTTPS to `https://api.zensu.dev`, or to your own
-host (see Self-hosting). These skills send data through it:
+host (see Self-hosting). These skills, and automatic work capture, send data
+through it:
 
 | Skill | What it sends |
 |-------|---------------|
@@ -381,6 +395,7 @@ host (see Self-hosting). These skills send data through it:
 | `/zensu:pulse` | HEAD SHA, branch, **the absolute path of your project root**, an optional product id and, at the end, the changed file paths |
 | `/zensu:pilot` | Feature status changes and release-gate checks |
 | `/zensu:work` | Stage events, heartbeats, questions and follow-ups for its work order |
+| Automatic work capture, any implementation task | The goal's title (at most 160 characters), its key and a criteria version or SHA-256 digest; the commit SHA of each new clean commit for that goal. Never transcripts, prompts, diffs, file lists, credentials or token usage |
 
 `/zensu:cover` and `/zensu:wargame` only read a feature record, and only when
 you name one; `/zensu:setup` and `/zensu:doctor` run `zensu auth status` and

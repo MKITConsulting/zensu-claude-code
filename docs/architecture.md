@@ -278,8 +278,10 @@ characters.
 | First prompt of a context generation: the first prompt of a session and the first after `/compact` or `/clear` | 9,088, or 11,219 when the prompt names a planning keyword | the best-solution-first reminder (354), the full zen-mode contract (3,117), the full delivery-route reminder (5,617) and, for a planning keyword, the intent router (2,131) |
 | Every later prompt | 1,751 to 5,253 | the reminder (354), the short zen-mode line (1,397), the short delivery-route line (2,532) when the reminder answers that prompt, and the hooks that speak only on a condition |
 
-The skill listing carries Zensu's skill descriptions on top: between about 4,100 and 15,000
-characters in the same sessions. These are field figures from one machine and nothing
+Automatic work capture landed after 0.29.0, so the census does not contain it: driving
+`hooks/session-start-ai-work.sh` directly, its primer adds about 760 characters, depending on
+the plugin path, to every main-thread `SessionStart`. The skill listing carries Zensu's skill
+descriptions on top: between about 4,100 and 15,000 characters in the same sessions. These are field figures from one machine and nothing
 re-derives them; `tests/structure/test-user-prompt-budget.sh` is what holds each prompt hook
 under a declared ceiling, and the cost paragraph under [Best Solution First](#best-solution-first)
 names every hook on the prompt channel. The switches are in
