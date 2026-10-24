@@ -21,10 +21,11 @@ node -e '
 node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const commands=(j.hooks?.Stop||[]).flatMap(x=>x.hooks||[]).map(x=>x.command||"");
-  process.exit(commands.length===2
-    && /stop-chain-enforcer\.sh/.test(commands[0])
-    && /stop-work-order\.sh/.test(commands[1]) ? 0 : 1);
-' "$HOOKS" && check "Stop hooks are the main-thread chain backstop and the work-order closer" PASS \
+  process.exit(commands.length===3
+    && /stop-ai-work-capture\.sh/.test(commands[0])
+    && /stop-chain-enforcer\.sh/.test(commands[1])
+    && /stop-work-order\.sh/.test(commands[2]) ? 0 : 1);
+' "$HOOKS" && check "Stop hooks include advisory AI-work capture, chain enforcement and work-order closure" PASS \
   || check "Stop-hook chain backstop wiring drifted" FAIL
 
 [ -x "$ROOT/hooks/post-review-tdd-delegate.sh" ] \
