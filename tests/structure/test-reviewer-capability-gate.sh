@@ -751,7 +751,7 @@ FAIL_CLOSED_STATUS=$?
 FAIL_CLOSED_STDERR="$(cat "$TMP/fail-closed.stderr")"
 [ "$FAIL_CLOSED_STATUS" -eq 2 ] && check "launcher failure exits with Claude blocking status 2" PASS || check "launcher failure exits with Claude blocking status 2 (got $FAIL_CLOSED_STATUS)" FAIL
 [ -z "$FAIL_CLOSED_STDOUT" ] && check "launcher failure suppresses child stdout" PASS || check "launcher failure suppresses child stdout" FAIL
-[ "$FAIL_CLOSED_STDERR" = 'zensu: reviewer capability gate unavailable' ] && check "launcher failure emits only a sanitized diagnostic" PASS || check "launcher failure emits only a sanitized diagnostic" FAIL
+[ "$FAIL_CLOSED_STDERR" = 'zensu: reviewer capability gate unavailable: the policy check exited with status 127' ] && check "launcher failure emits only a sanitized diagnostic that names the exit status" PASS || check "launcher failure emits only a sanitized diagnostic that names the exit status (got '$FAIL_CLOSED_STDERR')" FAIL
 
 WRONG_ROOT="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-root decision)"
 [ "$WRONG_ROOT" = deny ] && check "PreToolUse plugin-root mismatch denies before capability evaluation" PASS || check "PreToolUse plugin-root mismatch denies before capability evaluation" FAIL
@@ -775,10 +775,39 @@ read -r DRAIN_PRODUCER_STATUS DRAIN_HOOK_STATUS <"$DRAIN_STATUS_FILE"
 DRAIN_HOOK_MESSAGE="$(cat "$DRAIN_HOOK_ERR")"
 if [ "$DRAIN_PRODUCER_STATUS" = 0 ] && [ "$DRAIN_HOOK_STATUS" = 2 ] \
   && [ ! -s "$DRAIN_PRODUCER_ERR" ] \
-  && [ "$DRAIN_HOOK_MESSAGE" = 'zensu: reviewer capability gate unavailable' ]; then
+  && [ "$DRAIN_HOOK_MESSAGE" = 'zensu: reviewer capability gate unavailable: CLAUDE_PLUGIN_ROOT names another plugin installation than the one running this hook; start a fresh Claude Code session' ]; then
   check "plugin-root mismatch drains a large payload without producer EPIPE" PASS
 else
   check "plugin-root mismatch drains payload (producer=$DRAIN_PRODUCER_STATUS hook=$DRAIN_HOOK_STATUS)" FAIL
+fi
+
+NO_NODE_BIN="$TMP/no-node-bin"
+mkdir -p "$NO_NODE_BIN"
+for no_node_tool in dirname cat; do
+  printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$no_node_tool")" >"$NO_NODE_BIN/$no_node_tool"
+  chmod +x "$NO_NODE_BIN/$no_node_tool"
+done
+NO_NODE_BASH="$(command -v bash)"
+NO_NODE_ROOT="$(cd -P -- "$PLUGIN" && pwd -P)"
+NO_NODE_STATUS_FILE="$TMP/no-node-pipe-status"
+NO_NODE_ERR="$TMP/no-node.stderr"
+(
+  set +e
+  set -o pipefail
+  node -e 'process.stdout.write("x".repeat(2 * 1024 * 1024))' 2>/dev/null \
+    | PATH="$NO_NODE_BIN" CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+        "$NO_NODE_BASH" "$GATE" >/dev/null 2>"$NO_NODE_ERR"
+  statuses=("${PIPESTATUS[@]}")
+  printf '%s %s\n' "${statuses[0]:-missing}" "${statuses[1]:-missing}" >"$NO_NODE_STATUS_FILE"
+)
+read -r NO_NODE_PRODUCER_STATUS NO_NODE_HOOK_STATUS <"$NO_NODE_STATUS_FILE"
+NO_NODE_MESSAGE="$(cat "$NO_NODE_ERR")"
+NO_NODE_EXPECTED="zensu: reviewer capability gate unavailable: node was not found on the PATH that Claude Code was started with, and Zensu blocks every tool call until node is available. Install Node.js or put it on that PATH, then restart Claude Code (see Requirements in $NO_NODE_ROOT/README.md), or disable the Zensu plugin"
+if [ "$NO_NODE_PRODUCER_STATUS" = 0 ] && [ "$NO_NODE_HOOK_STATUS" = 2 ] \
+  && [ "$NO_NODE_MESSAGE" = "$NO_NODE_EXPECTED" ] && [ -f "$NO_NODE_ROOT/README.md" ]; then
+  check "a missing node blocks with a reason that names node, the PATH, the README Requirements and disabling the plugin, and drains the payload" PASS
+else
+  check "missing node (producer=$NO_NODE_PRODUCER_STATUS hook=$NO_NODE_HOOK_STATUS message='$NO_NODE_MESSAGE')" FAIL
 fi
 
 WRONG_DATA="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-data decision)"
