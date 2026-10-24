@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture authenticated work and committed result versions (#498)
+- **tdd**: Give every step task a short name (#500)
+
+### Changed
+
+- **multi-repo**: Specify the folder anchor for stage 2 (#499)
+
 ### Upgrade notes
 
 - **tdd task labels**: every step task `/zensu:tdd` creates now carries a short name after its
