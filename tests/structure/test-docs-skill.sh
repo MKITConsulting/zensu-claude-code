@@ -81,7 +81,7 @@ pin "D7c verifies the gate via features get docs_complete" "$SKILL_MD" "zensu fe
 # D8 — code-grounding discipline: references the shared guide with the explicit
 # Read imperative, and names the forbidden metadata-dump anti-pattern.
 pin "D8a references docs/documentation-guide.md" "$SKILL_MD" "docs/documentation-guide.md"
-pin "D8b has explicit Read imperative" "$SKILL_MD" 'Read `docs/documentation-guide.md`'
+pin "D8b has explicit Read imperative at the plugin-absolute path" "$SKILL_MD" 'Read `${CLAUDE_PLUGIN_ROOT}/docs/documentation-guide.md`'
 pin "D8c forbids the metadata-dump anti-pattern" "$SKILL_MD" "metadata dump"
 
 # D9 — batch fan-out is a READ-ONLY Explore pass (mutations stay on the main thread).

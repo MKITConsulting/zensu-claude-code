@@ -166,6 +166,10 @@ Autopilot run skips its own stage count for the same stops.
 
 ## Reference Files
 
+A reference is read with `Read` and is not rendered, so it spells the plugin root
+`<absolute-plugin-root>`: read that as `${CLAUDE_PLUGIN_ROOT}`, never as a path relative to the
+working directory.
+
 - `references/protocol.md` — the state files, the stage mapping, how a new attempt takes an order
   over, the error codes the helpers handle, what each verb sends to Zensu, and what the work-order
   hooks deny.

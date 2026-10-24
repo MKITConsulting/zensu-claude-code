@@ -99,7 +99,7 @@ allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
 Anything else is refused, and the doctor goes back to being denied by the very
 defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
 own separate justification — it WRITES, so it cannot borrow this one; see
-[Session Control](../../docs/session-control.md) "Unbindable sessions".
+`${CLAUDE_PLUGIN_ROOT}/docs/session-control.md`, "Unbindable sessions".
 
 The root preflight lives inside `zensu-doctor.sh`, so an invalid root still prints
 the standardized doctor table fragment rather than an unformatted shell error.
