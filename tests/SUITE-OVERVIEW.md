@@ -412,7 +412,7 @@ Generated from `tests/profiles/unit-files.v1.json` by `node tests/structure/lib-
 
 | Unit file | Registered | Skips | Driven by | Summary |
 |---|---|---|---|---|
-| `session-control/session-control-core-v1.test.js` | 226 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
+| `session-control/session-control-core-v1.test.js` | 227 | darwin 2, linux 5, root 5, win32 22 | `session-control/run.sh` | Session Control core: the runtime-lineage predicate, the attestation fields, every workflow-state transition, process identity, the lock holder markers and the workflow-baseline classification. |
 | `structure/acceptance-verify-v1.test.js` | 26 | – | `test-acceptance-gate.sh` | Acceptance records: the record schema and store, the verify-feature driver ids, criteria from the shared lister, the chain anchor, criterion and gate verdicts, and retention. |
 | `structure/ai-work-capture.test.js` | 8 | – | `test-ai-work-capture.sh` | AI work capture: durable retries, account and host binding, explicit goals, commit submission and refusal of automatic decisions. |
 | `structure/aspect-activation-v1.test.js` | 21 | – | `test-incremental-review-rounds.sh` | Review-aspect activation: which review perspectives a round activates for a given change. |
