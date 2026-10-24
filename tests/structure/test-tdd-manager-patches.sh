@@ -418,6 +418,16 @@ if grep -qF 'Tasks are just UI noise' "$AGENT"; then
 else
   check "MT7 Rationalization Counter: skipping tasks because the log tracks progress" FAIL
 fi
+if grep -qF '`{step_id} [test] {short_name}`' "$AGENT" \
+  && grep -qF '`{step_id} [impl] {short_name}`' "$AGENT" \
+  && grep -qF '`{step_id} [verify] {short_name}`' "$AGENT" \
+  && grep -qF '`{step_id} [wire] {short_name}`' "$AGENT" \
+  && grep -qF 'shortened from the step'"'"'s `Description`' "$AGENT" \
+  && ! grep -qE '`\{step_id\} \[(test|impl|verify|wire)\]`' "$AGENT"; then
+  check "MT8 every step task subject carries a short name after its tag" PASS
+else
+  check "MT8 every step task subject carries a short name after its tag" FAIL
+fi
 
 # Cross-Layer Value Flow Pairing rule (Principle 2)
 if grep -qF 'Cross-Layer Value Flow Pairing' "$AGENT"; then
