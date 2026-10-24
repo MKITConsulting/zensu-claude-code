@@ -168,16 +168,21 @@ OUT3="$(invoke "$P1" stop_session_01 "$TMP/missing.json" off)"
 [ "$(printf '%s' "$OUT3" | decision)" = block ] \
   && check "S3 ZENSU_CHAIN=off cannot bypass the outer run" PASS \
   || check "S3 ZENSU_CHAIN=off cannot bypass the outer run" FAIL
-OUT_TEXT="$OUT3" node -e '
+P3B="$TMP/bypass-notice"; start "$P3B" stop_run_bypass stop_session_bypass
+autopilot_apply_event stop_run_bypass plan-bypass PLAN_APPROVED '{"approvedPlanSha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' "$P3B" >/dev/null
+CLAUDE_PROJECT_DIR="$P3B" bash "$LOG" --tdd-begin --session stop_session_bypass --autopilot-run stop_run_bypass \
+  --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id chain-bypass-001 >/dev/null
+OUT3B="$(invoke "$P3B" stop_session_bypass "$TMP/missing.json" off)"
+OUT_TEXT="$OUT3B" node -e '
   const parsed = JSON.parse(process.env.OUT_TEXT);
   const keys = Object.keys(parsed);
   process.exit(keys[0] === "decision" && parsed.decision === "block" && typeof parsed.reason === "string"
-    && parsed.reason.startsWith("STOP intercepted by durable Zensu Autopilot run")
+    && parsed.reason.startsWith("STOP intercepted by durable Zensu Autopilot run stop_run_bypass.")
     && typeof parsed.systemMessage === "string"
     && parsed.systemMessage.split("\n").includes("Gates bypassed during this session: ZENSU_CHAIN") ? 0 : 1);
 ' 2>/dev/null \
-  && check "S3b the outer block carries the inner bypass notice as its systemMessage in the same single JSON object" PASS \
-  || check "S3b the outer block carries the inner bypass notice as its systemMessage (out=$OUT3)" FAIL
+  && check "S3b the outer block of a bound chain carries the inner bypass notice as its systemMessage in the same single JSON object" PASS \
+  || check "S3b the outer block of a bound chain carries the inner bypass notice as its systemMessage (out=$OUT3B)" FAIL
 
 P2="$TMP/escape-env"; start "$P2" stop_run_escape_env stop_session_escape_env
 OUT4="$(invoke "$P2" stop_session_escape_env "$TMP/missing.json" '' off)"
