@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing they could recognize. The in-progress text names the step as well
   (`Implementing S1: Config parser`). Strict and vanilla mode and the integration `[wire]` task
   follow the same rule.
+- **wiki publishing**: `/zensu:implement` and `/zensu:docs` now change a wiki page that already
+  exists with `zensu wiki update <page-id>` instead of creating it again. Both look the page up
+  first, through the `wikiPageId` of the feature's linked doc in `zensu doc gen-context` or the
+  page's `path` in `zensu wiki list --json`, and `/zensu:implement` updates the page that a
+  refused `zensu wiki create` names. A re-run of `/zensu:implement` relied on `wiki create`
+  updating the existing page, which a create-only `wiki create` refuses, and a re-run of
+  `/zensu:docs` passed `--content` to `zensu link docs`, which never changes an existing page,
+  so the page kept its old text. Both skills now declare `update_wiki_page` in their workflow
+  window.
 
 ## [0.29.0] - 2026-10-23
 

@@ -58,8 +58,8 @@ else
   check "D3 SKILL.md is workflow-wrapped (--workflow-begin + --workflow-end)" FAIL
 fi
 
-# D4 — the --tools declaration names exactly the one doc mutation the skill runs.
-pin "D4 workflow --tools declares the doc mutation" "$SKILL_MD" '--tools "link_docs"'
+# D4 — the --tools declaration names exactly the two doc mutations the skill runs.
+pin "D4 workflow --tools declares the doc mutations" "$SKILL_MD" '--tools "link_docs,update_wiki_page"'
 
 # D5 — the docs_complete contract: the three hard rules.
 pin "D5a contract: fresh (require_fresh / is_outdated)" "$SKILL_MD" "is_outdated"
