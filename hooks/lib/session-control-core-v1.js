@@ -3900,28 +3900,6 @@ const WORKFLOW_INTEGER_EXTENSIONS = [
   'autopilotAttempt',
 ];
 
-const REVIEW_HANDBACK_KEYS = Object.freeze(['agentId', 'envelope', 'schemaVersion', 'ticket']);
-const REVIEW_HANDBACK_AGENT_RE = /^[A-Za-z0-9_-]{1,128}$/;
-const REVIEW_HANDBACK_TICKET_RE = /^[A-Za-z0-9_-]{1,96}$/;
-
-function reviewHandbackShapeOk(marker) {
-  return Boolean(marker)
-    && typeof marker === 'object'
-    && !Array.isArray(marker)
-    && Object.keys(marker).sort().join(',') === REVIEW_HANDBACK_KEYS.join(',')
-    && marker.schemaVersion === 1
-    && typeof marker.ticket === 'string'
-    && REVIEW_HANDBACK_TICKET_RE.test(marker.ticket)
-    && typeof marker.agentId === 'string'
-    && REVIEW_HANDBACK_AGENT_RE.test(marker.agentId)
-    && Array.isArray(marker.envelope)
-    && (marker.envelope.length === 0 || marker.envelope.length === 3)
-    && marker.envelope.every((line) => typeof line === 'string'
-      && line.length > 0
-      && line.length <= 512
-      && !/[\u0000-\u001f\u007f]/.test(line));
-}
-
 function validateWorkflowString(value, label, allowEmpty = false) {
   if (
     typeof value !== 'string'
@@ -4029,13 +4007,6 @@ function validateWorkflowExtensions(state) {
     ) {
       fail('workflow extension reviewRearm is invalid');
     }
-  }
-
-  if (
-    Object.prototype.hasOwnProperty.call(state, 'reviewHandback')
-    && !reviewHandbackShapeOk(state.reviewHandback)
-  ) {
-    fail('workflow extension reviewHandback is invalid');
   }
 
   if (Object.prototype.hasOwnProperty.call(state, 'deferredReviewCancellation')) {
@@ -5119,7 +5090,6 @@ function retireDeferredReviewOwner(options) {
         draft.reviewRound = 0;
         draft.stopBlockCount = 0;
         delete draft.implStopCount;
-        delete draft.reviewHandback;
         draft.deferredReviewClaim = '';
         return draft;
       });
@@ -5657,7 +5627,6 @@ function resetDeferredReviewState(state) {
   state.history = [];
   delete state.reviewRearm;
   delete state.implStopCount;
-  delete state.reviewHandback;
   delete state.autopilotRunId;
   delete state.autopilotAttempt;
   delete state.autopilotReturnStage;
@@ -6315,7 +6284,6 @@ module.exports = {
   resetReviewBudget,
   readWorkflowState,
   workflowChainSnapshot,
-  reviewHandbackShapeOk,
   inspectDeferredReviewOwner,
   deferredReviewOwnedByOther,
   prepareDeferredReviewTransfer,

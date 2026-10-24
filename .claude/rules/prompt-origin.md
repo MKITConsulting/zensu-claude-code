@@ -37,10 +37,7 @@ field, so it never reaches a hook: the 2.1.295 builder passes the submitted text
 still sends no origin field. A subagent hand-back is stored as the line `Another Claude session
 sent a message:` followed by an `<agent-message from="…">` block, with `origin.kind: peer`, and the
 `UserPromptSubmit` hooks fire on it. These facts come from the session transcript and from the
-2.1.295 binary; no live payload was logged for them. The 2.1.304 desktop transcript stores a
-hand-back as a `queued_command` whose prompt opens with the `<agent-message from="…">` line itself
-and whose origin carries `handback: true`; `.claude/rules/review-handback.md` holds the frame
-inside it.
+2.1.295 binary; no live payload was logged for them.
 
 ## The classification
 
@@ -78,7 +75,7 @@ the window classifies as `typed`, which is the firing direction. `U4` pins the b
 | `user-prompt-context-nudge.sh` | once per band | once per band | once per band |
 | `user-prompt-worktree-keep.sh` | notice only | notice only | notice only |
 | `user-prompt-session-hub-receipt.sh` | silent; writes a receipt only for the Session Hub's exact takeover command | silent | silent |
-| `user-prompt-review-handback.sh` | silent | silent; only the hand-back of the agent a live review ticket is bound to gets the post-review directive (`.claude/rules/review-handback.md`) | silent |
+| `user-prompt-review-handback.sh` | silent, with no `node` child | silent, with no `node` child while no background review is pending in the plugin's store; the hand-back or completion notification of a pending consume reviewer carries the review's routing directive (`.claude/rules/background-review-completion.md`) | silent |
 
 `.claude/rules/prompt-ledger.md` owns the once-per-generation mechanism. Zen-mode and best-solution-first stay on every kind on purpose: the reply to a notification or a
 CI event is user-visible, so its shape and its option set still matter. The reminder's CI note, its decided

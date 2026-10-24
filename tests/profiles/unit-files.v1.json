@@ -22,6 +22,11 @@
       "summary": "Review-aspect activation: which review perspectives a round activates for a given change."
     },
     {
+      "path": "tests/structure/background-review-v1.test.js", "registered": 24, "skips": {"win32": 1},
+      "runs": [{ "driver": "tests/structure/test-background-review.sh" }],
+      "summary": "Background review agents: the consume record and the fan-out entries with their bounds, the claim predicate shared with the ticket claim, the arrival match that claims or retires, the Stop wait verdict and the idle sweeps."
+    },
+    {
       "path": "tests/structure/chain-recovery-v1.test.js", "registered": 21,
       "runs": [{ "driver": "tests/structure/test-chain-recover.sh" }],
       "summary": "The chain shape lattice and the rearm-receipt predicate."
